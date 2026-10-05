@@ -996,6 +996,11 @@ pub(crate) fn is_parent_or_guardian_relation(value: Option<&str>) -> bool {
     )
 }
 
+/// A guardian (Vormund) rather than a parent.
+pub(crate) fn is_legal_guardian_relation(value: Option<&str>) -> bool {
+    normalized_patient_relation_type(value) == "guardian"
+}
+
 pub(crate) fn is_minor_on(date_of_birth: Option<NaiveDate>, today: NaiveDate) -> bool {
     let Some(date_of_birth) = date_of_birth else {
         return false;
@@ -3897,6 +3902,24 @@ async fn update_lead(
     let compliance_changed = compliance_status
         .as_deref()
         .is_some_and(|value| value != current_compliance_status);
+    // The wizard sends the whole list of trusted contacts. A contact the lead
+    // added to in the cabinet (it has a `lead_representatives` row) stays even
+    // when the list was loaded before and does not name it; the lead row is
+    // locked from here, so the list and the write are one step.
+    let trusted_contacts = match trusted_contacts {
+        Some(incoming) => {
+            match super::lead_representatives::keep_represented_contacts(&mut tx, lead_id, incoming)
+                .await
+            {
+                Ok(contacts) => Some(contacts),
+                Err(error) => {
+                    tracing::error!(%error, lead_id = %lead_id, "keep represented trusted contacts");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            }
+        }
+        None => None,
+    };
     let update_result = sqlx::query(
         r#"UPDATE leads
            SET email = COALESCE($2, email),
@@ -7572,12 +7595,19 @@ pub(crate) async fn anonymize_lead_pii(
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
     // The payer declaration of an unconverted lead goes with it (a converted
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
-    // lead's own GwG statements from the cabinet and staff's confirmations of
-    // the own-account payments (§ 12 Abs. 1 GwG) follow the same rule.
+    // lead's own GwG statements from the cabinet, what the cabinet holds about
+    // the lead's representatives and staff's confirmations of the own-account
+    // payments (§ 12 Abs. 1 GwG) follow the same rule.
     sqlx::query(
         r#"WITH removed_payer AS (
                DELETE FROM lead_payer_declarations
                WHERE lead_id = $1 AND patient_id IS NULL
+           ), removed_representatives AS (
+               DELETE FROM lead_representatives representatives
+               USING leads lead
+               WHERE representatives.lead_id = $1
+                 AND lead.id = representatives.lead_id
+                 AND lead.converted_patient_id IS NULL
            ), removed_statements AS (
                DELETE FROM lead_gwg_declarations statements
                USING leads lead

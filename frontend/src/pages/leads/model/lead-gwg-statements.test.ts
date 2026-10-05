@@ -1,14 +1,29 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLeadPortalIntake, type LeadGwgIdentification } from "../data/lead-portal-intake-api";
+import {
+  normalizeLeadPortalIntake,
+  normalizeLeadRepresentation,
+  type LeadGwgIdentification,
+  type LeadRepresentation,
+  type LeadRepresentative,
+} from "../data/lead-portal-intake-api";
 import {
   answerLabel,
   contactChannelsLabel,
+  custodyLabel,
+  custodyStatement,
   gwgLegalAnswers,
   hasGwgStatements,
+  hasRepresentationStatements,
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
+  representationStatements,
+  representationWarnings,
+  representationWarningText,
+  representativeAddress,
+  representativeName,
+  representativeRoleLabel,
   salutationLabel,
 } from "./lead-gwg-statements";
 
@@ -265,5 +280,265 @@ describe("own economic interest from the payer declaration", () => {
       }),
     ).toEqual({ answer: false, beneficialOwner: "Viktor Zahler, 02.03.1970, Wien, Musterweg 1" });
     expect(ownAccountStatement({ acts_on_own_account: false })).toEqual({ answer: false, beneficialOwner: "" });
+  });
+});
+
+const ANNA_ID = "11111111-1111-4111-8111-111111111111";
+const BEN_ID = "22222222-2222-4222-8222-222222222222";
+
+/** A representative as the server sends it; only the id is required. */
+function person(patch: Partial<LeadRepresentative> & { id: string }): LeadRepresentative {
+  const normalized = normalizeLeadRepresentation({ representatives: [patch] })?.representatives[0];
+  if (!normalized) throw new Error("not a representative");
+  return normalized;
+}
+
+function representation(patch: Partial<LeadRepresentation> = {}): LeadRepresentation {
+  return {
+    has_representative: null,
+    under_guardianship: null,
+    custody: null,
+    custody_stated: false,
+    representatives: [],
+    ...patch,
+  };
+}
+
+const anna = person({ id: ANNA_ID, slot: "rep1", relation: "parent", first_name: "Anna", last_name: "Muster", has_data: true });
+const ben = person({ id: BEN_ID, slot: "rep2", relation: "parent", first_name: "Ben", last_name: "Muster" });
+
+describe("who acts for the lead, in the portal state", () => {
+  it("has none when the server sends none (an older backend, or a role that may not read it)", () => {
+    for (const raw of [{ lead_id: "lead-1" }, { lead_id: "lead-1", representation: null }, { lead_id: "lead-1", representation: "joint" }]) {
+      const intake = normalizeLeadPortalIntake(raw);
+      expect(intake?.representation).toBeNull();
+      expect(intake?.representation_updated_at).toBeNull();
+      expect(representationStatements(intake, ru)).toBeNull();
+      expect(hasRepresentationStatements(intake)).toBe(false);
+    }
+  });
+
+  it("keeps the answers, the custody and each person with every key present", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      minor: true,
+      representation_updated_at: "2026-10-05T09:40:00Z",
+      representation: {
+        has_representative: null,
+        under_guardianship: null,
+        custody: "sole_parent",
+        custody_stated: true,
+        representatives: [
+          {
+            id: ANNA_ID,
+            slot: "rep1",
+            role: "legal_representative",
+            relation: "parent",
+            first_name: " Anna ",
+            last_name: "Muster",
+            date_of_birth: "1985-03-02",
+            citizenships: ["DE", "", 4, "UA"],
+            email: "anna.muster@example.com",
+            id_document_type: "passport",
+            id_valid_until: "2031-04-30",
+            identity_documents: [{ id: "doc-a", file_name: "anna-pass.pdf", uploaded_at: "2026-10-05T09:10:00Z", reviewed: true }],
+            authority_documents: "none",
+            has_login: true,
+            has_data: true,
+            contact_origin: "staff",
+          },
+          // Not a person: no id.
+          { first_name: "Nobody" },
+          null,
+        ],
+      },
+    });
+    expect(intake?.representation_updated_at).toBe("2026-10-05T09:40:00Z");
+    expect(intake?.representation).toEqual({
+      has_representative: null,
+      under_guardianship: null,
+      custody: "sole_parent",
+      custody_stated: true,
+      representatives: [
+        {
+          id: ANNA_ID,
+          slot: "rep1",
+          role: "legal_representative",
+          relation: "parent",
+          first_name: "Anna",
+          last_name: "Muster",
+          date_of_birth: "1985-03-02",
+          birth_place: null,
+          birth_country: null,
+          citizenships: ["DE", "UA"],
+          street: null,
+          zip: null,
+          city: null,
+          country: null,
+          email: "anna.muster@example.com",
+          phone: null,
+          id_document_type: "passport",
+          id_document_number: null,
+          id_issuing_authority: null,
+          id_issuing_country: null,
+          id_issued_on: null,
+          id_valid_until: "2031-04-30",
+          identity_documents: [{ id: "doc-a", file_name: "anna-pass.pdf", uploaded_at: "2026-10-05T09:10:00Z", reviewed: true }],
+          authority_documents: [],
+          has_login: true,
+          has_data: true,
+          contact_origin: "staff",
+        },
+      ],
+    });
+  });
+
+  it("reads an unknown custody as not stated", () => {
+    expect(normalizeLeadRepresentation({ custody: "shared", custody_stated: true })).toMatchObject({
+      custody: null,
+      custody_stated: false,
+    });
+    expect(normalizeLeadRepresentation({ custody: "joint" })).toMatchObject({ custody: "joint", custody_stated: false });
+    expect(normalizeLeadRepresentation({ custody: "guardian", custody_stated: true })).toMatchObject({
+      custody: "guardian",
+      custody_stated: true,
+    });
+  });
+
+  it("counts what was entered in the cabinet as the lead's statements, not what staff know", () => {
+    // A parent who is only a trusted contact, and a custody staff stated.
+    const known = { representation: representation({ custody: "joint", custody_stated: true, representatives: [ben] }) };
+    expect(hasRepresentationStatements(known)).toBe(false);
+    expect(hasRepresentationStatements({ ...known, representation_updated_at: "2026-10-05T09:40:00Z" })).toBe(true);
+    expect(hasRepresentationStatements({ representation: representation({ representatives: [anna] }) })).toBe(true);
+    expect(
+      hasRepresentationStatements({
+        representation: representation({
+          representatives: [person({ id: BEN_ID, authority_documents: [{ id: "doc-b", file_name: "order.pdf", uploaded_at: null, reviewed: false }] })],
+        }),
+      }),
+    ).toBe(true);
+    // An adult's "no" is an answer.
+    expect(hasRepresentationStatements({ representation: representation({ has_representative: false }) })).toBe(true);
+    expect(hasRepresentationStatements({ representation: representation({ under_guardianship: true }) })).toBe(true);
+    expect(hasRepresentationStatements({ representation: representation() })).toBe(false);
+    // The whole block is then no longer "nothing entered yet".
+    expect(
+      hasGwgStatements({
+        identification: EMPTY_IDENTIFICATION,
+        identification_updated_at: null,
+        identity_documents: [],
+        representation: representation({ has_representative: false }),
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("labels of the representation", () => {
+  it("names the custody and says when nobody stated it", () => {
+    expect(custodyLabel("joint", ru)).toBe("Оба родителя совместно");
+    expect(custodyLabel("sole_parent", de)).toBe("Ein Elternteil allein (alleiniges Sorgerecht)");
+    expect(custodyLabel("guardian", de)).toBe("Vormund oder Pfleger");
+    expect(custodyLabel(null, ru)).toBe("");
+    expect(custodyStatement({ custody: "joint", custody_stated: false }, ru)).toBe("не указано — оба родителя");
+    expect(custodyStatement({ custody: "joint", custody_stated: false }, de)).toBe("nicht angegeben – beide Eltern");
+    expect(custodyStatement({ custody: "joint", custody_stated: true }, ru)).toBe("Оба родителя совместно");
+    expect(custodyStatement({ custody: "guardian", custody_stated: true }, ru)).toBe("Опекун или попечитель");
+    expect(custodyStatement({ custody: null, custody_stated: true }, ru)).toBe("не указано — оба родителя");
+  });
+
+  it("names the capacity a person acts in", () => {
+    expect(representativeRoleLabel({ role: "legal_representative", relation: "parent" }, ru)).toBe("Родитель");
+    expect(representativeRoleLabel({ role: "legal_representative", relation: "Guardian" }, de)).toBe("Vormund");
+    // A relation staff typed freely.
+    expect(representativeRoleLabel({ role: "legal_representative", relation: "Mutter" }, ru)).toBe("Законный представитель");
+    expect(representativeRoleLabel({ role: "authorised_representative", relation: "representative" }, ru)).toBe(
+      "Уполномоченный представитель",
+    );
+    expect(representativeRoleLabel({ role: "authorised_representative", relation: null }, de)).toBe("Bevollmächtigte Person");
+    expect(representativeRoleLabel({ role: "legal_guardian", relation: "guardian" }, de)).toBe("Betreuer/in");
+  });
+
+  it("writes the name and the address from the parts that are known", () => {
+    expect(representativeName(anna)).toBe("Anna Muster");
+    expect(representativeName({ first_name: null, last_name: " Muster " })).toBe("Muster");
+    expect(representativeName({ first_name: null, last_name: null })).toBe("");
+    expect(representativeAddress({ street: "Musterweg 1", zip: "10115", city: "Berlin", country: "DE" }, "ru")).toBe(
+      "Musterweg 1, 10115 Berlin, Германия",
+    );
+    expect(representativeAddress({ street: null, zip: null, city: "Wien", country: "AT" }, "de")).toBe("Wien, Österreich");
+    expect(representativeAddress({ street: null, zip: null, city: null, country: null }, "ru")).toBe("");
+  });
+});
+
+describe("warnings about the representation of a minor", () => {
+  it("asks for a parent or guardian when nobody is on file", () => {
+    expect(representationWarnings(representation({ custody: "joint" }), true)).toEqual(["no_representative"]);
+    expect(representationWarnings(representation({ custody: "sole_parent", custody_stated: true }), true)).toEqual([
+      "no_representative",
+    ]);
+    expect(representationWarningText("no_representative", ru)).toBe("Добавьте родителя или законного представителя");
+  });
+
+  it("misses the second parent while both represent the child", () => {
+    expect(representationWarnings(representation({ custody: "joint", representatives: [anna] }), true)).toEqual([
+      "joint_custody_incomplete",
+    ]);
+    // Without an answer both parents represent the child.
+    expect(representationWarnings(representation({ custody: null, representatives: [anna] }), true)).toEqual([
+      "joint_custody_incomplete",
+    ]);
+    expect(representationWarnings(representation({ custody: "joint", representatives: [anna, ben] }), true)).toEqual([]);
+    expect(representationWarningText("joint_custody_incomplete", de)).toContain("nur ein Elternteil erfasst");
+  });
+
+  it("points at several representatives when one person represents the child alone", () => {
+    for (const custody of ["sole_parent", "guardian"] as const) {
+      expect(representationWarnings(representation({ custody, custody_stated: true, representatives: [anna, ben] }), true)).toEqual([
+        "single_custody_several",
+      ]);
+      expect(representationWarnings(representation({ custody, custody_stated: true, representatives: [anna] }), true)).toEqual([]);
+    }
+    expect(representationWarningText("single_custody_several", ru)).toContain("указано несколько представителей");
+  });
+
+  it("has none for an adult or without the representation", () => {
+    expect(representationWarnings(representation({ representatives: [] }), false)).toEqual([]);
+    expect(representationWarnings(representation({ has_representative: true, representatives: [anna, ben] }), false)).toEqual([]);
+    expect(representationWarnings(null, true)).toEqual([]);
+  });
+});
+
+describe("the representation as the block shows it", () => {
+  it("shows a minor the custody, the legal representatives and the warnings", () => {
+    const statements = representationStatements(
+      { minor: true, representation: representation({ custody: "joint", representatives: [anna] }) },
+      ru,
+    );
+    expect(statements).toEqual({
+      kind: "minor",
+      custody: "не указано — оба родителя",
+      persons: [anna],
+      warnings: ["joint_custody_incomplete"],
+    });
+  });
+
+  it("shows an adult the two answers and the persons a yes names", () => {
+    const agent = person({ id: ANNA_ID, slot: "agent", role: "authorised_representative", first_name: "Anna", last_name: "Muster", has_data: true });
+    expect(
+      representationStatements(
+        {
+          minor: false,
+          representation: representation({ has_representative: true, under_guardianship: false, representatives: [agent] }),
+        },
+        de,
+      ),
+    ).toEqual({ kind: "adult", hasRepresentative: true, underGuardianship: false, persons: [agent] });
+    expect(representationStatements({ minor: false, representation: representation() }, ru)).toEqual({
+      kind: "adult",
+      hasRepresentative: null,
+      underGuardianship: null,
+      persons: [],
+    });
   });
 });

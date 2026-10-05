@@ -3,7 +3,12 @@
 //! Subjects:
 //! * the patient of a lead (`lead_patient`);
 //! * for a minor patient, the lead's trusted contacts whose relation is
-//!   parent or guardian (`lead_guardian`);
+//!   parent or guardian (`lead_guardian`), with the name parts, citizenships
+//!   and residence country the parent entered in the cabinet
+//!   (`lead_representatives`, by the id of the contact);
+//! * for an adult patient, the representative and the legal guardian
+//!   (Betreuer) named in the cabinet — the same `lead_guardian` subject, its
+//!   relation is the role;
 //! * the third-party payer of a lead (`lead_payer`) from
 //!   `lead_payer_declarations`: a person, or a company, an organisation or an
 //!   insurer screened as an organisation by its name — see
@@ -239,21 +244,117 @@ pub async fn load_leads_subjects(
     .fetch_all(db)
     .await?;
     let mut payers = load_payer_rows(db, lead_ids).await;
+    let mut representatives = load_representative_rows(db, lead_ids).await?;
     let today = crate::app_time::today();
     let mut leads = Vec::with_capacity(rows.len());
     for row in rows {
         let lead_id: Uuid = row.try_get("id")?;
         let payer_rows = payers.remove(&lead_id).unwrap_or_default();
-        if let Some(lead) = lead_subjects_from_row(&row, &payer_rows, today) {
+        let representative_rows = representatives.remove(&lead_id).unwrap_or_default();
+        if let Some(lead) = lead_subjects_from_row(&row, &payer_rows, &representative_rows, today) {
             leads.push(lead);
         }
     }
     Ok(leads)
 }
 
+/// What the cabinet holds about the representatives of the leads
+/// (`lead_representatives`), as JSON rows by lead: the role, the name parts,
+/// the citizenships and the residence country of a trusted contact
+/// (`contact_id`).
+async fn load_representative_rows(
+    db: &gmed_db::DbPool,
+    lead_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        "SELECT r.lead_id, to_jsonb(r) FROM lead_representatives r WHERE r.lead_id = ANY($1)",
+    )
+    .bind(lead_ids)
+    .fetch_all(db)
+    .await?;
+    let mut by_lead: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    for (lead_id, row) in rows {
+        by_lead.entry(lead_id).or_default().push(row);
+    }
+    Ok(by_lead)
+}
+
+/// The row of a trusted contact among a lead's representative rows.
+fn representative_row<'a>(rows: &'a [Value], contact: &Value) -> Option<&'a Value> {
+    let contact_id = json_text(contact, "id").to_lowercase();
+    if contact_id.is_empty() {
+        return None;
+    }
+    rows.iter()
+        .find(|row| json_text(row, "contact_id").to_lowercase() == contact_id)
+}
+
+/// A trusted contact as a guardian subject. The row the cabinet wrote for the
+/// contact (`extras`) adds what the contact entry does not hold: the name as
+/// first and last name (while it still is the name of the contact), the
+/// citizenships and the residence country. One subject per person: the
+/// reference is the id of the contact, with or without a row.
+fn guardian_subject(
+    lead_id: Uuid,
+    position: usize,
+    contact: &Value,
+    extras: Option<&Value>,
+    relation: String,
+) -> SubjectRecord {
+    let (first, last) = match extras {
+        Some(extras) => crate::routes::lead_representatives::name_parts(
+            &json_text(contact, "name"),
+            Some(&json_text(extras, "first_name")),
+            Some(&json_text(extras, "last_name")),
+        ),
+        None => split_full_name(&json_text(contact, "name")),
+    };
+    let mut residence = json_codes(contact, "country");
+    let mut citizenships = json_codes(contact, "citizenships");
+    for code in json_codes(contact, "residence_country").into_iter().chain(
+        extras
+            .map(|extras| json_codes(extras, "country"))
+            .unwrap_or_default(),
+    ) {
+        if !residence.contains(&code) {
+            residence.push(code);
+        }
+    }
+    for code in extras
+        .map(|extras| json_codes(extras, "citizenships"))
+        .unwrap_or_default()
+    {
+        if !citizenships.contains(&code) {
+            citizenships.push(code);
+        }
+    }
+    let subject_ref = contact
+        .get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("contact-{position}"));
+    SubjectRecord {
+        kind: SubjectKind::LeadGuardian,
+        lead_id: Some(lead_id),
+        patient_id: None,
+        subject_ref,
+        subject: Subject {
+            first_name: first,
+            middle_name: None,
+            last_name: last,
+            date_of_birth: json_date(contact, "birth_date"),
+            citizenships,
+            organisation: false,
+        },
+        residence,
+        relation: non_empty(relation),
+    }
+}
+
 fn lead_subjects_from_row(
     row: &sqlx::postgres::PgRow,
     payer_rows: &[Value],
+    representative_rows: &[Value],
     today: NaiveDate,
 ) -> Option<LeadSubjects> {
     let lead_id: Uuid = row.try_get("id").ok()?;
@@ -291,44 +392,41 @@ fn lead_subjects_from_row(
         relation: None,
     }];
 
+    let contacts: Value = row
+        .try_get::<Option<Value>, _>("trusted_contacts")
+        .unwrap_or(None)
+        .unwrap_or(Value::Null);
     if crate::routes::leads::is_minor_on(date_of_birth, today) {
-        let contacts: Value = row
-            .try_get::<Option<Value>, _>("trusted_contacts")
-            .unwrap_or(None)
-            .unwrap_or(Value::Null);
         for (position, contact) in contacts.as_array().into_iter().flatten().enumerate() {
             let relation = json_text(contact, "relation");
             if !is_guardian_relation(&relation) {
                 continue;
             }
-            let (first, last) = split_full_name(&json_text(contact, "name"));
-            let mut residence = json_codes(contact, "country");
-            for code in json_codes(contact, "residence_country") {
-                if !residence.contains(&code) {
-                    residence.push(code);
-                }
+            // What the parent entered in the cabinet; a row of an adult role
+            // (from before a corrected date of birth) says nothing here.
+            let extras = representative_row(representative_rows, contact)
+                .filter(|extras| json_text(extras, "role") == "legal_representative");
+            subjects.push(guardian_subject(
+                lead_id, position, contact, extras, relation,
+            ));
+        }
+    } else {
+        // An adult's contacts are not screened — but for the representative
+        // and the legal guardian (Betreuer) the lead named in the cabinet.
+        for (position, contact) in contacts.as_array().into_iter().flatten().enumerate() {
+            let Some(extras) = representative_row(representative_rows, contact) else {
+                continue;
+            };
+            let role = json_text(extras, "role");
+            if role == "authorised_representative" || role == "legal_guardian" {
+                subjects.push(guardian_subject(
+                    lead_id,
+                    position,
+                    contact,
+                    Some(extras),
+                    role,
+                ));
             }
-            let subject_ref = contact
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("contact-{position}"));
-            subjects.push(SubjectRecord {
-                kind: SubjectKind::LeadGuardian,
-                lead_id: Some(lead_id),
-                patient_id: None,
-                subject_ref,
-                subject: Subject {
-                    first_name: first,
-                    middle_name: None,
-                    last_name: last,
-                    date_of_birth: json_date(contact, "birth_date"),
-                    citizenships: json_codes(contact, "citizenships"),
-                    organisation: false,
-                },
-                residence,
-                relation: non_empty(relation),
-            });
         }
     }
 
@@ -1129,6 +1227,70 @@ mod tests {
         );
         assert_eq!(split_full_name(" Solo "), (String::new(), "Solo".into()));
         assert_eq!(split_full_name(""), (String::new(), String::new()));
+    }
+
+    #[test]
+    fn a_guardian_subject_takes_what_the_cabinet_entered_for_the_contact() {
+        let lead_id = Uuid::new_v4();
+        let contact = json!({
+            "id": "5D0C1F0E-0000-4000-8000-000000000001",
+            "name": "Anna von Muster",
+            "relation": "mother",
+            "birth_date": "1985-03-02",
+        });
+        // Without a row: the name split at the last space, nothing else known.
+        let plain = guardian_subject(lead_id, 0, &contact, None, "mother".into());
+        assert_eq!(plain.kind, SubjectKind::LeadGuardian);
+        assert_eq!(plain.subject_ref, "5D0C1F0E-0000-4000-8000-000000000001");
+        assert_eq!(
+            (
+                plain.subject.first_name.as_str(),
+                plain.subject.last_name.as_str()
+            ),
+            ("Anna von", "Muster")
+        );
+        assert!(plain.subject.citizenships.is_empty() && plain.residence.is_empty());
+
+        // The row is found by the id of the contact, whatever the case.
+        let rows = vec![json!({
+            "contact_id": "5d0c1f0e-0000-4000-8000-000000000001",
+            "role": "legal_representative",
+            "first_name": "Anna",
+            "last_name": "von Muster",
+            "citizenships": ["DE", "UA"],
+            "country": "AT",
+        })];
+        let extras = representative_row(&rows, &contact);
+        assert!(extras.is_some());
+        let entered = guardian_subject(lead_id, 0, &contact, extras, "mother".into());
+        // The same person under the same reference, now with more data: the
+        // fingerprint changes, so an earlier decision is reviewed again.
+        assert_eq!(entered.subject_ref, plain.subject_ref);
+        assert_eq!(
+            (
+                entered.subject.first_name.as_str(),
+                entered.subject.last_name.as_str()
+            ),
+            ("Anna", "von Muster")
+        );
+        assert_eq!(entered.subject.citizenships, vec!["DE", "UA"]);
+        assert_eq!(entered.residence, vec!["AT"]);
+        assert_eq!(entered.countries(), vec!["DE", "UA", "AT"]);
+        assert_eq!(
+            entered.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1985, 3, 2)
+        );
+        assert_ne!(
+            subject_fingerprint(&plain.subject),
+            subject_fingerprint(&entered.subject)
+        );
+        // A contact without an id has no row and keeps its position.
+        let unnamed = json!({ "name": "Ben Muster", "relation": "father" });
+        assert!(representative_row(&rows, &unnamed).is_none());
+        assert_eq!(
+            guardian_subject(lead_id, 3, &unnamed, None, "father".into()).subject_ref,
+            "contact-3"
+        );
     }
 
     #[test]

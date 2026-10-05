@@ -202,6 +202,62 @@ async fn seed_signature_request(
     id
 }
 
+/// A minor lead (Mia Muster) with the given trusted contacts.
+async fn seed_minor_lead(pool: &PgPool, trusted_contacts: Value) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              street_address, city, zip_code, country, qualification_status,
+                              compliance_status, intake_source, trusted_contacts)
+           VALUES ('Mia', 'Muster', $1, DATE '2016-04-05', 'female', 'Teststr. 5', 'Berlin',
+                   '10115', 'DE', 'qualified', 'signed', 'staff_wizard', $2)
+           RETURNING id"#,
+    )
+    .bind(format!(
+        "ident-minor-{}@example.com",
+        Uuid::new_v4().simple()
+    ))
+    .bind(trusted_contacts)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// One signature as the provider evidence records it, made with `email`.
+fn signature_by(role: &str, email: &str, signed_at: DateTime<Utc>) -> Value {
+    let mut entry = signer(role, "QES", signed_at);
+    entry["email"] = json!(email);
+    entry
+}
+
+/// A completed live QES request whose `signers` name the persons who signed
+/// (`first name`, `last name`, `email`, `role`).
+async fn seed_named_signature_request(
+    app: &TestApp,
+    source: Uuid,
+    signatures: Vec<Value>,
+    signers: Value,
+) -> Uuid {
+    let id = seed_signature_request(app, source, "completed", "QES", false, signatures).await;
+    sqlx::query("UPDATE document_signature_requests SET signers = $2 WHERE id = $1")
+        .bind(id)
+        .bind(signers)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    id
+}
+
+/// The line of one representative in the identification status.
+fn representative_line(status: &Value, id: Uuid) -> Value {
+    status["representatives"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no representatives: {status}"))
+        .iter()
+        .find(|line| line["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no line of {id}: {status}"))
+}
+
 fn instant(value: &Value) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(value.as_str().unwrap_or_else(|| panic!("no time: {value}")))
         .unwrap()
@@ -248,11 +304,14 @@ async fn the_status_reports_the_qualified_signature_of_the_patient() {
     // Nothing signed, nothing confirmed, nobody else pays.
     let (status, empty) = json_request(&app, "GET", &path, &sales, None).await;
     assert_eq!(status, StatusCode::OK, "{empty}");
+    // An adult: no legal representatives to identify.
     assert_eq!(
         empty,
         json!({
+            "minor": false,
             "contract_partner": { "qes": null, "own_account_payment": null },
             "payer": null,
+            "representatives": [],
         })
     );
 
@@ -631,9 +690,10 @@ async fn the_payer_is_a_person_of_its_own_only_while_a_third_party_pays() {
     assert_eq!(status, StatusCode::OK, "{saved}");
     let (status, named) = json_request(&app, "GET", &status_path, &pm, None).await;
     assert_eq!(status, StatusCode::OK, "{named}");
+    // (An adult's payer is never one of the lead's representatives.)
     assert_eq!(
         named["payer"],
-        json!({ "qes": null, "own_account_payment": null }),
+        json!({ "qes": null, "own_account_payment": null, "same_person_as": null }),
         "{named}"
     );
 
@@ -696,7 +756,7 @@ async fn the_payer_is_a_person_of_its_own_only_while_a_third_party_pays() {
     let (_, replaced) = json_request(&app, "GET", &status_path, &pm, None).await;
     assert_eq!(
         replaced["payer"],
-        json!({ "qes": null, "own_account_payment": null }),
+        json!({ "qes": null, "own_account_payment": null, "same_person_as": null }),
         "{replaced}"
     );
     // The new payer's payment is confirmed anew, by whoever confirms it.
@@ -828,4 +888,564 @@ async fn the_identification_sheet_generates_with_the_signature_and_the_marks_go_
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(marks(discarded).await, 0);
     assert_eq!(marks(lead_id).await, 1, "other leads keep theirs");
+}
+
+#[tokio::test]
+async fn each_parent_of_a_minor_is_identified_by_the_own_signature() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let (anna, ben, aunt) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let lead_id = seed_minor_lead(
+        pool,
+        json!([
+            { "id": aunt, "name": "Tante Muster", "relation": "aunt",
+              "email": "tante.muster@example.com" },
+            { "id": anna, "name": "Anna Muster", "relation": "mother",
+              "email": "Anna.Muster@example.com" },
+            { "id": ben, "name": "Ben Muster", "relation": "father",
+              "email": "ben.muster@example.com" },
+        ]),
+    )
+    .await;
+    let status_path = format!("/api/v1/leads/{lead_id}/identification-status");
+    let payment_path = |subject: &str| {
+        format!("/api/v1/leads/{lead_id}/identification-status/{subject}/own-account-payment")
+    };
+    let confirm = || Some(json!({ "confirmed": true }));
+
+    // Nothing signed: the parents are the persons to identify, the child and
+    // the aunt are not.
+    let (status, empty) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{empty}");
+    assert_eq!(
+        empty,
+        json!({
+            "minor": true,
+            "contract_partner": { "qes": null, "own_account_payment": null },
+            "payer": null,
+            "representatives": [
+                { "id": anna, "subject": format!("representative:{anna}"), "name": "Anna Muster",
+                  "relation": "mother", "has_email": true, "qes": null,
+                  "own_account_payment": null },
+                { "id": ben, "subject": format!("representative:{ben}"), "name": "Ben Muster",
+                  "relation": "father", "has_email": true, "qes": null,
+                  "own_account_payment": null },
+            ],
+        })
+    );
+
+    // One request, signed by both parents as `client` and by GMED: each
+    // parent has the own time, and nothing counts for the child.
+    let anna_signed_at = Utc::now() - Duration::hours(5);
+    let ben_signed_at = Utc::now() - Duration::hours(3);
+    let contract = seed_document(&app, Some(lead_id)).await;
+    seed_named_signature_request(
+        &app,
+        contract,
+        vec![
+            signature_by("client", "anna.muster@example.com", anna_signed_at),
+            signature_by("client", "ben.muster@example.com", ben_signed_at),
+            signature_by("agency", "office@example.com", ben_signed_at),
+        ],
+        json!([]),
+    )
+    .await;
+    let (_, signed) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(signed["minor"], true, "{signed}");
+    assert!(signed["contract_partner"]["qes"].is_null(), "{signed}");
+    let anna_line = representative_line(&signed, anna);
+    let ben_line = representative_line(&signed, ben);
+    assert_eq!(anna_line["qes"]["test_mode"], false, "{signed}");
+    assert_eq!(
+        instant(&anna_line["qes"]["signed_at"]).timestamp(),
+        anna_signed_at.timestamp()
+    );
+    assert_eq!(
+        instant(&ben_line["qes"]["signed_at"]).timestamp(),
+        ben_signed_at.timestamp()
+    );
+
+    // A parent who signed with another address is found by the name the
+    // request gave that signer; a stranger's signature is nobody's.
+    let later = Utc::now() - Duration::hours(1);
+    let order = seed_document(&app, Some(lead_id)).await;
+    seed_named_signature_request(
+        &app,
+        order,
+        vec![
+            signature_by("client", "ben.privat@example.com", later),
+            signature_by("client", "fremd@example.com", later),
+        ],
+        json!([
+            { "first_name": "Ben", "last_name": "Muster", "email": "ben.privat@example.com",
+              "role": "client" },
+            { "first_name": "Viktor", "last_name": "Fremd", "email": "fremd@example.com",
+              "role": "client" },
+        ]),
+    )
+    .await;
+    let (_, renamed) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(
+        instant(&representative_line(&renamed, ben)["qes"]["signed_at"]).timestamp(),
+        later.timestamp(),
+        "{renamed}"
+    );
+    assert_eq!(
+        instant(&representative_line(&renamed, anna)["qes"]["signed_at"]).timestamp(),
+        anna_signed_at.timestamp(),
+        "{renamed}"
+    );
+    assert!(renamed["contract_partner"]["qes"].is_null(), "{renamed}");
+
+    // The payment is confirmed per parent; for the child there is none.
+    let (status, error) = json_request(
+        &app,
+        "POST",
+        &payment_path("contract_partner"),
+        &pm,
+        confirm(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["error"], "identification_subject_minor", "{error}");
+    for stranger in [aunt, Uuid::new_v4()] {
+        let (status, error) = json_request(
+            &app,
+            "POST",
+            &payment_path(&format!("representative:{stranger}")),
+            &pm,
+            confirm(),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["error"], "identification_subject_invalid", "{error}");
+    }
+    let (status, error) = json_request(
+        &app,
+        "POST",
+        &payment_path("representative:someone"),
+        &pm,
+        confirm(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &payment_path(&format!("representative:{anna}")),
+        &pm,
+        confirm(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(
+        representative_line(&confirmed, anna)["own_account_payment"]["confirmed_by_name"],
+        staff_name("patient_manager"),
+        "{confirmed}"
+    );
+    assert!(
+        representative_line(&confirmed, ben)["own_account_payment"].is_null(),
+        "{confirmed}"
+    );
+    assert!(
+        confirmed["contract_partner"]["own_account_payment"].is_null(),
+        "{confirmed}"
+    );
+    let subjects: Vec<String> =
+        sqlx::query_scalar("SELECT subject FROM lead_identification_payments WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(subjects, vec![format!("representative:{anna}")]);
+
+    // An adult has no representatives to confirm anything for, and the
+    // adult's own line works as before.
+    let adult = seed_lead(pool).await;
+    let (status, error) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/leads/{adult}/identification-status/representative:{anna}/own-account-payment"
+        ),
+        &pm,
+        confirm(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+    assert_eq!(error["error"], "identification_subject_invalid", "{error}");
+}
+
+#[tokio::test]
+async fn a_parent_who_pays_is_one_person_with_the_payer() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let (anna, ben) = (Uuid::new_v4(), Uuid::new_v4());
+    // The mother has an address; the father has none, but a date of birth.
+    let lead_id = seed_minor_lead(
+        pool,
+        json!([
+            { "id": anna, "name": "Anna Muster", "relation": "mother",
+              "email": "anna.muster@example.com" },
+            { "id": ben, "name": "Ben Muster", "relation": "father",
+              "birth_date": "1984-07-09" },
+        ]),
+    )
+    .await;
+    let status_path = format!("/api/v1/leads/{lead_id}/identification-status");
+    let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let payer_payment =
+        format!("/api/v1/leads/{lead_id}/identification-status/payer/own-account-payment");
+    let payer = |first_name: &str, last_name: &str, date_of_birth: &str, email: &str| {
+        let mut payer = third_party_payer();
+        payer["first_name"] = json!(first_name);
+        payer["last_name"] = json!(last_name);
+        payer["date_of_birth"] = json!(date_of_birth);
+        payer["email"] = json!(email);
+        payer["relationship"] = json!("Elternteil");
+        payer
+    };
+
+    // "I pay (as a parent)": the payer has the mother's address.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &pm,
+        Some(payer(
+            "Anna",
+            "Muster",
+            "1985-03-02",
+            "Anna.Muster@example.com",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, named) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(
+        named["payer"],
+        json!({
+            "qes": null,
+            "own_account_payment": null,
+            "same_person_as": format!("representative:{anna}"),
+        }),
+        "{named}"
+    );
+
+    // She signs the cost assumption as `payer`: it is her signature on both
+    // lines, and the father's line stays empty.
+    let signed_at = Utc::now() - Duration::hours(2);
+    let cost_assumption = seed_document(&app, Some(lead_id)).await;
+    seed_named_signature_request(
+        &app,
+        cost_assumption,
+        vec![signature_by("payer", "anna.muster@example.com", signed_at)],
+        json!([]),
+    )
+    .await;
+    let (_, signed) = json_request(&app, "GET", &status_path, &pm, None).await;
+    for line in [&signed["payer"], &representative_line(&signed, anna)] {
+        assert_eq!(
+            instant(&line["qes"]["signed_at"]).timestamp(),
+            signed_at.timestamp(),
+            "{signed}"
+        );
+    }
+    assert!(
+        representative_line(&signed, ben)["qes"].is_null(),
+        "{signed}"
+    );
+    assert!(signed["contract_partner"]["qes"].is_null(), "{signed}");
+
+    // The payment confirmed on the payer's line is the mother's mark.
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &payer_payment,
+        &pm,
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    for line in [&confirmed["payer"], &representative_line(&confirmed, anna)] {
+        assert_eq!(
+            line["own_account_payment"]["confirmed_by_name"],
+            staff_name("patient_manager"),
+            "{confirmed}"
+        );
+    }
+    let subjects: Vec<String> =
+        sqlx::query_scalar("SELECT subject FROM lead_identification_payments WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(subjects, vec![format!("representative:{anna}")]);
+    // Taking it back on the payer's line removes that one mark.
+    let (status, revoked) = json_request(
+        &app,
+        "POST",
+        &payer_payment,
+        &pm,
+        Some(json!({ "confirmed": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert!(
+        representative_line(&revoked, anna)["own_account_payment"].is_null(),
+        "{revoked}"
+    );
+
+    // The father pays instead. His contact has no address, so name and date
+    // of birth say that he is the payer; what he signs as payer with the
+    // payer's address is his signature.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &pm,
+        Some(payer(
+            "ben",
+            "MUSTER",
+            "1984-07-09",
+            "ben.zahlt@example.com",
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let named_at: DateTime<Utc> = sqlx::query_scalar(
+        "SELECT identity_changed_at FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let ben_signed_at = named_at + Duration::milliseconds(1);
+    let second = seed_document(&app, Some(lead_id)).await;
+    seed_named_signature_request(
+        &app,
+        second,
+        vec![signature_by(
+            "payer",
+            "ben.zahlt@example.com",
+            ben_signed_at,
+        )],
+        json!([]),
+    )
+    .await;
+    let (_, father) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(
+        father["payer"]["same_person_as"],
+        format!("representative:{ben}"),
+        "{father}"
+    );
+    assert_eq!(representative_line(&father, ben)["has_email"], false);
+    for line in [&father["payer"], &representative_line(&father, ben)] {
+        assert_eq!(
+            instant(&line["qes"]["signed_at"]).timestamp(),
+            ben_signed_at.timestamp(),
+            "{father}"
+        );
+    }
+    // The mother's signature stays hers.
+    assert_eq!(
+        instant(&representative_line(&father, anna)["qes"]["signed_at"]).timestamp(),
+        signed_at.timestamp(),
+        "{father}"
+    );
+
+    // Somebody else pays: a person of its own again, with nothing yet.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &declaration_path,
+        &pm,
+        Some(third_party_payer()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, other) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(
+        other["payer"],
+        json!({ "qes": null, "own_account_payment": null, "same_person_as": null }),
+        "{other}"
+    );
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &payer_payment,
+        &pm,
+        Some(json!({ "confirmed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert!(
+        confirmed["payer"]["own_account_payment"].is_object(),
+        "{confirmed}"
+    );
+    assert!(
+        representative_line(&confirmed, ben)["own_account_payment"].is_null(),
+        "{confirmed}"
+    );
+}
+
+#[tokio::test]
+async fn a_minor_has_one_identification_sheet_per_legal_representative() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let ceo = app.bearer("ceo");
+    let (anna, ben, aunt) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let lead_id = seed_minor_lead(
+        pool,
+        json!([
+            { "id": anna, "name": "Anna Muster", "relation": "mother",
+              "email": "anna.muster@example.com", "birth_date": "1985-03-02" },
+            { "id": ben, "name": "Ben Muster", "relation": "father" },
+            { "id": aunt, "name": "Tante Muster", "relation": "aunt" },
+        ]),
+    )
+    .await;
+    let generate = |lead_id: Uuid, subject: Option<&str>| {
+        let mut body = json!({
+            "template_id": "gwg_identification",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active"
+        });
+        if let Some(subject) = subject {
+            body["bindings"] = json!({ "gwg_identification": { "subject": subject } });
+        }
+        Some(body)
+    };
+
+    // The child has no sheet of its own: the parents are identified.
+    for subject in [None, Some("contract_partner")] {
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            generate(lead_id, subject),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(
+            refused["code"], "minor_sheet_per_representative",
+            "{refused}"
+        );
+        assert_eq!(
+            refused["error"], "minor_sheet_per_representative",
+            "{refused}"
+        );
+    }
+    // Only a legal representative has one.
+    for subject in [
+        format!("representative:{aunt}"),
+        format!("representative:{}", Uuid::new_v4()),
+        "representative:someone".to_string(),
+        "representative".to_string(),
+    ] {
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            generate(lead_id, Some(subject.as_str())),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{subject}: {refused}"
+        );
+        assert_eq!(
+            refused["code"], "representative_sheet_not_available",
+            "{subject}: {refused}"
+        );
+        assert_eq!(
+            refused["error"], "representative_sheet_not_available",
+            "{subject}: {refused}"
+        );
+    }
+
+    // The mother also pays: one person, and her sheet says so. Each parent
+    // gets an own sheet, named in the stored binding.
+    let mut payer = third_party_payer();
+    payer["first_name"] = json!("Anna");
+    payer["last_name"] = json!("Muster");
+    payer["email"] = json!("anna.muster@example.com");
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &pm,
+        Some(payer),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    for parent in [anna, ben] {
+        let subject = format!("representative:{parent}");
+        let (status, generated) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &ceo,
+            generate(lead_id, Some(subject.as_str())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{subject}: {generated}");
+        let (template, binding): (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT generated_template_id, generated_bindings::text FROM documents WHERE id = $1",
+        )
+        .bind(Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap())
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(template.as_deref(), Some("gwg_identification"));
+        assert!(
+            binding
+                .as_deref()
+                .is_some_and(|binding| binding.contains(&subject)),
+            "{binding:?}"
+        );
+    }
+    // The payer's own sheet stays possible on the server.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        generate(lead_id, Some("payer")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+
+    // An adult's sheet is the adult's own; nobody has a sheet as the adult's
+    // representative.
+    let adult = seed_lead(pool).await;
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        generate(adult, Some(format!("representative:{anna}").as_str())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "representative_sheet_not_available",
+        "{refused}"
+    );
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        generate(adult, Some("contract_partner")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
 }

@@ -25,7 +25,9 @@ type Person = {
   qes: { signed_at: string; test_mode: boolean } | null;
   own_account_payment: { confirmed_at: string; confirmed_by_name: string | null; note: string | null } | null;
 };
-type Status = { contract_partner: Person; payer: Person | null };
+type Representative = Person & { id: string; subject: string; name: string; relation: string; has_email: boolean };
+/** A server that knows minors also sends `minor` and `representatives`; an older one does not. */
+type Status = { contract_partner: Person; payer: Person | null; minor?: boolean; representatives?: Representative[] };
 type Subject = "contract_partner" | "payer";
 
 // 11:20 in Berlin.
@@ -83,6 +85,10 @@ type Mock = {
   payerKind?: "self" | "third_party";
   /** The server refuses to change the confirmation. */
   refuse?: boolean;
+  /** The lead became a minor after this tab loaded the status: the server refuses the child's line. */
+  refuseMinor?: boolean;
+  /** What the portal state says about the lead's age. */
+  minor?: boolean;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -117,7 +123,7 @@ async function mount(page: Page, mock: Mock) {
         uploads: [],
         uploads_hidden: false,
         guardians: { links: [], candidates: [] },
-        minor: false,
+        minor: mock.minor ?? false,
         can_issue: true,
         can_review_uploads: true,
       };
@@ -130,6 +136,14 @@ async function mount(page: Page, mock: Mock) {
       const subject = confirmation[1] as Subject;
       const body = request.postDataJSON() as { confirmed?: boolean };
       calls.push({ subject, body });
+      if (mock.refuseMinor) {
+        await route.fulfill({
+          status: 422,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "identification_subject_minor", message: "The lead is a minor" }),
+        });
+        return;
+      }
       if (mock.refuse) {
         await route.fulfill({
           status: 409,
@@ -288,6 +302,74 @@ test("a refused change is reported and the label stays", async ({ page }) => {
   await expect(block.getByTestId("lead-identification-error")).toBeVisible();
   await expect(patient.payment).toHaveText("Ожидается платёж с собственного счёта");
   await expect(patient.line.getByRole("button", { name: "Подтвердить платёж" })).toBeEnabled();
+  expect(calls).toHaveLength(1);
+});
+
+test("a minor has no line of his own: without a parent on file the block asks for one", async ({ page }) => {
+  const { wizard, block, row, calls } = await mount(page, {
+    lang: "ru",
+    minor: true,
+    // The child neither signs nor pays; nobody represents him yet.
+    status: { contract_partner: { qes: null, own_account_payment: null }, payer: null, minor: true, representatives: [] },
+  });
+  await expect(block).toContainText("Идентификация по квалифицированной подписи");
+  await expect(block.getByTestId("lead-identification-minor")).toContainText(
+    "подписывают и платят законные представители, у ребёнка своей строки нет",
+  );
+  await expect(block.getByTestId("lead-identification-no-representative")).toHaveText(
+    "Добавьте родителя или законного представителя",
+  );
+  await expect(row("contract_partner").line).toHaveCount(0);
+  await expect(block.getByRole("listitem")).toHaveCount(0);
+  await expect(block.getByRole("button")).toHaveCount(0);
+  // No sheet for the child either.
+  const actions = wizard.getByTestId("gwg-identification-actions");
+  await expect(actions.getByTestId("gwg-identification-no-representative")).toBeVisible();
+  await expect(actions.getByRole("button")).toHaveCount(0);
+  expect(calls).toEqual([]);
+});
+
+test("a parent of a minor is identified on the own line, with the payment sent for that parent", async ({ page }) => {
+  const motherId = "11111111-1111-4111-8111-111111111111";
+  const mother = `representative:${motherId}`;
+  const { block, row, calls } = await mount(page, {
+    lang: "de",
+    minor: true,
+    refuse: true,
+    status: {
+      contract_partner: { qes: null, own_account_payment: null },
+      payer: null,
+      minor: true,
+      representatives: [
+        { id: motherId, subject: mother, name: "Anna Muster", relation: "parent", has_email: true, qes: SIGNED, own_account_payment: null },
+      ],
+    },
+  });
+  await expect(row("contract_partner").line).toHaveCount(0);
+  const line = block.getByTestId(`lead-identification-${mother}`);
+  await expect(line).toContainText("Anna Muster");
+  await expect(line).toContainText("Elternteil");
+  await expect(block.getByTestId(`lead-identification-qes-${mother}`)).toHaveText("Qualifizierte Signatur · 05.10.2026");
+  await expect(block.getByTestId(`lead-identification-payment-${mother}`)).toHaveText("Zahlung vom eigenen Konto ausstehend");
+  await line.getByRole("button", { name: "Zahlung bestätigen" }).click();
+  // The server of this mock refuses; what matters is whom the confirmation was sent for.
+  await expect(block.getByTestId("lead-identification-error")).toBeVisible();
+  expect(calls).toEqual([{ subject: mother, body: { confirmed: true } }]);
+});
+
+test("a tab that still shows the child's line is told why the payment was refused", async ({ page }) => {
+  const { block, row, calls } = await mount(page, {
+    lang: "ru",
+    refuseMinor: true,
+    // Loaded while the lead still counted as an adult.
+    status: { contract_partner: { qes: SIGNED, own_account_payment: null }, payer: null },
+  });
+  const patient = row("contract_partner");
+  await patient.line.getByRole("button", { name: "Подтвердить платёж" }).click();
+  await expect(block.getByTestId("lead-identification-error")).toHaveText(
+    "Пациент несовершеннолетний: платёж подтверждается у законного представителя, а не у ребёнка. Обновите страницу",
+  );
+  await expect(patient.payment).toHaveText("Ожидается платёж с собственного счёта");
   expect(calls).toHaveLength(1);
 });
 

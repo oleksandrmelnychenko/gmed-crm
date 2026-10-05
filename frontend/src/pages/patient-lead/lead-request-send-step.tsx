@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
 import { canSubmit, changedSinceSubmit, consentGiven, missingForSubmit } from "./lead-request-model";
 import { RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
-import { requestSummary, type SummaryGroup } from "./lead-request-summary";
+import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
@@ -199,30 +199,55 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
       {groups.map((group) => (
         <section key={group.id} className="px-3 py-2.5" data-testid={`lead-request-summary-${group.id}`}>
           <h4 className="text-xs font-semibold text-foreground">{group.title}</h4>
-          {group.rows.length === 0 ? (
+          {group.rows.length === 0 && !group.parts?.length ? (
             <p className="mt-1 text-sm text-muted-foreground">{group.empty}</p>
-          ) : group.rows.every((row) => !row.label) ? (
-            // A plain list: the uploaded files.
-            <ul className="mt-1.5 space-y-1 text-sm">
-              {group.rows.map((row, index) => (
-                <li key={`${row.value}-${index}`} className="break-words">
-                  {row.value}
-                </li>
-              ))}
-            </ul>
           ) : (
-            <dl className="mt-1.5 space-y-1.5 text-sm">
-              {group.rows.map((row) => (
-                // Stacked on a phone, label beside value from the tablet width on.
-                <div key={row.label} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
-                  <dt className="text-xs leading-5 text-muted-foreground">{row.label}</dt>
-                  <dd className="min-w-0 whitespace-pre-line break-words">{row.value}</dd>
-                </div>
-              ))}
-            </dl>
+            <SummaryRows rows={group.rows} />
           )}
+          {/* The persons of the group: each representative with the own statements and files. */}
+          {group.parts?.map((part) => (
+            <div
+              key={part.id}
+              className="mt-2.5 border-t border-dashed border-border pt-2"
+              data-testid={`lead-request-summary-${group.id}-${part.id}`}
+            >
+              <h5 className="text-xs font-medium text-foreground">{part.title}</h5>
+              {part.rows.length === 0 ? (
+                <p className="mt-1 text-sm text-muted-foreground">{group.empty}</p>
+              ) : (
+                <SummaryRows rows={part.rows} />
+              )}
+            </div>
+          ))}
         </section>
       ))}
     </div>
+  );
+}
+
+function SummaryRows({ rows }: { rows: SummaryRow[] }) {
+  if (rows.length === 0) return null;
+  if (rows.every((row) => !row.label)) {
+    // A plain list: the uploaded files.
+    return (
+      <ul className="mt-1.5 space-y-1 text-sm">
+        {rows.map((row, index) => (
+          <li key={`${row.value}-${index}`} className="break-words">
+            {row.value}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  return (
+    <dl className="mt-1.5 space-y-1.5 text-sm">
+      {rows.map((row) => (
+        // Stacked on a phone, label beside value from the tablet width on.
+        <div key={row.label} className="sm:grid sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] sm:gap-4">
+          <dt className="text-xs leading-5 text-muted-foreground">{row.label}</dt>
+          <dd className="min-w-0 whitespace-pre-line break-words">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }

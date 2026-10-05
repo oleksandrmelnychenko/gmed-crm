@@ -231,3 +231,229 @@ describe("LeadGwgStatements", () => {
     );
   });
 });
+
+const ANNA_ID = "11111111-1111-4111-8111-111111111111";
+const BEN_ID = "22222222-2222-4222-8222-222222222222";
+
+/** The mother filled in her data in the cabinet; the father is only a trusted contact. */
+const PARENTS = [
+  {
+    id: ANNA_ID,
+    slot: "rep1",
+    role: "legal_representative",
+    relation: "parent",
+    first_name: "Anna",
+    last_name: "Muster",
+    date_of_birth: "1985-03-02",
+    birth_place: "Kyiv",
+    birth_country: "UA",
+    citizenships: ["UA", "DE"],
+    street: "Musterweg 1",
+    zip: "10115",
+    city: "Berlin",
+    country: "DE",
+    email: "anna.muster@example.com",
+    phone: "+49 30 100001",
+    id_document_type: "passport",
+    id_document_number: "FA7654321",
+    id_issuing_authority: "Passamt 8031",
+    id_issuing_country: "UA",
+    id_issued_on: "2021-05-01",
+    id_valid_until: "2026-10-04",
+    identity_documents: [{ id: "doc-a1", file_name: "anna-pass.pdf", uploaded_at: "2026-10-05T09:10:00Z", reviewed: true }],
+    authority_documents: [{ id: "doc-a2", file_name: "sorgerecht.pdf", uploaded_at: "2026-10-04T08:00:00Z", reviewed: false }],
+    has_login: true,
+    has_data: true,
+    contact_origin: "staff",
+  },
+  {
+    id: BEN_ID,
+    slot: "rep2",
+    role: "legal_representative",
+    relation: "parent",
+    first_name: "Ben",
+    last_name: "Muster",
+    email: "ben.muster@example.com",
+    has_login: false,
+    has_data: false,
+    contact_origin: "staff",
+  },
+];
+
+function minorState(representation: Record<string, unknown>, patch: Record<string, unknown> = {}): LeadPortalIntake {
+  return portalState({
+    minor: true,
+    representation: { has_representative: null, under_guardianship: null, custody: "joint", custody_stated: false, ...representation },
+    representation_updated_at: "2026-10-05T09:40:00Z",
+    ...patch,
+  });
+}
+
+/** The markup of the representation group, or of one person in it. */
+function part(html: string, testId: string, closing: string): string {
+  const start = html.indexOf(`data-testid="${testId}"`);
+  if (start < 0) return "";
+  return html.slice(start, html.indexOf(closing, start));
+}
+
+describe("LeadGwgStatements: who acts for the lead", () => {
+  it("lists the legal representatives of a minor after the identity document", () => {
+    const html = render(minorState({ representatives: PARENTS }));
+    expect(html).toContain("Законные представители");
+    // 09:40 UTC is 11:40 in Berlin.
+    expect(part(html, "lead-gwg-representation-updated", "</span>")).toContain("изменено в кабинете · 05.10.2026 11:40");
+    expect(html.indexOf("lead-gwg-identity-documents")).toBeLessThan(html.indexOf('data-testid="lead-gwg-representation"'));
+    expect(html.indexOf('data-testid="lead-gwg-representation"')).toBeLessThan(html.indexOf("lead-gwg-own-account"));
+    // Nobody stated the custody: both parents represent the child, and both are on file.
+    expect(statement(html, "lead-gwg-custody")).toContain("не указано — оба родителя");
+    expect(html).not.toContain("lead-gwg-representation-warning");
+
+    const anna = part(html, `lead-gwg-representative-${ANNA_ID}`, `lead-gwg-representative-${BEN_ID}"`);
+    for (const text of [
+      "Anna Muster",
+      "Родитель",
+      "есть доступ в кабинет",
+      "02.03.1985",
+      "Kyiv, Украина",
+      "Украина, Германия",
+      "Musterweg 1, 10115 Berlin, Германия",
+      "anna.muster@example.com",
+      "+49 30 100001",
+      "Паспорт",
+      "FA7654321",
+      "Passamt 8031, Украина",
+      "01.05.2021",
+      "anna-pass.pdf",
+      " · 05.10.2026 · просмотрен",
+      "sorgerecht.pdf",
+      " · 04.10.2026",
+    ]) {
+      expect(anna).toContain(text);
+    }
+    expect(anna).not.toContain("в кабинете ещё не заполнено");
+    // Her passport ran out the day before.
+    const expired = statement(html, `lead-gwg-representative-valid-until-${ANNA_ID}`);
+    expect(expired).toContain('data-warning="true"');
+    expect(expired).toContain("04.10.2026 · срок истёк");
+
+    const ben = html.slice(html.indexOf(`data-testid="lead-gwg-representative-${BEN_ID}"`), html.indexOf("lead-gwg-own-account"));
+    expect(ben).toContain("Ben Muster");
+    expect(ben).toContain("в кабинете ещё не заполнено");
+    expect(ben).not.toContain("есть доступ в кабинет");
+    expect(statement(html, `lead-gwg-representative-valid-until-${BEN_ID}`)).toContain("не указано");
+    expect(statement(html, `lead-gwg-representative-identity-documents-${BEN_ID}`)).toContain("—");
+    // Still nothing can be edited.
+    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+  });
+
+  it("warns when the number of representatives does not fit the custody", () => {
+    const sole = render(minorState({ custody: "sole_parent", custody_stated: true, representatives: PARENTS }));
+    expect(statement(sole, "lead-gwg-custody")).toContain("Один родитель (единоличная опека)");
+    expect(part(sole, "lead-gwg-representation-warning", "</p>")).toContain('data-warning="single_custody_several"');
+    expect(sole).toContain("Ребёнка представляет один человек, но указано несколько представителей");
+
+    const joint = render(minorState({ custody: "joint", custody_stated: true, representatives: [PARENTS[0]] }));
+    expect(statement(joint, "lead-gwg-custody")).toContain("Оба родителя совместно");
+    expect(part(joint, "lead-gwg-representation-warning", "</p>")).toContain('data-warning="joint_custody_incomplete"');
+    expect(joint).toContain("Ребёнка представляют оба родителя, но указан только один");
+
+    const guardian = render(minorState({ custody: "guardian", custody_stated: true, representatives: [{ ...PARENTS[0], relation: "guardian" }] }));
+    expect(statement(guardian, "lead-gwg-custody")).toContain("Опекун или попечитель");
+    expect(guardian).toContain("Опекун");
+    expect(guardian).not.toContain("lead-gwg-representation-warning");
+  });
+
+  it("asks for a parent or guardian when a minor has none, instead of an empty list", () => {
+    const html = render(minorState({ representatives: [] }));
+    expect(part(html, "lead-gwg-representation-warning", "</p>")).toContain("Добавьте родителя или законного представителя");
+    expect(html).not.toContain("lead-gwg-representative-");
+    expect(render(minorState({ representatives: [] }), null, "de")).toContain(
+      "Bitte einen Elternteil oder eine gesetzliche Vertreterin / einen gesetzlichen Vertreter hinzufügen",
+    );
+  });
+
+  it("names the parents of a minor even while nobody opened the cabinet", () => {
+    const html = render(
+      minorState(
+        { representatives: [PARENTS[1]] },
+        { identification: {}, identification_updated_at: null, identity_documents: [], representation_updated_at: null },
+      ),
+    );
+    expect(html).toContain("Пациент ещё не заполнил эти данные в кабинете");
+    expect(html).toContain("Законные представители");
+    expect(html).toContain("Ben Muster");
+    expect(html).toContain("Ребёнка представляют оба родителя, но указан только один");
+    expect(html).not.toContain("lead-gwg-representation-updated");
+    // The lead's own statements are not claimed.
+    expect(html).not.toContain("Юридические вопросы");
+  });
+
+  it("shows an adult the two answers and the person a yes names", () => {
+    const html = render(
+      portalState({
+        minor: false,
+        representation: {
+          has_representative: true,
+          under_guardianship: false,
+          custody: null,
+          custody_stated: false,
+          representatives: [{ ...PARENTS[0], slot: "agent", role: "authorised_representative", relation: "representative", has_login: false }],
+        },
+        representation_updated_at: "2026-10-05T09:40:00Z",
+      }),
+    );
+    expect(html).toContain("Представительство");
+    expect(html).not.toContain("Законные представители");
+    const acts = statement(html, "lead-gwg-has-representative");
+    expect(acts).toContain("Да");
+    expect(acts).toContain('data-warning="true"');
+    const guardianship = statement(html, "lead-gwg-under-guardianship");
+    expect(guardianship).toContain("Нет");
+    expect(guardianship).not.toContain('data-warning="true"');
+    expect(html).toContain("Уполномоченный представитель");
+    expect(html).toContain("sorgerecht.pdf");
+    expect(html).not.toContain("lead-gwg-custody");
+    expect(html).not.toContain("lead-gwg-representation-warning");
+    expect(html).not.toContain("есть доступ в кабинет");
+  });
+
+  it("keeps an adult who answered nothing about it to the two open questions", () => {
+    const html = render(
+      portalState({
+        representation: { has_representative: null, under_guardianship: null, custody: null, custody_stated: false, representatives: [] },
+      }),
+    );
+    expect(statement(html, "lead-gwg-has-representative")).toContain("Не отвечено");
+    expect(statement(html, "lead-gwg-under-guardianship")).toContain("Не отвечено");
+    expect(html).not.toContain("lead-gwg-representative-");
+  });
+
+  it("shows nothing of it to a role the server keeps it from", () => {
+    const html = render(portalState({ minor: true, representation: null }));
+    expect(html).not.toContain("lead-gwg-representation");
+    expect(html).not.toContain("Законные представители");
+    // The rest of the statements stays.
+    expect(html).toContain("Личность");
+  });
+
+  it("reads in German too", () => {
+    const html = render(minorState({ custody: "sole_parent", custody_stated: true, representatives: PARENTS }), null, "de");
+    for (const text of [
+      "Gesetzliche Vertreter",
+      "im Portal geändert · 05.10.2026 11:40",
+      "Wer vertritt das Kind",
+      "Ein Elternteil allein (alleiniges Sorgerecht)",
+      "Elternteil",
+      "hat Zugang zum Portal",
+      "Musterweg 1, 10115 Berlin, Deutschland",
+      "Ukraine, Deutschland",
+      "04.10.2026 · abgelaufen",
+      "Dateien: Ausweis",
+      "Dateien: Vertretungsnachweis",
+      "im Portal noch nicht ausgefüllt",
+      "Das Kind wird von einer Person allein vertreten",
+    ]) {
+      expect(html).toContain(text);
+    }
+  });
+});

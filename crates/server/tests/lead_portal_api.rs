@@ -206,8 +206,9 @@ fn declared() -> Option<Value> {
 
 /// Fills in everything "send to the manager" needs, as the cabinet does: the
 /// personal data, who pays (the patient, in the own interest), the statements
-/// for the identification, the request consent and a copy of the identity
-/// document. Returns the request as the last save answered it.
+/// for the identification, that nobody acts for the (adult) patient, the
+/// request consent and a copy of the identity document. Returns the request
+/// as the last save answered it.
 async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &str) -> Value {
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     for (part, body) in [
@@ -228,6 +229,10 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
             json!({ "payer_kind": "self", "acts_on_own_account": true }),
         ),
         ("identification", complete_identification()),
+        (
+            "representation",
+            json!({ "has_representative": false, "under_guardianship": false }),
+        ),
     ] {
         let (status, body) = json_request(
             app,
@@ -682,8 +687,9 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // Who pays (owner request 2026-10-05) and the statements for the GwG
-    // identification are part of what the manager needs, in form order.
+    // Who pays (owner request 2026-10-05), the statements for the GwG
+    // identification and whether somebody acts for the patient are part of
+    // what the manager needs, in form order.
     let still_missing = json!([
         "payer_kind",
         "birth_place",
@@ -694,6 +700,8 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         "id_issuing_country",
         "id_valid_until",
         "id_document_upload",
+        "has_representative",
+        "under_guardianship",
         "payer_own_account",
         "pep_self",
         "pep_related",
@@ -737,6 +745,26 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         &format!("{request}/identification"),
         &patient,
         Some(complete_identification()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!([
+            "id_document_upload",
+            "has_representative",
+            "under_guardianship"
+        ]),
+        "{body}"
+    );
+    // An adult says whether somebody acts for him and whether he is under
+    // legal guardianship; "no" to both asks for nobody else.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &patient,
+        Some(json!({ "has_representative": false, "under_guardianship": false })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -2169,6 +2197,57 @@ async fn purging_a_lead_clears_the_portal_intake() {
             .unwrap();
     assert_eq!(statements, 1);
 
+    // Somebody acts for the patient after all: the person, the copy of that
+    // person's identity document and the power of attorney are part of what
+    // the request holds.
+    let representative = Uuid::new_v4();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/representation"),
+        &patient,
+        Some(json!({ "has_representative": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/representatives/{representative}"),
+        &patient,
+        Some(json!({
+            "role": "authorised_representative",
+            "first_name": "Ben",
+            "last_name": "Muster",
+            "citizenships": ["DE"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    for part in ["identity-document", "authority-document"] {
+        let (status, body) = upload_file(
+            router,
+            &format!("/api/v1/me/lead-requests/{lead_id}/representatives/{representative}/{part}"),
+            &patient,
+            "vertreter.pdf",
+            "application/pdf",
+            PDF,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{part}: {body}");
+    }
+    let representative_documents: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT u.document_id FROM lead_portal_uploads u
+           JOIN documents d ON d.id = u.document_id
+           WHERE u.lead_id = $1 AND u.representative_id = $2 AND d.storage_key IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .bind(representative)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(representative_documents.len(), 2);
+
     let (status, body) = json_request(
         router,
         "POST",
@@ -2200,6 +2279,23 @@ async fn purging_a_lead_clears_the_portal_intake() {
     assert_eq!(statements, 0);
     assert_eq!(payer, 0);
     assert_eq!(documents, 0);
+    // So does what the request held about the representative: the row, the
+    // trusted contact and both files.
+    let (representatives, contacts, files): (i64, Value, i64) = sqlx::query_as(
+        r#"SELECT (SELECT count(*) FROM lead_representatives WHERE lead_id = $1),
+                  trusted_contacts,
+                  (SELECT count(*) FROM documents
+                   WHERE id = ANY($2) AND storage_key IS NOT NULL)
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(&representative_documents)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(representatives, 0);
+    assert_eq!(contacts, json!([]));
+    assert_eq!(files, 0);
     let (status, _) = json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
     // The login itself is switched off with the lead.
     assert_eq!(status, StatusCode::UNAUTHORIZED);

@@ -165,6 +165,101 @@ export type LeadRequestDocument = {
   can_delete: boolean;
 };
 
+/**
+ * The place a person has in the form: the first and second legal
+ * representative of a minor, an adult's representative, an adult's legal
+ * guardian (Betreuer).
+ */
+export type RepresentativeSlot = "rep1" | "rep2" | "agent" | "guardian";
+
+export type RepresentativeRole = "legal_representative" | "authorised_representative" | "legal_guardian";
+
+/** Who represents a minor: both parents, one parent alone, or a guardian. */
+export type Custody = "joint" | "sole_parent" | "guardian";
+
+/** A person who acts for the lead, with the own identity document and uploads. */
+export type LeadRequestRepresentative = {
+  id: string;
+  /** `null`: on file at GMED, but not asked for in the form (a second parent with sole custody). */
+  slot: RepresentativeSlot | null;
+  role: RepresentativeRole;
+  relation: string | null;
+  /** The person the caller's login was issued for. */
+  mine: boolean;
+  /** The e-mail is a sign-in address: only staff change it. */
+  email_locked: boolean;
+  can_remove: boolean;
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  birth_place: string | null;
+  birth_country: string | null;
+  citizenships: string[];
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+  /** `passport`, `id_card` or `residence_permit`. */
+  id_document_type: string | null;
+  id_document_number: string | null;
+  id_issuing_authority: string | null;
+  id_issuing_country: string | null;
+  id_issued_on: string | null;
+  id_valid_until: string | null;
+  /** Photos or scans of this person's identity document. */
+  identity_documents: LeadRequestDocument[];
+  /** Proof that this person may act: power of attorney, appointment, sole custody. */
+  authority_documents: LeadRequestDocument[];
+};
+
+/**
+ * Who acts for the lead (owner spec "Patientenformular", section 3). An adult
+ * answers the two questions and `custody` is `null`; for a minor the answers
+ * are `null` and `custody` is never `null` (not stated counts as `joint`).
+ */
+export type LeadRequestRepresentation = {
+  has_representative: boolean | null;
+  under_guardianship: boolean | null;
+  custody: Custody | null;
+  custody_stated: boolean;
+  representatives: LeadRequestRepresentative[];
+};
+
+/** Only the changed answers: the two questions of an adult, or the custody of a minor. */
+export type RepresentationPatch = {
+  has_representative?: boolean | null;
+  under_guardianship?: boolean | null;
+  custody?: Custody;
+};
+
+/**
+ * Only the changed keys of a person: `""` clears a text, date or choice.
+ * `role` goes with the first save of a person, which creates it.
+ */
+export type RepresentativePatch = Partial<
+  Record<
+    Exclude<
+      keyof LeadRequestRepresentative,
+      | "id"
+      | "slot"
+      | "role"
+      | "relation"
+      | "mine"
+      | "email_locked"
+      | "can_remove"
+      | "citizenships"
+      | "identity_documents"
+      | "authority_documents"
+    >,
+    string
+  >
+> & { citizenships?: string[]; role?: RepresentativeRole };
+
+/** The two uploads of a representative: a copy of the identity document, and the proof of authority. */
+export type RepresentativeUploadKind = "identity" | "authority";
+
 /** One request (lead) the login fills in: its own or, as a parent, a child's. */
 export type LeadRequest = {
   lead_id: string;
@@ -183,6 +278,8 @@ export type LeadRequest = {
   identification?: LeadRequestIdentification;
   /** Photos or scans of the identity document; never among `documents` (medical). */
   identity_documents?: LeadRequestDocument[];
+  /** Who acts for the lead; absent on an older server. `minor` says which of the two blocks applies. */
+  representation?: LeadRequestRepresentation;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -255,7 +352,50 @@ export function uploadLeadIdentityDocument(leadId: string, file: File): Promise<
   return apiFetch<LeadRequest>(`${base(leadId)}/identity-document`, { method: "POST", body: form });
 }
 
-/** Withdraws an own upload: a medical document or a copy of the identity document. */
+/** The answers about who acts for the lead; an answer taken back removes the person named for it. */
+export function saveLeadRepresentation(leadId: string, patch: RepresentationPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/representation`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+const representative = (leadId: string, representativeId: string) =>
+  `${base(leadId)}/representatives/${encodeURIComponent(representativeId)}`;
+
+/** Saves the changed keys of a representative; an id the server does not know creates the person. */
+export function saveLeadRepresentative(
+  leadId: string,
+  representativeId: string,
+  patch: RepresentativePatch,
+): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(representative(leadId, representativeId), {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** Removes a representative the cabinet created, with the uploads; the server refuses anybody else. */
+export function removeLeadRepresentative(leadId: string, representativeId: string): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(representative(leadId, representativeId), { method: "DELETE" });
+}
+
+/** An upload of a representative; like the lead's identity document it needs the request consent first. */
+export function uploadLeadRepresentativeDocument(
+  leadId: string,
+  representativeId: string,
+  kind: RepresentativeUploadKind,
+  file: File,
+): Promise<LeadRequest> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<LeadRequest>(`${representative(leadId, representativeId)}/${kind}-document`, {
+    method: "POST",
+    body: form,
+  });
+}
+
+/** Withdraws an own upload: a medical document, a copy of an identity document or a proof of authority. */
 export function withdrawLeadDocument(leadId: string, documentId: string): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/documents/${encodeURIComponent(documentId)}`, {
     method: "DELETE",

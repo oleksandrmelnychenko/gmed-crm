@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -37,7 +37,7 @@ import {
   portalCredentialsMessage,
   type PatientMessageLanguage,
 } from "../model/lead-portal-access";
-import { currentGwgSheet, gwgSheetRequest } from "../model/gwg-identification";
+import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gwg-identification";
 import { leadErrorMessage } from "../model/leads-model";
 import {
   fetchLeadPortalIntake,
@@ -140,6 +140,15 @@ export function LeadPortalAccessDetail({
   }, [canOffer, lead.id]);
 
   const [sheetBusy, setSheetBusy] = useState(false);
+  // Whether the lead is a minor, from the portal state the parents' block
+  // loads: `undefined` while loading, `null` when it is not known.
+  const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
+  const onPortalIntake = useCallback((intake: LeadPortalIntake | null) => {
+    setMinor(intake ? intake.minor : null);
+  }, []);
+  // A minor has no sheet of his own: each legal representative gets one, in
+  // the wizard. The quick button is for the patient's own sheet only.
+  const canOfferSheet = canIssue && minor !== undefined && minor !== true;
 
   /**
    * The GwG identification sheet of the patient, filled by the server from
@@ -160,7 +169,8 @@ export function LeadPortalAccessDetail({
       );
       await downloadDocumentFile(generated.id, generated.original_filename || generated.auto_name);
     } catch (nextError) {
-      setError(leadErrorMessage(nextError, (ru, deText) => (de ? deText : ru)));
+      const tx = (ru: string, deText: string) => (de ? deText : ru);
+      setError(gwgSheetErrorText(nextError, tx) ?? leadErrorMessage(nextError, tx));
     } finally {
       setSheetBusy(false);
     }
@@ -260,7 +270,7 @@ export function LeadPortalAccessDetail({
             {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
           </Button>
         ) : null}
-        {canIssue ? (
+        {canOfferSheet ? (
           <Button
             type="button"
             variant="outline"
@@ -327,7 +337,7 @@ export function LeadPortalAccessDetail({
         </p>
       )}
       {error ? <p className="text-rose-700">{error}</p> : null}
-      <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} />
+      <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} onIntake={onPortalIntake} />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>
         <DialogContent className="max-w-md">
@@ -726,11 +736,14 @@ export function LeadGuardianAccess({
   lang,
   canIssue,
   onChanged,
+  onIntake,
 }: {
   lead: Lead;
   lang: Lang;
   canIssue: boolean;
   onChanged?: () => void;
+  /** Receives the portal state after each load (null when it could not be read). */
+  onIntake?: (intake: LeadPortalIntake | null) => void;
 }) {
   const de = lang === "de";
   const tx = (ru: string, deText: string) => (de ? deText : ru);
@@ -739,13 +752,20 @@ export function LeadGuardianAccess({
   const [error, setError] = useState("");
   const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string } | null>(null);
   const [notice, setNotice] = useState("");
+  const onIntakeRef = useRef(onIntake);
+  useEffect(() => {
+    onIntakeRef.current = onIntake;
+  }, [onIntake]);
 
   const load = useCallback(async () => {
+    let next: LeadPortalIntake | null = null;
     try {
-      setIntake(await fetchLeadPortalIntake(lead.id));
+      next = await fetchLeadPortalIntake(lead.id);
     } catch {
-      setIntake(null);
+      next = null;
     }
+    setIntake(next);
+    onIntakeRef.current?.(next);
   }, [lead.id]);
 
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
-import type { LeadRequest } from "./lead-request-api";
+import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import {
   LEGAL_DETAILS,
   LEGAL_QUESTIONS,
@@ -12,7 +12,22 @@ import {
   payerTypeOf,
   type PayerField,
 } from "./lead-request-model";
-import { identificationFieldLabel, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
+import {
+  REPRESENTATIVE_FIELDS,
+  REPRESENTATIVE_SLOTS,
+  asksRepresentativeField,
+  authorityProofOf,
+  representativeInSlot,
+  type RepresentativeField,
+} from "./lead-request-representation-model";
+import {
+  identificationFieldLabel,
+  payerFieldLabel,
+  representativeFieldLabel,
+  representativeHeading,
+  representativeUploadLabel,
+  type LeadRequestText,
+} from "./lead-request-text";
 
 /** One statement in the summary; a row without a label is an entry of a list (a file). */
 export type SummaryRow = { label: string; value: string };
@@ -22,10 +37,14 @@ export type SummaryGroupId =
   | "address"
   | "contact"
   | "identity"
+  | "representation"
   | "insurance"
   | "payer"
   | "legal"
   | "documents";
+
+/** A person inside a group: a representative with the own statements and files. */
+export type SummaryPart = { id: string; title: string; rows: SummaryRow[] };
 
 export type SummaryGroup = {
   id: SummaryGroupId;
@@ -33,6 +52,8 @@ export type SummaryGroup = {
   rows: SummaryRow[];
   /** What the group says while nothing was entered. */
   empty: string;
+  /** The persons of the group, below its own rows. */
+  parts?: SummaryPart[];
 };
 
 /**
@@ -55,14 +76,13 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   const yesNo = (value: boolean | null | undefined) => option(text.yesNo, answerFromBoolean(value));
   const identificationLabel = (field: Parameters<typeof identificationFieldLabel>[1]) =>
     identificationFieldLabel(text, field, guardian);
+  const entered = (rows: Array<[string, string | null | undefined]>): SummaryRow[] =>
+    rows.flatMap(([label, value]) => (value?.trim() ? [{ label, value: value.trim() }] : []));
   const group = (id: SummaryGroupId, title: string, rows: Array<[string, string | null | undefined]>, empty = text.summaryEmpty) => {
-    groups.push({
-      id,
-      title,
-      rows: rows.flatMap(([label, value]) => (value?.trim() ? [{ label, value: value.trim() }] : [])),
-      empty,
-    });
+    groups.push({ id, title, rows: entered(rows), empty });
   };
+  const fileNames = (documents: readonly { file_name: string | null }[] | null | undefined) =>
+    (documents ?? []).map((document) => document.file_name ?? "—").join(", ");
 
   group("person", text.sectionPerson, [
     [identificationLabel("salutation"), option(text.salutationOptions, identification?.salutation)],
@@ -102,8 +122,69 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       [identificationLabel("id_issuing_country"), country(identification.id_issuing_country)],
       [identificationLabel("id_issued_on"), formatAppDate(identification.id_issued_on)],
       [identificationLabel("id_valid_until"), formatAppDate(identification.id_valid_until)],
-      [text.identityFiles, (request.identity_documents ?? []).map((document) => document.file_name ?? "—").join(", ")],
+      [text.identityFiles, fileNames(request.identity_documents)],
     ]);
+  }
+
+  // Who acts for the lead: the answers of an adult or the custody of a minor,
+  // then each person the form asks for, with the files.
+  const representation = request.representation;
+  if (representation) {
+    const custody = request.minor ? (representation.custody ?? "joint") : null;
+    const stated = (person: LeadRequestRepresentative, field: RepresentativeField) => {
+      switch (field) {
+        case "citizenships":
+          return countries(person.citizenships);
+        case "birth_country":
+        case "country":
+        case "id_issuing_country":
+          return country(person[field]);
+        case "date_of_birth":
+        case "id_issued_on":
+        case "id_valid_until":
+          return formatAppDate(person[field]);
+        case "id_document_type":
+          return option(text.idDocumentTypeOptions, person.id_document_type);
+        default:
+          return person[field];
+      }
+    };
+    const parts = REPRESENTATIVE_SLOTS.flatMap((slot) => {
+      const person = representativeInSlot(representation, slot);
+      if (!person) return [];
+      const proof = authorityProofOf(slot, custody);
+      return [
+        {
+          id: slot,
+          title: representativeHeading(text, slot, person.mine),
+          rows: entered([
+            ...REPRESENTATIVE_FIELDS.filter((field) => asksRepresentativeField(slot, field)).map(
+              (field): [string, string | null | undefined] => [representativeFieldLabel(text, field), stated(person, field)],
+            ),
+            [representativeUploadLabel(text, slot, "identity"), fileNames(person.identity_documents)],
+            // A proof is listed where the form asks for one.
+            [
+              proof ? text.representativeAuthority[proof.proof] : "",
+              proof ? fileNames(person.authority_documents) : "",
+            ],
+          ]),
+        },
+      ];
+    });
+    groups.push({
+      id: "representation",
+      title: request.minor ? text.sectionLegalRepresentatives : text.sectionRepresentation,
+      rows: entered(
+        custody
+          ? [[text.custodyQuestion, text.custodyOptions[custody]]]
+          : [
+              [text.hasRepresentativeQuestion, yesNo(representation.has_representative)],
+              [text.underGuardianshipQuestion, yesNo(representation.under_guardianship)],
+            ],
+      ),
+      empty: text.summaryEmpty,
+      parts,
+    });
   }
 
   group("insurance", text.sectionInsurance, [

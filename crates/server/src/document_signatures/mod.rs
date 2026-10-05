@@ -2,7 +2,7 @@
 pub mod closure;
 pub mod connection;
 mod create;
-mod defaults;
+pub(crate) mod defaults;
 mod effects;
 pub(crate) mod frames;
 mod legal;

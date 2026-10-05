@@ -90,6 +90,69 @@ export type LeadIdentityDocument = {
   reviewed: boolean;
 };
 
+/** Who represents a minor; a request without an answer counts as `joint`. */
+export type LeadCustody = "joint" | "sole_parent" | "guardian";
+
+export const LEAD_CUSTODY_VALUES: readonly LeadCustody[] = ["joint", "sole_parent", "guardian"];
+
+/**
+ * A person who acts for the lead: a legal representative of a minor (a
+ * trusted contact with relation parent / guardian) or an adult's authorised
+ * representative or legal guardian (Betreuer). `id` is the id of the trusted
+ * contact. Name, date of birth, e-mail and phone are the contact's own values;
+ * the rest is what was entered in the cabinet.
+ */
+export type LeadRepresentative = {
+  id: string;
+  /** `rep1`, `rep2`, `agent`, `guardian`, or null for a person on file the cabinet does not ask for. */
+  slot: string | null;
+  /** `legal_representative`, `authorised_representative` or `legal_guardian`. */
+  role: string;
+  /** The relation of the trusted contact: `parent`, `guardian`, `representative`, … */
+  relation: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  birth_place: string | null;
+  birth_country: string | null;
+  citizenships: string[];
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+  id_document_type: string | null;
+  id_document_number: string | null;
+  id_issuing_authority: string | null;
+  id_issuing_country: string | null;
+  id_issued_on: string | null;
+  id_valid_until: string | null;
+  /** Photos or scans of this person's identity document. */
+  identity_documents: LeadIdentityDocument[];
+  /** Proofs of the authority to represent (power of attorney, custody order, …). */
+  authority_documents: LeadIdentityDocument[];
+  /** The person has an active login to the cabinet of this request. */
+  has_login: boolean;
+  /** GwG data of this person were entered (a `lead_representatives` row exists). */
+  has_data: boolean;
+  /** `portal` when the cabinet created the trusted contact, `staff` when it existed. */
+  contact_origin: string | null;
+};
+
+/** Who acts for the lead, as stated in the cabinet (and, for the custody, by staff). */
+export type LeadRepresentation = {
+  /** Adult: "does somebody act for you?"; null for a minor or while unanswered. */
+  has_representative: boolean | null;
+  /** Adult: "are you under legal guardianship?"; null for a minor or while unanswered. */
+  under_guardianship: boolean | null;
+  /** Minor: never null on the server (unanswered counts as `joint`); null for an adult. */
+  custody: LeadCustody | null;
+  /** False while nobody stated the custody: `custody` is then only the default. */
+  custody_stated: boolean;
+  representatives: LeadRepresentative[];
+};
+
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
 export type LeadPortalIntake = {
   lead_id: string;
@@ -116,6 +179,13 @@ export type LeadPortalIntake = {
   /** The caller's role may not read the statements; they come empty then. */
   identification_hidden: boolean;
   identity_documents: LeadIdentityDocument[];
+  /**
+   * Who acts for the lead; null when the server does not send it (an older
+   * backend, or a role that may not read the payer block).
+   */
+  representation: LeadRepresentation | null;
+  /** Last change of the representation by the lead or a parent; null when nothing was entered. */
+  representation_updated_at: string | null;
 };
 
 export type LeadGuardianAccessIssued = {
@@ -161,6 +231,8 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     identification_updated_at: textOrNull(raw.identification_updated_at),
     identification_hidden: Boolean(raw.identification_hidden),
     identity_documents: normalizeIdentityDocuments(raw.identity_documents),
+    representation: normalizeLeadRepresentation(raw.representation),
+    representation_updated_at: textOrNull(raw.representation_updated_at),
   };
 }
 
@@ -217,6 +289,64 @@ function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
       },
     ];
   });
+}
+
+function normalizeRepresentative(value: unknown): LeadRepresentative | null {
+  const raw = asRecord(value);
+  if (!raw || typeof raw.id !== "string" || !raw.id.trim()) return null;
+  return {
+    id: raw.id.trim(),
+    slot: textOrNull(raw.slot),
+    role: textOrNull(raw.role) ?? "legal_representative",
+    relation: textOrNull(raw.relation),
+    first_name: textOrNull(raw.first_name),
+    last_name: textOrNull(raw.last_name),
+    date_of_birth: textOrNull(raw.date_of_birth),
+    birth_place: textOrNull(raw.birth_place),
+    birth_country: textOrNull(raw.birth_country),
+    citizenships: Array.isArray(raw.citizenships)
+      ? raw.citizenships.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+      : [],
+    street: textOrNull(raw.street),
+    zip: textOrNull(raw.zip),
+    city: textOrNull(raw.city),
+    country: textOrNull(raw.country),
+    email: textOrNull(raw.email),
+    phone: textOrNull(raw.phone),
+    id_document_type: textOrNull(raw.id_document_type),
+    id_document_number: textOrNull(raw.id_document_number),
+    id_issuing_authority: textOrNull(raw.id_issuing_authority),
+    id_issuing_country: textOrNull(raw.id_issuing_country),
+    id_issued_on: textOrNull(raw.id_issued_on),
+    id_valid_until: textOrNull(raw.id_valid_until),
+    identity_documents: normalizeIdentityDocuments(raw.identity_documents),
+    authority_documents: normalizeIdentityDocuments(raw.authority_documents),
+    has_login: raw.has_login === true,
+    has_data: raw.has_data === true,
+    contact_origin: textOrNull(raw.contact_origin),
+  };
+}
+
+/**
+ * Who acts for the lead, with every key present; null when the server sent
+ * none (an older backend, or a role that may not read it).
+ */
+export function normalizeLeadRepresentation(value: unknown): LeadRepresentation | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const custody = LEAD_CUSTODY_VALUES.find((item) => item === raw.custody) ?? null;
+  return {
+    has_representative: answerOrNull(raw.has_representative),
+    under_guardianship: answerOrNull(raw.under_guardianship),
+    custody,
+    custody_stated: custody !== null && raw.custody_stated === true,
+    representatives: Array.isArray(raw.representatives)
+      ? raw.representatives.flatMap((item) => {
+          const representative = normalizeRepresentative(item);
+          return representative ? [representative] : [];
+        })
+      : [],
+  };
 }
 
 export function setLeadStep1FillMode(leadId: string, mode: Step1FillMode): Promise<{ fill_mode: Step1FillMode }> {

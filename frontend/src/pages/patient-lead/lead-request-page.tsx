@@ -73,6 +73,7 @@ import {
   type Step,
 } from "./lead-request-parts";
 import { PayerSection } from "./lead-request-payer-section";
+import { RepresentationSection } from "./lead-request-representation";
 import { SendStep } from "./lead-request-send-step";
 import {
   LEAD_CABINET_LANGS,
@@ -388,12 +389,12 @@ function LeadRequestView({
 }
 
 /** The parts of step "data" that save on their own; the footer shows one state for all. */
-type SavePart = "personal" | "payer" | "identification";
+type SavePart = "personal" | "payer" | "identification" | "representation";
 
 /**
  * Step "data" in the order of the GwG form (owner spec 2026-10-05): consent
- * and contact channels, person, address, contact, identity document,
- * insurance, who pays, legal questions.
+ * and contact channels, person, address, contact, identity document, who acts
+ * for the lead, insurance, who pays, legal questions.
  */
 function PersonalDataStep({
   request,
@@ -418,6 +419,7 @@ function PersonalDataStep({
     personal: "idle",
     payer: "idle",
     identification: "idle",
+    representation: "idle",
   });
   const [fieldError, setFieldError] = useState<{ field: string; message: string } | null>(null);
   const guardian = request.access_kind === "guardian";
@@ -428,6 +430,10 @@ function PersonalDataStep({
   const setPayerSaveState = useCallback((state: SaveState) => setSaveState("payer", state), [setSaveState]);
   const setIdentificationSaveState = useCallback(
     (state: SaveState) => setSaveState("identification", state),
+    [setSaveState],
+  );
+  const setRepresentationSaveState = useCallback(
+    (state: SaveState) => setSaveState("representation", state),
     [setSaveState],
   );
 
@@ -709,6 +715,19 @@ function PersonalDataStep({
           lang={lang}
           enqueue={enqueue}
           onChange={onChange}
+        />
+      ) : null}
+
+      {/* An older server does not know who acts for the lead. Adult or minor: the block starts anew with the other questions. */}
+      {request.representation ? (
+        <RepresentationSection
+          key={request.minor ? "minor" : "adult"}
+          request={request}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={setRepresentationSaveState}
         />
       ) : null}
 

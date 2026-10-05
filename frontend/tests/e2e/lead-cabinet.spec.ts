@@ -66,6 +66,16 @@ function leadRequest() {
     } as Record<string, unknown>,
     // Copies of the identity document; never among `documents` (medical).
     identity_documents: [] as Record<string, unknown>[],
+    // Who acts for the lead: an adult answers two questions. A server that
+    // does not know the block yet does not send the key. The persons and the
+    // minor's block have a spec of their own (lead-cabinet-representation).
+    representation: {
+      has_representative: null,
+      under_guardianship: null,
+      custody: null,
+      custody_stated: false,
+      representatives: [],
+    } as Record<string, unknown> | undefined,
     minor: false,
     documents: [] as Record<string, unknown>[],
     max_documents: 30,
@@ -176,6 +186,12 @@ function recompute(request: ReturnType<typeof leadRequest>) {
     }
     if (payer?.payer_kind === "third_party" && !identification.payment_background) missing.push("payment_background");
   }
+  // A server that knows the representation (contract phase 1b-2) needs both answers of an adult.
+  const representation = request.representation;
+  if (representation) {
+    if (representation.has_representative == null) missing.push("has_representative");
+    if (representation.under_guardianship == null) missing.push("under_guardianship");
+  }
   request.progress.missing_for_submit = missing;
   request.progress.filled = [
     "first_name", "last_name", ...SUBMIT_FIELDS, "phone", "primary_language",
@@ -241,6 +257,8 @@ function completeRequest(request: ReturnType<typeof leadRequest>) {
     relationship_kind: null,
     contact_consent_at: null,
   };
+  // Nobody acts for the patient.
+  if (request.representation) Object.assign(request.representation, { has_representative: false, under_guardianship: false });
   request.consents.lead_inquiry_processing.given_at = "2026-10-03T09:15:00Z";
 }
 
@@ -302,6 +320,7 @@ async function setup(
     personalData: [] as Record<string, unknown>[],
     payer: [] as Record<string, unknown>[],
     identification: [] as Record<string, unknown>[],
+    representation: [] as Record<string, unknown>[],
     consents: [] as string[],
     uploads: 0,
     identityUploads: 0,
@@ -424,6 +443,14 @@ async function setup(
       for (const [question, details] of Object.entries(LEGAL_DETAILS)) {
         if (request.identification[question] !== true) request.identification[details] = null;
       }
+      if (request.submitted_at) request.changed_since_submit = true;
+      recompute(request);
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/representation" && method === "POST" && request.representation) {
+      const patch = req.postDataJSON() as Record<string, unknown>;
+      calls.representation.push(patch);
+      Object.assign(request.representation, patch);
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
@@ -565,6 +592,8 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Geburtsort");
     await expect(missing).toContainText("Ausweisdokument: Art des Dokuments");
     await expect(missing).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
+    await expect(missing).toContainText("Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?");
+    await expect(missing).toContainText("Stehen Sie unter rechtlicher Betreuung?");
     await expect(missing).toContainText("Handeln Sie im eigenen wirtschaftlichen Interesse?");
     await expect(missing).toContainText("Gesetzliche Fragen: Öffentliches Amt");
     await expect(missing).toContainText("Gesetzliche Fragen: Sanktionen");
@@ -608,6 +637,15 @@ test.describe("lead cabinet", () => {
         id_issuing_country: "UA",
         id_valid_until: "2031-03-04",
       });
+
+    // Nobody acts for the patient: both questions are answered with "no", and nobody is asked for.
+    const representation = page.getByTestId("lead-request-representation");
+    await choose(page, representation.getByRole("combobox", { name: /Handelt jemand für Sie/ }), "Nein");
+    await choose(page, representation.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" }), "Nein");
+    await expect
+      .poll(() => Object.assign({}, ...calls.representation))
+      .toEqual({ has_representative: false, under_guardianship: false });
+    await expect(representation.getByRole("group")).toHaveCount(0);
 
     const payer = page.getByTestId("lead-request-payer");
     await choose(page, payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Ich selbst");
@@ -1205,6 +1243,9 @@ test.describe("lead cabinet", () => {
     await expect(identity).toContainText("FE123456");
     await expect(identity).toContainText("04.03.2031");
     await expect(identity).toContainText("reisepass.jpg");
+    const representation = page.getByTestId("lead-request-summary-representation");
+    await expect(representation).toContainText("Handelt jemand für Sie");
+    await expect(representation.locator("dd")).toHaveText(["Nein", "Nein"]);
     await expect(page.getByTestId("lead-request-summary-insurance")).toContainText("Noch keine Angaben");
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Ich selbst");
     const legal = page.getByTestId("lead-request-summary-legal");
@@ -1263,10 +1304,11 @@ test.describe("lead cabinet", () => {
     const { calls } = await setup(page, "lead", {
       prepare: (request) => {
         completeRequest(request);
-        // An older server sends neither the statements nor the copies.
+        // An older server sends neither the statements nor the copies, and nothing about who acts for the lead.
         const older = request as { identification?: unknown; identity_documents?: unknown };
         older.identification = undefined;
         older.identity_documents = undefined;
+        request.representation = undefined;
         request.payer_self_template = undefined;
         request.payer = { payer_kind: "self" };
       },
@@ -1274,6 +1316,7 @@ test.describe("lead cabinet", () => {
     await page.goto("/");
     await expect(page.locator("#lead-request-first_name")).toHaveValue("Anna");
     await expect(page.getByTestId("lead-request-identity")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-representation")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-contact-channels")).toHaveCount(0);
     await expect(page.locator("#lead-request-birth_place")).toHaveCount(0);

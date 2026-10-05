@@ -3,15 +3,31 @@
  * signature (§ 12 Abs. 1 GwG, owner decision 2026-10-05): a completed QES of
  * the person counts as the identification, and staff confirm by hand that the
  * payment arrived from an account in that person's own name. The labels only
- * inform — nothing is blocked by them.
+ * inform — nothing is blocked by them. For a minor the legal representatives
+ * sign and pay, so they are identified instead of the child.
  */
 import type { StatusTone } from "@/components/ui-shell";
+import { ApiRequestError } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 
 export type Tx = (ru: string, de: string) => string;
 
-/** The patient or, when somebody else pays, the third-party payer. */
-export type IdentificationSubject = "contract_partner" | "payer";
+/** A legal representative of a minor: `representative:<id of the trusted contact>`. */
+export type RepresentativeSubject = `representative:${string}`;
+
+/**
+ * The patient, a third-party payer or — for a minor, who has no line of his
+ * own — one of the legal representatives.
+ */
+export type IdentificationSubject = "contract_partner" | "payer" | RepresentativeSubject;
+
+export function representativeSubject(id: string): RepresentativeSubject {
+  return `representative:${id}`;
+}
+
+export function isRepresentativeSubject(value: unknown): value is RepresentativeSubject {
+  return typeof value === "string" && value.startsWith("representative:") && value.length > "representative:".length;
+}
 
 export type QualifiedSignature = {
   signed_at: string;
@@ -30,10 +46,34 @@ export type PersonIdentification = {
   own_account_payment: OwnAccountPayment | null;
 };
 
+/**
+ * The third-party payer. For a minor the payer is often a parent: then he is
+ * the same person as a legal representative, `same_person_as` names that
+ * representative and the signature and the payment are that person's.
+ */
+export type PayerIdentification = PersonIdentification & {
+  same_person_as: RepresentativeSubject | null;
+};
+
+/** A legal representative of a minor: signs and pays instead of the child. */
+export type RepresentativeIdentification = PersonIdentification & {
+  id: string;
+  subject: RepresentativeSubject;
+  name: string;
+  /** The relation of the trusted contact: `parent`, `guardian`, … */
+  relation: string | null;
+  /** A signature is attributed by the signer's e-mail: without one it cannot count. */
+  has_email: boolean;
+};
+
 export type LeadIdentificationStatus = {
+  /** For a minor both values are null: the child neither signs nor pays. */
   contract_partner: PersonIdentification;
   /** `null` unless the payer declaration names a third party. */
-  payer: PersonIdentification | null;
+  payer: PayerIdentification | null;
+  minor: boolean;
+  /** The legal representatives of a minor; empty for an adult. */
+  representatives: RepresentativeIdentification[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -61,19 +101,50 @@ function normalizePerson(value: Record<string, unknown>): PersonIdentification {
   };
 }
 
+function normalizeRepresentatives(value: unknown): RepresentativeIdentification[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const record = asRecord(item);
+    const id = text(record?.id)?.trim();
+    if (!record || !id) return [];
+    return [
+      {
+        ...normalizePerson(record),
+        id,
+        // The subject is built from the id, so a line can never post to another person.
+        subject: representativeSubject(id),
+        name: text(record.name)?.trim() ?? "",
+        relation: text(record.relation)?.trim() ?? null,
+        has_email: record.has_email === true,
+      },
+    ];
+  });
+}
+
 /**
  * The server response; `null` for anything that is not an identification
  * status (an older backend, an unexpected proxy reply), so nothing is claimed
- * about a state that is not known.
+ * about a state that is not known. A server that does not know minors yet
+ * answers without `minor` and `representatives`: the lead is then shown as an
+ * adult, as before.
  */
 export function normalizeLeadIdentificationStatus(value: unknown): LeadIdentificationStatus | null {
   const record = asRecord(value);
   const contractPartner = asRecord(record?.contract_partner);
   if (!record || !contractPartner) return null;
   const payer = asRecord(record.payer);
+  const representatives = normalizeRepresentatives(record.representatives);
+  // Only a representative of this very answer can be "the same person".
+  const samePersonAs = payer?.same_person_as;
+  const samePerson = isRepresentativeSubject(samePersonAs)
+    && representatives.some((person) => person.subject === samePersonAs)
+    ? samePersonAs
+    : null;
   return {
     contract_partner: normalizePerson(contractPartner),
-    payer: payer ? normalizePerson(payer) : null,
+    payer: payer ? { ...normalizePerson(payer), same_person_as: samePerson } : null,
+    minor: record.minor === true,
+    representatives,
   };
 }
 
@@ -116,18 +187,120 @@ export function ownAccountPaymentLabel(person: PersonIdentification, tx: Tx): Id
 
 export type IdentificationPerson = {
   subject: IdentificationSubject;
-  /** The person's role in the lead, as the line is captioned. */
+  /** How the line is captioned: the person's role in the lead, or the name of a representative. */
   role: string;
+  /** Said beside the caption in small print (a representative's relation); "" otherwise. */
+  detail: string;
   person: PersonIdentification;
+  /**
+   * Whether the payment is confirmed on this line. Not on the line of a payer
+   * who is a representative: it only repeats that person's labels.
+   */
+  canConfirm: boolean;
+  /** A caption that is a whole sentence stands on a line of its own. */
+  wide: boolean;
+  /** What stands in the way of this person's identification; "" when nothing does. */
+  note: string;
 };
 
-/** The lines of the block: the patient, and the payer only when a third party pays. */
+/** "родитель" / "опекун" beside the name of a legal representative. */
+function representativeRelationLabel(relation: string | null, tx: Tx): string {
+  const key = relation?.trim().toLowerCase();
+  if (key === "parent") return tx("родитель", "Elternteil");
+  if (key === "guardian") return tx("опекун", "Vormund");
+  return tx("законный представитель", "gesetzliche/r Vertreter/in");
+}
+
+/**
+ * The lines of the block. Adult: the patient, and the payer when a third
+ * party pays. Minor: no line for the child — one per legal representative,
+ * and the payer; a payer who is one of the representatives is the same person
+ * and gets no second confirmation.
+ */
 export function identificationPersons(status: LeadIdentificationStatus, tx: Tx): IdentificationPerson[] {
-  const persons: IdentificationPerson[] = [
-    { subject: "contract_partner", role: tx("Пациент", "Patient/in"), person: status.contract_partner },
-  ];
-  if (status.payer) {
-    persons.push({ subject: "payer", role: tx("Плательщик", "Kostenübernehmer"), person: status.payer });
+  const persons: IdentificationPerson[] = status.minor
+    ? status.representatives.map((representative) => ({
+        subject: representative.subject,
+        role: representative.name || tx("Законный представитель", "Gesetzliche/r Vertreter/in"),
+        detail: representativeRelationLabel(representative.relation, tx),
+        person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
+        canConfirm: true,
+        wide: false,
+        note: representative.has_email
+          ? ""
+          : tx("нет e-mail — подпись не засчитается", "keine E-Mail – die Signatur wird nicht angerechnet"),
+      }))
+    : [
+        {
+          subject: "contract_partner",
+          role: tx("Пациент", "Patient/in"),
+          detail: "",
+          person: status.contract_partner,
+          canConfirm: true,
+          wide: false,
+          note: "",
+        },
+      ];
+  const payer = status.payer;
+  if (!payer) return persons;
+  const samePerson = payer.same_person_as
+    ? status.representatives.find((representative) => representative.subject === payer.same_person_as)
+    : undefined;
+  if (samePerson) {
+    const name = samePerson.name || tx("без имени", "ohne Namen");
+    persons.push({
+      subject: "payer",
+      role: tx(
+        `Плательщик — тот же человек, что и представитель ${name}`,
+        `Kostenträger — dieselbe Person wie Vertreter/in ${name}`,
+      ),
+      detail: "",
+      person: { qes: samePerson.qes, own_account_payment: samePerson.own_account_payment },
+      canConfirm: false,
+      wide: true,
+      note: "",
+    });
+    return persons;
   }
+  persons.push({
+    subject: "payer",
+    role: tx("Плательщик", "Kostenübernehmer"),
+    detail: "",
+    person: { qes: payer.qes, own_account_payment: payer.own_account_payment },
+    canConfirm: true,
+    wide: false,
+    note: "",
+  });
   return persons;
+}
+
+/** A minor without a parent or guardian on file: nobody can be identified yet. */
+export function identificationLacksRepresentative(status: LeadIdentificationStatus): boolean {
+  return status.minor && status.representatives.length === 0;
+}
+
+/**
+ * The server refuses to confirm a payment for the child of a minor's request
+ * (422 `identification_subject_minor`: an older wizard tab still shows the
+ * patient's line), as one localized sentence; `null` for other errors.
+ */
+export function identificationErrorText(error: unknown, tx: Tx): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  if (![error.body?.code, error.body?.error, error.code].includes("identification_subject_minor")) return null;
+  return tx(
+    "Пациент несовершеннолетний: платёж подтверждается у законного представителя, а не у ребёнка. Обновите страницу",
+    "Der Patient ist minderjährig: Die Zahlung wird bei der gesetzlichen Vertretung bestätigt, nicht beim Kind. Bitte die Seite aktualisieren",
+  );
+}
+
+/**
+ * The representative a third-party payer is the same person as (a parent who
+ * also pays): staff identify that person once, as the representative.
+ */
+export function payerSamePerson(
+  status: LeadIdentificationStatus | null | undefined,
+): RepresentativeIdentification | null {
+  const subject = status?.payer?.same_person_as;
+  if (!status || !subject) return null;
+  return status.representatives.find((representative) => representative.subject === subject) ?? null;
 }

@@ -39,6 +39,7 @@ pub mod lead_portal_account;
 pub mod lead_portal_guardians;
 pub mod lead_portal_intake;
 pub mod lead_portal_login_email;
+pub mod lead_representatives;
 pub mod leads;
 pub mod legal;
 pub mod me;

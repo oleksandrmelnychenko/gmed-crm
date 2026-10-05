@@ -1,17 +1,47 @@
 import { describe, expect, it } from "vitest";
 
+import { ApiRequestError } from "@/lib/api";
+
 import {
+  identificationErrorText,
+  identificationLacksRepresentative,
   identificationPersons,
+  isRepresentativeSubject,
   normalizeLeadIdentificationStatus,
   ownAccountPaymentLabel,
+  payerSamePerson,
   qualifiedSignatureLabel,
+  representativeSubject,
+  type LeadIdentificationStatus,
   type PersonIdentification,
+  type RepresentativeIdentification,
 } from "./lead-identification";
+import { identificationStatusChanged } from "./use-lead-identification-status";
 
 const ru = (text: string) => text;
 const de = (_ru: string, text: string) => text;
 
 const NOTHING: PersonIdentification = { qes: null, own_account_payment: null };
+const SIGNED = { signed_at: "2026-10-05T09:20:00Z", test_mode: false };
+const CONFIRMED = { confirmed_at: "2026-10-05T10:00:00Z", confirmed_by_name: "Petra Manager", note: null };
+
+const ANNA_ID = "11111111-1111-4111-8111-111111111111";
+const BEN_ID = "22222222-2222-4222-8222-222222222222";
+
+function representative(patch: Partial<RepresentativeIdentification> & { id: string; name: string }): RepresentativeIdentification {
+  return {
+    ...NOTHING,
+    subject: representativeSubject(patch.id),
+    relation: "parent",
+    has_email: true,
+    ...patch,
+  };
+}
+
+/** A lead as the server answers it: an adult unless the patch says otherwise. */
+function status(patch: Partial<LeadIdentificationStatus> = {}): LeadIdentificationStatus {
+  return { contract_partner: NOTHING, payer: null, minor: false, representatives: [], ...patch };
+}
 
 describe("normalizeLeadIdentificationStatus", () => {
   it("reads the patient and, when a third party pays, the payer", () => {
@@ -28,7 +58,10 @@ describe("normalizeLeadIdentificationStatus", () => {
             confirmed_by_name: "Petra Manager",
             note: "  ",
           },
+          same_person_as: null,
         },
+        minor: false,
+        representatives: [],
       }),
     ).toEqual({
       contract_partner: {
@@ -42,24 +75,96 @@ describe("normalizeLeadIdentificationStatus", () => {
           confirmed_by_name: "Petra Manager",
           note: null,
         },
+        same_person_as: null,
       },
-    });
-    expect(normalizeLeadIdentificationStatus({ contract_partner: {}, payer: null })).toEqual({
-      contract_partner: NOTHING,
-      payer: null,
+      minor: false,
+      representatives: [],
     });
   });
 
+  it("reads a server that does not know minors yet as an adult lead", () => {
+    expect(normalizeLeadIdentificationStatus({ contract_partner: {}, payer: null })).toEqual(status());
+    expect(normalizeLeadIdentificationStatus({ contract_partner: {}, payer: {} })).toEqual(
+      status({ payer: { ...NOTHING, same_person_as: null } }),
+    );
+  });
+
   it("drops a signature or a confirmation without its time", () => {
-    const status = normalizeLeadIdentificationStatus({
+    const answer = normalizeLeadIdentificationStatus({
       contract_partner: { qes: { test_mode: true }, own_account_payment: { confirmed_by_name: "Petra Manager" } },
     });
-    expect(status).toEqual({ contract_partner: NOTHING, payer: null });
+    expect(answer).toEqual(status());
   });
 
   it("knows nothing about a reply that is not a status", () => {
     for (const reply of [null, undefined, [], "ok", {}, { payer: null }, { contract_partner: [] }]) {
       expect(normalizeLeadIdentificationStatus(reply)).toBeNull();
+    }
+  });
+
+  it("reads the legal representatives of a minor, each with the own signature and payment", () => {
+    const answer = normalizeLeadIdentificationStatus({
+      // The child neither signs nor pays.
+      contract_partner: { qes: null, own_account_payment: null },
+      payer: null,
+      minor: true,
+      representatives: [
+        {
+          id: ANNA_ID,
+          subject: `representative:${ANNA_ID}`,
+          name: " Anna Muster ",
+          relation: "parent",
+          has_email: true,
+          qes: SIGNED,
+          own_account_payment: CONFIRMED,
+        },
+        { id: BEN_ID, subject: "payer", name: "Ben Muster", relation: null, qes: null, own_account_payment: null },
+        // Not a person: no id.
+        { name: "Nobody" },
+        "text",
+      ],
+    });
+    expect(answer).toEqual(
+      status({
+        minor: true,
+        representatives: [
+          representative({ id: ANNA_ID, name: "Anna Muster", qes: SIGNED, own_account_payment: CONFIRMED }),
+          // The subject always follows the id; without the flag there is no e-mail.
+          representative({ id: BEN_ID, name: "Ben Muster", relation: null, has_email: false }),
+        ],
+      }),
+    );
+    expect(answer?.representatives[1].subject).toBe(`representative:${BEN_ID}`);
+  });
+
+  it("names the representative a paying parent is, and only one of this answer", () => {
+    const raw = {
+      contract_partner: {},
+      minor: true,
+      representatives: [{ id: ANNA_ID, name: "Anna Muster", relation: "parent", has_email: true }],
+    };
+    const same = normalizeLeadIdentificationStatus({
+      ...raw,
+      payer: { qes: SIGNED, own_account_payment: null, same_person_as: `representative:${ANNA_ID}` },
+    });
+    expect(same?.payer).toEqual({ qes: SIGNED, own_account_payment: null, same_person_as: `representative:${ANNA_ID}` });
+    expect(payerSamePerson(same)?.name).toBe("Anna Muster");
+
+    for (const samePersonAs of [`representative:${BEN_ID}`, "contract_partner", "representative:", 7, null]) {
+      const other = normalizeLeadIdentificationStatus({ ...raw, payer: { same_person_as: samePersonAs } });
+      expect(other?.payer?.same_person_as).toBeNull();
+      expect(payerSamePerson(other)).toBeNull();
+    }
+    expect(payerSamePerson(null)).toBeNull();
+  });
+});
+
+describe("the subject of a legal representative", () => {
+  it("is the id of the trusted contact behind a prefix", () => {
+    expect(representativeSubject(ANNA_ID)).toBe(`representative:${ANNA_ID}`);
+    expect(isRepresentativeSubject(`representative:${ANNA_ID}`)).toBe(true);
+    for (const value of ["representative:", "payer", "contract_partner", "", null, 5]) {
+      expect(isRepresentativeSubject(value)).toBe(false);
     }
   });
 });
@@ -126,17 +231,149 @@ describe("ownAccountPaymentLabel", () => {
 });
 
 describe("identificationPersons", () => {
+  const line = { detail: "", canConfirm: true, wide: false, note: "" };
+
   it("lists the patient alone while the patient pays", () => {
-    expect(identificationPersons({ contract_partner: NOTHING, payer: null }, ru)).toEqual([
-      { subject: "contract_partner", role: "Пациент", person: NOTHING },
+    expect(identificationPersons(status(), ru)).toEqual([
+      { ...line, subject: "contract_partner", role: "Пациент", person: NOTHING },
     ]);
+    expect(identificationLacksRepresentative(status())).toBe(false);
   });
 
   it("adds the payer when a third party pays", () => {
-    const payer = { ...NOTHING, qes: { signed_at: "2026-10-05T09:20:00Z", test_mode: false } };
-    expect(identificationPersons({ contract_partner: NOTHING, payer }, de)).toEqual([
-      { subject: "contract_partner", role: "Patient/in", person: NOTHING },
-      { subject: "payer", role: "Kostenübernehmer", person: payer },
+    const payer = { ...NOTHING, qes: SIGNED };
+    expect(identificationPersons(status({ payer: { ...payer, same_person_as: null } }), de)).toEqual([
+      { ...line, subject: "contract_partner", role: "Patient/in", person: NOTHING },
+      { ...line, subject: "payer", role: "Kostenübernehmer", person: payer },
     ]);
+  });
+
+  it("lists the legal representatives of a minor and no line for the child", () => {
+    const minor = status({
+      // Whatever an older row says about the child: it has no line.
+      contract_partner: { qes: SIGNED, own_account_payment: CONFIRMED },
+      minor: true,
+      representatives: [
+        representative({ id: ANNA_ID, name: "Anna Muster", qes: SIGNED, own_account_payment: CONFIRMED }),
+        representative({ id: BEN_ID, name: "Ben Muster", relation: "guardian", has_email: false }),
+      ],
+    });
+    expect(identificationPersons(minor, ru)).toEqual([
+      {
+        subject: `representative:${ANNA_ID}`,
+        role: "Anna Muster",
+        detail: "родитель",
+        person: { qes: SIGNED, own_account_payment: CONFIRMED },
+        canConfirm: true,
+        wide: false,
+        note: "",
+      },
+      {
+        subject: `representative:${BEN_ID}`,
+        role: "Ben Muster",
+        detail: "опекун",
+        person: NOTHING,
+        canConfirm: true,
+        wide: false,
+        // A signature is attributed by the signer's e-mail.
+        note: "нет e-mail — подпись не засчитается",
+      },
+    ]);
+    const german = identificationPersons(minor, de);
+    expect(german.map((person) => person.detail)).toEqual(["Elternteil", "Vormund"]);
+    expect(german[1].note).toBe("keine E-Mail – die Signatur wird nicht angerechnet");
+    expect(identificationLacksRepresentative(minor)).toBe(false);
+  });
+
+  it("captions a representative without a name or a known relation", () => {
+    const minor = status({
+      minor: true,
+      representatives: [representative({ id: ANNA_ID, name: "", relation: "Mutter" })],
+    });
+    expect(identificationPersons(minor, ru)[0]).toMatchObject({
+      role: "Законный представитель",
+      detail: "законный представитель",
+    });
+  });
+
+  it("shows a paying parent once: the payer line repeats the representative and confirms nothing", () => {
+    const minor = status({
+      minor: true,
+      representatives: [
+        representative({ id: ANNA_ID, name: "Anna Muster", qes: SIGNED, own_account_payment: CONFIRMED }),
+        representative({ id: BEN_ID, name: "Ben Muster" }),
+      ],
+      // The server repeats the representative's values; the line reads them from the representative.
+      payer: { ...NOTHING, same_person_as: `representative:${ANNA_ID}` },
+    });
+    const persons = identificationPersons(minor, ru);
+    expect(persons.map((person) => person.subject)).toEqual([
+      `representative:${ANNA_ID}`,
+      `representative:${BEN_ID}`,
+      "payer",
+    ]);
+    expect(persons[2]).toEqual({
+      subject: "payer",
+      role: "Плательщик — тот же человек, что и представитель Anna Muster",
+      detail: "",
+      person: { qes: SIGNED, own_account_payment: CONFIRMED },
+      canConfirm: false,
+      wide: true,
+      note: "",
+    });
+    expect(identificationPersons(minor, de)[2].role).toBe(
+      "Kostenträger — dieselbe Person wie Vertreter/in Anna Muster",
+    );
+  });
+
+  it("keeps the own line of a payer who is somebody else", () => {
+    const minor = status({
+      minor: true,
+      representatives: [representative({ id: ANNA_ID, name: "Anna Muster" })],
+      payer: { ...NOTHING, qes: SIGNED, same_person_as: null },
+    });
+    expect(identificationPersons(minor, ru)[1]).toEqual({
+      ...line,
+      subject: "payer",
+      role: "Плательщик",
+      person: { ...NOTHING, qes: SIGNED },
+    });
+  });
+
+  it("knows a minor without a parent or guardian on file", () => {
+    const alone = status({ minor: true, payer: { ...NOTHING, same_person_as: null } });
+    expect(identificationLacksRepresentative(alone)).toBe(true);
+    // Only the payer is left to identify.
+    expect(identificationPersons(alone, ru).map((person) => person.subject)).toEqual(["payer"]);
+  });
+});
+
+describe("refusals of the server", () => {
+  it("explains that the payment of a minor is confirmed for a representative", () => {
+    const refused = new ApiRequestError("identification_subject_minor", {
+      status: 422,
+      code: "identification_subject_minor",
+      body: { error: "identification_subject_minor" },
+    });
+    expect(identificationErrorText(refused, ru)).toContain("платёж подтверждается у законного представителя");
+    expect(identificationErrorText(refused, de)).toContain("bei der gesetzlichen Vertretung");
+    expect(identificationErrorText(new ApiRequestError("lead_converted", { status: 409 }), ru)).toBeNull();
+    expect(identificationErrorText(new Error("identification_subject_minor"), ru)).toBeNull();
+  });
+});
+
+describe("when the status is loaded again", () => {
+  it("follows a confirmed payment, a new payer and a change of the representation", () => {
+    expect(identificationStatusChanged({ type: "lead.updated", payload: { identification_updated: true } })).toBe(true);
+    expect(identificationStatusChanged({ type: "lead.updated", payload: {} })).toBe(false);
+    expect(identificationStatusChanged({ type: "lead.portal_updated", payload: { change: "payer" } })).toBe(true);
+    // A parent in the cabinet (with `access_kind`) or a colleague (without).
+    expect(
+      identificationStatusChanged({ type: "lead.portal_updated", payload: { change: "representation", access_kind: "guardian" } }),
+    ).toBe(true);
+    expect(identificationStatusChanged({ type: "lead.portal_updated", payload: { change: "representation" } })).toBe(true);
+    expect(identificationStatusChanged({ type: "lead.portal_updated", payload: { change: "personal_data" } })).toBe(false);
+    expect(identificationStatusChanged({ type: "lead.portal_updated" })).toBe(false);
+    expect(identificationStatusChanged({ type: "document.updated", payload: { change: "representation" } })).toBe(false);
   });
 });

@@ -223,4 +223,137 @@ test("an older backend without the statements does not break the documents step"
   const { wizard, block } = await mount(page, "ru", {});
   await expect(block.getByTestId("lead-gwg-statements-empty")).toHaveText("Пациент ещё не заполнил эти данные в кабинете");
   await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
+  // Nothing about a representation the server does not send.
+  await expect(block.getByTestId("lead-gwg-representation")).toHaveCount(0);
+});
+
+test("an adult's answers about a representative stand after the identity document", async ({ page }) => {
+  const { wizard, block } = await mount(page, "ru", {
+    ...statements,
+    representation: {
+      has_representative: true,
+      under_guardianship: false,
+      custody: null,
+      custody_stated: false,
+      representatives: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          slot: "agent",
+          role: "authorised_representative",
+          relation: "representative",
+          first_name: "Ben",
+          last_name: "Muster",
+          date_of_birth: "1984-01-15",
+          street: "Musterweg 1",
+          zip: "10115",
+          city: "Berlin",
+          country: "DE",
+          id_document_type: "id_card",
+          id_document_number: "L01X00T47",
+          id_valid_until: "2032-01-31",
+          identity_documents: [{ id: "doc-ben-id", file_name: "ben-ausweis.jpg", uploaded_at: "2026-10-05T09:30:00Z", reviewed: false }],
+          authority_documents: [{ id: "doc-ben-poa", file_name: "vollmacht.pdf", uploaded_at: "2026-10-05T09:35:00Z", reviewed: true }],
+          has_login: false,
+          has_data: true,
+          contact_origin: "portal",
+        },
+      ],
+    },
+    representation_updated_at: "2026-10-05T09:40:00Z",
+  });
+
+  const group = block.getByTestId("lead-gwg-representation");
+  await expect(group).toContainText("Представительство");
+  const acts = group.getByTestId("lead-gwg-has-representative");
+  await expect(acts).toContainText("Да");
+  await expect(acts).toHaveAttribute("data-warning", "true");
+  await expect(group.getByTestId("lead-gwg-under-guardianship")).toContainText("Нет");
+  await expect(group.getByTestId("lead-gwg-custody")).toHaveCount(0);
+  const person = group.getByTestId("lead-gwg-representative-11111111-1111-4111-8111-111111111111");
+  for (const text of [
+    "Ben Muster",
+    "Уполномоченный представитель",
+    "15.01.1984",
+    "Musterweg 1, 10115 Berlin, Германия",
+    "Удостоверение личности",
+    "31.01.2032",
+    "ben-ausweis.jpg · 05.10.2026",
+    "vollmacht.pdf · 05.10.2026 · просмотрен",
+  ]) {
+    await expect(person).toContainText(text);
+  }
+  // The representative of an adult is named on the lead's own sheet: the buttons stay as they are.
+  const actions = wizard.getByTestId("gwg-identification-actions");
+  await expect(actions.getByRole("button", { name: "Сформировать для пациента", exact: true })).toBeEnabled();
+  await expect(actions.getByRole("button", { name: "Для плательщика", exact: true })).toBeVisible();
+  // The lead's own badge stays the only one.
+  await expect(block.getByTestId("patient-field-badge")).toHaveText("от пациента · 05.10.2026 11:20");
+});
+
+test("the parents of a minor are named before anybody opens the cabinet, and a missing one is asked for", async ({ page }) => {
+  const untouched = {
+    identification: Object.fromEntries(
+      Object.keys(statements.identification).map((key) => [key, key === "contact_channels" ? [] : null]),
+    ),
+    identification_updated_at: null,
+    identity_documents: [],
+    minor: true,
+  };
+  const mother = {
+    id: "11111111-1111-4111-8111-111111111111",
+    slot: "rep1",
+    role: "legal_representative",
+    relation: "parent",
+    first_name: "Anna",
+    last_name: "Muster",
+    email: "anna.muster@example.com",
+    has_login: false,
+    has_data: false,
+    contact_origin: "staff",
+  };
+  const { wizard, block } = await mount(page, "ru", {
+    ...untouched,
+    representation: { has_representative: null, under_guardianship: null, custody: "joint", custody_stated: false, representatives: [mother] },
+    representation_updated_at: null,
+  });
+
+  await expect(block.getByTestId("lead-gwg-statements-empty")).toHaveText("Пациент ещё не заполнил эти данные в кабинете");
+  const group = block.getByTestId("lead-gwg-representation");
+  await expect(group).toContainText("Законные представители");
+  await expect(group.getByTestId("lead-gwg-custody")).toContainText("не указано — оба родителя");
+  const person = group.getByTestId(`lead-gwg-representative-${mother.id}`);
+  await expect(person).toContainText("Anna Muster");
+  await expect(person.getByTestId("lead-gwg-representative-no-data")).toHaveText("в кабинете ещё не заполнено");
+  // Both parents represent the child, and only one is on file.
+  const warning = group.getByTestId("lead-gwg-representation-warning");
+  await expect(warning).toHaveAttribute("data-warning", "joint_custody_incomplete");
+  await expect(warning).toContainText("Ребёнка представляют оба родителя, но указан только один");
+  // The sheet is made for the parent, not for the child (this mock has no identification status).
+  const actions = wizard.getByTestId("gwg-identification-actions");
+  await expect(actions.getByRole("button", { name: "Сформировать для Anna Muster", exact: true })).toBeEnabled();
+  await expect(actions.getByRole("button", { name: /пациента/ })).toHaveCount(0);
+});
+
+test("a minor without a parent on file: the block and the sheet ask for one", async ({ page }) => {
+  const { wizard, block } = await mount(page, "ru", {
+    ...statements,
+    minor: true,
+    representation: { has_representative: null, under_guardianship: null, custody: "joint", custody_stated: false, representatives: [] },
+    representation_updated_at: null,
+  });
+  const group = block.getByTestId("lead-gwg-representation");
+  const warning = group.getByTestId("lead-gwg-representation-warning");
+  await expect(warning).toHaveAttribute("data-warning", "no_representative");
+  await expect(warning).toHaveText("Добавьте родителя или законного представителя");
+  await expect(group.locator("[data-testid^='lead-gwg-representative-']")).toHaveCount(0);
+  // The child's own statements stay readable.
+  await expect(block).toContainText("FA1234567");
+
+  const actions = wizard.getByTestId("gwg-identification-actions");
+  await expect(actions.getByTestId("gwg-identification-no-representative")).toHaveText(
+    "Добавьте родителя или законного представителя",
+  );
+  // No sheet for the child; the third-party payer of this mock keeps the own one.
+  await expect(actions.getByRole("button", { name: /пациента/ })).toHaveCount(0);
+  await expect(actions.getByRole("button")).toHaveText("Для плательщика");
 });

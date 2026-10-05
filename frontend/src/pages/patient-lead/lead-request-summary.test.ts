@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LeadRequest, LeadRequestDocument } from "./lead-request-api";
+import type { LeadRequest, LeadRequestDocument, LeadRequestRepresentative } from "./lead-request-api";
 import { requestSummary } from "./lead-request-summary";
 import { leadRequestText } from "./lead-request-text";
 
@@ -351,6 +351,168 @@ describe("lead request summary", () => {
       label: "Which country?",
       value: "Iran",
     });
+  });
+
+  it("shows who acts for an adult after the identity document: the answers, then each person with the files", () => {
+    const agent: LeadRequestRepresentative = {
+      id: "11111111-1111-4111-8111-111111111111",
+      slot: "agent",
+      role: "authorised_representative",
+      relation: "representative",
+      mine: false,
+      email_locked: false,
+      can_remove: true,
+      first_name: "Ben",
+      last_name: "Muster",
+      date_of_birth: "1980-01-15",
+      birth_place: null,
+      // Not asked of an adult's representative: not shown either.
+      birth_country: "DE",
+      citizenships: ["DE"],
+      street: "Musterstraße 2",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+      email: null,
+      phone: null,
+      id_document_type: "id_card",
+      id_document_number: "L01X00T47",
+      id_issuing_authority: "Bürgeramt Mitte",
+      id_issuing_country: "DE",
+      id_issued_on: null,
+      id_valid_until: "2031-03-04",
+      identity_documents: [upload("rep-id-1", "ausweis-ben.jpg")],
+      authority_documents: [upload("rep-auth-1", "vollmacht.pdf")],
+    };
+    const groups = requestSummary(
+      request({
+        representation: {
+          has_representative: true,
+          under_guardianship: false,
+          custody: null,
+          custody_stated: false,
+          representatives: [agent],
+        },
+      }),
+      de,
+      "de",
+    );
+    expect(groups.map((group) => group.id).slice(3, 6)).toEqual(["identity", "representation", "insurance"]);
+    const group = groups.find((item) => item.id === "representation");
+    expect(group?.title).toBe("Vertretung");
+    expect(rows(groups, "representation")).toEqual({
+      "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?": "Ja",
+      "Stehen Sie unter rechtlicher Betreuung?": "Nein",
+    });
+    expect(group?.parts?.map((part) => [part.id, part.title])).toEqual([["agent", "Vertretende Person"]]);
+    expect(Object.fromEntries((group?.parts?.[0].rows ?? []).map((row) => [row.label, row.value]))).toEqual({
+      Vorname: "Ben",
+      Nachname: "Muster",
+      Geburtsdatum: "15.01.1980",
+      "Staatsangehörigkeit(en)": "Deutschland",
+      "Straße und Hausnummer": "Musterstraße 2",
+      Postleitzahl: "10115",
+      Ort: "Berlin",
+      Wohnsitzland: "Deutschland",
+      "Art des Dokuments": "Personalausweis",
+      Dokumentnummer: "L01X00T47",
+      "Ausstellende Behörde": "Bürgeramt Mitte",
+      Ausstellungsland: "Deutschland",
+      "Gültig bis": "04.03.2031",
+      "Foto oder Scan des Ausweises": "ausweis-ben.jpg",
+      "Nachweis der Vertretungsmacht (z. B. Vollmacht)": "vollmacht.pdf",
+    });
+
+    // Not answered yet: the group says so, and names nobody.
+    const open = requestSummary(
+      request({
+        representation: {
+          has_representative: null,
+          under_guardianship: null,
+          custody: null,
+          custody_stated: false,
+          representatives: [],
+        },
+      }),
+      de,
+      "de",
+    ).find((item) => item.id === "representation");
+    expect(open?.rows).toEqual([]);
+    expect(open?.parts).toEqual([]);
+    expect(open?.empty).toBe("Noch keine Angaben");
+  });
+
+  it("shows the custody and the legal representatives of a minor", () => {
+    const parent = (overrides: Partial<LeadRequestRepresentative>): LeadRequestRepresentative => ({
+      id: "11111111-1111-4111-8111-111111111111",
+      slot: "rep1",
+      role: "legal_representative",
+      relation: "parent",
+      mine: true,
+      email_locked: true,
+      can_remove: false,
+      first_name: "Anna",
+      last_name: "Muster",
+      date_of_birth: "1985-03-02",
+      birth_place: "Kyiv",
+      birth_country: "UA",
+      citizenships: ["UA"],
+      street: null,
+      zip: null,
+      city: null,
+      country: null,
+      email: "anna.muster@example.com",
+      phone: null,
+      id_document_type: null,
+      id_document_number: null,
+      id_issuing_authority: null,
+      id_issuing_country: null,
+      id_issued_on: null,
+      id_valid_until: null,
+      identity_documents: [],
+      authority_documents: [upload("rep-auth-2", "urkunde.pdf")],
+      ...overrides,
+    });
+    const minor = (custody: "joint" | "guardian") =>
+      requestSummary(
+        request({
+          access_kind: "guardian",
+          minor: true,
+          representation: {
+            has_representative: null,
+            under_guardianship: null,
+            custody,
+            custody_stated: custody !== "joint",
+            representatives: [
+              parent({}),
+              parent({ id: "22222222-2222-4222-8222-222222222222", slot: custody === "joint" ? "rep2" : null, mine: false, first_name: "Ben", email: null, authority_documents: [] }),
+            ],
+          },
+        }),
+        de,
+        "de",
+      ).find((item) => item.id === "representation");
+
+    const joint = minor("joint");
+    expect(joint?.title).toBe("Gesetzliche Vertreter");
+    expect(joint?.rows).toEqual([{ label: "Wer vertritt das Kind?", value: "Beide Eltern gemeinsam" }]);
+    expect(joint?.parts?.map((part) => part.title)).toEqual(["1. Vertreter/in – Sie", "2. Vertreter/in – anderer Elternteil"]);
+    // Parents with joint custody show no proof: a file from an earlier answer is not listed.
+    expect(joint?.parts?.[0].rows).toEqual([
+      { label: "Vorname", value: "Anna" },
+      { label: "Nachname", value: "Muster" },
+      { label: "Geburtsdatum", value: "02.03.1985" },
+      { label: "Geburtsort", value: "Kyiv" },
+      { label: "Geburtsland", value: "Ukraine" },
+      { label: "Staatsangehörigkeit(en)", value: "Ukraine" },
+      { label: "E-Mail", value: "anna.muster@example.com" },
+    ]);
+
+    // A guardian shows the certificate of appointment; a person on file without a place in the form is not the lead's statement.
+    const guardian = minor("guardian");
+    expect(guardian?.rows).toEqual([{ label: "Wer vertritt das Kind?", value: "Vormund oder Pfleger" }]);
+    expect(guardian?.parts?.map((part) => part.id)).toEqual(["rep1"]);
+    expect(guardian?.parts?.[0].rows.at(-1)).toEqual({ label: "Bestallungsurkunde", value: "urkunde.pdf" });
   });
 
   it("shows no identification on a server that does not know it", () => {

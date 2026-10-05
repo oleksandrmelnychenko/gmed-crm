@@ -53,7 +53,38 @@ type MailMock = {
 };
 type Call = { method: string; path: string; body: unknown };
 
-async function setup(page: Page, lang: "ru" | "de", mail: MailMock = {}) {
+/** The portal state of a lead who is a child: one parent on file, no login for her yet. */
+function minorPortalIntake(leadId: string) {
+  return {
+    lead_id: leadId,
+    fill_mode: "patient",
+    patient_fields: {},
+    patient_payer: null,
+    progress: { filled: 2, total: 12, documents: 0, submitted_at: null },
+    submitted_at: null,
+    submitted_by: null,
+    consents: [],
+    uploads: [],
+    uploads_hidden: false,
+    guardians: {
+      links: [],
+      candidates: [
+        {
+          trusted_contact_id: "11111111-1111-4111-8111-111111111111",
+          name: "Anna Muster",
+          relation: "parent",
+          email: "anna.muster@example.com",
+          access_id: null,
+        },
+      ],
+    },
+    minor: true,
+    can_issue: true,
+    can_review_uploads: true,
+  };
+}
+
+async function setup(page: Page, lang: "ru" | "de", mail: MailMock = {}, minorLeadId?: string) {
   const calls: Call[] = [];
   await page.addInitScript((language) => {
     localStorage.setItem("gmed_lang", language);
@@ -90,6 +121,9 @@ async function setup(page: Page, lang: "ru" | "de", mail: MailMock = {}) {
     const lead = leads.find((item) => path.startsWith(`/leads/${item.id}/`));
     if (lead && method === "POST") {
       calls.push({ method, path: path.replace(`/leads/${lead.id}`, ""), body: route.request().postDataJSON() });
+    }
+    if (lead && lead.id === minorLeadId && path.endsWith("/portal-intake")) {
+      return route.fulfill({ json: minorPortalIntake(lead.id) });
     }
     if (lead && path.endsWith("/portal-login-email")) {
       if (method === "POST") {
@@ -282,4 +316,27 @@ test("the GwG identification sheet of the lead downloads from the row", async ({
       }),
     },
   ]);
+});
+
+test("a minor lead has no quick sheet button: the sheets are made per parent in the wizard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const calls = await setup(page, "ru", {}, leads[0].id);
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[0].id}`).first().click();
+  await page.getByTestId(`lead-expand-${leads[1].id}`).first().click();
+  const rows = page.getByTestId("lead-portal-access");
+
+  // The child: the parents' block is loaded, and the row offers no sheet.
+  const minor = rows.filter({ hasText: "anton.testovich@example.com" }).first();
+  await expect(minor.getByTestId("lead-guardian-access")).toContainText("Доступ родителей (несовершеннолетний)");
+  await expect(minor.getByTestId("lead-guardian-access")).toContainText("Anna Muster");
+  await expect(minor.getByTestId("lead-gwg-sheet")).toHaveCount(0);
+  // The other actions of the row stay.
+  await expect(minor.getByRole("button", { name: "Новый пароль" })).toBeVisible();
+  await expect(minor.getByTestId("lead-portal-send-email")).toBeVisible();
+
+  // An adult keeps the button.
+  const adult = rows.filter({ hasText: "sofia.beispiel@example.com" }).first();
+  await expect(adult.getByTestId("lead-gwg-sheet")).toHaveText("Doku-Bogen GwG");
+  expect(calls.filter((call) => call.path === "/documents/generate")).toEqual([]);
 });

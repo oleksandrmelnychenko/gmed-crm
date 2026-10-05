@@ -108,7 +108,7 @@ pub(super) fn is_minor(date_of_birth: Option<NaiveDate>) -> bool {
     age < 18
 }
 
-fn is_guardian_relation(value: Option<&str>) -> bool {
+pub(crate) fn is_guardian_relation(value: Option<&str>) -> bool {
     let value = value.unwrap_or_default().trim().to_lowercase();
     [
         "parent",

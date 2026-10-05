@@ -633,6 +633,136 @@ async fn guardians_of_minors_and_patients_are_screened() {
     );
 }
 
+/// What the cabinet holds about a representative (`lead_representatives`) is
+/// part of the screened person: a change queues the lead, and new data of a
+/// parent is a new possible match even after a "false positive" decision.
+#[tokio::test]
+async fn cabinet_data_reopens_a_parents_decision_and_an_adults_representative_is_screened() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let father = Uuid::new_v4();
+    let minor = insert_lead(
+        &app,
+        "Mila",
+        "Beispiel",
+        Some("2016-04-04"),
+        &[],
+        json!([{ "id": father, "name": "Testomir Korneev", "relation": "father" }]),
+    )
+    .await;
+    let status = lead_status(&app, minor).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = open_hits(&app).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "lead_guardian");
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!(
+            "/sanctions/hits/{}/decision",
+            hits[0]["id"].as_str().unwrap()
+        ),
+        &app.ceo(),
+        Some(json!({ "decision": "false_positive", "reason": "Another person, passport checked" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(lead_status(&app, minor).await["screening"], "clear");
+    assert!(!lead_is_queued(&app, minor).await);
+
+    // The father states his citizenship in the cabinet: the row of the
+    // representative queues the lead, and the same person with more data is
+    // one new open hit under the same reference.
+    sqlx::query(
+        r#"INSERT INTO lead_representatives
+               (lead_id, contact_id, role, contact_origin, first_name, last_name, citizenships)
+           VALUES ($1, $2, 'legal_representative', 'staff', 'Testomir', 'Korneev', ARRAY['UA'])"#,
+    )
+    .bind(minor)
+    .bind(father)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert!(lead_is_queued(&app, minor).await);
+    let status = lead_status(&app, minor).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    assert_eq!(status["open_hits"], 1, "{status}");
+    let hits = open_hits(&app).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "lead_guardian");
+    assert_eq!(
+        hits[0]["current_subject"]["citizenships"],
+        json!(["UA"]),
+        "{hits:?}"
+    );
+    let references: Vec<(String, String)> = sqlx::query_as(
+        "SELECT subject_ref, status FROM sanctions_hits WHERE lead_id = $1 ORDER BY created_at",
+    )
+    .bind(minor)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        references,
+        vec![
+            (father.to_string(), "false_positive".to_string()),
+            (father.to_string(), "open".to_string()),
+        ]
+    );
+    // Removing the row queues the lead again.
+    assert!(!lead_is_queued(&app, minor).await);
+    sqlx::query("DELETE FROM lead_representatives WHERE lead_id = $1")
+        .bind(minor)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    assert!(lead_is_queued(&app, minor).await);
+
+    // An adult's contacts are not screened — but for the representative and
+    // the legal guardian the adult named in the cabinet (a row of that role).
+    let agent = Uuid::new_v4();
+    let adult = insert_lead(
+        &app,
+        "Max",
+        "Beispiel",
+        Some("1980-04-04"),
+        &[],
+        json!([{ "id": agent, "name": "Testomir Korneev", "relation": "representative" }]),
+    )
+    .await;
+    assert_eq!(lead_status(&app, adult).await["screening"], "clear");
+    sqlx::query(
+        r#"INSERT INTO lead_representatives
+               (lead_id, contact_id, role, contact_origin, first_name, last_name)
+           VALUES ($1, $2, 'authorised_representative', 'portal', 'Testomir', 'Korneev')"#,
+    )
+    .bind(adult)
+    .bind(agent)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let status = lead_status(&app, adult).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let represented: (String, String, Option<String>) = sqlx::query_as(
+        r#"SELECT subject_kind, subject_ref, subject_snapshot ->> 'relation'
+           FROM sanctions_hits WHERE lead_id = $1 AND status = 'open'"#,
+    )
+    .bind(adult)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        represented,
+        (
+            "lead_guardian".to_string(),
+            agent.to_string(),
+            Some("authorised_representative".to_string())
+        )
+    );
+}
+
 async fn lead_is_queued(app: &TestApp, lead_id: Uuid) -> bool {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM sanctions_screening_queue

@@ -73,9 +73,25 @@ import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import {
   GWG_IDENTIFICATION_TEMPLATE,
   currentGwgSheet,
+  gwgSheetErrorText,
+  gwgSheetPlan,
   gwgSheetRequest,
-  type GwgSheetSubject,
+  isRepresentativeUploadArt,
+  type GwgSheetButton,
 } from "../model/gwg-identification";
+import { identificationErrorText, payerSamePerson } from "../model/lead-identification";
+import { representativeName } from "../model/lead-gwg-statements";
+import {
+  leadUpdateWithChangedContacts,
+  mergeTrustedContacts,
+  storedTrustedContactDrafts,
+  trustedContactsPayload,
+  type TrustedContactPayload,
+} from "../model/lead-trusted-contacts";
+import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
+import { removeLeadRepresentativeData } from "../data/lead-representation-api";
+import { LeadCustodySelect } from "./lead-custody-select";
+import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
@@ -2015,6 +2031,10 @@ export function preferPersistedCommercialLines(
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   // A proof of the origin of assets belongs to the due-diligence form, whatever its file is called.
   if (item.art === AML_ASSET_ORIGIN_EVIDENCE_ART) return null;
+  // What the lead cabinet uploaded for a person who acts for the lead (a
+  // parent's passport, a proof of authority) is never the lead's own identity
+  // document, although its type and name contain "identity".
+  if (isRepresentativeUploadArt(item.art)) return null;
   const templateId = item.generated_template_id?.trim().toLowerCase();
   if (templateId === "privacy_information") return "privacy_information";
   if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
@@ -2081,6 +2101,8 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
 function errorText(error: unknown, tx: Tx): string {
   const payerGate = payerGateErrorText(error, tx);
   if (payerGate) return payerGate;
+  const representation = gwgSheetErrorText(error, tx) ?? identificationErrorText(error, tx);
+  if (representation) return representation;
   if (error instanceof Error && error.message === "Generate the current order document before confirming its signatures") {
     return tx("Сначала создайте актуальную версию документа заказа, затем подтвердите подписи", "Erstellen Sie zuerst die aktuelle Auftragsversion und bestätigen Sie anschließend die Unterschriften");
   }
@@ -2868,6 +2890,17 @@ export function LeadWizard({
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
+  // The trusted contacts as the server stores them, as far as this wizard
+  // knows. A save sends the contacts only when staff changed them: a parent
+  // added in the lead cabinet meanwhile must not be overwritten by an older list.
+  const [trustedContactsBase, setTrustedContactsBase] = useState<TrustedContactPayload[]>([]);
+  const trustedContactsBaseRef = useRef(trustedContactsBase);
+  const lastSentTrustedContactsRef = useRef<TrustedContactPayload[] | null>(null);
+  // Counts the saves that changed who represents the lead (the contacts, or
+  // the date of birth crossing the age of majority): the portal state and the
+  // identification status are loaded again after each.
+  const [representationVersion, setRepresentationVersion] = useState(0);
+  const savedMinorRef = useRef(false);
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
@@ -3411,6 +3444,11 @@ export function LeadWizard({
         hydrated.current = leadId;
         lastPersistedLeadIdRef.current = leadId;
         setDraft(nextDraft);
+        setTrustedContactsBase(trustedContactsPayload(
+          storedTrustedContactDrafts(nextLead.trusted_contacts, nextDraft.trustedContacts),
+        ));
+        lastSentTrustedContactsRef.current = null;
+        savedMinorRef.current = isMinor(nextDraft.birthDate, new Date());
         initialServiceOptionsRef.current = nextDraft.serviceNeeds;
         setStep(nextStep);
         setTouchedMasterFields(new Set());
@@ -3477,20 +3515,46 @@ export function LeadWizard({
   useEffect(() => {
     step1PortalLeadRef.current = lead;
   }, [lead]);
+  useEffect(() => {
+    trustedContactsBaseRef.current = trustedContactsBase;
+  }, [trustedContactsBase]);
   const mergePatientStep1 = useCallback(async () => {
     if (!leadId) return;
+    // A save under way reaches the server first, so the fresh lead knows it.
+    await saveQueueRef.current;
     clearApiCache(`/leads/${leadId}`);
     const fresh = await fetchLeadDetail(leadId).catch(() => null);
     if (!fresh || hydrated.current !== leadId) return;
     const previous = step1PortalLeadRef.current;
+    const next = draftFromLead(fresh);
     if (previous) {
       const base = draftFromLead(previous);
-      const next = draftFromLead(fresh);
       setDraft((current) => (current ? mergePatientUpdates(current, base, next) ?? current : current));
     }
+    // The cabinet changes trusted contacts too (a second parent, a corrected
+    // name): they replace the contacts staff have not edited.
+    const freshContacts = storedTrustedContactDrafts(fresh.trusted_contacts, next.trustedContacts);
+    const storedContacts = trustedContactsBaseRef.current;
+    setTrustedContactsBase(trustedContactsPayload(freshContacts));
+    lastSentTrustedContactsRef.current = null;
+    setDraft((current) => {
+      if (!current) return current;
+      const merged = mergeTrustedContacts(current.trustedContacts, storedContacts, freshContacts);
+      return JSON.stringify(merged) === JSON.stringify(current.trustedContacts)
+        ? current
+        : { ...current, trustedContacts: merged };
+    });
     setLead(fresh);
   }, [leadId]);
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
+  // Who signs and pays (for a minor the legal representatives): shown in the
+  // documents step and used by the buttons of the GwG identification sheet.
+  const identification = useLeadIdentificationStatus(
+    open && step === "documents" ? leadId : null,
+    documents,
+    payer.data?.declaration?.updated_at ?? null,
+    representationVersion,
+  );
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   const patientUploadDocuments = useMemo(() => {
     const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
@@ -3500,6 +3564,10 @@ export function LeadWizard({
   const reloadStep1Portal = useCallback(() => {
     void reloadStep1PortalState();
   }, [reloadStep1PortalState]);
+  // A save that changed the contacts or the lead's age changes who represents the lead.
+  useEffect(() => {
+    if (representationVersion > 0) void reloadStep1PortalState();
+  }, [representationVersion, reloadStep1PortalState]);
   useEffect(() => {
     wizardStateBaseRef.current = { ...wizardStateBaseRef.current, step1_fill_mode: step1Portal.mode };
   }, [step1Portal.mode]);
@@ -3571,6 +3639,9 @@ export function LeadWizard({
     hydrated.current = "__new__";
     setLead(null);
     setDraft(nextDraft);
+    setTrustedContactsBase([]);
+    lastSentTrustedContactsRef.current = null;
+    savedMinorRef.current = false;
     setStep("master_data");
     setDocuments([]);
     setCases([]);
@@ -4370,8 +4441,25 @@ export function LeadWizard({
 
         lastPersistedLeadIdRef.current = targetLeadId;
         stage = "lead-update";
-        await updateLeadWizard(targetLeadId, payload);
+        // The contacts go out only when staff changed them since they were
+        // loaded. The list this wizard sent last is what the server has, even
+        // before the next render knows it.
+        const update = leadUpdateWithChangedContacts(
+          payload,
+          snapshot.draft.trustedContacts,
+          lastSentTrustedContactsRef.current ?? trustedContactsBase,
+        );
+        await updateLeadWizard(targetLeadId, update.body);
         if (hydrated.current !== targetLeadId) return;
+        if (update.contacts) {
+          lastSentTrustedContactsRef.current = update.contacts;
+          setTrustedContactsBase(update.contacts);
+        }
+        const savedMinor = isMinor(snapshot.draft.birthDate, new Date());
+        if (update.contacts || savedMinor !== savedMinorRef.current) {
+          savedMinorRef.current = savedMinor;
+          setRepresentationVersion((version) => version + 1);
+        }
 
         let savedDraft = snapshot.draft;
         if (
@@ -4446,7 +4534,7 @@ export function LeadWizard({
       () => undefined,
     );
     return queued;
-  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, tx]);
+  }, [existingPatient?.id, hydrateClinicalDraft, lead?.prospect_patient_id, leadId, loadPatientClinical, onCreated, trustedContactsBase, tx]);
 
   useEffect(() => {
     if (!open || !autosaveSnapshot || loading) return;
@@ -4753,6 +4841,30 @@ export function LeadWizard({
       ...current,
       trustedContacts: current.trustedContacts.filter((contact) => contact.id !== contactId),
     } : current);
+  };
+
+  /**
+   * A contact whose GwG data were entered in the lead cabinet cannot simply be
+   * removed (the server keeps it). Staff first remove those data; the contact
+   * and the uploaded documents stay, and the contact can then be removed.
+   */
+  const removeRepresentativeGwgData = async (contact: TrustedContactDraft) => {
+    if (!leadId) return;
+    const confirmed = window.confirm(tx(
+      `Убрать данные GwG у контакта «${contact.name}»? Сведения, внесённые в кабинете (адрес, гражданство, документ), и привязка загруженных файлов будут удалены. Сам контакт и документы останутся.`,
+      `GwG-Angaben von „${contact.name}“ entfernen? Die im Portal erfassten Angaben (Anschrift, Staatsangehörigkeit, Ausweis) und die Zuordnung der hochgeladenen Dateien werden gelöscht. Der Kontakt und die Dokumente bleiben erhalten.`,
+    ));
+    if (!confirmed) return;
+    setBusy(`remove-gwg-data-${contact.id}`);
+    setError("");
+    try {
+      step1Portal.applyRepresentation(await removeLeadRepresentativeData(leadId, contact.id));
+      setRepresentationVersion((version) => version + 1);
+    } catch (nextError) {
+      showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const toggleServiceNeed = (value: string, checked: boolean) => {
@@ -5062,13 +5174,14 @@ export function LeadWizard({
   }
 
   /**
-   * The GwG identification sheet of the patient or of the third-party payer.
-   * The server fills it from the lead, so the wizard is saved first; a new
-   * sheet replaces the current one of the same person as its next version.
+   * The GwG identification sheet of the patient, of the third-party payer or
+   * — for a minor — of one legal representative. The server fills it from the
+   * lead, so the wizard is saved first; a new sheet replaces the current one
+   * of the same person as its next version.
    */
-  async function generateGwgIdentificationSheet(subject: GwgSheetSubject) {
+  async function generateGwgIdentificationSheet({ subject, personName }: GwgSheetButton) {
     if (!draft) return;
-    setBusy(`generate-gwg_identification-${subject}`);
+    setBusy(gwgSheetBusyKey(subject));
     setError("");
     try {
       if (!(await save("documents", false))) return;
@@ -5078,6 +5191,7 @@ export function LeadWizard({
         gwgSheetRequest({
           leadId: targetLeadId,
           subject,
+          personName,
           orderId: order?.id,
           orderNumber: order?.order_number,
           replaceDocumentId: currentGwgSheet(wizardDocuments.gwg_identification, subject)?.id,
@@ -6144,6 +6258,26 @@ ${serviceCommentLines.join("\n")}`
     trustedContactEditor
     && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
   );
+  // Who represents the lead, as the server knows it: the sheets of a minor are
+  // made per legal representative, and a contact with GwG data keeps them.
+  const portalRepresentation = step1Portal.intake?.representation ?? null;
+  const gwgDataContactIds = new Set(
+    (portalRepresentation?.representatives ?? []).flatMap((person) => (person.has_data ? [person.id] : [])),
+  );
+  const gwgSheets = gwgSheetPlan({
+    minor: identification.status?.minor
+      ?? step1Portal.intake?.minor
+      ?? (draft ? isMinor(draft.birthDate, new Date()) : false),
+    representatives: identification.status
+      ? identification.status.representatives
+      : (portalRepresentation?.representatives ?? []).map((person) => ({
+          id: person.id,
+          name: representativeName(person),
+        })),
+    payer: payer.data?.declaration,
+    payerSamePersonName: payerSamePerson(identification.status)?.name ?? null,
+    payerSamePersonUnknown: !identification.loaded,
+  });
   return (
     <PortalUploadsProvider
       intake={step1Portal.intake}
@@ -6876,6 +7010,18 @@ ${serviceCommentLines.join("\n")}`
                         {visibleMasterError("guardian")}
                       </p>
                     ) : null}
+                    {leadId && portalRepresentation ? (
+                      <LeadCustodySelect
+                        leadId={leadId}
+                        representation={portalRepresentation}
+                        disabled={isBusy}
+                        tx={tx}
+                        errorText={(nextError) => errorText(nextError, tx)}
+                        // The server must know the date of birth of a minor before it takes the custody.
+                        beforeSave={step1Portal.intake?.minor ? undefined : () => save(step, false)}
+                        onSaved={step1Portal.applyRepresentation}
+                      />
+                    ) : null}
                     {draft.trustedContacts.filter((contact) => ["parent", "guardian"].includes(contact.relation)).length === 0 ? (
                       <EmptyCell>{tx("Представитель не указан", "Kein Vertreter angegeben")}</EmptyCell>
                     ) : (
@@ -7326,56 +7472,18 @@ ${serviceCommentLines.join("\n")}`
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Лист идентификации по GwG", "Dokumentationsbogen natürliche Personen (GwG)")}
                   accessory={(
-                    <span className="inline-flex flex-wrap justify-end gap-2" data-testid="gwg-identification-actions">
-                      <Button
-                        type="button"
-                        variant="default"
-                        size="sm"
-                        className="h-8 rounded-lg"
-                        disabled={isBusy}
-                        onClick={() => void generateGwgIdentificationSheet("contract_partner")}
-                      >
-                        {busy === "generate-gwg_identification-contract_partner"
-                          ? <LoaderCircle className="size-3.5 animate-spin" />
-                          : <FileText className="size-3.5" />}
-                        {currentGwgSheet(wizardDocuments.gwg_identification, "contract_partner")
-                          ? tx("Обновить для пациента", "Für Patient/in aktualisieren")
-                          : tx("Сформировать для пациента", "Für Patient/in erstellen")}
-                      </Button>
-                      {payer.data?.declaration?.payer_kind === "third_party"
-                        && (payer.data.declaration.payer_type ?? "person") === "person" ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 rounded-lg"
-                          disabled={isBusy}
-                          onClick={() => void generateGwgIdentificationSheet("payer")}
-                        >
-                          {busy === "generate-gwg_identification-payer"
-                            ? <LoaderCircle className="size-3.5 animate-spin" />
-                            : <FileText className="size-3.5" />}
-                          {currentGwgSheet(wizardDocuments.gwg_identification, "payer")
-                            ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
-                            : tx("Для плательщика", "Für Kostenübernehmer erstellen")}
-                        </Button>
-                      ) : null}
-                      {payer.data?.declaration?.payer_kind === "third_party"
-                        && (payer.data.declaration.payer_type ?? "person") !== "person" ? (
-                        <span className="self-center text-xs text-muted-foreground" data-testid="gwg-identification-payer-organisation">
-                          {tx(
-                            "Для организации лист для физических лиц не формируется",
-                            "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
-                          )}
-                        </span>
-                      ) : null}
-                    </span>
+                    <LeadGwgSheetActions
+                      plan={gwgSheets}
+                      documents={wizardDocuments.gwg_identification}
+                      busy={busy}
+                      disabled={isBusy}
+                      tx={tx}
+                      onGenerate={(button) => void generateGwgIdentificationSheet(button)}
+                    />
                   )}
                 >
                   <LeadIdentificationStatus
-                    leadId={leadId}
-                    documents={documents}
-                    payerVersion={payer.data?.declaration?.updated_at ?? null}
+                    identification={identification}
                     canEdit
                     disabled={isBusy}
                     tx={tx}
@@ -7533,6 +7641,11 @@ ${serviceCommentLines.join("\n")}`
                               {contact.relation ? (
                                 <span className="text-xs text-muted-foreground">{contact.relation}</span>
                               ) : null}
+                              {gwgDataContactIds.has(contact.id) ? (
+                                <Badge variant="outline" className="border-border bg-muted/40 text-[10px] text-muted-foreground" data-testid="trusted-contact-gwg-badge">
+                                  {tx("Представитель (GwG)", "Vertreter/in (GwG)")}
+                                </Badge>
+                              ) : null}
                             </div>
                             <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                               {contact.birthDate ? <span>{germanDocumentDate(contact.birthDate)}</span> : null}
@@ -7552,6 +7665,23 @@ ${serviceCommentLines.join("\n")}`
                             >
                               <Pencil aria-hidden="true" className="size-3.5" />
                             </Button>
+                            {gwgDataContactIds.has(contact.id) ? (
+                              // The server keeps a contact with GwG data: they are removed first.
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-destructive hover:text-destructive"
+                                disabled={isBusy}
+                                aria-label={`${tx("Убрать данные GwG", "GwG-Angaben entfernen")}: ${contact.name}`}
+                                onClick={() => void removeRepresentativeGwgData(contact)}
+                              >
+                                {busy === `remove-gwg-data-${contact.id}`
+                                  ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
+                                  : null}
+                                {tx("Убрать данные GwG", "GwG-Angaben entfernen")}
+                              </Button>
+                            ) : (
                             <Button
                               type="button"
                               variant="ghost"
@@ -7563,6 +7693,7 @@ ${serviceCommentLines.join("\n")}`
                             >
                               <Trash2 aria-hidden="true" className="size-3.5" />
                             </Button>
+                            )}
                           </div>
                         </li>
                       ))}
@@ -9165,11 +9296,12 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
                     >
                       <option value="">{tx("Выберите", "Auswählen")}</option>
-                      {trustedContactEditor.relation && !["parent", "guardian", "spouse", "relative", "other"].includes(trustedContactEditor.relation) ? (
+                      {trustedContactEditor.relation && !["parent", "guardian", "representative", "spouse", "relative", "other"].includes(trustedContactEditor.relation) ? (
                         <option value={trustedContactEditor.relation}>{trustedContactEditor.relation}</option>
                       ) : null}
                       <option value="parent">{tx("Мать / отец", "Mutter / Vater")}</option>
                       <option value="guardian">{tx("Законный представитель", "Gesetzlicher Vertreter")}</option>
+                      <option value="representative">{tx("Уполномоченный представитель", "Bevollmächtigte Person")}</option>
                       <option value="spouse">{tx("Супруг / супруга", "Ehepartner/in")}</option>
                       <option value="relative">{tx("Родственник", "Verwandte Person")}</option>
                       <option value="other">{tx("Другое", "Sonstiges")}</option>

@@ -6078,3 +6078,151 @@ async fn a_minor_lead_gets_no_patient_login() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
 }
+
+/// The wizard saves the whole list of trusted contacts. A list it loaded
+/// before the parent entered the second parent in the cabinet must not drop
+/// that person.
+#[tokio::test]
+async fn a_wizard_save_with_an_older_contact_list_keeps_the_representative_from_the_cabinet() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let mother = Uuid::new_v4();
+    let mother_contact = json!({
+        "id": mother,
+        "name": "Anna Muster",
+        "relation": "mother",
+        "email": format!("anna.muster.{tag}@example.com")
+    });
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "date_of_birth": "2016-04-05",
+            "email": format!("mia.muster.{tag}@example.com"),
+            "trusted_contacts": [mother_contact.clone()]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let contacts_of = |lead: &Value| {
+        lead["trusted_contacts"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no contacts: {lead}"))
+            .iter()
+            .map(|contact| {
+                (
+                    contact["id"].as_str().unwrap_or_default().to_string(),
+                    contact["name"].as_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // The mother gets the login and names the father in the cabinet.
+    let (status, issued) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians"),
+        &pm,
+        Some(json!({ "trusted_contact_id": mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let parent = format!(
+        "Bearer {}",
+        jwt::issue_access_token(TEST_SECRET, guardian, "patient", Uuid::new_v4()).unwrap()
+    );
+    let father = Uuid::new_v4();
+    let (status, request) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/representatives/{father}"),
+        &parent,
+        Some(json!({
+            "role": "legal_representative",
+            "first_name": "Ben",
+            "last_name": "Muster",
+            "phone": "+49 30 000000"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{request}");
+
+    // The wizard still has the list with the mother alone and saves it — also
+    // together with other fields, and also as an empty list.
+    for stale in [json!([mother_contact.clone()]), json!([])] {
+        let keeps_mother = stale.as_array().is_some_and(|list| !list.is_empty());
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/leads/{lead_id}/update"),
+            &pm,
+            Some(json!({ "city": "Berlin", "trusted_contacts": stale })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, lead) =
+            json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{lead}");
+        let contacts = contacts_of(&lead);
+        assert!(
+            contacts.contains(&(father.to_string(), "Ben Muster".to_string())),
+            "the father entered in the cabinet is still a trusted contact: {lead}"
+        );
+        // The mother has no row: the wizard removes her as before.
+        assert_eq!(
+            contacts.iter().any(|(id, _)| *id == mother.to_string()),
+            keeps_mother,
+            "{lead}"
+        );
+        if !keeps_mother {
+            // The kept contact is the first one now, like after any save.
+            assert_eq!(lead["trusted_contact_name"], "Ben Muster", "{lead}");
+            assert_eq!(lead["trusted_contact_phone"], "+49 30 000000", "{lead}");
+        }
+    }
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_representatives WHERE lead_id = $1::uuid AND contact_id = $2",
+    )
+    .bind(&lead_id)
+    .bind(father)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(rows, 1);
+
+    // Only staff who work the lead remove what the cabinet entered; then the
+    // wizard removes the contact as usual.
+    let remove = format!("/api/v1/leads/{lead_id}/representatives/{father}");
+    let (status, _) =
+        json_request(&app, "DELETE", &remove, &app.auth_header("concierge"), None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, removed) = json_request(&app, "DELETE", &remove, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{removed}");
+    assert_eq!(
+        removed["representation"]["representatives"][0]["has_data"], false,
+        "{removed}"
+    );
+    let (status, gone) = json_request(&app, "DELETE", &remove, &pm, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{gone}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": [] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(lead["trusted_contacts"], json!([]), "{lead}");
+}

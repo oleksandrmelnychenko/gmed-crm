@@ -24,7 +24,10 @@
 //! states what the GwG identification sheet needs ([`Identification`], table
 //! `lead_gwg_declarations`): place of birth, identity document with a photo or
 //! scan of it, the legal questions, and confirms on sending that the
-//! information is complete and true.
+//! information is complete and true. Who acts for the lead — an adult's
+//! representative or legal guardian, the parents or the guardian of a minor —
+//! is stated on the same page; that part lives in
+//! [`crate::routes::lead_representatives`], and its routes are registered here.
 //!
 //! A login that reaches only requests is in the lead cabinet
 //! (`/me.portal_mode = "lead"`); [`lead_portal_guard`] closes the rest of the
@@ -49,6 +52,7 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
 use crate::routes::lead_payer::{self, PortalPayerError, PortalPayerInput};
+use crate::routes::lead_representatives;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -259,6 +263,26 @@ pub fn router() -> Router<AppState> {
             post(upload_my_identity_document)
                 .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
         )
+        // Who acts for the lead (representation).
+        .route(
+            "/me/lead-requests/{lead_id}/representation",
+            post(lead_representatives::update_my_representation),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/representatives/{representative_id}",
+            post(lead_representatives::upsert_my_representative)
+                .delete(lead_representatives::remove_my_representative),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/representatives/{representative_id}/identity-document",
+            post(lead_representatives::upload_my_representative_identity_document)
+                .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/representatives/{representative_id}/authority-document",
+            post(lead_representatives::upload_my_representative_authority_document)
+                .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
         .route("/me/lead-requests/{lead_id}/consent", post(give_consent))
         .route(
             "/me/lead-requests/{lead_id}/consent/revoke",
@@ -288,6 +312,15 @@ pub fn router() -> Router<AppState> {
         .route(
             "/leads/{lead_id}/portal-intake/documents/{document_id}/review",
             post(review_portal_upload),
+        )
+        // Staff: the custody of a minor, and the row of a representative.
+        .route(
+            "/leads/{lead_id}/representation",
+            post(lead_representatives::set_lead_custody),
+        )
+        .route(
+            "/leads/{lead_id}/representatives/{representative_id}",
+            delete(lead_representatives::remove_lead_representative),
         )
 }
 
@@ -463,7 +496,7 @@ pub async fn lead_portal_guard(
 }
 
 #[allow(clippy::result_large_err)]
-fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Response> {
+pub(crate) fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Response> {
     // Strictly the patient role: `require_any_role` would let the CEO through.
     if auth.role == Role::Patient {
         Ok(())
@@ -477,7 +510,7 @@ fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Response> {
 
 /// Locks the lead and checks the caller's link in the same statement. `None`
 /// when the lead is gone, converted or not the caller's.
-async fn lock_my_lead(
+pub(crate) async fn lock_my_lead(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
     user_id: Uuid,
@@ -753,12 +786,12 @@ pub(crate) struct PersonalDataPatch {
 pub(crate) struct FieldError {
     /// `invalid_field`, or a code of its own where the cabinet says more
     /// than "invalid" (an expired identity document).
-    code: &'static str,
-    field: &'static str,
-    message: &'static str,
+    pub(crate) code: &'static str,
+    pub(crate) field: &'static str,
+    pub(crate) message: &'static str,
 }
 
-fn field_error(field: &'static str, message: &'static str) -> FieldError {
+pub(crate) fn field_error(field: &'static str, message: &'static str) -> FieldError {
     FieldError {
         code: "invalid_field",
         field,
@@ -767,7 +800,7 @@ fn field_error(field: &'static str, message: &'static str) -> FieldError {
 }
 
 impl FieldError {
-    fn into_response(self) -> axum::response::Response {
+    pub(crate) fn into_response(self) -> axum::response::Response {
         coded(
             StatusCode::UNPROCESSABLE_ENTITY,
             self.code,
@@ -777,7 +810,7 @@ impl FieldError {
     }
 }
 
-fn clean_text(
+pub(crate) fn clean_text(
     value: &str,
     field: &'static str,
     max_chars: usize,
@@ -792,8 +825,24 @@ fn clean_text(
     Ok((!value.is_empty()).then_some(value))
 }
 
+/// A phone number: at least five digits, with the usual separators only.
+pub(crate) fn clean_phone(value: &str, field: &'static str) -> Result<Option<String>, FieldError> {
+    let phone = clean_text(value, field, 40)?;
+    if let Some(phone) = &phone {
+        let digits = phone.chars().filter(char::is_ascii_digit).count();
+        if digits < 5
+            || !phone
+                .chars()
+                .all(|ch| ch.is_ascii_digit() || " +-()/.".contains(ch))
+        {
+            return Err(field_error(field, "Invalid phone number"));
+        }
+    }
+    Ok(phone)
+}
+
 /// One of `allowed`, or nothing for an empty value.
-fn one_of(
+pub(crate) fn one_of(
     value: &str,
     field: &'static str,
     allowed: &[&str],
@@ -896,18 +945,7 @@ pub(crate) fn apply_personal_data_patch(
         next.country = country_code(value, "country")?;
     }
     if let Some(value) = &patch.phone {
-        let phone = clean_text(value, "phone", 40)?;
-        if let Some(phone) = &phone {
-            let digits = phone.chars().filter(char::is_ascii_digit).count();
-            if digits < 5
-                || !phone
-                    .chars()
-                    .all(|ch| ch.is_ascii_digit() || " +-()/.".contains(ch))
-            {
-                return Err(field_error("phone", "Invalid phone number"));
-            }
-        }
-        next.phone = phone;
+        next.phone = clean_phone(value, "phone")?;
     }
     if let Some(value) = &patch.primary_language {
         let value = value.trim().to_lowercase();
@@ -1008,7 +1046,7 @@ const IDENTIFICATION_MARKER: &str = "identification";
 const SALUTATION_VALUES: [&str; 3] = ["mr", "ms", "none"];
 /// In the order of the form; stored in this order.
 const CONTACT_CHANNEL_VALUES: [&str; 3] = ["email", "phone", "messenger"];
-const ID_DOCUMENT_TYPE_VALUES: [&str; 3] = ["passport", "id_card", "residence_permit"];
+pub(crate) const ID_DOCUMENT_TYPE_VALUES: [&str; 3] = ["passport", "id_card", "residence_permit"];
 /// Longest free text of a statement (details of a "yes", payment background).
 const STATEMENT_TEXT_MAX: usize = 2000;
 
@@ -1296,7 +1334,10 @@ fn clean_long_text(
     Ok((!value.is_empty()).then(|| value.to_string()))
 }
 
-fn optional_date(value: &str, field: &'static str) -> Result<Option<NaiveDate>, FieldError> {
+pub(crate) fn optional_date(
+    value: &str,
+    field: &'static str,
+) -> Result<Option<NaiveDate>, FieldError> {
     match value.trim() {
         "" => Ok(None),
         value => NaiveDate::parse_from_str(value, "%Y-%m-%d")
@@ -1445,7 +1486,9 @@ fn changed_identification_fields(
 }
 
 /// The statements of a lead and when the lead last changed them; nothing
-/// entered while there is no row.
+/// entered while there is no row. A row only staff wrote (the custody of a
+/// minor, stated in the wizard before the parent entered anything) has no
+/// author and no such time.
 pub(crate) async fn load_identification<'e, E>(
     executor: E,
     lead_id: Uuid,
@@ -1460,7 +1503,10 @@ where
     Ok(match row {
         Some(row) => (
             Identification::from_row(&row),
-            row.try_get::<DateTime<Utc>, _>("updated_at").ok(),
+            row.try_get::<Option<Uuid>, _>("updated_by")
+                .ok()
+                .flatten()
+                .and_then(|_| row.try_get::<DateTime<Utc>, _>("updated_at").ok()),
         ),
         None => (Identification::default(), None),
     })
@@ -1537,14 +1583,22 @@ async fn store_identification(
     .map(|_| ())
 }
 
-/// The two kinds of portal uploads (`lead_portal_uploads.kind`).
+/// The kinds of portal uploads (`lead_portal_uploads.kind`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum UploadKind {
+pub(crate) enum UploadKind {
     /// A medical document of the request, under the Art. 9 consent.
     Medical,
-    /// A photo or scan of the identity document, under the consent to
-    /// process the request data. Never medical.
+    /// A photo or scan of the lead's own identity document, under the
+    /// consent to process the request data. Never medical.
     Identity,
+    /// A photo or scan of the identity document of a representative. Never
+    /// the lead's own: it is stored under its own document type, so it can
+    /// neither be confirmed as the lead's identity document nor tick the
+    /// lead's identification sheet.
+    RepresentativeIdentity,
+    /// The proof that a representative may act: a power of attorney, the
+    /// appointment deed of a guardian, a proof of sole custody.
+    RepresentativeAuthority,
 }
 
 impl UploadKind {
@@ -1552,6 +1606,8 @@ impl UploadKind {
         match self {
             UploadKind::Medical => "medical",
             UploadKind::Identity => "identity",
+            UploadKind::RepresentativeIdentity => lead_representatives::UPLOAD_IDENTITY,
+            UploadKind::RepresentativeAuthority => lead_representatives::UPLOAD_AUTHORITY,
         }
     }
 
@@ -1559,34 +1615,53 @@ impl UploadKind {
     fn consent(self) -> ConsentPurpose {
         match self {
             UploadKind::Medical => ConsentPurpose::HealthData,
-            UploadKind::Identity => ConsentPurpose::InquiryProcessing,
+            UploadKind::Identity
+            | UploadKind::RepresentativeIdentity
+            | UploadKind::RepresentativeAuthority => ConsentPurpose::InquiryProcessing,
         }
+    }
+
+    /// A file of a representative, linked to that person.
+    fn of_representative(self) -> bool {
+        matches!(
+            self,
+            UploadKind::RepresentativeIdentity | UploadKind::RepresentativeAuthority
+        )
     }
 }
 
 /// Everything still missing before the request can be sent, as the keys of
 /// `progress.missing_for_submit`: the personal data, who pays, then the
-/// statements for the identification in form order.
+/// statements for the identification in form order. `representation` is what
+/// [`lead_representatives::missing_for_submit`] says about who acts for the
+/// lead; the form asks it after the identity document.
 fn missing_for_submit(
     data: &PersonalData,
     payer: Option<&lead_payer::Declaration>,
     identification: &Identification,
     identity_document_uploaded: bool,
+    representation: Vec<String>,
     today: NaiveDate,
-) -> Vec<&'static str> {
+) -> Vec<String> {
     let mut missing = data.missing_for_submit();
     missing.extend(lead_payer::portal_missing(payer));
     missing.extend(identification.missing_identity(today));
     if !identity_document_uploaded {
         missing.push("id_document_upload");
     }
-    missing.extend(lead_payer::portal_missing_own_account(payer));
-    missing.extend(identification.missing_legal());
+    let mut missing = missing.into_iter().map(str::to_string).collect::<Vec<_>>();
+    missing.extend(representation);
+    missing.extend(
+        lead_payer::portal_missing_own_account(payer)
+            .into_iter()
+            .chain(identification.missing_legal())
+            .map(str::to_string),
+    );
     // Why another person pays is asked with a third-party payer only.
     if payer.is_some_and(lead_payer::Declaration::is_third_party)
         && identification.payment_background.is_none()
     {
-        missing.push("payment_background");
+        missing.push("payment_background".to_string());
     }
     missing
 }
@@ -1594,7 +1669,7 @@ fn missing_for_submit(
 /// Staff took a portal upload over: marked it as reviewed or, for a copy of
 /// the identity document, confirmed it as such. From then on the patient can
 /// no longer remove it.
-fn upload_taken_over(upload: &PgRow) -> bool {
+pub(crate) fn upload_taken_over(upload: &PgRow) -> bool {
     let time = |column: &str| {
         upload
             .try_get::<Option<DateTime<Utc>>, _>(column)
@@ -1604,7 +1679,7 @@ fn upload_taken_over(upload: &PgRow) -> bool {
     time("reviewed_at").is_some() || time("signed_at").is_some()
 }
 
-fn upload_file_name(upload: &PgRow) -> Option<String> {
+pub(crate) fn upload_file_name(upload: &PgRow) -> Option<String> {
     upload
         .try_get::<Option<String>, _>("original_filename")
         .ok()
@@ -1677,8 +1752,11 @@ where
 /// "I pay (as a parent)": what the form puts into the payer fields when the
 /// parent names himself — first and last name, date of birth, e-mail and
 /// phone of a trusted contact. Only these: never the address or the relation.
-/// The name is split at the last space; a single word is the last name.
-fn payer_template_from_contact(contact: &Value) -> Value {
+/// The name parts are the ones the parent entered as a representative
+/// (`names`: first and last name of the contact's row) while they still are
+/// the contact's name; otherwise the name is split at the last space, and a
+/// single word is the last name.
+fn payer_template_from_contact(contact: &Value, names: Option<(&str, &str)>) -> Value {
     let text = |key: &str| {
         contact
             .get(key)
@@ -1686,14 +1764,11 @@ fn payer_template_from_contact(contact: &Value) -> Value {
             .map(str::trim)
             .filter(|value| !value.is_empty())
     };
-    let name = text("name")
-        .unwrap_or_default()
-        .split_whitespace()
-        .collect::<Vec<_>>();
-    let (first_name, last_name) = match name.split_last() {
-        Some((last, given)) => (given.join(" "), (*last).to_string()),
-        None => (String::new(), String::new()),
-    };
+    let (first_name, last_name) = lead_representatives::name_parts(
+        text("name").unwrap_or_default(),
+        names.map(|(first, _)| first),
+        names.map(|(_, last)| last),
+    );
     json!({
         "first_name": first_name,
         "last_name": last_name,
@@ -1712,6 +1787,7 @@ async fn guardian_payer_template<'e, E>(
     executor: E,
     lead_id: Uuid,
     user_id: Uuid,
+    representation: &lead_representatives::Loaded,
 ) -> Result<Option<Value>, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = sqlx::Postgres>,
@@ -1736,11 +1812,23 @@ where
     .bind(user_id)
     .fetch_optional(executor)
     .await?;
-    Ok(contact.as_ref().map(payer_template_from_contact))
+    Ok(contact.as_ref().map(|contact| {
+        let row = lead_representatives::entry_id(contact)
+            .and_then(|contact_id| representation.row_of(contact_id));
+        payer_template_from_contact(
+            contact,
+            row.map(|row| {
+                (
+                    row.first_name.as_deref().unwrap_or_default(),
+                    row.last_name.as_deref().unwrap_or_default(),
+                )
+            }),
+        )
+    }))
 }
 
 /// The request page of one lead for the portal.
-async fn request_payload(
+pub(crate) async fn request_payload(
     state: &AppState,
     lead_id: Uuid,
     user_id: Uuid,
@@ -1774,13 +1862,21 @@ async fn request_payload(
     .fetch_one(&state.db)
     .await?;
     let data = PersonalData::from_row(&row);
-    let payer = {
+    // Who pays, and who acts for the lead.
+    let (payer, representation) = {
         let mut conn = state.db.acquire().await?;
-        lead_payer::load_declaration(&mut conn, lead_id).await?
+        (
+            lead_payer::load_declaration(&mut conn, lead_id).await?,
+            lead_representatives::load(&mut conn, lead_id)
+                .await?
+                .unwrap_or_default(),
+        )
     };
     let (identification, _) = load_identification(&state.db, lead_id).await?;
     let payer_self_template = match kind {
-        AccessKind::Guardian => guardian_payer_template(&state.db, lead_id, user_id).await?,
+        AccessKind::Guardian => {
+            guardian_payer_template(&state.db, lead_id, user_id, &representation).await?
+        }
         AccessKind::Own => None,
     };
     let uploads = sqlx::query(
@@ -1827,14 +1923,17 @@ async fn request_payload(
             })
             .collect()
     };
+    // The files of a representative are listed with that person, never here.
     let documents = uploads_of(UploadKind::Medical);
     let identity_documents = uploads_of(UploadKind::Identity);
+    let today = crate::app_time::today();
     let missing = missing_for_submit(
         &data,
         payer.as_ref(),
         &identification,
         !identity_documents.is_empty(),
-        crate::app_time::today(),
+        lead_representatives::missing_for_submit(&representation, today),
+        today,
     );
     let mut consents = Map::new();
     for purpose in ConsentPurpose::ALL {
@@ -1871,7 +1970,8 @@ async fn request_payload(
         "payer": lead_payer::portal_payload(payer.as_ref()),
         "payer_self_template": payer_self_template,
         "identification": identification.to_json(),
-        "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
+        "minor": crate::routes::leads::is_minor_on(data.date_of_birth, today),
+        "representation": lead_representatives::portal_payload(&representation, user_id),
         "documents": documents,
         "identity_documents": identity_documents,
         "max_documents": MAX_PORTAL_UPLOADS,
@@ -1891,7 +1991,7 @@ async fn request_payload(
 // Patient endpoints
 // ----------------------------------------------------------------------------
 
-fn err(status: StatusCode, message: &str) -> axum::response::Response {
+pub(crate) fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (
         status,
         Json(json!({
@@ -1902,7 +2002,12 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
-fn coded(status: StatusCode, code: &str, message: &str, extra: Value) -> axum::response::Response {
+pub(crate) fn coded(
+    status: StatusCode,
+    code: &str,
+    message: &str,
+    extra: Value,
+) -> axum::response::Response {
     let mut body = json!({
         "error": status.canonical_reason().unwrap_or("error"),
         "code": code,
@@ -1916,12 +2021,12 @@ fn coded(status: StatusCode, code: &str, message: &str, extra: Value) -> axum::r
     (status, Json(body)).into_response()
 }
 
-fn internal(error: impl std::fmt::Display, what: &str) -> axum::response::Response {
+pub(crate) fn internal(error: impl std::fmt::Display, what: &str) -> axum::response::Response {
     tracing::error!(%error, what, "lead portal intake");
     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
 }
 
-fn not_found() -> axum::response::Response {
+pub(crate) fn not_found() -> axum::response::Response {
     err(StatusCode::NOT_FOUND, "Request not found")
 }
 
@@ -2554,7 +2659,7 @@ async fn upload_my_lead_document(
     Path(lead_id): Path<Uuid>,
     multipart: Multipart,
 ) -> axum::response::Response {
-    store_my_upload(state, auth, lead_id, multipart, UploadKind::Medical).await
+    store_my_upload(state, auth, lead_id, multipart, UploadKind::Medical, None).await
 }
 
 /// `POST /me/lead-requests/{lead_id}/identity-document` (multipart `file`): a
@@ -2567,21 +2672,24 @@ async fn upload_my_identity_document(
     Path(lead_id): Path<Uuid>,
     multipart: Multipart,
 ) -> axum::response::Response {
-    store_my_upload(state, auth, lead_id, multipart, UploadKind::Identity).await
+    store_my_upload(state, auth, lead_id, multipart, UploadKind::Identity, None).await
 }
 
-/// File types of a copy of the identity document.
+/// File types of a copy of an identity document or of a proof of authority.
 const IDENTITY_DOCUMENT_MIME_TYPES: [&str; 3] = ["application/pdf", "image/jpeg", "image/png"];
 
 /// Stores an upload of the caller's request as a document of the lead and
 /// registers it in `lead_portal_uploads` with the consent it was made under.
-/// Both kinds count toward the upload limit of the request.
-async fn store_my_upload(
+/// Every kind counts toward the upload limit of the request. A file of a
+/// representative names that person (`representative_id`): the person must be
+/// a representative of the lead, otherwise 404.
+pub(crate) async fn store_my_upload(
     state: AppState,
     auth: AuthUser,
     lead_id: Uuid,
     mut multipart: Multipart,
     upload_kind: UploadKind,
+    representative_id: Option<Uuid>,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
@@ -2590,6 +2698,18 @@ async fn store_my_upload(
         Ok(Some(kind)) => kind,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "resolve request"),
+    };
+    // Whose file it is; the document is named after the person.
+    let representative = match (upload_kind.of_representative(), representative_id) {
+        (false, _) => None,
+        (true, Some(representative_id)) => {
+            match lead_representatives::upload_target(&state, lead_id, representative_id).await {
+                Ok(Some(name)) => Some((representative_id, name)),
+                Ok(None) => return err(StatusCode::NOT_FOUND, "Representative not found"),
+                Err(error) => return internal(error, "resolve representative"),
+            }
+        }
+        (true, None) => return err(StatusCode::NOT_FOUND, "Representative not found"),
     };
     match active_consent(&state.db, lead_id, auth.user_id, upload_kind.consent()).await {
         Ok(Some(_)) => {}
@@ -2601,7 +2721,9 @@ async fn store_my_upload(
                     "Consent to the processing of health data is required before uploading",
                     json!({ "version": HEALTH_CONSENT_VERSION }),
                 ),
-                UploadKind::Identity => coded(
+                UploadKind::Identity
+                | UploadKind::RepresentativeIdentity
+                | UploadKind::RepresentativeAuthority => coded(
                     StatusCode::FORBIDDEN,
                     "inquiry_consent_required",
                     "Please agree to the processing of your data for the request first",
@@ -2686,18 +2808,41 @@ async fn store_my_upload(
             json!({}),
         );
     }
-    // A copy of the identity document is stored like the one staff upload in
-    // the wizard (`identity`), so the identity check finds it.
-    let (auto_name, art, category, access_category) = if medical {
-        (
-            file_name.as_str(),
+    let person = representative
+        .as_ref()
+        .map(|(_, name)| name.as_str())
+        .unwrap_or_default();
+    // A copy of the lead's identity document is stored like the one staff
+    // upload in the wizard (`identity`), so the identity check finds it. The
+    // files of a representative have a document type of their own: they are
+    // never the lead's identity document.
+    let (auto_name, art, category, access_category) = match upload_kind {
+        UploadKind::Medical => (
+            file_name.clone(),
             "patient_medical_upload",
             "medical",
             "medical",
-        )
-    } else {
-        ("Identity document", "identity", "identity", "internal")
+        ),
+        UploadKind::Identity => (
+            "Identity document".to_string(),
+            "identity",
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeIdentity => (
+            format!("Identity document – {person}"),
+            lead_representatives::UPLOAD_IDENTITY,
+            "identity",
+            "internal",
+        ),
+        UploadKind::RepresentativeAuthority => (
+            format!("Proof of authority – {person}"),
+            lead_representatives::UPLOAD_AUTHORITY,
+            "administrative",
+            "internal",
+        ),
     };
+    let auto_name = auto_name.as_str();
     let input = NewStoredDocument {
         document_id: None,
         document_number: None,
@@ -2755,10 +2900,24 @@ async fn store_my_upload(
         else {
             return Ok(None);
         };
+        // The person may have been removed meanwhile; a parent staff entered
+        // gets the row the file is linked to.
+        if let Some((representative_id, _)) = &representative
+            && !lead_representatives::ensure_row_for_upload(
+                &mut tx,
+                lead_id,
+                *representative_id,
+                auth.user_id,
+            )
+            .await?
+        {
+            return Ok(None);
+        }
         sqlx::query(
             r#"INSERT INTO lead_portal_uploads
-                   (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind)
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+                   (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind,
+                    representative_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
         )
         .bind(document_id)
         .bind(lead_id)
@@ -2766,6 +2925,7 @@ async fn store_my_upload(
         .bind(kind.as_str())
         .bind(consent_id)
         .bind(upload_kind.as_str())
+        .bind(representative.as_ref().map(|(id, _)| *id))
         .execute(&mut *tx)
         .await?;
         audit::write_in_transaction(
@@ -2783,6 +2943,7 @@ async fn store_my_upload(
                     "file_size": file_size,
                     "is_medical": medical,
                     "kind": upload_kind.as_str(),
+                    "representative_id": representative.as_ref().map(|(id, _)| *id),
                 }),
             ),
         )
@@ -2815,6 +2976,10 @@ async fn store_my_upload(
         }),
     )
     .await;
+    // What staff see of the lead's representation changed with the file.
+    if upload_kind.of_representative() {
+        lead_representatives::publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
+    }
     match request_payload(&state, lead_id, auth.user_id, kind).await {
         Ok(payload) => (StatusCode::CREATED, Json(payload)).into_response(),
         Err(error) => internal(error, "load request"),
@@ -2839,8 +3004,8 @@ async fn discard_stored_document(state: &AppState, document_id: Uuid, storage_ke
 }
 
 /// `DELETE /me/lead-requests/{lead_id}/documents/{document_id}`: the uploader
-/// removes an upload — a medical document or a copy of the identity document —
-/// that staff have not taken over yet.
+/// removes an upload — a medical document, a copy of the identity document or
+/// a file of a representative — that staff have not taken over yet.
 async fn withdraw_my_lead_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2915,6 +3080,11 @@ async fn withdraw_my_lead_document(
     }
     let storage_key: Option<String> = upload.try_get("storage_key").ok().flatten();
     let upload_kind: String = upload.try_get("kind").unwrap_or_default();
+    let of_representative = [
+        lead_representatives::UPLOAD_IDENTITY,
+        lead_representatives::UPLOAD_AUTHORITY,
+    ]
+    .contains(&upload_kind.as_str());
     let staged =
         match crate::routes::documents::stage_document_file_delete(storage_key.as_deref()).await {
             Ok(staged) => staged,
@@ -2975,6 +3145,9 @@ async fn withdraw_my_lead_document(
         json!({ "change": "document_withdrawn", "document_id": document_id, "access_kind": kind.as_str() }),
     )
     .await;
+    if of_representative {
+        lead_representatives::publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
+    }
     match request_payload(&state, lead_id, auth.user_id, kind).await {
         Ok(payload) => Json(payload).into_response(),
         Err(error) => internal(error, "load request"),
@@ -3036,12 +3209,18 @@ async fn submit_my_lead_request(
         Ok(uploaded) => uploaded,
         Err(error) => return internal(error, "load identity documents"),
     };
+    let representation = match lead_representatives::load(&mut tx, lead_id).await {
+        Ok(representation) => representation.unwrap_or_default(),
+        Err(error) => return internal(error, "load representation"),
+    };
+    let today = crate::app_time::today();
     let missing = missing_for_submit(
         &data,
         payer.as_ref(),
         &identification,
         identity_uploaded,
-        crate::app_time::today(),
+        lead_representatives::missing_for_submit(&representation, today),
+        today,
     );
     if !missing.is_empty() {
         return coded(
@@ -3071,22 +3250,25 @@ async fn submit_my_lead_request(
             json!({ "purpose": ConsentPurpose::InquiryProcessing.consent_type() }),
         );
     };
-    // Medical documents and copies of the identity document, counted apart:
-    // "documents" has always meant the medical ones.
-    let (documents, identity_documents): (i64, i64) = match sqlx::query_as(
-        r#"SELECT count(*) FILTER (WHERE u.kind = 'medical'),
-                  count(*) FILTER (WHERE u.kind = 'identity')
-           FROM lead_portal_uploads u
-           JOIN documents d ON d.id = u.document_id
-           WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL"#,
-    )
-    .bind(lead_id)
-    .fetch_one(&mut *tx)
-    .await
-    {
-        Ok(counts) => counts,
-        Err(error) => return internal(error, "count uploads"),
-    };
+    // Medical documents, copies of the identity document and the files of the
+    // representatives, counted apart: "documents" has always meant the
+    // medical ones.
+    let (documents, identity_documents, representative_documents): (i64, i64, i64) =
+        match sqlx::query_as(
+            r#"SELECT count(*) FILTER (WHERE u.kind = 'medical'),
+                      count(*) FILTER (WHERE u.kind = 'identity'),
+                      count(*) FILTER (WHERE u.representative_id IS NOT NULL)
+               FROM lead_portal_uploads u
+               JOIN documents d ON d.id = u.document_id
+               WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL"#,
+        )
+        .bind(lead_id)
+        .fetch_one(&mut *tx)
+        .await
+        {
+            Ok(counts) => counts,
+            Err(error) => return internal(error, "count uploads"),
+        };
     if let Err(error) = sqlx::query(
         r#"UPDATE leads
            SET portal_submitted_at = now(), portal_submitted_by = $2, updated_at = now()
@@ -3126,6 +3308,8 @@ async fn submit_my_lead_request(
                 "total_fields": PROGRESS_FIELDS.len(),
                 "documents": documents,
                 "identity_documents": identity_documents,
+                "representatives": representation.representation.representatives.len(),
+                "representative_documents": representative_documents,
                 "declared_correct": true,
                 "inquiry_consent_record_id": inquiry_consent_id,
             }),
@@ -3233,7 +3417,9 @@ async fn notify_lead_staff(state: &AppState, lead_id: Uuid, kind: &str, title: &
 
 /// `GET /leads/{lead_id}/portal-intake`: who fills step 1, which fields came
 /// from the patient, progress, consents, uploads and the guardian logins.
-/// Upload details only for roles with medical access; Sales sees counts.
+/// Upload details only for roles with medical access; Sales sees counts. The
+/// lead's statements and who acts for the lead (`representation`) only for
+/// the roles that read the payer declaration.
 async fn get_lead_portal_intake(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3310,12 +3496,20 @@ async fn get_lead_portal_intake(
         Err(error) => return internal(error, "load uploads"),
     };
     // "Uploads" are the medical documents, as before; the copies of the
-    // identity document are listed with the lead's statements below.
-    let (identity_uploads, uploads): (Vec<&PgRow>, Vec<&PgRow>) =
-        all_uploads.iter().partition(|upload| {
-            upload.try_get::<String, _>("kind").ok().as_deref()
-                == Some(UploadKind::Identity.as_str())
-        });
+    // identity document are listed with the lead's statements below, the
+    // files of a representative with that person.
+    let uploads_of = |kind: UploadKind| -> Vec<&PgRow> {
+        all_uploads
+            .iter()
+            .filter(|upload| {
+                upload.try_get::<String, _>("kind").ok().as_deref() == Some(kind.as_str())
+            })
+            .collect()
+    };
+    let (identity_uploads, uploads) = (
+        uploads_of(UploadKind::Identity),
+        uploads_of(UploadKind::Medical),
+    );
     // The lead's own GwG statements (PEP, identity document, …) are for the
     // roles that read the payer declaration; the concierge gets none of it.
     let statements_visible = lead_payer::may_view(&auth);
@@ -3339,6 +3533,25 @@ async fn get_lead_portal_intake(
             })
         })
         .collect();
+    // Who acts for the lead, for the same roles as the statements.
+    let (representation, representation_updated_at) = if statements_visible {
+        let loaded = match state.db.acquire().await {
+            Ok(mut conn) => lead_representatives::load(&mut conn, lead_id).await,
+            Err(error) => Err(error),
+        };
+        match loaded {
+            Ok(loaded) => {
+                let loaded = loaded.unwrap_or_default();
+                (
+                    lead_representatives::staff_payload(&loaded),
+                    lead_representatives::updated_at(&loaded, &updates),
+                )
+            }
+            Err(error) => return internal(error, "load representation"),
+        }
+    } else {
+        (Value::Null, None)
+    };
     let consents = match sqlx::query(
         r#"SELECT c.id, c.consent_type, c.granted_at, c.revoked_at,
                   c.context->>'text_version' AS version,
@@ -3444,6 +3657,8 @@ async fn get_lead_portal_intake(
         "identification_updated_at": identification_updated_at,
         "identification_hidden": !statements_visible,
         "identity_documents": identity_documents,
+        "representation": representation,
+        "representation_updated_at": representation_updated_at,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
@@ -4182,8 +4397,18 @@ mod tests {
         data.zip_code = Some("10115".into());
         data.city = Some("Berlin".into());
         data.country = Some("DE".into());
+        // Who acts for the lead is asked after the identity document; the
+        // keys come from `lead_representatives::missing_for_submit`.
+        let representation = || vec!["has_representative".to_string()];
         assert_eq!(
-            missing_for_submit(&data, None, &Identification::default(), false, today()),
+            missing_for_submit(
+                &data,
+                None,
+                &Identification::default(),
+                false,
+                representation(),
+                today()
+            ),
             vec![
                 "payer_kind",
                 "birth_place",
@@ -4194,6 +4419,7 @@ mod tests {
                 "id_issuing_country",
                 "id_valid_until",
                 "id_document_upload",
+                "has_representative",
                 "payer_own_account",
                 "pep_self",
                 "pep_related",
@@ -4230,7 +4456,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            missing_for_submit(&data, Some(&payer), &stated, true, today()),
+            missing_for_submit(&data, Some(&payer), &stated, true, Vec::new(), today()),
             vec![
                 "payer_relationship_kind",
                 "payer_contact_consent",
@@ -4257,12 +4483,15 @@ mod tests {
             contact_consent_at: Some(Utc::now()),
             ..payer
         };
-        assert!(missing_for_submit(&data, Some(&payer), &complete, true, today()).is_empty());
+        assert!(
+            missing_for_submit(&data, Some(&payer), &complete, true, Vec::new(), today())
+                .is_empty()
+        );
     }
 
     #[test]
     fn a_parent_as_payer_is_prefilled_from_the_trusted_contact_without_the_address() {
-        let template = payer_template_from_contact(&json!({
+        let contact = json!({
             "id": "5d0c1f0e-0000-4000-8000-000000000001",
             "name": "  Olga Maria  Kind ",
             "relation": "mother",
@@ -4270,7 +4499,8 @@ mod tests {
             "phone": "+49 30 000000",
             "birth_date": "1985-03-04",
             "address": "Musterweg 1, 10115 Berlin"
-        }));
+        });
+        let template = payer_template_from_contact(&contact, None);
         assert_eq!(
             template,
             json!({
@@ -4281,10 +4511,20 @@ mod tests {
                 "phone": "+49 30 000000"
             })
         );
+        // The name parts the parent entered as a representative count while
+        // they still are the name of the contact.
+        let entered = payer_template_from_contact(&contact, Some(("Olga", "Maria Kind")));
+        assert_eq!(
+            (&entered["first_name"], &entered["last_name"]),
+            (&json!("Olga"), &json!("Maria Kind"))
+        );
+        let renamed = payer_template_from_contact(&contact, Some(("Olga", "Beispiel")));
+        assert_eq!(renamed["last_name"], "Kind");
         // A single word is the last name; what is not known is null.
         assert_eq!(
             payer_template_from_contact(
-                &json!({ "name": "Kind", "birth_date": "", "phone": null })
+                &json!({ "name": "Kind", "birth_date": "", "phone": null }),
+                None
             ),
             json!({
                 "first_name": "",

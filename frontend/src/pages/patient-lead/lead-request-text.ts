@@ -1,6 +1,6 @@
 import type { Lang } from "@/lib/i18n";
 
-import type { PayerType } from "./lead-request-api";
+import type { Custody, PayerType, RepresentativeSlot } from "./lead-request-api";
 import {
   organisationPayerType,
   type ContactChannel,
@@ -12,6 +12,12 @@ import {
   type RelationshipKind,
   type SubmitField,
 } from "./lead-request-model";
+import {
+  authorityProofOf,
+  representativeSubmitPart,
+  type AuthorityProof,
+  type RepresentativeField,
+} from "./lead-request-representation-model";
 
 /**
  * Texts of the lead cabinet in DE, EN, UA and RU (the rest of the patient
@@ -146,6 +152,44 @@ export type LeadRequestText = {
   /** The uploaded copies in the summary and, when none is there, in the missing list. */
   identityFiles: string;
   idDocumentExpired: string;
+  /** Who acts for the lead (owner spec section 3): an adult's representative and legal guardian. */
+  sectionRepresentation: string;
+  hasRepresentativeQuestion: string;
+  underGuardianshipQuestion: string;
+  /** The same block for a minor: the legal representatives. */
+  sectionLegalRepresentatives: string;
+  legalRepresentativesIntro: string;
+  custodyQuestion: string;
+  custodyOptions: Record<Custody, string>;
+  /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
+  representativeCaptions: Record<RepresentativeSlot, string>;
+  /** Added to the caption: the person who fills in the form, and the other parent. */
+  representativeYou: string;
+  representativeOtherParent: string;
+  /** A person with custody on file at GMED whom the form does not ask for. */
+  representativeOnFile: (name: string) => string;
+  copyChildAddress: string;
+  /**
+   * Below an e-mail that is a sign-in address (the own one, or the other
+   * parent's), and below the one the invitation goes to.
+   */
+  representativeEmailIsLogin: string;
+  representativeEmailIsTheirLogin: string;
+  representativeInviteHint: string;
+  representativeInformHint: string;
+  representativeRemove: string;
+  /** `who` is the person's name, or the caption while there is none. */
+  representativeRemoveConfirm: (who: string) => string;
+  /** The uploads of a person: the copy of a guardian's identity document, and the proofs of authority. */
+  representativeGuardianIdentity: string;
+  representativeAuthority: Record<AuthorityProof, string>;
+  noAuthorityDocuments: string;
+  representativeUploadNeedsPerson: string;
+  /** What the server refuses about a person. */
+  representativeInUse: string;
+  representativeLimit: string;
+  representativeEmailLocked: string;
+  representativeEmailDuplicate: string;
   sectionLegal: string;
   legalIntro: string;
   /** Prefix of a legal question in the list of what is still missing. */
@@ -221,6 +265,54 @@ export function identificationFieldLabel(text: LeadRequestText, field: Identific
   return (guardian ? forGuardian[field] : undefined) ?? text.identificationFields[field];
 }
 
+/** Label of a field of a representative: the labels of the patient's own fields. */
+export function representativeFieldLabel(text: LeadRequestText, field: RepresentativeField): string {
+  switch (field) {
+    case "first_name":
+    case "last_name":
+    case "date_of_birth":
+    case "citizenships":
+    case "city":
+    case "country":
+    case "phone":
+      return text.fields[field];
+    case "street":
+      return text.fields.street_address;
+    case "zip":
+      return text.fields.zip_code;
+    case "email":
+      return text.payerEmail;
+    default:
+      return text.identificationFields[field];
+  }
+}
+
+/**
+ * Heading of a person's form. The parent who fills in the form reads "you";
+ * the second representative of a minor is the other parent.
+ */
+export function representativeHeading(text: LeadRequestText, slot: RepresentativeSlot, mine = false): string {
+  const caption = text.representativeCaptions[slot];
+  if (mine) return `${caption} – ${text.representativeYou}`;
+  return slot === "rep2" ? `${caption} – ${text.representativeOtherParent}` : caption;
+}
+
+/**
+ * Label of an upload of a person: the copy of the identity document, or the
+ * proof of authority that the person's place in the form (and, for a minor,
+ * the custody) asks for.
+ */
+export function representativeUploadLabel(
+  text: LeadRequestText,
+  slot: RepresentativeSlot,
+  kind: "identity" | "authority",
+  custody: Custody | null | undefined = null,
+): string {
+  if (kind === "identity") return slot === "guardian" ? text.representativeGuardianIdentity : text.identityFiles;
+  // Without a custody the first representative is named the proof the request needs: a guardian's.
+  return text.representativeAuthority[authorityProofOf(slot, custody ?? "guardian")?.proof ?? "power_of_attorney"];
+}
+
 const LEGAL_TOPIC_OF: Partial<Record<SubmitField, LegalQuestion>> = {
   pep_self: "pep_self",
   pep_self_details: "pep_self",
@@ -255,6 +347,19 @@ export function submitFieldLabel(
   }
   if (field === "payment_background") return `${text.payerPerson}: ${text.identificationFields.payment_background}`;
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
+  if (field === "has_representative") return text.hasRepresentativeQuestion;
+  if (field === "under_guardianship") return text.underGuardianshipQuestion;
+  // A field or an upload of a representative carries the caption of that person.
+  const person = representativeSubmitPart(field);
+  if (person) {
+    const label =
+      person.part === "id_upload"
+        ? representativeUploadLabel(text, person.slot, "identity")
+        : person.part === "authority_upload"
+          ? representativeUploadLabel(text, person.slot, "authority")
+          : representativeFieldLabel(text, person.part);
+    return `${text.representativeCaptions[person.slot]}: ${label}`;
+  }
   const topic = LEGAL_TOPIC_OF[field];
   if (topic) {
     // A missing answer names the question; missing details name what a "yes" asks for.
@@ -468,6 +573,50 @@ const de: LeadRequestText = {
   noIdentityDocuments: "Noch kein Ausweis hochgeladen.",
   identityFiles: "Foto oder Scan des Ausweises",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
+  sectionRepresentation: "Vertretung",
+  hasRepresentativeQuestion: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
+  underGuardianshipQuestion: "Stehen Sie unter rechtlicher Betreuung?",
+  sectionLegalRepresentatives: "Gesetzliche Vertreter",
+  legalRepresentativesIntro:
+    "Für Minderjährige handeln die gesetzlichen Vertreter. Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
+  custodyQuestion: "Wer vertritt das Kind?",
+  custodyOptions: {
+    joint: "Beide Eltern gemeinsam",
+    sole_parent: "Ein Elternteil allein (alleiniges Sorgerecht)",
+    guardian: "Vormund oder Pfleger",
+  },
+  representativeCaptions: {
+    rep1: "1. Vertreter/in",
+    rep2: "2. Vertreter/in",
+    agent: "Vertretende Person",
+    guardian: "Betreuer/in",
+  },
+  representativeYou: "Sie",
+  representativeOtherParent: "anderer Elternteil",
+  representativeOnFile: (name) =>
+    `Bei GMED ist eine weitere sorgeberechtigte Person hinterlegt: ${name}. Bitte sprechen Sie uns an.`,
+  copyChildAddress: "Adresse des Kindes übernehmen",
+  representativeEmailIsLogin: "Ihre Anmeldeadresse",
+  representativeEmailIsTheirLogin: "Anmeldeadresse dieser Person",
+  representativeInviteHint: "An diese Adresse senden wir die Einladung zur Unterschrift.",
+  representativeInformHint: "Bitte informieren Sie diese Person darüber, dass Sie ihre Daten angeben.",
+  representativeRemove: "Entfernen",
+  representativeRemoveConfirm: (who) =>
+    `${who}: Alle Angaben und hochgeladenen Dateien zu dieser Person werden entfernt. Fortfahren?`,
+  representativeGuardianIdentity: "Ausweis der Betreuerin / des Betreuers",
+  representativeAuthority: {
+    power_of_attorney: "Nachweis der Vertretungsmacht (z. B. Vollmacht)",
+    guardianship_certificate: "Bestellungsurkunde oder Betreuerausweis",
+    appointment_certificate: "Bestallungsurkunde",
+    sole_custody: "Nachweis des alleinigen Sorgerechts",
+  },
+  noAuthorityDocuments: "Noch kein Nachweis hochgeladen.",
+  representativeUploadNeedsPerson: "Zum Hochladen bitte zuerst den Nachnamen dieser Person eintragen.",
+  representativeInUse: "Diese Person kann hier nicht entfernt werden. Bitte sprechen Sie uns an.",
+  representativeLimit: "Für diese Anfrage kann keine weitere Person angegeben werden.",
+  representativeEmailLocked: "Diese Adresse ist eine Anmeldeadresse und kann hier nicht geändert werden.",
+  representativeEmailDuplicate:
+    "Diese E-Mail-Adresse ist bereits bei einer anderen Person angegeben. Für die Unterschrift braucht jede Person eine eigene Adresse.",
   sectionLegal: "Gesetzliche Fragen (Geldwäscheprävention)",
   legalIntro: "Diese Fragen schreibt das Geldwäschegesetz vor. Bitte beantworten Sie jede mit Ja oder Nein.",
   legalShort: "Gesetzliche Fragen",
@@ -684,6 +833,50 @@ const ru: LeadRequestText = {
   noIdentityDocuments: "Документ ещё не загружен.",
   identityFiles: "Фото или скан документа",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
+  sectionRepresentation: "Представительство",
+  hasRepresentativeQuestion: "Действует ли кто-то от вашего имени (представитель, посредник, уполномоченное лицо)?",
+  underGuardianshipQuestion: "Назначен ли вам опекун по решению суда (rechtliche Betreuung)?",
+  sectionLegalRepresentatives: "Законные представители",
+  legalRepresentativesIntro:
+    "За несовершеннолетних действуют законные представители. Согласие и подписи нужны от обоих родителей.",
+  custodyQuestion: "Кто представляет ребёнка?",
+  custodyOptions: {
+    joint: "Оба родителя вместе",
+    sole_parent: "Один из родителей (единоличное право опеки)",
+    guardian: "Опекун или попечитель",
+  },
+  representativeCaptions: {
+    rep1: "1-й представитель",
+    rep2: "2-й представитель",
+    agent: "Представитель",
+    guardian: "Опекун",
+  },
+  representativeYou: "вы",
+  representativeOtherParent: "второй родитель",
+  representativeOnFile: (name) =>
+    `В GMED указан ещё один человек с правом опеки: ${name}. Пожалуйста, свяжитесь с нами.`,
+  copyChildAddress: "Взять адрес ребёнка",
+  representativeEmailIsLogin: "Ваш адрес для входа",
+  representativeEmailIsTheirLogin: "Адрес для входа этого человека",
+  representativeInviteHint: "На этот адрес мы отправим приглашение на подпись.",
+  representativeInformHint: "Пожалуйста, сообщите этому человеку, что вы указываете его данные.",
+  representativeRemove: "Удалить",
+  representativeRemoveConfirm: (who) =>
+    `${who}: все данные и загруженные файлы этого человека будут удалены. Продолжить?`,
+  representativeGuardianIdentity: "Документ, удостоверяющий личность опекуна",
+  representativeAuthority: {
+    power_of_attorney: "Подтверждение полномочий (например, доверенность)",
+    guardianship_certificate: "Решение о назначении опекуна или удостоверение опекуна",
+    appointment_certificate: "Документ о назначении опекуном",
+    sole_custody: "Подтверждение единоличного права опеки",
+  },
+  noAuthorityDocuments: "Подтверждение ещё не загружено.",
+  representativeUploadNeedsPerson: "Чтобы загрузить, сначала укажите фамилию этого человека.",
+  representativeInUse: "Этого человека нельзя удалить здесь. Пожалуйста, свяжитесь с нами.",
+  representativeLimit: "В этой заявке больше нельзя указать ни одного человека.",
+  representativeEmailLocked: "Это адрес для входа, изменить его здесь нельзя.",
+  representativeEmailDuplicate:
+    "Этот адрес e-mail уже указан для другого человека. Для подписи каждому нужен собственный адрес.",
   sectionLegal: "Вопросы по закону (противодействие отмыванию денег)",
   legalIntro:
     "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Пожалуйста, ответьте на каждый «да» или «нет».",
@@ -900,6 +1093,50 @@ const uk: LeadRequestText = {
   noIdentityDocuments: "Документ ще не завантажено.",
   identityFiles: "Фото або скан документа",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
+  sectionRepresentation: "Представництво",
+  hasRepresentativeQuestion: "Чи діє хтось від вашого імені (представник, посередник, уповноважена особа)?",
+  underGuardianshipQuestion: "Чи призначено вам опікуна за рішенням суду (rechtliche Betreuung)?",
+  sectionLegalRepresentatives: "Законні представники",
+  legalRepresentativesIntro:
+    "За неповнолітніх діють законні представники. Згода та підписи потрібні від обох батьків.",
+  custodyQuestion: "Хто представляє дитину?",
+  custodyOptions: {
+    joint: "Обоє батьків разом",
+    sole_parent: "Один із батьків (одноосібне право опіки)",
+    guardian: "Опікун або піклувальник",
+  },
+  representativeCaptions: {
+    rep1: "1-й представник",
+    rep2: "2-й представник",
+    agent: "Представник",
+    guardian: "Опікун",
+  },
+  representativeYou: "ви",
+  representativeOtherParent: "другий із батьків",
+  representativeOnFile: (name) =>
+    `У GMED зазначено ще одну людину з правом опіки: ${name}. Будь ласка, зв'яжіться з нами.`,
+  copyChildAddress: "Взяти адресу дитини",
+  representativeEmailIsLogin: "Ваша адреса для входу",
+  representativeEmailIsTheirLogin: "Адреса для входу цієї людини",
+  representativeInviteHint: "На цю адресу ми надішлемо запрошення до підписання.",
+  representativeInformHint: "Будь ласка, повідомте цій людині, що ви вказуєте її дані.",
+  representativeRemove: "Видалити",
+  representativeRemoveConfirm: (who) =>
+    `${who}: усі дані та завантажені файли цієї людини буде видалено. Продовжити?`,
+  representativeGuardianIdentity: "Документ, що посвідчує особу опікуна",
+  representativeAuthority: {
+    power_of_attorney: "Підтвердження повноважень (наприклад, довіреність)",
+    guardianship_certificate: "Рішення про призначення опікуна або посвідчення опікуна",
+    appointment_certificate: "Документ про призначення опікуном",
+    sole_custody: "Підтвердження одноосібного права опіки",
+  },
+  noAuthorityDocuments: "Підтвердження ще не завантажено.",
+  representativeUploadNeedsPerson: "Щоб завантажити, спершу вкажіть прізвище цієї людини.",
+  representativeInUse: "Цю людину не можна видалити тут. Будь ласка, зв'яжіться з нами.",
+  representativeLimit: "У цій заявці більше не можна вказати жодної людини.",
+  representativeEmailLocked: "Це адреса для входу, змінити її тут не можна.",
+  representativeEmailDuplicate:
+    "Цю адресу e-mail уже вказано для іншої людини. Для підпису кожному потрібна власна адреса.",
   sectionLegal: "Запитання за законом (запобігання відмиванню коштів)",
   legalIntro:
     "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
@@ -1110,6 +1347,49 @@ const en: LeadRequestText = {
   noIdentityDocuments: "No identity document uploaded yet.",
   identityFiles: "Photo or scan of the document",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
+  sectionRepresentation: "Representation",
+  hasRepresentativeQuestion: "Is somebody acting for you (representative, messenger, authorised person)?",
+  underGuardianshipQuestion: "Are you under legal guardianship?",
+  sectionLegalRepresentatives: "Legal representatives",
+  legalRepresentativesIntro:
+    "For minors the legal representatives act. Consent and signatures are needed from both parents.",
+  custodyQuestion: "Who represents the child?",
+  custodyOptions: {
+    joint: "Both parents together",
+    sole_parent: "One parent alone (sole custody)",
+    guardian: "Guardian or custodian",
+  },
+  representativeCaptions: {
+    rep1: "1st representative",
+    rep2: "2nd representative",
+    agent: "Representative",
+    guardian: "Legal guardian",
+  },
+  representativeYou: "you",
+  representativeOtherParent: "other parent",
+  representativeOnFile: (name) => `GMED has another person with custody on file: ${name}. Please contact us.`,
+  copyChildAddress: "Use the child's address",
+  representativeEmailIsLogin: "Your sign-in address",
+  representativeEmailIsTheirLogin: "This person's sign-in address",
+  representativeInviteHint: "We send the invitation to sign to this address.",
+  representativeInformHint: "Please let this person know that you are giving us their details.",
+  representativeRemove: "Remove",
+  representativeRemoveConfirm: (who) =>
+    `${who}: all details and uploaded files of this person will be removed. Continue?`,
+  representativeGuardianIdentity: "Identity document of the guardian",
+  representativeAuthority: {
+    power_of_attorney: "Proof of authority (e.g. power of attorney)",
+    guardianship_certificate: "Certificate of appointment or guardian's ID card",
+    appointment_certificate: "Certificate of appointment as guardian",
+    sole_custody: "Proof of sole custody",
+  },
+  noAuthorityDocuments: "No proof uploaded yet.",
+  representativeUploadNeedsPerson: "To upload, first enter this person's last name.",
+  representativeInUse: "This person cannot be removed here. Please contact us.",
+  representativeLimit: "No further person can be named for this request.",
+  representativeEmailLocked: "This is a sign-in address and cannot be changed here.",
+  representativeEmailDuplicate:
+    "This e-mail address is already given for another person. Each person needs an address of their own to sign.",
   sectionLegal: "Legal questions (anti-money laundering)",
   legalIntro: "German anti-money laundering law requires these questions. Please answer each with yes or no.",
   legalShort: "Legal questions",

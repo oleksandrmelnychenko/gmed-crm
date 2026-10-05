@@ -224,6 +224,9 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   privacy_information: "Informationsblatt zum Datenschutz",
   privacy_consents: "Einverständniserklärung zur Datenübermittlung",
   order_cost_estimate: "Kostenvoranschlag zum Einzelauftrag",
+  // Uploads of the lead cabinet for a person who acts for the lead.
+  representative_authority: "Vertretungsnachweis",
+  representative_identity: "Ausweis (Vertreter/in)",
   single_order: "Einzelauftrag",
   treatment_plan: "Behandlungsplan",
   visa_invitation: "Einladungsschreiben (Visum)",

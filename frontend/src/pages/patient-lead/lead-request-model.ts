@@ -11,6 +11,7 @@ import type {
   PayerType,
   PersonalDataPatch,
 } from "./lead-request-api";
+import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -641,8 +642,8 @@ export function stillRejectedIdentification(
 /** Keys of the identification in `progress.missing_for_submit`: its fields and the upload. */
 export type IdentificationSubmitField = IdentificationField | "id_document_upload";
 
-/** A field of the personal data, of the payer block or of the identification. */
-export type SubmitField = PersonalField | PayerField | IdentificationSubmitField;
+/** A field of the personal data, of the payer block, of the identification or of the representation. */
+export type SubmitField = PersonalField | PayerField | IdentificationSubmitField | RepresentationSubmitField;
 
 /** Everything `progress.missing_for_submit` can name, in the order of the form. */
 export const SUBMIT_FIELDS: SubmitField[] = [
@@ -675,6 +676,8 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "id_issued_on",
   "id_valid_until",
   "id_document_upload",
+  // Who acts for the lead: the answers and the persons
+  ...REPRESENTATION_SUBMIT_FIELDS,
   // Insurance
   "has_insurance",
   "insurance_type",
