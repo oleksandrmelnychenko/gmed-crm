@@ -50,7 +50,6 @@ export interface Translations
   nav_admin: string;
   nav_section_security: string;
   nav_section_dsgvo: string;
-  nav_signatures: string;
   nav_api_connections: string;
   nav_users_roles: string;
   nav_access_matrix: string;

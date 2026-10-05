@@ -751,22 +751,29 @@ test("separate German connection dialog validates setup and clears the secret", 
   await expect(open).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "Elektronische Unterschrift", exact: true })).toHaveCount(0);
-  // The API access has its own menu item next to "Elektronische Signatur";
-  // the signature page keeps the representatives and only links to it.
-  await page.locator('a[href="/admin/signatures"]').click();
-  await expect(page.getByRole("heading", { name: "Elektronische Signatur", exact: true })).toBeVisible();
-  await expect(page.getByTestId("api-connections-link")).toBeVisible();
-  await expect(page.getByText("api_demo_fixture", { exact: true })).toHaveCount(0);
+  // One menu item for the external services: a tab for the signature (access
+  // and representatives) and a tab for the e-mail.
+  await expect(page.locator('nav a[href="/admin/signatures"]')).toHaveCount(0);
   await page.locator('nav a[href="/admin/api-connections"]').click();
   await expect(page).toHaveURL(/\/admin\/api-connections$/);
   await expect(page.getByRole("heading", { name: "API-Verbindungen", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Elektronische Signatur · Skribble", exact: true })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("api_demo_fixture", { exact: true })).toBeVisible();
   await expect(page.getByLabel("API-Schlüssel", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Vertretungen einrichten", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "E-Mail · Mittaro", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/api-connections\?tab=email$/);
+  await expect(page.getByTestId("mail-connection")).toContainText("Mittaro");
+  await expect(page.getByText("api_demo_fixture", { exact: true })).toHaveCount(0);
+  // The former address of the signature page forwards here.
+  await page.goto("/admin/signatures");
+  await expect(page).toHaveURL(/\/admin\/api-connections$/);
+  await expect(page.getByText("api_demo_fixture", { exact: true })).toBeVisible();
   await page.evaluate(() => localStorage.setItem("gmed_lang", "ru"));
   await page.reload();
   await expect(page.getByRole("heading", { name: "API-подключения", exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Кабинет Skribble", exact: true })).toHaveAttribute("href", "https://my.skribble.de/");
-  await page.locator('a[href="/admin/signatures"]').scrollIntoViewIfNeeded();
+  await page.locator('nav a[href="/admin/api-connections"]').scrollIntoViewIfNeeded();
   await page.screenshot({ path: "../artifacts/design-qa/signature-admin-desktop.png" });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
@@ -786,7 +793,7 @@ for (const lang of ["de", "ru"] as const) {
       if (route.request().method() === "POST" || fixture.submissions.length) return route.fallback();
       await route.fulfill({ json: { enabled: true, region: "DE", test_mode: true, can_send: true, can_configure: true, ineligible_reason: null, requests: [], suggested_signers: [client, agency] } });
     });
-    await page.goto("/admin/signatures");
+    await page.goto("/admin/api-connections");
     await page.getByRole("button", { name: tx("Настроить представителей", "Vertretungen einrichten"), exact: true }).click();
     await page.getByLabel(tx("Имя", "Vorname"), { exact: true }).fill(agency.first_name);
     await page.getByLabel(tx("Фамилия", "Nachname"), { exact: true }).fill(agency.last_name);

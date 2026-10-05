@@ -61,7 +61,7 @@ describe("role cabinets", () => {
       "admin/settings",
       "admin/activity",
       "admin/health",
-      "admin/signatures",
+      "admin/api-connections",
       "admin/datev",
       "incidents",
     ]);

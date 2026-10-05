@@ -128,7 +128,7 @@ test("it admin lands on the technical cabinet without patients", async ({ page }
       "admin/settings",
       "admin/activity",
       "admin/health",
-      "admin/signatures",
+      "admin/api-connections",
       "admin/datev",
       "incidents",
     ],
