@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequest } from "./lead-request-api";
 import {
   canSubmit,
+  changedSinceSubmit,
   consentText,
   draftFromPersonalData,
   formatFileSize,
   missingForSubmit,
   personalDataPatch,
   rejectedValue,
+  withInsuranceAnswer,
 } from "./lead-request-model";
 
 const personal = {
@@ -24,6 +26,11 @@ const personal = {
   country: null,
   phone: null,
   primary_language: null,
+  has_insurance: null,
+  insurance_type: null,
+  insurance_provider: null,
+  insurance_number: null,
+  insurance_covers_germany: null,
 };
 
 function request(overrides: Partial<LeadRequest> = {}): LeadRequest {
@@ -92,6 +99,60 @@ describe("lead request send step", () => {
     expect(consentText(request(), "lead_inquiry_processing", "ru")).toBe("Я согласен(на) …");
     expect(consentText(request(), "lead_inquiry_processing", "en")).toBe("Ich bin einverstanden …");
     expect(consentText(request(), "health_data_processing", "de")).toBe("");
+  });
+
+  it("keeps the insurance block consistent with the answer", () => {
+    const insured = draftFromPersonalData({
+      ...personal,
+      has_insurance: true,
+      insurance_type: "private",
+      insurance_provider: "Allianz Care",
+      insurance_number: "A-123",
+      insurance_covers_germany: "not_sure",
+    });
+    expect(insured.has_insurance).toBe("yes");
+    expect(draftFromPersonalData({ ...personal, has_insurance: false }).has_insurance).toBe("no");
+    expect(draftFromPersonalData(personal).has_insurance).toBe("");
+
+    // "No" is the self-payer: the details go, and only the difference is sent.
+    const selfPayer = withInsuranceAnswer(insured, "no");
+    expect(selfPayer).toMatchObject({
+      has_insurance: "no",
+      insurance_type: "self_pay",
+      insurance_provider: "",
+      insurance_number: "",
+      insurance_covers_germany: "",
+    });
+    expect(personalDataPatch(insured, selfPayer)).toEqual({
+      has_insurance: "no",
+      insurance_type: "self_pay",
+      insurance_provider: "",
+      insurance_number: "",
+      insurance_covers_germany: "",
+    });
+    // Back to "yes": an insured person is not the self-payer type.
+    expect(withInsuranceAnswer(selfPayer, "yes")).toMatchObject({ has_insurance: "yes", insurance_type: "" });
+    expect(withInsuranceAnswer(insured, "")).toMatchObject({ has_insurance: "", insurance_provider: "Allianz Care" });
+  });
+
+  it("offers to send again only after a change", () => {
+    expect(changedSinceSubmit(request())).toBe(false);
+    const sent = request({ submitted_at: "2026-10-03T09:30:00Z" });
+    expect(changedSinceSubmit(sent)).toBe(false);
+    expect(changedSinceSubmit({ ...sent, changed_since_submit: true })).toBe(true);
+    expect(changedSinceSubmit({ ...sent, changed_since_submit: false })).toBe(false);
+    // An older server does not say; a document uploaded afterwards still counts.
+    const document = {
+      id: "doc-1",
+      file_name: "befund.pdf",
+      size_bytes: 1,
+      mime_type: "application/pdf",
+      uploaded_by_me: true,
+      reviewed: false,
+      can_delete: true,
+    };
+    expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T09:00:00Z" }] })).toBe(false);
+    expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T10:00:00Z" }] })).toBe(true);
   });
 
   it("formats file sizes", () => {

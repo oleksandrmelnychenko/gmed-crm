@@ -141,12 +141,8 @@ async fn lead_with_login(app: &TestApp, first_name: &str, email: &str) -> (Uuid,
         .unwrap()
         .parse()
         .unwrap();
-    // The one-time password was replaced (the gate is tested elsewhere).
-    sqlx::query("UPDATE users SET password_reset_required = false WHERE id = $1")
-        .bind(user_id)
-        .execute(&app.suite.pool)
-        .await
-        .unwrap();
+    // The issued password is not forced to change (owner decision 2026-10-05):
+    // the login uses the portal as it is.
     (lead_id, user_id, bearer(user_id, "patient"))
 }
 
@@ -395,7 +391,7 @@ async fn a_patient_edits_only_the_own_step_one_fields() {
         .iter()
         .find(|lead| lead["id"] == json!(lead_a))
         .unwrap();
-    assert_eq!(row["portal_intake"]["total"], 11, "{row}");
+    assert_eq!(row["portal_intake"]["total"], 12, "{row}");
     let _ = user_a;
 }
 
@@ -617,6 +613,86 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
             .any(|consent| consent["type"] == "lead_inquiry_processing"),
         "{intake}"
     );
+
+    // Nothing changed since sending: there is nothing to send again.
+    assert_eq!(body["changed_since_submit"], false, "{body}");
+
+    // The insurance block of wizard step 1 is the patient's to fill in too.
+    let personal_data = format!("/api/v1/me/lead-requests/{lead_id}/personal-data");
+    let (status, insured) = json_request(
+        router,
+        "POST",
+        &personal_data,
+        &patient,
+        Some(json!({
+            "has_insurance": "yes",
+            "insurance_type": "private",
+            "insurance_provider": "Allianz Care",
+            "insurance_number": "A-123",
+            "insurance_covers_germany": "not_sure"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{insured}");
+    assert_eq!(insured["personal_data"]["has_insurance"], true, "{insured}");
+    assert_eq!(
+        insured["personal_data"]["insurance_provider"],
+        "Allianz Care"
+    );
+    assert_eq!(insured["progress"]["total"], 12);
+    // A change after sending is what "send again" is for.
+    assert_eq!(insured["changed_since_submit"], true, "{insured}");
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        intake["patient_fields"]["insurance_provider"]["access_kind"], "self",
+        "{intake}"
+    );
+
+    let (status, self_payer) = json_request(
+        router,
+        "POST",
+        &personal_data,
+        &patient,
+        Some(json!({ "has_insurance": "no" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{self_payer}");
+    assert_eq!(self_payer["personal_data"]["has_insurance"], false);
+    assert_eq!(self_payer["personal_data"]["insurance_type"], "self_pay");
+    assert!(self_payer["personal_data"]["insurance_provider"].is_null());
+    let stored: (Option<bool>, Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT has_insurance, insurance_type, insurance_provider, insurance_covers_germany FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored,
+        (Some(false), Some("self_pay".to_string()), None, None)
+    );
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &personal_data,
+        &patient,
+        Some(json!({ "insurance_type": "gold" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["field"], "insurance_type");
+
+    let (status, resent) = json_request(router, "POST", &submit, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{resent}");
+    assert_eq!(resent["changed_since_submit"], false, "{resent}");
 }
 
 /// A minor lead with a mother as trusted contact; returns (lead, contact id).
@@ -692,11 +768,14 @@ async fn parents_get_one_login_for_their_minor_children_and_lose_it_with_the_las
     assert_eq!(reused["reused"], true);
     assert!(reused["one_time_password"].is_null());
 
-    sqlx::query("UPDATE users SET password_reset_required = false WHERE id = $1")
-        .bind(guardian)
-        .execute(pool)
-        .await
-        .unwrap();
+    // A parent's login is not stopped by a forced password change either.
+    let forced: bool =
+        sqlx::query_scalar("SELECT password_reset_required FROM users WHERE id = $1")
+            .bind(guardian)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(!forced);
     let parent = bearer(guardian, "patient");
     let (_, requests) =
         json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;

@@ -28,6 +28,11 @@ export const PORTAL_FIELD_BY_DRAFT_KEY: Record<string, string> = {
   country: "country",
   phone: "phone",
   language: "primary_language",
+  hasInsurance: "has_insurance",
+  insuranceType: "insurance_type",
+  insuranceProvider: "insurance_provider",
+  insuranceNumber: "insurance_number",
+  insuranceCoversGermany: "insurance_covers_germany",
 };
 
 /** Step-1 fields that become optional when the patient fills them in. */

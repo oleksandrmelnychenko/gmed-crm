@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 
 import { buildApiUrl } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 
 type LegalNotice = Partial<Record<
@@ -19,16 +21,22 @@ type LegalNotice = Partial<Record<
   string
 >>;
 
+const cardClass = "space-y-3 rounded-xl border border-border bg-card px-4 py-4 shadow-sm sm:px-5";
+
 /**
  * Impressum and Datenschutzerklärung, reachable without signing in (Art. 13
  * DSGVO, § 5 TMG). The controller details come from the agency settings so the
- * page never drifts from the contracts.
+ * page never drifts from the contracts. A signed-in patient or lead sees the
+ * same page inside the portal (see `LegalNoticeRoute`).
  */
 export function LegalNoticePage() {
   const { t } = useLang();
+  const { user } = useAuth();
+  const { hash } = useLocation();
   const l = (key: string) => t.uiText[key] ?? key;
   const [notice, setNotice] = useState<LegalNotice | null>(null);
   const [failed, setFailed] = useState(false);
+  const inPortal = user?.role === "patient" && !user.password_change_required;
 
   useEffect(() => {
     let cancelled = false;
@@ -45,18 +53,21 @@ export function LegalNoticePage() {
     };
   }, []);
 
+  // A link to "/legal#privacy" (the consent in the lead cabinet) opens at the privacy notice.
+  useEffect(() => {
+    if (hash === "#privacy" && (notice || failed)) {
+      document.getElementById("privacy")?.scrollIntoView({ block: "start" });
+    }
+  }, [hash, notice, failed]);
+
   const name = notice?.agency_name || "GMED";
   const privacyEmail = notice?.agency_privacy_email || notice?.agency_email || "";
   const paragraphs = (key: string) => l(key).split("\n\n");
 
-  return (
-    <main className="mx-auto max-w-3xl space-y-8 px-4 py-8 text-sm text-foreground">
-      <a href="/login" className="text-xs text-muted-foreground underline">
-        {l("legal_back")}
-      </a>
-
-      <section className="space-y-3" data-testid="legal-imprint">
-        <h1 className="text-xl font-semibold">{l("legal_imprint_title")}</h1>
+  const content = (
+    <>
+      <section className={cardClass} data-testid="legal-imprint">
+        <h1 className="text-lg font-semibold leading-tight">{l("legal_imprint_title")}</h1>
         {failed ? <p className="text-red-700">{l("legal_load_error")}</p> : null}
         <address className="not-italic leading-6">
           <strong>{name}</strong>
@@ -69,8 +80,8 @@ export function LegalNoticePage() {
         </address>
       </section>
 
-      <section className="space-y-3" data-testid="legal-privacy">
-        <h2 className="text-lg font-semibold">{l("legal_privacy_title")}</h2>
+      <section id="privacy" className={`${cardClass} scroll-mt-4 leading-relaxed`} data-testid="legal-privacy">
+        <h2 className="text-lg font-semibold leading-tight">{l("legal_privacy_title")}</h2>
         <p>
           <strong>{l("legal_privacy_controller")}:</strong> {name}
           {notice?.agency_address ? `, ${notice.agency_address}` : ""}
@@ -81,13 +92,30 @@ export function LegalNoticePage() {
           <p key={index}>{paragraph.replace("{system}", notice?.agency_data_system_name || "GMED-CRM-System")}</p>
         ))}
         {notice?.agency_data_processor_notice ? <p>{notice.agency_data_processor_notice}</p> : null}
-        <h3 className="font-semibold">{l("legal_rights_title")}</h3>
+        <h3 className="pt-1 font-semibold">{l("legal_rights_title")}</h3>
         <p>{l("legal_rights_body")}</p>
         <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 font-medium text-amber-900">
           {l("legal_objection_notice")}
         </p>
         <p>{l("legal_complaint_body")}</p>
       </section>
+    </>
+  );
+
+  // Inside the portal the shell already provides <main> and the way back.
+  if (inPortal) {
+    return (
+      <div className="mx-auto w-full max-w-2xl space-y-5 pb-16 text-sm text-foreground" data-testid="legal-notice">
+        {content}
+      </div>
+    );
+  }
+  return (
+    <main className="mx-auto max-w-3xl space-y-5 px-4 py-8 text-sm text-foreground" data-testid="legal-notice">
+      <a href="/login" className="text-xs text-muted-foreground underline">
+        {l("legal_back")}
+      </a>
+      {content}
     </main>
   );
 }

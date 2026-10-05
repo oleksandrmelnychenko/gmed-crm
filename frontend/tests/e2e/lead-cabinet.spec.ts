@@ -26,10 +26,15 @@ function leadRequest() {
       country: null,
       phone: null,
       primary_language: null,
+      has_insurance: null,
+      insurance_type: null,
+      insurance_provider: null,
+      insurance_number: null,
+      insurance_covers_germany: null,
     } as Record<string, unknown>,
     progress: {
       filled: 2,
-      total: 11,
+      total: 12,
       missing_for_submit: ["date_of_birth", "legal_sex", "citizenships", "street_address", "zip_code", "city", "country"],
     },
     minor: false,
@@ -53,6 +58,7 @@ function leadRequest() {
       },
     } as Record<string, { type: string; version: string; texts: Record<string, string>; given_at: string | null }>,
     submitted_at: null as string | null,
+    changed_since_submit: false,
     retention_deadline_at: "2026-10-17T08:00:00Z",
   };
 }
@@ -80,7 +86,7 @@ function recompute(request: ReturnType<typeof leadRequest>) {
   request.progress.missing_for_submit = SUBMIT_FIELDS.filter((field) => !filled(field));
   request.progress.filled = [
     "first_name", "last_name", ...SUBMIT_FIELDS, "phone", "primary_language",
-  ].filter(filled).length;
+  ].filter(filled).length + (data.has_insurance == null ? 0 : 1);
 }
 
 async function setup(
@@ -125,6 +131,11 @@ async function setup(
       const patch = req.postDataJSON() as Record<string, unknown>;
       calls.personalData.push(patch);
       Object.assign(request.personal_data, patch);
+      // Like the server: the answer is stored as a boolean, "no" is the self-payer.
+      if ("has_insurance" in patch) {
+        request.personal_data.has_insurance = patch.has_insurance === "yes" ? true : patch.has_insurance === "no" ? false : null;
+      }
+      if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
     }
@@ -151,6 +162,7 @@ async function setup(
     if (path === "/me/lead-requests/lead-1/submit" && method === "POST") {
       calls.submits += 1;
       request.submitted_at = "2026-10-03T09:30:00Z";
+      request.changed_since_submit = false;
       return route.fulfill({ json: request });
     }
     if (path === "/me/profile") {
@@ -240,6 +252,64 @@ test.describe("lead cabinet", () => {
     await send.click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("03.10.2026");
     expect(calls.submits).toBe(1);
+
+    // Sent: the page says what happens next and offers nothing to send.
+    await expect(page.getByTestId("lead-request-next-steps")).toContainText("Ihre Ansprechperson prüft");
+    await expect(page.getByRole("heading", { name: "Das haben wir erhalten" })).toBeVisible();
+    await expect(send).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
+
+    // The insurance block of the staff wizard is the patient's to fill in. A
+    // change after sending is what "send again" is for.
+    await page.getByRole("button", { name: "Angaben ändern" }).click();
+    const insurance = page.getByTestId("lead-request-insurance");
+    await expect(insurance.getByRole("textbox", { name: "Versicherer" })).toHaveCount(0);
+    await insurance.getByRole("combobox", { name: "Krankenversicherung vorhanden?" }).click();
+    await page.getByRole("option", { name: "Ja", exact: true }).click();
+    await insurance.getByRole("textbox", { name: "Versicherer" }).fill("Allianz Care");
+    await expect
+      .poll(() => calls.personalData.some((patch) => patch.has_insurance === "yes" && patch.insurance_provider === "Allianz Care"))
+      .toBe(true);
+
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-changed")).toContainText("nach dem Senden geändert");
+    await expect(send).toHaveText("Erneut senden");
+    await send.click();
+    await expect.poll(() => calls.submits).toBe(2);
+    await expect(send).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
+  });
+
+  test("no insurance means self-payer and hides the details", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+    const insurance = page.getByTestId("lead-request-insurance");
+    await insurance.getByRole("combobox", { name: "Krankenversicherung vorhanden?" }).click();
+    await page.getByRole("option", { name: "Nein, ich zahle selbst" }).click();
+    await expect.poll(() => calls.personalData.at(-1)).toMatchObject({ has_insurance: "no", insurance_type: "self_pay" });
+    await expect(insurance.getByRole("combobox", { name: "Versicherungsart" })).toHaveCount(0);
+    await expect(insurance.getByRole("textbox", { name: "Versicherungsnummer" })).toHaveCount(0);
+  });
+
+  test("the account of a lead offers no password change", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/account");
+    await expect(page.getByTestId("account-page")).toBeVisible();
+    // The lead keeps the password the manager issued (owner decision 2026-10-05).
+    await expect(page.getByText("Passwort ändern")).toHaveCount(0);
+    await expect(page.locator('input[type="password"]')).toHaveCount(0);
+  });
+
+  test("the legal notice opens inside the cabinet, not on the page that leads back to the login", async ({ page }) => {
+    await setup(page, "lead");
+    await page.goto("/");
+    const menu = page.locator("nav");
+    await menu.getByRole("link", { name: /Impressum/ }).click();
+    await expect(page).toHaveURL(/\/legal$/);
+    await expect(page.getByTestId("legal-notice")).toBeVisible();
+    await expect(page.getByTestId("legal-privacy")).toBeVisible();
+    await expect(menu.getByRole("link", { name: "Ihre Anfrage" })).toBeVisible();
+    await expect(page.getByText("Zurück zur Anmeldung")).toHaveCount(0);
   });
 
   test("the lead switches the cabinet to Ukrainian or English and keeps the choice", async ({ page }) => {

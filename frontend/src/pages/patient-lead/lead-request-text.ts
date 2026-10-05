@@ -54,9 +54,13 @@ export type LeadRequestText = {
   sending: string;
   sentTitle: string;
   sentBody: (dateTime: string) => string;
-  sentAgainHint: string;
+  /** After sending: what the person can expect, in order. */
+  nextTitle: string;
+  nextSteps: readonly string[];
+  sentSummaryTitle: string;
   sendAgain: string;
   editData: string;
+  addDocuments: string;
   loadFailed: string;
   retry: string;
   noRequest: string;
@@ -68,6 +72,13 @@ export type LeadRequestText = {
   sectionConsent: string;
   sectionUpload: string;
   stepOf: (index: number, total: number) => string;
+  sectionInsurance: string;
+  notStated: string;
+  insuranceAnswerOptions: { yes: string; no: string };
+  insuranceTypeOptions: { private: string; public: string; foreign: string };
+  insuranceCoverageOptions: { yes: string; no: string; not_sure: string };
+  /** After sending, when the request was changed: why to send again. */
+  changedAfterSend: string;
 };
 
 const de: LeadRequestText = {
@@ -95,6 +106,11 @@ const de: LeadRequestText = {
     country: "Wohnsitzland",
     phone: "Telefon",
     primary_language: "Bevorzugte Sprache",
+    has_insurance: "Krankenversicherung vorhanden?",
+    insurance_type: "Versicherungsart",
+    insurance_provider: "Versicherer",
+    insurance_number: "Versicherungsnummer",
+    insurance_covers_germany: "Deckt Behandlung in Deutschland",
   },
   legalSexOptions: {
     female: "Weiblich",
@@ -141,9 +157,16 @@ const de: LeadRequestText = {
   sending: "Wird gesendet…",
   sentTitle: "Vielen Dank!",
   sentBody: (dateTime) => `Ihre Angaben wurden am ${dateTime} gesendet. Wir melden uns bei Ihnen.`,
-  sentAgainHint: "Sie haben danach noch etwas geändert? Senden Sie die Angaben einfach erneut.",
+  nextTitle: "So geht es weiter",
+  nextSteps: [
+    "Ihre Ansprechperson prüft Ihre Angaben und Unterlagen.",
+    "Wir melden uns bei Ihnen und besprechen die nächsten Schritte.",
+    "Bis dahin müssen Sie nichts weiter tun. Hat sich etwas geändert oder haben Sie neue Unterlagen, ergänzen Sie Ihre Anfrage und senden Sie sie erneut.",
+  ],
+  sentSummaryTitle: "Das haben wir erhalten",
   sendAgain: "Erneut senden",
   editData: "Angaben ändern",
+  addDocuments: "Unterlagen ergänzen",
   loadFailed: "Die Anfrage konnte nicht geladen werden.",
   retry: "Erneut versuchen",
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
@@ -155,6 +178,13 @@ const de: LeadRequestText = {
   sectionConsent: "Einwilligung",
   sectionUpload: "Ihre Unterlagen",
   stepOf: (index, total) => `Schritt ${index} von ${total}`,
+  sectionInsurance: "Versicherung",
+  notStated: "Keine Angabe",
+  insuranceAnswerOptions: { yes: "Ja", no: "Nein, ich zahle selbst" },
+  insuranceTypeOptions: { private: "Privat", public: "Gesetzlich", foreign: "Ausländische Versicherung" },
+  insuranceCoverageOptions: { yes: "Ja", no: "Nein", not_sure: "Weiß ich nicht" },
+  changedAfterSend:
+    "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
 };
 
 const ru: LeadRequestText = {
@@ -182,6 +212,11 @@ const ru: LeadRequestText = {
     country: "Страна проживания",
     phone: "Телефон",
     primary_language: "Предпочитаемый язык",
+    has_insurance: "Есть страхование?",
+    insurance_type: "Тип страхования",
+    insurance_provider: "Страховая компания",
+    insurance_number: "Номер полиса",
+    insurance_covers_germany: "Покрывает лечение в Германии",
   },
   legalSexOptions: {
     female: "Женский",
@@ -227,9 +262,16 @@ const ru: LeadRequestText = {
   sending: "Отправляется…",
   sentTitle: "Спасибо!",
   sentBody: (dateTime) => `Ваши данные отправлены ${dateTime}. Мы свяжемся с вами.`,
-  sentAgainHint: "Изменили что-то после отправки? Просто отправьте данные ещё раз.",
+  nextTitle: "Что дальше",
+  nextSteps: [
+    "Ваш менеджер проверит данные и документы.",
+    "Мы свяжемся с вами и обсудим следующие шаги.",
+    "До этого от вас ничего не требуется. Если что-то изменилось или появились новые документы, дополните заявку и отправьте её ещё раз.",
+  ],
+  sentSummaryTitle: "Что мы получили",
   sendAgain: "Отправить ещё раз",
   editData: "Изменить данные",
+  addDocuments: "Добавить документы",
   loadFailed: "Не удалось загрузить заявку.",
   retry: "Повторить",
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
@@ -241,6 +283,13 @@ const ru: LeadRequestText = {
   sectionConsent: "Согласие",
   sectionUpload: "Ваши документы",
   stepOf: (index, total) => `Шаг ${index} из ${total}`,
+  sectionInsurance: "Страхование",
+  notStated: "Не указано",
+  insuranceAnswerOptions: { yes: "Да", no: "Нет, оплачиваю сам(а)" },
+  insuranceTypeOptions: { private: "Частное", public: "Государственное", foreign: "Иностранное" },
+  insuranceCoverageOptions: { yes: "Да", no: "Нет", not_sure: "Не знаю" },
+  changedAfterSend:
+    "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
 };
 
 const uk: LeadRequestText = {
@@ -268,6 +317,11 @@ const uk: LeadRequestText = {
     country: "Країна проживання",
     phone: "Телефон",
     primary_language: "Бажана мова",
+    has_insurance: "Є страхування?",
+    insurance_type: "Тип страхування",
+    insurance_provider: "Страхова компанія",
+    insurance_number: "Номер поліса",
+    insurance_covers_germany: "Покриває лікування в Німеччині",
   },
   legalSexOptions: {
     female: "Жіноча",
@@ -313,9 +367,16 @@ const uk: LeadRequestText = {
   sending: "Надсилається…",
   sentTitle: "Дякуємо!",
   sentBody: (dateTime) => `Ваші дані надіслано ${dateTime}. Ми зв'яжемося з вами.`,
-  sentAgainHint: "Змінили щось після надсилання? Просто надішліть дані ще раз.",
+  nextTitle: "Що далі",
+  nextSteps: [
+    "Ваш менеджер перевірить дані та документи.",
+    "Ми зв'яжемося з вами й обговоримо наступні кроки.",
+    "До того від вас нічого не потрібно. Якщо щось змінилося або з'явилися нові документи, доповніть заявку й надішліть її ще раз.",
+  ],
+  sentSummaryTitle: "Що ми отримали",
   sendAgain: "Надіслати ще раз",
   editData: "Змінити дані",
+  addDocuments: "Додати документи",
   loadFailed: "Не вдалося завантажити заявку.",
   retry: "Спробувати ще раз",
   noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
@@ -327,6 +388,13 @@ const uk: LeadRequestText = {
   sectionConsent: "Згода",
   sectionUpload: "Ваші документи",
   stepOf: (index, total) => `Крок ${index} з ${total}`,
+  sectionInsurance: "Страхування",
+  notStated: "Не вказано",
+  insuranceAnswerOptions: { yes: "Так", no: "Ні, плачу самостійно" },
+  insuranceTypeOptions: { private: "Приватне", public: "Державне", foreign: "Іноземне" },
+  insuranceCoverageOptions: { yes: "Так", no: "Ні", not_sure: "Не знаю" },
+  changedAfterSend:
+    "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
 };
 
 const en: LeadRequestText = {
@@ -354,6 +422,11 @@ const en: LeadRequestText = {
     country: "Country of residence",
     phone: "Phone",
     primary_language: "Preferred language",
+    has_insurance: "Do you have health insurance?",
+    insurance_type: "Type of insurance",
+    insurance_provider: "Insurer",
+    insurance_number: "Policy number",
+    insurance_covers_germany: "Covers treatment in Germany",
   },
   legalSexOptions: {
     female: "Female",
@@ -399,9 +472,16 @@ const en: LeadRequestText = {
   sending: "Sending…",
   sentTitle: "Thank you!",
   sentBody: (dateTime) => `Your details were sent on ${dateTime}. We will get in touch.`,
-  sentAgainHint: "Changed something afterwards? Just send your details again.",
+  nextTitle: "What happens next",
+  nextSteps: [
+    "Your contact person reviews your details and documents.",
+    "We will get in touch and discuss the next steps.",
+    "Until then there is nothing more to do. If something has changed or you have new documents, add them to your request and send it again.",
+  ],
+  sentSummaryTitle: "What we received",
   sendAgain: "Send again",
   editData: "Edit details",
+  addDocuments: "Add documents",
   loadFailed: "The request could not be loaded.",
   retry: "Try again",
   noRequest: "There is no open request for your account at the moment.",
@@ -413,6 +493,13 @@ const en: LeadRequestText = {
   sectionConsent: "Consent",
   sectionUpload: "Your documents",
   stepOf: (index, total) => `Step ${index} of ${total}`,
+  sectionInsurance: "Insurance",
+  notStated: "Not specified",
+  insuranceAnswerOptions: { yes: "Yes", no: "No, I pay myself" },
+  insuranceTypeOptions: { private: "Private", public: "Statutory (public)", foreign: "Foreign" },
+  insuranceCoverageOptions: { yes: "Yes", no: "No", not_sure: "Not sure" },
+  changedAfterSend:
+    "You changed your request after sending it. Send it again so that your contact person receives the changes.",
 };
 
 /** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */

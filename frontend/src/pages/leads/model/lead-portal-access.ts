@@ -4,9 +4,9 @@ import type { LeadPortalAccountSummary } from "@/lib/api/types";
  * State of the patient login created with a lead (owner decision 2026-10-03):
  * - `none`: the lead has no login (older leads, or created without e-mail)
  * - `disabled`: the lead was deleted, so the login was switched off
- * - `never_logged_in`: the one-time password has not been used yet
- * - `password_pending`: signed in, but the one-time password is not replaced
- * - `active`: signed in with an own password
+ * - `never_logged_in`: the issued password has not been used yet
+ * - `password_pending`: an administrator forced a password change that is still open
+ * - `active`: signed in
  */
 export type LeadPortalStatus =
   | "none"
@@ -127,7 +127,9 @@ export function patientMessageLanguage(language: string | null | undefined): Pat
 
 /**
  * Text the staff member sends to the patient (messenger, SMS) together with
- * the one-time password. The password is never put into a URL.
+ * the password. The password is never put into a URL. The lead keeps this
+ * password: the cabinet neither forces nor offers a change (owner decision
+ * 2026-10-05); a lost one is replaced by staff.
  */
 export function portalCredentialsMessage(input: {
   firstName: string;
@@ -145,8 +147,7 @@ export function portalCredentialsMessage(input: {
         "your access to the GMed patient portal is ready. Please enter your personal details and upload your documents there.",
         `Sign in: ${loginUrl}`,
         `Login: ${email}`,
-        `One-time password: ${password}`,
-        "You will set your own password when you sign in for the first time.",
+        `Password: ${password}`,
       ].join("\n");
     case "ru":
       return [
@@ -154,8 +155,7 @@ export function portalCredentialsMessage(input: {
         "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там свои данные и загрузите документы.",
         `Вход: ${loginUrl}`,
         `Логин: ${email}`,
-        `Одноразовый пароль: ${password}`,
-        "При первом входе вы зададите свой пароль.",
+        `Пароль: ${password}`,
       ].join("\n");
     case "uk":
       return [
@@ -163,8 +163,7 @@ export function portalCredentialsMessage(input: {
         "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
         `Вхід: ${loginUrl}`,
         `Логін: ${email}`,
-        `Одноразовий пароль: ${password}`,
-        "Під час першого входу ви встановите власний пароль.",
+        `Пароль: ${password}`,
       ].join("\n");
     default:
       return [
@@ -172,8 +171,7 @@ export function portalCredentialsMessage(input: {
         "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
         `Anmeldung: ${loginUrl}`,
         `Benutzername: ${email}`,
-        `Einmalpasswort: ${password}`,
-        "Bei der ersten Anmeldung legen Sie Ihr eigenes Passwort fest.",
+        `Passwort: ${password}`,
       ].join("\n");
   }
 }

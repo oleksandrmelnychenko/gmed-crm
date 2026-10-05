@@ -44,6 +44,7 @@ import {
 import {
   MAX_UPLOAD_BYTES,
   canSubmit,
+  changedSinceSubmit,
   consentGiven,
   consentText,
   draftFromPersonalData,
@@ -52,6 +53,7 @@ import {
   missingForSubmit,
   personalDataPatch,
   rejectedValue,
+  withInsuranceAnswer,
   type PersonalDraft,
   type PersonalField,
   type RejectedValue,
@@ -269,7 +271,7 @@ function LeadRequestView({
   const steps = [
     { id: "data", label: text.stepData, Icon: UserRound, done: missingForSubmit(request).length === 0 && consentGiven(request, INQUIRY_CONSENT) },
     { id: "documents", label: text.stepDocuments, Icon: FileText, done: request.documents.length > 0 },
-    { id: "send", label: text.stepSend, Icon: Send, done: Boolean(request.submitted_at) },
+    { id: "send", label: text.stepSend, Icon: Send, done: Boolean(request.submitted_at) && !changedSinceSubmit(request) },
   ] as const;
 
   return (
@@ -599,6 +601,76 @@ function PersonalDataStep({
       </div>
       </Section>
 
+      <Section title={text.sectionInsurance}>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-insurance">
+        <FormField field="has_insurance" text={text} error={errorFor("has_insurance")}>
+          <NativeComboboxSelect
+            {...fieldProps("has_insurance")}
+            className={selectClass}
+            value={draft.has_insurance}
+            onChange={(event) => setDraft((current) => withInsuranceAnswer(current, event.target.value))}
+          >
+            <option value="">{text.notStated}</option>
+            <option value="yes">{text.insuranceAnswerOptions.yes}</option>
+            <option value="no">{text.insuranceAnswerOptions.no}</option>
+          </NativeComboboxSelect>
+        </FormField>
+        {/* The details exist only for an insured person. */}
+        {draft.has_insurance === "yes" ? (
+          <>
+            <FormField field="insurance_type" text={text} error={errorFor("insurance_type")}>
+              <NativeComboboxSelect
+                {...fieldProps("insurance_type")}
+                className={selectClass}
+                value={draft.insurance_type}
+                onChange={(event) => set("insurance_type", event.target.value)}
+              >
+                <option value="">{text.choose}</option>
+                {(Object.keys(text.insuranceTypeOptions) as Array<keyof LeadRequestText["insuranceTypeOptions"]>).map((value) => (
+                  <option key={value} value={value}>
+                    {text.insuranceTypeOptions[value]}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </FormField>
+            <FormField field="insurance_provider" text={text} error={errorFor("insurance_provider")}>
+              <Input
+                {...fieldProps("insurance_provider")}
+                className={inputClass}
+                autoComplete="off"
+                value={draft.insurance_provider}
+                onChange={(event) => set("insurance_provider", event.target.value)}
+              />
+            </FormField>
+            <FormField field="insurance_number" text={text} error={errorFor("insurance_number")}>
+              <Input
+                {...fieldProps("insurance_number")}
+                className={inputClass}
+                autoComplete="off"
+                value={draft.insurance_number}
+                onChange={(event) => set("insurance_number", event.target.value)}
+              />
+            </FormField>
+            <FormField field="insurance_covers_germany" text={text} error={errorFor("insurance_covers_germany")}>
+              <NativeComboboxSelect
+                {...fieldProps("insurance_covers_germany")}
+                className={selectClass}
+                value={draft.insurance_covers_germany}
+                onChange={(event) => set("insurance_covers_germany", event.target.value)}
+              >
+                <option value="">{text.notStated}</option>
+                {(Object.keys(text.insuranceCoverageOptions) as Array<keyof LeadRequestText["insuranceCoverageOptions"]>).map((value) => (
+                  <option key={value} value={value}>
+                    {text.insuranceCoverageOptions[value]}
+                  </option>
+                ))}
+              </NativeComboboxSelect>
+            </FormField>
+          </>
+        ) : null}
+      </div>
+      </Section>
+
       <Section title={text.sectionConsent}>
         <ConsentCheckbox
           request={request}
@@ -742,7 +814,7 @@ function ConsentCheckbox({
         <span className="space-y-1">
           <span className="block leading-snug">{label}</span>
           {privacyLink ? (
-            <a href="/legal" target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
+            <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
               {text.privacyLink}
             </a>
           ) : null}
@@ -923,6 +995,9 @@ function SendStep({
   const missing = missingForSubmit(request);
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
   const ready = canSubmit(request, INQUIRY_CONSENT);
+  const sent = Boolean(request.submitted_at);
+  // Sent and unchanged: there is nothing to send. Sent and changed: send again.
+  const changed = changedSinceSubmit(request);
 
   async function send() {
     setBusy(true);
@@ -939,13 +1014,39 @@ function SendStep({
   return (
     <section className="space-y-6" data-testid="lead-request-send">
       {request.submitted_at ? (
-        <SuccessBanner>
-          <p className="font-semibold">{text.sentTitle}</p>
-          <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
-          <p className="mt-1 text-xs">{text.sentAgainHint}</p>
-        </SuccessBanner>
+        <>
+          <SuccessBanner>
+            <p className="font-semibold">{text.sentTitle}</p>
+            <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
+          </SuccessBanner>
+          {changed ? (
+            <div
+              role="status"
+              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+              data-testid="lead-request-changed"
+            >
+              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <p>{text.changedAfterSend}</p>
+            </div>
+          ) : null}
+          <Section title={text.nextTitle}>
+            <ol className="space-y-2.5 text-sm" data-testid="lead-request-next-steps">
+              {text.nextSteps.map((item, index) => (
+                <li key={item} className="flex items-start gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] font-mono text-[11px] font-medium text-[var(--brand)]"
+                  >
+                    {index + 1}
+                  </span>
+                  <span className="leading-snug">{item}</span>
+                </li>
+              ))}
+            </ol>
+          </Section>
+        </>
       ) : null}
-      <Section title={text.sendTitle}>
+      <Section title={request.submitted_at ? text.sentSummaryTitle : text.sendTitle}>
       <ul className="space-y-1 text-sm">
         <li>{text.sendSummaryFields(request.progress.filled, request.progress.total)}</li>
         <li>{text.sendSummaryDocuments(request.documents.length)}</li>
@@ -974,14 +1075,36 @@ function SendStep({
       {error ? <Banner tone="error">{error}</Banner> : null}
       </Section>
       <StepFooter index={3} text={text}>
-        <Button type="button" variant="outline" className="h-9" onClick={() => onEdit(request.submitted_at ? "data" : "documents")}>
-          <ArrowLeft aria-hidden="true" className="size-3.5" />
-          {request.submitted_at ? text.editData : text.back}
-        </Button>
-        <Button type="button" className="h-9 gap-2" disabled={!ready || busy} onClick={() => void send()} data-testid="lead-request-submit">
-          {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
-          {busy ? text.sending : request.submitted_at ? text.sendAgain : text.sendButton}
-        </Button>
+        {request.submitted_at ? (
+          // Sent already: changing the request is the secondary path, not the next step.
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("data")}>
+              <Pencil aria-hidden="true" className="size-3.5" />
+              {text.editData}
+            </Button>
+            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("documents")}>
+              <Upload aria-hidden="true" className="size-3.5" />
+              {text.addDocuments}
+            </Button>
+          </div>
+        ) : (
+          <Button type="button" variant="outline" className="h-9" onClick={() => onEdit("documents")}>
+            <ArrowLeft aria-hidden="true" className="size-3.5" />
+            {text.back}
+          </Button>
+        )}
+        {sent && !changed ? null : (
+          <Button
+            type="button"
+            className="h-9 gap-2"
+            disabled={!ready || busy}
+            onClick={() => void send()}
+            data-testid="lead-request-submit"
+          >
+            {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
+            {busy ? text.sending : sent ? text.sendAgain : text.sendButton}
+          </Button>
+        )}
       </StepFooter>
     </section>
   );

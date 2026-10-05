@@ -152,7 +152,7 @@ export function LeadPortalAccessDetail({
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{de ? "Neues Einmalpasswort ausgeben?" : "Выдать новый одноразовый пароль?"}</DialogTitle>
+            <DialogTitle>{de ? "Neues Passwort ausgeben?" : "Выдать новый пароль?"}</DialogTitle>
             <DialogDescription>
               {de
                 ? "Das bisherige Passwort funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet."
@@ -251,13 +251,13 @@ export function PortalCredentialsDialog({
                 ? "Zugang für den Patienten angelegt"
                 : "Доступ для пациента создан"
               : de
-                ? "Neues Einmalpasswort"
-                : "Новый одноразовый пароль"}
+                ? "Neues Passwort"
+                : "Новый пароль"}
           </DialogTitle>
           <DialogDescription>
             {de
-              ? "Das Passwort wird nur jetzt angezeigt. Bei der ersten Anmeldung legt der Patient ein eigenes fest."
-              : "Пароль показывается только сейчас. При первом входе пациент задаст свой."}
+              ? "Das Passwort wird nur jetzt angezeigt. Der Patient meldet sich damit an; geht es verloren, geben Sie hier ein neues aus."
+              : "Пароль показывается только сейчас. Пациент входит с ним; если пароль потерян, выдайте здесь новый."}
           </DialogDescription>
         </DialogHeader>
         {credentials ? (

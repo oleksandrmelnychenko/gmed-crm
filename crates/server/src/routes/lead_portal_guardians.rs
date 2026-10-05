@@ -382,8 +382,9 @@ async fn issue_guardian_access(
                 Err(error) => return internal(error, "hash password"),
             };
             let inserted: Result<Uuid, sqlx::Error> = sqlx::query_scalar(
+                // Like the lead's own login: no forced change at the first sign-in.
                 r#"INSERT INTO users (email, password_hash, name, role, is_active, password_reset_required)
-                   VALUES ($1, $2, $3, 'patient', true, true)
+                   VALUES ($1, $2, $3, 'patient', true, false)
                    RETURNING id"#,
             )
             .bind(&email)
@@ -438,7 +439,7 @@ async fn issue_guardian_access(
                 if let Err(error) = sqlx::query(
                     r#"UPDATE users
                        SET is_active = true, password_hash = $2,
-                           password_reset_required = true, updated_at = now()
+                           password_reset_required = false, updated_at = now()
                        WHERE id = $1"#,
                 )
                 .bind(user_id)
@@ -585,7 +586,7 @@ async fn reset_guardian_password(
         return err(StatusCode::CONFLICT, "The login is deactivated");
     }
     let one_time_password = password_policy::generate_one_time_password();
-    match password_policy::replace_password(&state.db, user_id, &one_time_password, true).await {
+    match password_policy::replace_password(&state.db, user_id, &one_time_password, false).await {
         Ok(()) => {}
         Err(password_policy::PasswordChangeError::Rejected(message)) => {
             return err(StatusCode::UNPROCESSABLE_ENTITY, message);

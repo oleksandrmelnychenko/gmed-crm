@@ -146,8 +146,10 @@ pub(crate) async fn create_for_lead_in_tx(
     let hash = password::hash_password(&one_time_password)
         .map_err(|error| sqlx::Error::Protocol(format!("hash portal password: {error}")))?;
     let user_id: Uuid = sqlx::query_scalar(
+        // No forced change at the first sign-in: the lead keeps the issued
+        // password (owner decision 2026-10-05).
         r#"INSERT INTO users (email, password_hash, name, role, is_active, password_reset_required)
-           VALUES ($1, $2, $3, 'patient', true, true)
+           VALUES ($1, $2, $3, 'patient', true, false)
            RETURNING id"#,
     )
     .bind(email)
@@ -479,7 +481,7 @@ async fn issue_lead_portal_access(
             return internal(error, lead_id, "commit lookup");
         }
         let one_time_password = password_policy::generate_one_time_password();
-        match password_policy::replace_password(&state.db, user_id, &one_time_password, true).await
+        match password_policy::replace_password(&state.db, user_id, &one_time_password, false).await
         {
             Ok(()) => {}
             Err(password_policy::PasswordChangeError::Rejected(message)) => {

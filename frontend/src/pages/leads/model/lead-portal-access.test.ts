@@ -59,7 +59,10 @@ describe("portalCredentialsMessage", () => {
     });
     expect(message).toContain("Вітаємо, Olena!");
     expect(message).toContain("Логін: olena@example.com");
-    expect(message).toContain("Одноразовий пароль: Kq7-mP2x");
+    expect(message).toContain("Пароль: Kq7-mP2x");
+    // The lead keeps the issued password: nothing about a one-time password or a change.
+    expect(message).not.toContain("Одноразовий");
+    expect(message).not.toContain("першого входу");
     expect(message).toContain("https://app.example/login");
   });
 

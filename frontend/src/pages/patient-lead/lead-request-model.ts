@@ -16,6 +16,12 @@ export type PersonalDraft = {
   country: string;
   phone: string;
   primary_language: string;
+  /** "yes", "no" or "" (not stated). */
+  has_insurance: string;
+  insurance_type: string;
+  insurance_provider: string;
+  insurance_number: string;
+  insurance_covers_germany: string;
 };
 
 export type PersonalField = keyof PersonalDraft;
@@ -33,6 +39,11 @@ export const PERSONAL_FIELDS: PersonalField[] = [
   "country",
   "phone",
   "primary_language",
+  "has_insurance",
+  "insurance_type",
+  "insurance_provider",
+  "insurance_number",
+  "insurance_covers_germany",
 ];
 
 export function draftFromPersonalData(data: LeadRequestPersonalData): PersonalDraft {
@@ -49,6 +60,34 @@ export function draftFromPersonalData(data: LeadRequestPersonalData): PersonalDr
     country: data.country ?? "",
     phone: data.phone ?? "",
     primary_language: data.primary_language ?? "",
+    has_insurance: data.has_insurance == null ? "" : data.has_insurance ? "yes" : "no",
+    insurance_type: data.insurance_type ?? "",
+    insurance_provider: data.insurance_provider ?? "",
+    insurance_number: data.insurance_number ?? "",
+    insurance_covers_germany: data.insurance_covers_germany ?? "",
+  };
+}
+
+/**
+ * The draft after the answer "is there an insurance?". "No" means self-payer,
+ * as in the staff wizard: the details of an insurance go (the server does the
+ * same). An insured person is never the self-payer type.
+ */
+export function withInsuranceAnswer(draft: PersonalDraft, answer: string): PersonalDraft {
+  if (answer === "no") {
+    return {
+      ...draft,
+      has_insurance: "no",
+      insurance_type: "self_pay",
+      insurance_provider: "",
+      insurance_number: "",
+      insurance_covers_germany: "",
+    };
+  }
+  return {
+    ...draft,
+    has_insurance: answer,
+    insurance_type: draft.insurance_type === "self_pay" ? "" : draft.insurance_type,
   };
 }
 
@@ -94,6 +133,19 @@ export function missingForSubmit(request: Pick<LeadRequest, "progress">): Person
 
 export function consentGiven(request: Pick<LeadRequest, "consents">, purpose: string): boolean {
   return Boolean(request.consents[purpose]?.given_at);
+}
+
+/**
+ * Something changed after the request was sent: only then "send again" is
+ * offered. An older server does not say so; documents uploaded later still count.
+ */
+export function changedSinceSubmit(
+  request: Pick<LeadRequest, "submitted_at" | "changed_since_submit" | "documents">,
+): boolean {
+  if (!request.submitted_at) return false;
+  if (typeof request.changed_since_submit === "boolean") return request.changed_since_submit;
+  const sentAt = Date.parse(request.submitted_at);
+  return request.documents.some((document) => Date.parse(document.uploaded_at) > sentAt);
 }
 
 export function canSubmit(request: Pick<LeadRequest, "progress" | "consents">, inquiryPurpose: string): boolean {
