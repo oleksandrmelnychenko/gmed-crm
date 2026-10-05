@@ -1,18 +1,25 @@
 import { describe, expect, it } from "vitest";
 
-import type { LeadRequest } from "./lead-request-api";
+import type { LeadRequest, LeadRequestIdentification } from "./lead-request-api";
 import {
   canSubmit,
   changedSinceSubmit,
+  combinedSaveState,
   consentText,
+  draftFromIdentification,
   draftFromPayer,
   draftFromPersonalData,
   formatFileSize,
+  identificationPatch,
   missingForSubmit,
   payerInput,
   personalDataPatch,
   rejectedValue,
+  stillRejectedIdentification,
+  withContactChannel,
   withInsuranceAnswer,
+  withLegalAnswer,
+  withRejectedIdentification,
 } from "./lead-request-model";
 
 const personal = {
@@ -80,6 +87,120 @@ describe("lead request autosave patch", () => {
   it("clears an optional field with an empty string", () => {
     const saved = draftFromPersonalData(personal);
     expect(personalDataPatch(saved, { ...saved, city: "" })).toEqual({ city: "" });
+  });
+});
+
+const identification: LeadRequestIdentification = {
+  salutation: null,
+  former_names: null,
+  birth_place: "Kyiv",
+  birth_country: "UA",
+  habitual_residence_country: null,
+  contact_channels: ["phone"],
+  id_document_type: "passport",
+  id_document_number: "FE123456",
+  id_issuing_authority: null,
+  id_issuing_country: null,
+  id_issued_on: null,
+  id_valid_until: null,
+  pep_self: null,
+  pep_self_details: null,
+  pep_related: null,
+  pep_related_details: null,
+  high_risk_country: null,
+  high_risk_country_code: null,
+  sanctions_links: null,
+  sanctions_links_details: null,
+  payment_background: null,
+  declared_correct_at: null,
+};
+
+describe("lead request identification autosave", () => {
+  it("sends only the changed statements, trimmed", () => {
+    const saved = draftFromIdentification(identification);
+    const draft = {
+      ...saved,
+      birth_place: "  Lviv ",
+      id_issuing_authority: " Ministry  of the Interior ",
+      id_valid_until: "2031-05-01",
+      salutation: "ms",
+    };
+    expect(identificationPatch(saved, draft)).toEqual({
+      salutation: "ms",
+      birth_place: "Lviv",
+      id_issuing_authority: "Ministry of the Interior",
+      id_valid_until: "2031-05-01",
+    });
+    expect(identificationPatch(saved, saved)).toEqual({});
+    // A removed text, date or choice is cleared with an empty string.
+    expect(identificationPatch(saved, { ...saved, birth_country: "", id_document_number: " " })).toEqual({
+      birth_country: "",
+      id_document_number: "",
+    });
+    // Nothing entered yet, and an older server without the statements: an empty form.
+    expect(draftFromIdentification(undefined)).toMatchObject({ birth_place: "", contact_channels: [], pep_self: "" });
+    expect(identificationPatch(draftFromIdentification(undefined), draftFromIdentification(null))).toEqual({});
+  });
+
+  it("sends the legal answers as true, false or null and the details only with a yes", () => {
+    const saved = draftFromIdentification(identification);
+    const yes = { ...withLegalAnswer(saved, "pep_self", "yes"), pep_self_details: " Minister,\nUkraine, 2020–2024 " };
+    // Several lines stay several lines.
+    expect(identificationPatch(saved, yes)).toEqual({ pep_self: true, pep_self_details: "Minister,\nUkraine, 2020–2024" });
+    expect(identificationPatch(saved, withLegalAnswer(saved, "sanctions_links", "no"))).toEqual({ sanctions_links: false });
+
+    const stored = draftFromIdentification({
+      ...identification,
+      pep_self: true,
+      pep_self_details: "Minister",
+      high_risk_country: true,
+      high_risk_country_code: "IR",
+    });
+    expect(stored).toMatchObject({ pep_self: "yes", high_risk_country: "yes", high_risk_country_code: "IR" });
+    // "No" and "not answered" drop the details, as the server does.
+    expect(identificationPatch(stored, withLegalAnswer(stored, "pep_self", "no"))).toEqual({
+      pep_self: false,
+      pep_self_details: "",
+    });
+    expect(identificationPatch(stored, withLegalAnswer(stored, "high_risk_country", ""))).toEqual({
+      high_risk_country: null,
+      high_risk_country_code: "",
+    });
+  });
+
+  it("keeps the contact channels a set in the order of the form", () => {
+    const saved = draftFromIdentification(identification);
+    const more = withContactChannel(withContactChannel(saved, "messenger", true), "email", true);
+    expect(more.contact_channels).toEqual(["email", "phone", "messenger"]);
+    expect(identificationPatch(saved, more)).toEqual({ contact_channels: ["email", "phone", "messenger"] });
+    expect(withContactChannel(more, "phone", true).contact_channels).toEqual(["email", "phone", "messenger"]);
+    expect(identificationPatch(saved, withContactChannel(saved, "phone", false))).toEqual({ contact_channels: [] });
+    // The same channels in another order are no change.
+    const stored = draftFromIdentification({ ...identification, contact_channels: ["messenger", "email", "email", "fax"] });
+    expect(stored.contact_channels).toEqual(["email", "messenger"]);
+  });
+
+  it("does not repeat a value the server refused until the patient changes it", () => {
+    const saved = draftFromIdentification(identification);
+    const draft = { ...saved, id_valid_until: "2020-01-01", id_document_number: "FE999" };
+    const rejected = withRejectedIdentification({}, "id_valid_until", draft);
+    expect(rejected).toEqual({ id_valid_until: "2020-01-01" });
+    // The refused date stays out; the rest of the patch still goes.
+    expect(identificationPatch(saved, draft, rejected ?? {})).toEqual({ id_document_number: "FE999" });
+    // A second refusal keeps the first.
+    expect(withRejectedIdentification(rejected ?? {}, "id_document_number", draft)).toEqual({
+      id_valid_until: "2020-01-01",
+      id_document_number: "FE999",
+    });
+    // A changed value may be sent again.
+    const corrected = { ...draft, id_valid_until: "2031-01-01" };
+    expect(stillRejectedIdentification(rejected ?? {}, draft)).toEqual(rejected);
+    expect(stillRejectedIdentification(rejected ?? {}, corrected)).toEqual({});
+    expect(identificationPatch(saved, corrected, stillRejectedIdentification(rejected ?? {}, corrected))).toMatchObject({
+      id_valid_until: "2031-01-01",
+    });
+    // A field the form does not know is not the form's to hold back.
+    expect(withRejectedIdentification({}, "declared_correct_at", draft)).toBeNull();
   });
 });
 
@@ -202,6 +323,96 @@ describe("lead request send step", () => {
       progress: { filled: 3, total: 12, missing_for_submit: ["payer_last_name", "city", "payer_kind", "unknown"] },
     });
     expect(missing).toEqual(["city", "payer_kind", "payer_last_name"]);
+  });
+
+  it("sends the own economic interest with the answer who pays", () => {
+    const self = { ...draftFromPayer(null), payer_kind: "self" };
+    // Not answered yet: left out, so the server keeps what it has.
+    expect(payerInput(self)).toEqual({ payer_kind: "self" });
+    expect(payerInput({ ...self, acts_on_own_account: "yes", beneficial_owner: "stale" })).toEqual({
+      payer_kind: "self",
+      acts_on_own_account: true,
+    });
+    // "No" names the person; an emptied text is sent empty, so the server drops the old one.
+    expect(payerInput({ ...self, acts_on_own_account: "no", beneficial_owner: "  Viktor Zahler,\n01.02.1970 " })).toEqual({
+      payer_kind: "self",
+      acts_on_own_account: false,
+      beneficial_owner: "Viktor Zahler,\n01.02.1970",
+    });
+    expect(payerInput({ ...self, acts_on_own_account: "no" })).toEqual({
+      payer_kind: "self",
+      acts_on_own_account: false,
+      beneficial_owner: "",
+    });
+    // Without "who pays" there is no answer to attach it to.
+    expect(payerInput({ ...draftFromPayer(null), acts_on_own_account: "yes" })).toBeNull();
+
+    const olderServer = {
+      payer_kind: "self" as const,
+      first_name: null,
+      last_name: null,
+      date_of_birth: null,
+      street: null,
+      zip: null,
+      city: null,
+      country: null,
+      citizenships: [],
+      relationship: null,
+      email: null,
+      phone: null,
+    };
+    const stored = draftFromPayer({ ...olderServer, acts_on_own_account: false, beneficial_owner: "Viktor Zahler" });
+    expect(stored).toMatchObject({ acts_on_own_account: "no", beneficial_owner: "Viktor Zahler" });
+    expect(draftFromPayer({ ...olderServer, acts_on_own_account: null, beneficial_owner: null }).acts_on_own_account).toBe("");
+    // An older server does not send the two keys: the question counts as not answered.
+    expect(draftFromPayer(olderServer).acts_on_own_account).toBe("");
+  });
+
+  it("lists the missing statements of the identification in form order", () => {
+    const missing = missingForSubmit({
+      progress: {
+        filled: 3,
+        total: 12,
+        missing_for_submit: [
+          "sanctions_links",
+          "pep_self_details",
+          "payer_beneficial_owner",
+          "payment_background",
+          "id_document_upload",
+          "id_valid_until",
+          "birth_country",
+          "city",
+          "birth_place",
+          "payer_own_account",
+          "payer_kind",
+          "pep_self",
+          "high_risk_country_code",
+        ],
+      },
+    });
+    expect(missing).toEqual([
+      "birth_place",
+      "birth_country",
+      "city",
+      "id_valid_until",
+      "id_document_upload",
+      "payer_kind",
+      "payment_background",
+      "payer_own_account",
+      "payer_beneficial_owner",
+      "pep_self",
+      "pep_self_details",
+      "high_risk_country_code",
+      "sanctions_links",
+    ]);
+  });
+
+  it("shows one save state for the parts of the form", () => {
+    expect(combinedSaveState(["idle", "idle", "idle"])).toBe("idle");
+    expect(combinedSaveState(["saved", "idle", "idle"])).toBe("saved");
+    // A part that could not be saved is not hidden by another that was.
+    expect(combinedSaveState(["saved", "error", "idle"])).toBe("error");
+    expect(combinedSaveState(["saved", "error", "saving"])).toBe("saving");
   });
 
   it("formats file sizes", () => {

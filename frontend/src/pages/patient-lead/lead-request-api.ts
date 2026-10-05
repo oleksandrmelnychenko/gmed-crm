@@ -43,6 +43,12 @@ export type LeadRequestPayer = {
   relationship: string | null;
   email: string | null;
   phone: string | null;
+  /**
+   * Own economic interest (GwG): `null` until answered, absent on an older
+   * server. On "no" the person in whose interest the patient acts is named.
+   */
+  acts_on_own_account?: boolean | null;
+  beneficial_owner?: string | null;
 };
 
 /** What the cabinet sends: the whole answer, empty values left out. */
@@ -59,7 +65,52 @@ export type LeadRequestPayerInput = {
   relationship?: string;
   email?: string;
   phone?: string;
+  /** Left out until answered: the server then keeps the stored answer. */
+  acts_on_own_account?: boolean;
+  /** Sent with the answer "no" only. */
+  beneficial_owner?: string;
 };
+
+/**
+ * The lead's own statements for the GwG identification sheet (owner spec
+ * "Patientenformular", 2026-10-05). Everything is optional until the request
+ * is sent.
+ */
+export type LeadRequestIdentification = {
+  /** `mr`, `ms` or `none`. */
+  salutation: string | null;
+  former_names: string | null;
+  birth_place: string | null;
+  birth_country: string | null;
+  /** Only when it differs from the country of residence. */
+  habitual_residence_country: string | null;
+  /** Subset of `email`, `phone`, `messenger`. */
+  contact_channels: string[];
+  /** `passport`, `id_card` or `residence_permit`. */
+  id_document_type: string | null;
+  id_document_number: string | null;
+  id_issuing_authority: string | null;
+  id_issuing_country: string | null;
+  id_issued_on: string | null;
+  id_valid_until: string | null;
+  pep_self: boolean | null;
+  pep_self_details: string | null;
+  pep_related: boolean | null;
+  pep_related_details: string | null;
+  high_risk_country: boolean | null;
+  high_risk_country_code: string | null;
+  sanctions_links: boolean | null;
+  sanctions_links_details: string | null;
+  /** Why another person pays; asked with a third-party payer only. */
+  payment_background: string | null;
+  /** Set by the server when the request is sent with the confirmation. */
+  declared_correct_at: string | null;
+};
+
+/** Only the changed keys: `""` clears a text, date or choice, `null` an answer. */
+export type IdentificationPatch = Partial<
+  Record<Exclude<keyof LeadRequestIdentification, "declared_correct_at">, string | string[] | boolean | null>
+>;
 
 export type LeadRequestConsent = {
   type: string;
@@ -89,6 +140,10 @@ export type LeadRequest = {
   progress: { filled: number; total: number; missing_for_submit: string[] };
   /** `null` until the question is answered; absent on an older server. */
   payer?: LeadRequestPayer | null;
+  /** The statements for the identification; absent on an older server. */
+  identification?: LeadRequestIdentification;
+  /** Photos or scans of the identity document; never among `documents` (medical). */
+  identity_documents?: LeadRequestDocument[];
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -122,6 +177,13 @@ export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Pro
   });
 }
 
+export function saveLeadIdentification(leadId: string, patch: IdentificationPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/identification`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
 export function giveLeadConsent(
   leadId: string,
   purpose: string,
@@ -147,12 +209,27 @@ export function uploadLeadDocument(leadId: string, file: File): Promise<LeadRequ
   return apiFetch<LeadRequest>(`${base(leadId)}/documents`, { method: "POST", body: form });
 }
 
+/** A photo or scan of the identity document; the server needs the request consent first. */
+export function uploadLeadIdentityDocument(leadId: string, file: File): Promise<LeadRequest> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<LeadRequest>(`${base(leadId)}/identity-document`, { method: "POST", body: form });
+}
+
+/** Withdraws an own upload: a medical document or a copy of the identity document. */
 export function withdrawLeadDocument(leadId: string, documentId: string): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/documents/${encodeURIComponent(documentId)}`, {
     method: "DELETE",
   });
 }
 
-export function submitLeadRequest(leadId: string): Promise<LeadRequest> {
-  return apiFetch<LeadRequest>(`${base(leadId)}/submit`, { method: "POST" });
+/**
+ * Sends the request. `declaredCorrect` is the confirmation that the statements
+ * are complete and true; a server that knows the identification requires it.
+ */
+export function submitLeadRequest(leadId: string, declaredCorrect: boolean): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/submit`, {
+    method: "POST",
+    ...(declaredCorrect ? { body: JSON.stringify({ declared_correct: true }) } : {}),
+  });
 }

@@ -17,7 +17,14 @@
 //! Two consents ([`ConsentPurpose`], stored in `consent_records`): the
 //! explicit Art. 9 (2)(a) DSGVO consent before the first upload of medical
 //! documents (the server rejects an upload without it) and the consent to
-//! process the entered data before "send to the manager".
+//! process the entered data before "send to the manager" and before a copy of
+//! the identity document is uploaded.
+//!
+//! Since 2026-10-05 (owner spec "Patientenformular (Lead-Link)") the lead also
+//! states what the GwG identification sheet needs ([`Identification`], table
+//! `lead_gwg_declarations`): place of birth, identity document with a photo or
+//! scan of it, the legal questions, and confirms on sending that the
+//! information is complete and true.
 //!
 //! A login that reaches only requests is in the lead cabinet
 //! (`/me.portal_mode = "lead"`); [`lead_portal_guard`] closes the rest of the
@@ -31,7 +38,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use chrono::{DateTime, NaiveDate, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
@@ -63,9 +70,10 @@ pub(crate) enum ConsentPurpose {
     /// Required before the first upload.
     HealthData,
     /// Processing of the entered data to handle the request (owner request
-    /// 2026-10-03). Required before "send to the manager". It does not
-    /// replace the signed DSGVO document, which alone stops the 14-day
-    /// deletion of an unqualified lead.
+    /// 2026-10-03). Required before "send to the manager" and before a copy
+    /// of the identity document is uploaded. It does not replace the signed
+    /// DSGVO document, which alone stops the 14-day deletion of an
+    /// unqualified lead.
     InquiryProcessing,
 }
 
@@ -242,6 +250,15 @@ pub fn router() -> Router<AppState> {
             post(update_my_personal_data),
         )
         .route("/me/lead-requests/{lead_id}/payer", post(update_my_payer))
+        .route(
+            "/me/lead-requests/{lead_id}/identification",
+            post(update_my_identification),
+        )
+        .route(
+            "/me/lead-requests/{lead_id}/identity-document",
+            post(upload_my_identity_document)
+                .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024)),
+        )
         .route("/me/lead-requests/{lead_id}/consent", post(give_consent))
         .route(
             "/me/lead-requests/{lead_id}/consent/revoke",
@@ -734,12 +751,30 @@ pub(crate) struct PersonalDataPatch {
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct FieldError {
+    /// `invalid_field`, or a code of its own where the cabinet says more
+    /// than "invalid" (an expired identity document).
+    code: &'static str,
     field: &'static str,
     message: &'static str,
 }
 
 fn field_error(field: &'static str, message: &'static str) -> FieldError {
-    FieldError { field, message }
+    FieldError {
+        code: "invalid_field",
+        field,
+        message,
+    }
+}
+
+impl FieldError {
+    fn into_response(self) -> axum::response::Response {
+        coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            self.code,
+            self.message,
+            json!({ "field": self.field }),
+        )
+    }
 }
 
 fn clean_text(
@@ -963,6 +998,639 @@ fn patient_field_markers(lead_id: Uuid, data: &PersonalData, updates: &Value) ->
 }
 
 // ----------------------------------------------------------------------------
+// Identification: the lead's own GwG statements
+// ----------------------------------------------------------------------------
+
+/// Key of the statements in `leads.portal_field_updates`: like a personal data
+/// field it says when the patient last changed them.
+const IDENTIFICATION_MARKER: &str = "identification";
+
+const SALUTATION_VALUES: [&str; 3] = ["mr", "ms", "none"];
+/// In the order of the form; stored in this order.
+const CONTACT_CHANNEL_VALUES: [&str; 3] = ["email", "phone", "messenger"];
+const ID_DOCUMENT_TYPE_VALUES: [&str; 3] = ["passport", "id_card", "residence_permit"];
+/// Longest free text of a statement (details of a "yes", payment background).
+const STATEMENT_TEXT_MAX: usize = 2000;
+
+/// The statements the patient edits (API keys = column names of
+/// `lead_gwg_declarations`), in form order. `declared_correct_at` is not
+/// among them: the server sets it when the request is sent.
+const IDENTIFICATION_FIELDS: [&str; 21] = [
+    "salutation",
+    "former_names",
+    "birth_place",
+    "birth_country",
+    "habitual_residence_country",
+    "contact_channels",
+    "id_document_type",
+    "id_document_number",
+    "id_issuing_authority",
+    "id_issuing_country",
+    "id_issued_on",
+    "id_valid_until",
+    "pep_self",
+    "pep_self_details",
+    "pep_related",
+    "pep_related_details",
+    "high_risk_country",
+    "high_risk_country_code",
+    "sanctions_links",
+    "sanctions_links_details",
+    "payment_background",
+];
+
+/// What the lead states himself for the GwG identification sheet (owner spec
+/// "Patientenformular (Lead-Link)", 2026-10-05): place of birth, identity
+/// document, the legal questions and why a third person pays. One row per
+/// lead in `lead_gwg_declarations`; nothing entered is the default. Staff read
+/// the statements and keep their own AML assessment in the wizard.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Identification {
+    pub(crate) salutation: Option<String>,
+    pub(crate) former_names: Option<String>,
+    pub(crate) birth_place: Option<String>,
+    pub(crate) birth_country: Option<String>,
+    pub(crate) habitual_residence_country: Option<String>,
+    pub(crate) contact_channels: Vec<String>,
+    pub(crate) id_document_type: Option<String>,
+    pub(crate) id_document_number: Option<String>,
+    pub(crate) id_issuing_authority: Option<String>,
+    pub(crate) id_issuing_country: Option<String>,
+    pub(crate) id_issued_on: Option<NaiveDate>,
+    pub(crate) id_valid_until: Option<NaiveDate>,
+    /// The legal questions: `None` until answered. The details belong to a
+    /// "yes" only.
+    pub(crate) pep_self: Option<bool>,
+    pub(crate) pep_self_details: Option<String>,
+    pub(crate) pep_related: Option<bool>,
+    pub(crate) pep_related_details: Option<String>,
+    pub(crate) high_risk_country: Option<bool>,
+    pub(crate) high_risk_country_code: Option<String>,
+    pub(crate) sanctions_links: Option<bool>,
+    pub(crate) sanctions_links_details: Option<String>,
+    pub(crate) payment_background: Option<String>,
+    /// When the request was last sent with the confirmation that the
+    /// statements are complete and true.
+    pub(crate) declared_correct_at: Option<DateTime<Utc>>,
+}
+
+impl Identification {
+    fn from_row(row: &PgRow) -> Self {
+        let text =
+            |column: &str| non_empty(row.try_get::<Option<String>, _>(column).ok().flatten());
+        let date = |column: &str| row.try_get::<Option<NaiveDate>, _>(column).ok().flatten();
+        let answer = |column: &str| row.try_get::<Option<bool>, _>(column).ok().flatten();
+        Identification {
+            salutation: text("salutation"),
+            former_names: text("former_names"),
+            birth_place: text("birth_place"),
+            birth_country: text("birth_country"),
+            habitual_residence_country: text("habitual_residence_country"),
+            contact_channels: row
+                .try_get::<Vec<String>, _>("contact_channels")
+                .unwrap_or_default(),
+            id_document_type: text("id_document_type"),
+            id_document_number: text("id_document_number"),
+            id_issuing_authority: text("id_issuing_authority"),
+            id_issuing_country: text("id_issuing_country"),
+            id_issued_on: date("id_issued_on"),
+            id_valid_until: date("id_valid_until"),
+            pep_self: answer("pep_self"),
+            pep_self_details: text("pep_self_details"),
+            pep_related: answer("pep_related"),
+            pep_related_details: text("pep_related_details"),
+            high_risk_country: answer("high_risk_country"),
+            high_risk_country_code: text("high_risk_country_code"),
+            sanctions_links: answer("sanctions_links"),
+            sanctions_links_details: text("sanctions_links_details"),
+            payment_background: text("payment_background"),
+            declared_correct_at: row
+                .try_get::<Option<DateTime<Utc>>, _>("declared_correct_at")
+                .ok()
+                .flatten(),
+        }
+    }
+
+    /// Every key is always present, `null` or empty when nothing was entered.
+    pub(crate) fn to_json(&self) -> Value {
+        let date = |value: Option<NaiveDate>| value.map(|date| date.format("%Y-%m-%d").to_string());
+        json!({
+            "salutation": self.salutation,
+            "former_names": self.former_names,
+            "birth_place": self.birth_place,
+            "birth_country": self.birth_country,
+            "habitual_residence_country": self.habitual_residence_country,
+            "contact_channels": self.contact_channels,
+            "id_document_type": self.id_document_type,
+            "id_document_number": self.id_document_number,
+            "id_issuing_authority": self.id_issuing_authority,
+            "id_issuing_country": self.id_issuing_country,
+            "id_issued_on": date(self.id_issued_on),
+            "id_valid_until": date(self.id_valid_until),
+            "pep_self": self.pep_self,
+            "pep_self_details": self.pep_self_details,
+            "pep_related": self.pep_related,
+            "pep_related_details": self.pep_related_details,
+            "high_risk_country": self.high_risk_country,
+            "high_risk_country_code": self.high_risk_country_code,
+            "sanctions_links": self.sanctions_links,
+            "sanctions_links_details": self.sanctions_links_details,
+            "payment_background": self.payment_background,
+            "declared_correct_at": self.declared_correct_at,
+        })
+    }
+
+    /// Stable text of the statements for the marker in
+    /// `leads.portal_field_updates` (the confirmation is not a statement).
+    fn marker_value(&self) -> String {
+        let statements = self.to_json();
+        IDENTIFICATION_FIELDS
+            .iter()
+            .map(|field| statements[*field].to_string())
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+
+    /// The identity part of what is needed to send the request, in form
+    /// order. A document that has expired since it was entered counts as
+    /// missing.
+    fn missing_identity(&self, today: NaiveDate) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        for (field, filled) in [
+            ("birth_place", self.birth_place.is_some()),
+            ("birth_country", self.birth_country.is_some()),
+            ("id_document_type", self.id_document_type.is_some()),
+            ("id_document_number", self.id_document_number.is_some()),
+            ("id_issuing_authority", self.id_issuing_authority.is_some()),
+            ("id_issuing_country", self.id_issuing_country.is_some()),
+            (
+                "id_valid_until",
+                self.id_valid_until.is_some_and(|date| date >= today),
+            ),
+        ] {
+            if !filled {
+                missing.push(field);
+            }
+        }
+        missing
+    }
+
+    /// The legal questions still open: each needs an answer, and a "yes" its
+    /// details (the country for the high-risk question).
+    fn missing_legal(&self) -> Vec<&'static str> {
+        let mut missing = Vec::new();
+        for (question, answer, details, has_details) in [
+            (
+                "pep_self",
+                self.pep_self,
+                "pep_self_details",
+                self.pep_self_details.is_some(),
+            ),
+            (
+                "pep_related",
+                self.pep_related,
+                "pep_related_details",
+                self.pep_related_details.is_some(),
+            ),
+            (
+                "high_risk_country",
+                self.high_risk_country,
+                "high_risk_country_code",
+                self.high_risk_country_code.is_some(),
+            ),
+            (
+                "sanctions_links",
+                self.sanctions_links,
+                "sanctions_links_details",
+                self.sanctions_links_details.is_some(),
+            ),
+        ] {
+            match answer {
+                None => missing.push(question),
+                Some(true) if !has_details => missing.push(details),
+                Some(_) => {}
+            }
+        }
+        missing
+    }
+}
+
+/// A key that is present in the body, also with `null` (an absent key stays
+/// `None`): the autosave sends only what changed, and `null` clears a value.
+fn sent<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+/// Partial update of the statements from the cabinet (only the changed keys).
+/// `null` or an empty string clears a text, a date or a choice; a legal
+/// answer is `true`, `false` or `null`. Unknown keys — the confirmation
+/// `declared_correct_at` above all — are rejected.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct IdentificationPatch {
+    #[serde(default, deserialize_with = "sent")]
+    salutation: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    former_names: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    birth_place: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    birth_country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    habitual_residence_country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    contact_channels: Option<Option<Vec<String>>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_document_type: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_document_number: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_issuing_authority: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_issuing_country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_issued_on: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    id_valid_until: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    pep_self: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "sent")]
+    pep_self_details: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    pep_related: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "sent")]
+    pep_related_details: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    high_risk_country: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "sent")]
+    high_risk_country_code: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    sanctions_links: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "sent")]
+    sanctions_links_details: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    payment_background: Option<Option<String>>,
+}
+
+/// A free text that may run over several lines: only the ends are trimmed.
+fn clean_long_text(
+    value: &str,
+    field: &'static str,
+    max_chars: usize,
+) -> Result<Option<String>, FieldError> {
+    let value = value.replace("\r\n", "\n").replace('\r', "\n");
+    let value = value.trim();
+    if value.chars().count() > max_chars {
+        return Err(field_error(field, "Too long"));
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+    {
+        return Err(field_error(field, "Invalid characters"));
+    }
+    Ok((!value.is_empty()).then(|| value.to_string()))
+}
+
+fn optional_date(value: &str, field: &'static str) -> Result<Option<NaiveDate>, FieldError> {
+    match value.trim() {
+        "" => Ok(None),
+        value => NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .map(Some)
+            .map_err(|_| field_error(field, "Use YYYY-MM-DD")),
+    }
+}
+
+/// Applies `patch` to `current`; the result is what gets stored. A sent
+/// expiry date in the past is refused with its own code; the details of a
+/// legal question are dropped unless its answer is "yes".
+pub(crate) fn apply_identification_patch(
+    current: &Identification,
+    patch: &IdentificationPatch,
+    today: NaiveDate,
+) -> Result<Identification, FieldError> {
+    // `null` clears like an empty string.
+    fn text(value: &Option<String>) -> &str {
+        value.as_deref().unwrap_or_default()
+    }
+    let mut next = current.clone();
+    if let Some(value) = &patch.salutation {
+        next.salutation = one_of(text(value), "salutation", &SALUTATION_VALUES)?;
+    }
+    if let Some(value) = &patch.former_names {
+        next.former_names = clean_text(text(value), "former_names", 200)?;
+    }
+    if let Some(value) = &patch.birth_place {
+        next.birth_place = clean_text(text(value), "birth_place", 200)?;
+    }
+    if let Some(value) = &patch.birth_country {
+        next.birth_country = country_code(text(value), "birth_country")?;
+    }
+    if let Some(value) = &patch.habitual_residence_country {
+        next.habitual_residence_country = country_code(text(value), "habitual_residence_country")?;
+    }
+    if let Some(values) = &patch.contact_channels {
+        let mut chosen = Vec::new();
+        for value in values.iter().flatten() {
+            match one_of(value, "contact_channels", &CONTACT_CHANNEL_VALUES)? {
+                Some(channel) if !chosen.contains(&channel) => chosen.push(channel),
+                _ => {}
+            }
+        }
+        next.contact_channels = CONTACT_CHANNEL_VALUES
+            .iter()
+            .filter(|channel| chosen.iter().any(|value| value == *channel))
+            .map(|channel| channel.to_string())
+            .collect();
+    }
+    if let Some(value) = &patch.id_document_type {
+        next.id_document_type = one_of(text(value), "id_document_type", &ID_DOCUMENT_TYPE_VALUES)?;
+    }
+    if let Some(value) = &patch.id_document_number {
+        next.id_document_number = clean_text(text(value), "id_document_number", 60)?;
+    }
+    if let Some(value) = &patch.id_issuing_authority {
+        next.id_issuing_authority = clean_text(text(value), "id_issuing_authority", 200)?;
+    }
+    if let Some(value) = &patch.id_issuing_country {
+        next.id_issuing_country = country_code(text(value), "id_issuing_country")?;
+    }
+    if let Some(value) = &patch.id_issued_on {
+        let issued_on = optional_date(text(value), "id_issued_on")?;
+        if issued_on.is_some_and(|date| date > today) {
+            return Err(field_error(
+                "id_issued_on",
+                "Date of issue is in the future",
+            ));
+        }
+        if issued_on.is_some_and(|date| date < NaiveDate::from_ymd_opt(1900, 1, 1).unwrap_or(date))
+        {
+            return Err(field_error("id_issued_on", "Date of issue is too early"));
+        }
+        next.id_issued_on = issued_on;
+    }
+    if let Some(value) = &patch.id_valid_until {
+        let valid_until = optional_date(text(value), "id_valid_until")?;
+        // The last day of validity still counts.
+        if valid_until.is_some_and(|date| date < today) {
+            return Err(FieldError {
+                code: "id_document_expired",
+                field: "id_valid_until",
+                message: "The identity document has expired",
+            });
+        }
+        next.id_valid_until = valid_until;
+    }
+    if let Some(value) = patch.pep_self {
+        next.pep_self = value;
+    }
+    if let Some(value) = &patch.pep_self_details {
+        next.pep_self_details =
+            clean_long_text(text(value), "pep_self_details", STATEMENT_TEXT_MAX)?;
+    }
+    if let Some(value) = patch.pep_related {
+        next.pep_related = value;
+    }
+    if let Some(value) = &patch.pep_related_details {
+        next.pep_related_details =
+            clean_long_text(text(value), "pep_related_details", STATEMENT_TEXT_MAX)?;
+    }
+    if let Some(value) = patch.high_risk_country {
+        next.high_risk_country = value;
+    }
+    if let Some(value) = &patch.high_risk_country_code {
+        next.high_risk_country_code = country_code(text(value), "high_risk_country_code")?;
+    }
+    if let Some(value) = patch.sanctions_links {
+        next.sanctions_links = value;
+    }
+    if let Some(value) = &patch.sanctions_links_details {
+        next.sanctions_links_details =
+            clean_long_text(text(value), "sanctions_links_details", STATEMENT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.payment_background {
+        next.payment_background =
+            clean_long_text(text(value), "payment_background", STATEMENT_TEXT_MAX)?;
+    }
+    // The details belong to a "yes": with any other answer they go.
+    if next.pep_self != Some(true) {
+        next.pep_self_details = None;
+    }
+    if next.pep_related != Some(true) {
+        next.pep_related_details = None;
+    }
+    if next.high_risk_country != Some(true) {
+        next.high_risk_country_code = None;
+    }
+    if next.sanctions_links != Some(true) {
+        next.sanctions_links_details = None;
+    }
+    Ok(next)
+}
+
+fn changed_identification_fields(
+    before: &Identification,
+    after: &Identification,
+) -> Vec<&'static str> {
+    let (before, after) = (before.to_json(), after.to_json());
+    IDENTIFICATION_FIELDS
+        .iter()
+        .copied()
+        .filter(|field| before[*field] != after[*field])
+        .collect()
+}
+
+/// The statements of a lead and when the lead last changed them; nothing
+/// entered while there is no row.
+pub(crate) async fn load_identification<'e, E>(
+    executor: E,
+    lead_id: Uuid,
+) -> Result<(Identification, Option<DateTime<Utc>>), sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let row = sqlx::query("SELECT * FROM lead_gwg_declarations WHERE lead_id = $1")
+        .bind(lead_id)
+        .fetch_optional(executor)
+        .await?;
+    Ok(match row {
+        Some(row) => (
+            Identification::from_row(&row),
+            row.try_get::<DateTime<Utc>, _>("updated_at").ok(),
+        ),
+        None => (Identification::default(), None),
+    })
+}
+
+/// Writes the statements of a lead (everything but the confirmation, which
+/// only "send to the manager" sets).
+async fn store_identification(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+    statements: &Identification,
+    actor: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (
+               lead_id, salutation, former_names, birth_place, birth_country,
+               habitual_residence_country, contact_channels, id_document_type,
+               id_document_number, id_issuing_authority, id_issuing_country, id_issued_on,
+               id_valid_until, pep_self, pep_self_details, pep_related, pep_related_details,
+               high_risk_country, high_risk_country_code, sanctions_links,
+               sanctions_links_details, payment_background, updated_by)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+                   $17, $18, $19, $20, $21, $22, $23)
+           ON CONFLICT (lead_id) DO UPDATE SET
+               salutation = EXCLUDED.salutation,
+               former_names = EXCLUDED.former_names,
+               birth_place = EXCLUDED.birth_place,
+               birth_country = EXCLUDED.birth_country,
+               habitual_residence_country = EXCLUDED.habitual_residence_country,
+               contact_channels = EXCLUDED.contact_channels,
+               id_document_type = EXCLUDED.id_document_type,
+               id_document_number = EXCLUDED.id_document_number,
+               id_issuing_authority = EXCLUDED.id_issuing_authority,
+               id_issuing_country = EXCLUDED.id_issuing_country,
+               id_issued_on = EXCLUDED.id_issued_on,
+               id_valid_until = EXCLUDED.id_valid_until,
+               pep_self = EXCLUDED.pep_self,
+               pep_self_details = EXCLUDED.pep_self_details,
+               pep_related = EXCLUDED.pep_related,
+               pep_related_details = EXCLUDED.pep_related_details,
+               high_risk_country = EXCLUDED.high_risk_country,
+               high_risk_country_code = EXCLUDED.high_risk_country_code,
+               sanctions_links = EXCLUDED.sanctions_links,
+               sanctions_links_details = EXCLUDED.sanctions_links_details,
+               payment_background = EXCLUDED.payment_background,
+               updated_by = EXCLUDED.updated_by,
+               updated_at = now()"#,
+    )
+    .bind(lead_id)
+    .bind(&statements.salutation)
+    .bind(&statements.former_names)
+    .bind(&statements.birth_place)
+    .bind(&statements.birth_country)
+    .bind(&statements.habitual_residence_country)
+    .bind(&statements.contact_channels)
+    .bind(&statements.id_document_type)
+    .bind(&statements.id_document_number)
+    .bind(&statements.id_issuing_authority)
+    .bind(&statements.id_issuing_country)
+    .bind(statements.id_issued_on)
+    .bind(statements.id_valid_until)
+    .bind(statements.pep_self)
+    .bind(&statements.pep_self_details)
+    .bind(statements.pep_related)
+    .bind(&statements.pep_related_details)
+    .bind(statements.high_risk_country)
+    .bind(&statements.high_risk_country_code)
+    .bind(statements.sanctions_links)
+    .bind(&statements.sanctions_links_details)
+    .bind(&statements.payment_background)
+    .bind(actor)
+    .execute(&mut **tx)
+    .await
+    .map(|_| ())
+}
+
+/// The two kinds of portal uploads (`lead_portal_uploads.kind`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UploadKind {
+    /// A medical document of the request, under the Art. 9 consent.
+    Medical,
+    /// A photo or scan of the identity document, under the consent to
+    /// process the request data. Never medical.
+    Identity,
+}
+
+impl UploadKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            UploadKind::Medical => "medical",
+            UploadKind::Identity => "identity",
+        }
+    }
+
+    /// The consent the upload needs first.
+    fn consent(self) -> ConsentPurpose {
+        match self {
+            UploadKind::Medical => ConsentPurpose::HealthData,
+            UploadKind::Identity => ConsentPurpose::InquiryProcessing,
+        }
+    }
+}
+
+/// Everything still missing before the request can be sent, as the keys of
+/// `progress.missing_for_submit`: the personal data, who pays, then the
+/// statements for the identification in form order.
+fn missing_for_submit(
+    data: &PersonalData,
+    payer: Option<&lead_payer::Declaration>,
+    identification: &Identification,
+    identity_document_uploaded: bool,
+    today: NaiveDate,
+) -> Vec<&'static str> {
+    let mut missing = data.missing_for_submit();
+    missing.extend(lead_payer::portal_missing(payer));
+    missing.extend(identification.missing_identity(today));
+    if !identity_document_uploaded {
+        missing.push("id_document_upload");
+    }
+    missing.extend(lead_payer::portal_missing_own_account(payer));
+    missing.extend(identification.missing_legal());
+    // Why another person pays is asked with a third-party payer only.
+    if payer.is_some_and(lead_payer::Declaration::is_third_party)
+        && identification.payment_background.is_none()
+    {
+        missing.push("payment_background");
+    }
+    missing
+}
+
+/// Staff took a portal upload over: marked it as reviewed or, for a copy of
+/// the identity document, confirmed it as such. From then on the patient can
+/// no longer remove it.
+fn upload_taken_over(upload: &PgRow) -> bool {
+    let time = |column: &str| {
+        upload
+            .try_get::<Option<DateTime<Utc>>, _>(column)
+            .ok()
+            .flatten()
+    };
+    time("reviewed_at").is_some() || time("signed_at").is_some()
+}
+
+fn upload_file_name(upload: &PgRow) -> Option<String> {
+    upload
+        .try_get::<Option<String>, _>("original_filename")
+        .ok()
+        .flatten()
+        .or_else(|| upload.try_get::<String, _>("auto_name").ok())
+}
+
+/// Whether the lead has an identity document uploaded through the cabinet.
+async fn identity_document_uploaded<'e, E>(executor: E, lead_id: Uuid) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM lead_portal_uploads u
+               JOIN documents d ON d.id = u.document_id
+               WHERE u.lead_id = $1 AND u.kind = 'identity'
+                 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+           )"#,
+    )
+    .bind(lead_id)
+    .fetch_one(executor)
+    .await
+}
+
+// ----------------------------------------------------------------------------
 // Request payload
 // ----------------------------------------------------------------------------
 
@@ -1045,11 +1713,11 @@ async fn request_payload(
         let mut conn = state.db.acquire().await?;
         lead_payer::load_declaration(&mut conn, lead_id).await?
     };
-    let mut missing_for_submit = data.missing_for_submit();
-    missing_for_submit.extend(lead_payer::portal_missing(payer.as_ref()));
+    let (identification, _) = load_identification(&state.db, lead_id).await?;
     let uploads = sqlx::query(
-        r#"SELECT u.document_id, u.created_at, u.reviewed_at, u.uploaded_by,
-                  d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id
+        r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by,
+                  d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id,
+                  d.signed_at
            FROM lead_portal_uploads u
            JOIN documents d ON d.id = u.document_id
            WHERE u.lead_id = $1
@@ -1060,36 +1728,45 @@ async fn request_payload(
     .bind(lead_id)
     .fetch_all(&state.db)
     .await?;
-    let documents: Vec<Value> = uploads
-        .iter()
-        .map(|upload| {
-            let reviewed = upload
-                .try_get::<Option<DateTime<Utc>>, _>("reviewed_at")
-                .ok()
-                .flatten()
-                .is_some();
-            let mine = upload.try_get::<Uuid, _>("uploaded_by").ok() == Some(user_id);
-            let moved = upload
-                .try_get::<Option<Uuid>, _>("patient_id")
-                .ok()
-                .flatten()
-                .is_some();
-            json!({
-                "id": upload.try_get::<Uuid, _>("document_id").ok(),
-                "file_name": upload
-                    .try_get::<Option<String>, _>("original_filename")
+    // Medical documents and copies of the identity document are two lists.
+    let uploads_of = |kind: UploadKind| -> Vec<Value> {
+        uploads
+            .iter()
+            .filter(|upload| {
+                upload.try_get::<String, _>("kind").ok().as_deref() == Some(kind.as_str())
+            })
+            .map(|upload| {
+                // Staff took the file over: marked as reviewed, or confirmed
+                // as the identity document.
+                let reviewed = upload_taken_over(upload);
+                let mine = upload.try_get::<Uuid, _>("uploaded_by").ok() == Some(user_id);
+                let moved = upload
+                    .try_get::<Option<Uuid>, _>("patient_id")
                     .ok()
                     .flatten()
-                    .or_else(|| upload.try_get::<String, _>("auto_name").ok()),
-                "size_bytes": upload.try_get::<Option<i64>, _>("file_size").ok().flatten(),
-                "mime_type": upload.try_get::<Option<String>, _>("mime_type").ok().flatten(),
-                "uploaded_at": upload.try_get::<DateTime<Utc>, _>("created_at").ok(),
-                "uploaded_by_me": mine,
-                "reviewed": reviewed,
-                "can_delete": mine && !reviewed && !moved,
+                    .is_some();
+                json!({
+                    "id": upload.try_get::<Uuid, _>("document_id").ok(),
+                    "file_name": upload_file_name(upload),
+                    "size_bytes": upload.try_get::<Option<i64>, _>("file_size").ok().flatten(),
+                    "mime_type": upload.try_get::<Option<String>, _>("mime_type").ok().flatten(),
+                    "uploaded_at": upload.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                    "uploaded_by_me": mine,
+                    "reviewed": reviewed,
+                    "can_delete": mine && !reviewed && !moved,
+                })
             })
-        })
-        .collect();
+            .collect()
+    };
+    let documents = uploads_of(UploadKind::Medical);
+    let identity_documents = uploads_of(UploadKind::Identity);
+    let missing = missing_for_submit(
+        &data,
+        payer.as_ref(),
+        &identification,
+        !identity_documents.is_empty(),
+        crate::app_time::today(),
+    );
     let mut consents = Map::new();
     for purpose in ConsentPurpose::ALL {
         let given = active_consent(&state.db, lead_id, user_id, purpose).await?;
@@ -1120,11 +1797,13 @@ async fn request_payload(
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
-            "missing_for_submit": missing_for_submit,
+            "missing_for_submit": missing,
         },
         "payer": lead_payer::portal_payload(payer.as_ref()),
+        "identification": identification.to_json(),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "documents": documents,
+        "identity_documents": identity_documents,
         "max_documents": MAX_PORTAL_UPLOADS,
         "consents": consents,
         "submitted_at": row
@@ -1241,14 +1920,7 @@ async fn update_my_personal_data(
     let today = crate::app_time::today();
     let next = match apply_personal_data_patch(&current, &patch, today) {
         Ok(next) => next,
-        Err(error) => {
-            return coded(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "invalid_field",
-                error.message,
-                json!({ "field": error.field }),
-            );
-        }
+        Err(error) => return error.into_response(),
     };
     // A minor has no own login (owner decision 2026-10-03): the parents fill
     // in the request. The date is not stored; staff are told to issue the
@@ -1465,6 +2137,97 @@ async fn update_my_payer(
         "lead.portal_updated",
         lead_id,
         json!({ "change": "payer", "access_kind": kind.as_str() }),
+    )
+    .await;
+    match request_payload(&state, lead_id, auth.user_id, kind).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal(error, "load request"),
+    }
+}
+
+/// `POST /me/lead-requests/{lead_id}/identification`: autosave of the lead's
+/// own statements for the GwG identification sheet (only the changed keys).
+/// The audit event names the changed fields, never their values.
+async fn update_my_identification(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(patch): Json<IdentificationPatch>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return not_found(),
+        Err(error) => return internal(error, "lock request"),
+    };
+    let current = match load_identification(&mut *tx, lead_id).await {
+        Ok((current, _)) => current,
+        Err(error) => return internal(error, "load identification"),
+    };
+    let next = match apply_identification_patch(&current, &patch, crate::app_time::today()) {
+        Ok(next) => next,
+        Err(error) => return error.into_response(),
+    };
+    let changed = changed_identification_fields(&current, &next);
+    if changed.is_empty() {
+        drop(tx);
+        return match request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal(error, "load request"),
+        };
+    }
+    if let Err(error) = store_identification(&mut tx, lead_id, &next, auth.user_id).await {
+        return internal(error, "store identification");
+    }
+    let marker = json!({
+        IDENTIFICATION_MARKER: {
+            "at": Utc::now(),
+            "by": auth.user_id,
+            "kind": kind.as_str(),
+            "hash": value_marker(lead_id, IDENTIFICATION_MARKER, Some(&next.marker_value())),
+        }
+    });
+    if let Err(error) = sqlx::query(
+        r#"UPDATE leads
+           SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(marker)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "mark identification");
+    }
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_portal_update_identification",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({ "fields": changed, "access_kind": kind.as_str() }),
+        ),
+    )
+    .await
+    {
+        return internal(error, "audit identification");
+    }
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit identification");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "identification", "access_kind": kind.as_str() }),
     )
     .await;
     match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -1717,7 +2480,36 @@ async fn upload_my_lead_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
+    multipart: Multipart,
+) -> axum::response::Response {
+    store_my_upload(state, auth, lead_id, multipart, UploadKind::Medical).await
+}
+
+/// `POST /me/lead-requests/{lead_id}/identity-document` (multipart `file`): a
+/// photo or scan of the identity document (PDF, JPG or PNG). Not medical: it
+/// needs the consent to process the request data, and staff confirm it in
+/// place like an identity document they uploaded themselves.
+async fn upload_my_identity_document(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    multipart: Multipart,
+) -> axum::response::Response {
+    store_my_upload(state, auth, lead_id, multipart, UploadKind::Identity).await
+}
+
+/// File types of a copy of the identity document.
+const IDENTITY_DOCUMENT_MIME_TYPES: [&str; 3] = ["application/pdf", "image/jpeg", "image/png"];
+
+/// Stores an upload of the caller's request as a document of the lead and
+/// registers it in `lead_portal_uploads` with the consent it was made under.
+/// Both kinds count toward the upload limit of the request.
+async fn store_my_upload(
+    state: AppState,
+    auth: AuthUser,
+    lead_id: Uuid,
     mut multipart: Multipart,
+    upload_kind: UploadKind,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
@@ -1727,15 +2519,26 @@ async fn upload_my_lead_document(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "resolve request"),
     };
-    match active_consent(&state.db, lead_id, auth.user_id, ConsentPurpose::HealthData).await {
+    match active_consent(&state.db, lead_id, auth.user_id, upload_kind.consent()).await {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return coded(
-                StatusCode::FORBIDDEN,
-                "health_consent_required",
-                "Consent to the processing of health data is required before uploading",
-                json!({ "version": HEALTH_CONSENT_VERSION }),
-            );
+            return match upload_kind {
+                UploadKind::Medical => coded(
+                    StatusCode::FORBIDDEN,
+                    "health_consent_required",
+                    "Consent to the processing of health data is required before uploading",
+                    json!({ "version": HEALTH_CONSENT_VERSION }),
+                ),
+                UploadKind::Identity => coded(
+                    StatusCode::FORBIDDEN,
+                    "inquiry_consent_required",
+                    "Please agree to the processing of your data for the request first",
+                    json!({
+                        "purpose": ConsentPurpose::InquiryProcessing.consent_type(),
+                        "version": ConsentPurpose::InquiryProcessing.version(),
+                    }),
+                ),
+            };
         }
         Err(error) => return internal(error, "load consent"),
     }
@@ -1802,6 +2605,27 @@ async fn upload_my_lead_document(
         Ok(mime_type) => mime_type,
         Err(response) => return response,
     };
+    let medical = upload_kind == UploadKind::Medical;
+    if !medical && !IDENTITY_DOCUMENT_MIME_TYPES.contains(&mime_type.as_str()) {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "unsupported_file_type",
+            "Upload the identity document as PDF, JPG or PNG",
+            json!({}),
+        );
+    }
+    // A copy of the identity document is stored like the one staff upload in
+    // the wizard (`identity`), so the identity check finds it.
+    let (auto_name, art, category, access_category) = if medical {
+        (
+            file_name.as_str(),
+            "patient_medical_upload",
+            "medical",
+            "medical",
+        )
+    } else {
+        ("Identity document", "identity", "identity", "internal")
+    };
     let input = NewStoredDocument {
         document_id: None,
         document_number: None,
@@ -1809,13 +2633,13 @@ async fn upload_my_lead_document(
         lead_id: Some(lead_id),
         order_id: None,
         appointment_id: None,
-        auto_name: &file_name,
+        auto_name,
         original_filename: &file_name,
-        art: "patient_medical_upload",
-        category: Some("medical"),
+        art,
+        category: Some(category),
         status: "active",
         visibility: "internal",
-        is_medical: true,
+        is_medical: medical,
         mime_type: &mime_type,
         klinik: None,
         ursprung: Some("lead_portal"),
@@ -1823,7 +2647,7 @@ async fn upload_my_lead_document(
         document_direction: Some("incoming"),
         document_variant: Some("original"),
         document_language: None,
-        access_category: Some("medical"),
+        access_category: Some(access_category),
         document_date: Some(crate::app_time::today()),
         source_person: Some("patient_portal"),
         source_institution: None,
@@ -1855,20 +2679,21 @@ async fn upload_my_lead_document(
             return Ok::<_, sqlx::Error>(None);
         };
         let Some((consent_id, _)) =
-            active_consent(&mut *tx, lead_id, auth.user_id, ConsentPurpose::HealthData).await?
+            active_consent(&mut *tx, lead_id, auth.user_id, upload_kind.consent()).await?
         else {
             return Ok(None);
         };
         sqlx::query(
             r#"INSERT INTO lead_portal_uploads
-                   (document_id, lead_id, uploaded_by, access_kind, consent_record_id)
-               VALUES ($1, $2, $3, $4, $5)"#,
+                   (document_id, lead_id, uploaded_by, access_kind, consent_record_id, kind)
+               VALUES ($1, $2, $3, $4, $5, $6)"#,
         )
         .bind(document_id)
         .bind(lead_id)
         .bind(auth.user_id)
         .bind(kind.as_str())
         .bind(consent_id)
+        .bind(upload_kind.as_str())
         .execute(&mut *tx)
         .await?;
         audit::write_in_transaction(
@@ -1884,7 +2709,8 @@ async fn upload_my_lead_document(
                     "consent_record_id": consent_id,
                     "mime_type": mime_type,
                     "file_size": file_size,
-                    "is_medical": true,
+                    "is_medical": medical,
+                    "kind": upload_kind.as_str(),
                 }),
             ),
         )
@@ -1909,7 +2735,12 @@ async fn upload_my_lead_document(
         Some(auth.user_id),
         "lead.portal_updated",
         lead_id,
-        json!({ "change": "document_uploaded", "document_id": document_id, "access_kind": kind.as_str() }),
+        json!({
+            "change": "document_uploaded",
+            "document_id": document_id,
+            "access_kind": kind.as_str(),
+            "kind": upload_kind.as_str(),
+        }),
     )
     .await;
     match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -1936,7 +2767,8 @@ async fn discard_stored_document(state: &AppState, document_id: Uuid, storage_ke
 }
 
 /// `DELETE /me/lead-requests/{lead_id}/documents/{document_id}`: the uploader
-/// removes an upload that staff have not reviewed yet.
+/// removes an upload — a medical document or a copy of the identity document —
+/// that staff have not taken over yet.
 async fn withdraw_my_lead_document(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1955,7 +2787,7 @@ async fn withdraw_my_lead_document(
         Err(error) => return internal(error, "lock request"),
     };
     let upload = match sqlx::query(
-        r#"SELECT u.uploaded_by, u.reviewed_at, d.storage_key, d.patient_id, d.lead_id,
+        r#"SELECT u.uploaded_by, u.reviewed_at, u.kind, d.storage_key, d.patient_id, d.lead_id,
                   d.signed_at,
                   EXISTS(SELECT 1 FROM document_shares s WHERE s.document_id = d.id) AS shared,
                   EXISTS(SELECT 1 FROM document_review_events r WHERE r.document_id = d.id)
@@ -2010,6 +2842,7 @@ async fn withdraw_my_lead_document(
         );
     }
     let storage_key: Option<String> = upload.try_get("storage_key").ok().flatten();
+    let upload_kind: String = upload.try_get("kind").unwrap_or_default();
     let staged =
         match crate::routes::documents::stage_document_file_delete(storage_key.as_deref()).await {
             Ok(staged) => staged,
@@ -2044,6 +2877,7 @@ async fn withdraw_my_lead_document(
                 json!({
                     "lead_id": lead_id,
                     "access_kind": kind.as_str(),
+                    "kind": upload_kind,
                     "file_removed_from_disk": staged.is_some(),
                 }),
             ),
@@ -2075,16 +2909,38 @@ async fn withdraw_my_lead_document(
     }
 }
 
-/// `POST /me/lead-requests/{lead_id}/submit`: "send to the manager". Marks
-/// the data as submitted and tells the lead's owner and the patient managers.
-/// The data stays editable; a later send updates the time.
+/// Body of "send to the manager". Anything else than `declared_correct: true`
+/// — also no body at all — is a request without the confirmation.
+#[derive(Default, Deserialize)]
+struct SubmitRequest {
+    #[serde(default)]
+    declared_correct: bool,
+}
+
+/// `POST /me/lead-requests/{lead_id}/submit`: "send to the manager". Needs the
+/// confirmation that the information is complete and true, marks the data as
+/// submitted and tells the lead's owner and the patient managers. The data
+/// stays editable; a later send updates the time.
 async fn submit_my_lead_request(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
+    body: axum::body::Bytes,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
+    }
+    // The checkbox of the last step (owner spec 2026-10-05).
+    let declared_correct = serde_json::from_slice::<SubmitRequest>(&body)
+        .unwrap_or_default()
+        .declared_correct;
+    if !declared_correct {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "declaration_required",
+            "Please confirm that the information is complete and true",
+            json!({}),
+        );
     }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -2100,8 +2956,21 @@ async fn submit_my_lead_request(
         Ok(payer) => payer,
         Err(error) => return internal(error, "load payer"),
     };
-    let mut missing = data.missing_for_submit();
-    missing.extend(lead_payer::portal_missing(payer.as_ref()));
+    let identification = match load_identification(&mut *tx, lead_id).await {
+        Ok((identification, _)) => identification,
+        Err(error) => return internal(error, "load identification"),
+    };
+    let identity_uploaded = match identity_document_uploaded(&mut *tx, lead_id).await {
+        Ok(uploaded) => uploaded,
+        Err(error) => return internal(error, "load identity documents"),
+    };
+    let missing = missing_for_submit(
+        &data,
+        payer.as_ref(),
+        &identification,
+        identity_uploaded,
+        crate::app_time::today(),
+    );
     if !missing.is_empty() {
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2130,8 +2999,12 @@ async fn submit_my_lead_request(
             json!({ "purpose": ConsentPurpose::InquiryProcessing.consent_type() }),
         );
     };
-    let documents: i64 = match sqlx::query_scalar(
-        r#"SELECT count(*) FROM lead_portal_uploads u
+    // Medical documents and copies of the identity document, counted apart:
+    // "documents" has always meant the medical ones.
+    let (documents, identity_documents): (i64, i64) = match sqlx::query_as(
+        r#"SELECT count(*) FILTER (WHERE u.kind = 'medical'),
+                  count(*) FILTER (WHERE u.kind = 'identity')
+           FROM lead_portal_uploads u
            JOIN documents d ON d.id = u.document_id
            WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL"#,
     )
@@ -2139,7 +3012,7 @@ async fn submit_my_lead_request(
     .fetch_one(&mut *tx)
     .await
     {
-        Ok(count) => count,
+        Ok(counts) => counts,
         Err(error) => return internal(error, "count uploads"),
     };
     if let Err(error) = sqlx::query(
@@ -2154,6 +3027,20 @@ async fn submit_my_lead_request(
     {
         return internal(error, "mark submitted");
     }
+    // The confirmation is recorded with the statements it covers (the row
+    // exists: the required statements are in it). Same time as the send.
+    if let Err(error) = sqlx::query(
+        r#"UPDATE lead_gwg_declarations
+           SET declared_correct_at = now(), declared_correct_by = $2
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "record declaration");
+    }
     if let Err(error) = audit::write_in_transaction(
         &mut tx,
         &audit::domain_event(
@@ -2166,6 +3053,8 @@ async fn submit_my_lead_request(
                 "filled_fields": data.filled_count(),
                 "total_fields": PROGRESS_FIELDS.len(),
                 "documents": documents,
+                "identity_documents": identity_documents,
+                "declared_correct": true,
                 "inquiry_consent_record_id": inquiry_consent_id,
             }),
         ),
@@ -2330,8 +3219,9 @@ async fn get_lead_portal_intake(
             })
         })
     };
-    let uploads = match sqlx::query(
-        r#"SELECT u.document_id, u.created_at, u.access_kind, u.reviewed_at,
+    let all_uploads = match sqlx::query(
+        r#"SELECT u.document_id, u.kind, u.created_at, u.access_kind, u.reviewed_at,
+                  d.original_filename, d.auto_name, d.signed_at,
                   c.granted_at AS consent_given_at, c.revoked_at AS consent_revoked_at,
                   c.context->>'text_version' AS consent_version
            FROM lead_portal_uploads u
@@ -2347,6 +3237,36 @@ async fn get_lead_portal_intake(
         Ok(rows) => rows,
         Err(error) => return internal(error, "load uploads"),
     };
+    // "Uploads" are the medical documents, as before; the copies of the
+    // identity document are listed with the lead's statements below.
+    let (identity_uploads, uploads): (Vec<&PgRow>, Vec<&PgRow>) =
+        all_uploads.iter().partition(|upload| {
+            upload.try_get::<String, _>("kind").ok().as_deref()
+                == Some(UploadKind::Identity.as_str())
+        });
+    // The lead's own GwG statements (PEP, identity document, …) are for the
+    // roles that read the payer declaration; the concierge gets none of it.
+    let statements_visible = lead_payer::may_view(&auth);
+    let (identification, identification_updated_at) = if statements_visible {
+        match load_identification(&state.db, lead_id).await {
+            Ok(loaded) => loaded,
+            Err(error) => return internal(error, "load identification"),
+        }
+    } else {
+        (Identification::default(), None)
+    };
+    let identity_documents: Vec<Value> = identity_uploads
+        .iter()
+        .filter(|_| statements_visible)
+        .map(|upload| {
+            json!({
+                "id": upload.try_get::<Uuid, _>("document_id").ok(),
+                "file_name": upload_file_name(upload),
+                "uploaded_at": upload.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                "reviewed": upload_taken_over(upload),
+            })
+        })
+        .collect();
     let consents = match sqlx::query(
         r#"SELECT c.id, c.consent_type, c.granted_at, c.revoked_at,
                   c.context->>'text_version' AS version,
@@ -2448,6 +3368,10 @@ async fn get_lead_portal_intake(
         "consents": consent_items,
         "uploads": upload_items,
         "uploads_hidden": !medical,
+        "identification": identification.to_json(),
+        "identification_updated_at": identification_updated_at,
+        "identification_hidden": !statements_visible,
+        "identity_documents": identity_documents,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
@@ -2605,9 +3529,11 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
     }
     let rows = match sqlx::query(&format!(
         r#"SELECT l.id, {PERSONAL_DATA_COLUMNS}, l.portal_submitted_at,
+                  -- The medical documents, as before; a copy of the identity
+                  -- document is not one of "N documents".
                   (SELECT count(*) FROM lead_portal_uploads u
                    JOIN documents d ON d.id = u.document_id
-                   WHERE u.lead_id = l.id AND u.withdrawn_at IS NULL
+                   WHERE u.lead_id = l.id AND u.kind = 'medical' AND u.withdrawn_at IS NULL
                      AND d.file_deleted_at IS NULL) AS documents,
                   (SELECT count(*) FROM lead_portal_access a
                    WHERE a.lead_id = l.id AND a.revoked_at IS NULL) AS guardians
@@ -2659,12 +3585,17 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
 }
 
 /// Clears what the portal intake keeps on the lead itself, in the purge
-/// transaction (uploads go with the lead's documents, consents stay as
-/// evidence without personal data of their own).
+/// transaction: the markers, the time of sending, the upload rows of both
+/// kinds and the lead's own GwG statements (uploads go with the lead's
+/// documents, consents stay as evidence without personal data of their own).
 pub(crate) async fn purge_portal_intake_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
 ) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM lead_gwg_declarations WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
     sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = '{}'::jsonb,
@@ -2912,6 +3843,342 @@ mod tests {
             let error = apply_personal_data_patch(&anna(), &patch, today()).unwrap_err();
             assert_eq!(error.field, field);
         }
+    }
+
+    fn identification_patch(body: Value) -> IdentificationPatch {
+        serde_json::from_value(body).unwrap()
+    }
+
+    #[test]
+    fn identification_patch_changes_only_the_sent_keys_and_normalises() {
+        let stated = apply_identification_patch(
+            &Identification::default(),
+            &identification_patch(json!({
+                "salutation": "MS",
+                "former_names": "  Anna   Beispiel ",
+                "birth_place": " Kyiv ",
+                "birth_country": "ua",
+                "contact_channels": ["messenger", "email", "email", ""],
+                "id_document_type": "Passport",
+                "id_document_number": " AB  123456 ",
+                "id_issuing_authority": "Stadt Kyiv",
+                "id_issuing_country": "ua",
+                "id_issued_on": "2021-02-01",
+                "id_valid_until": "2026-10-03",
+                "pep_self": false,
+                "pep_related": true,
+                "pep_related_details": " Bruder,\r\nMinister \n",
+                "payment_background": "Mein Onkel zahlt."
+            })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(stated.salutation.as_deref(), Some("ms"));
+        assert_eq!(stated.former_names.as_deref(), Some("Anna Beispiel"));
+        assert_eq!(stated.birth_place.as_deref(), Some("Kyiv"));
+        assert_eq!(stated.birth_country.as_deref(), Some("UA"));
+        // The channels are stored once each, in the order of the form.
+        assert_eq!(stated.contact_channels, ["email", "messenger"]);
+        assert_eq!(stated.id_document_type.as_deref(), Some("passport"));
+        assert_eq!(stated.id_document_number.as_deref(), Some("AB 123456"));
+        // The last day of validity still counts.
+        assert_eq!(stated.id_valid_until, Some(today()));
+        assert_eq!(stated.pep_self, Some(false));
+        // A text over several lines keeps its lines.
+        assert_eq!(
+            stated.pep_related_details.as_deref(),
+            Some("Bruder,\nMinister")
+        );
+        assert_eq!(
+            changed_identification_fields(&Identification::default(), &stated),
+            vec![
+                "salutation",
+                "former_names",
+                "birth_place",
+                "birth_country",
+                "contact_channels",
+                "id_document_type",
+                "id_document_number",
+                "id_issuing_authority",
+                "id_issuing_country",
+                "id_issued_on",
+                "id_valid_until",
+                "pep_self",
+                "pep_related",
+                "pep_related_details",
+                "payment_background"
+            ]
+        );
+
+        // Only the sent keys change; `null` and "" clear, an absent key stays.
+        let next = apply_identification_patch(
+            &stated,
+            &identification_patch(json!({
+                "former_names": null,
+                "birth_place": "",
+                "id_issued_on": "",
+                "contact_channels": null,
+                "pep_self": null
+            })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(
+            changed_identification_fields(&stated, &next),
+            vec![
+                "former_names",
+                "birth_place",
+                "contact_channels",
+                "id_issued_on",
+                "pep_self"
+            ]
+        );
+        assert_eq!(next.pep_self, None);
+        assert_eq!(next.birth_country.as_deref(), Some("UA"));
+        // The marker of the statements follows their values.
+        assert_ne!(next.marker_value(), stated.marker_value());
+
+        // The same values again change nothing.
+        let same = apply_identification_patch(
+            &stated,
+            &identification_patch(json!({ "birth_country": "UA", "pep_related": true })),
+            today(),
+        )
+        .unwrap();
+        assert!(changed_identification_fields(&stated, &same).is_empty());
+    }
+
+    #[test]
+    fn details_of_a_legal_question_belong_to_a_yes() {
+        let yes = apply_identification_patch(
+            &Identification::default(),
+            &identification_patch(json!({
+                "pep_self": true,
+                "pep_self_details": "Abgeordnete, Ukraine, 2019–2023",
+                "high_risk_country": true,
+                "high_risk_country_code": "ir",
+                "sanctions_links": true,
+                "sanctions_links_details": "Geschäftspartner"
+            })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(yes.high_risk_country_code.as_deref(), Some("IR"));
+        assert!(yes.pep_self_details.is_some());
+
+        let no = apply_identification_patch(
+            &yes,
+            &identification_patch(json!({
+                "pep_self": false,
+                "high_risk_country": null,
+                "sanctions_links": false
+            })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(no.pep_self_details, None);
+        assert_eq!(no.high_risk_country_code, None);
+        assert_eq!(no.sanctions_links_details, None);
+
+        // Details without a "yes" are not kept.
+        let stray = apply_identification_patch(
+            &Identification::default(),
+            &identification_patch(json!({ "pep_related_details": "Bruder" })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(stray, Identification::default());
+    }
+
+    #[test]
+    fn identification_patch_rejects_invalid_values() {
+        for (body, field, code) in [
+            (json!({ "salutation": "dr" }), "salutation", "invalid_field"),
+            (
+                json!({ "former_names": "x".repeat(201) }),
+                "former_names",
+                "invalid_field",
+            ),
+            (
+                json!({ "birth_country": "Ukraine" }),
+                "birth_country",
+                "invalid_field",
+            ),
+            (
+                json!({ "habitual_residence_country": "DEU" }),
+                "habitual_residence_country",
+                "invalid_field",
+            ),
+            (
+                json!({ "contact_channels": ["email", "fax"] }),
+                "contact_channels",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_document_type": "driving_licence" }),
+                "id_document_type",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_document_number": "1".repeat(61) }),
+                "id_document_number",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_issued_on": "2026-10-04" }),
+                "id_issued_on",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_issued_on": "01.02.2021" }),
+                "id_issued_on",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_valid_until": "2031-02-30" }),
+                "id_valid_until",
+                "invalid_field",
+            ),
+            (
+                json!({ "id_valid_until": "2026-10-02" }),
+                "id_valid_until",
+                "id_document_expired",
+            ),
+            (
+                json!({ "pep_self": true, "pep_self_details": "x".repeat(2001) }),
+                "pep_self_details",
+                "invalid_field",
+            ),
+            (
+                json!({ "high_risk_country": true, "high_risk_country_code": "Iran" }),
+                "high_risk_country_code",
+                "invalid_field",
+            ),
+        ] {
+            let error = apply_identification_patch(
+                &Identification::default(),
+                &identification_patch(body),
+                today(),
+            )
+            .unwrap_err();
+            assert_eq!((error.field, error.code), (field, code));
+        }
+
+        // A stored date that has passed since does not block other changes.
+        let expired = Identification {
+            id_valid_until: NaiveDate::from_ymd_opt(2026, 10, 1),
+            ..Default::default()
+        };
+        let next = apply_identification_patch(
+            &expired,
+            &identification_patch(json!({ "birth_place": "Wien" })),
+            today(),
+        )
+        .unwrap();
+        assert_eq!(next.id_valid_until, expired.id_valid_until);
+    }
+
+    #[test]
+    fn the_confirmation_and_unknown_keys_cannot_be_patched() {
+        for body in [
+            json!({ "declared_correct_at": "2026-10-05T09:20:00Z" }),
+            json!({ "declared_correct": true }),
+            json!({ "first_name": "Anna" }),
+        ] {
+            assert!(serde_json::from_value::<IdentificationPatch>(body).is_err());
+        }
+        // Without the confirmation there is nothing to send, whatever the body.
+        for body in ["", "{}", "null", r#"{"declared_correct":false}"#] {
+            let request: SubmitRequest =
+                serde_json::from_slice(body.as_bytes()).unwrap_or_default();
+            assert!(!request.declared_correct, "{body}");
+        }
+        let request: SubmitRequest =
+            serde_json::from_slice(br#"{"declared_correct":true}"#).unwrap_or_default();
+        assert!(request.declared_correct);
+    }
+
+    #[test]
+    fn sending_needs_the_identification_in_form_order() {
+        let mut data = anna();
+        data.date_of_birth = NaiveDate::from_ymd_opt(1988, 5, 1);
+        data.legal_sex = Some("female".into());
+        data.citizenships = vec!["UA".into()];
+        data.street_address = Some("Musterweg 1".into());
+        data.zip_code = Some("10115".into());
+        data.city = Some("Berlin".into());
+        data.country = Some("DE".into());
+        assert_eq!(
+            missing_for_submit(&data, None, &Identification::default(), false, today()),
+            vec![
+                "payer_kind",
+                "birth_place",
+                "birth_country",
+                "id_document_type",
+                "id_document_number",
+                "id_issuing_authority",
+                "id_issuing_country",
+                "id_valid_until",
+                "id_document_upload",
+                "payer_own_account",
+                "pep_self",
+                "pep_related",
+                "high_risk_country",
+                "sanctions_links"
+            ]
+        );
+
+        // A "yes" asks for its details, a third-party payer for the background,
+        // "no" to the own interest for the person, and a document that has
+        // expired since it was entered is missing again.
+        let payer = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            first_name: Some("Viktor".into()),
+            last_name: Some("Zahler".into()),
+            citizenships: vec!["AT".into()],
+            acts_on_own_account: false,
+            own_account_answered: true,
+            ..Default::default()
+        };
+        let stated = Identification {
+            birth_place: Some("Kyiv".into()),
+            birth_country: Some("UA".into()),
+            id_document_type: Some("passport".into()),
+            id_document_number: Some("AB123456".into()),
+            id_issuing_authority: Some("Stadt Kyiv".into()),
+            id_issuing_country: Some("UA".into()),
+            id_valid_until: NaiveDate::from_ymd_opt(2026, 10, 2),
+            pep_self: Some(true),
+            pep_related: Some(false),
+            high_risk_country: Some(true),
+            sanctions_links: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            missing_for_submit(&data, Some(&payer), &stated, true, today()),
+            vec![
+                "id_valid_until",
+                "payer_beneficial_owner",
+                "pep_self_details",
+                "high_risk_country_code",
+                "sanctions_links_details",
+                "payment_background"
+            ]
+        );
+
+        let complete = Identification {
+            id_valid_until: NaiveDate::from_ymd_opt(2031, 2, 1),
+            pep_self: Some(false),
+            high_risk_country: Some(false),
+            sanctions_links: Some(false),
+            payment_background: Some("Mein Onkel zahlt.".into()),
+            ..stated
+        };
+        let payer = lead_payer::Declaration {
+            beneficial_owner_name: Some("Viktor Zahler".into()),
+            ..payer
+        };
+        assert!(missing_for_submit(&data, Some(&payer), &complete, true, today()).is_empty());
     }
 
     #[test]

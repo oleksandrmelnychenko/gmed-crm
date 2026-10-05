@@ -2663,15 +2663,24 @@ struct GwgIdentificationSheet {
     last_name: String,
     birth_date: Option<NaiveDate>,
     birth_place: Option<String>,
+    /// ISO code; the lead states it in the cabinet.
+    birth_country: Option<String>,
     /// ISO codes.
     citizenships: Vec<String>,
     street: Option<String>,
     zip: Option<String>,
     city: Option<String>,
     country: Option<String>,
-    /// What the lead record knows about the identity document. Type, number
-    /// and issuing authority are not asked yet; the wizard keeps the expiry.
-    identity_document: Option<String>,
+    /// The identity document as the lead stated it in the cabinet: `passport`,
+    /// `id_card` or `residence_permit`, its number, the issuing authority and
+    /// its country (ISO code). Until then the wizard's passport expiry is all
+    /// the lead record knows.
+    identity_document_type: Option<String>,
+    identity_document_number: Option<String>,
+    identity_document_authority: Option<String>,
+    identity_document_country: Option<String>,
+    identity_document_issued_on: Option<NaiveDate>,
+    identity_document_valid_until: Option<NaiveDate>,
     /// A passport or identity document is stored with the lead.
     identity_document_on_file: bool,
     /// Parents or guardians of a minor: name and relation as entered.
@@ -2690,7 +2699,10 @@ struct GwgIdentificationSheet {
 }
 
 /// Reads the sheet of the patient or of the third-party payer from the lead:
-/// personal data, the payer declaration and the AML answers of the wizard.
+/// personal data, the lead's own statements from the cabinet (place of birth,
+/// identity document, the legal questions), the payer declaration and the AML
+/// answers of the wizard. A "yes" of the lead to the PEP or the high-risk
+/// country question counts like staff's own answer in section 5.
 async fn load_gwg_identification_sheet(
     state: &AppState,
     lead_id: Uuid,
@@ -2736,6 +2748,9 @@ async fn load_gwg_identification_sheet(
             .await
             .map_err(|error| failed(error, "payer declaration"))?
     };
+    let (statements, _) = super::lead_portal_intake::load_identification(&state.db, lead_id)
+        .await
+        .map_err(|error| failed(error, "lead statements"))?;
     let text = |column: &str| {
         row.try_get::<Option<String>, _>(column)
             .ok()
@@ -2758,7 +2773,12 @@ async fn load_gwg_identification_sheet(
     let mut sheet = GwgIdentificationSheet {
         reviewer_name: text("reviewer_name").unwrap_or_default(),
         review_date: today,
-        politically_exposed: aml.pep_contract_partner || aml.pep_beneficial_owner,
+        // The lead's own answers (PEP himself, or a family member or close
+        // associate) count like staff's.
+        politically_exposed: aml.pep_contract_partner
+            || aml.pep_beneficial_owner
+            || statements.pep_self == Some(true)
+            || statements.pep_related == Some(true),
         unusual_transaction: aml.unusual_complex_or_large
             || aml.unusual_pattern
             || aml.no_lawful_purpose,
@@ -2801,11 +2821,20 @@ async fn load_gwg_identification_sheet(
         sheet.zip = text("zip_code");
         sheet.city = text("city");
         sheet.country = text("country");
-        sheet.identity_document = wizard_state
-            .get("passport_expiry")
-            .and_then(Value::as_str)
-            .and_then(|value| NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok())
-            .map(|expiry| format!("gültig bis {}", expiry.format("%d.%m.%Y")));
+        sheet.birth_place = statements.birth_place.clone();
+        sheet.birth_country = statements.birth_country.clone();
+        sheet.identity_document_type = statements.id_document_type.clone();
+        sheet.identity_document_number = statements.id_document_number.clone();
+        sheet.identity_document_authority = statements.id_issuing_authority.clone();
+        sheet.identity_document_country = statements.id_issuing_country.clone();
+        sheet.identity_document_issued_on = statements.id_issued_on;
+        // The wizard's passport expiry stands in until the lead states it.
+        sheet.identity_document_valid_until = statements.id_valid_until.or_else(|| {
+            wizard_state
+                .get("passport_expiry")
+                .and_then(Value::as_str)
+                .and_then(|value| NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok())
+        });
         sheet.identity_document_on_file =
             row.try_get::<bool, _>("identity_on_file").unwrap_or(false);
         if super::leads::is_minor_on(sheet.birth_date, today) {
@@ -2830,12 +2859,17 @@ async fn load_gwg_identification_sheet(
                 }
             }
         }
-        if let Some(declaration) = declaration.as_ref() {
+        // Neither box is ticked until the lead or staff answered the question.
+        if let Some(declaration) = declaration
+            .as_ref()
+            .filter(|declaration| declaration.own_account_answered)
+        {
             sheet.acts_on_own_account = Some(declaration.acts_on_own_account);
             sheet.beneficial_owner_name = declaration.beneficial_owner_name.clone();
             sheet.beneficial_owner_note = declaration.beneficial_owner_note.clone();
         }
         risk_countries.extend(sheet.country.clone());
+        risk_countries.extend(statements.habitual_residence_country.clone());
         risk_countries.extend(sheet.citizenships.iter().cloned());
         risk_countries.extend(
             wizard_state
@@ -2847,6 +2881,7 @@ async fn load_gwg_identification_sheet(
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
+        || statements.high_risk_country == Some(true)
         || risk_countries
             .iter()
             .any(|country| super::leads::is_enhanced_due_diligence_country(country));
@@ -20154,14 +20189,25 @@ fn build_gwg_identification_pdf(
         "Vor- und Nachname",
         Some(full_name.as_str()).filter(|name| !name.is_empty()),
     );
-    let birth = match (
-        date(sheet.birth_date),
-        sheet.birth_place.as_deref().map(str::trim),
+    // "Kyiv (Ukraine)": the place with the country of birth, either alone
+    // when the other is not stated.
+    let birth_place = match (
+        sheet
+            .birth_place
+            .as_deref()
+            .map(str::trim)
+            .filter(|place| !place.is_empty()),
+        sheet.birth_country.as_deref().map(german_document_country),
     ) {
-        (Some(day), Some(place)) if !place.is_empty() => Some(format!("{day}, {place}")),
-        (Some(day), _) => Some(format!("{day}, Geburtsort: —")),
-        (None, Some(place)) if !place.is_empty() => Some(format!("—, {place}")),
-        _ => None,
+        (Some(place), Some(country)) => Some(format!("{place} ({country})")),
+        (Some(place), None) => Some(place.to_string()),
+        (None, country) => country,
+    };
+    let birth = match (date(sheet.birth_date), birth_place) {
+        (Some(day), Some(place)) => Some(format!("{day}, {place}")),
+        (Some(day), None) => Some(format!("{day}, Geburtsort: —")),
+        (None, Some(place)) => Some(format!("—, {place}")),
+        (None, None) => None,
     };
     aml_labeled_value(&mut layout, "Geburtsdatum, Geburtsort", birth.as_deref());
     let citizenships = sheet
@@ -20198,10 +20244,56 @@ fn build_gwg_identification_pdf(
         "Wohnanschrift",
         Some(address.as_str()).filter(|value| !value.is_empty()),
     );
+    // "Reisepass, Nr. AB123456, ausgestellt von Stadt Kyiv (Ukraine) am
+    // 01.02.2021, gültig bis 01.02.2031": only what is known.
+    let issued = {
+        let authority = sheet
+            .identity_document_authority
+            .as_deref()
+            .map(str::trim)
+            .filter(|authority| !authority.is_empty());
+        let country = sheet
+            .identity_document_country
+            .as_deref()
+            .map(german_document_country);
+        let by = match (authority, country) {
+            (Some(authority), Some(country)) => Some(format!("von {authority} ({country})")),
+            (Some(authority), None) => Some(format!("von {authority}")),
+            (None, Some(country)) => Some(format!("in {country}")),
+            (None, None) => None,
+        };
+        let on = date(sheet.identity_document_issued_on).map(|day| format!("am {day}"));
+        let parts = [by, on].into_iter().flatten().collect::<Vec<_>>();
+        (!parts.is_empty()).then(|| format!("ausgestellt {}", parts.join(" ")))
+    };
+    let identity_document = [
+        sheet
+            .identity_document_type
+            .as_deref()
+            .map(|kind| match kind {
+                "passport" => "Reisepass",
+                "id_card" => "Personalausweis",
+                "residence_permit" => "Aufenthaltstitel",
+                other => other,
+            })
+            .map(str::to_string),
+        sheet
+            .identity_document_number
+            .as_deref()
+            .map(str::trim)
+            .filter(|number| !number.is_empty())
+            .map(|number| format!("Nr. {number}")),
+        issued,
+        date(sheet.identity_document_valid_until).map(|day| format!("gültig bis {day}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(", ");
     aml_labeled_value(
         &mut layout,
         "Ausweisdokument (Art, Nummer, ausstellende Behörde)",
-        sheet.identity_document.as_deref(),
+        Some(identity_document.as_str()).filter(|value| !value.is_empty()),
     );
     aml_checkbox_line(
         &mut layout,
@@ -20360,8 +20452,9 @@ fn build_gwg_identification_pdf(
     legal_signature_line(
         &mut layout,
         // The name stands under the signature line; beside the date it would
-        // be cut off. The label stays: the signature frames read from the PDF
-        // text take an underline after "Bearbeiter" for the agency's
+        // be cut off. The label stays beside the date: it tells the reader
+        // who signs, and the signature frames read from the PDF text take an
+        // underline after "Bearbeiter" for the agency's
         // (`document_signatures::frames`), as the recorded frame says.
         &format!("Datum: {review_date}     Bearbeiter/in:"),
         reviewer,
@@ -29635,12 +29728,21 @@ mod tests {
             first_name: "Anna".to_string(),
             last_name: "Beispiel".to_string(),
             birth_date: NaiveDate::from_ymd_opt(1988, 5, 1),
+            // What the lead stated in the cabinet: place and country of birth
+            // and the identity document.
+            birth_place: Some("Kyiv".to_string()),
+            birth_country: Some("UA".to_string()),
             citizenships: vec!["UA".to_string(), "DE".to_string()],
             street: Some("Musterweg 1".to_string()),
             zip: Some("10115".to_string()),
             city: Some("Berlin".to_string()),
             country: Some("DE".to_string()),
-            identity_document: Some("gültig bis 01.02.2031".to_string()),
+            identity_document_type: Some("passport".to_string()),
+            identity_document_number: Some("AB123456".to_string()),
+            identity_document_authority: Some("Stadt Kyiv".to_string()),
+            identity_document_country: Some("UA".to_string()),
+            identity_document_issued_on: NaiveDate::from_ymd_opt(2021, 2, 1),
+            identity_document_valid_until: NaiveDate::from_ymd_opt(2031, 2, 1),
             identity_document_on_file: true,
             acts_on_own_account: Some(false),
             beneficial_owner_name: Some("Viktor Zahler".to_string()),
@@ -29663,9 +29765,11 @@ mod tests {
         assert!(text.contains("Identifizierung natürlicher Personen"));
         assert!(text.contains("Beispiel, Anna"));
         assert!(text.contains("Patient/in"));
-        assert!(text.contains("01.05.1988"));
+        assert!(text.contains("01.05.1988, Kyiv (Ukraine)"));
         assert!(text.contains("Ukraine, Deutschland"));
         assert!(text.contains("Musterweg 1"));
+        assert!(text.contains("Reisepass, Nr. AB123456"));
+        assert!(text.contains("ausgestellt von Stadt Kyiv (Ukraine) am 01.02.2021"));
         assert!(text.contains("gültig bis 01.02.2031"));
         assert!(text.contains("A-20261005-0001"));
         assert!(text.contains("Bearbeiter Beispiel"));
@@ -29676,11 +29780,20 @@ mod tests {
         assert!(text.contains("Begründung einer Geschäftsbeziehung"));
 
         // Nobody acts for an adult; without a "yes" the annex is not needed.
+        // Of the identity document the sheet names only what is known: here
+        // the type and the expiry.
         let plain = super::GwgIdentificationSheet {
             increased_risk: false,
             politically_exposed: false,
             acts_on_own_account: Some(true),
             beneficial_owner_name: None,
+            birth_place: None,
+            birth_country: None,
+            identity_document_type: Some("residence_permit".to_string()),
+            identity_document_number: None,
+            identity_document_authority: None,
+            identity_document_country: None,
+            identity_document_issued_on: None,
             ..sheet
         };
         let bytes = super::build_gwg_identification_pdf(
@@ -29694,6 +29807,10 @@ mod tests {
         assert!(text.contains("der Vertragspartner handelt selbst"));
         assert!(text.contains("ist nicht erforderlich"));
         assert!(!text.contains("Viktor Zahler"));
+        assert!(text.contains("01.05.1988, Geburtsort:"));
+        assert!(!text.contains("Kyiv"));
+        assert!(text.contains("Aufenthaltstitel, gültig bis 01.02.2031"));
+        assert!(!text.contains("ausgestellt"));
     }
 
     fn parents_as_party() -> super::ContractingDoc {

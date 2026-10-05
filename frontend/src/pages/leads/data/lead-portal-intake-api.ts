@@ -46,6 +46,50 @@ export type LeadGuardianCandidate = {
   access_id: string | null;
 };
 
+/**
+ * The lead's own GwG statements from the cabinet (place of birth, identity
+ * document, PEP, …). Staff read them; they do not edit them.
+ */
+export type LeadGwgIdentification = {
+  /** `mr`, `ms` or `none`. */
+  salutation: string | null;
+  former_names: string | null;
+  birth_place: string | null;
+  /** ISO 3166-1 alpha-2, like every country below. */
+  birth_country: string | null;
+  habitual_residence_country: string | null;
+  /** Subset of `email`, `phone`, `messenger`. */
+  contact_channels: string[];
+  /** `passport`, `id_card` or `residence_permit`. */
+  id_document_type: string | null;
+  id_document_number: string | null;
+  id_issuing_authority: string | null;
+  id_issuing_country: string | null;
+  /** Calendar dates, `YYYY-MM-DD`. */
+  id_issued_on: string | null;
+  id_valid_until: string | null;
+  /** Yes/no answers: null while the lead has not answered. */
+  pep_self: boolean | null;
+  pep_self_details: string | null;
+  pep_related: boolean | null;
+  pep_related_details: string | null;
+  high_risk_country: boolean | null;
+  high_risk_country_code: string | null;
+  sanctions_links: boolean | null;
+  sanctions_links_details: string | null;
+  payment_background: string | null;
+  /** Set by the server when the lead sends the request with the confirmation. */
+  declared_correct_at: string | null;
+};
+
+/** A photo or scan of the identity document the lead uploaded in the cabinet. */
+export type LeadIdentityDocument = {
+  id: string;
+  file_name: string;
+  uploaded_at: string | null;
+  reviewed: boolean;
+};
+
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
 export type LeadPortalIntake = {
   lead_id: string;
@@ -65,6 +109,13 @@ export type LeadPortalIntake = {
   can_issue: boolean;
   /** The caller may mark patient uploads as reviewed (leads.edit + medical access). */
   can_review_uploads: boolean;
+  /** The lead's own GwG statements; null when the server does not send them. */
+  identification: LeadGwgIdentification | null;
+  /** Last change of these statements by the lead; null when nothing was entered. */
+  identification_updated_at: string | null;
+  /** The caller's role may not read the statements; they come empty then. */
+  identification_hidden: boolean;
+  identity_documents: LeadIdentityDocument[];
 };
 
 export type LeadGuardianAccessIssued = {
@@ -106,7 +157,66 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     minor: Boolean(raw.minor),
     can_issue: Boolean(raw.can_issue),
     can_review_uploads: Boolean(raw.can_review_uploads),
+    identification: normalizeIdentification(raw.identification),
+    identification_updated_at: textOrNull(raw.identification_updated_at),
+    identification_hidden: Boolean(raw.identification_hidden),
+    identity_documents: normalizeIdentityDocuments(raw.identity_documents),
   };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+const textOrNull = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
+const answerOrNull = (value: unknown) => (typeof value === "boolean" ? value : null);
+
+/** The lead's statements with every key present; null when the server sent none. */
+function normalizeIdentification(value: unknown): LeadGwgIdentification | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  return {
+    salutation: textOrNull(raw.salutation),
+    former_names: textOrNull(raw.former_names),
+    birth_place: textOrNull(raw.birth_place),
+    birth_country: textOrNull(raw.birth_country),
+    habitual_residence_country: textOrNull(raw.habitual_residence_country),
+    contact_channels: Array.isArray(raw.contact_channels)
+      ? raw.contact_channels.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+      : [],
+    id_document_type: textOrNull(raw.id_document_type),
+    id_document_number: textOrNull(raw.id_document_number),
+    id_issuing_authority: textOrNull(raw.id_issuing_authority),
+    id_issuing_country: textOrNull(raw.id_issuing_country),
+    id_issued_on: textOrNull(raw.id_issued_on),
+    id_valid_until: textOrNull(raw.id_valid_until),
+    pep_self: answerOrNull(raw.pep_self),
+    pep_self_details: textOrNull(raw.pep_self_details),
+    pep_related: answerOrNull(raw.pep_related),
+    pep_related_details: textOrNull(raw.pep_related_details),
+    high_risk_country: answerOrNull(raw.high_risk_country),
+    high_risk_country_code: textOrNull(raw.high_risk_country_code),
+    sanctions_links: answerOrNull(raw.sanctions_links),
+    sanctions_links_details: textOrNull(raw.sanctions_links_details),
+    payment_background: textOrNull(raw.payment_background),
+    declared_correct_at: textOrNull(raw.declared_correct_at),
+  };
+}
+
+function normalizeIdentityDocuments(value: unknown): LeadIdentityDocument[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const raw = asRecord(item);
+    if (!raw || typeof raw.id !== "string") return [];
+    return [
+      {
+        id: raw.id,
+        file_name: textOrNull(raw.file_name) ?? "",
+        uploaded_at: textOrNull(raw.uploaded_at),
+        reviewed: raw.reviewed === true,
+      },
+    ];
+  });
 }
 
 export function setLeadStep1FillMode(leadId: string, mode: Step1FillMode): Promise<{ fill_mode: Step1FillMode }> {

@@ -28,6 +28,8 @@ export type SourceOfFunds = (typeof SOURCE_OF_FUNDS)[number];
 export type PayerDeclaration = {
   payer_kind: PayerKind;
   acts_on_own_account: boolean;
+  /** False until the lead cabinet or staff gave the answer; absent on an older server. */
+  own_account_answered?: boolean;
   beneficial_owner_name: string | null;
   beneficial_owner_note: string | null;
   source_of_funds: SourceOfFunds | null;

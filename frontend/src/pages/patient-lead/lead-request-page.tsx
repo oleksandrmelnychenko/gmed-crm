@@ -3,28 +3,24 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
-  CircleAlert,
   CircleCheck,
   Clock,
   FileText,
   LoaderCircle,
-  Pencil,
   Send,
-  Trash2,
   Upload,
   UserRound,
 } from "lucide-react";
 
-import { Banner, Section, SuccessBanner } from "@/components/ui-shell";
+import { Banner, Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
-import { checkboxClass, inputClass, selectClass, tokens } from "@/components/record-workspace/primitives/design-tokens";
-import { ApiRequestError } from "@/lib/api";
-import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -33,56 +29,59 @@ import {
   HEALTH_CONSENT,
   INQUIRY_CONSENT,
   fetchMyLeadRequests,
-  giveLeadConsent,
-  revokeLeadConsent,
-  saveLeadPayer,
   saveLeadPersonalData,
-  submitLeadRequest,
   uploadLeadDocument,
   withdrawLeadDocument,
   type LeadRequest,
 } from "./lead-request-api";
 import {
+  ContactChannelsField,
+  IdentificationCountrySelect,
+  IdentificationFormField,
+  IdentificationTextInput,
+  IdentityDocumentSection,
+  LegalQuestionsSection,
+  useIdentificationForm,
+} from "./lead-request-identification";
+import {
   MAX_UPLOAD_BYTES,
-  canSubmit,
   changedSinceSubmit,
+  combinedSaveState,
   consentGiven,
   consentText,
-  draftFromPayer,
   draftFromPersonalData,
-  formatFileSize,
   languageName,
-  missingForSubmit,
-  payerInput,
   personalDataPatch,
   rejectedValue,
   withInsuranceAnswer,
-  type PayerDraft,
-  type PayerField,
   type PersonalDraft,
   type PersonalField,
   type RejectedValue,
+  type SaveState,
 } from "./lead-request-model";
+import {
+  ConsentCheckbox,
+  FormField,
+  SaveIndicator,
+  StepFooter,
+  UploadedFileList,
+  errorBody,
+  errorMessage,
+  useAutosave,
+  useRequestQueue,
+  type RequestQueue,
+  type Step,
+} from "./lead-request-parts";
+import { PayerSection } from "./lead-request-payer-section";
+import { SendStep } from "./lead-request-send-step";
 import {
   LEAD_CABINET_LANGS,
   asLeadCabinetLang,
   leadRequestText,
-  payerFieldLabel,
   resolveLeadCabinetLang,
-  submitFieldLabel,
   type LeadCabinetLang,
   type LeadRequestText,
 } from "./lead-request-text";
-
-type Step = "data" | "documents" | "send";
-
-function errorBody(error: unknown): Record<string, unknown> | null {
-  return error instanceof ApiRequestError && error.body ? (error.body as Record<string, unknown>) : null;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * Lead cabinet (owner decision 2026-10-03): the prospective patient — or a
@@ -273,6 +272,8 @@ function LeadRequestView({
 }) {
   const guardian = request.access_kind === "guardian";
   const [step, setStep] = useState<Step>(request.submitted_at ? "send" : "data");
+  // One queue for the writes of all steps: the last answer shown is the newest state.
+  const enqueue = useRequestQueue();
   const deadline = request.retention_deadline_at ? formatAppDate(request.retention_deadline_at) : "";
   // The same step tabs as the staff lead wizard (design taken over 2026-10-04).
   const steps = [
@@ -351,86 +352,109 @@ function LeadRequestView({
 
       <div className="px-4 pt-5 sm:px-5">
       {step === "data" ? (
-        <PersonalDataStep request={request} text={text} lang={lang} onChange={onChange} onNext={() => setStep("documents")} />
+        <PersonalDataStep
+          request={request}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onNext={() => setStep("documents")}
+        />
       ) : null}
       {step === "documents" ? (
         <DocumentsStep
           request={request}
           text={text}
           lang={lang}
+          enqueue={enqueue}
           onChange={onChange}
           onBack={() => setStep("data")}
           onNext={() => setStep("send")}
         />
       ) : null}
       {step === "send" ? (
-        <SendStep request={request} text={text} onChange={onChange} onEdit={(target) => setStep(target)} />
+        <SendStep
+          request={request}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onEdit={(target) => setStep(target)}
+        />
       ) : null}
       </div>
     </article>
   );
 }
 
-const STEP_COUNT = 3;
+/** The parts of step "data" that save on their own; the footer shows one state for all. */
+type SavePart = "personal" | "payer" | "identification";
 
-/** The bottom bar of a step, as in the staff lead wizard: progress and save state above the buttons. */
-function StepFooter({
-  index,
-  text,
-  status,
-  children,
-}: {
-  index: number;
-  text: LeadRequestText;
-  status?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
-    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-        <span>{text.stepOf(index, STEP_COUNT)}</span>
-        {status}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
-    </div>
-  );
-}
-
-type SaveState = "idle" | "saving" | "saved" | "error";
-
+/**
+ * Step "data" in the order of the GwG form (owner spec 2026-10-05): consent
+ * and contact channels, person, address, contact, identity document,
+ * insurance, who pays, legal questions.
+ */
 function PersonalDataStep({
   request,
   text,
   lang,
+  enqueue,
   onChange,
   onNext,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
   lang: string;
+  enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onNext: () => void;
 }) {
   const [draft, setDraft] = useState<PersonalDraft>(() => draftFromPersonalData(request.personal_data));
   const savedRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
   const rejectedRef = useRef<RejectedValue | null>(null);
-  const queueRef = useRef<Promise<void>>(Promise.resolve());
-  const [saveState, setSaveState] = useState<SaveState>("idle");
+  const failedRef = useRef(false);
+  const [saveStates, setSaveStates] = useState<Record<SavePart, SaveState>>({
+    personal: "idle",
+    payer: "idle",
+    identification: "idle",
+  });
   const [fieldError, setFieldError] = useState<{ field: string; message: string } | null>(null);
+  const guardian = request.access_kind === "guardian";
+
+  const setSaveState = useCallback((part: SavePart, state: SaveState) => {
+    setSaveStates((current) => (current[part] === state ? current : { ...current, [part]: state }));
+  }, []);
+  const setPayerSaveState = useCallback((state: SaveState) => setSaveState("payer", state), [setSaveState]);
+  const setIdentificationSaveState = useCallback(
+    (state: SaveState) => setSaveState("identification", state),
+    [setSaveState],
+  );
 
   const save = useCallback(
     (snapshot: PersonalDraft) => {
-      queueRef.current = queueRef.current.then(async () => {
+      void enqueue(async () => {
         const patch = personalDataPatch(savedRef.current, snapshot, rejectedRef.current);
-        if (Object.keys(patch).length === 0) return;
-        setSaveState("saving");
+        if (Object.keys(patch).length === 0) {
+          // Nothing to save. A failure is over once the refused value is gone from the form.
+          const refused = rejectedRef.current;
+          const stillRefused = refused !== null && rejectedValue(refused.field, snapshot)?.value === refused.value;
+          if (failedRef.current && !stillRefused) {
+            failedRef.current = false;
+            rejectedRef.current = null;
+            setFieldError(null);
+            setSaveState("personal", "saved");
+          }
+          return;
+        }
+        setSaveState("personal", "saving");
         try {
           const next = await saveLeadPersonalData(request.lead_id, patch);
           savedRef.current = draftFromPersonalData(next.personal_data);
           rejectedRef.current = null;
+          failedRef.current = false;
           setFieldError(null);
-          setSaveState("saved");
+          setSaveState("personal", "saved");
           onChange(next);
         } catch (cause) {
           const body = errorBody(cause);
@@ -442,17 +466,26 @@ function PersonalDataStep({
               message: body?.code === "minor_needs_guardian" ? text.minorNeedsGuardian : text.invalidField,
             });
           }
-          setSaveState("error");
+          failedRef.current = true;
+          setSaveState("personal", "error");
         }
       });
     },
-    [onChange, request.lead_id, text],
+    [enqueue, onChange, request.lead_id, setSaveState, text],
   );
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => save(draft), 700);
-    return () => window.clearTimeout(timer);
-  }, [draft, save]);
+  useAutosave(draft, save);
+
+  // The statements for the identification are one record, asked in several
+  // sections below. An older server does not know them: the sections stay away.
+  const identification = useIdentificationForm({
+    request,
+    text,
+    enqueue,
+    onChange,
+    onSaveState: setIdentificationSaveState,
+  });
+  const withIdentification = request.identification !== undefined;
 
   const set = <K extends PersonalField>(field: K, value: PersonalDraft[K]) => {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -469,9 +502,49 @@ function PersonalDataStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-data">
+      {/* Privacy first (spec section 0): the consent the request and the upload of the identity document need. */}
+      <Section title={text.sectionConsent}>
+        <ConsentCheckbox
+          request={request}
+          purpose={INQUIRY_CONSENT}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          label={consentText(request, INQUIRY_CONSENT, lang) || text.inquiryConsentLabel}
+          testId="lead-request-inquiry-consent"
+          privacyLink
+        />
+        {withIdentification ? <ContactChannelsField form={identification} text={text} /> : null}
+      </Section>
+
       <Section title={text.sectionPerson}>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-        <FormField field="first_name" text={text} error={errorFor("first_name")} required>
+        {withIdentification ? (
+          <IdentificationFormField form={identification} field="salutation" text={text}>
+            <NativeComboboxSelect
+              id="lead-request-salutation"
+              className={selectClass}
+              value={identification.draft.salutation}
+              onChange={(event) => identification.set("salutation", event.target.value)}
+            >
+              <option value="">{text.choose}</option>
+              {(Object.keys(text.salutationOptions) as Array<keyof LeadRequestText["salutationOptions"]>).map((value) => (
+                <option key={value} value={value}>
+                  {text.salutationOptions[value]}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </IdentificationFormField>
+        ) : null}
+        <FormField
+          field="first_name"
+          text={text}
+          error={errorFor("first_name")}
+          required
+          // The salutation takes the first cell: the two names stay side by side.
+          className={withIdentification ? "sm:col-start-1" : undefined}
+        >
           <Input
             {...fieldProps("first_name")}
             className={inputClass}
@@ -498,6 +571,11 @@ function PersonalDataStep({
             onChange={(event) => set("middle_name", event.target.value)}
           />
         </FormField>
+        {withIdentification ? (
+          <IdentificationFormField form={identification} field="former_names" text={text}>
+            <IdentificationTextInput form={identification} field="former_names" maxLength={200} />
+          </IdentificationFormField>
+        ) : null}
         <FormField field="date_of_birth" text={text} error={errorFor("date_of_birth")} required>
           <Input
             key={`date_of_birth-${lang}`}
@@ -511,6 +589,16 @@ function PersonalDataStep({
             onChange={(event) => set("date_of_birth", event.target.value)}
           />
         </FormField>
+        {withIdentification ? (
+          <>
+            <IdentificationFormField form={identification} field="birth_place" text={text} required>
+              <IdentificationTextInput form={identification} field="birth_place" maxLength={200} />
+            </IdentificationFormField>
+            <IdentificationFormField form={identification} field="birth_country" text={text} required>
+              <IdentificationCountrySelect form={identification} field="birth_country" text={text} lang={lang} />
+            </IdentificationFormField>
+          </>
+        ) : null}
         <FormField field="legal_sex" text={text} error={errorFor("legal_sex")} required>
           <NativeComboboxSelect
             {...fieldProps("legal_sex")}
@@ -576,6 +664,11 @@ function PersonalDataStep({
             onChange={(code) => set("country", code ?? "")}
           />
         </FormField>
+        {withIdentification ? (
+          <IdentificationFormField form={identification} field="habitual_residence_country" text={text}>
+            <IdentificationCountrySelect form={identification} field="habitual_residence_country" text={text} lang={lang} />
+          </IdentificationFormField>
+        ) : null}
       </div>
       </Section>
       <Section title={text.sectionContact}>
@@ -607,6 +700,17 @@ function PersonalDataStep({
         </FormField>
       </div>
       </Section>
+
+      {withIdentification ? (
+        <IdentityDocumentSection
+          request={request}
+          form={identification}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+        />
+      ) : null}
 
       <Section title={text.sectionInsurance}>
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-insurance">
@@ -680,23 +784,26 @@ function PersonalDataStep({
 
       {/* An older server does not know the question yet. */}
       {request.payer !== undefined ? (
-        <PayerSection request={request} text={text} lang={lang} onChange={onChange} onSaveState={setSaveState} />
-      ) : null}
-
-      <Section title={text.sectionConsent}>
-        <ConsentCheckbox
+        <PayerSection
           request={request}
-          purpose={INQUIRY_CONSENT}
           text={text}
           lang={lang}
+          identification={withIdentification ? identification : undefined}
+          enqueue={enqueue}
           onChange={onChange}
-          label={consentText(request, INQUIRY_CONSENT, lang) || text.inquiryConsentLabel}
-          testId="lead-request-inquiry-consent"
-          privacyLink
+          onSaveState={setPayerSaveState}
         />
-      </Section>
+      ) : null}
 
-      <StepFooter index={1} text={text} status={<SaveIndicator state={saveState} text={text} />}>
+      {withIdentification ? (
+        <LegalQuestionsSection form={identification} text={text} lang={lang} guardian={guardian} />
+      ) : null}
+
+      <StepFooter
+        index={1}
+        text={text}
+        status={<SaveIndicator state={combinedSaveState(Object.values(saveStates))} text={text} />}
+      >
         <Button type="button" variant="outline" className="h-9" disabled>
           <ArrowLeft aria-hidden="true" className="size-3.5" />
           {text.back}
@@ -710,381 +817,11 @@ function PersonalDataStep({
   );
 }
 
-/**
- * "Who pays" (owner request 2026-10-05): the patient, or another person who
- * is then named. The answer is saved as a whole; the server keeps it in the
- * lead's payer declaration, where the sanctions screening picks it up.
- */
-function PayerSection({
-  request,
-  text,
-  lang,
-  onChange,
-  onSaveState,
-}: {
-  request: LeadRequest;
-  text: LeadRequestText;
-  lang: string;
-  onChange: (request: LeadRequest) => void;
-  onSaveState: (state: SaveState) => void;
-}) {
-  const [draft, setDraft] = useState<PayerDraft>(() => draftFromPayer(request.payer));
-  const savedRef = useRef<PayerDraft>(draftFromPayer(request.payer));
-  const rejectedRef = useRef<string | null>(null);
-  const queueRef = useRef<Promise<void>>(Promise.resolve());
-  const [fieldError, setFieldError] = useState<string | null>(null);
-  const options = request.access_kind === "guardian" ? text.payerOptionsGuardian : text.payerOptions;
-
-  const save = useCallback(
-    (snapshot: PayerDraft) => {
-      queueRef.current = queueRef.current.then(async () => {
-        const input = payerInput(snapshot);
-        if (!input) return;
-        const key = JSON.stringify(input);
-        if (key === JSON.stringify(payerInput(savedRef.current)) || key === rejectedRef.current) return;
-        onSaveState("saving");
-        try {
-          const next = await saveLeadPayer(request.lead_id, input);
-          savedRef.current = draftFromPayer(next.payer);
-          rejectedRef.current = null;
-          setFieldError(null);
-          onSaveState("saved");
-          onChange(next);
-        } catch (cause) {
-          // The refused answer is not repeated until the patient changes it.
-          rejectedRef.current = key;
-          const field = errorBody(cause)?.field;
-          setFieldError(typeof field === "string" ? field : "payer");
-          onSaveState("error");
-        }
-      });
-    },
-    [onChange, onSaveState, request.lead_id],
-  );
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => save(draft), 700);
-    return () => window.clearTimeout(timer);
-  }, [draft, save]);
-
-  const set = <K extends keyof PayerDraft>(field: K, value: PayerDraft[K]) => {
-    setDraft((current) => ({ ...current, [field]: value }));
-  };
-  const errorFor = (field: PayerField) => (fieldError === field ? text.invalidField : undefined);
-  const fieldProps = (field: PayerField) => ({
-    id: `lead-request-${field}`,
-    "aria-invalid": Boolean(errorFor(field)) || undefined,
-    "aria-describedby": errorFor(field) ? `lead-request-${field}-error` : undefined,
-  });
-  const field = (name: PayerField, required = false, className?: string) => ({
-    id: `lead-request-${name}`,
-    label: payerFieldLabel(text, name),
-    error: errorFor(name),
-    required,
-    className,
-  });
-
-  return (
-    <Section title={text.sectionPayer}>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-payer">
-        <LabeledField {...field("payer_kind", true, "sm:col-span-2")}>
-          <NativeComboboxSelect
-            {...fieldProps("payer_kind")}
-            className={selectClass}
-            value={draft.payer_kind}
-            onChange={(event) => set("payer_kind", event.target.value)}
-          >
-            <option value="">{text.choose}</option>
-            <option value="self">{options.self}</option>
-            <option value="third_party">{options.third_party}</option>
-          </NativeComboboxSelect>
-        </LabeledField>
-        {/* Another person's data exist only when another person pays. */}
-        {draft.payer_kind === "third_party" ? (
-          <>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerIntro}</p>
-            <LabeledField {...field("payer_first_name", true)}>
-              <Input
-                {...fieldProps("payer_first_name")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.first_name}
-                onChange={(event) => set("first_name", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_last_name", true)}>
-              <Input
-                {...fieldProps("payer_last_name")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.last_name}
-                onChange={(event) => set("last_name", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_citizenships", true)}>
-              <CitizenshipMultiSelect
-                id="lead-request-payer_citizenships"
-                value={draft.citizenships}
-                lang={lang}
-                placeholder={text.citizenshipsPlaceholder}
-                invalid={Boolean(errorFor("payer_citizenships"))}
-                onChange={(next) => set("citizenships", next)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_date_of_birth")}>
-              <Input
-                key={`payer_date_of_birth-${lang}`}
-                {...fieldProps("payer_date_of_birth")}
-                className={inputClass}
-                type="date"
-                autoComplete="off"
-                pickerLang={asLeadCabinetLang(lang) ?? undefined}
-                max={appDateKey()}
-                value={draft.date_of_birth}
-                onChange={(event) => set("date_of_birth", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_relationship", false, "sm:col-span-2")}>
-              <Input
-                {...fieldProps("payer_relationship")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.relationship}
-                onChange={(event) => set("relationship", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_street", false, "sm:col-span-2")}>
-              <Input
-                {...fieldProps("payer_street")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.street}
-                onChange={(event) => set("street", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_zip")}>
-              <Input
-                {...fieldProps("payer_zip")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.zip}
-                onChange={(event) => set("zip", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_city")}>
-              <Input
-                {...fieldProps("payer_city")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.city}
-                onChange={(event) => set("city", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_country")}>
-              <CountrySelect
-                value={draft.country || null}
-                lang={lang}
-                className={selectClass}
-                aria-label={payerFieldLabel(text, "payer_country")}
-                onChange={(code) => set("country", code ?? "")}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_phone")}>
-              <Input
-                {...fieldProps("payer_phone")}
-                className={inputClass}
-                type="tel"
-                autoComplete="off"
-                value={draft.phone}
-                onChange={(event) => set("phone", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_email", false, "sm:col-span-2")}>
-              <Input
-                {...fieldProps("payer_email")}
-                className={inputClass}
-                type="email"
-                autoComplete="off"
-                value={draft.email}
-                onChange={(event) => set("email", event.target.value)}
-              />
-            </LabeledField>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerInformHint}</p>
-          </>
-        ) : null}
-        {fieldError === "payer" ? (
-          <p role="alert" className="text-xs text-destructive sm:col-span-2">
-            {text.notSaved}
-          </p>
-        ) : null}
-      </div>
-    </Section>
-  );
-}
-
-function FormField({
-  field,
-  text,
-  error,
-  required = false,
-  className,
-  children,
-}: {
-  field: PersonalField;
-  text: LeadRequestText;
-  error?: string;
-  required?: boolean;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <LabeledField
-      id={`lead-request-${field}`}
-      label={text.fields[field]}
-      error={error}
-      required={required}
-      className={className}
-    >
-      {children}
-    </LabeledField>
-  );
-}
-
-/** A label, its control and the error below it. */
-function LabeledField({
-  id,
-  label,
-  error,
-  required = false,
-  className,
-  children,
-}: {
-  id: string;
-  label: string;
-  error?: string;
-  required?: boolean;
-  className?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className={cn("min-w-0 space-y-1.5", className)}>
-      <label htmlFor={id} className={cn(tokens.text.label, "block")}>
-        {label}
-        {required ? (
-          <span aria-hidden="true" className="ml-0.5 text-destructive">
-            *
-          </span>
-        ) : null}
-      </label>
-      {children}
-      {error ? (
-        <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function SaveIndicator({ state, text }: { state: SaveState; text: LeadRequestText }) {
-  if (state === "idle") return null;
-  return (
-    <span
-      role="status"
-      aria-live="polite"
-      data-testid="lead-request-save-state"
-      className={cn(
-        "inline-flex items-center gap-1.5 text-xs",
-        state === "error" ? "text-destructive" : "text-muted-foreground",
-      )}
-    >
-      {state === "saving" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
-      {state === "saved" ? <Check aria-hidden="true" className="size-3.5 text-emerald-600" /> : null}
-      {state === "error" ? <CircleAlert aria-hidden="true" className="size-3.5" /> : null}
-      {state === "saving" ? text.saving : state === "saved" ? text.saved : text.notSaved}
-    </span>
-  );
-}
-
-/** A consent checkbox: checking gives the consent with the shown text, unchecking withdraws it. */
-function ConsentCheckbox({
-  request,
-  purpose,
-  text,
-  lang,
-  label,
-  onChange,
-  testId,
-  privacyLink = false,
-}: {
-  request: LeadRequest;
-  purpose: string;
-  text: LeadRequestText;
-  lang: string;
-  label: string;
-  onChange: (request: LeadRequest) => void;
-  testId: string;
-  privacyLink?: boolean;
-}) {
-  const consent = request.consents[purpose];
-  const given = consentGiven(request, purpose);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function toggle(checked: boolean) {
-    if (!consent) return;
-    if (!checked && !window.confirm(text.consentWithdrawConfirm)) return;
-    setBusy(true);
-    setError("");
-    try {
-      if (checked) {
-        const result = await giveLeadConsent(request.lead_id, purpose, consent.version, lang);
-        onChange({
-          ...request,
-          consents: { ...request.consents, [purpose]: { ...consent, given_at: result.given_at } },
-        });
-      } else {
-        await revokeLeadConsent(request.lead_id, purpose);
-        onChange({ ...request, consents: { ...request.consents, [purpose]: { ...consent, given_at: null } } });
-      }
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-border bg-muted/10 px-3 py-3" data-testid={testId}>
-      <label className="flex items-start gap-3 text-sm">
-        <input
-          type="checkbox"
-          className={cn(checkboxClass, "mt-0.5")}
-          checked={given}
-          disabled={busy || !consent}
-          onChange={(event) => void toggle(event.target.checked)}
-        />
-        <span className="space-y-1">
-          <span className="block leading-snug">{label}</span>
-          {privacyLink ? (
-            <a href="/legal#privacy" target="_blank" rel="noreferrer" className="text-xs text-[var(--brand)] underline">
-              {text.privacyLink}
-            </a>
-          ) : null}
-          {given && consent?.given_at ? (
-            <span className="block text-xs text-muted-foreground">{text.consentGivenAt(formatAppDateTime(consent.given_at))}</span>
-          ) : null}
-        </span>
-      </label>
-      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
-    </div>
-  );
-}
-
 function DocumentsStep({
   request,
   text,
   lang,
+  enqueue,
   onChange,
   onBack,
   onNext,
@@ -1092,6 +829,7 @@ function DocumentsStep({
   request: LeadRequest;
   text: LeadRequestText;
   lang: string;
+  enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onBack: () => void;
   onNext: () => void;
@@ -1113,7 +851,7 @@ function DocumentsStep({
         continue;
       }
       try {
-        latest = await uploadLeadDocument(request.lead_id, file);
+        latest = await enqueue(() => uploadLeadDocument(request.lead_id, file));
         onChange(latest);
       } catch (cause) {
         nextErrors.push(`${file.name}: ${errorMessage(cause)}`);
@@ -1126,7 +864,7 @@ function DocumentsStep({
   async function remove(documentId: string) {
     setErrors([]);
     try {
-      onChange(await withdrawLeadDocument(request.lead_id, documentId));
+      onChange(await enqueue(() => withdrawLeadDocument(request.lead_id, documentId)));
     } catch (cause) {
       setErrors([errorMessage(cause)]);
     }
@@ -1144,6 +882,7 @@ function DocumentsStep({
           text={text}
           lang={lang}
           label={text.healthConsentLabel}
+          enqueue={enqueue}
           onChange={onChange}
           testId="lead-request-health-consent"
         />
@@ -1185,36 +924,14 @@ function DocumentsStep({
         ))}
       </div>
 
-      <ul className="divide-y divide-border rounded-lg border border-border" data-testid="lead-request-document-list">
-        {request.documents.length === 0 ? (
-          <li className="px-3 py-3 text-sm text-muted-foreground">{text.noDocuments}</li>
-        ) : (
-          request.documents.map((document) => (
-            <li key={document.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
-              <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate">{document.file_name ?? "—"}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {[formatAppDateTime(document.uploaded_at), formatFileSize(document.size_bytes, lang)].filter(Boolean).join(" · ")}
-                  {document.reviewed ? ` · ${text.documentTakenOver}` : ""}
-                </span>
-              </span>
-              {document.can_delete ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-8 gap-1 text-xs"
-                  onClick={() => void remove(document.id)}
-                >
-                  <Trash2 aria-hidden="true" className="size-3.5" />
-                  {text.removeDocument}
-                </Button>
-              ) : null}
-            </li>
-          ))
-        )}
-      </ul>
+      <UploadedFileList
+        documents={request.documents}
+        text={text}
+        lang={lang}
+        emptyText={text.noDocuments}
+        testId="lead-request-document-list"
+        onRemove={(documentId) => void remove(documentId)}
+      />
       <p className="text-xs text-muted-foreground">{text.documentsOptional}</p>
       </Section>
 
@@ -1227,137 +944,6 @@ function DocumentsStep({
           {text.next}
           <ArrowRight aria-hidden="true" className="size-3.5" />
         </Button>
-      </StepFooter>
-    </section>
-  );
-}
-
-function SendStep({
-  request,
-  text,
-  onChange,
-  onEdit,
-}: {
-  request: LeadRequest;
-  text: LeadRequestText;
-  onChange: (request: LeadRequest) => void;
-  onEdit: (step: Step) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const missing = missingForSubmit(request);
-  const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
-  const ready = canSubmit(request, INQUIRY_CONSENT);
-  const sent = Boolean(request.submitted_at);
-  // Sent and unchanged: there is nothing to send. Sent and changed: send again.
-  const changed = changedSinceSubmit(request);
-
-  async function send() {
-    setBusy(true);
-    setError("");
-    try {
-      onChange(await submitLeadRequest(request.lead_id));
-    } catch (cause) {
-      setError(errorMessage(cause));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="space-y-6" data-testid="lead-request-send">
-      {request.submitted_at ? (
-        <>
-          <SuccessBanner>
-            <p className="font-semibold">{text.sentTitle}</p>
-            <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
-          </SuccessBanner>
-          {changed ? (
-            <div
-              role="status"
-              className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-              data-testid="lead-request-changed"
-            >
-              <CircleAlert aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-              <p>{text.changedAfterSend}</p>
-            </div>
-          ) : null}
-          <Section title={text.nextTitle}>
-            <ol className="space-y-2.5 text-sm" data-testid="lead-request-next-steps">
-              {text.nextSteps.map((item, index) => (
-                <li key={item} className="flex items-start gap-3">
-                  <span
-                    aria-hidden="true"
-                    className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--brand-soft)] font-mono text-[11px] font-medium text-[var(--brand)]"
-                  >
-                    {index + 1}
-                  </span>
-                  <span className="leading-snug">{item}</span>
-                </li>
-              ))}
-            </ol>
-          </Section>
-        </>
-      ) : null}
-      <Section title={request.submitted_at ? text.sentSummaryTitle : text.sendTitle}>
-      <ul className="space-y-1 text-sm">
-        <li>{text.sendSummaryFields(request.progress.filled, request.progress.total)}</li>
-        <li>{text.sendSummaryDocuments(request.documents.length)}</li>
-      </ul>
-      {missing.length > 0 || !inquiryConsent ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          <p className="font-medium">{text.missingTitle}</p>
-          <ul className="mt-1 list-inside list-disc">
-            {missing.map((field) => (
-              <li key={field}>{submitFieldLabel(text, field)}</li>
-            ))}
-            {!inquiryConsent ? <li>{text.inquiryConsentMissing}</li> : null}
-          </ul>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-2 gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-            onClick={() => onEdit("data")}
-          >
-            <Pencil aria-hidden="true" className="size-3.5" />
-            {text.editData}
-          </Button>
-        </div>
-      ) : null}
-      {error ? <Banner tone="error">{error}</Banner> : null}
-      </Section>
-      <StepFooter index={3} text={text}>
-        {request.submitted_at ? (
-          // Sent already: changing the request is the secondary path, not the next step.
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("data")}>
-              <Pencil aria-hidden="true" className="size-3.5" />
-              {text.editData}
-            </Button>
-            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("documents")}>
-              <Upload aria-hidden="true" className="size-3.5" />
-              {text.addDocuments}
-            </Button>
-          </div>
-        ) : (
-          <Button type="button" variant="outline" className="h-9" onClick={() => onEdit("documents")}>
-            <ArrowLeft aria-hidden="true" className="size-3.5" />
-            {text.back}
-          </Button>
-        )}
-        {sent && !changed ? null : (
-          <Button
-            type="button"
-            className="h-9 gap-2"
-            disabled={!ready || busy}
-            onClick={() => void send()}
-            data-testid="lead-request-submit"
-          >
-            {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : <Send aria-hidden="true" className="size-3.5" />}
-            {busy ? text.sending : sent ? text.sendAgain : text.sendButton}
-          </Button>
-        )}
       </StepFooter>
     </section>
   );

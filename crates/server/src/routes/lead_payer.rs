@@ -85,6 +85,10 @@ pub fn router() -> Router<AppState> {
 pub(crate) struct Declaration {
     pub payer_kind: String,
     pub acts_on_own_account: bool,
+    /// Whether the own-account question was answered at all: by the lead in
+    /// the cabinet or by staff. Until then `acts_on_own_account` is only the
+    /// column default.
+    pub own_account_answered: bool,
     pub beneficial_owner_name: Option<String>,
     pub beneficial_owner_note: Option<String>,
     pub source_of_funds: Option<String>,
@@ -108,15 +112,15 @@ pub(crate) struct Declaration {
     pub payer_informed_by: Option<Uuid>,
 }
 
-const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, beneficial_owner_name, \
-     beneficial_owner_note, source_of_funds, source_of_funds_description, \
+const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
+     beneficial_owner_name, beneficial_owner_note, source_of_funds, source_of_funds_description, \
      source_of_funds_document_id, first_name, last_name, date_of_birth, place_of_birth, \
      street, zip, city, country, citizenships, relationship, email, phone, \
      payer_informed_at, payer_informed_by, identity_changed_at, patient_id, created_at, \
      updated_at";
 
 impl Declaration {
-    fn is_third_party(&self) -> bool {
+    pub(crate) fn is_third_party(&self) -> bool {
         self.payer_kind == PAYER_KIND_THIRD_PARTY
     }
 
@@ -124,6 +128,7 @@ impl Declaration {
         Self {
             payer_kind: row.try_get("payer_kind").unwrap_or_default(),
             acts_on_own_account: row.try_get("acts_on_own_account").unwrap_or(true),
+            own_account_answered: row.try_get("own_account_answered").unwrap_or(false),
             beneficial_owner_name: row.try_get("beneficial_owner_name").unwrap_or_default(),
             beneficial_owner_note: row.try_get("beneficial_owner_note").unwrap_or_default(),
             source_of_funds: row.try_get("source_of_funds").unwrap_or_default(),
@@ -182,6 +187,7 @@ impl Declaration {
         json!({
             "payer_kind": self.payer_kind,
             "acts_on_own_account": self.acts_on_own_account,
+            "own_account_answered": self.own_account_answered,
             "beneficial_owner_name": self.beneficial_owner_name,
             "beneficial_owner_note": self.beneficial_owner_note,
             "source_of_funds": self.source_of_funds,
@@ -306,7 +312,9 @@ fn declaration_from_input(
     let mut declaration = Declaration {
         payer_kind: payer_kind.to_string(),
         acts_on_own_account: input.acts_on_own_account,
-        beneficial_owner_name: text(&input.beneficial_owner_name, SHORT_TEXT_MAX)?,
+        // The cabinet names the person in one text (name, date and place of
+        // birth, address), so the name takes a long text.
+        beneficial_owner_name: text(&input.beneficial_owner_name, LONG_TEXT_MAX)?,
         beneficial_owner_note: text(&input.beneficial_owner_note, LONG_TEXT_MAX)?,
         source_of_funds,
         source_of_funds_description: text(&input.source_of_funds_description, LONG_TEXT_MAX)?,
@@ -1120,8 +1128,9 @@ fn error(status: StatusCode, code: &str, message: &str) -> Response {
 }
 
 /// Read access: roles that work the lead (leads.edit) and the CEO Assistant
-/// (read-only). The concierge sees only the service grid of leads.
-fn may_view(auth: &AuthUser) -> bool {
+/// (read-only). The concierge sees only the service grid of leads. The same
+/// roles read the lead's own GwG statements from the cabinet.
+pub(crate) fn may_view(auth: &AuthUser) -> bool {
     auth.can(Capability::LeadsEdit) || auth.role == Role::CeoAssistant
 }
 
@@ -1165,7 +1174,7 @@ async fn save_payer_declaration(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    let declaration = match declaration_from_input(&body, crate::app_time::today()) {
+    let mut declaration = match declaration_from_input(&body, crate::app_time::today()) {
         Ok(declaration) => declaration,
         Err(code) => {
             return error(
@@ -1175,6 +1184,8 @@ async fn save_payer_declaration(
             );
         }
     };
+    // The staff form always states the own-account answer.
+    declaration.own_account_answered = true;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return database_error(error, "begin payer declaration"),
@@ -1238,7 +1249,6 @@ async fn save_payer_declaration(
         Ok(payer) => payer.declaration,
         Err(error) => return database_error(error, "load previous payer declaration"),
     };
-    let mut declaration = declaration;
     if body.payer_informed && declaration.is_third_party() {
         // The first confirmation keeps its time and author.
         let earlier = previous
@@ -1319,12 +1329,13 @@ async fn store_declaration(
                source_of_funds_document_id, first_name, last_name, date_of_birth,
                place_of_birth, street, zip, city, country, citizenships, relationship,
                email, phone, payer_informed_at, payer_informed_by,
-               identity_changed_at, created_by, updated_by)
+               identity_changed_at, created_by, updated_by, own_account_answered)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21)
+                   $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                acts_on_own_account = EXCLUDED.acts_on_own_account,
+               own_account_answered = EXCLUDED.own_account_answered,
                beneficial_owner_name = EXCLUDED.beneficial_owner_name,
                beneficial_owner_note = EXCLUDED.beneficial_owner_note,
                source_of_funds = EXCLUDED.source_of_funds,
@@ -1373,6 +1384,7 @@ async fn store_declaration(
     .bind(identity_changed)
     .bind(declaration.payer_informed_at)
     .bind(declaration.payer_informed_by)
+    .bind(declaration.own_account_answered)
     .execute(conn)
     .await
     .map(|_| ())
@@ -1383,12 +1395,14 @@ async fn store_declaration(
 // ----------------------------------------------------------------------------
 
 /// What the patient (or a parent of a minor) states in the lead cabinet: who
-/// pays and, for a third party, who that is (owner request 2026-10-05). The
-/// GwG part of the declaration — own account, beneficial owner, source of
-/// funds, the Art. 14 confirmation — stays with staff and is kept as it is.
+/// pays and, for a third party, who that is (owner request 2026-10-05), and
+/// whether the patient acts in the own economic interest (owner spec
+/// "Patientenformular", 2026-10-05). The rest of the GwG part of the
+/// declaration — source of funds, staff's further details on the beneficial
+/// owner, the Art. 14 confirmation — stays with staff and is kept as it is.
 /// The data land in the same declaration, so the sanctions screening and the
 /// country policy see the payer the moment the cabinet saves it.
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalPayerInput {
     payer_kind: String,
@@ -1404,6 +1418,12 @@ pub(crate) struct PortalPayerInput {
     relationship: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    /// "Do you act in your own economic interest?" Left out: the stored
+    /// answer stays.
+    acts_on_own_account: Option<bool>,
+    /// For the answer "no": the person in whose interest the patient acts
+    /// (name, date and place of birth, address) in one text.
+    beneficial_owner: Option<String>,
 }
 
 pub(crate) enum PortalPayerError {
@@ -1429,6 +1449,7 @@ fn portal_field_of(code: &str) -> &'static str {
         "payer_email_invalid" => "payer_email",
         "payer_country_invalid" => "payer_country",
         "payer_citizenships_invalid" => "payer_citizenships",
+        "payer_beneficial_owner_too_long" => "payer_beneficial_owner",
         _ => "payer",
     }
 }
@@ -1455,6 +1476,12 @@ impl Declaration {
             "relationship": self.relationship,
             "email": self.email,
             "phone": self.phone,
+            // `null` until somebody answered the question.
+            "acts_on_own_account": self.own_account_answered.then_some(self.acts_on_own_account),
+            "beneficial_owner": self
+                .beneficial_owner_name
+                .as_ref()
+                .filter(|_| self.own_account_answered && !self.acts_on_own_account),
         })
     }
 }
@@ -1502,6 +1529,22 @@ pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static 
     missing
 }
 
+/// The own-interest part of what the cabinet needs before sending: the answer
+/// and, for a "no", the person in whose interest the patient acts. Kept apart
+/// from [`portal_missing`] because the form asks it after the identity
+/// document.
+pub(crate) fn portal_missing_own_account(declaration: Option<&Declaration>) -> Vec<&'static str> {
+    match declaration.filter(|declaration| declaration.own_account_answered) {
+        None => vec!["payer_own_account"],
+        Some(declaration)
+            if !declaration.acts_on_own_account && blank(&declaration.beneficial_owner_name) =>
+        {
+            vec!["payer_beneficial_owner"]
+        }
+        Some(_) => Vec::new(),
+    }
+}
+
 /// Stable text of what the cabinet entered, for the "entered by the patient"
 /// marker of the lead.
 pub(crate) fn portal_marker_value(declaration: &Declaration) -> String {
@@ -1511,15 +1554,34 @@ pub(crate) fn portal_marker_value(declaration: &Declaration) -> String {
 /// Merges the cabinet's answer into the stored declaration. Staff fields are
 /// kept; the place of birth and the Art. 14 confirmation belong to the person
 /// named before and go when the cabinet names somebody else.
+///
+/// Own economic interest: without the answer in the body the stored answer
+/// and the named person stay. With it, the named person is what the cabinet
+/// sent (a "no" without a text clears it; a "yes" has nobody to name), and
+/// staff's further details go when another person is named.
 fn declaration_from_portal(
     previous: Option<&Declaration>,
     input: &PortalPayerInput,
     today: NaiveDate,
 ) -> Result<Declaration, &'static str> {
+    if input
+        .beneficial_owner
+        .as_deref()
+        .is_some_and(|value| value.trim().chars().count() > LONG_TEXT_MAX)
+    {
+        return Err("payer_beneficial_owner_too_long");
+    }
+    let own_account_sent = input.acts_on_own_account.is_some() || input.beneficial_owner.is_some();
     let staff = DeclarationInput {
         payer_kind: input.payer_kind.clone(),
-        acts_on_own_account: previous.is_none_or(|previous| previous.acts_on_own_account),
-        beneficial_owner_name: previous.and_then(|previous| previous.beneficial_owner_name.clone()),
+        acts_on_own_account: input
+            .acts_on_own_account
+            .unwrap_or_else(|| previous.is_none_or(|previous| previous.acts_on_own_account)),
+        beneficial_owner_name: if own_account_sent {
+            input.beneficial_owner.clone()
+        } else {
+            previous.and_then(|previous| previous.beneficial_owner_name.clone())
+        },
         beneficial_owner_note: previous.and_then(|previous| previous.beneficial_owner_note.clone()),
         source_of_funds: previous.and_then(|previous| previous.source_of_funds.clone()),
         source_of_funds_description: previous
@@ -1541,6 +1603,13 @@ fn declaration_from_portal(
         payer_informed: false,
     };
     let mut declaration = declaration_from_input(&staff, today)?;
+    declaration.own_account_answered = input.acts_on_own_account.is_some()
+        || previous.is_some_and(|previous| previous.own_account_answered);
+    if previous
+        .is_none_or(|previous| previous.beneficial_owner_name != declaration.beneficial_owner_name)
+    {
+        declaration.beneficial_owner_note = None;
+    }
     if let Some(previous) = previous
         && previous.is_third_party()
         && declaration.is_third_party()
@@ -1900,6 +1969,79 @@ mod tests {
         assert_eq!(reasons, ["Payer declaration is missing"]);
         assert_eq!(checks[0]["passed"], false);
         assert_eq!(checks[1]["passed"], true);
+    }
+
+    fn portal(kind: &str) -> PortalPayerInput {
+        PortalPayerInput {
+            payer_kind: kind.to_string(),
+            ..PortalPayerInput::default()
+        }
+    }
+
+    #[test]
+    fn the_cabinet_answers_the_own_account_question() {
+        // Who pays alone does not answer it.
+        let unanswered = declaration_from_portal(None, &portal("self"), today()).unwrap();
+        assert!(!unanswered.own_account_answered);
+        assert_eq!(
+            portal_missing_own_account(Some(&unanswered)),
+            ["payer_own_account"]
+        );
+        assert_eq!(portal_missing_own_account(None), ["payer_own_account"]);
+        assert!(unanswered.portal_json()["acts_on_own_account"].is_null());
+
+        // "No" needs the person in whose interest the patient acts.
+        let mut answer = portal("self");
+        answer.acts_on_own_account = Some(false);
+        answer.beneficial_owner = Some("  ".into());
+        let no = declaration_from_portal(Some(&unanswered), &answer, today()).unwrap();
+        assert!(no.own_account_answered);
+        assert!(!no.acts_on_own_account);
+        assert_eq!(
+            portal_missing_own_account(Some(&no)),
+            ["payer_beneficial_owner"]
+        );
+        answer.beneficial_owner = Some(" Viktor Zahler, 06.05.1970, Wien ".into());
+        let named = declaration_from_portal(Some(&no), &answer, today()).unwrap();
+        assert_eq!(
+            named.beneficial_owner_name.as_deref(),
+            Some("Viktor Zahler, 06.05.1970, Wien")
+        );
+        assert!(portal_missing_own_account(Some(&named)).is_empty());
+        assert_eq!(named.portal_json()["acts_on_own_account"], false);
+        assert_eq!(
+            named.portal_json()["beneficial_owner"],
+            "Viktor Zahler, 06.05.1970, Wien"
+        );
+
+        // A save that leaves the block out keeps the answer and the person,
+        // and staff's further details with them.
+        let mut with_note = named.clone();
+        with_note.beneficial_owner_note = Some("Onkel".into());
+        let kept = declaration_from_portal(Some(&with_note), &portal("self"), today()).unwrap();
+        assert_eq!(kept, with_note);
+
+        // "Yes" has nobody to name.
+        let mut yes = portal("self");
+        yes.acts_on_own_account = Some(true);
+        yes.beneficial_owner = Some("Viktor Zahler".into());
+        let own = declaration_from_portal(Some(&with_note), &yes, today()).unwrap();
+        assert!(own.acts_on_own_account && own.own_account_answered);
+        assert_eq!(own.beneficial_owner_name, None);
+        assert_eq!(own.beneficial_owner_note, None);
+        assert!(portal_missing_own_account(Some(&own)).is_empty());
+        assert_eq!(own.portal_json()["acts_on_own_account"], true);
+        assert!(own.portal_json()["beneficial_owner"].is_null());
+
+        // Another person named: the details of the previous one go.
+        answer.beneficial_owner = Some("Erika Anders".into());
+        let other = declaration_from_portal(Some(&with_note), &answer, today()).unwrap();
+        assert_eq!(other.beneficial_owner_name.as_deref(), Some("Erika Anders"));
+        assert_eq!(other.beneficial_owner_note, None);
+
+        answer.beneficial_owner = Some("x".repeat(LONG_TEXT_MAX + 1));
+        let error = declaration_from_portal(None, &answer, today()).unwrap_err();
+        assert_eq!(portal_field_of(error), "payer_beneficial_owner");
     }
 
     #[test]

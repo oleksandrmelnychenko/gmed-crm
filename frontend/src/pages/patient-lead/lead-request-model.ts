@@ -1,7 +1,9 @@
 import { cachedLanguageDisplayNames } from "@/lib/intl-cache";
 
 import type {
+  IdentificationPatch,
   LeadRequest,
+  LeadRequestIdentification,
   LeadRequestPayer,
   LeadRequestPayerInput,
   LeadRequestPersonalData,
@@ -146,6 +148,10 @@ export type PayerDraft = {
   country: string;
   phone: string;
   email: string;
+  /** Own economic interest: "yes", "no" or "" (not answered yet). */
+  acts_on_own_account: string;
+  /** In whose interest the patient acts; asked with the answer "no". */
+  beneficial_owner: string;
 };
 
 /** Keys of the payer block in `progress.missing_for_submit` and in field errors. */
@@ -161,7 +167,9 @@ export type PayerField =
   | "payer_city"
   | "payer_country"
   | "payer_phone"
-  | "payer_email";
+  | "payer_email"
+  | "payer_own_account"
+  | "payer_beneficial_owner";
 
 export const PAYER_FIELDS: PayerField[] = [
   "payer_kind",
@@ -176,7 +184,18 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_country",
   "payer_phone",
   "payer_email",
+  "payer_own_account",
+  "payer_beneficial_owner",
 ];
+
+/** A stored yes/no answer as the value of its select: "yes", "no" or "". */
+export function answerFromBoolean(value: boolean | null | undefined): string {
+  return value == null ? "" : value ? "yes" : "no";
+}
+
+function booleanFromAnswer(answer: string): boolean | null {
+  return answer === "yes" ? true : answer === "no" ? false : null;
+}
 
 export function draftFromPayer(payer: LeadRequestPayer | null | undefined): PayerDraft {
   return {
@@ -192,34 +211,305 @@ export function draftFromPayer(payer: LeadRequestPayer | null | undefined): Paye
     country: payer?.country ?? "",
     phone: payer?.phone ?? "",
     email: payer?.email ?? "",
+    acts_on_own_account: answerFromBoolean(payer?.acts_on_own_account),
+    beneficial_owner: payer?.beneficial_owner ?? "",
   };
 }
 
 /**
  * What is sent for the payer block: nothing until the question is answered,
  * only the answer for "I pay myself" (the server drops another person's data),
- * and for a third party every filled value.
+ * and for a third party every filled value. The own economic interest goes
+ * with either answer once it is stated; "no" always carries the named person
+ * (also empty, so a removed text is removed on the server).
  */
 export function payerInput(draft: PayerDraft): LeadRequestPayerInput | null {
-  if (draft.payer_kind === "self") return { payer_kind: "self" };
-  if (draft.payer_kind !== "third_party") return null;
-  const input: LeadRequestPayerInput = { payer_kind: "third_party" };
-  const texts = ["first_name", "last_name", "date_of_birth", "relationship", "street", "zip", "city", "country", "phone", "email"] as const;
-  for (const field of texts) {
-    const value = draft[field].trim().replace(/\s+/g, " ");
-    if (value) input[field] = value;
+  if (draft.payer_kind !== "self" && draft.payer_kind !== "third_party") return null;
+  const input: LeadRequestPayerInput = { payer_kind: draft.payer_kind };
+  if (draft.payer_kind === "third_party") {
+    const texts = ["first_name", "last_name", "date_of_birth", "relationship", "street", "zip", "city", "country", "phone", "email"] as const;
+    for (const field of texts) {
+      const value = draft[field].trim().replace(/\s+/g, " ");
+      if (value) input[field] = value;
+    }
+    if (draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
   }
-  if (draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
+  if (draft.acts_on_own_account === "yes") {
+    input.acts_on_own_account = true;
+  } else if (draft.acts_on_own_account === "no") {
+    input.acts_on_own_account = false;
+    input.beneficial_owner = draft.beneficial_owner.trim();
+  }
   return input;
 }
 
-/** Field of the personal data or of the payer block. */
-export type SubmitField = PersonalField | PayerField;
+/** The four legal yes/no questions (GwG, spec section 9), in form order. */
+export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const;
+
+export type LegalQuestion = (typeof LEGAL_QUESTIONS)[number];
+
+/** The statements for the identification as the patient types them. */
+export type IdentificationDraft = {
+  /** "mr", "ms", "none" or "". */
+  salutation: string;
+  former_names: string;
+  birth_place: string;
+  birth_country: string;
+  habitual_residence_country: string;
+  contact_channels: string[];
+  id_document_type: string;
+  id_document_number: string;
+  id_issuing_authority: string;
+  id_issuing_country: string;
+  id_issued_on: string;
+  id_valid_until: string;
+  payment_background: string;
+  /** The legal questions: "yes", "no" or "" (not answered yet). */
+  pep_self: string;
+  pep_self_details: string;
+  pep_related: string;
+  pep_related_details: string;
+  high_risk_country: string;
+  high_risk_country_code: string;
+  sanctions_links: string;
+  sanctions_links_details: string;
+};
+
+export type IdentificationField = keyof IdentificationDraft;
+
+export const IDENTIFICATION_FIELDS: IdentificationField[] = [
+  "salutation",
+  "former_names",
+  "birth_place",
+  "birth_country",
+  "habitual_residence_country",
+  "contact_channels",
+  "id_document_type",
+  "id_document_number",
+  "id_issuing_authority",
+  "id_issuing_country",
+  "id_issued_on",
+  "id_valid_until",
+  "payment_background",
+  "pep_self",
+  "pep_self_details",
+  "pep_related",
+  "pep_related_details",
+  "high_risk_country",
+  "high_risk_country_code",
+  "sanctions_links",
+  "sanctions_links_details",
+];
+
+/** What a "yes" to a legal question asks for: a text, or the country for the high-risk question. */
+export const LEGAL_DETAILS = {
+  pep_self: "pep_self_details",
+  pep_related: "pep_related_details",
+  high_risk_country: "high_risk_country_code",
+  sanctions_links: "sanctions_links_details",
+} as const satisfies Record<LegalQuestion, IdentificationField>;
+
+export const CONTACT_CHANNELS = ["email", "phone", "messenger"] as const;
+
+export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
+
+/** Free texts that may run over several lines: only the ends are trimmed. */
+const MULTILINE_FIELDS: ReadonlySet<IdentificationField> = new Set([
+  "payment_background",
+  "pep_self_details",
+  "pep_related_details",
+  "sanctions_links_details",
+]);
+
+/** The chosen channels without duplicates, in the order of the form. */
+function contactChannels(values: readonly string[]): string[] {
+  return CONTACT_CHANNELS.filter((channel) => values.includes(channel));
+}
+
+export function draftFromIdentification(data: LeadRequestIdentification | null | undefined): IdentificationDraft {
+  return {
+    salutation: data?.salutation ?? "",
+    former_names: data?.former_names ?? "",
+    birth_place: data?.birth_place ?? "",
+    birth_country: data?.birth_country ?? "",
+    habitual_residence_country: data?.habitual_residence_country ?? "",
+    contact_channels: contactChannels(data?.contact_channels ?? []),
+    id_document_type: data?.id_document_type ?? "",
+    id_document_number: data?.id_document_number ?? "",
+    id_issuing_authority: data?.id_issuing_authority ?? "",
+    id_issuing_country: data?.id_issuing_country ?? "",
+    id_issued_on: data?.id_issued_on ?? "",
+    id_valid_until: data?.id_valid_until ?? "",
+    payment_background: data?.payment_background ?? "",
+    pep_self: answerFromBoolean(data?.pep_self),
+    pep_self_details: data?.pep_self_details ?? "",
+    pep_related: answerFromBoolean(data?.pep_related),
+    pep_related_details: data?.pep_related_details ?? "",
+    high_risk_country: answerFromBoolean(data?.high_risk_country),
+    high_risk_country_code: data?.high_risk_country_code ?? "",
+    sanctions_links: answerFromBoolean(data?.sanctions_links),
+    sanctions_links_details: data?.sanctions_links_details ?? "",
+  };
+}
+
+/**
+ * The draft after the answer to a legal question. The details belong to a
+ * "yes" only: with any other answer they go (the server does the same).
+ */
+export function withLegalAnswer(draft: IdentificationDraft, question: LegalQuestion, answer: string): IdentificationDraft {
+  const next: IdentificationDraft = { ...draft, [question]: answer };
+  if (answer !== "yes") next[LEGAL_DETAILS[question]] = "";
+  return next;
+}
+
+/** A contact channel switched on or off. */
+export function withContactChannel(draft: IdentificationDraft, channel: ContactChannel, chosen: boolean): IdentificationDraft {
+  const rest = draft.contact_channels.filter((item) => item !== channel);
+  return { ...draft, contact_channels: contactChannels(chosen ? [...rest, channel] : rest) };
+}
+
+/** The comparable form of a field: what would be sent, as text. */
+export function identificationValue(field: IdentificationField, draft: IdentificationDraft): string {
+  if (field === "contact_channels") return contactChannels(draft.contact_channels).join(",");
+  const value = draft[field].trim();
+  return MULTILINE_FIELDS.has(field) ? value : value.replace(/\s+/g, " ");
+}
+
+/** Values the server refused, by field; none of them is sent again until the patient changes it. */
+export type RejectedIdentification = Partial<Record<IdentificationField, string>>;
+
+/**
+ * Only the statements that differ from the last saved state. A cleared text
+ * is sent as `""`, a legal answer as `true`, `false` or `null`, and a refused
+ * value is not repeated.
+ */
+export function identificationPatch(
+  saved: IdentificationDraft,
+  draft: IdentificationDraft,
+  rejected: RejectedIdentification = {},
+): IdentificationPatch {
+  const patch: IdentificationPatch = {};
+  for (const field of IDENTIFICATION_FIELDS) {
+    const next = identificationValue(field, draft);
+    if (next === identificationValue(field, saved)) continue;
+    if (rejected[field] === next) continue;
+    if (field === "contact_channels") patch[field] = contactChannels(draft.contact_channels);
+    else if ((LEGAL_QUESTIONS as readonly string[]).includes(field)) patch[field] = booleanFromAnswer(next);
+    else patch[field] = next;
+  }
+  return patch;
+}
+
+/** Notes that the server refused the current value of `field`; other fields keep their entry. */
+export function withRejectedIdentification(
+  rejected: RejectedIdentification,
+  field: string,
+  draft: IdentificationDraft,
+): RejectedIdentification | null {
+  if (!IDENTIFICATION_FIELDS.includes(field as IdentificationField)) return null;
+  const key = field as IdentificationField;
+  return { ...rejected, [key]: identificationValue(key, draft) };
+}
+
+/** The refusals that still apply: a value the patient changed since may be sent again. */
+export function stillRejectedIdentification(
+  rejected: RejectedIdentification,
+  draft: IdentificationDraft,
+): RejectedIdentification {
+  const next: RejectedIdentification = {};
+  for (const field of IDENTIFICATION_FIELDS) {
+    if (rejected[field] !== undefined && rejected[field] === identificationValue(field, draft)) next[field] = rejected[field];
+  }
+  return next;
+}
+
+/** Keys of the identification in `progress.missing_for_submit`: its fields and the upload. */
+export type IdentificationSubmitField = IdentificationField | "id_document_upload";
+
+/** A field of the personal data, of the payer block or of the identification. */
+export type SubmitField = PersonalField | PayerField | IdentificationSubmitField;
+
+/** Everything `progress.missing_for_submit` can name, in the order of the form. */
+export const SUBMIT_FIELDS: SubmitField[] = [
+  // Person
+  "salutation",
+  "first_name",
+  "last_name",
+  "middle_name",
+  "former_names",
+  "date_of_birth",
+  "birth_place",
+  "birth_country",
+  "legal_sex",
+  "citizenships",
+  // Address
+  "street_address",
+  "zip_code",
+  "city",
+  "country",
+  "habitual_residence_country",
+  // Contact
+  "phone",
+  "primary_language",
+  "contact_channels",
+  // Identity document
+  "id_document_type",
+  "id_document_number",
+  "id_issuing_authority",
+  "id_issuing_country",
+  "id_issued_on",
+  "id_valid_until",
+  "id_document_upload",
+  // Insurance
+  "has_insurance",
+  "insurance_type",
+  "insurance_provider",
+  "insurance_number",
+  "insurance_covers_germany",
+  // Who pays
+  "payer_kind",
+  "payer_first_name",
+  "payer_last_name",
+  "payer_date_of_birth",
+  "payer_citizenships",
+  "payer_relationship",
+  "payer_street",
+  "payer_zip",
+  "payer_city",
+  "payer_country",
+  "payer_phone",
+  "payer_email",
+  "payment_background",
+  "payer_own_account",
+  "payer_beneficial_owner",
+  // Legal questions
+  "pep_self",
+  "pep_self_details",
+  "pep_related",
+  "pep_related_details",
+  "high_risk_country",
+  "high_risk_country_code",
+  "sanctions_links",
+  "sanctions_links_details",
+];
 
 /** Fields still missing for "send to the manager", in form order. */
 export function missingForSubmit(request: Pick<LeadRequest, "progress">): SubmitField[] {
   const missing = new Set(request.progress.missing_for_submit);
-  return [...PERSONAL_FIELDS, ...PAYER_FIELDS].filter((field) => missing.has(field));
+  return SUBMIT_FIELDS.filter((field) => missing.has(field));
+}
+
+/** The autosave state of one part of the form. */
+export type SaveState = "idle" | "saving" | "saved" | "error";
+
+/**
+ * The one save indicator of the step: the parts of the form save on their
+ * own, and a part that could not be saved is not hidden by another that was.
+ */
+export function combinedSaveState(states: readonly SaveState[]): SaveState {
+  if (states.includes("saving")) return "saving";
+  if (states.includes("error")) return "error";
+  return states.includes("saved") ? "saved" : "idle";
 }
 
 export function consentGiven(request: Pick<LeadRequest, "consents">, purpose: string): boolean {

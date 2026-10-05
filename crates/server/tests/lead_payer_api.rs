@@ -230,6 +230,12 @@ async fn payer_declaration_access_validation_and_audit() {
             "cost_assumption_missing"
         ])
     );
+    // The staff form always states the own-account answer, also the default.
+    assert_eq!(saved["declaration"]["acts_on_own_account"], true, "{saved}");
+    assert_eq!(
+        saved["declaration"]["own_account_answered"], true,
+        "{saved}"
+    );
 
     // Not on own account: the beneficial owner must be named.
     let (status, saved) = json_request(
@@ -690,6 +696,31 @@ async fn the_gwg_identification_sheet_is_filled_from_the_lead_and_its_payer() {
     assert_eq!(template.as_deref(), Some("gwg_identification"));
     assert_eq!(art, "gwg_identification");
     assert_eq!(lead, Some(lead_id));
+
+    // The lead's own statements from the cabinet (place of birth, identity
+    // document, the legal questions) are read into the sheet as well.
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (
+               lead_id, birth_place, birth_country, id_document_type, id_document_number,
+               id_issuing_authority, id_issuing_country, id_issued_on, id_valid_until,
+               pep_self, pep_related, pep_related_details, high_risk_country, sanctions_links)
+           VALUES ($1, 'Kyiv', 'UA', 'passport', 'AB123456', 'Stadt Kyiv', 'UA',
+                   DATE '2021-02-01', DATE '2031-02-01', false, true, 'Bruder, Minister',
+                   false, false)"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, regenerated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{regenerated}");
 
     // Without a third-party payer there is no payer sheet.
     let (status, body) = json_request(

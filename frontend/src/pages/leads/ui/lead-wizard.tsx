@@ -210,6 +210,7 @@ import {
   LeadWizardDocumentMetadata,
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
+import { LeadGwgStatements } from "./lead-gwg-statements";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
 import {
@@ -7360,6 +7361,12 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   )}
                 >
+                  <LeadGwgStatements
+                    intake={step1Portal.intake}
+                    payer={payer.data?.declaration ?? null}
+                    tx={tx}
+                    lang={lang}
+                  />
                   <p className="text-xs leading-5 text-muted-foreground">
                     {tx(
                       "Заполняется из заявки: личные данные, гражданство, адрес, документ, представители, плательщик и ответы AML. На каждого человека свой лист; подписывает сотрудник GMED.",
