@@ -20359,8 +20359,11 @@ fn build_gwg_identification_pdf(
 
     legal_signature_line(
         &mut layout,
-        // The name stands under the signature line; beside the date it would be cut off.
-        &format!("Datum: {review_date}"),
+        // The name stands under the signature line; beside the date it would
+        // be cut off. The label stays: the signature frames read from the PDF
+        // text take an underline after "Bearbeiter" for the agency's
+        // (`document_signatures::frames`), as the recorded frame says.
+        &format!("Datum: {review_date}     Bearbeiter/in:"),
         reviewer,
         "agency",
     );
