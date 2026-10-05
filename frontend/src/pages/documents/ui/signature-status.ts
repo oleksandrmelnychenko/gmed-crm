@@ -17,16 +17,17 @@ const SIGNATURE_STATUS_TEXT: Record<string, [string, string]> = {
   error: ["Ошибка подписания", "Signatur fehlgeschlagen"],
 };
 
-const INFORMATIONAL_DOCUMENT_KINDS = ["privacy_information", "cost_estimate"];
+const INFORMATIONAL_TEMPLATES = ["privacy_information", "cost_estimate"];
 
 /**
  * Informational documents (privacy information, cost estimate) travel as
  * attachments for acknowledgement and are never the subject of a signature
  * request; the server refuses them (`informational_document_not_signable`).
+ * Like the server, this goes by the template the document was generated from
+ * and nothing else: an uploaded file of the same kind stays signable.
  */
-export function isInformationalDocument(document: { generated_template_id?: string | null; art?: string | null }): boolean {
-  const template = document.generated_template_id?.trim().toLowerCase();
-  return INFORMATIONAL_DOCUMENT_KINDS.includes(template || (document.art ?? "").trim().toLowerCase());
+export function isInformationalDocument(document: { generated_template_id?: string | null }): boolean {
+  return INFORMATIONAL_TEMPLATES.includes(document.generated_template_id ?? "");
 }
 
 /** Label of a signature request status; unknown values read as "needs review". */
