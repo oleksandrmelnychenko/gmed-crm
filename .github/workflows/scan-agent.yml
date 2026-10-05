@@ -65,7 +65,7 @@ jobs:
           tar -tvzf "gmed-scan-$version-linux-x86_64.tar.gz"
 
       - name: Upload binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gmed-scan-linux-x86_64
           path: gmed-scan-*-linux-x86_64.tar.gz
@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload installer logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gmed-scan-windows-msi-logs
           path: ${{ runner.temp }}/msi-*.log
@@ -197,7 +197,7 @@ jobs:
           retention-days: 14
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gmed-scan-windows-x64
           path: |
@@ -274,7 +274,7 @@ jobs:
           pkgutil --pkg-info com.gmedhealth.scan
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gmed-scan-macos-universal
           path: gmed-scan-*-macos-universal.pkg
