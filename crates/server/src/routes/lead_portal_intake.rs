@@ -3586,8 +3586,9 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
 
 /// Clears what the portal intake keeps on the lead itself, in the purge
 /// transaction: the markers, the time of sending, the upload rows of both
-/// kinds and the lead's own GwG statements (uploads go with the lead's
-/// documents, consents stay as evidence without personal data of their own).
+/// kinds, the lead's own GwG statements and staff's confirmations of the
+/// own-account payments (uploads go with the lead's documents, consents stay
+/// as evidence without personal data of their own).
 pub(crate) async fn purge_portal_intake_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -3596,6 +3597,7 @@ pub(crate) async fn purge_portal_intake_in_tx(
         .bind(lead_id)
         .execute(&mut **tx)
         .await?;
+    super::lead_identification::purge_in_tx(tx, lead_id).await?;
     sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = '{}'::jsonb,

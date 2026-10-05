@@ -2683,6 +2683,14 @@ struct GwgIdentificationSheet {
     identity_document_valid_until: Option<NaiveDate>,
     /// A passport or identity document is stored with the lead.
     identity_document_on_file: bool,
+    /// The person's completed qualified electronic signature, which counts as
+    /// the verification of the identity (§ 12 Abs. 1 GwG): the day it was
+    /// signed and whether it is only a test signature of the provider's demo
+    /// account.
+    qualified_signature: Option<(NaiveDate, bool)>,
+    /// The day staff confirmed the payment from an account in the person's
+    /// own name, which the law asks for beside the signature.
+    own_account_payment_confirmed_on: Option<NaiveDate>,
     /// Parents or guardians of a minor: name and relation as entered.
     representatives: Vec<(String, String)>,
     /// `None` until the payer declaration says so.
@@ -2738,15 +2746,20 @@ async fn load_gwg_identification_sheet(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let declaration = {
+    let (declaration, identification) = {
         let mut conn = state
             .db
             .acquire()
             .await
             .map_err(|error| failed(error, "connection"))?;
-        super::lead_payer::load_declaration(&mut conn, lead_id)
+        let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
             .await
-            .map_err(|error| failed(error, "payer declaration"))?
+            .map_err(|error| failed(error, "payer declaration"))?;
+        let identification =
+            super::lead_identification::load_identification_status(&mut conn, lead_id)
+                .await
+                .map_err(|error| failed(error, "identification status"))?;
+        (declaration, identification)
     };
     let (statements, _) = super::lead_portal_intake::load_identification(&state.db, lead_id)
         .await
@@ -2878,6 +2891,22 @@ async fn load_gwg_identification_sheet(
                 .map(str::to_string),
         );
     }
+    // Identification by qualified electronic signature and the payment from
+    // the person's own account, on the days they happened in Germany.
+    let person = if for_payer {
+        identification.payer.unwrap_or_default()
+    } else {
+        identification.contract_partner
+    };
+    sheet.qualified_signature = person.qes.map(|signature| {
+        (
+            crate::app_time::date_of(signature.signed_at),
+            signature.test_mode,
+        )
+    });
+    sheet.own_account_payment_confirmed_on = person
+        .own_account_payment
+        .map(|payment| crate::app_time::date_of(payment.confirmed_at));
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
@@ -20295,11 +20324,40 @@ fn build_gwg_identification_pdf(
         "Ausweisdokument (Art, Nummer, ausstellende Behörde)",
         Some(identity_document.as_str()).filter(|value| !value.is_empty()),
     );
+    // A completed qualified electronic signature of the person counts as the
+    // verification of the identity (owner decision 2026-10-05). § 12 Abs. 1
+    // GwG adds a payment from an account in the person's own name: staff
+    // confirm it by hand, the sheet says whether they did. Without such a
+    // signature the box stays empty and the sheet says nothing more.
     aml_checkbox_line(
         &mut layout,
-        false,
+        sheet.qualified_signature.is_some(),
         "Oder: Die Überprüfung der Identität erfolgte anhand eines elektronischen Identitätsnachweises, einer qualifizierten elektronischen Signatur oder eines notifizierten elektronischen Identifizierungssystems (Nachweis ist beigefügt).",
     );
+    if let Some((signed_on, test_mode)) = sheet.qualified_signature {
+        let signed_on = signed_on.format("%d.%m.%Y");
+        let signature = if test_mode {
+            format!(
+                "Qualifizierte elektronische Signatur vom {signed_on} (Testmodus, kein rechtswirksamer Nachweis)"
+            )
+        } else {
+            format!("Qualifizierte elektronische Signatur vom {signed_on}")
+        };
+        aml_labeled_value(
+            &mut layout,
+            "Elektronische Überprüfung der Identität",
+            Some(signature.as_str()),
+        );
+        let payment = match sheet.own_account_payment_confirmed_on {
+            Some(day) => format!("bestätigt am {}", day.format("%d.%m.%Y")),
+            None => "ausstehend".to_string(),
+        };
+        aml_labeled_value(
+            &mut layout,
+            "Zahlung von einem Konto auf den Namen des Vertragspartners (§ 12 Abs. 1 GwG)",
+            Some(payment.as_str()),
+        );
+    }
     aml_checkbox_line(
         &mut layout,
         false,
@@ -29744,6 +29802,9 @@ mod tests {
             identity_document_issued_on: NaiveDate::from_ymd_opt(2021, 2, 1),
             identity_document_valid_until: NaiveDate::from_ymd_opt(2031, 2, 1),
             identity_document_on_file: true,
+            // The patient signed with a qualified electronic signature; the
+            // payment from the own account is not confirmed yet.
+            qualified_signature: Some((NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(), false)),
             acts_on_own_account: Some(false),
             beneficial_owner_name: Some("Viktor Zahler".to_string()),
             increased_risk: true,
@@ -29778,10 +29839,40 @@ mod tests {
         // A "yes" in section 5 asks for the enhanced due diligence sheet.
         assert!(text.contains("ist zusätzlich auszufüllen"));
         assert!(text.contains("Begründung einer Geschäftsbeziehung"));
+        // The qualified signature ticks its box and is dated; the payment
+        // from the own account is still awaited.
+        assert!(text.contains("[X] Oder: Die Überprüfung der Identität"));
+        assert!(text.contains("Qualifizierte elektronische Signatur vom 02.10.2026"));
+        assert!(!text.contains("Testmodus"));
+        assert!(text.contains(
+            "Zahlung von einem Konto auf den Namen des Vertragspartners (§ 12 Abs. 1 GwG) ausstehend"
+        ));
+
+        // A test signature says so; the confirmed payment carries its day.
+        let confirmed = super::GwgIdentificationSheet {
+            qualified_signature: Some((NaiveDate::from_ymd_opt(2026, 10, 2).unwrap(), true)),
+            own_account_payment_confirmed_on: NaiveDate::from_ymd_opt(2026, 10, 4),
+            ..sheet.clone()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &confirmed,
+            &legal_test_agency(),
+            Some("A-20261005-0001"),
+            "GWG-20261005-UNITTEST0003",
+        )
+        .unwrap();
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261005-UNITTEST0003");
+        assert!(text.contains(
+            "Qualifizierte elektronische Signatur vom 02.10.2026 (Testmodus, kein rechtswirksamer Nachweis)"
+        ));
+        assert!(text.contains("(§ 12 Abs. 1 GwG) bestätigt am 04.10.2026"));
+        assert!(!text.contains("ausstehend"));
 
         // Nobody acts for an adult; without a "yes" the annex is not needed.
         // Of the identity document the sheet names only what is known: here
-        // the type and the expiry.
+        // the type and the expiry. Without a qualified signature the box
+        // stays empty and the payment is not mentioned, confirmed or not.
         let plain = super::GwgIdentificationSheet {
             increased_risk: false,
             politically_exposed: false,
@@ -29794,6 +29885,8 @@ mod tests {
             identity_document_authority: None,
             identity_document_country: None,
             identity_document_issued_on: None,
+            qualified_signature: None,
+            own_account_payment_confirmed_on: NaiveDate::from_ymd_opt(2026, 10, 4),
             ..sheet
         };
         let bytes = super::build_gwg_identification_pdf(
@@ -29811,6 +29904,9 @@ mod tests {
         assert!(!text.contains("Kyiv"));
         assert!(text.contains("Aufenthaltstitel, gültig bis 01.02.2031"));
         assert!(!text.contains("ausgestellt"));
+        assert!(text.contains("[ ] Oder: Die Überprüfung der Identität"));
+        assert!(!text.contains("Qualifizierte elektronische Signatur vom"));
+        assert!(!text.contains("Zahlung von einem Konto"));
     }
 
     fn parents_as_party() -> super::ContractingDoc {

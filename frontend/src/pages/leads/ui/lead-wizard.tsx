@@ -211,6 +211,7 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
+import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
 import {
@@ -7361,6 +7362,15 @@ ${serviceCommentLines.join("\n")}`
                     </span>
                   )}
                 >
+                  <LeadIdentificationStatus
+                    leadId={leadId}
+                    documents={documents}
+                    payerVersion={payer.data?.declaration?.updated_at ?? null}
+                    canEdit
+                    disabled={isBusy}
+                    tx={tx}
+                    errorText={(nextError) => errorText(nextError, tx)}
+                  />
                   <LeadGwgStatements
                     intake={step1Portal.intake}
                     payer={payer.data?.declaration ?? null}
