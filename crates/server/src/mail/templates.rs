@@ -1,9 +1,11 @@
 //! GMED e-mail templates: branded HTML with a plain-text alternative.
 //!
-//! The HTML is table-based with inline styles for mail clients. It loads
-//! nothing from outside (the wordmark is text, not an image), so opening a
-//! message reveals nothing to anyone, and it reads the same when a client
-//! blocks remote content. Every value from the database is escaped.
+//! The HTML is table-based with inline styles for mail clients. The only
+//! remote resource is the GMED logo from the console's own server
+//! (`/gmed-logo.png`, the same URL for everyone, so it identifies no one); a
+//! client that blocks images shows the styled alt text "GMED" instead. No
+//! fonts, styles or tracking load from anywhere. Every value from the
+//! database is escaped.
 
 use chrono::NaiveDate;
 
@@ -124,6 +126,22 @@ pub struct PortalLoginEmail<'a> {
     /// A parent filling in a minor's request.
     pub for_guardian: bool,
     pub agency: &'a AgencyIdentity,
+    /// The GMED logo on the console ([`logo_url`]); without it the header
+    /// shows the text wordmark.
+    pub logo_url: Option<&'a str>,
+}
+
+/// Path of the logo the console serves (`frontend/public/gmed-logo.png`,
+/// 726 × 286 px, black on transparent).
+pub const LOGO_PATH: &str = "/gmed-logo.png";
+/// Shown size in the e-mail header; the file has about 5× the pixels for
+/// sharp rendering on high-density screens.
+const LOGO_WIDTH: u32 = 132;
+const LOGO_HEIGHT: u32 = 52;
+
+/// The logo URL on `console_url` (an origin without a trailing slash).
+pub fn logo_url(console_url: &str) -> String {
+    format!("{}{LOGO_PATH}", console_url.trim_end_matches('/'))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -329,6 +347,15 @@ fn login_html(
         .map(|line| escape_html(line))
         .collect::<Vec<_>>()
         .join("<br>");
+    // The alt text carries the wordmark's look when a client blocks images.
+    let wordmark_style = format!("font:800 26px/1 {FONT};letter-spacing:3px;color:{INK};");
+    let brand_mark = match email.logo_url {
+        Some(logo) => format!(
+            r#"<img src="{}" width="{LOGO_WIDTH}" height="{LOGO_HEIGHT}" alt="GMED" style="display:block;border:0;outline:none;text-decoration:none;width:{LOGO_WIDTH}px;height:auto;{wordmark_style}">"#,
+            escape_html(logo)
+        ),
+        None => "GMED".to_string(),
+    };
     // Label above the value: fits a phone without squeezing the value, and
     // the password never wraps, so it is copied in one piece.
     let credential_row = |label: &str, value: &str, mono: bool| {
@@ -362,8 +389,8 @@ fn login_html(
 <tr><td style="height:4px;line-height:4px;font-size:0;background:{BRAND};">&nbsp;</td></tr>
 <tr><td style="padding:28px 32px 8px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
-<td style="font:800 26px/1 {FONT};letter-spacing:3px;color:{INK};">GMED</td>
-<td style="padding-left:12px;border-left:1px solid #e4e4e7;font:13px/1.2 {FONT};color:{MUTED};">{portal}</td>
+<td style="vertical-align:middle;padding-right:16px;{wordmark_style}">{brand_mark}</td>
+<td style="vertical-align:middle;padding-left:14px;border-left:1px solid #e4e4e7;font:13px/1.2 {FONT};color:{MUTED};">{portal}</td>
 </tr></table>
 </td></tr>
 <tr><td style="padding:24px 32px 8px;">
@@ -440,6 +467,7 @@ mod tests {
             complete_by: NaiveDate::from_ymd_opt(2026, 10, 19),
             for_guardian: false,
             agency: &agency,
+            logo_url: Some("https://console.gmed-health.com/gmed-logo.png"),
         })
     }
 
@@ -479,10 +507,16 @@ mod tests {
     }
 
     #[test]
-    fn html_loads_nothing_from_outside() {
+    fn the_logo_on_the_console_is_the_only_remote_resource() {
+        assert_eq!(
+            logo_url("https://console.gmed-health.com/"),
+            "https://console.gmed-health.com/gmed-logo.png"
+        );
         let html = render(MailLanguage::De, "Anna").html;
-        assert!(!html.contains("<img"));
-        assert!(!html.contains("src="));
+        let sources = html.split("src=\"").skip(1).collect::<Vec<_>>();
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].starts_with("https://console.gmed-health.com/gmed-logo.png\""));
+        assert!(html.contains(r#"alt="GMED""#));
         assert!(!html.contains("url("));
         assert!(!html.contains("<link"));
         assert!(!html.contains("<script"));
@@ -490,6 +524,25 @@ mod tests {
         for href in html.split("href=\"").skip(1) {
             assert!(href.starts_with("https://console.gmed-health.com/login\""));
         }
+    }
+
+    #[test]
+    fn without_a_logo_url_the_header_shows_the_text_wordmark() {
+        let agency = AgencyIdentity::default();
+        let html = portal_login(&PortalLoginEmail {
+            language: MailLanguage::En,
+            recipient_name: "Anna",
+            login: "anna@example.test",
+            password: "Kq7-mP2x-Rw9t",
+            login_url: "https://console.gmed-health.com/login",
+            complete_by: None,
+            for_guardian: false,
+            agency: &agency,
+            logo_url: None,
+        })
+        .html;
+        assert!(!html.contains("<img"));
+        assert!(html.contains(">GMED</td>"));
     }
 
     #[test]
@@ -504,6 +557,7 @@ mod tests {
             complete_by: None,
             for_guardian: false,
             agency: &agency,
+            logo_url: Some("https://console.gmed-health.com/gmed-logo.png?\"><script>"),
         });
         assert!(!email.html.contains("<b>Anna</b>"));
         assert!(
@@ -529,6 +583,7 @@ mod tests {
             complete_by: None,
             for_guardian: true,
             agency: &agency,
+            logo_url: None,
         });
         assert!(email.text.starts_with("Вітаємо!\n"));
         assert!(email.text.contains("для вашої дитини"));

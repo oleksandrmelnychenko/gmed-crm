@@ -3,9 +3,10 @@
 //! hand-off to the receiving server and keeps only metadata; it adds no
 //! tracking pixels and rewrites no links.
 //!
-//! Every message is sent as HTML with a plain-text alternative. The HTML loads
-//! nothing from outside (no images, fonts or styles), so opening it reveals
-//! nothing to anyone. Messages never carry health data.
+//! Every message is sent as HTML with a plain-text alternative. The only
+//! remote resource of the HTML is the GMED logo from the console's own server
+//! (one URL for everyone, no tracking); no fonts or styles load from anywhere.
+//! Messages never carry health data.
 //!
 //! Without `GMED_MITTARO_API_KEY`, `GMED_MAIL_FROM` and a console URL the
 //! mailer reports `not_configured` and nothing is sent.

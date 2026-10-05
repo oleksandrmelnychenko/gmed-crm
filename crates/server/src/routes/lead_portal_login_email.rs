@@ -329,6 +329,7 @@ async fn send_login_email(
     };
     let agency = load_agency_identity(&state).await;
     let login_url = format!("{console_url}/login");
+    let logo_url = templates::logo_url(&console_url);
     let rendered = templates::portal_login(&PortalLoginEmail {
         language,
         recipient_name: recipient_name.trim(),
@@ -338,6 +339,7 @@ async fn send_login_email(
         complete_by,
         for_guardian: !own_login,
         agency: &agency,
+        logo_url: Some(&logo_url),
     });
     let outgoing = OutgoingEmail {
         to: recipient.clone(),
