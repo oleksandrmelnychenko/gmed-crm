@@ -25,6 +25,14 @@ type ReleaseEnvironment = {
 
 const RELEASE_NOTES: CustomerReleaseNote[] = [
   {
+    commit: "4d1b78c",
+    title: { ru: "Заказы без разрешения бухгалтерии", de: "Aufträge ohne Abrechnungsfreigabe" },
+    description: {
+      ru: "Отдельное «Разрешение бухгалтерии» на заказе убрано. Заказ допускают отсутствие долгов, подписи по заказу (или покрытие пакетом) и контроль оплаты — ждать отметки бухгалтерии больше не нужно.",
+      de: "Die gesonderte Abrechnungsfreigabe am Auftrag entfällt. Über die Durchführung entscheiden offene Forderungen, die Auftragsunterschriften (oder eine Paketdeckung) und die Zahlungsverfolgung – eine Freigabe der Buchhaltung ist nicht mehr nötig.",
+    },
+  },
+  {
     commit: "26ad6fa",
     title: { ru: "E-Rechnung: счета в формате ZUGFeRD", de: "E-Rechnung: Rechnungen im ZUGFeRD-Format" },
     description: {
