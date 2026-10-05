@@ -37,6 +37,7 @@ pub mod lead_payer;
 pub mod lead_portal_account;
 pub mod lead_portal_guardians;
 pub mod lead_portal_intake;
+pub mod lead_portal_login_email;
 pub mod leads;
 pub mod legal;
 pub mod me;
@@ -108,6 +109,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(lead_portal_account::router())
         .merge(lead_portal_guardians::router())
         .merge(lead_portal_intake::router())
+        .merge(lead_portal_login_email::router())
         .merge(lead_payer::router())
         .merge(orders::router())
         .merge(order_intakes::router())

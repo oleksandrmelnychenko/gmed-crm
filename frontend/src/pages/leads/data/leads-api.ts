@@ -104,6 +104,51 @@ export function issueLeadPortalAccess(leadId: string) {
   return postJson<LeadPortalAccountIssued>(`/leads/${leadId}/portal-account`, {});
 }
 
+export type LeadLoginEmailLanguage = "de" | "en" | "ru" | "uk";
+
+export type LeadLoginEmailRecord = {
+  user_id: string;
+  recipient: string;
+  language: LeadLoginEmailLanguage;
+  status: "sent" | "failed";
+  error_code: string | null;
+  sent_at: string;
+  sent_by_name: string | null;
+};
+
+/** Whether sign-in data can be e-mailed (Mittaro), and what was sent so far. */
+export type LeadLoginEmailInfo = {
+  available: boolean;
+  reason_code: string;
+  can_send: boolean;
+  lead_language: LeadLoginEmailLanguage | null;
+  sent: LeadLoginEmailRecord[];
+};
+
+export type LeadLoginEmailSent = {
+  sent_to: string;
+  sent_at: string;
+  language: LeadLoginEmailLanguage;
+  message_id: string;
+  /** The same message had been sent already; nothing new went out. */
+  replayed: boolean;
+};
+
+export function fetchLeadLoginEmails(leadId: string) {
+  return apiFetch<LeadLoginEmailInfo>(`/leads/${leadId}/portal-login-email`);
+}
+
+/**
+ * E-mails the sign-in data of the lead's login or of a parent's login. The
+ * server sends the password only while it is still the login's current one.
+ */
+export function sendLeadLoginEmail(
+  leadId: string,
+  body: { user_id: string; password: string; language: LeadLoginEmailLanguage },
+) {
+  return postJson<LeadLoginEmailSent>(`/leads/${leadId}/portal-login-email`, body);
+}
+
 export function createLead(payload: CreateLeadBody) {
   return postJson<CreateLeadResponse>("/leads", payload as unknown as JsonPayload);
 }

@@ -157,7 +157,7 @@ import {
   leadPortalStatusLabel,
   type LeadPortalStatus,
 } from "./model/lead-portal-access";
-import { LeadPortalAccessDetail, PortalCredentialsDialog } from "./ui/lead-portal-access";
+import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
 import { LeadSanctionsBadge, useLeadSanctionsFlags } from "@/pages/sanctions/components";
 const PORTAL_STATUS_DOT: Record<LeadPortalStatus, string> = {
   none: "bg-transparent",
@@ -696,11 +696,7 @@ function useLeadsPageContent() {
     });
   }
   // One-time password of a login created from the "new lead" sheet.
-  const [issuedPortalAccess, setIssuedPortalAccess] = useState<{
-    email: string;
-    password: string;
-    firstName: string;
-  } | null>(null);
+  const [issuedPortalAccess, setIssuedPortalAccess] = useState<PortalCredentials | null>(null);
   // Rows opened with the chevron before the name show the patient login.
   const [expandedLeadIds, setExpandedLeadIds] = useState<ReadonlySet<string>>(() => new Set());
   const toggleLeadExpanded = useCallback((leadId: string) => {
@@ -1269,6 +1265,8 @@ function useLeadsPageContent() {
           email: created.portal_account.email,
           password: portalPassword,
           firstName: payload.first_name,
+          leadId: created.id,
+          userId: created.portal_account.user_id,
         });
       }
       if (permissions.canConvert) openLeadWizard(created.id);

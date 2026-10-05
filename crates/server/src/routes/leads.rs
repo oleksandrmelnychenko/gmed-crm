@@ -403,6 +403,11 @@ fn lead_portal_account_summary(row: &sqlx::postgres::PgRow) -> Value {
                 .ok()
                 .flatten()
                 .map(|value| value.to_rfc3339()),
+            "login_emailed_at": row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_login_emailed_at")
+                .ok()
+                .flatten()
+                .map(|value| value.to_rfc3339()),
         }),
         None => Value::Null,
     }
@@ -449,6 +454,10 @@ async fn list_leads(
                       AS portal_password_change_pending,
                   (SELECT max(tf.created_at) FROM token_families tf WHERE tf.user_id = leads.portal_user_id)
                       AS portal_last_login_at,
+                  (SELECT max(e.created_at) FROM portal_login_emails e
+                    WHERE e.lead_id = leads.id AND e.user_id = leads.portal_user_id
+                      AND e.status = 'sent')
+                      AS portal_login_emailed_at,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR $2::text IS NOT NULL

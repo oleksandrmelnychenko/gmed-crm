@@ -1071,6 +1071,28 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
       return json(route, { items: [] });
     }
 
+    const loginEmailLead = path.match(/^\/leads\/([^/]+)\/portal-login-email$/)?.[1];
+    if (loginEmailLead) {
+      if (route.request().method() === "POST") {
+        const body = route.request().postDataJSON() as { language: string };
+        return json(route, {
+          sent_to: leadDetails.get(loginEmailLead)?.email ?? "",
+          // 15:42 in Berlin.
+          sent_at: "2026-10-05T13:42:00Z",
+          language: body.language,
+          message_id: "email_01TEST",
+          replayed: false,
+        });
+      }
+      return json(route, {
+        available: true,
+        reason_code: "ready",
+        can_send: true,
+        lead_language: null,
+        sent: [],
+      });
+    }
+
     if (path === "/leads" && route.request().method() === "POST") {
       const payload = JSON.parse(route.request().postData() ?? "{}") as {
         first_name?: string;
@@ -3052,6 +3074,22 @@ test.describe("lead onboarding wizard", () => {
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toContain("Passwort: Kq7-mP2x-Rw9t");
+
+    // With Mittaro set up, the same sign-in data goes out by e-mail on a click.
+    await credentials.getByRole("button", { name: "EN", exact: true }).click();
+    const emailRequest = page.waitForRequest((emailCall) =>
+      emailCall.method() === "POST" &&
+      new URL(emailCall.url()).pathname === `/api/v1/leads/${createdId}/portal-login-email`,
+    );
+    await credentials.getByRole("button", { name: "An neue.person@example.com senden" }).click();
+    expect((await emailRequest).postDataJSON()).toEqual({
+      user_id: "00000000-0000-0000-0000-000000000991",
+      password: "Kq7-mP2x-Rw9t",
+      language: "en",
+    });
+    await expect(credentials.getByTestId("portal-credentials-email-status")).toHaveText(
+      "Gesendet an neue.person@example.com · 05.10.2026 15:42",
+    );
     await credentials.getByRole("button", { name: "Fertig" }).click();
     await expect(credentials).toBeHidden();
 

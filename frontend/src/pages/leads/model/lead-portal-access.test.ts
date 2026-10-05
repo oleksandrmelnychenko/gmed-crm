@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canIssueLeadPortalPassword,
   leadPortalStatus,
+  loginEmailErrorMessage,
   patientMessageLanguage,
   portalCredentialsMessage,
 } from "./lead-portal-access";
@@ -105,5 +106,22 @@ describe("portal e-mail conflicts", () => {
         "ru",
       ),
     ).toBe("Max Muster · сотрудник (продажи)");
+  });
+});
+
+describe("loginEmailErrorMessage", () => {
+  const failure = (code: string) => ({ status: 503, body: { code, message: "x" } });
+
+  it("translates the delivery codes of the server", () => {
+    expect(loginEmailErrorMessage(failure("mail_not_configured"), "ru")).toContain("не настроена");
+    expect(loginEmailErrorMessage(failure("mail_not_configured"), "de")).toContain("nicht eingerichtet");
+    expect(loginEmailErrorMessage(failure("portal_password_outdated"), "ru")).toContain("новый пароль");
+    expect(loginEmailErrorMessage(failure("mail_quota_reached"), "de")).toContain("Kontingent");
+  });
+
+  it("leaves other errors to the general lead error text", () => {
+    expect(loginEmailErrorMessage(failure("something_else"), "ru")).toBeNull();
+    expect(loginEmailErrorMessage(new Error("boom"), "ru")).toBeNull();
+    expect(loginEmailErrorMessage(null, "de")).toBeNull();
   });
 });

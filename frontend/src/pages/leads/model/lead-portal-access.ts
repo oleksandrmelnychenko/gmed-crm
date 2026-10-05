@@ -116,6 +116,51 @@ export function portalEmailOwnerHref(owner: PortalEmailOwner): string | null {
   return null;
 }
 
+const LOGIN_EMAIL_ERRORS: Record<string, { ru: string; de: string }> = {
+  mail_not_configured: {
+    ru: "Отправка e-mail не настроена (Mittaro). Передайте доступ сообщением",
+    de: "Der E-Mail-Versand ist nicht eingerichtet (Mittaro). Zugang bitte per Nachricht weitergeben",
+  },
+  mail_quota_reached: {
+    ru: "Лимит писем Mittaro исчерпан. Повторите позже",
+    de: "Das E-Mail-Kontingent bei Mittaro ist ausgeschöpft. Bitte später erneut versuchen",
+  },
+  mail_rejected: {
+    ru: "Mittaro отклонил ключ или домен отправителя. Сообщите администратору",
+    de: "Mittaro hat den Schlüssel oder die Absenderdomain abgelehnt. Bitte die Administration informieren",
+  },
+  mail_invalid_message: {
+    ru: "Mittaro не принял письмо. Сообщите администратору",
+    de: "Mittaro hat die E-Mail nicht angenommen. Bitte die Administration informieren",
+  },
+  mail_unavailable: {
+    ru: "Сервис e-mail временно недоступен. Повторите попытку",
+    de: "Der E-Mail-Dienst ist vorübergehend nicht erreichbar. Bitte erneut versuchen",
+  },
+  portal_password_outdated: {
+    ru: "Этот пароль уже заменён. Выдайте новый пароль и отправьте его",
+    de: "Dieses Passwort wurde bereits ersetzt. Bitte ein neues Passwort ausgeben und senden",
+  },
+  login_inactive: {
+    ru: "Вход отключён",
+    de: "Der Zugang ist deaktiviert",
+  },
+  login_email_invalid: {
+    ru: "У входа нет корректного e-mail",
+    de: "Der Zugang hat keine gültige E-Mail-Adresse",
+  },
+};
+
+/** Localized reason a sign-in e-mail was not sent, from the server's code. */
+export function loginEmailErrorMessage(error: unknown, lang: Lang): string | null {
+  if (!error || typeof error !== "object") return null;
+  const body = (error as { body?: Record<string, unknown> | null }).body;
+  const code = body && typeof body.code === "string" ? body.code : null;
+  const message = code ? LOGIN_EMAIL_ERRORS[code] : undefined;
+  if (!message) return null;
+  return lang === "de" ? message.de : message.ru;
+}
+
 export type PatientMessageLanguage = "de" | "en" | "ru" | "uk";
 
 /** Resolves the lead's language to one of the message templates (German fallback). */

@@ -46,7 +46,8 @@
 - `architecture/06_frontend-feature-pages-refactor-plan_ua.md` - канонічний tracker наступної хвилі міграції root feature pages до патерну `appointments` / `patients`
 - `architecture/invoice-line-comments_ua.md` - примітка до позиції рахунку: де вводиться, де друкується, коли фіксується.
 - `architecture/aml-enhanced-due-diligence_ua.md` - формуляр § 15 GwG і докази походження коштів: де зберігаються файли, що перевіряє сервер, що друкується.
-- `architecture/lead-patient-portal_ua.md` - кабінет ліда в порталі пацієнта: режими `lead`/`patient`, крок 1 і документи від пацієнта, згоди (ст. 9 і обробка заявки), доступ батьків неповнолітнього
+- `architecture/lead-patient-portal_ua.md` - кабінет ліда в порталі пацієнта: режими `lead`/`patient`, крок 1 і документи від пацієнта, згоди (ст. 9 і обробка заявки), доступ батьків неповнолітнього, вхід на e-mail
+- `architecture/mittaro-email_ua.md` - листи через Mittaro: налаштування акаунта, DNS домену, змінні середовища, AVV, що лишається на сервері
 - `architecture/invoice-payer-model_ua.md` - рахунок платнику замість пацієнта: сторона договору (неповнолітні), платник, зафіксований отримувач рахунку (§ 14 UStG, GoBD), перевірки при випуску, список для перевірки юристом
 - `architecture/lead-payer-declaration_ua.md` - «Кто платит»: декларація платника ліда (GwG), кілька громадянств (ISO), Kostenübernahmeerklärung як Schuldbeitritt, GMED підписує після клієнта й платника, список для перевірки юристом
 - `architecture/sanctions-screening_ua.md` - санкційний скринінг ЄС (список FSF на нашому сервері, збіги, рішення CEO, FiSaLis вручну) і політика заблокованих країн; блокування кваліфікації, підпису агентства і роботи за замовленнями; юридичні застереження
