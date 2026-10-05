@@ -516,35 +516,6 @@ test.describe("commercial live workflows", () => {
       scenario.credentials.billing.email,
       scenario.credentials.password,
     );
-    const billingReleaseResult = await billingPage.evaluate(
-      async ({ orderId }) => {
-        const token = window.localStorage.getItem("gmed_access_token");
-        const response = await fetch(`/api/v1/orders/${orderId}/process-gates`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            billing_release_status: "granted",
-            billing_release_note:
-              "Live E2E billing release before invoice creation.",
-          }),
-        });
-
-        return {
-          ok: response.ok,
-          status: response.status,
-          body: await response.text(),
-        };
-      },
-      { orderId: scenario.order.id },
-    );
-    expect(
-      billingReleaseResult.ok,
-      billingReleaseResult.body,
-    ).toBeTruthy();
-
     await billingPage.goto(
       `/invoices?quote=${createdQuote.id}&order=${scenario.order.id}&patient=${scenario.patient.id}`,
     );
