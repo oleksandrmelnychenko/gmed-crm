@@ -4,11 +4,18 @@ import { isInformationalDocument, signaturePresentation, signatureStatusText } f
 
 describe("isInformationalDocument", () => {
   it("recognises the attachments that are never signed themselves", () => {
-    expect(isInformationalDocument({ generated_template_id: "privacy_information", art: "contract" })).toBe(true);
-    expect(isInformationalDocument({ generated_template_id: null, art: "Cost_Estimate " })).toBe(true);
-    expect(isInformationalDocument({ generated_template_id: "framework_contract", art: "privacy_information" })).toBe(false);
-    expect(isInformationalDocument({ generated_template_id: "privacy_consents", art: "consent" })).toBe(false);
-    expect(isInformationalDocument({ art: "contract" })).toBe(false);
+    expect(isInformationalDocument({ generated_template_id: "privacy_information" })).toBe(true);
+    expect(isInformationalDocument({ generated_template_id: "cost_estimate" })).toBe(true);
+    expect(isInformationalDocument({ generated_template_id: "framework_contract" })).toBe(false);
+    expect(isInformationalDocument({ generated_template_id: "privacy_consents" })).toBe(false);
+    expect(isInformationalDocument({})).toBe(false);
+  });
+
+  it("goes by the template only, like the server: an uploaded file of the same kind stays signable", () => {
+    const uploadedCostEstimate = { generated_template_id: null, art: "cost_estimate" };
+    const contractFiledAsPrivacyInformation = { generated_template_id: "framework_contract", art: "privacy_information" };
+    expect(isInformationalDocument(uploadedCostEstimate)).toBe(false);
+    expect(isInformationalDocument(contractFiledAsPrivacyInformation)).toBe(false);
   });
 });
 
