@@ -45,7 +45,16 @@ const leads = [
   },
 ];
 
-async function setup(page: Page, lang: "ru" | "de") {
+type MailMock = {
+  /** Mittaro is connected. */
+  available?: boolean;
+  /** The provider refuses the e-mail. */
+  failSend?: boolean;
+};
+type Call = { method: string; path: string; body: unknown };
+
+async function setup(page: Page, lang: "ru" | "de", mail: MailMock = {}) {
+  const calls: Call[] = [];
   await page.addInitScript((language) => {
     localStorage.setItem("gmed_lang", language);
     localStorage.setItem("gmed_access_token", "lead-portal-row-token");
@@ -60,8 +69,45 @@ async function setup(page: Page, lang: "ru" | "de") {
       });
     }
     if (path === "/leads") return route.fulfill({ json: leads });
+    const method = route.request().method();
+    const lead = leads.find((item) => path.startsWith(`/leads/${item.id}/`));
+    if (lead && method === "POST") {
+      calls.push({ method, path: path.replace(`/leads/${lead.id}`, ""), body: route.request().postDataJSON() });
+    }
+    if (lead && path.endsWith("/portal-login-email")) {
+      if (method === "POST") {
+        if (mail.failSend) {
+          return route.fulfill({ status: 503, json: { code: "mail_unavailable", error: "Mail service unavailable" } });
+        }
+        return route.fulfill({
+          json: {
+            sent_to: lead.email,
+            // 15:42 in Berlin.
+            sent_at: "2026-10-05T13:42:00Z",
+            language: (route.request().postDataJSON() as { language: string }).language,
+            message_id: "email_01TEST",
+            replayed: false,
+          },
+        });
+      }
+      return route.fulfill({
+        json: {
+          available: mail.available ?? true,
+          reason_code: mail.available === false ? "mail_not_configured" : "ready",
+          can_send: true,
+          lead_language: "uk",
+          sent: [],
+        },
+      });
+    }
+    if (lead && path.endsWith("/portal-account") && method === "POST") {
+      return route.fulfill({
+        json: { user_id: lead.portal_account.user_id, email: lead.email, created: false, one_time_password: "Kq7-mP2x-Rw9t" },
+      });
+    }
     return route.fulfill({ json: [] });
   });
+  return calls;
 }
 
 test("the expanded lead row shows the patient portal at a glance", async ({ page }) => {
@@ -123,4 +169,75 @@ test("the patient portal row reads in German too", async ({ page }) => {
   await expect(row.getByTestId("lead-portal-progress")).toContainText("12 von 12 Feldern");
   await expect(row).toContainText("Gesendet");
   await expect(row.getByRole("button", { name: "Neues Passwort" })).toBeVisible();
+});
+
+test("one click issues a new password and e-mails the access to the lead", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const calls = await setup(page, "ru");
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[1].id}`).first().click();
+  const row = page.getByTestId("lead-portal-access").first();
+
+  // The second action of the row, right after "New password".
+  const send = row.getByTestId("lead-portal-send-email");
+  await expect(send).toHaveText("Отправить доступ на e-mail");
+  await expect(send).toBeEnabled();
+  const reset = await row.getByRole("button", { name: "Новый пароль" }).boundingBox();
+  const sendBox = await send.boundingBox();
+  expect(sendBox!.x - (reset!.x + reset!.width)).toBeLessThan(40);
+
+  await send.click();
+  const dialog = page.getByTestId("lead-portal-email-dialog");
+  // The stored hash cannot be sent: the dialog says a new password replaces the old one.
+  await expect(dialog).toContainText("старый перестанет работать");
+  await expect(dialog).toContainText("открытые сессии пациента будут завершены");
+  await expect(dialog).toContainText("sofia.beispiel@example.com");
+  // The lead's own language is preselected and can be changed.
+  await expect(dialog.getByRole("button", { name: "UA", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await dialog.getByRole("button", { name: "EN", exact: true }).click();
+  expect(calls).toEqual([]);
+
+  await dialog.getByTestId("lead-portal-email-confirm").click();
+  await expect(row.getByTestId("lead-portal-email-notice")).toHaveText(
+    "Доступ отправлен на sofia.beispiel@example.com · 05.10.2026 15:42",
+  );
+  await expect(dialog).toBeHidden();
+  // The password went into the e-mail, not onto the screen.
+  await expect(page.getByTestId("portal-credentials-password")).toHaveCount(0);
+  expect(calls).toEqual([
+    { method: "POST", path: "/portal-account", body: {} },
+    { method: "POST", path: "/portal-login-email", body: { user_id: "u-sofia", password: "Kq7-mP2x-Rw9t", language: "en" } },
+  ]);
+});
+
+test("without a mail connection the button explains instead of replacing the password", async ({ page }) => {
+  const calls = await setup(page, "de", { available: false });
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[1].id}`).first().click();
+  const row = page.getByTestId("lead-portal-access").first();
+  await row.getByRole("button", { name: "Zugang per E-Mail senden" }).click();
+  const dialog = page.getByTestId("lead-portal-email-dialog");
+  await expect(dialog).toContainText("Der E-Mail-Versand ist nicht eingerichtet");
+  await expect(dialog).toContainText("API-Verbindungen");
+  await expect(dialog.getByTestId("lead-portal-email-confirm")).toHaveCount(0);
+  // The window has its own corner button of the same name; this is the footer one.
+  await dialog.getByRole("button", { name: "Schließen", exact: true }).first().click();
+  await expect(dialog).toBeHidden();
+  expect(calls).toEqual([]);
+});
+
+test("a failed e-mail hands the new password over in the usual window", async ({ page }) => {
+  const calls = await setup(page, "ru", { failSend: true });
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[1].id}`).first().click();
+  const row = page.getByTestId("lead-portal-access").first();
+  await row.getByTestId("lead-portal-send-email").click();
+  await page.getByTestId("lead-portal-email-confirm").click();
+
+  // The old password is gone already, so the new one must not be lost.
+  await expect(page.getByTestId("portal-credentials-password")).toHaveText("Kq7-mP2x-Rw9t");
+  await expect(row).toContainText("Письмо не отправлено: Сервис e-mail временно недоступен");
+  await expect(row).toContainText("Новый пароль уже действует");
+  await expect(row.getByTestId("lead-portal-email-notice")).toHaveCount(0);
+  expect(calls.map((call) => call.path)).toEqual(["/portal-account", "/portal-login-email"]);
 });
