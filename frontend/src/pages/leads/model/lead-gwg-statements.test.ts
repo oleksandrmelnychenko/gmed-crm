@@ -1,23 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  normalizeLeadPortalBilling,
   normalizeLeadPortalIntake,
   normalizeLeadRepresentation,
   type LeadGwgIdentification,
+  type LeadPortalBilling,
   type LeadRepresentation,
   type LeadRepresentative,
 } from "../data/lead-portal-intake-api";
 import {
   answerLabel,
+  billingStatements,
+  complianceFlagLabel,
+  complianceFlagsLine,
   contactChannelsLabel,
   custodyLabel,
   custodyStatement,
   gwgLegalAnswers,
+  hasBillingStatements,
   hasGwgStatements,
   hasRepresentationStatements,
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
+  paymentMethodLabel,
+  paymentRouteByPayerNote,
   representationStatements,
   representationWarnings,
   representationWarningText,
@@ -506,6 +514,306 @@ describe("warnings about the representation of a minor", () => {
     expect(representationWarnings(representation({ representatives: [] }), false)).toEqual([]);
     expect(representationWarnings(representation({ has_representative: true, representatives: [anna, ben] }), false)).toEqual([]);
     expect(representationWarnings(null, true)).toEqual([]);
+  });
+});
+
+/** Sections 7–8 as the server sends them for a self-payer who has answered nothing yet. */
+function billing(patch: Partial<LeadPortalBilling> = {}): LeadPortalBilling {
+  return {
+    invoice_to: null,
+    invoice_name: null,
+    invoice_street: null,
+    invoice_zip: null,
+    invoice_city: null,
+    invoice_country: null,
+    invoice_email: null,
+    invoice_vat_id: null,
+    invoice_tax_number: null,
+    payment_route_by: "patient",
+    payment_method: null,
+    payment_method_details: null,
+    account_country: null,
+    account_holder: null,
+    bank_name: null,
+    via_third_party: null,
+    via_third_party_details: null,
+    compliance_flags: [],
+    ...patch,
+  };
+}
+
+const rows = (statements: ReturnType<typeof billingStatements>["invoice"]) =>
+  statements.map((row) => [row.key, row.value, row.details, row.warning]);
+
+describe("invoice recipient and payment route in the portal state", () => {
+  it("has none when the server sends none (an older backend, or a role that may not read it)", () => {
+    for (const raw of [{ lead_id: "lead-1" }, { lead_id: "lead-1", billing: null }, { lead_id: "lead-1", billing: "self" }]) {
+      const intake = normalizeLeadPortalIntake(raw);
+      expect(intake?.billing).toBeNull();
+      expect(intake?.billing_updated_at).toBeNull();
+      expect(hasBillingStatements(intake)).toBe(false);
+    }
+  });
+
+  it("keeps the answers with every key present and reads unknown values as not answered", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1",
+      billing_updated_at: "2026-10-06T09:40:00Z",
+      billing: {
+        invoice_to: "other",
+        invoice_name: " Beispiel GmbH ",
+        invoice_street: "Beispielstraße 2",
+        invoice_zip: "10117",
+        invoice_city: "Berlin",
+        invoice_country: "DE",
+        invoice_email: "rechnung@example.com",
+        invoice_vat_id: "DE123456789",
+        payment_route_by: "patient",
+        payment_method: "cash",
+        via_third_party: true,
+        via_third_party_details: "Paid by my brother through a payment service",
+        compliance_flags: ["cash_payment", "third_party_payment", "something_new", 4],
+      },
+    });
+    expect(intake?.billing_updated_at).toBe("2026-10-06T09:40:00Z");
+    expect(intake?.billing).toEqual(
+      billing({
+        invoice_to: "other",
+        invoice_name: "Beispiel GmbH",
+        invoice_street: "Beispielstraße 2",
+        invoice_zip: "10117",
+        invoice_city: "Berlin",
+        invoice_country: "DE",
+        invoice_email: "rechnung@example.com",
+        invoice_vat_id: "DE123456789",
+        payment_method: "cash",
+        via_third_party: true,
+        via_third_party_details: "Paid by my brother through a payment service",
+        compliance_flags: ["cash_payment", "third_party_payment"],
+      }),
+    );
+    expect(normalizeLeadPortalBilling({ invoice_to: "parents", payment_method: "paypal", payment_route_by: "guardian", via_third_party: "yes" })).toEqual(
+      billing(),
+    );
+    expect(normalizeLeadPortalBilling({ payment_route_by: "payer" })?.payment_route_by).toBe("payer");
+    expect(normalizeLeadPortalBilling({ compliance_flags: "cash_payment" })?.compliance_flags).toEqual([]);
+  });
+
+  it("counts the lead's answers as statements, not the staff fields", () => {
+    expect(hasBillingStatements({ billing: billing() })).toBe(false);
+    expect(hasBillingStatements({ billing: billing({ invoice_vat_id: "DE123456789", invoice_tax_number: "12/345/67890" }) })).toBe(false);
+    expect(hasBillingStatements({ billing: billing({ compliance_flags: ["cash_payment"] }) })).toBe(false);
+    expect(hasBillingStatements({ billing: billing(), billing_updated_at: "2026-10-06T09:40:00Z" })).toBe(true);
+    expect(hasBillingStatements({ billing: billing({ invoice_to: "self" }) })).toBe(true);
+    // A "no" is an answer too.
+    expect(hasBillingStatements({ billing: billing({ via_third_party: false }) })).toBe(true);
+    expect(hasBillingStatements({ billing: billing({ payment_method: "bank_transfer" }) })).toBe(true);
+    // The whole block is then no longer "nothing entered yet".
+    expect(
+      hasGwgStatements({
+        identification: EMPTY_IDENTIFICATION,
+        identification_updated_at: null,
+        identity_documents: [],
+        billing: billing({ invoice_to: "self" }),
+      }),
+    ).toBe(true);
+    expect(
+      hasGwgStatements({ identification: EMPTY_IDENTIFICATION, identification_updated_at: null, identity_documents: [], billing: billing() }),
+    ).toBe(false);
+  });
+});
+
+describe("labels of sections 7–8", () => {
+  it("names the payment methods and the compliance flags in both languages", () => {
+    expect(["bank_transfer", "card", "cash", "crypto", "other"].map((value) => paymentMethodLabel(value, ru))).toEqual([
+      "Банковский перевод",
+      "Банковская карта",
+      "Наличные",
+      "Криптовалюта",
+      "Иной способ",
+    ]);
+    expect(["bank_transfer", "card", "cash", "crypto", "other"].map((value) => paymentMethodLabel(value, de))).toEqual([
+      "Überweisung",
+      "Karte",
+      "Bar",
+      "Kryptowährung",
+      "Sonstiges",
+    ]);
+    expect(paymentMethodLabel(null, ru)).toBe("");
+    expect(paymentMethodLabel("cheque", ru)).toBe("cheque");
+    expect(["cash_payment", "crypto_payment", "other_method", "third_party_payment"].map((flag) => complianceFlagLabel(flag, ru))).toEqual([
+      "наличные",
+      "криптовалюта",
+      "иной способ оплаты",
+      "платёж через третье лицо",
+    ]);
+    expect(["cash_payment", "crypto_payment", "other_method", "third_party_payment"].map((flag) => complianceFlagLabel(flag, de))).toEqual([
+      "Barzahlung",
+      "Kryptowährung",
+      "sonstiger Zahlungsweg",
+      "Zahlung über Dritte",
+    ]);
+    expect(complianceFlagsLine([], ru)).toBe("");
+    expect(complianceFlagsLine(["cash_payment", "third_party_payment"], ru)).toBe(
+      "Требуется проверка комплаенса: наличные, платёж через третье лицо",
+    );
+    expect(complianceFlagsLine(["crypto_payment"], de)).toBe("Compliance-Prüfung erforderlich: Kryptowährung");
+    expect(paymentRouteByPayerNote(de)).toBe("Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)");
+  });
+});
+
+describe("sections 7–8 as the group shows them", () => {
+  it("lists a self-payer's transfer without a warning", () => {
+    const statements = billingStatements(
+      billing({
+        invoice_to: "self",
+        invoice_email: "anna.muster@example.com",
+        payment_method: "bank_transfer",
+        account_country: "DE",
+        account_holder: "Anna Muster",
+        bank_name: "Musterbank",
+        via_third_party: false,
+      }),
+      ru,
+      "ru",
+    );
+    expect(rows(statements.invoice)).toEqual([
+      ["invoice_to", "пациенту", "", false],
+      ["invoice_email", "anna.muster@example.com", "", false],
+    ]);
+    expect(rows(statements.payment)).toEqual([
+      ["payment_method", "Банковский перевод", "", false],
+      ["account_country", "Германия", "", false],
+      ["account_holder", "Anna Muster", "", false],
+      ["bank_name", "Musterbank", "", false],
+      ["via_third_party", "Нет", "", false],
+    ]);
+    expect(statements.byPayer).toBe(false);
+    expect(statements.complianceLine).toBe("");
+  });
+
+  it("warns about cash and a payment through a third party, and names the other address", () => {
+    const statements = billingStatements(
+      billing({
+        invoice_to: "other",
+        invoice_name: "Beispiel GmbH",
+        invoice_street: "Beispielstraße 2",
+        invoice_zip: "10117",
+        invoice_city: "Berlin",
+        invoice_country: "DE",
+        invoice_email: "rechnung@example.com",
+        invoice_vat_id: "DE123456789",
+        invoice_tax_number: "30/123/45678",
+        payment_method: "cash",
+        via_third_party: true,
+        via_third_party_details: "My brother brings the money",
+        compliance_flags: ["cash_payment", "third_party_payment"],
+      }),
+      ru,
+      "ru",
+    );
+    expect(rows(statements.invoice)).toEqual([
+      ["invoice_to", "по другому адресу", "", false],
+      ["invoice_name", "Beispiel GmbH", "", false],
+      ["invoice_address", "Beispielstraße 2, 10117 Berlin, Германия", "", false],
+      ["invoice_email", "rechnung@example.com", "", false],
+      ["invoice_tax", "USt-IdNr. DE123456789 · Steuernummer 30/123/45678", "", false],
+    ]);
+    // No account for cash: the server clears it.
+    expect(rows(statements.payment)).toEqual([
+      ["payment_method", "Наличные", "", true],
+      ["via_third_party", "Да", "My brother brings the money", true],
+    ]);
+    expect(statements.complianceLine).toBe("Требуется проверка комплаенса: наличные, платёж через третье лицо");
+  });
+
+  it("warns about crypto and another method, with what the lead described", () => {
+    const crypto = billingStatements(billing({ payment_method: "crypto", compliance_flags: ["crypto_payment"] }), de, "de");
+    expect(rows(crypto.payment)[0]).toEqual(["payment_method", "Kryptowährung", "", true]);
+    expect(crypto.payment.map((row) => row.key)).toEqual(["payment_method", "via_third_party"]);
+    expect(crypto.complianceLine).toBe("Compliance-Prüfung erforderlich: Kryptowährung");
+
+    const other = billingStatements(
+      billing({ payment_method: "other", payment_method_details: " Cheque from abroad ", compliance_flags: ["other_method"] }),
+      ru,
+      "ru",
+    );
+    expect(rows(other.payment)[0]).toEqual(["payment_method", "Иной способ", "Cheque from abroad", true]);
+    expect(other.complianceLine).toBe("Требуется проверка комплаенса: иной способ оплаты");
+
+    // A card needs the account rows; the bank is optional there.
+    const card = billingStatements(billing({ payment_method: "card", account_country: "AT", account_holder: "Anna Muster" }), de, "de");
+    expect(rows(card.payment)).toEqual([
+      ["payment_method", "Karte", "", false],
+      ["account_country", "Österreich", "", false],
+      ["account_holder", "Anna Muster", "", false],
+      ["bank_name", "", "", false],
+      ["via_third_party", "Nicht beantwortet", "", false],
+    ]);
+  });
+
+  it("shows a lead who has not answered yet every row, empty", () => {
+    const statements = billingStatements(billing(), ru, "ru");
+    expect(rows(statements.invoice)).toEqual([
+      ["invoice_to", "не указано", "", false],
+      ["invoice_email", "", "", false],
+    ]);
+    expect(rows(statements.payment)).toEqual([
+      ["payment_method", "", "", false],
+      ["account_country", "", "", false],
+      ["account_holder", "", "", false],
+      ["bank_name", "", "", false],
+      ["via_third_party", "Не отвечено", "", false],
+    ]);
+    expect(statements.complianceLine).toBe("");
+  });
+
+  it("asks nothing of section 8 while the third-party payer answers it himself", () => {
+    const statements = billingStatements(
+      billing({ invoice_to: "payer", invoice_vat_id: "ATU12345678", payment_route_by: "payer" }),
+      ru,
+      "ru",
+    );
+    expect(statements.byPayer).toBe(true);
+    expect(statements.payment).toEqual([]);
+    expect(rows(statements.invoice)).toEqual([
+      ["invoice_to", "плательщику", "", false],
+      ["invoice_email", "", "", false],
+      ["invoice_tax", "USt-IdNr. ATU12345678", "", false],
+    ]);
+    expect(statements.complianceLine).toBe("");
+  });
+
+  it("reads in German too", () => {
+    const statements = billingStatements(
+      billing({
+        invoice_to: "other",
+        invoice_name: "Beispiel GmbH",
+        invoice_city: "Wien",
+        invoice_country: "AT",
+        payment_method: "bank_transfer",
+        account_country: "AT",
+        via_third_party: true,
+        via_third_party_details: "Zahlungsdienstleister",
+        compliance_flags: ["third_party_payment"],
+      }),
+      de,
+      "de",
+    );
+    expect(statements.invoice.map((row) => [row.label, row.value])).toEqual([
+      ["Rechnung geht an", "an eine andere Adresse"],
+      ["Name auf der Rechnung", "Beispiel GmbH"],
+      ["Rechnungsanschrift", "Wien, Österreich"],
+      ["E-Mail für Rechnungen", ""],
+    ]);
+    expect(statements.payment.map((row) => [row.label, row.value, row.details, row.warning])).toEqual([
+      ["Zahlungsweg", "Überweisung", "", false],
+      ["Land des Kontos", "Österreich", "", false],
+      ["Kontoinhaber/in", "", "", false],
+      ["Bank", "", "", false],
+      ["Zahlung über Dritte / Zahlungsdienstleister", "Ja", "Zahlungsdienstleister", true],
+    ]);
+    expect(statements.complianceLine).toBe("Compliance-Prüfung erforderlich: Zahlung über Dritte");
   });
 });
 

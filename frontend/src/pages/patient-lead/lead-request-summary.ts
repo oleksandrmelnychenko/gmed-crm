@@ -2,6 +2,7 @@ import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
+import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
   LEGAL_DETAILS,
   LEGAL_QUESTIONS,
@@ -22,6 +23,7 @@ import {
 } from "./lead-request-representation-model";
 import {
   identificationFieldLabel,
+  invoiceToLabel,
   payerFieldLabel,
   representativeFieldLabel,
   representativeHeading,
@@ -40,6 +42,7 @@ export type SummaryGroupId =
   | "representation"
   | "insurance"
   | "payer"
+  | "billing"
   | "legal"
   | "documents";
 
@@ -244,6 +247,39 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         payerFieldLabel(text, "payer_beneficial_owner", guardian),
         payer?.acts_on_own_account === false ? payer.beneficial_owner : "",
       ],
+    ]);
+  }
+
+  // Invoice recipient and payment route: the entered rows of section 7 and,
+  // when it is asked, of section 8; the payer's answer is named as such.
+  const billing = request.billing;
+  if (billing) {
+    const label = (field: BillingField) => text.billingFields[field];
+    const other = billing.invoice_to === "other";
+    const routeAsked = asksPaymentRoute(billing.payment_route_by);
+    const account = asksAccount(billing.payment_method ?? "");
+    group("billing", text.sectionBillingSummary, [
+      [
+        label("invoice_to"),
+        billing.invoice_to ? invoiceToLabel(text, billing.invoice_to, guardian, billing.payment_route_by) : "",
+      ],
+      [label("invoice_name"), other ? billing.invoice_name : ""],
+      [label("invoice_street"), other ? billing.invoice_street : ""],
+      [label("invoice_zip"), other ? billing.invoice_zip : ""],
+      [label("invoice_city"), other ? billing.invoice_city : ""],
+      [label("invoice_country"), other ? country(billing.invoice_country) : ""],
+      [label("invoice_email"), billing.invoice_to === "payer" ? "" : billing.invoice_email],
+      ...(routeAsked
+        ? ([
+            [label("payment_method"), option(text.paymentMethodOptions, billing.payment_method)],
+            [label("payment_method_details"), billing.payment_method === "other" ? billing.payment_method_details : ""],
+            [label("account_country"), account ? country(billing.account_country) : ""],
+            [label("account_holder"), account ? billing.account_holder : ""],
+            [label("bank_name"), account ? billing.bank_name : ""],
+            [label("via_third_party"), yesNo(billing.via_third_party)],
+            [label("via_third_party_details"), billing.via_third_party ? billing.via_third_party_details : ""],
+          ] satisfies Array<[string, string | null | undefined]>)
+        : [[text.sectionPaymentRoute, text.paymentRouteByPayerShort] satisfies [string, string]]),
     ]);
   }
 

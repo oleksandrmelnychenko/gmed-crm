@@ -267,6 +267,84 @@ describe("PatientPayerSummaryCardView", () => {
     expect(html).toContain("Плательщика заказа или счёта меняют в заказе и в счёте");
   });
 
+  it("section 7: the invoice goes to another address, with the staff fields, after line 1", () => {
+    const summary = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      source: { lead_id: LEAD_ID, converted_at: "2026-10-06T09:12:00Z" },
+      declaration: {
+        payer_kind: "self",
+        invoice_to: "other",
+        invoice_name: "Beispiel GmbH",
+        invoice_street: "Beispielstraße 2",
+        invoice_zip: "10117",
+        invoice_city: "Berlin",
+        invoice_country: "DE",
+        invoice_email: "rechnung@example.com",
+        invoice_vat_id: "DE123456789",
+        invoice_tax_number: "30/123/45678",
+      },
+      contracting_party: { kind: "patient", patient_name: "Anna Muster", debtor_name: "Anna Muster", representatives: [] },
+      invoice_recipient: {
+        source: "invoice_address",
+        role: "invoice_address",
+        kind: "contact",
+        name: "Beispiel GmbH",
+        street: "Beispielstraße 2",
+        zip: "10117",
+        city: "Berlin",
+        country: "DE",
+        email: "rechnung@example.com",
+        missing: [],
+      },
+      identification: null,
+    })!;
+    const html = render({ status: "loaded", summary });
+    const invoiceTo = block(html, "invoice-to", "</span></span></div>");
+    expect(invoiceTo).toContain("Счёт направляется");
+    expect(invoiceTo).toContain("по другому адресу");
+    expect(invoiceTo).toContain("Beispiel GmbH");
+    expect(invoiceTo).toContain("Beispielstraße 2, 10117 Berlin, Германия");
+    expect(invoiceTo).toContain("rechnung@example.com");
+    expect(block(html, "invoice-tax")).toContain("USt-IdNr. / Steuernummer");
+    expect(block(html, "invoice-tax")).toContain("USt-IdNr. DE123456789 · Steuernummer 30/123/45678");
+    const recipient = block(html, "recipient", "</span></div>");
+    expect(recipient).toContain("Beispiel GmbH");
+    expect(recipient).toContain("адрес для счетов по декларации");
+    // Right after "who pays".
+    const order = ["who-pays", "invoice-to", "invoice-tax", "contracting-party", "recipient"]
+      .map((id) => html.indexOf(`data-testid="patient-payer-summary-${id}"`));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The party at another address is no Kostenübernehmer: no such wording anywhere.
+    expect(html).not.toMatch(/Kostenübernehm|плательщик по умолчанию|cost_bearer/);
+
+    const german = render({ status: "loaded", summary }, { lang: "de" });
+    expect(block(german, "invoice-to", "</span></span></div>")).toContain("Rechnung geht an");
+    expect(block(german, "invoice-to", "</span></span></div>")).toContain("an eine andere Adresse");
+    expect(block(german, "invoice-to", "</span></span></div>")).toContain("Beispielstraße 2, 10117 Berlin, Deutschland");
+    expect(block(german, "recipient", "</span></div>")).toContain("Rechnungsanschrift laut Erklärung");
+  });
+
+  it("section 7: 'to me' with an e-mail, 'to the payer' without one, nothing on an older server", () => {
+    const self = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      declaration: { payer_kind: "self", invoice_to: "self", invoice_email: "anna.muster@example.com" },
+    })!;
+    const selfHtml = render({ status: "loaded", summary: self });
+    expect(block(selfHtml, "invoice-to", "</span></span></div>")).toContain("пациенту");
+    expect(block(selfHtml, "invoice-to", "</span></span></div>")).toContain("anna.muster@example.com");
+    expect(selfHtml).not.toContain('data-testid="patient-payer-summary-invoice-tax"');
+
+    const payer = normalizePatientPayerSummary({ ...minorExample(), declaration: { ...minorExample().declaration!, invoice_to: "payer" } })!;
+    const payerHtml = render({ status: "loaded", summary: payer });
+    expect(block(payerHtml, "invoice-to", "</span></span></div>")).toContain("плательщику");
+    expect(block(payerHtml, "invoice-to", "</span></span></div>")).not.toContain("@");
+
+    const older = render({ status: "loaded", summary: minorExample() });
+    expect(older).not.toContain('data-testid="patient-payer-summary-invoice-to"');
+    expect(older).not.toContain("Счёт направляется");
+  });
+
   it("open request: the info line with the link to the new request", () => {
     const summary = { ...minorExample(), open_request: { lead_id: OPEN_LEAD_ID, has_declaration: true } };
     const html = render({ status: "loaded", summary });

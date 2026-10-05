@@ -10,6 +10,8 @@ import {
   conversionNote,
   identificationLines,
   invoiceRecipientSourceNote,
+  invoiceTaxStatement,
+  invoiceToStatement,
   isThirdPartyPayer,
   leadPath,
   minorWithoutPayerWarning,
@@ -531,6 +533,8 @@ describe("label helpers", () => {
   it("notes where the invoice recipient comes from", () => {
     expect(invoiceRecipientSourceNote("payer_declaration", ru)).toBe("по декларации плательщика");
     expect(invoiceRecipientSourceNote("payer_declaration", de)).toBe("laut Zahlererklärung");
+    expect(invoiceRecipientSourceNote("invoice_address", ru)).toBe("адрес для счетов по декларации");
+    expect(invoiceRecipientSourceNote("invoice_address", de)).toBe("Rechnungsanschrift laut Erklärung");
     expect(invoiceRecipientSourceNote("default_payer", ru)).toBe("плательщик по умолчанию");
     expect(invoiceRecipientSourceNote("default_payer", de)).toBe("Standardzahler");
     expect(invoiceRecipientSourceNote("contracting_party", ru)).toBe("сторона договора");
@@ -560,6 +564,91 @@ describe("label helpers", () => {
     expect(conversionNote({ ...source, converted_at: null, declared_at: null }, ru)).toBe("Зафиксировано при конвертации обращения");
     expect(leadPath(LEAD_ID)).toBe(`/leads?lead=${LEAD_ID}`);
     expect(leadPath("a b")).toBe("/leads?lead=a%20b");
+  });
+
+  it("says where the invoice goes (section 7) and shows the staff fields when set", () => {
+    const other = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      declaration: {
+        ...selfDeclaration(),
+        invoice_to: "other",
+        invoice_name: "Beispiel GmbH",
+        invoice_street: "Beispielstraße 2",
+        invoice_zip: "10117",
+        invoice_city: "Berlin",
+        invoice_country: "DE",
+        invoice_email: "rechnung@example.com",
+        invoice_vat_id: "DE123456789",
+        invoice_tax_number: "30/123/45678",
+      },
+    })!.declaration!;
+    expect(other).toMatchObject({
+      payer_kind: "self",
+      invoice_to: "other",
+      invoice_name: "Beispiel GmbH",
+      invoice_country: "DE",
+      invoice_vat_id: "DE123456789",
+    });
+    expect(invoiceToStatement(other, ru, "ru")).toEqual({
+      label: "по другому адресу",
+      name: "Beispiel GmbH",
+      address: "Beispielstraße 2, 10117 Berlin, Германия",
+      email: "rechnung@example.com",
+    });
+    expect(invoiceToStatement(other, de, "de")).toMatchObject({ label: "an eine andere Adresse", address: "Beispielstraße 2, 10117 Berlin, Deutschland" });
+    expect(invoiceTaxStatement(other)).toBe("USt-IdNr. DE123456789 · Steuernummer 30/123/45678");
+
+    // "To me": only the e-mail for invoices, when given.
+    const self = { ...other, invoice_to: "self" as const };
+    expect(invoiceToStatement(self, ru, "ru")).toEqual({ label: "пациенту", name: null, address: null, email: "rechnung@example.com" });
+    expect(invoiceToStatement({ ...self, invoice_email: null }, de, "de")).toEqual({ label: "an die Patientin / den Patienten", name: null, address: null, email: null });
+    // "To the payer": the invoice goes to the third party; no e-mail of its own.
+    const payer = { ...thirdPartyDeclaration(), invoice_to: "payer", invoice_email: "stray@example.com", invoice_vat_id: null, invoice_tax_number: null };
+    const payerDeclaration = normalizePatientPayerSummary({ patient_id: PATIENT_ID, declaration: payer })!.declaration!;
+    expect(invoiceToStatement(payerDeclaration, ru, "ru")).toEqual({ label: "плательщику", name: null, address: null, email: null });
+    expect(invoiceToStatement(payerDeclaration, de, "de")?.label).toBe("an die zahlende Person / Organisation");
+    expect(invoiceTaxStatement(payerDeclaration)).toBeNull();
+    // Unanswered: the line says so.
+    const open = normalizePatientPayerSummary({ patient_id: PATIENT_ID, declaration: { ...selfDeclaration(), invoice_to: null } })!.declaration!;
+    expect(invoiceToStatement(open, ru, "ru")).toEqual({ label: "не указано", name: null, address: null, email: null });
+    // An unknown value of the server reads as not answered.
+    const unknown = normalizePatientPayerSummary({ patient_id: PATIENT_ID, declaration: { ...selfDeclaration(), invoice_to: "parents" } })!.declaration!;
+    expect(unknown.invoice_to).toBeNull();
+    expect(invoiceToStatement(unknown, ru, "ru")?.label).toBe("не указано");
+  });
+
+  it("shows no section-7 line on a server that does not send it, and never a section-8 key", () => {
+    const older = normalizePatientPayerSummary({ patient_id: PATIENT_ID, declaration: thirdPartyDeclaration() })!.declaration!;
+    expect(older).not.toHaveProperty("invoice_to");
+    expect(older.invoice_name).toBeNull();
+    expect(invoiceToStatement(older, ru, "ru")).toBeNull();
+    expect(invoiceTaxStatement(older)).toBeNull();
+    expect(invoiceToStatement(null, ru, "ru")).toBeNull();
+    const withRoute = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      declaration: { ...selfDeclaration(), invoice_to: "self", payment_method: "cash", via_third_party: true, account_holder: "Anna Muster" },
+    })!.declaration!;
+    for (const key of ["payment_method", "via_third_party", "account_holder"]) {
+      expect(withRoute).not.toHaveProperty(key);
+    }
+  });
+
+  it("knows the recipient of another address (role invoice_address)", () => {
+    const summary = normalizePatientPayerSummary({
+      patient_id: PATIENT_ID,
+      invoice_recipient: {
+        ...PATIENT_RECIPIENT,
+        source: "invoice_address",
+        role: "invoice_address",
+        kind: "contact",
+        name: "Beispiel GmbH",
+        street: "Beispielstraße 2",
+        zip: "10117",
+        email: "rechnung@example.com",
+      },
+    })!;
+    expect(summary.invoice_recipient).toMatchObject({ source: "invoice_address", role: "invoice_address", kind: "contact", name: "Beispiel GmbH" });
+    expect(invoiceRecipientSourceNote(summary.invoice_recipient!.source, ru)).toBe("адрес для счетов по декларации");
   });
 
   it("lists the identification with the wizard's words", () => {

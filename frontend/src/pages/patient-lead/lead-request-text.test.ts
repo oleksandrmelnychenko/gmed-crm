@@ -5,6 +5,7 @@ import {
   LEAD_CABINET_LANGS,
   asLeadCabinetLang,
   identificationFieldLabel,
+  invoiceToLabel,
   leadRequestText,
   payerFieldLabel,
   resolveLeadCabinetLang,
@@ -182,6 +183,46 @@ describe("lead cabinet languages", () => {
         expect(identificationFieldLabel(text, field, true)).not.toBe(identificationFieldLabel(text, field));
       }
       expect(text.ownAccountQuestionGuardian).not.toBe(text.ownAccountQuestion);
+    }
+  });
+
+  it("names what is still missing about invoice and payment, with the section where a label alone would not do", () => {
+    const de = leadRequestText("de");
+    // The questions stand alone; "Ort" or "Land" alone would be the address's.
+    expect(submitFieldLabel(de, "invoice_to")).toBe("Wohin soll die Rechnung gehen?");
+    expect(submitFieldLabel(de, "invoice_name")).toBe("Rechnungsempfänger: Name auf der Rechnung");
+    expect(submitFieldLabel(de, "invoice_city")).toBe("Rechnungsempfänger: Ort");
+    expect(submitFieldLabel(de, "invoice_country")).toBe("Rechnungsempfänger: Land");
+    expect(submitFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
+    expect(submitFieldLabel(de, "payment_method_details")).toBe("Zahlungsweg: Sonstiges – Bitte beschreiben");
+    expect(submitFieldLabel(de, "account_country")).toBe("Zahlungsweg: Land des Kontos");
+    expect(submitFieldLabel(de, "account_holder")).toBe("Zahlungsweg: Kontoinhaber/in");
+    expect(submitFieldLabel(de, "bank_name")).toBe("Zahlungsweg: Name der Bank");
+    expect(submitFieldLabel(de, "via_third_party")).toBe(
+      "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
+    );
+    expect(submitFieldLabel(de, "via_third_party_details")).toBe("Zahlungsweg: Bitte beschreiben (wer, welcher Dienst)");
+    expect(submitFieldLabel(leadRequestText("en"), "invoice_zip")).toBe("Invoice recipient: Postcode");
+    expect(submitFieldLabel(leadRequestText("uk"), "account_holder")).toBe("Спосіб оплати: Власник рахунку");
+    expect(submitFieldLabel(leadRequestText("ru"), "payment_method_details")).toBe("Способ оплаты: Другое – Опишите, пожалуйста");
+  });
+
+  it("names where the invoice goes per login: a parent reads 'to the patient', a paying parent 'to me (I pay)'", () => {
+    const de = leadRequestText("de");
+    expect(invoiceToLabel(de, "self")).toBe("An mich");
+    expect(invoiceToLabel(de, "payer")).toBe("An die zahlende Person / Organisation");
+    expect(invoiceToLabel(de, "other")).toBe("An eine andere Adresse");
+    expect(invoiceToLabel(de, "self", true)).toBe(
+      "An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)",
+    );
+    expect(invoiceToLabel(de, "payer", true, "patient")).toBe("An die zahlende Person / Organisation");
+    expect(invoiceToLabel(de, "payer", true, "guardian")).toBe("An mich (ich zahle)");
+    expect(invoiceToLabel(leadRequestText("en"), "payer", true, "guardian")).toBe("To me (I pay)");
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      expect(text.invoiceToOptionsGuardian.self).not.toBe(text.invoiceToOptions.self);
+      expect(text.invoiceToOptionsGuardian.other).toBe(text.invoiceToOptions.other);
+      expect(Object.keys(text.paymentMethodOptions)).toEqual(["bank_transfer", "card", "cash", "crypto", "other"]);
     }
   });
 

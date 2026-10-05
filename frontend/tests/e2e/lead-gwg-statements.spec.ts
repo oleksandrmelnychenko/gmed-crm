@@ -223,8 +223,9 @@ test("an older backend without the statements does not break the documents step"
   const { wizard, block } = await mount(page, "ru", {});
   await expect(block.getByTestId("lead-gwg-statements-empty")).toHaveText("Пациент ещё не заполнил эти данные в кабинете");
   await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
-  // Nothing about a representation the server does not send.
+  // Nothing about a representation or a payment route the server does not send.
   await expect(block.getByTestId("lead-gwg-representation")).toHaveCount(0);
+  await expect(block.getByTestId("lead-gwg-billing")).toHaveCount(0);
 });
 
 test("an adult's answers about a representative stand after the identity document", async ({ page }) => {
@@ -332,6 +333,116 @@ test("the parents of a minor are named before anybody opens the cabinet, and a m
   const actions = wizard.getByTestId("gwg-identification-actions");
   await expect(actions.getByRole("button", { name: "Сформировать для Anna Muster", exact: true })).toBeEnabled();
   await expect(actions.getByRole("button", { name: /пациента/ })).toHaveCount(0);
+});
+
+/** Sections 7–8: the invoice to another address, paid in cash through a third party — two compliance flags. */
+const cashBilling = {
+  billing: {
+    invoice_to: "other",
+    invoice_name: "Beispiel GmbH",
+    invoice_street: "Beispielstraße 2",
+    invoice_zip: "10117",
+    invoice_city: "Berlin",
+    invoice_country: "DE",
+    invoice_email: "rechnung@example.com",
+    invoice_vat_id: "DE123456789",
+    invoice_tax_number: null,
+    payment_route_by: "patient",
+    payment_method: "cash",
+    payment_method_details: null,
+    account_country: null,
+    account_holder: null,
+    bank_name: null,
+    via_third_party: true,
+    via_third_party_details: "My brother brings the money",
+    compliance_flags: ["cash_payment", "third_party_payment"],
+  },
+  // 11:40 in Berlin.
+  billing_updated_at: "2026-10-05T09:40:00Z",
+};
+
+test("the invoice recipient and the payment route follow the economic interest; cash and a third party are flagged", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, block } = await mount(page, "ru", { ...statements, ...cashBilling });
+
+  const group = block.getByTestId("lead-gwg-billing");
+  await expect(group).toContainText("Счёт и оплата (разделы 7–8 анкеты)");
+  await expect(group.getByTestId("patient-field-badge")).toHaveText("от пациента · 05.10.2026 11:40");
+  // The lead's own badge stays beside it.
+  await expect(block.getByTestId("patient-field-badge")).toHaveCount(2);
+  // After the economic interest, before the legal questions.
+  const ownAccountBox = await block.getByTestId("lead-gwg-own-account").boundingBox();
+  const groupBox = await group.boundingBox();
+  const legalBox = await block.getByTestId("lead-gwg-answer-pep_self").boundingBox();
+  expect(ownAccountBox!.y).toBeLessThan(groupBox!.y);
+  expect(groupBox!.y + groupBox!.height).toBeLessThanOrEqual(legalBox!.y);
+
+  // Section 7: the other address with the country's name, the staff fields.
+  await expect(group.getByTestId("lead-gwg-billing-invoice_to")).toContainText("по другому адресу");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_name")).toContainText("Beispiel GmbH");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_address")).toContainText("Beispielstraße 2, 10117 Berlin, Германия");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_email")).toContainText("rechnung@example.com");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_tax")).toContainText("USt-IdNr. DE123456789");
+  // Section 8: cash and a payment through a third party stand out; no account for cash.
+  const method = group.getByTestId("lead-gwg-billing-payment_method");
+  await expect(method).toContainText("Наличные");
+  await expect(method).toHaveAttribute("data-warning", "true");
+  await expect(group.getByTestId("lead-gwg-billing-account_country")).toHaveCount(0);
+  const third = group.getByTestId("lead-gwg-billing-via_third_party");
+  await expect(third).toContainText("Да");
+  await expect(third).toContainText("My brother brings the money");
+  await expect(third).toHaveAttribute("data-warning", "true");
+  const flag = group.getByTestId("lead-gwg-billing-flag");
+  await expect(flag).toHaveText("Требуется проверка комплаенса: наличные, платёж через третье лицо");
+  await expect(flag).toHaveClass(/text-amber-700/);
+  await expect(group.getByTestId("lead-gwg-billing-by-payer")).toHaveCount(0);
+  // Read-only: nothing forces the EDD sheet or blocks anything; staff decide.
+  await expect(group.locator("input, textarea, select, button")).toHaveCount(0);
+  await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
+
+  await group.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-gwg-billing-ru-desktop.png"), animations: "disabled" });
+  // On a phone the group must not widen the wizard.
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await wizard.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  expect(await group.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await group.scrollIntoViewIfNeeded();
+  await expect(flag).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("lead-gwg-billing-ru-mobile.png"), animations: "disabled" });
+});
+
+test("a third-party payer states the payment route himself: one note instead of section 8, in German", async ({ page }) => {
+  const { block } = await mount(page, "de", {
+    ...statements,
+    billing: {
+      ...cashBilling.billing,
+      invoice_to: "payer",
+      invoice_name: null,
+      invoice_street: null,
+      invoice_zip: null,
+      invoice_city: null,
+      invoice_country: null,
+      invoice_email: null,
+      invoice_vat_id: null,
+      payment_route_by: "payer",
+      payment_method: null,
+      via_third_party: null,
+      via_third_party_details: null,
+      compliance_flags: [],
+    },
+    billing_updated_at: "2026-10-05T09:40:00Z",
+  });
+  const group = block.getByTestId("lead-gwg-billing");
+  await expect(group).toContainText("Rechnung und Zahlung (Abschnitte 7–8)");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_to")).toContainText("an die zahlende Person / Organisation");
+  await expect(group.getByTestId("lead-gwg-billing-invoice_name")).toHaveCount(0);
+  await expect(group.getByTestId("lead-gwg-billing-invoice_tax")).toHaveCount(0);
+  await expect(group.getByTestId("lead-gwg-billing-by-payer")).toHaveText(
+    "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+  );
+  for (const key of ["payment_method", "account_country", "account_holder", "bank_name", "via_third_party", "flag"]) {
+    await expect(group.getByTestId(`lead-gwg-billing-${key}`)).toHaveCount(0);
+  }
 });
 
 test("a minor without a parent on file: the block and the sheet ask for one", async ({ page }) => {

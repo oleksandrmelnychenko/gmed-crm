@@ -8,12 +8,15 @@ import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKeyOf } from "@/lib/app-time-zone";
 
 import type {
+  LeadComplianceFlag,
   LeadCustody,
   LeadGwgIdentification,
+  LeadPortalBilling,
   LeadPortalIntake,
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
+import { invoiceTaxLine, invoiceToLabel, type PaymentMethod } from "./lead-payer";
 
 export type Tx = (ru: string, de: string) => string;
 
@@ -21,7 +24,41 @@ export type Tx = (ru: string, de: string) => string;
 export const EMPTY_STATEMENT = "—";
 
 type GwgIntake = Pick<LeadPortalIntake, "identification" | "identification_updated_at" | "identity_documents">
-  & Partial<Pick<LeadPortalIntake, "representation" | "representation_updated_at">>;
+  & Partial<Pick<LeadPortalIntake, "representation" | "representation_updated_at" | "billing" | "billing_updated_at">>;
+
+/** The keys of sections 7–8 the lead answers in the cabinet (not the staff fields, not the derived flags). */
+const BILLING_ANSWER_KEYS = [
+  "invoice_to",
+  "invoice_name",
+  "invoice_street",
+  "invoice_zip",
+  "invoice_city",
+  "invoice_country",
+  "invoice_email",
+  "payment_method",
+  "payment_method_details",
+  "account_country",
+  "account_holder",
+  "bank_name",
+  "via_third_party",
+  "via_third_party_details",
+] as const satisfies readonly (keyof LeadPortalBilling)[];
+
+/**
+ * Whether the lead answered anything of sections 7–8 in the cabinet. The
+ * staff fields (USt-IdNr., Steuernummer) are not the lead's statements.
+ */
+export function hasBillingStatements(
+  intake: Partial<Pick<LeadPortalIntake, "billing" | "billing_updated_at">> | null | undefined,
+): boolean {
+  const billing = intake?.billing;
+  if (!billing) return false;
+  if (intake?.billing_updated_at) return true;
+  return BILLING_ANSWER_KEYS.some((key) => {
+    const value = billing[key];
+    return typeof value === "boolean" || Boolean(value);
+  });
+}
 
 /**
  * Whether anything about the representation was entered in the cabinet: an
@@ -44,13 +81,13 @@ export function hasRepresentationStatements(
 }
 
 /**
- * Whether the lead entered any GwG statement, uploaded an identity document
- * or stated who acts for him.
+ * Whether the lead entered any GwG statement, uploaded an identity document,
+ * stated who acts for him, or answered where the invoice goes and how he pays.
  */
 export function hasGwgStatements(intake: GwgIntake | null | undefined): boolean {
   if (!intake) return false;
   if (intake.identification_updated_at || intake.identity_documents.length > 0) return true;
-  if (hasRepresentationStatements(intake)) return true;
+  if (hasRepresentationStatements(intake) || hasBillingStatements(intake)) return true;
   return Object.values(intake.identification ?? {}).some((value) =>
     Array.isArray(value) ? value.length > 0 : typeof value === "boolean" || Boolean(value),
   );
@@ -352,4 +389,157 @@ export function representationStatements(
     underGuardianship: representation.under_guardianship,
     persons: representation.representatives,
   };
+}
+
+/** How the lead will pay, as the cabinet words the five answers. */
+export function paymentMethodLabel(value: PaymentMethod | string | null | undefined, tx: Tx): string {
+  return enumLabel(
+    {
+      bank_transfer: tx("Банковский перевод", "Überweisung"),
+      card: tx("Банковская карта", "Karte"),
+      cash: tx("Наличные", "Bar"),
+      crypto: tx("Криптовалюта", "Kryptowährung"),
+      other: tx("Иной способ", "Sonstiges"),
+    },
+    value,
+  );
+}
+
+/** What a compliance flag of the server stands for, in the words of the amber line. */
+export function complianceFlagLabel(flag: LeadComplianceFlag | string, tx: Tx): string {
+  return enumLabel(
+    {
+      cash_payment: tx("наличные", "Barzahlung"),
+      crypto_payment: tx("криптовалюта", "Kryptowährung"),
+      other_method: tx("иной способ оплаты", "sonstiger Zahlungsweg"),
+      third_party_payment: tx("платёж через третье лицо", "Zahlung über Dritte"),
+    },
+    flag,
+  );
+}
+
+/** "Требуется проверка комплаенса: наличные, платёж через третье лицо"; "" without a flag. */
+export function complianceFlagsLine(flags: readonly string[], tx: Tx): string {
+  if (flags.length === 0) return "";
+  return tx("Требуется проверка комплаенса: ", "Compliance-Prüfung erforderlich: ")
+    + flags.map((flag) => complianceFlagLabel(flag, tx)).join(", ");
+}
+
+/** The methods that call for a compliance check on their own (D7). */
+const FLAGGED_METHODS: readonly string[] = ["cash", "crypto", "other"];
+
+export type BillingStatementKey =
+  | "invoice_to"
+  | "invoice_name"
+  | "invoice_address"
+  | "invoice_email"
+  | "invoice_tax"
+  | "payment_method"
+  | "account_country"
+  | "account_holder"
+  | "bank_name"
+  | "via_third_party";
+
+export type BillingStatement = {
+  key: BillingStatementKey;
+  label: string;
+  /** "" when the lead left it empty (shown as a dash). */
+  value: string;
+  /** What the lead added to "other" or to a "yes"; "" otherwise. */
+  details: string;
+  /** Staff must look at it: cash, crypto, another method, a payment through a third party. */
+  warning: boolean;
+};
+
+/**
+ * Sections 7–8 as the group "Счёт и оплата" shows them: the rows of the
+ * invoice recipient, the rows of the payment route — or none while the payer
+ * answers section 8 himself through an own link (`byPayer`) — and the
+ * compliance flags of the server as labels.
+ */
+export type BillingStatements = {
+  invoice: BillingStatement[];
+  payment: BillingStatement[];
+  /** Section 8 is the third-party payer's answer: the cabinet asked nothing. */
+  byPayer: boolean;
+  /** The compliance line; "" without a flag. */
+  complianceLine: string;
+};
+
+export function billingStatements(billing: LeadPortalBilling, tx: Tx, lang: string): BillingStatements {
+  const country = (code: string | null) => countryNameForDisplay(code, lang);
+  const statement = (
+    key: BillingStatementKey,
+    label: string,
+    value: string | null,
+    options: { details?: string | null; warning?: boolean } = {},
+  ): BillingStatement => ({
+    key,
+    label,
+    value: value?.trim() ?? "",
+    details: options.details?.trim() ?? "",
+    warning: options.warning === true,
+  });
+
+  const invoice: BillingStatement[] = [
+    statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(billing.invoice_to, tx)),
+  ];
+  if (billing.invoice_to === "other") {
+    invoice.push(
+      statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), billing.invoice_name),
+      statement(
+        "invoice_address",
+        tx("Адрес для счёта", "Rechnungsanschrift"),
+        representativeAddress(
+          { street: billing.invoice_street, zip: billing.invoice_zip, city: billing.invoice_city, country: billing.invoice_country },
+          lang,
+        ),
+      ),
+    );
+  }
+  invoice.push(statement("invoice_email", tx("E-mail для счетов", "E-Mail für Rechnungen"), billing.invoice_email));
+  const taxLine = invoiceTaxLine(billing);
+  if (taxLine) invoice.push(statement("invoice_tax", "USt-IdNr. / Steuernummer", taxLine));
+
+  const byPayer = billing.payment_route_by === "payer";
+  const method = billing.payment_method;
+  const payment: BillingStatement[] = [];
+  if (!byPayer) {
+    payment.push(
+      statement("payment_method", tx("Способ оплаты", "Zahlungsweg"), paymentMethodLabel(method, tx), {
+        details: method === "other" ? billing.payment_method_details : null,
+        warning: method !== null && FLAGGED_METHODS.includes(method),
+      }),
+    );
+    // The account is asked for a transfer or a card; for cash, crypto or
+    // another method the server clears it.
+    if (method === null || method === "bank_transfer" || method === "card") {
+      payment.push(
+        statement("account_country", tx("Страна счёта", "Land des Kontos"), country(billing.account_country)),
+        statement("account_holder", tx("Владелец счёта", "Kontoinhaber/in"), billing.account_holder),
+        statement("bank_name", tx("Банк", "Bank"), billing.bank_name),
+      );
+    }
+    payment.push(
+      statement(
+        "via_third_party",
+        tx("Платёж через третье лицо / платёжного провайдера", "Zahlung über Dritte / Zahlungsdienstleister"),
+        answerLabel(billing.via_third_party, tx),
+        {
+          details: billing.via_third_party === true ? billing.via_third_party_details : null,
+          warning: billing.via_third_party === true,
+        },
+      ),
+    );
+  }
+
+  return { invoice, payment, byPayer, complianceLine: complianceFlagsLine(billing.compliance_flags, tx) };
+}
+
+/** The note that stands in for section 8 while the third-party payer answers it himself. */
+export function paymentRouteByPayerNote(tx: Tx): string {
+  return tx(
+    "Способ оплаты укажет плательщик (собственная ссылка — следующий этап)",
+    "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+  );
 }

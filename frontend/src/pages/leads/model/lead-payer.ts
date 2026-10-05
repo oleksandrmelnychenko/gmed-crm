@@ -78,10 +78,42 @@ export type PayerDeclaration = {
   relationship_kind?: PayerRelationshipKind | null;
   /** When the lead agreed that GMED contacts the payer; only the lead gives it. */
   contact_consent_at?: string | null;
+  /**
+   * Section 7 of the form (invoice recipient), answered by the lead in the
+   * cabinet; absent on an older server. Staff do not edit it: the recipient
+   * of an order or an invoice is changed there.
+   */
+  invoice_to?: InvoiceTo | null;
+  invoice_name?: string | null;
+  invoice_street?: string | null;
+  invoice_zip?: string | null;
+  invoice_city?: string | null;
+  invoice_country?: string | null;
+  invoice_email?: string | null;
+  /** The two staff fields of section 7; absent on an older server. */
+  invoice_vat_id?: string | null;
+  invoice_tax_number?: string | null;
+  /** Section 8 (payment route), answered by the payer; read in "Данные от пациента". */
+  payment_method?: PaymentMethod | null;
+  payment_method_details?: string | null;
+  account_country?: string | null;
+  account_holder?: string | null;
+  bank_name?: string | null;
+  via_third_party?: boolean | null;
+  via_third_party_details?: string | null;
   patient_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
 };
+
+/** Where the invoice goes: to the patient, to the third-party payer, or to another address. */
+export const INVOICE_TO_VALUES = ["self", "payer", "other"] as const;
+
+export type InvoiceTo = (typeof INVOICE_TO_VALUES)[number];
+
+export const PAYMENT_METHODS = ["bank_transfer", "card", "cash", "crypto", "other"] as const;
+
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export type PayerDeclarationStatus = {
   complete: boolean;
@@ -181,6 +213,15 @@ export type PayerDeclarationForm = {
   organisationName: string;
   relationshipKind: PayerRelationshipKind | "";
   payerTypeSupport: PayerTypeSupport;
+  /** USt-IdNr. and Steuernummer of the invoice recipient: the staff fields of section 7. */
+  invoiceVatId: string;
+  invoiceTaxNumber: string;
+  /**
+   * Whether the server stores the two fields: a loaded declaration carries
+   * `invoice_vat_id` or, on an older server, does not — that server rejects
+   * the unknown keys, so they are neither offered nor sent.
+   */
+  invoiceTaxSupport: PayerTypeSupport;
 };
 
 /**
@@ -216,6 +257,9 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   organisationName: "",
   relationshipKind: "",
   payerTypeSupport: "unknown",
+  invoiceVatId: "",
+  invoiceTaxNumber: "",
+  invoiceTaxSupport: "unknown",
 };
 
 function isSourceOfFunds(value: string | null | undefined): value is SourceOfFunds {
@@ -295,8 +339,35 @@ export function payerDeclarationToForm(
     organisationName: declaration.organisation_name ?? "",
     relationshipKind: isRelationshipKind(declaration.relationship_kind) ? declaration.relationship_kind : "",
     payerTypeSupport: Object.hasOwn(declaration, "payer_type") ? "supported" : "unsupported",
+    invoiceVatId: declaration.invoice_vat_id ?? "",
+    invoiceTaxNumber: declaration.invoice_tax_number ?? "",
+    invoiceTaxSupport: Object.hasOwn(declaration, "invoice_vat_id") ? "supported" : "unsupported",
   };
 }
+
+/**
+ * Whether the inputs USt-IdNr. / Steuernummer are offered: not on a server
+ * known to reject them.
+ */
+export function invoiceTaxFieldsShown(form: Pick<PayerDeclarationForm, "invoiceTaxSupport">): boolean {
+  return form.invoiceTaxSupport !== "unsupported";
+}
+
+/**
+ * Whether the save body carries USt-IdNr. / Steuernummer: always for a server
+ * known to store them, never for an older one. Before the first save the
+ * server is unknown, so they go out only when staff entered one of them.
+ */
+function sendsInvoiceTax(form: Pick<PayerDeclarationForm, "invoiceTaxSupport" | "invoiceVatId" | "invoiceTaxNumber">): boolean {
+  if (form.invoiceTaxSupport !== "unknown") return form.invoiceTaxSupport === "supported";
+  return form.invoiceVatId.trim() !== "" || form.invoiceTaxNumber.trim() !== "";
+}
+
+/** The keys of the save body for section 7 that staff may set; an older server does not know them. */
+export type InvoiceTaxPayload = {
+  invoice_vat_id: string | null;
+  invoice_tax_number: string | null;
+};
 
 /** The keys of the save body an older server does not know. */
 export type PayerTypePayload = {
@@ -320,7 +391,10 @@ function sendsPayerType(form: PayerDeclarationForm): boolean {
  * Body of POST /leads/{id}/payer-declaration. Fields that do not apply are
  * sent empty; the server clears them as well (data minimization): no personal
  * identity for an organisation, no free-text relationship beside a kind that
- * says it all. The lead's contact consent is never part of it.
+ * says it all. The lead's contact consent and the lead's answers of sections
+ * 7–8 (invoice recipient, payment route) are never part of it: of those the
+ * body carries only the two staff fields USt-IdNr. / Steuernummer, and only
+ * for a server that knows them (an absent key keeps the stored value).
  */
 export function payerDeclarationPayload(form: PayerDeclarationForm) {
   const text = (value: string) => value.trim() || null;
@@ -335,6 +409,12 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
         payer_type: thirdParty ? form.payerType : null,
         organisation_name: organisation ? text(form.organisationName) : null,
         relationship_kind: thirdParty ? form.relationshipKind || null : null,
+      }
+    : {};
+  const invoiceTax: Partial<InvoiceTaxPayload> = sendsInvoiceTax(form)
+    ? {
+        invoice_vat_id: text(form.invoiceVatId),
+        invoice_tax_number: text(form.invoiceTaxNumber),
       }
     : {};
   return {
@@ -359,7 +439,40 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
     phone: thirdParty ? text(form.phone) : null,
     payer_informed: thirdParty && form.payerInformed,
     ...typed,
+    ...invoiceTax,
   };
+}
+
+/**
+ * Where the invoice goes, as the lead chose it in the cabinet: "пациенту",
+ * "плательщику", "по другому адресу"; "не указано" while unanswered. The
+ * same words stand in the wizard and on the patient card.
+ */
+export function invoiceToLabel(value: InvoiceTo | string | null | undefined, tx: Tx): string {
+  switch (value) {
+    case "self":
+      return tx("пациенту", "an die Patientin / den Patienten");
+    case "payer":
+      return tx("плательщику", "an die zahlende Person / Organisation");
+    case "other":
+      return tx("по другому адресу", "an eine andere Adresse");
+    default:
+      return value ? value : tx("не указано", "nicht angegeben");
+  }
+}
+
+/**
+ * "USt-IdNr. DE123456789 · Steuernummer 12/345/67890": the staff fields of
+ * section 7 that are set; "" without either.
+ */
+export function invoiceTaxLine(
+  declaration: Pick<PayerDeclaration, "invoice_vat_id" | "invoice_tax_number"> | null | undefined,
+): string {
+  const vatId = declaration?.invoice_vat_id?.trim();
+  const taxNumber = declaration?.invoice_tax_number?.trim();
+  return [vatId ? `USt-IdNr. ${vatId}` : "", taxNumber ? `Steuernummer ${taxNumber}` : ""]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function payerTypeLabel(value: PayerType, tx: Tx) {

@@ -77,6 +77,36 @@ const company: Declaration = {
   contact_consent_at: "2026-10-05T09:30:00Z",
 };
 
+/**
+ * The same company on a server that stores sections 7–8 of the form: the
+ * lead chose the invoice to the payer; nobody typed the staff fields yet.
+ */
+const billedCompany: Declaration = {
+  ...company,
+  invoice_to: "payer",
+  invoice_name: null,
+  invoice_street: null,
+  invoice_zip: null,
+  invoice_city: null,
+  invoice_country: null,
+  invoice_email: null,
+  invoice_vat_id: null,
+  invoice_tax_number: null,
+  payment_method: null,
+  payment_method_details: null,
+  account_country: null,
+  account_holder: null,
+  bank_name: null,
+  via_third_party: null,
+  via_third_party_details: null,
+};
+
+/** The keys of sections 7–8 the lead answers: staff never send them. */
+const LEAD_BILLING_KEYS = [
+  "invoice_to", "invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country", "invoice_email",
+  "payment_method", "payment_method_details", "account_country", "account_holder", "bank_name", "via_third_party", "via_third_party_details",
+];
+
 async function mount(page: Page, lang: "ru" | "de", declaration: Declaration) {
   const state = { declaration };
   const saves: Declaration[] = [];
@@ -258,8 +288,11 @@ test("staff turn a private payer into a company: name and seat instead of the pe
     email: "viktor.zahler@example.com",
     payer_informed: true,
   });
-  // The consent is the lead's: staff never send it.
+  // The consent is the lead's: staff never send it. This server knows no
+  // USt-IdNr. / Steuernummer either: the keys stay out of the body.
   expect(Object.keys(saves[0]).filter((key) => key.includes("consent"))).toEqual([]);
+  expect(saves[0]).not.toHaveProperty("invoice_vat_id");
+  expect(saves[0]).not.toHaveProperty("invoice_tax_number");
 
   // The saved company stays in the form; no sheet for natural persons for it.
   await expect(type).toContainText("Компания");
@@ -313,6 +346,68 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
 });
 
+test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the invoice goes stays the lead's choice", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { section, saves } = await mount(page, "ru", billedCompany);
+
+  // Section 7 as the lead chose it: read-only, with the note that it was chosen in the cabinet.
+  const recipient = section.getByTestId("lead-payer-invoice-recipient");
+  await expect(recipient).toContainText("Получатель счёта (раздел 7 анкеты)");
+  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveText(
+    "Счёт направляется: плательщику · выбрал пациент в кабинете",
+  );
+  await expect(recipient.locator("select, [role=radio], [role=combobox]")).toHaveCount(0);
+  // The two staff inputs, empty so far.
+  const vatId = recipient.getByLabel(/^USt-IdNr\. получателя счёта/);
+  const taxNumber = recipient.getByLabel(/^Steuernummer получателя счёта/);
+  await expect(vatId).toHaveValue("");
+  await expect(taxNumber).toHaveValue("");
+  await expect(recipient.locator("input")).toHaveCount(2);
+
+  await vatId.fill("DE123456789");
+  await taxNumber.fill(" 30/123/45678 ");
+  await recipient.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-payer-invoice-tax-ru-desktop.png"), animations: "disabled" });
+  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
+  expect(saves).toHaveLength(1);
+  expect(saves[0]).toMatchObject({
+    payer_kind: "third_party",
+    payer_type: "company",
+    organisation_name: "Beispiel GmbH",
+    invoice_vat_id: "DE123456789",
+    invoice_tax_number: "30/123/45678",
+  });
+  // The lead's answers of sections 7–8 and the consent are never in the body.
+  for (const key of [...LEAD_BILLING_KEYS, "contact_consent_at"]) {
+    expect(saves[0]).not.toHaveProperty(key);
+  }
+  // The saved values stay in the form; a cleared field is sent as null.
+  await expect(vatId).toHaveValue("DE123456789");
+  await expect(taxNumber).toHaveValue("30/123/45678");
+  await taxNumber.fill("");
+  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
+  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
+  expect(saves[1]).toMatchObject({ invoice_vat_id: "DE123456789", invoice_tax_number: null });
+});
+
+test("the lead's choice of another address is named, in German", async ({ page }) => {
+  const { section } = await mount(page, "de", { ...billedCompany, invoice_to: "other", invoice_name: "Beispiel Stiftung", invoice_vat_id: "DE987654321" });
+  const recipient = section.getByTestId("lead-payer-invoice-recipient");
+  await expect(recipient).toContainText("Rechnungsempfänger (Abschnitt 7)");
+  await expect(recipient.getByTestId("lead-payer-invoice-to")).toHaveText(
+    "Rechnung geht an: an eine andere Adresse — Beispiel Stiftung · vom Patienten im Portal gewählt",
+  );
+  await expect(recipient.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("DE987654321");
+  await expect(recipient.getByLabel(/^Steuernummer des Rechnungsempfängers/)).toHaveValue("");
+});
+
+test("a lead who has not chosen where the invoice goes yet", async ({ page }) => {
+  const { section } = await mount(page, "de", { ...billedCompany, invoice_to: null });
+  await expect(section.getByTestId("lead-payer-invoice-to")).toHaveText("Rechnung geht an: nicht angegeben · wählt der Patient im Portal");
+  await expect(section.getByLabel(/^USt-IdNr\. des Rechnungsempfängers/)).toHaveValue("");
+});
+
 test("an older backend keeps the form of a private person and gets none of the new keys", async ({ page }) => {
   const { wizard, section, sheetActions, saves } = await mount(page, "ru", olderPerson);
 
@@ -320,6 +415,10 @@ test("an older backend keeps the form of a private person and gets none of the n
   await expect(section.getByRole("combobox", { name: "Тип плательщика", exact: true })).toHaveCount(0);
   await expect(section.getByRole("combobox", { name: "Кем приходится пациенту", exact: true })).toHaveCount(0);
   await expect(section.getByTestId("lead-payer-contact-consent")).toHaveCount(0);
+  // Neither the staff fields of section 7 nor the lead's choice: the server does not send `invoice_vat_id`.
+  await expect(section.getByTestId("lead-payer-invoice-recipient")).toHaveCount(0);
+  await expect(section.getByLabel(/USt-IdNr\./)).toHaveCount(0);
+  await expect(section).not.toContainText("Счёт направляется");
   // The relationship is the free text it was.
   const relationship = section.getByLabel(/^Кем приходится пациенту/);
   await expect(relationship).toHaveValue("brother");
@@ -327,7 +426,7 @@ test("an older backend keeps the form of a private person and gets none of the n
   await section.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
   expect(saves[0]).toMatchObject({ payer_kind: "third_party", first_name: "Viktor", relationship: "Bruder", citizenships: ["AT"] });
-  for (const key of ["payer_type", "organisation_name", "relationship_kind"]) {
+  for (const key of ["payer_type", "organisation_name", "relationship_kind", "invoice_vat_id", "invoice_tax_number"]) {
     expect(saves[0]).not.toHaveProperty(key);
   }
   // The payer is a person there: the sheet can be created.

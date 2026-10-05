@@ -5856,6 +5856,219 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     );
 }
 
+/// A non-cancelled invoice of the order addressed to a free-text payer with
+/// `role` (`cost_bearer` or `invoice_address`).
+async fn seed_invoice_with_payer(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+    role: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+               order_id, patient_id, invoice_number, invoice_type, status,
+               total_net, total_vat, total_gross, line_items, created_by,
+               payer_contact_name, payer_address_street, payer_address_zip,
+               payer_address_city, payer_address_country, payer_role
+           ) VALUES ($1, $2, $3, 'advance', 'draft', 100, 19, 119, '[]', $4,
+                     'Viktor Zahler', 'Ringstr. 9', '1010', 'Wien', 'AT', $5)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-{role}"))
+    .bind(created_by)
+    .bind(role)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn single_order_names_no_cost_bearer_for_an_invoice_to_the_partys_other_address() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-single-order-invoice-address");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
+    let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
+    let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+    let generate = |app: axum::Router, bearer: String| async move {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &bearer,
+            Some(json!({
+                "template_id": "single_order",
+                "patient_id": patient_id,
+                "order_id": order_id,
+                "language": "de",
+                "bindings": { "party_sign_place": "Berlin", "party_sign_date": "2026-10-06" }
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "generate single order: {body:?}");
+        let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let (status, bytes) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        extract_pdf_text(&bytes)
+    };
+
+    // The order's only invoice goes to the party at another address (the
+    // lead's "invoice to another address"): nobody joins the debt.
+    let invoice_address = seed_invoice_with_payer(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &tag,
+        "invoice_address",
+    )
+    .await;
+    let text = generate(app.clone(), admin_bearer.clone()).await;
+    assert!(!text.contains("Kostenübernehmer"), "{text:?}");
+    assert!(!text.contains("Viktor Zahler"), "{text:?}");
+
+    // An invoice to a Kostenübernehmer of the same order names him as before.
+    sqlx::query("UPDATE invoices SET status = 'cancelled' WHERE id = $1")
+        .bind(invoice_address)
+        .execute(&pool)
+        .await
+        .unwrap();
+    seed_invoice_with_payer(&pool, order_id, patient_id, admin_id, &tag, "cost_bearer").await;
+    let text = generate(app, admin_bearer).await;
+    assert!(text.contains("Kostenübernehmer"), "{text:?}");
+    assert!(text.contains("Viktor Zahler"), "{text:?}");
+    assert!(text.contains("Schuldbeitritt"), "{text:?}");
+}
+
+/// A lead with its own login-less cabinet answers: who pays, and how
+/// (section 8 of the form), as the cabinet stores them.
+async fn seed_lead_with_payment_route(
+    pool: &PgPool,
+    tag: &str,
+    payer_kind: &str,
+    payment_method: &str,
+) -> Uuid {
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              street_address, city, zip_code, country, citizenships,
+                              qualification_status, compliance_status, intake_source)
+           VALUES ('Anna', 'Muster', $1, DATE '1985-02-03', 'female', 'Musterweg 1', 'Berlin',
+                   '10115', 'DE', '{DE}', 'qualified', 'signed', 'staff_wizard')
+           RETURNING id"#,
+    )
+    .bind(format!("anna-{tag}@example.com"))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let third_party = payer_kind == "third_party";
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, payer_kind, payer_type, first_name, last_name, date_of_birth,
+               street, zip, city, country, citizenships, relationship_kind, email,
+               source_of_funds, payer_informed_at, acts_on_own_account, own_account_answered,
+               payment_method, account_country, account_holder, bank_name, via_third_party)
+           VALUES ($1, $2,
+                   CASE WHEN $3 THEN 'person' END, CASE WHEN $3 THEN 'Viktor' END,
+                   CASE WHEN $3 THEN 'Zahler' END, CASE WHEN $3 THEN DATE '1970-05-01' END,
+                   CASE WHEN $3 THEN 'Ringstr. 9' END, CASE WHEN $3 THEN '1010' END,
+                   CASE WHEN $3 THEN 'Wien' END, CASE WHEN $3 THEN 'AT' END,
+                   CASE WHEN $3 THEN '{AT}'::text[] ELSE '{}'::text[] END,
+                   CASE WHEN $3 THEN 'relative' END,
+                   CASE WHEN $3 THEN 'viktor.zahler@example.com' END,
+                   'employment', CASE WHEN $3 THEN now() END, true, true,
+                   $4, CASE WHEN $4 IN ('bank_transfer', 'card') THEN 'DE' END,
+                   CASE WHEN $4 IN ('bank_transfer', 'card') THEN 'Anna Muster' END,
+                   CASE WHEN $4 = 'bank_transfer' THEN 'Musterbank' END, false)"#,
+    )
+    .bind(lead_id)
+    .bind(payer_kind)
+    .bind(third_party)
+    .bind(payment_method)
+    .execute(pool)
+    .await
+    .unwrap();
+    lead_id
+}
+
+#[tokio::test]
+async fn gwg_identification_sheet_prints_the_payment_route_on_the_payers_sheet() {
+    let Some((app, pool, _admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let sheet_text = |app: axum::Router, bearer: String, lead_id: Uuid, subject: Option<&str>| {
+        let subject = subject.map(str::to_string);
+        async move {
+            let mut body = json!({
+                "template_id": "gwg_identification",
+                "lead_id": lead_id,
+                "language": "de",
+                "status": "active"
+            });
+            if let Some(subject) = subject {
+                body["bindings"] = json!({ "gwg_identification": { "subject": subject } });
+            }
+            let (status, generated) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{generated}");
+            let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+            let (status, bytes) = bytes_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}/download"),
+                &bearer,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            extract_pdf_text(&bytes)
+        }
+    };
+
+    // The patient pays herself by bank transfer: her sheet carries the route.
+    let own = seed_lead_with_payment_route(
+        &pool,
+        &unique_tag("gwg-route-self"),
+        "self",
+        "bank_transfer",
+    )
+    .await;
+    let text = sheet_text(app.clone(), admin_bearer.clone(), own, None).await;
+    assert!(text.contains("Angaben zum Zahlungsweg"), "{text:?}");
+    assert!(text.contains("Konto in Deutschland"), "{text:?}");
+    assert!(text.contains("Kontoinhaber/in: Anna Muster"), "{text:?}");
+    assert!(text.contains("Bank: Musterbank"), "{text:?}");
+    assert!(!text.contains("gesonderte Prüfung"), "{text:?}");
+
+    // A third party pays in cash: the patient's sheet says nothing of it,
+    // the payer's sheet carries the route with the hint.
+    let paid =
+        seed_lead_with_payment_route(&pool, &unique_tag("gwg-route-payer"), "third_party", "cash")
+            .await;
+    let text = sheet_text(app.clone(), admin_bearer.clone(), paid, None).await;
+    assert!(!text.contains("Angaben zum Zahlungsweg"), "{text:?}");
+    let text = sheet_text(app, admin_bearer, paid, Some("payer")).await;
+    assert!(text.contains("Angaben zum Zahlungsweg"), "{text:?}");
+    assert!(text.contains("Barzahlung"), "{text:?}");
+    assert!(text.contains("gesonderte Prüfung"), "{text:?}");
+}
+
 #[tokio::test]
 async fn appointment_confirmation_autofills_clinic_and_date_from_appointment() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {

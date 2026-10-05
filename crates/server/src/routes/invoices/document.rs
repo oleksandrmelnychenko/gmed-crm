@@ -220,7 +220,10 @@ pub(super) async fn load_invoice_recipient(
     Ok(Some(recipient))
 }
 
-/// The contracting party's name when it is not the invoice recipient.
+/// The contracting party's name when it is not the invoice recipient — and
+/// not the recipient's own name either: the party at another address is
+/// still the party (the lead's "invoice to another address"), so it is not
+/// named a second time as Leistungsempfänger.
 pub(super) async fn live_service_recipient_name(
     conn: &mut PgConnection,
     recipient: &Value,
@@ -235,7 +238,11 @@ pub(super) async fn live_service_recipient_name(
         crate::app_time::today(),
     )
     .await?;
-    Ok((!party.is_recipient(recipient)).then(|| party.debtor_name()))
+    let named = super::payer::recipient_is_named_party(
+        recipient.get("name").and_then(Value::as_str),
+        &party,
+    );
+    Ok((!party.is_recipient(recipient) && !named).then(|| party.debtor_name()))
 }
 
 /// First and last day the invoiced services were rendered (Leistungszeitraum).

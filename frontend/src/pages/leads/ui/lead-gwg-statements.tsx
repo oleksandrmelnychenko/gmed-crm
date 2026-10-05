@@ -5,9 +5,10 @@ import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import type { LeadIdentityDocument, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
+import type { LeadIdentityDocument, LeadPortalBilling, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
 import {
   answerLabel,
+  billingStatements,
   contactChannelsLabel,
   EMPTY_STATEMENT,
   gwgLegalAnswers,
@@ -15,12 +16,14 @@ import {
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
+  paymentRouteByPayerNote,
   representationStatements,
   representationWarningText,
   representativeAddress,
   representativeName,
   representativeRoleLabel,
   salutationLabel,
+  type BillingStatement,
   type GwgPayerStatement,
   type RepresentationStatements,
   type Tx,
@@ -264,6 +267,88 @@ function RepresentationGroup({
   );
 }
 
+/** One row of sections 7–8: the answer, what the lead added to it, amber when staff must look at it. */
+function BillingStatementRow({ statement, className }: { statement: BillingStatement; className?: string }) {
+  return (
+    <Statement
+      label={statement.label}
+      className={className}
+      warning={statement.warning}
+      testId={`lead-gwg-billing-${statement.key}`}
+    >
+      {statement.value ? (
+        <>
+          <span className={cn(statement.warning && "font-semibold", statement.key === "invoice_email" && "break-all")}>
+            {statement.value}
+          </span>
+          {statement.details ? <span className="mt-0.5 block whitespace-pre-line">{statement.details}</span> : null}
+        </>
+      ) : null}
+    </Statement>
+  );
+}
+
+/**
+ * Invoice recipient and payment route (sections 7–8 of the form): where the
+ * invoice goes as the lead chose it, the staff fields USt-IdNr. /
+ * Steuernummer when set, and how the payment is made — or, for a third-party
+ * payer, the note that the payer states it himself. Cash, crypto, another
+ * method and a payment through a third party are amber and named in the
+ * compliance line; they force nothing, staff decide.
+ */
+function BillingGroup({
+  billing,
+  updatedAt,
+  tx,
+  lang,
+}: {
+  billing: LeadPortalBilling;
+  updatedAt: string | null;
+  tx: Tx;
+  lang: string;
+}) {
+  const statements = billingStatements(billing, tx, lang);
+  return (
+    <div className="space-y-2" data-testid="lead-gwg-billing">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-xs font-semibold text-foreground">
+          {tx("Счёт и оплата (разделы 7–8 анкеты)", "Rechnung und Zahlung (Abschnitte 7–8)")}
+        </h4>
+        {updatedAt ? (
+          <span className="inline-flex" data-testid="lead-gwg-billing-updated">
+            <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
+          </span>
+        ) : null}
+      </div>
+      <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+        {statements.invoice.map((statement) => (
+          <BillingStatementRow key={statement.key} statement={statement} />
+        ))}
+      </dl>
+      {statements.byPayer ? (
+        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-gwg-billing-by-payer">
+          {paymentRouteByPayerNote(tx)}
+        </p>
+      ) : (
+        <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+          {statements.payment.map((statement) => (
+            <BillingStatementRow
+              key={statement.key}
+              statement={statement}
+              className={statement.key === "via_third_party" ? "col-span-full" : undefined}
+            />
+          ))}
+        </dl>
+      )}
+      {statements.complianceLine ? (
+        <p data-testid="lead-gwg-billing-flag" className={cn("text-xs font-medium leading-5", WARNING_TEXT)}>
+          {statements.complianceLine}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * "Данные от пациента" in the GwG section of the wizard: what the lead stated
  * in the cabinet, for staff to check before they sign the identification
@@ -271,7 +356,9 @@ function RepresentationGroup({
  * the portal state is loaded, nor to a role the server keeps the statements
  * from. The representation is its own group after the identity document; the
  * legal representatives of a minor are listed even while the lead entered
- * nothing, because they are known from the request.
+ * nothing, because they are known from the request. Invoice recipient and
+ * payment route (sections 7–8) follow the economic interest, while the
+ * server sends them.
  */
 export function LeadGwgStatements({
   intake,
@@ -385,6 +472,10 @@ export function LeadGwgStatements({
           {identification.payment_background}
         </Statement>
       </StatementGroup>
+
+      {intake.billing ? (
+        <BillingGroup billing={intake.billing} updatedAt={intake.billing_updated_at} tx={tx} lang={lang} />
+      ) : null}
 
       <StatementGroup title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
         {legalAnswers.map((item) => (

@@ -34,11 +34,12 @@ import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata"
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 import {
-  EMPTY_PAYER_DECLARATION_FORM,
   PAYER_RELATIONSHIP_KINDS,
   PAYER_SECTION_ID,
   PAYER_TYPES,
   SOURCE_OF_FUNDS,
+  invoiceTaxFieldsShown,
+  invoiceToLabel,
   isOrganisationPayerForm,
   payerDeclarationToForm,
   payerFormMissing,
@@ -117,7 +118,9 @@ function PayerCheckbox({
  * A third party is a private person (personal identity, address,
  * citizenships) or a company, an organisation or an insurer (name and seat).
  * The lead's consent that GMED contacts the payer is shown, never edited:
- * only the lead gives it in the cabinet.
+ * only the lead gives it in the cabinet. The same holds for where the invoice
+ * goes (section 7 of the form): staff add only USt-IdNr. / Steuernummer of
+ * the invoice recipient.
  */
 export function LeadPayerDeclarationSection({
   leadId,
@@ -145,7 +148,9 @@ export function LeadPayerDeclarationSection({
   /** Set while the payer is the one the patient stated in the lead cabinet. */
   patientMarker?: PatientFieldMarker | null;
 }) {
-  const [form, setForm] = useState<PayerDeclarationForm>(EMPTY_PAYER_DECLARATION_FORM);
+  // The stored declaration is the first form state as well, so a render
+  // without effects (static markup) already shows it.
+  const [form, setForm] = useState<PayerDeclarationForm>(() => payerDeclarationToForm(data?.declaration));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<"save" | "upload" | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
@@ -177,6 +182,11 @@ export function LeadPayerDeclarationSection({
   const missing = payerFormMissing(form);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
+  // Section 7: the lead chose where the invoice goes; an older server does
+  // not send the key, and a lead who has not answered yet has it null.
+  const invoiceTo = data?.declaration?.invoice_to;
+  const invoiceToKnown = invoiceTo !== undefined;
+  const invoiceTaxShown = invoiceTaxFieldsShown(form);
 
   async function save() {
     if (!form.kind) {
@@ -542,6 +552,51 @@ export function LeadPayerDeclarationSection({
                 "Der Kostenübernehmer unterschreibt die Kostenübernahmeerklärung (Schuldbeitritt). Sie wird im Schritt „Vertrag & Angebot“ erstellt, sobald der Auftrag besteht.",
               )}
             </p>
+          </div>
+        ) : null}
+
+        {invoiceToKnown || invoiceTaxShown ? (
+          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-payer-invoice-recipient">
+            <div className="text-xs font-semibold text-foreground">
+              {tx("Получатель счёта (раздел 7 анкеты)", "Rechnungsempfänger (Abschnitt 7)")}
+            </div>
+            {invoiceToKnown ? (
+              <p className="text-xs text-muted-foreground" data-testid="lead-payer-invoice-to">
+                {tx("Счёт направляется: ", "Rechnung geht an: ")}
+                <span className="font-medium text-foreground">{invoiceToLabel(invoiceTo, tx)}</span>
+                {invoiceTo === "other" && data?.declaration?.invoice_name ? (
+                  <span className="font-medium text-foreground">{` — ${data.declaration.invoice_name}`}</span>
+                ) : null}
+                {" · "}
+                {invoiceTo
+                  ? tx("выбрал пациент в кабинете", "vom Patienten im Portal gewählt")
+                  : tx("выбирает пациент в кабинете", "wählt der Patient im Portal")}
+              </p>
+            ) : null}
+            {invoiceTaxShown ? (
+              <div className="grid gap-4 sm:grid-cols-2">
+                <PayerField label={tx("USt-IdNr. получателя счёта", "USt-IdNr. des Rechnungsempfängers")}>
+                  <Input
+                    className={inputClass}
+                    value={form.invoiceVatId}
+                    maxLength={20}
+                    disabled={readOnly}
+                    autoComplete="off"
+                    onChange={(event) => patch("invoiceVatId", event.target.value)}
+                  />
+                </PayerField>
+                <PayerField label={tx("Steuernummer получателя счёта", "Steuernummer des Rechnungsempfängers")}>
+                  <Input
+                    className={inputClass}
+                    value={form.invoiceTaxNumber}
+                    maxLength={30}
+                    disabled={readOnly}
+                    autoComplete="off"
+                    onChange={(event) => patch("invoiceTaxNumber", event.target.value)}
+                  />
+                </PayerField>
+              </div>
+            ) : null}
           </div>
         ) : null}
 

@@ -10,6 +10,15 @@ import {
 } from "./lead-payer";
 
 /**
+ * Whether a `lead.portal_updated` change touches the payer declaration row:
+ * "who pays" (`payer`) and the invoice recipient / payment route of sections
+ * 7–8 (`billing`) are stored on it.
+ */
+export function payerDeclarationChanged(change: unknown): boolean {
+  return change === "payer" || change === "billing";
+}
+
+/**
  * Loads the payer declaration of a lead and keeps it fresh: `reload` after
  * anything that changes the order, its signatures or the cost assumption
  * document, `save` for the declaration itself. A failed load leaves the last
@@ -59,10 +68,11 @@ export function useLeadPayerDeclaration(leadId: string | null | undefined, enabl
     void reload();
   }, [reload]);
 
-  // The patient states who pays in the lead cabinet: show it at once.
+  // The patient states who pays, where the invoice goes and how the payment
+  // is made in the lead cabinet: show it at once.
   useRealtimeSubscription(["lead.portal_updated"], (event) => {
     if (!enabled || !leadId || event.entity_id !== leadId) return;
-    if (event.payload?.change === "payer") void reload();
+    if (payerDeclarationChanged(event.payload?.change)) void reload();
   });
 
   return { data, loading, error, reload, save };

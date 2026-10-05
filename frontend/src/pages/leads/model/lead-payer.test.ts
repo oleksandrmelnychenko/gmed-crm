@@ -7,6 +7,9 @@ import {
   PAYER_RELATIONSHIP_KINDS,
   PAYER_TYPES,
   declaredPayerType,
+  invoiceTaxFieldsShown,
+  invoiceTaxLine,
+  invoiceToLabel,
   isOrganisationPayerForm,
   normalizePayerDeclarationResponse,
   payerAmlCountries,
@@ -374,6 +377,113 @@ describe("payer type: person, company, organisation or insurer", () => {
     // An older response stays without the key, so the form knows the server.
     const older = normalizePayerDeclarationResponse({ declaration: thirdParty, status: {} });
     expect(older?.declaration).not.toHaveProperty("payer_type");
+  });
+});
+
+/** The same company on a server that stores sections 7–8: the lead chose "to me", staff typed the VAT id. */
+const billed: PayerDeclaration = {
+  ...company,
+  invoice_to: "self",
+  invoice_name: null,
+  invoice_street: null,
+  invoice_zip: null,
+  invoice_city: null,
+  invoice_country: null,
+  invoice_email: "anna.muster@example.com",
+  invoice_vat_id: "DE123456789",
+  invoice_tax_number: null,
+  payment_method: "bank_transfer",
+  payment_method_details: null,
+  account_country: "DE",
+  account_holder: "Anna Muster",
+  bank_name: "Musterbank",
+  via_third_party: false,
+  via_third_party_details: null,
+};
+
+describe("USt-IdNr. / Steuernummer of the invoice recipient (section 7, staff fields)", () => {
+  it("maps the two fields to the form and back, for a third party and a self-payer alike", () => {
+    const form = payerDeclarationToForm(billed);
+    expect(form).toMatchObject({ invoiceVatId: "DE123456789", invoiceTaxNumber: "", invoiceTaxSupport: "supported" });
+    expect(invoiceTaxFieldsShown(form)).toBe(true);
+    expect(payerDeclarationPayload({ ...form, invoiceTaxNumber: " 30/123/45678 " })).toMatchObject({
+      payer_kind: "third_party",
+      invoice_vat_id: "DE123456789",
+      invoice_tax_number: "30/123/45678",
+    });
+    expect(payerDeclarationPayload({ ...form, kind: "self" })).toMatchObject({
+      payer_kind: "self",
+      invoice_vat_id: "DE123456789",
+      invoice_tax_number: null,
+    });
+    // Cleared by staff: sent as null, which clears it on the server.
+    expect(payerDeclarationPayload({ ...form, invoiceVatId: "  " })).toMatchObject({ invoice_vat_id: null, invoice_tax_number: null });
+  });
+
+  it("never sends the lead's answers of sections 7–8", () => {
+    const payload = payerDeclarationPayload(payerDeclarationToForm(billed));
+    for (const key of [
+      "invoice_to", "invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country", "invoice_email",
+      "payment_method", "payment_method_details", "account_country", "account_holder", "bank_name", "via_third_party", "via_third_party_details",
+    ]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+  });
+
+  it("sends neither field to an older server and does not offer the inputs", () => {
+    // `company` has no `invoice_vat_id` key: the server does not know it.
+    const form = payerDeclarationToForm(company);
+    expect(form).toMatchObject({ invoiceVatId: "", invoiceTaxNumber: "", invoiceTaxSupport: "unsupported" });
+    expect(invoiceTaxFieldsShown(form)).toBe(false);
+    const payload = payerDeclarationPayload({ ...form, invoiceVatId: "DE123456789" });
+    expect(payload).not.toHaveProperty("invoice_vat_id");
+    expect(payload).not.toHaveProperty("invoice_tax_number");
+    // The key present with null still means "known".
+    expect(payerDeclarationToForm({ ...company, invoice_vat_id: null }).invoiceTaxSupport).toBe("supported");
+  });
+
+  it("before the first save sends the fields only when staff entered one", () => {
+    expect(EMPTY_PAYER_DECLARATION_FORM.invoiceTaxSupport).toBe("unknown");
+    expect(invoiceTaxFieldsShown(EMPTY_PAYER_DECLARATION_FORM)).toBe(true);
+    const fresh = { ...EMPTY_PAYER_DECLARATION_FORM, kind: "self" as const };
+    expect(payerDeclarationPayload(fresh)).not.toHaveProperty("invoice_vat_id");
+    expect(payerDeclarationPayload(fresh)).not.toHaveProperty("invoice_tax_number");
+    expect(payerDeclarationPayload({ ...fresh, invoiceTaxNumber: "30/123/45678" })).toMatchObject({
+      invoice_vat_id: null,
+      invoice_tax_number: "30/123/45678",
+    });
+  });
+
+  it("keeps the sixteen keys of a server response", () => {
+    const normalized = normalizePayerDeclarationResponse({ declaration: billed, status: {} });
+    expect(normalized?.declaration).toMatchObject({
+      invoice_to: "self",
+      invoice_email: "anna.muster@example.com",
+      invoice_vat_id: "DE123456789",
+      payment_method: "bank_transfer",
+      account_holder: "Anna Muster",
+      via_third_party: false,
+    });
+    expect(normalizePayerDeclarationResponse({ declaration: company, status: {} })?.declaration).not.toHaveProperty("invoice_to");
+  });
+
+  it("words where the invoice goes and the staff fields", () => {
+    expect(invoiceToLabel("self", tx)).toBe("пациенту");
+    expect(invoiceToLabel("payer", tx)).toBe("плательщику");
+    expect(invoiceToLabel("other", tx)).toBe("по другому адресу");
+    expect(invoiceToLabel(null, tx)).toBe("не указано");
+    expect(invoiceToLabel(undefined, de)).toBe("nicht angegeben");
+    expect(invoiceToLabel("self", de)).toBe("an die Patientin / den Patienten");
+    expect(invoiceToLabel("payer", de)).toBe("an die zahlende Person / Organisation");
+    expect(invoiceToLabel("other", de)).toBe("an eine andere Adresse");
+    expect(invoiceToLabel("parents", de)).toBe("parents");
+    expect(invoiceTaxLine(billed)).toBe("USt-IdNr. DE123456789");
+    expect(invoiceTaxLine({ invoice_vat_id: " DE123456789 ", invoice_tax_number: "30/123/45678" })).toBe(
+      "USt-IdNr. DE123456789 · Steuernummer 30/123/45678",
+    );
+    expect(invoiceTaxLine({ invoice_vat_id: null, invoice_tax_number: "30/123/45678" })).toBe("Steuernummer 30/123/45678");
+    expect(invoiceTaxLine(company)).toBe("");
+    expect(invoiceTaxLine(null)).toBe("");
   });
 });
 

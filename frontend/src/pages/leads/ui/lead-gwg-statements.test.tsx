@@ -457,3 +457,151 @@ describe("LeadGwgStatements: who acts for the lead", () => {
     }
   });
 });
+
+/** Sections 7–8 of a self-payer who pays by transfer from a German account. */
+const TRANSFER = {
+  invoice_to: "self",
+  invoice_email: "anna.muster@example.com",
+  invoice_vat_id: null,
+  invoice_tax_number: null,
+  payment_route_by: "patient",
+  payment_method: "bank_transfer",
+  account_country: "DE",
+  account_holder: "Anna Muster",
+  bank_name: "Musterbank",
+  via_third_party: false,
+  compliance_flags: [],
+};
+
+/** Another address, cash, and a payment through a third party: two flags. */
+const CASH = {
+  invoice_to: "other",
+  invoice_name: "Beispiel GmbH",
+  invoice_street: "Beispielstraße 2",
+  invoice_zip: "10117",
+  invoice_city: "Berlin",
+  invoice_country: "DE",
+  invoice_email: "rechnung@example.com",
+  invoice_vat_id: "DE123456789",
+  invoice_tax_number: null,
+  payment_route_by: "patient",
+  payment_method: "cash",
+  via_third_party: true,
+  via_third_party_details: "My brother brings the money",
+  compliance_flags: ["cash_payment", "third_party_payment"],
+};
+
+function billingState(billing: Record<string, unknown> | null, patch: Record<string, unknown> = {}): LeadPortalIntake {
+  return portalState({ billing, billing_updated_at: billing ? "2026-10-06T09:40:00Z" : null, ...patch });
+}
+
+describe("LeadGwgStatements: invoice recipient and payment route", () => {
+  it("shows the group after the economic interest, with the time of the last change", () => {
+    const html = render(billingState(TRANSFER));
+    const group = part(html, "lead-gwg-billing", 'data-testid="lead-gwg-answer-pep_self"');
+    expect(group).toContain("Счёт и оплата (разделы 7–8 анкеты)");
+    // 09:40 UTC is 11:40 in Berlin.
+    expect(part(group, "lead-gwg-billing-updated", "</span>")).toContain("от пациента · 06.10.2026 11:40");
+    expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf('data-testid="lead-gwg-billing"'));
+    expect(html.indexOf('data-testid="lead-gwg-billing"')).toBeLessThan(html.indexOf("Юридические вопросы"));
+    expect(statement(html, "lead-gwg-billing-invoice_to")).toContain("пациенту");
+    expect(statement(html, "lead-gwg-billing-invoice_email")).toContain("anna.muster@example.com");
+    expect(group).not.toContain("lead-gwg-billing-invoice_name");
+    expect(group).not.toContain("lead-gwg-billing-invoice_tax");
+    const method = statement(html, "lead-gwg-billing-payment_method");
+    expect(method).toContain("Банковский перевод");
+    expect(method).not.toContain('data-warning="true"');
+    expect(statement(html, "lead-gwg-billing-account_country")).toContain("Германия");
+    expect(statement(html, "lead-gwg-billing-account_holder")).toContain("Anna Muster");
+    expect(statement(html, "lead-gwg-billing-bank_name")).toContain("Musterbank");
+    const third = statement(html, "lead-gwg-billing-via_third_party");
+    expect(third).toContain("Нет");
+    expect(third).not.toContain('data-warning="true"');
+    expect(group).not.toContain("lead-gwg-billing-flag");
+    expect(group).not.toContain("lead-gwg-billing-by-payer");
+    // Still nothing can be edited.
+    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+  });
+
+  it("flags cash and a payment through a third party in amber, names the other address and the staff fields", () => {
+    const html = render(billingState(CASH));
+    expect(statement(html, "lead-gwg-billing-invoice_to")).toContain("по другому адресу");
+    expect(statement(html, "lead-gwg-billing-invoice_name")).toContain("Beispiel GmbH");
+    expect(statement(html, "lead-gwg-billing-invoice_address")).toContain("Beispielstraße 2, 10117 Berlin, Германия");
+    expect(statement(html, "lead-gwg-billing-invoice_tax")).toContain("USt-IdNr. DE123456789");
+    const method = statement(html, "lead-gwg-billing-payment_method");
+    expect(method).toContain('data-warning="true"');
+    expect(method).toContain("Наличные");
+    // No account rows for cash.
+    expect(html).not.toContain("lead-gwg-billing-account_country");
+    expect(html).not.toContain("lead-gwg-billing-bank_name");
+    const third = statement(html, "lead-gwg-billing-via_third_party");
+    expect(third).toContain('data-warning="true"');
+    expect(third).toContain("Да");
+    expect(third).toContain("My brother brings the money");
+    const flag = part(html, "lead-gwg-billing-flag", "</p>");
+    expect(flag).toContain("Требуется проверка комплаенса: наличные, платёж через третье лицо");
+    expect(flag).toContain("text-amber-700");
+  });
+
+  it("notes that the third-party payer states the payment route himself", () => {
+    const html = render(billingState({ ...TRANSFER, invoice_to: "payer", invoice_email: null, payment_route_by: "payer", payment_method: null, account_country: null, account_holder: null, bank_name: null, via_third_party: null }));
+    expect(statement(html, "lead-gwg-billing-invoice_to")).toContain("плательщику");
+    expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Способ оплаты укажет плательщик (собственная ссылка — следующий этап)");
+    for (const key of ["payment_method", "account_country", "account_holder", "bank_name", "via_third_party", "flag"]) {
+      expect(html).not.toContain(`lead-gwg-billing-${key}`);
+    }
+  });
+
+  it("stays out while the server does not send the sections", () => {
+    const html = render(billingState(null));
+    expect(html).not.toContain("lead-gwg-billing");
+    expect(html).not.toContain("Счёт и оплата");
+    // The rest of the statements stays.
+    expect(html).toContain("Юридические вопросы");
+  });
+
+  it("shows the sections even when the lead answered nothing else yet", () => {
+    const html = render(
+      billingState({ ...TRANSFER, invoice_vat_id: "DE123456789" }, { identification: {}, identification_updated_at: null, identity_documents: [] }),
+    );
+    expect(html).not.toContain("Пациент ещё не заполнил эти данные в кабинете");
+    expect(statement(html, "lead-gwg-billing-invoice_tax")).toContain("USt-IdNr. DE123456789");
+    // Only staff typed something: that is not a statement of the lead.
+    const staffOnly = render(
+      portalState({
+        identification: {},
+        identification_updated_at: null,
+        identity_documents: [],
+        billing: { invoice_vat_id: "DE123456789", payment_route_by: "patient", compliance_flags: [] },
+        billing_updated_at: null,
+      }),
+    );
+    expect(staffOnly).toContain("Пациент ещё не заполнил эти данные в кабинете");
+    expect(staffOnly).not.toContain("lead-gwg-billing");
+  });
+
+  it("reads in German too", () => {
+    const html = render(billingState(CASH), null, "de");
+    for (const text of [
+      "Rechnung und Zahlung (Abschnitte 7–8)",
+      "vom Patienten · 06.10.2026 11:40",
+      "Rechnung geht an",
+      "an eine andere Adresse",
+      "Name auf der Rechnung",
+      "Rechnungsanschrift",
+      "Beispielstraße 2, 10117 Berlin, Deutschland",
+      "E-Mail für Rechnungen",
+      "USt-IdNr. / Steuernummer",
+      "Zahlungsweg",
+      "Bar",
+      "Zahlung über Dritte / Zahlungsdienstleister",
+      "Compliance-Prüfung erforderlich: Barzahlung, Zahlung über Dritte",
+    ]) {
+      expect(html).toContain(text);
+    }
+    expect(render(billingState({ payment_route_by: "payer", compliance_flags: [] }), null, "de")).toContain(
+      "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
+    );
+  });
+});

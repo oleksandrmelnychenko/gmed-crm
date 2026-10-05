@@ -729,6 +729,298 @@ async fn the_declared_third_party_pays_the_invoice_after_the_default_payer_and_b
     assert_eq!(inherited.record.payer_patient_relation_id, Some(own_mother));
 }
 
+/// Section 7 of the lead's form as the cabinet stores it on the declaration:
+/// where the invoice goes and, for `other`, the party at that address.
+async fn set_invoice_to(
+    pool: &PgPool,
+    lead_id: Uuid,
+    invoice_to: Option<&str>,
+    name: Option<&str>,
+) {
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET invoice_to = $2,
+               invoice_name = CASE WHEN $2 = 'other' THEN $3 END,
+               invoice_street = CASE WHEN $2 = 'other' THEN 'Nebenweg 2' END,
+               invoice_zip = CASE WHEN $2 = 'other' THEN '10115' END,
+               invoice_city = CASE WHEN $2 = 'other' THEN 'Berlin' END,
+               invoice_country = CASE WHEN $2 = 'other' THEN 'DE' END,
+               invoice_email = CASE WHEN $2 IN ('self', 'other') THEN 'rechnung@example.com' END
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(invoice_to)
+    .bind(name)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The Kostenübernehmer the declaration itself writes on a lead's order
+/// (`sync_order_payers`): Viktor Zahler as a free-text cost bearer.
+async fn sync_viktor_on_order(pool: &PgPool, order_id: Uuid) {
+    sqlx::query(
+        r#"UPDATE orders
+           SET payer_contact_name = 'Viktor Zahler',
+               payer_contact_email = 'viktor.zahler@example.com',
+               payer_contact_relationship = 'Verwandte/r',
+               payer_address_street = 'Ringstr. 9', payer_address_zip = '1010',
+               payer_address_city = 'Wien', payer_address_country = 'AT',
+               payer_role = 'cost_bearer'
+           WHERE id = $1"#,
+    )
+    .bind(order_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_bearer() {
+    let Some(fx) = fixture("payer-invoice-to").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    let patient_name = format!("Kind {} Muster", fx.tag);
+    let lead = seed_converted_declaration(&fx.pool, patient, "third_party").await;
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let mut conn = fx.pool.acquire().await.unwrap();
+
+    // "To another address" under the patient's own name: the invoice goes
+    // there as to the party itself — no Kostenübernehmer, no confirmation
+    // at release, no Leistungsempfänger line.
+    set_invoice_to(&fx.pool, lead, Some("other"), Some(&patient_name)).await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(draft["payer"]["role"], "invoice_address", "{draft}");
+    assert_eq!(draft["payer"]["contact_name"], patient_name, "{draft}");
+    assert_eq!(draft["recipient"]["kind"], "contact", "{draft}");
+    assert_eq!(draft["recipient"]["street"], "Nebenweg 2", "{draft}");
+    assert_eq!(draft["recipient"]["email"], "rechnung@example.com");
+    assert!(
+        draft["recipient"]["service_recipient_name"].is_null(),
+        "the party under its own name: {draft}"
+    );
+    let inherited = gmed_server::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.source, "invoice_address");
+    assert_eq!(
+        inherited.record.payer_role.as_deref(),
+        Some("invoice_address")
+    );
+    // The Kostenübernehmer chain still names the declared third party.
+    let cost_bearer = gmed_server::routes::invoices::payer::inherited_cost_bearer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cost_bearer.source, "payer_declaration");
+    assert_eq!(
+        cost_bearer.record.contact_name.as_deref(),
+        Some("Viktor Zahler")
+    );
+    assert_eq!(
+        cost_bearer.record.payer_role.as_deref(),
+        Some("cost_bearer")
+    );
+    let (status, released) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["name"], patient_name);
+    assert_eq!(snapshot["payer_role"], "invoice_address");
+    assert!(snapshot["service_recipient_name"].is_null(), "{snapshot}");
+    assert_eq!(snapshot["confirmations"], json!({}), "{snapshot}");
+
+    // Another name at the other address: still no confirmation (the lead
+    // chose it), but the invoice names the Leistungsempfänger (§ 14 Abs. 4
+    // Nr. 1 UStG).
+    set_invoice_to(&fx.pool, lead, Some("other"), Some("Beispiel GmbH")).await;
+    let company = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let company_id = company["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        company["payer"]["contact_name"], "Beispiel GmbH",
+        "{company}"
+    );
+    assert_eq!(
+        company["recipient"]["service_recipient_name"], patient_name,
+        "{company}"
+    );
+    let (status, released) = release(&fx.app, &fx.billing, &company_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&company_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["name"], "Beispiel GmbH");
+    assert_eq!(snapshot["service_recipient_name"], patient_name);
+
+    // "To me" while a third party pays: the Kostenübernehmer the declaration
+    // wrote on the order is skipped, the patient receives the invoice; a note
+    // staff added keeps it that way, any other staff edit makes it staff's
+    // payer, which wins. A second order of the patient: one active advance
+    // and one final invoice per quote.
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &format!("{}-b", fx.tag)).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    sync_viktor_on_order(&fx.pool, order).await;
+    set_invoice_to(&fx.pool, lead, Some("self"), None).await;
+    let inherited = gmed_server::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.source, "none", "{:?}", inherited.record);
+    assert!(!inherited.record.is_set());
+    let mine = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    assert_eq!(mine["recipient"]["kind"], "patient", "{mine}");
+    assert_eq!(mine["recipient"]["name"], patient_name, "{mine}");
+    sqlx::query("UPDATE orders SET payer_notes = 'Zahlt per Überweisung' WHERE id = $1")
+        .bind(order)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let inherited = gmed_server::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.source, "none", "a note is passed through");
+    let cost_bearer = gmed_server::routes::invoices::payer::inherited_cost_bearer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(cost_bearer.source, "order", "the Kostenübernehmer stays");
+    assert_eq!(
+        cost_bearer.record.contact_name.as_deref(),
+        Some("Viktor Zahler")
+    );
+    sqlx::query("UPDATE orders SET payer_contact_email = 'buchhaltung@example.com' WHERE id = $1")
+        .bind(order)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let inherited = gmed_server::routes::invoices::payer::inherited_invoice_payer(
+        &mut conn,
+        Some(order),
+        patient,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.source, "order", "staff set the payer");
+    assert_eq!(
+        inherited.record.contact_email.as_deref(),
+        Some("buchhaltung@example.com")
+    );
+
+    // "To the payer" and no answer: the declared third party as today.
+    sync_viktor_on_order(&fx.pool, order).await;
+    for invoice_to in [Some("payer"), None] {
+        set_invoice_to(&fx.pool, lead, invoice_to, None).await;
+        let inherited = gmed_server::routes::invoices::payer::inherited_invoice_payer(
+            &mut conn,
+            Some(order),
+            patient,
+        )
+        .await
+        .unwrap();
+        assert_eq!(inherited.source, "order", "{invoice_to:?}");
+        assert_eq!(
+            inherited.record.contact_name.as_deref(),
+            Some("Viktor Zahler")
+        );
+        let inherited =
+            gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, patient)
+                .await
+                .unwrap();
+        assert_eq!(inherited.source, "payer_declaration", "{invoice_to:?}");
+        assert_eq!(inherited.record.payer_role.as_deref(), Some("cost_bearer"));
+    }
+    // Another address without a name falls through like "to me".
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET invoice_to = 'other', invoice_name = NULL WHERE lead_id = $1",
+    )
+    .bind(lead)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let inherited =
+        gmed_server::routes::invoices::payer::inherited_invoice_payer(&mut conn, None, patient)
+            .await
+            .unwrap();
+    assert_eq!(inherited.source, "none");
+
+    // Billing may set the role on a draft and on an order.
+    let fresh = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let fresh_id = fresh["id"].as_str().unwrap().to_string();
+    let (status, body) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &fresh_id,
+        json!({
+            "payer_contact_name": patient_name,
+            "payer_address_street": "Nebenweg 2",
+            "payer_address_zip": "10115",
+            "payer_address_city": "Berlin",
+            "payer_address_country": "DE",
+            "payer_role": "invoice_address"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["role"], "invoice_address", "{body}");
+    assert!(
+        body["release_checks"]["warnings"]
+            .as_array()
+            .is_none_or(|warnings| warnings
+                .iter()
+                .all(|warning| warning["code"] != "recipient_not_contracting_party")),
+        "{body}"
+    );
+    let (status, body) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/orders/{order}/payer"),
+        &fx.manager,
+        Some(json!({
+            "payer_contact_name": "Beispiel GmbH",
+            "payer_address_street": "Industriestraße 9",
+            "payer_address_zip": "50667",
+            "payer_address_city": "Köln",
+            "payer_address_country": "DE",
+            "payer_role": "invoice_address"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let role: Option<String> = sqlx::query_scalar("SELECT payer_role FROM orders WHERE id = $1")
+        .bind(order)
+        .fetch_one(&fx.pool)
+        .await
+        .unwrap();
+    assert_eq!(role.as_deref(), Some("invoice_address"));
+}
+
 #[tokio::test]
 async fn framework_contract_party_choice_is_followed_by_its_orders() {
     let Some(fx) = fixture("payer-contract").await else {

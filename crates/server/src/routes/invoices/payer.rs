@@ -4,11 +4,20 @@
 //! patient record, or a free-text contact, with its own e-mail and postal
 //! address. A new invoice takes the payer of its head order (a family order
 //! paid by one person), else of its own order, else the patient's default
-//! payer relation, else the third party the patient's payer declaration
-//! names (the lead's "Кто платит", kept with the patient after conversion),
-//! else the contracting party when that is the patient's legal
-//! representatives (a minor's parents). The record is taken as a whole, never
-//! mixed field by field from different people.
+//! payer relation, else what the patient's payer declaration says (the
+//! lead's "Кто платит" and "where does the invoice go", kept with the
+//! patient after conversion), else the contracting party when that is the
+//! patient's legal representatives (a minor's parents). The record is taken
+//! as a whole, never mixed field by field from different people.
+//!
+//! Two chains read the same steps ([`inherited_invoice_payer`] and
+//! [`inherited_cost_bearer`]): the recipient chain follows section 7 of the
+//! lead's form — "to me" skips the Kostenübernehmer the declaration itself
+//! wrote on the order and names nobody, "to another address" names the party
+//! at that address (role [`PAYER_ROLE_INVOICE_ADDRESS`], no Kostenübernehmer)
+//! —, the cost-bearer chain ignores it: the Einzelauftrag, the
+//! Kostenübernahmeerklärung and the `payer` signer keep naming the third
+//! party who joins the debt, wherever the invoice goes.
 //!
 //! The recipient is resolved by the database function
 //! `invoice_recipient_resolve` and frozen into `recipient_snapshot` when the
@@ -46,6 +55,11 @@ pub(crate) use document::{InvoiceRecipient, missing_address_parts};
 
 pub(crate) const PAYER_ROLE_CONTRACTING_PARTY: &str = "contracting_party";
 pub(crate) const PAYER_ROLE_COST_BEARER: &str = "cost_bearer";
+/// The contracting party itself at another address (the lead's "invoice to
+/// another address", phase 2): not a Kostenübernehmer — no Schuldbeitritt, no
+/// Kostenübernahmeerklärung, no confirmation at release, never written on an
+/// order by the declaration, and left out of the documents' payer fallback.
+pub(crate) const PAYER_ROLE_INVOICE_ADDRESS: &str = "invoice_address";
 
 /// One payer as stored on an order or invoice.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -289,7 +303,10 @@ pub(crate) fn payer_from_input(
         return Err(("payer_field_too_long", "Payer field is too long"));
     }
     match record.payer_role.as_deref() {
-        None | Some(PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_COST_BEARER) => {}
+        None
+        | Some(
+            PAYER_ROLE_CONTRACTING_PARTY | PAYER_ROLE_COST_BEARER | PAYER_ROLE_INVOICE_ADDRESS,
+        ) => {}
         Some(_) => return Err(("payer_role_invalid", "Invalid payer role")),
     }
     if !record.is_set() {
@@ -398,19 +415,86 @@ pub(crate) async fn adapt_payer_to_patient(
 pub struct InheritedPayer {
     pub record: PayerRecord,
     /// `head_order`, `order`, `default_payer`, `payer_declaration`,
-    /// `contracting_party` or `none`.
+    /// `invoice_address` (the declaration's "to another address", recipient
+    /// chain only), `contracting_party` or `none`.
     pub source: &'static str,
     /// A minor patient would receive the invoice: the creation answer warns
     /// and the release asks for confirmation.
     pub minor_without_payer: bool,
 }
 
-/// The payer a new invoice inherits (see the module documentation).
+/// The recipient a new invoice inherits (see the module documentation):
+/// the chain that follows where the lead said the invoice should go.
 pub async fn inherited_invoice_payer(
     conn: &mut PgConnection,
     order_id: Option<Uuid>,
     patient_id: Uuid,
 ) -> Result<InheritedPayer, sqlx::Error> {
+    inherit(conn, order_id, patient_id, true).await
+}
+
+/// The Kostenübernehmer of an order (the Einzelauftrag, the
+/// Kostenübernahmeerklärung, the `payer` signer): the same steps without
+/// section 7 of the lead's form — the order payer counts whatever the lead
+/// said about the invoice, the declaration names its third party or nobody.
+pub async fn inherited_cost_bearer(
+    conn: &mut PgConnection,
+    order_id: Option<Uuid>,
+    patient_id: Uuid,
+) -> Result<InheritedPayer, sqlx::Error> {
+    inherit(conn, order_id, patient_id, false).await
+}
+
+/// Whether the declaration asks to skip the Kostenübernehmer it wrote on the
+/// order itself ("to me" or "to another address") and what it names instead:
+/// the party at the other address, the third party, or nobody.
+struct DeclaredRecipient {
+    /// The Kostenübernehmer record the declaration syncs onto the lead's
+    /// orders (`notes` are taken from the order record it is compared with).
+    synced: Option<lead_payer::Declaration>,
+    record: Option<PayerRecord>,
+    source: &'static str,
+}
+
+async fn inherit(
+    conn: &mut PgConnection,
+    order_id: Option<Uuid>,
+    patient_id: Uuid,
+    recipient: bool,
+) -> Result<InheritedPayer, sqlx::Error> {
+    let declared = lead_payer::patient_declaration(conn, patient_id)
+        .await?
+        .map(|declared| declared.declaration);
+    let declared = match declared {
+        Some(declaration) => {
+            let invoice_to = declaration.invoice_to.as_deref();
+            let other = recipient && invoice_to == Some(lead_payer::INVOICE_TO_OTHER);
+            let to_self = recipient && invoice_to == Some(lead_payer::INVOICE_TO_SELF);
+            let address = other
+                .then(|| invoice_address_record(&declaration))
+                .flatten();
+            let (record, source) = if let Some(address) = address {
+                (Some(address), "invoice_address")
+            } else if to_self || other {
+                // "To me", or another address without a name: nobody from
+                // the declaration; the contracting party decides.
+                (None, "payer_declaration")
+            } else {
+                (declaration.order_payer_record(None), "payer_declaration")
+            };
+            DeclaredRecipient {
+                synced: (to_self || other).then_some(declaration),
+                record,
+                source,
+            }
+        }
+        None => DeclaredRecipient {
+            synced: None,
+            record: None,
+            source: "payer_declaration",
+        },
+    };
+
     if let Some(order_id) = order_id {
         let sql = format!(
             "SELECT {}, {} FROM orders o LEFT JOIN orders h ON h.id = o.head_order_id WHERE o.id = $1",
@@ -425,6 +509,17 @@ pub async fn inherited_invoice_payer(
             for (prefix, source) in [("head_", "head_order"), ("own_", "order")] {
                 let record = PayerRecord::from_row(&row, prefix);
                 if !record.is_set() {
+                    continue;
+                }
+                // The Kostenübernehmer the declaration itself wrote on the
+                // order is not where the lead wants the invoice; a payer
+                // staff set or corrected on the order wins.
+                if declared.synced.as_ref().is_some_and(|declaration| {
+                    declaration
+                        .order_payer_record(record.notes.clone())
+                        .as_ref()
+                        == Some(&record)
+                }) {
                     continue;
                 }
                 let record = adapt_payer_to_patient(conn, record, patient_id).await?;
@@ -464,16 +559,16 @@ pub async fn inherited_invoice_payer(
             minor_without_payer: false,
         });
     }
-    // The third party the patient's payer declaration names (the lead's
-    // "Кто платит"), as a free-text contact with the declared address — the
-    // record the declaration wrote on the lead's orders. A self-payer
-    // declaration sets nothing; the steps below decide then.
-    if let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await?
-        && let Some(record) = declared.declaration.order_payer_record(None)
-    {
+    // What the patient's payer declaration says (the lead's "Кто платит"
+    // and, for the recipient, "where does the invoice go"): the party at
+    // another address, or the third party as a free-text contact with the
+    // declared address — the record the declaration wrote on the lead's
+    // orders. "To me" and a self-payer declaration set nothing; the steps
+    // below decide then.
+    if let Some(record) = declared.record {
         return Ok(InheritedPayer {
             record,
-            source: "payer_declaration",
+            source: declared.source,
             minor_without_payer: false,
         });
     }
@@ -495,6 +590,41 @@ pub async fn inherited_invoice_payer(
         source: "none",
         minor_without_payer: party.patient_is_minor,
     })
+}
+
+/// The party at the other address the declaration names (section 7 of the
+/// lead's form, `invoice_to = other`): a free-text contact with that name,
+/// e-mail and address, role [`PAYER_ROLE_INVOICE_ADDRESS`]. `None` without a
+/// name — the chain then goes on as for "to me".
+fn invoice_address_record(declaration: &lead_payer::Declaration) -> Option<PayerRecord> {
+    let name = declaration
+        .invoice_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())?;
+    Some(PayerRecord {
+        contact_name: Some(name.to_string()),
+        contact_email: declaration.invoice_email.clone(),
+        address_street: declaration.invoice_street.clone(),
+        address_zip: declaration.invoice_zip.clone(),
+        address_city: declaration.invoice_city.clone(),
+        address_country: declaration.invoice_country.clone(),
+        payer_role: Some(PAYER_ROLE_INVOICE_ADDRESS.to_string()),
+        ..PayerRecord::default()
+    })
+}
+
+/// Whether the recipient's name is the contracting party's own (trimmed,
+/// case-insensitive): the party at another address is still the party, so
+/// the invoice names no separate Leistungsempfänger.
+pub(crate) fn recipient_is_named_party(
+    recipient_name: Option<&str>,
+    party: &ContractingParty,
+) -> bool {
+    let party_name = party.debtor_name().trim().to_lowercase();
+    recipient_name
+        .map(|name| name.trim().to_lowercase())
+        .is_some_and(|name| !name.is_empty() && name == party_name)
 }
 
 /// Writes a payer onto an invoice inside the caller's transaction.
@@ -657,12 +787,28 @@ struct RecipientEvaluation {
 }
 
 impl RecipientEvaluation {
-    /// Addressed to someone other than the party and not marked as
-    /// Kostenübernehmer (a minor recipient is asked about separately).
+    /// Addressed to someone other than the party and marked neither as
+    /// Kostenübernehmer nor as the party's other address (a minor recipient
+    /// is asked about separately).
     fn needs_party_confirmation(&self) -> bool {
         !self.is_party
             && !self.minor_recipient
-            && self.payer_role.as_deref() != Some(PAYER_ROLE_COST_BEARER)
+            && !matches!(
+                self.payer_role.as_deref(),
+                Some(PAYER_ROLE_COST_BEARER | PAYER_ROLE_INVOICE_ADDRESS)
+            )
+    }
+
+    /// The Leistungsempfänger line of the invoice: the contracting party
+    /// when the invoice is addressed to somebody else; not when the recipient
+    /// is the party under its own name at another address (§ 14 Abs. 4 Nr. 1
+    /// UStG names the same person once).
+    fn service_recipient_name(&self) -> Option<String> {
+        if self.is_party || recipient_is_named_party(Some(&self.recipient.name), &self.party) {
+            None
+        } else {
+            Some(self.party.debtor_name())
+        }
     }
 }
 
@@ -829,17 +975,14 @@ pub(crate) async fn release_recipient_snapshot(
         );
     }
 
+    let service_recipient_name = evaluation.service_recipient_name();
     let mut snapshot = match evaluation.live {
         Value::Object(map) => map,
         _ => Map::new(),
     };
     snapshot.insert(
         "service_recipient_name".into(),
-        if evaluation.is_party {
-            Value::Null
-        } else {
-            json!(evaluation.party.debtor_name())
-        },
+        json!(service_recipient_name),
     );
     snapshot.insert("contracting_party".into(), party_summary(&evaluation.party));
     snapshot.insert("payer_role".into(), json!(evaluation.payer_role));

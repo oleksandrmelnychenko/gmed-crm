@@ -19,6 +19,8 @@ import {
   defaultPayerBadgeLabel,
   identificationLines,
   invoiceRecipientSourceNote,
+  invoiceTaxStatement,
+  invoiceToStatement,
   isThirdPartyPayer,
   leadPath,
   minorWithoutPayerWarning,
@@ -161,6 +163,8 @@ function LoadedCard({
   const thirdParty = isThirdPartyPayer(declaration) ? declaration : null;
   const addressWarning = recipient ? missingAddressWarning(recipient, tx) : null;
   const identificationRows = identification ? identificationLines(identification, tx) : [];
+  const invoiceTo = invoiceToStatement(declaration, tx, lang);
+  const invoiceTax = invoiceTaxStatement(declaration);
 
   return (
     <SummaryCard title={tx("Плательщик", "Zahler")} state="loaded">
@@ -169,6 +173,27 @@ function LoadedCard({
         value={whoPaysLabel(declaration, tx)}
         testId={`${TEST_ID}-who-pays`}
       />
+      {invoiceTo ? (
+        <SummaryLine
+          label={tx("Счёт направляется", "Rechnung geht an")}
+          testId={`${TEST_ID}-invoice-to`}
+          value={(
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span>{invoiceTo.label}</span>
+              {invoiceTo.name ? <span className="font-normal">{invoiceTo.name}</span> : null}
+              {invoiceTo.address ? <span className="font-normal">{invoiceTo.address}</span> : null}
+              {invoiceTo.email ? <span className="break-all font-normal">{invoiceTo.email}</span> : null}
+            </span>
+          )}
+        />
+      ) : null}
+      {invoiceTax ? (
+        <SummaryLine
+          label={tx("USt-IdNr. / Steuernummer", "USt-IdNr. / Steuernummer")}
+          value={invoiceTax}
+          testId={`${TEST_ID}-invoice-tax`}
+        />
+      ) : null}
       {openRequest ? (
         <div className="px-3.5 py-2.5" data-testid={`${TEST_ID}-open-request`}>
           <p className="text-xs font-medium leading-5 text-sky-700 dark:text-sky-300">

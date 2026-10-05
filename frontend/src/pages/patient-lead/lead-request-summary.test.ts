@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { LeadRequest, LeadRequestDocument, LeadRequestRepresentative } from "./lead-request-api";
+import type { LeadRequest, LeadRequestBilling, LeadRequestDocument, LeadRequestRepresentative } from "./lead-request-api";
 import { requestSummary } from "./lead-request-summary";
 import { leadRequestText } from "./lead-request-text";
 
@@ -513,6 +513,118 @@ describe("lead request summary", () => {
     expect(guardian?.rows).toEqual([{ label: "Wer vertritt das Kind?", value: "Vormund oder Pfleger" }]);
     expect(guardian?.parts?.map((part) => part.id)).toEqual(["rep1"]);
     expect(guardian?.parts?.[0].rows.at(-1)).toEqual({ label: "Bestallungsurkunde", value: "urkunde.pdf" });
+  });
+
+  it("shows invoice and payment after the payer: the recipient, and the route when it is asked", () => {
+    const billing = (overrides: Partial<LeadRequestBilling> = {}): LeadRequestBilling => ({
+      invoice_to: "other",
+      invoice_name: "Beispiel GmbH",
+      invoice_street: "Musterstraße 2",
+      invoice_zip: "10115",
+      invoice_city: "Berlin",
+      invoice_country: "DE",
+      invoice_email: "rechnung@example.com",
+      payer_declared: true,
+      payment_route_by: "patient",
+      payment_method: "bank_transfer",
+      payment_method_details: "stale",
+      account_country: "DE",
+      account_holder: "Anna Muster",
+      bank_name: "Musterbank",
+      via_third_party: true,
+      via_third_party_details: "Mein Bruder zahlt über PayPal.",
+      account_holder_suggestion: "Anna Muster",
+      ...overrides,
+    });
+    const groups = requestSummary(request({ billing: billing() }), de, "de");
+    expect(groups.map((group) => group.id).slice(5, 8)).toEqual(["payer", "billing", "legal"]);
+    expect(groups.find((group) => group.id === "billing")?.title).toBe("Rechnung und Zahlung");
+    expect(rows(groups, "billing")).toEqual({
+      "Wohin soll die Rechnung gehen?": "An eine andere Adresse",
+      "Name auf der Rechnung": "Beispiel GmbH",
+      "Straße und Hausnummer": "Musterstraße 2",
+      PLZ: "10115",
+      Ort: "Berlin",
+      Land: "Deutschland",
+      "E-Mail für Rechnungen (optional)": "rechnung@example.com",
+      "Wie werden Sie bezahlen?": "Überweisung",
+      "Land des Kontos": "Deutschland",
+      "Kontoinhaber/in": "Anna Muster",
+      "Name der Bank": "Musterbank",
+      "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?": "Ja",
+      "Bitte beschreiben (wer, welcher Dienst)": "Mein Bruder zahlt über PayPal.",
+    });
+
+    // "To me" names no address; cash has no account; a "no" has no details.
+    const self = requestSummary(
+      request({ billing: billing({ invoice_to: "self", payment_method: "cash", via_third_party: false }) }),
+      de,
+      "de",
+    );
+    expect(rows(self, "billing")).toEqual({
+      "Wohin soll die Rechnung gehen?": "An mich",
+      "E-Mail für Rechnungen (optional)": "rechnung@example.com",
+      "Wie werden Sie bezahlen?": "Bar",
+      "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?": "Nein",
+    });
+    // "Other" shows its details.
+    expect(rows(requestSummary(request({ billing: billing({ payment_method: "other", payment_method_details: "Scheck" }) }), de, "de"), "billing")).toMatchObject({
+      "Wie werden Sie bezahlen?": "Sonstiges",
+      "Bitte beschreiben": "Scheck",
+    });
+
+    // To the payer: no e-mail; the payer answers the route, which the summary says in one row.
+    const payer = requestSummary(
+      request({ billing: billing({ invoice_to: "payer", payment_route_by: "payer", payment_method: null, via_third_party: null }) }),
+      de,
+      "de",
+    );
+    expect(rows(payer, "billing")).toEqual({
+      "Wohin soll die Rechnung gehen?": "An die zahlende Person / Organisation",
+      Zahlungsweg: "gibt die zahlende Person an",
+    });
+    // A paying parent reads "to me (I pay)"; a parent reads "to me" as "to the patient".
+    const parent = requestSummary(
+      request({ access_kind: "guardian", billing: billing({ invoice_to: "payer", payment_route_by: "guardian" }) }),
+      de,
+      "de",
+    );
+    expect(rows(parent, "billing")["Wohin soll die Rechnung gehen?"]).toBe("An mich (ich zahle)");
+    expect(
+      rows(requestSummary(request({ access_kind: "guardian", billing: billing({ invoice_to: "self" }) }), de, "de"), "billing")[
+        "Wohin soll die Rechnung gehen?"
+      ],
+    ).toBe("An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)");
+    expect(rows(requestSummary(request({ billing: billing({ invoice_to: "other" }) }), leadRequestText("en"), "en"), "billing")).toMatchObject({
+      "Where should the invoice go?": "To another address",
+      Country: "Germany",
+      "How will you pay?": "Bank transfer",
+    });
+
+    // Nothing answered yet: the group says so.
+    const open = requestSummary(
+      request({
+        billing: billing({
+          invoice_to: null,
+          invoice_name: null,
+          invoice_street: null,
+          invoice_zip: null,
+          invoice_city: null,
+          invoice_country: null,
+          invoice_email: null,
+          payment_method: null,
+          account_country: null,
+          account_holder: null,
+          bank_name: null,
+          via_third_party: null,
+          via_third_party_details: null,
+        }),
+      }),
+      de,
+      "de",
+    ).find((group) => group.id === "billing");
+    expect(open?.rows).toEqual([]);
+    expect(open?.empty).toBe("Noch keine Angaben");
   });
 
   it("shows no identification on a server that does not know it", () => {

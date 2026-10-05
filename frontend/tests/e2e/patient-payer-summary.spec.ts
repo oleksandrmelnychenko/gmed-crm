@@ -132,6 +132,31 @@ const noLeadSummary = {
 /** The declaration of the converted request stands while a new request is open. */
 const openRequestSummary = { ...minorSummary, open_request: { lead_id: openLeadId, has_declaration: true } };
 
+/**
+ * Section 7 of the form: an adult self-payer chose the invoice to another
+ * address (role `invoice_address`: the party at another address, not a
+ * Kostenübernehmer); staff typed USt-IdNr. and Steuernummer.
+ */
+const otherAddressSummary = {
+  ...selfSummary,
+  declaration: {
+    ...selfSummary.declaration,
+    invoice_to: "other",
+    invoice_name: "Beispiel GmbH",
+    invoice_street: "Beispielstraße 2",
+    invoice_zip: "10117",
+    invoice_city: "Berlin",
+    invoice_country: "DE",
+    invoice_email: "rechnung@example.com",
+    invoice_vat_id: "DE123456789",
+    invoice_tax_number: "30/123/45678",
+  },
+  invoice_recipient: {
+    source: "invoice_address", role: "invoice_address", kind: "contact", name: "Beispiel GmbH", street: "Beispielstraße 2", zip: "10117", city: "Berlin", country: "DE",
+    email: "rechnung@example.com", payer_patient_relation_id: null, payer_patient_id: null, missing: [], minor_without_payer: false,
+  },
+};
+
 type Answer = { status: number; json: unknown };
 
 type Mock = {
@@ -245,6 +270,11 @@ const words = {
     openRequest: "Открыто новое обращение — плательщик уточняется в нём",
     loadFailed: "Не удалось загрузить данные плательщика",
     retry: "Повторить",
+    invoiceTo: "Счёт направляется",
+    otherAddress: "по другому адресу",
+    otherAddressLine: "Beispielstraße 2, 10117 Berlin, Германия",
+    invoiceTax: "USt-IdNr. / Steuernummer",
+    sourceInvoiceAddress: "адрес для счетов по декларации",
   },
   de: {
     title: "Zahler",
@@ -284,6 +314,11 @@ const words = {
     openRequest: "Eine neue Anfrage ist offen – der Zahler wird dort erfasst",
     loadFailed: "Zahlerdaten konnten nicht geladen werden",
     retry: "Erneut versuchen",
+    invoiceTo: "Rechnung geht an",
+    otherAddress: "an eine andere Adresse",
+    otherAddressLine: "Beispielstraße 2, 10117 Berlin, Deutschland",
+    invoiceTax: "USt-IdNr. / Steuernummer",
+    sourceInvoiceAddress: "Rechnungsanschrift laut Erklärung",
   },
 } as const;
 
@@ -439,6 +474,48 @@ for (const [lang, width] of [["de", 1440], ["ru", 390]] as const) {
     expect(errors).toEqual([]);
   });
 }
+
+for (const [lang, width] of [["ru", 1440], ["de", 390]] as const) {
+  const w = words[lang];
+  test(`invoice to another address (section 7): the line after "who pays", the staff fields, the recipient's source ${lang} ${width}`, async ({ page }) => {
+    const mock: Mock = { lang, width, role: "ceo", answers: [{ status: 200, json: otherAddressSummary }] };
+    const { card, line, errors } = await mount(page, mock);
+    await expect(card).toHaveAttribute("data-state", "loaded");
+    await expect(line("who-pays")).toContainText(w.self);
+    // The line names where the invoice goes, with name, address and e-mail.
+    await expect(line("invoice-to")).toContainText(w.invoiceTo);
+    await expect(line("invoice-to")).toContainText(w.otherAddress);
+    await expect(line("invoice-to")).toContainText("Beispiel GmbH");
+    await expect(line("invoice-to")).toContainText(w.otherAddressLine);
+    await expect(line("invoice-to")).toContainText("rechnung@example.com");
+    await expect(line("invoice-tax")).toContainText(w.invoiceTax);
+    await expect(line("invoice-tax")).toContainText("USt-IdNr. DE123456789 · Steuernummer 30/123/45678");
+    // The recipient is the party at another address, noted as such.
+    await expect(line("recipient")).toContainText("Beispiel GmbH");
+    await expect(line("recipient")).toContainText(w.otherAddressLine);
+    await expect(line("recipient-source")).toHaveText(w.sourceInvoiceAddress);
+    await expect(line("recipient-address-warning")).toHaveCount(0);
+    // Not a Kostenübernehmer: no such wording anywhere on the card.
+    await expect(card).not.toContainText(/Kostenübernehm|cost_bearer/);
+    const order = await Promise.all(
+      ["who-pays", "invoice-to", "invoice-tax", "contracting-party", "recipient", "footer"].map(async (id) => (await line(id).boundingBox())!.y),
+    );
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    await expectNoHorizontalScroll(page, width);
+    await screenshot(page, "other-address", mock);
+    expect(errors).toEqual([]);
+  });
+}
+
+test("an older server without section 7 shows no invoice line de 1440", async ({ page }) => {
+  const mock: Mock = { lang: "de", width: 1440, role: "billing", answers: [{ status: 200, json: billingSummary }] };
+  const { card, line, errors } = await mount(page, mock);
+  await expect(card).toHaveAttribute("data-state", "loaded");
+  await expect(line("invoice-to")).toHaveCount(0);
+  await expect(line("invoice-tax")).toHaveCount(0);
+  await expect(card).not.toContainText(words.de.invoiceTo);
+  expect(errors).toEqual([]);
+});
 
 test("open request: the note links the new request beside the declaration of the converted one ru 1440", async ({ page }) => {
   const mock: Mock = { lang: "ru", width: 1440, role: "ceo", answers: [{ status: 200, json: openRequestSummary }] };

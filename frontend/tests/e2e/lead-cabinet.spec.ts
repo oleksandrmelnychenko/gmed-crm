@@ -76,6 +76,30 @@ function leadRequest() {
       custody_stated: false,
       representatives: [],
     } as Record<string, unknown> | undefined,
+    // Invoice recipient and payment route (contract phase 2): always an
+    // object; `payer_declared`, `payment_route_by` and the suggestion are
+    // recomputed from "who pays". A server that does not know the two
+    // sections does not send the key. The sections have a spec of their own
+    // (lead-cabinet-billing).
+    billing: {
+      invoice_to: null,
+      invoice_name: null,
+      invoice_street: null,
+      invoice_zip: null,
+      invoice_city: null,
+      invoice_country: null,
+      invoice_email: null,
+      payer_declared: false,
+      payment_route_by: "patient",
+      payment_method: null,
+      payment_method_details: null,
+      account_country: null,
+      account_holder: null,
+      bank_name: null,
+      via_third_party: null,
+      via_third_party_details: null,
+      account_holder_suggestion: "Anna Muster",
+    } as Record<string, unknown> | undefined,
     minor: false,
     documents: [] as Record<string, unknown>[],
     max_documents: 30,
@@ -135,6 +159,74 @@ const LEGAL_DETAILS: Record<string, string> = {
   sanctions_links: "sanctions_links_details",
 };
 
+// The keys of the two billing sections the cabinet writes (contract phase 2, 3.2).
+const INVOICE_KEYS = ["invoice_to", "invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country", "invoice_email"];
+const PAYMENT_ROUTE_KEYS = [
+  "payment_method",
+  "payment_method_details",
+  "account_country",
+  "account_holder",
+  "bank_name",
+  "via_third_party",
+  "via_third_party_details",
+];
+
+/** What tells one payer from another: a change clears section 8 (contract D5). */
+function payerKey(payer: Record<string, unknown> | null) {
+  return payer
+    ? JSON.stringify([payer.payer_kind, payer.payer_type ?? null, payer.organisation_name ?? null, payer.first_name ?? null, payer.last_name ?? null, payer.date_of_birth ?? null])
+    : null;
+}
+
+/** Like the server: what does not belong to the chosen answers goes. */
+function clearBillingDependents(billing: Record<string, unknown>) {
+  if (billing.invoice_to !== "other") {
+    for (const key of ["invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country"]) billing[key] = null;
+  }
+  if (billing.invoice_to === "payer") billing.invoice_email = null;
+  if (billing.payment_method !== "other") billing.payment_method_details = null;
+  if (billing.payment_method !== "bank_transfer" && billing.payment_method !== "card") {
+    for (const key of ["account_country", "account_holder", "bank_name"]) billing[key] = null;
+  }
+  if (billing.via_third_party !== true) billing.via_third_party_details = null;
+}
+
+/** Another payer: section 8 is that payer's answer and goes; "to the payer" goes with the third party. */
+function billingAfterPayerChange(
+  billing: Record<string, unknown>,
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
+) {
+  if (payerKey(before) !== payerKey(after)) {
+    for (const key of PAYMENT_ROUTE_KEYS) billing[key] = null;
+  }
+  if (after?.payer_kind !== "third_party" && billing.invoice_to === "payer") billing.invoice_to = null;
+}
+
+/** The keys of the two sections the request cannot be sent without (contract 3.3), in the server's order. */
+function billingMissing(billing: Record<string, unknown>): string[] {
+  const missing: string[] = [];
+  if (!billing.invoice_to) missing.push("invoice_to");
+  if (billing.invoice_to === "other") {
+    for (const key of ["invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country"]) {
+      if (!billing[key]) missing.push(key);
+    }
+  }
+  if (billing.payment_route_by !== "payer") {
+    const method = billing.payment_method;
+    if (!method) missing.push("payment_method");
+    if (method === "other" && !billing.payment_method_details) missing.push("payment_method_details");
+    if (method === "bank_transfer" || method === "card") {
+      if (!billing.account_country) missing.push("account_country");
+      if (!billing.account_holder) missing.push("account_holder");
+      if (method === "bank_transfer" && !billing.bank_name) missing.push("bank_name");
+    }
+    if (billing.via_third_party == null) missing.push("via_third_party");
+    else if (billing.via_third_party === true && !billing.via_third_party_details) missing.push("via_third_party_details");
+  }
+  return missing;
+}
+
 function recompute(request: ReturnType<typeof leadRequest>) {
   const data = request.personal_data;
   const filled = (field: string) => {
@@ -191,6 +283,30 @@ function recompute(request: ReturnType<typeof leadRequest>) {
   if (representation) {
     if (representation.has_representative == null) missing.push("has_representative");
     if (representation.under_guardianship == null) missing.push("under_guardianship");
+  }
+  // A server that knows invoice and payment (contract phase 2): who answers
+  // the payment route follows "who pays" — the patient, the paying parent
+  // whose login this is, or the payer, who is not asked here.
+  const billing = request.billing;
+  if (billing) {
+    const thirdParty = payer?.payer_kind === "third_party";
+    const template = request.payer_self_template;
+    const parentPays =
+      thirdParty &&
+      request.access_kind === "guardian" &&
+      Boolean(template) &&
+      payer?.relationship_kind === "parent" &&
+      payer?.first_name === template?.first_name &&
+      payer?.last_name === template?.last_name;
+    billing.payer_declared = thirdParty;
+    billing.payment_route_by = !thirdParty ? "patient" : parentPays ? "guardian" : "payer";
+    billing.account_holder_suggestion =
+      billing.payment_route_by === "payer"
+        ? null
+        : billing.payment_route_by === "guardian"
+          ? [template?.first_name, template?.last_name].filter(Boolean).join(" ")
+          : [data.first_name, data.last_name].filter(Boolean).join(" ");
+    missing.push(...billingMissing(billing));
   }
   request.progress.missing_for_submit = missing;
   request.progress.filled = [
@@ -259,6 +375,17 @@ function completeRequest(request: ReturnType<typeof leadRequest>) {
   };
   // Nobody acts for the patient.
   if (request.representation) Object.assign(request.representation, { has_representative: false, under_guardianship: false });
+  // The invoice goes to the patient, paid by bank transfer from the own account.
+  if (request.billing) {
+    Object.assign(request.billing, {
+      invoice_to: "self",
+      payment_method: "bank_transfer",
+      account_country: "DE",
+      account_holder: "Anna Muster",
+      bank_name: "Musterbank",
+      via_third_party: false,
+    });
+  }
   request.consents.lead_inquiry_processing.given_at = "2026-10-03T09:15:00Z";
 }
 
@@ -321,6 +448,7 @@ async function setup(
     payer: [] as Record<string, unknown>[],
     identification: [] as Record<string, unknown>[],
     representation: [] as Record<string, unknown>[],
+    billing: [] as Record<string, unknown>[],
     consents: [] as string[],
     uploads: 0,
     identityUploads: 0,
@@ -422,7 +550,29 @@ async function setup(
           Object.assign(stored, { first_name: null, last_name: null, date_of_birth: null, citizenships: [] });
         }
       }
+      const before = request.payer;
       request.payer = stored;
+      if (request.billing) billingAfterPayerChange(request.billing, before, stored);
+      if (request.submitted_at) request.changed_since_submit = true;
+      recompute(request);
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/billing" && method === "POST" && request.billing) {
+      const patch = req.postDataJSON() as Record<string, unknown>;
+      calls.billing.push(patch);
+      const unknown = Object.keys(patch).find((key) => !INVOICE_KEYS.includes(key) && !PAYMENT_ROUTE_KEYS.includes(key));
+      if (unknown) {
+        return route.fulfill({ status: 422, json: { code: "invalid_field", field: unknown, message: "Unknown field" } });
+      }
+      // Section 8 is the payer's answer: nothing is saved for anybody else.
+      if (request.billing.payment_route_by === "payer" && Object.keys(patch).some((key) => PAYMENT_ROUTE_KEYS.includes(key))) {
+        return route.fulfill({ status: 409, json: { code: "payment_route_by_payer", message: "The payer answers" } });
+      }
+      if (patch.invoice_to === "payer" && request.payer?.payer_kind !== "third_party") {
+        return route.fulfill({ status: 422, json: { code: "invalid_field", field: "invoice_to", message: "No third party" } });
+      }
+      for (const [key, value] of Object.entries(patch)) request.billing[key] = value === "" ? null : value;
+      clearBillingDependents(request.billing);
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
@@ -595,6 +745,8 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?");
     await expect(missing).toContainText("Stehen Sie unter rechtlicher Betreuung?");
     await expect(missing).toContainText("Handeln Sie im eigenen wirtschaftlichen Interesse?");
+    await expect(missing).toContainText("Wohin soll die Rechnung gehen?");
+    await expect(missing).toContainText("Wie werden Sie bezahlen?");
     await expect(missing).toContainText("Gesetzliche Fragen: Öffentliches Amt");
     await expect(missing).toContainText("Gesetzliche Fragen: Sanktionen");
 
@@ -652,6 +804,27 @@ test.describe("lead cabinet", () => {
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
     await choose(page, payer.getByRole("combobox", { name: "Handeln Sie im eigenen wirtschaftlichen Interesse?" }), "Ja");
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self", acts_on_own_account: true });
+
+    // The invoice goes to the patient; the payment comes by bank transfer from
+    // the own account (the holder is offered), not through anybody else.
+    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "An mich", exact: true }).check();
+    await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_to: "self" });
+    const paymentRoute = page.getByTestId("lead-request-payment-route");
+    await choose(page, paymentRoute.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }), "Überweisung");
+    await expect(paymentRoute.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveValue("Anna Muster");
+    await choose(page, paymentRoute.getByRole("combobox", { name: "Land des Kontos" }), "Deutschland");
+    await paymentRoute.getByRole("textbox", { name: "Name der Bank" }).fill("Musterbank");
+    await choose(page, paymentRoute.getByRole("combobox", { name: /Erfolgt die Zahlung über eine dritte Person/ }), "Nein");
+    await expect
+      .poll(() => Object.assign({}, ...calls.billing))
+      .toEqual({
+        invoice_to: "self",
+        payment_method: "bank_transfer",
+        account_holder: "Anna Muster",
+        account_country: "DE",
+        bank_name: "Musterbank",
+        via_third_party: false,
+      });
 
     // The four legal questions are answered with yes or no.
     for (const question of ["pep_self", "pep_related", "high_risk_country", "sanctions_links"]) {
@@ -1248,6 +1421,11 @@ test.describe("lead cabinet", () => {
     await expect(representation.locator("dd")).toHaveText(["Nein", "Nein"]);
     await expect(page.getByTestId("lead-request-summary-insurance")).toContainText("Noch keine Angaben");
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Ich selbst");
+    const billing = page.getByTestId("lead-request-summary-billing");
+    await expect(billing).toContainText("Rechnung und Zahlung");
+    await expect(billing).toContainText("An mich");
+    await expect(billing).toContainText("Überweisung");
+    await expect(billing).toContainText("Musterbank");
     const legal = page.getByTestId("lead-request-summary-legal");
     await expect(legal).toContainText("Üben Sie ein hochrangiges öffentliches Amt aus");
     await expect(legal).toContainText("Viktor Zahler, Vater, Minister, Ukraine");
@@ -1304,11 +1482,13 @@ test.describe("lead cabinet", () => {
     const { calls } = await setup(page, "lead", {
       prepare: (request) => {
         completeRequest(request);
-        // An older server sends neither the statements nor the copies, and nothing about who acts for the lead.
+        // An older server sends neither the statements nor the copies, nothing
+        // about who acts for the lead, and nothing about invoice and payment.
         const older = request as { identification?: unknown; identity_documents?: unknown };
         older.identification = undefined;
         older.identity_documents = undefined;
         request.representation = undefined;
+        request.billing = undefined;
         request.payer_self_template = undefined;
         request.payer = { payer_kind: "self" };
       },
@@ -1317,6 +1497,9 @@ test.describe("lead cabinet", () => {
     await expect(page.locator("#lead-request-first_name")).toHaveValue("Anna");
     await expect(page.getByTestId("lead-request-identity")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-representation")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-billing")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-contact-channels")).toHaveCount(0);
     await expect(page.locator("#lead-request-birth_place")).toHaveCount(0);
@@ -1324,6 +1507,7 @@ test.describe("lead cabinet", () => {
 
     await page.locator('[data-step="send"]').click();
     await expect(page.getByTestId("lead-request-summary-identity")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-summary-billing")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-declaration")).toHaveCount(0);
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("03.10.2026");

@@ -1,6 +1,7 @@
 import type { Lang } from "@/lib/i18n";
 
-import type { Custody, PayerType, RepresentativeSlot } from "./lead-request-api";
+import type { Custody, InvoiceTo, PaymentMethod, PaymentRouteBy, PayerType, RepresentativeSlot } from "./lead-request-api";
+import { BILLING_SUBMIT_FIELDS, INVOICE_FIELDS, type BillingField } from "./lead-request-billing-model";
 import {
   organisationPayerType,
   type ContactChannel,
@@ -190,6 +191,27 @@ export type LeadRequestText = {
   representativeLimit: string;
   representativeEmailLocked: string;
   representativeEmailDuplicate: string;
+  /** Invoice recipient and payment route (owner spec sections 7 and 8, contract phase 2). */
+  sectionBilling: string;
+  sectionPaymentRoute: string;
+  /** The two sections as one group of the summary. */
+  sectionBillingSummary: string;
+  billingFields: Record<BillingField, string>;
+  /** Where the invoice goes; a parent reads the first answer about the patient. */
+  invoiceToOptions: Record<InvoiceTo, string>;
+  invoiceToOptionsGuardian: Record<InvoiceTo, string>;
+  /** The answer "to the payer" when the parent who fills in the form is the one who pays. */
+  invoiceToMeAsPayer: string;
+  invoiceEmailHint: string;
+  vatHint: string;
+  paymentMethodOptions: Record<PaymentMethod, string>;
+  /** Cash and cryptocurrency are checked separately (money laundering act). */
+  cashCryptoNote: string;
+  totalAmountHint: string;
+  /** Section 8 when the payer answers it: nothing is asked here. */
+  paymentRouteByPayer: string;
+  /** The same in the summary, as the value of the row "payment route". */
+  paymentRouteByPayerShort: string;
   sectionLegal: string;
   legalIntro: string;
   /** Prefix of a legal question in the list of what is still missing. */
@@ -313,6 +335,36 @@ export function representativeUploadLabel(
   return text.representativeAuthority[authorityProofOf(slot, custody ?? "guardian")?.proof ?? "power_of_attorney"];
 }
 
+/**
+ * An answer to "where does the invoice go" as the form offers it. A parent
+ * reads "to me" as "to the patient"; a parent who pays reads "to the payer"
+ * as "to me (I pay)".
+ */
+export function invoiceToLabel(
+  text: LeadRequestText,
+  target: InvoiceTo,
+  guardian = false,
+  routeBy: PaymentRouteBy = "patient",
+): string {
+  if (target === "payer" && routeBy === "guardian") return text.invoiceToMeAsPayer;
+  return (guardian ? text.invoiceToOptionsGuardian : text.invoiceToOptions)[target];
+}
+
+/** The three questions of the two billing sections: they stand alone in the list of what is still missing. */
+const BILLING_QUESTIONS: readonly BillingField[] = ["invoice_to", "payment_method", "via_third_party"];
+
+/**
+ * A billing field in the list of what is still missing: the questions stand
+ * alone, the other fields carry their section (an "Ort" alone would be the
+ * address's). The details of "other" name that answer.
+ */
+function billingSubmitLabel(text: LeadRequestText, field: BillingField): string {
+  const label = text.billingFields[field];
+  if (BILLING_QUESTIONS.includes(field)) return label;
+  if (field === "payment_method_details") return `${text.sectionPaymentRoute}: ${text.paymentMethodOptions.other} – ${label}`;
+  return `${INVOICE_FIELDS.includes(field) ? text.sectionBilling : text.sectionPaymentRoute}: ${label}`;
+}
+
 const LEGAL_TOPIC_OF: Partial<Record<SubmitField, LegalQuestion>> = {
   pep_self: "pep_self",
   pep_self_details: "pep_self",
@@ -349,6 +401,7 @@ export function submitFieldLabel(
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
   if (field === "has_representative") return text.hasRepresentativeQuestion;
   if (field === "under_guardianship") return text.underGuardianshipQuestion;
+  if ((BILLING_SUBMIT_FIELDS as readonly string[]).includes(field)) return billingSubmitLabel(text, field as BillingField);
   // A field or an upload of a representative carries the caption of that person.
   const person = representativeSubmitPart(field);
   if (person) {
@@ -617,6 +670,49 @@ const de: LeadRequestText = {
   representativeEmailLocked: "Diese Adresse ist eine Anmeldeadresse und kann hier nicht geändert werden.",
   representativeEmailDuplicate:
     "Diese E-Mail-Adresse ist bereits bei einer anderen Person angegeben. Für die Unterschrift braucht jede Person eine eigene Adresse.",
+  sectionBilling: "Rechnungsempfänger",
+  sectionPaymentRoute: "Zahlungsweg",
+  sectionBillingSummary: "Rechnung und Zahlung",
+  billingFields: {
+    invoice_to: "Wohin soll die Rechnung gehen?",
+    invoice_name: "Name auf der Rechnung",
+    invoice_street: "Straße und Hausnummer",
+    invoice_zip: "PLZ",
+    invoice_city: "Ort",
+    invoice_country: "Land",
+    invoice_email: "E-Mail für Rechnungen (optional)",
+    payment_method: "Wie werden Sie bezahlen?",
+    payment_method_details: "Bitte beschreiben",
+    account_country: "Land des Kontos",
+    account_holder: "Kontoinhaber/in",
+    bank_name: "Name der Bank",
+    via_third_party: "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
+    via_third_party_details: "Bitte beschreiben (wer, welcher Dienst)",
+  },
+  invoiceToOptions: {
+    self: "An mich",
+    payer: "An die zahlende Person / Organisation",
+    other: "An eine andere Adresse",
+  },
+  invoiceToOptionsGuardian: {
+    self: "An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)",
+    payer: "An die zahlende Person / Organisation",
+    other: "An eine andere Adresse",
+  },
+  invoiceToMeAsPayer: "An mich (ich zahle)",
+  invoiceEmailHint: "Wenn leer, verwenden wir Ihre Kontaktadresse.",
+  vatHint: "USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.",
+  paymentMethodOptions: {
+    bank_transfer: "Überweisung",
+    card: "Karte",
+    cash: "Bar",
+    crypto: "Kryptowährung",
+    other: "Sonstiges",
+  },
+  cashCryptoNote: "Barzahlungen und Zahlungen in Kryptowährung prüft GMED gesondert (Geldwäschegesetz).",
+  totalAmountHint: "Den voraussichtlichen Gesamtbetrag trägt GMED ein.",
+  paymentRouteByPayer: "Den Zahlungsweg gibt die zahlende Person / Organisation selbst an; GMED wendet sich dazu an sie.",
+  paymentRouteByPayerShort: "gibt die zahlende Person an",
   sectionLegal: "Gesetzliche Fragen (Geldwäscheprävention)",
   legalIntro: "Diese Fragen schreibt das Geldwäschegesetz vor. Bitte beantworten Sie jede mit Ja oder Nein.",
   legalShort: "Gesetzliche Fragen",
@@ -877,6 +973,50 @@ const ru: LeadRequestText = {
   representativeEmailLocked: "Это адрес для входа, изменить его здесь нельзя.",
   representativeEmailDuplicate:
     "Этот адрес e-mail уже указан для другого человека. Для подписи каждому нужен собственный адрес.",
+  sectionBilling: "Получатель счёта",
+  sectionPaymentRoute: "Способ оплаты",
+  sectionBillingSummary: "Счёт и оплата",
+  billingFields: {
+    invoice_to: "Куда направить счёт?",
+    invoice_name: "Имя или название на счёте",
+    invoice_street: "Улица и дом",
+    invoice_zip: "Почтовый индекс",
+    invoice_city: "Город",
+    invoice_country: "Страна",
+    invoice_email: "E-mail для счетов (необязательно)",
+    payment_method: "Как вы будете платить?",
+    payment_method_details: "Опишите, пожалуйста",
+    account_country: "Страна счёта",
+    account_holder: "Владелец счёта",
+    bank_name: "Название банка",
+    via_third_party: "Производится ли оплата через третье лицо или платёжного провайдера?",
+    via_third_party_details: "Опишите, пожалуйста (кто, какой сервис)",
+  },
+  invoiceToOptions: {
+    self: "Мне",
+    payer: "Плательщику (лицу или организации, которая платит)",
+    other: "На другой адрес",
+  },
+  invoiceToOptionsGuardian: {
+    self: "Пациенту (для несовершеннолетних — законным представителям)",
+    payer: "Плательщику (лицу или организации, которая платит)",
+    other: "На другой адрес",
+  },
+  invoiceToMeAsPayer: "Мне (я плачу)",
+  invoiceEmailHint: "Если пусто, мы используем ваш контактный адрес.",
+  vatHint: "USt-IdNr. или налоговый номер при необходимости вносит GMED.",
+  paymentMethodOptions: {
+    bank_transfer: "Банковский перевод",
+    card: "Карта",
+    cash: "Наличные",
+    crypto: "Криптовалюта",
+    other: "Другое",
+  },
+  cashCryptoNote: "Оплату наличными и криптовалютой GMED проверяет отдельно (закон о противодействии отмыванию денег).",
+  totalAmountHint: "Ожидаемую общую сумму вносит GMED.",
+  paymentRouteByPayer:
+    "Способ оплаты указывает сам плательщик (лицо или организация, которая платит); GMED обратится к нему по этому вопросу.",
+  paymentRouteByPayerShort: "указывает плательщик",
   sectionLegal: "Вопросы по закону (противодействие отмыванию денег)",
   legalIntro:
     "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Пожалуйста, ответьте на каждый «да» или «нет».",
@@ -1137,6 +1277,50 @@ const uk: LeadRequestText = {
   representativeEmailLocked: "Це адреса для входу, змінити її тут не можна.",
   representativeEmailDuplicate:
     "Цю адресу e-mail уже вказано для іншої людини. Для підпису кожному потрібна власна адреса.",
+  sectionBilling: "Отримувач рахунку",
+  sectionPaymentRoute: "Спосіб оплати",
+  sectionBillingSummary: "Рахунок і оплата",
+  billingFields: {
+    invoice_to: "Куди надсилати рахунок?",
+    invoice_name: "Ім'я або назва на рахунку",
+    invoice_street: "Вулиця і будинок",
+    invoice_zip: "Поштовий індекс",
+    invoice_city: "Місто",
+    invoice_country: "Країна",
+    invoice_email: "E-mail для рахунків (необов'язково)",
+    payment_method: "Як ви будете платити?",
+    payment_method_details: "Опишіть, будь ласка",
+    account_country: "Країна рахунку",
+    account_holder: "Власник рахунку",
+    bank_name: "Назва банку",
+    via_third_party: "Чи здійснюється оплата через третю особу або платіжного провайдера?",
+    via_third_party_details: "Опишіть, будь ласка (хто, який сервіс)",
+  },
+  invoiceToOptions: {
+    self: "Мені",
+    payer: "Платнику (особі або організації, яка платить)",
+    other: "На іншу адресу",
+  },
+  invoiceToOptionsGuardian: {
+    self: "Пацієнту (для неповнолітніх — законним представникам)",
+    payer: "Платнику (особі або організації, яка платить)",
+    other: "На іншу адресу",
+  },
+  invoiceToMeAsPayer: "Мені (я плачу)",
+  invoiceEmailHint: "Якщо порожньо, ми використаємо вашу контактну адресу.",
+  vatHint: "USt-IdNr. або податковий номер за потреби вносить GMED.",
+  paymentMethodOptions: {
+    bank_transfer: "Банківський переказ",
+    card: "Картка",
+    cash: "Готівка",
+    crypto: "Криптовалюта",
+    other: "Інше",
+  },
+  cashCryptoNote: "Оплату готівкою та криптовалютою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
+  totalAmountHint: "Очікувану загальну суму вносить GMED.",
+  paymentRouteByPayer:
+    "Спосіб оплати вказує сам платник (особа або організація, яка платить); GMED звернеться до нього із цього приводу.",
+  paymentRouteByPayerShort: "вказує платник",
   sectionLegal: "Запитання за законом (запобігання відмиванню коштів)",
   legalIntro:
     "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
@@ -1390,6 +1574,49 @@ const en: LeadRequestText = {
   representativeEmailLocked: "This is a sign-in address and cannot be changed here.",
   representativeEmailDuplicate:
     "This e-mail address is already given for another person. Each person needs an address of their own to sign.",
+  sectionBilling: "Invoice recipient",
+  sectionPaymentRoute: "Payment",
+  sectionBillingSummary: "Invoice and payment",
+  billingFields: {
+    invoice_to: "Where should the invoice go?",
+    invoice_name: "Name on the invoice",
+    invoice_street: "Street and number",
+    invoice_zip: "Postcode",
+    invoice_city: "City",
+    invoice_country: "Country",
+    invoice_email: "E-mail for invoices (optional)",
+    payment_method: "How will you pay?",
+    payment_method_details: "Please describe",
+    account_country: "Country of the account",
+    account_holder: "Account holder",
+    bank_name: "Name of the bank",
+    via_third_party: "Is the payment made through a third person or a payment service provider?",
+    via_third_party_details: "Please describe (who, which service)",
+  },
+  invoiceToOptions: {
+    self: "To me",
+    payer: "To the paying person / organisation",
+    other: "To another address",
+  },
+  invoiceToOptionsGuardian: {
+    self: "To the patient (for minors: to the legal representatives)",
+    payer: "To the paying person / organisation",
+    other: "To another address",
+  },
+  invoiceToMeAsPayer: "To me (I pay)",
+  invoiceEmailHint: "If empty, we use your contact address.",
+  vatHint: "GMED enters a VAT ID or tax number if needed.",
+  paymentMethodOptions: {
+    bank_transfer: "Bank transfer",
+    card: "Card",
+    cash: "Cash",
+    crypto: "Cryptocurrency",
+    other: "Other",
+  },
+  cashCryptoNote: "GMED checks cash payments and payments in cryptocurrency separately (Money Laundering Act).",
+  totalAmountHint: "GMED enters the expected total amount.",
+  paymentRouteByPayer: "The paying person / organisation states the payment route themselves; GMED will contact them about it.",
+  paymentRouteByPayerShort: "stated by the paying person",
   sectionLegal: "Legal questions (anti-money laundering)",
   legalIntro: "German anti-money laundering law requires these questions. Please answer each with yes or no.",
   legalShort: "Legal questions",

@@ -704,6 +704,51 @@ describe("lead request send step", () => {
     ]);
   });
 
+  it("lists what is missing about invoice and payment after the payer, before the legal questions", () => {
+    const missing = missingForSubmit({
+      progress: {
+        filled: 3,
+        total: 12,
+        missing_for_submit: [
+          "pep_self",
+          "via_third_party_details",
+          "bank_name",
+          "invoice_country",
+          "payer_beneficial_owner",
+          "payment_method",
+          "invoice_to",
+          "account_holder",
+          "via_third_party",
+          "invoice_name",
+          "payment_method_details",
+          "account_country",
+          "invoice_city",
+          "invoice_zip",
+          "invoice_street",
+          "payer_kind",
+        ],
+      },
+    });
+    expect(missing).toEqual([
+      "payer_kind",
+      "payer_beneficial_owner",
+      "invoice_to",
+      "invoice_name",
+      "invoice_street",
+      "invoice_zip",
+      "invoice_city",
+      "invoice_country",
+      "payment_method",
+      "payment_method_details",
+      "account_country",
+      "account_holder",
+      "bank_name",
+      "via_third_party",
+      "via_third_party_details",
+      "pep_self",
+    ]);
+  });
+
   it("shows one save state for the parts of the form", () => {
     expect(combinedSaveState(["idle", "idle", "idle"])).toBe("idle");
     expect(combinedSaveState(["saved", "idle", "idle"])).toBe("saved");

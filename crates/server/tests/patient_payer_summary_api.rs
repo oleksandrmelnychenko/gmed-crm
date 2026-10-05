@@ -172,7 +172,10 @@ async fn seed_declaration(
                lead_id, patient_id, payer_kind, payer_type, organisation_name, first_name,
                last_name, date_of_birth, street, zip, city, country, citizenships,
                relationship_kind, relationship, email, phone, source_of_funds,
-               payer_informed_at, contact_consent_at, identity_changed_at)
+               payer_informed_at, contact_consent_at, identity_changed_at,
+               invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city,
+               invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
+               payment_method, account_country, account_holder, via_third_party)
            SELECT $1, $2, v ->> 'payer_kind', v ->> 'payer_type', v ->> 'organisation_name',
                   v ->> 'first_name', v ->> 'last_name', (v ->> 'date_of_birth')::date,
                   v ->> 'street', v ->> 'zip', v ->> 'city', v ->> 'country',
@@ -180,7 +183,12 @@ async fn seed_declaration(
                   v ->> 'relationship_kind', v ->> 'relationship', v ->> 'email', v ->> 'phone',
                   COALESCE(v ->> 'source_of_funds', 'employment'),
                   (v ->> 'payer_informed_at')::timestamptz,
-                  (v ->> 'contact_consent_at')::timestamptz, $4
+                  (v ->> 'contact_consent_at')::timestamptz, $4,
+                  v ->> 'invoice_to', v ->> 'invoice_name', v ->> 'invoice_street',
+                  v ->> 'invoice_zip', v ->> 'invoice_city', v ->> 'invoice_country',
+                  v ->> 'invoice_email', v ->> 'invoice_vat_id', v ->> 'invoice_tax_number',
+                  v ->> 'payment_method', v ->> 'account_country', v ->> 'account_holder',
+                  (v ->> 'via_third_party')::boolean
            FROM (SELECT $3::jsonb AS v) input"#,
     )
     .bind(lead_id)
@@ -453,6 +461,15 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         "phone",
         "contact_consent_at",
         "payer_informed_at",
+        "invoice_to",
+        "invoice_name",
+        "invoice_street",
+        "invoice_zip",
+        "invoice_city",
+        "invoice_country",
+        "invoice_email",
+        "invoice_vat_id",
+        "invoice_tax_number",
     ] {
         assert!(declaration[key].is_null(), "{key}: {body}");
     }
@@ -477,7 +494,14 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         minutes_ago(60),
     )
     .await;
-    seed_declaration(&app, paid_lead, Some(paid), viktor(), minutes_ago(90)).await;
+    // The lead also said the invoice goes to the payer and how Viktor pays
+    // (section 8): the card shows the former, never the latter.
+    let mut viktor_pays = viktor();
+    viktor_pays["invoice_to"] = json!("payer");
+    viktor_pays["invoice_vat_id"] = json!("ATU12345678");
+    viktor_pays["payment_method"] = json!("cash");
+    viktor_pays["via_third_party"] = json!(true);
+    seed_declaration(&app, paid_lead, Some(paid), viktor_pays, minutes_ago(90)).await;
     let body = summary(&app, paid, "ceo").await;
     assert_eq!(
         body["declaration"],
@@ -498,10 +522,19 @@ async fn a_self_payer_adult_and_a_third_party_person() {
             "phone": "+43 1 0000000",
             "contact_consent_at": "2026-10-05T18:40:00+00:00",
             "payer_informed_at": "2026-10-05T19:00:00+00:00",
+            "invoice_to": "payer",
+            "invoice_name": null,
+            "invoice_street": null,
+            "invoice_zip": null,
+            "invoice_city": null,
+            "invoice_country": null,
+            "invoice_email": null,
+            "invoice_vat_id": "ATU12345678",
+            "invoice_tax_number": null,
         }),
         "{body}"
     );
-    // No GwG answer leaves the server.
+    // No GwG answer and nothing of the payment route leaves the server.
     let text = body.to_string();
     for forbidden in [
         "date_of_birth",
@@ -510,6 +543,11 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         "beneficial_owner",
         "acts_on_own_account",
         "1970-05-01",
+        "payment_method",
+        "via_third_party",
+        "account_holder",
+        "compliance_flags",
+        "cash",
     ] {
         assert!(!text.contains(forbidden), "{forbidden} in {body}");
     }
@@ -538,14 +576,72 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         "{body}"
     );
 
-    // Billing sees the same, without the identification.
+    // Billing sees the same, without the identification — the invoice
+    // recipient of section 7 and the tax fields included.
     let billing = summary(&app, paid, "billing").await;
     assert!(billing["identification"].is_null(), "{billing}");
+    assert_eq!(billing["declaration"]["invoice_vat_id"], "ATU12345678");
     let mut expected = body.clone();
     expected["identification"] = Value::Null;
     assert_eq!(billing, expected);
     let assistant = summary(&app, paid, "ceo_assistant").await;
     assert_eq!(assistant, body);
+
+    // "To another address": the invoice goes to the party at that address
+    // (role `invoice_address`), not to a Kostenübernehmer.
+    let moved = seed_patient(&app, "Elsa", "1980-05-05").await;
+    let moved_lead = seed_converted_lead(
+        &app,
+        moved,
+        "Elsa",
+        "1980-05-05",
+        json!([]),
+        minutes_ago(60),
+    )
+    .await;
+    seed_declaration(
+        &app,
+        moved_lead,
+        Some(moved),
+        json!({
+            "payer_kind": "self",
+            "source_of_funds": "employment",
+            "invoice_to": "other",
+            "invoice_name": "Elsa Muster",
+            "invoice_street": "Nebenweg 2",
+            "invoice_zip": "80331",
+            "invoice_city": "München",
+            "invoice_country": "DE",
+            "invoice_email": "rechnung@example.com",
+            "invoice_tax_number": "12/345/67890"
+        }),
+        minutes_ago(90),
+    )
+    .await;
+    let body = summary(&app, moved, "billing").await;
+    assert_eq!(body["declaration"]["payer_kind"], "self", "{body}");
+    assert_eq!(body["declaration"]["invoice_to"], "other", "{body}");
+    assert_eq!(body["declaration"]["invoice_city"], "München", "{body}");
+    assert_eq!(body["declaration"]["invoice_tax_number"], "12/345/67890");
+    assert_eq!(
+        body["invoice_recipient"],
+        json!({
+            "source": "invoice_address",
+            "role": "invoice_address",
+            "kind": "contact",
+            "name": "Elsa Muster",
+            "street": "Nebenweg 2",
+            "zip": "80331",
+            "city": "München",
+            "country": "DE",
+            "email": "rechnung@example.com",
+            "payer_patient_relation_id": null,
+            "payer_patient_id": null,
+            "missing": [],
+            "minor_without_payer": false,
+        }),
+        "{body}"
+    );
 
     // An organisation is named by its name; its signer's QES is the payer's.
     let company = seed_patient(&app, "Dora", "1980-05-05").await;

@@ -1020,6 +1020,184 @@ async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leav
     assert_eq!(cleared, (None, None, None));
 }
 
+/// The lead's answers of sections 7 and 8 as the cabinet stores them: the
+/// invoice to another address, paid by card from a German account through a
+/// payment service.
+async fn seed_billing_answers(pool: &PgPool, lead_id: Uuid) {
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET invoice_to = 'other', invoice_name = 'Beispiel GmbH', invoice_street = 'Ringstr. 9',
+               invoice_zip = '1010', invoice_city = 'Wien', invoice_country = 'AT',
+               invoice_email = 'rechnung@example.com',
+               payment_method = 'card', account_country = 'DE', account_holder = 'Erika Zahler',
+               bank_name = 'Musterbank', via_third_party = true,
+               via_third_party_details = 'Zahlungsdienst Beispiel'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// The 16 keys of sections 7 and 8 of a declaration as the API shows them.
+fn billing_keys(declaration: &Value) -> Value {
+    let mut keys = serde_json::Map::new();
+    for key in [
+        "invoice_to",
+        "invoice_name",
+        "invoice_street",
+        "invoice_zip",
+        "invoice_city",
+        "invoice_country",
+        "invoice_email",
+        "invoice_vat_id",
+        "invoice_tax_number",
+        "payment_method",
+        "payment_method_details",
+        "account_country",
+        "account_holder",
+        "bank_name",
+        "via_third_party",
+        "via_third_party_details",
+    ] {
+        keys.insert(key.to_string(), declaration[key].clone());
+    }
+    Value::Object(keys)
+}
+
+#[tokio::test]
+async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let ceo = app.bearer("ceo");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+
+    // Staff declared the third party; the lead answered sections 7 and 8 in
+    // the cabinet. The staff GET shows all 16 keys.
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let empty = billing_keys(&body["declaration"]);
+    assert!(
+        empty.as_object().unwrap().values().all(Value::is_null),
+        "{body}"
+    );
+    seed_billing_answers(pool, lead_id).await;
+    let (status, body) = json_request(&app, "GET", &path, &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let answered = billing_keys(&body["declaration"]);
+    assert_eq!(answered["invoice_to"], "other", "{body}");
+    assert_eq!(answered["invoice_name"], "Beispiel GmbH", "{body}");
+    assert_eq!(answered["payment_method"], "card", "{body}");
+    assert_eq!(answered["via_third_party"], true, "{body}");
+    assert!(answered["invoice_vat_id"].is_null(), "{body}");
+
+    // The staff form of an older client (none of the keys) wipes nothing;
+    // the audit row is written as before.
+    let mut corrected = third_party_payer();
+    corrected["street"] = json!("Ringstr. 11");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(corrected)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["street"], "Ringstr. 11", "{body}");
+    assert_eq!(billing_keys(&body["declaration"]), answered, "{body}");
+
+    // The lead's keys are not staff's; the two tax fields are: sent they are
+    // stored, absent they stay, `null` clears.
+    let mut not_theirs = third_party_payer();
+    not_theirs["invoice_to"] = json!("self");
+    let (status, _) = json_request(&app, "POST", &path, &ceo, Some(not_theirs)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut taxed = third_party_payer();
+    taxed["invoice_vat_id"] = json!(" ATU12345678 ");
+    taxed["invoice_tax_number"] = json!("12/345/67890");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(taxed)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["declaration"]["invoice_vat_id"], "ATU12345678",
+        "{body}"
+    );
+    assert_eq!(
+        body["declaration"]["invoice_tax_number"], "12/345/67890",
+        "{body}"
+    );
+    assert_eq!(body["declaration"]["payment_method"], "card", "{body}");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["declaration"]["invoice_vat_id"], "ATU12345678",
+        "{body}"
+    );
+    let mut cleared = third_party_payer();
+    cleared["invoice_vat_id"] = json!(null);
+    cleared["invoice_tax_number"] = json!("");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(cleared)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["declaration"]["invoice_vat_id"].is_null(), "{body}");
+    assert!(
+        body["declaration"]["invoice_tax_number"].is_null(),
+        "{body}"
+    );
+    let mut too_long = third_party_payer();
+    too_long["invoice_vat_id"] = json!("x".repeat(21));
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(too_long)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "invoice_vat_id_too_long", "{body}");
+
+    // Another payer named by staff: the payment route was the first payer's
+    // answer and goes; where the invoice goes stays.
+    let mut renamed = third_party_payer();
+    renamed["last_name"] = json!("Anders");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(renamed)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let after = billing_keys(&body["declaration"]);
+    assert_eq!(after["invoice_to"], "other", "{body}");
+    assert_eq!(after["invoice_name"], "Beispiel GmbH", "{body}");
+    assert!(after["payment_method"].is_null(), "{body}");
+    assert!(after["account_holder"].is_null(), "{body}");
+    assert!(after["via_third_party"].is_null(), "{body}");
+    assert!(after["via_third_party_details"].is_null(), "{body}");
+
+    // The patient pays himself: "to the payer" would be no answer; another
+    // address still is.
+    seed_billing_answers(pool, lead_id).await;
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET invoice_to = 'payer', invoice_name = NULL, invoice_street = NULL,
+               invoice_zip = NULL, invoice_city = NULL, invoice_country = NULL,
+               invoice_email = NULL
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({
+            "payer_kind": "self",
+            "acts_on_own_account": true,
+            "source_of_funds": "savings"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let own = billing_keys(&body["declaration"]);
+    assert!(own["invoice_to"].is_null(), "{body}");
+    assert!(own["payment_method"].is_null(), "{body}");
+    let stored: (Option<String>, Option<String>, Option<bool>) = sqlx::query_as(
+        "SELECT invoice_to, payment_method, via_third_party FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (None, None, None));
+}
+
 /// A converted patient (adult, full address) whose lead declared `payer`,
 /// as the conversion leaves them: the lead converted, the declaration
 /// linked to the patient.

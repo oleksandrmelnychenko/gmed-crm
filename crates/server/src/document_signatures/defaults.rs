@@ -195,13 +195,15 @@ async fn order_payer_signer(state: &AppState, source: &PgRow) -> Result<Option<S
         return Ok(None);
     };
     // A lead's order has no patient yet: its payer (from the lead's payer
-    // declaration) is a contact that needs none.
+    // declaration) is a contact that needs none. The Kostenübernehmer chain,
+    // not the recipient one: where the lead wants the invoice sent does not
+    // change who joins the debt and signs.
     let patient_id = source
         .try_get::<Option<Uuid>, _>("patient_id")
         .unwrap_or_default()
         .unwrap_or(Uuid::nil());
     let mut conn = state.db.acquire().await.map_err(db_error)?;
-    let inherited = crate::routes::invoices::payer::inherited_invoice_payer(
+    let inherited = crate::routes::invoices::payer::inherited_cost_bearer(
         &mut conn,
         Some(order_id),
         patient_id,

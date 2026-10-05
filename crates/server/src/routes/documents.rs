@@ -2719,6 +2719,111 @@ struct GwgSheetActingPerson {
     authority_on_file: bool,
 }
 
+/// How the payer will pay, as answered in section 8 of the lead's form
+/// (owner spec "Patientenformular", phase 2): printed on the sheet of the
+/// person who pays, under the § 12 line. Cash, crypto, another method and a
+/// payment through a third party are flagged for a separate check.
+#[derive(Default, Clone)]
+struct GwgPaymentRoute {
+    /// `bank_transfer`, `card`, `cash`, `crypto` or `other`.
+    method: Option<String>,
+    /// What the method `other` is.
+    details: Option<String>,
+    /// ISO code of the account's country (bank transfer or card).
+    account_country: Option<String>,
+    account_holder: Option<String>,
+    bank_name: Option<String>,
+    /// Paid through a third person or a payment service provider.
+    via_third_party: Option<bool>,
+    via_third_party_details: Option<String>,
+    /// `Declaration::payment_route_flags`.
+    flags: Vec<&'static str>,
+}
+
+impl GwgPaymentRoute {
+    fn from_declaration(declaration: &super::lead_payer::Declaration) -> Self {
+        Self {
+            method: declaration.payment_method.clone(),
+            details: declaration.payment_method_details.clone(),
+            account_country: declaration.account_country.clone(),
+            account_holder: declaration.account_holder.clone(),
+            bank_name: declaration.bank_name.clone(),
+            via_third_party: declaration.via_third_party,
+            via_third_party_details: declaration.via_third_party_details.clone(),
+            flags: declaration.payment_route_flags(),
+        }
+    }
+
+    /// "Überweisung · Konto in Deutschland · Kontoinhaber/in: Anna Muster ·
+    /// Bank: Musterbank": only what is known, "keine Angabe" when nothing.
+    fn line(&self) -> String {
+        let method = self.method.as_deref().map(|method| match method {
+            "bank_transfer" => "Überweisung".to_string(),
+            "card" => "Kartenzahlung".to_string(),
+            "cash" => "Barzahlung".to_string(),
+            "crypto" => "Kryptowährung".to_string(),
+            "other" => match self.details.as_deref().map(str::trim) {
+                Some(details) if !details.is_empty() => {
+                    format!("Sonstiger Zahlungsweg: {details}")
+                }
+                _ => "Sonstiger Zahlungsweg".to_string(),
+            },
+            other => other.to_string(),
+        });
+        let value = |label: &str, value: Option<&str>| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| format!("{label}{value}"))
+        };
+        let parts = [
+            method,
+            self.account_country
+                .as_deref()
+                .map(|code| format!("Konto in {}", german_document_country(code))),
+            value("Kontoinhaber/in: ", self.account_holder.as_deref()),
+            value("Bank: ", self.bank_name.as_deref()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        if parts.is_empty() {
+            "keine Angabe".to_string()
+        } else {
+            parts.join(" · ")
+        }
+    }
+
+    /// "ja – <details>", "nein" or "keine Angabe".
+    fn third_party_line(&self) -> String {
+        match self.via_third_party {
+            Some(true) => match self.via_third_party_details.as_deref().map(str::trim) {
+                Some(details) if !details.is_empty() => format!("ja – {details}"),
+                _ => "ja".to_string(),
+            },
+            Some(false) => "nein".to_string(),
+            None => "keine Angabe".to_string(),
+        }
+    }
+
+    /// "Barzahlung / Zahlung über Dritte – gesonderte Prüfung" for the flags
+    /// that apply; `None` without any.
+    fn hint(&self) -> Option<String> {
+        let labels = self
+            .flags
+            .iter()
+            .map(|flag| match *flag {
+                "cash_payment" => "Barzahlung",
+                "crypto_payment" => "Kryptowährung",
+                "other_method" => "sonstiger Zahlungsweg",
+                "third_party_payment" => "Zahlung über Dritte",
+                other => other,
+            })
+            .collect::<Vec<_>>();
+        (!labels.is_empty()).then(|| format!("{} – gesonderte Prüfung", labels.join(" / ")))
+    }
+}
+
 /// One contract partner on the GwG identification sheet ("Dokumentationsbogen
 /// für natürliche Personen", federal form of the supervisory authorities,
 /// Stand Mai 2025): who the person is, who acts for them, the beneficial
@@ -2759,6 +2864,10 @@ struct GwgIdentificationSheet {
     /// The day staff confirmed the payment from an account in the person's
     /// own name, which the law asks for beside the signature.
     own_account_payment_confirmed_on: Option<NaiveDate>,
+    /// How the person will pay (section 8 of the lead's form): on the sheet
+    /// of the one who pays — the patient who pays himself, the third-party
+    /// payer, the parent who also pays —, `None` on every other sheet.
+    payment_route: Option<GwgPaymentRoute>,
     /// An adult's representative and legal guardian, as named in the cabinet.
     acting_persons: Vec<GwgSheetActingPerson>,
     /// The sheet of a legal representative of a minor: the child the person
@@ -3202,6 +3311,22 @@ async fn load_gwg_identification_sheet(
     sheet.own_account_payment_confirmed_on = person
         .own_account_payment
         .map(|payment| crate::app_time::date_of(payment.confirmed_at));
+    // The payment route (section 8 of the lead's form) belongs to the one
+    // who pays: the patient's sheet when the patient pays himself, the
+    // payer's sheet, and the sheet of the parent who is that payer.
+    let pays = match subject {
+        GwgSheetSubject::Payer => true,
+        GwgSheetSubject::ContractPartner => declaration
+            .as_ref()
+            .is_some_and(|declaration| !declaration.is_third_party()),
+        GwgSheetSubject::Representative(id) => {
+            super::lead_representatives::payer_same_person(representation, declaration.as_ref())
+                == Some(id)
+        }
+    };
+    if pays && let Some(declaration) = declaration.as_ref() {
+        sheet.payment_route = Some(GwgPaymentRoute::from_declaration(declaration));
+    }
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
         || !aml.triggered_countries.is_empty()
@@ -20616,6 +20741,25 @@ fn build_gwg_identification_pdf(
             Some(payment.as_str()),
         );
     }
+    // How the person will pay, as answered in the cabinet (section 8 of the
+    // lead's form): on the sheet of the one who pays, with or without a
+    // qualified signature. Cash, crypto, another method or a payment through
+    // a third party ask staff for a separate check; nothing is blocked.
+    if let Some(route) = &sheet.payment_route {
+        aml_labeled_value(
+            &mut layout,
+            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)",
+            Some(route.line().as_str()),
+        );
+        aml_labeled_value(
+            &mut layout,
+            "Zahlung über Dritte / Zahlungsdienstleister",
+            Some(route.third_party_line().as_str()),
+        );
+        if let Some(hint) = route.hint() {
+            aml_labeled_value(&mut layout, "Hinweis", Some(hint.as_str()));
+        }
+    }
     // Ticked when the legal guardian the lead named in the cabinet uploaded
     // both the appointment deed and a copy of the own identity document.
     aml_checkbox_line(
@@ -22034,7 +22178,10 @@ async fn load_order_quote_summary(
 /// Kostenübernahmeerklärung) names: the payer set on the order (or its head
 /// order), else the recipient of a non-cancelled invoice of the same order
 /// that is addressed to a payer. Resolved like the invoice recipient (name,
-/// e-mail and postal address); never taken from another order.
+/// e-mail and postal address); never taken from another order. It is the
+/// Kostenübernehmer, not where the lead wants the invoice sent: the chain
+/// ignores section 7 of the lead's form, and an invoice addressed to the
+/// party at another address (role `invoice_address`) names no payer here.
 async fn load_invoice_payer(
     state: &AppState,
     order_id: Option<Uuid>,
@@ -22051,7 +22198,7 @@ async fn load_invoice_payer(
         )
     };
     let mut conn = state.db.acquire().await.map_err(failed)?;
-    let inherited = crate::routes::invoices::payer::inherited_invoice_payer(
+    let inherited = crate::routes::invoices::payer::inherited_cost_bearer(
         &mut conn,
         Some(order_id),
         patient_id,
@@ -22089,6 +22236,7 @@ async fn load_invoice_payer(
                WHERE invoice.order_id = $1
                  AND invoice.patient_id = $2
                  AND invoice.status <> 'cancelled'
+                 AND invoice.payer_role IS DISTINCT FROM 'invoice_address'
                  AND (invoice.payer_patient_id IS NOT NULL
                       OR invoice.payer_patient_relation_id IS NOT NULL
                       OR NULLIF(btrim(invoice.payer_contact_name), '') IS NOT NULL)
@@ -30206,6 +30354,119 @@ mod tests {
         assert!(text.contains("[ ] Oder: Die Überprüfung der Identität"));
         assert!(!text.contains("Qualifizierte elektronische Signatur vom"));
         assert!(!text.contains("Zahlung von einem Konto"));
+        // Nothing of the payment route on a sheet that is not the payer's.
+        assert!(!text.contains("Angaben zum Zahlungsweg"));
+    }
+
+    #[test]
+    fn gwg_identification_sheet_prints_the_payment_route_of_the_one_who_pays() {
+        // A transfer from a German account, also without a qualified
+        // signature; nothing to flag.
+        let transfer = super::GwgIdentificationSheet {
+            role: "Patient/in",
+            first_name: "Anna".to_string(),
+            last_name: "Muster".to_string(),
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("bank_transfer".to_string()),
+                account_country: Some("DE".to_string()),
+                account_holder: Some("Anna Muster".to_string()),
+                bank_name: Some("Musterbank".to_string()),
+                via_third_party: Some(false),
+                ..Default::default()
+            }),
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 6).unwrap(),
+            ..Default::default()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &transfer,
+            &legal_test_agency(),
+            None,
+            "GWG-20261006-UNITTEST0007",
+        )
+        .unwrap();
+        // The frame of the agency's signature is still found under the text.
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261006-UNITTEST0007");
+        assert!(text.contains("Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)"));
+        assert_eq!(
+            transfer.payment_route.as_ref().unwrap().line(),
+            "Überweisung · Konto in Deutschland · Kontoinhaber/in: Anna Muster · Bank: Musterbank"
+        );
+        for part in [
+            "Überweisung",
+            "Konto in Deutschland",
+            "Kontoinhaber/in: Anna Muster",
+            "Bank: Musterbank",
+        ] {
+            assert!(text.contains(part), "{part} missing in {text}");
+        }
+        assert!(text.contains("Zahlung über Dritte / Zahlungsdienstleister"));
+        assert!(!text.contains("gesonderte Prüfung"));
+        assert!(
+            !text.contains("Zahlung von einem Konto"),
+            "no QES, no § 12 line"
+        );
+
+        // Cash through a third person: both flagged in one hint; "other"
+        // names what it is; nothing entered says so.
+        let cash = super::GwgIdentificationSheet {
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("cash".to_string()),
+                via_third_party: Some(true),
+                via_third_party_details: Some("Mein Bruder bringt das Geld.".to_string()),
+                flags: vec!["cash_payment", "third_party_payment"],
+                ..Default::default()
+            }),
+            ..transfer.clone()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &cash,
+            &legal_test_agency(),
+            None,
+            "GWG-20261006-UNITTEST0008",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261006-UNITTEST0008");
+        assert_eq!(
+            cash.payment_route.as_ref().unwrap().third_party_line(),
+            "ja – Mein Bruder bringt das Geld."
+        );
+        assert_eq!(
+            cash.payment_route.as_ref().unwrap().hint().as_deref(),
+            Some("Barzahlung / Zahlung über Dritte – gesonderte Prüfung")
+        );
+        assert!(text.contains("Mein Bruder bringt das Geld."));
+        assert!(text.contains("Barzahlung / Zahlung über Dritte"));
+        assert!(text.contains("gesonderte Prüfung"));
+        assert!(!text.contains("Kontoinhaber/in"));
+        let other = super::GwgPaymentRoute {
+            method: Some("other".to_string()),
+            details: Some("Scheck".to_string()),
+            flags: vec!["other_method"],
+            ..Default::default()
+        };
+        assert_eq!(other.line(), "Sonstiger Zahlungsweg: Scheck");
+        assert_eq!(other.third_party_line(), "keine Angabe");
+        assert_eq!(
+            other.hint().as_deref(),
+            Some("sonstiger Zahlungsweg – gesonderte Prüfung")
+        );
+        let empty = super::GwgPaymentRoute::default();
+        assert_eq!(empty.line(), "keine Angabe");
+        assert_eq!(empty.hint(), None);
+        let crypto = super::GwgPaymentRoute {
+            method: Some("crypto".to_string()),
+            via_third_party: Some(false),
+            flags: vec!["crypto_payment"],
+            ..Default::default()
+        };
+        assert_eq!(crypto.line(), "Kryptowährung");
+        assert_eq!(crypto.third_party_line(), "nein");
+        assert_eq!(
+            crypto.hint().as_deref(),
+            Some("Kryptowährung – gesonderte Prüfung")
+        );
     }
 
     #[test]

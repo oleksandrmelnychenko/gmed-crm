@@ -34,6 +34,17 @@
 //! and is a step of the payer a new invoice inherits
 //! (`invoices/payer.rs::inherited_invoice_payer`). See
 //! `docs/architecture/lead-payer-declaration_ua.md`.
+//!
+//! Sections 7 and 8 of the owner's form (phase 2, 2026-10-06) live on the
+//! same row: where the invoice goes (`invoice_to` and the other address — the
+//! input of the invoice recipient chain, never the Kostenübernehmer of the
+//! order) and how the payer will pay (`payment_method` …, the payer's own
+//! answer; the row is the payer). The cabinet patches them with
+//! [`save_billing_from_portal`]; every other save keeps them
+//! ([`Declaration::carry_billing`]), staff add only the USt-IdNr. and the
+//! Steuernummer. Cash, crypto, another method or a payment through a third
+//! person are compliance flags for staff ([`Declaration::payment_route_flags`]);
+//! they block nothing.
 
 use axum::{
     Json, Router,
@@ -91,6 +102,27 @@ pub const SOURCE_OF_FUNDS: &[&str] = &[
     "other",
 ];
 
+/// Where the invoice goes (`invoice_to`, section 7): to the patient, to the
+/// declared third party (only with one) or to the patient at another address.
+pub const INVOICE_TO_SELF: &str = "self";
+pub const INVOICE_TO_PAYER: &str = "payer";
+pub const INVOICE_TO_OTHER: &str = "other";
+pub const INVOICE_TO_VALUES: &[&str] = &[INVOICE_TO_SELF, INVOICE_TO_PAYER, INVOICE_TO_OTHER];
+
+/// How the payer will pay (`payment_method`, section 8).
+pub const PAYMENT_METHOD_BANK_TRANSFER: &str = "bank_transfer";
+pub const PAYMENT_METHOD_CARD: &str = "card";
+pub const PAYMENT_METHOD_CASH: &str = "cash";
+pub const PAYMENT_METHOD_CRYPTO: &str = "crypto";
+pub const PAYMENT_METHOD_OTHER: &str = "other";
+pub const PAYMENT_METHODS: &[&str] = &[
+    PAYMENT_METHOD_BANK_TRANSFER,
+    PAYMENT_METHOD_CARD,
+    PAYMENT_METHOD_CASH,
+    PAYMENT_METHOD_CRYPTO,
+    PAYMENT_METHOD_OTHER,
+];
+
 /// Template of the cost assumption declaration (Kostenübernahmeerklärung).
 pub const COST_ASSUMPTION_TEMPLATE: &str = "cost_coverage_declaration";
 
@@ -100,6 +132,12 @@ pub const PAYER_IDENTITY_BINDING_KEY: &str = "_payer_identity_version";
 
 const SHORT_TEXT_MAX: usize = 200;
 const LONG_TEXT_MAX: usize = 2000;
+/// Limits of sections 7 and 8 that differ from the short text (the database
+/// checks the same).
+const ZIP_MAX: usize = 20;
+const EMAIL_MAX: usize = 254;
+const INVOICE_VAT_ID_MAX: usize = 20;
+const INVOICE_TAX_NUMBER_MAX: usize = 30;
 
 pub fn router() -> Router<AppState> {
     Router::new().route(
@@ -155,6 +193,34 @@ pub(crate) struct Declaration {
     /// the costs and tells the payer the lead's name. Only the lead gives or
     /// removes this consent.
     pub contact_consent_at: Option<DateTime<Utc>>,
+    /// Section 7 (invoice recipient): where the invoice goes
+    /// ([`INVOICE_TO_VALUES`]); `None` until the lead answered.
+    pub invoice_to: Option<String>,
+    /// The other address (`invoice_to = other` only).
+    pub invoice_name: Option<String>,
+    pub invoice_street: Option<String>,
+    pub invoice_zip: Option<String>,
+    pub invoice_city: Option<String>,
+    pub invoice_country: Option<String>,
+    /// E-mail for invoices (`self` or `other`; cleared for `payer`).
+    pub invoice_email: Option<String>,
+    /// USt-IdNr. and Steuernummer of the invoice recipient: staff fields,
+    /// never touched by the cabinet.
+    pub invoice_vat_id: Option<String>,
+    pub invoice_tax_number: Option<String>,
+    /// Section 8 (payment route): how the payer will pay
+    /// ([`PAYMENT_METHODS`]); the details describe the method `other`.
+    pub payment_method: Option<String>,
+    pub payment_method_details: Option<String>,
+    /// Bank transfer or card: the country of the account, its holder and the
+    /// bank.
+    pub account_country: Option<String>,
+    pub account_holder: Option<String>,
+    pub bank_name: Option<String>,
+    /// Paid through a third person or a payment service provider; the
+    /// details say who or which.
+    pub via_third_party: Option<bool>,
+    pub via_third_party_details: Option<String>,
 }
 
 const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
@@ -162,7 +228,29 @@ const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_
      source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
      date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
      relationship_kind, relationship, email, phone, payer_informed_at, payer_informed_by, \
-     contact_consent_at, identity_changed_at, patient_id, created_at, updated_at";
+     contact_consent_at, invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city, \
+     invoice_country, invoice_email, invoice_vat_id, invoice_tax_number, payment_method, \
+     payment_method_details, account_country, account_holder, bank_name, via_third_party, \
+     via_third_party_details, identity_changed_at, patient_id, created_at, updated_at";
+
+/// The 14 keys of sections 7 and 8 the cabinet edits (API keys = column
+/// names), in form order; the two tax fields of section 7 are staff's.
+const BILLING_PORTAL_FIELDS: [&str; 14] = [
+    "invoice_to",
+    "invoice_name",
+    "invoice_street",
+    "invoice_zip",
+    "invoice_city",
+    "invoice_country",
+    "invoice_email",
+    "payment_method",
+    "payment_method_details",
+    "account_country",
+    "account_holder",
+    "bank_name",
+    "via_third_party",
+    "via_third_party_details",
+];
 
 impl Declaration {
     pub(crate) fn is_third_party(&self) -> bool {
@@ -218,6 +306,22 @@ impl Declaration {
             payer_informed_at: row.try_get("payer_informed_at").unwrap_or_default(),
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
             contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
+            invoice_to: row.try_get("invoice_to").unwrap_or_default(),
+            invoice_name: row.try_get("invoice_name").unwrap_or_default(),
+            invoice_street: row.try_get("invoice_street").unwrap_or_default(),
+            invoice_zip: row.try_get("invoice_zip").unwrap_or_default(),
+            invoice_city: row.try_get("invoice_city").unwrap_or_default(),
+            invoice_country: row.try_get("invoice_country").unwrap_or_default(),
+            invoice_email: row.try_get("invoice_email").unwrap_or_default(),
+            invoice_vat_id: row.try_get("invoice_vat_id").unwrap_or_default(),
+            invoice_tax_number: row.try_get("invoice_tax_number").unwrap_or_default(),
+            payment_method: row.try_get("payment_method").unwrap_or_default(),
+            payment_method_details: row.try_get("payment_method_details").unwrap_or_default(),
+            account_country: row.try_get("account_country").unwrap_or_default(),
+            account_holder: row.try_get("account_holder").unwrap_or_default(),
+            bank_name: row.try_get("bank_name").unwrap_or_default(),
+            via_third_party: row.try_get("via_third_party").unwrap_or_default(),
+            via_third_party_details: row.try_get("via_third_party_details").unwrap_or_default(),
         }
     }
 
@@ -287,10 +391,12 @@ impl Declaration {
         })
     }
 
-    /// What the patient card shows of the declaration: who pays and how the
-    /// payer is reached. None of the GwG answers (own account, beneficial
-    /// owner, source of funds), no date or place of birth, no citizenships —
-    /// those stay in the lead wizard.
+    /// What the patient card shows of the declaration: who pays, how the
+    /// payer is reached and where the invoice goes (section 7 with the tax
+    /// fields). None of the GwG answers (own account, beneficial owner,
+    /// source of funds), no date or place of birth, no citizenships, and
+    /// nothing of the payment route (section 8 is compliance evidence and
+    /// stays in the lead wizard).
     pub(crate) fn billing_json(&self) -> Value {
         json!({
             "payer_kind": self.payer_kind,
@@ -309,6 +415,15 @@ impl Declaration {
             "phone": self.phone,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
+            "invoice_to": self.invoice_to,
+            "invoice_name": self.invoice_name,
+            "invoice_street": self.invoice_street,
+            "invoice_zip": self.invoice_zip,
+            "invoice_city": self.invoice_city,
+            "invoice_country": self.invoice_country,
+            "invoice_email": self.invoice_email,
+            "invoice_vat_id": self.invoice_vat_id,
+            "invoice_tax_number": self.invoice_tax_number,
         })
     }
 
@@ -357,6 +472,22 @@ impl Declaration {
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
             "payer_informed_by": self.payer_informed_by,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
+            "invoice_to": self.invoice_to,
+            "invoice_name": self.invoice_name,
+            "invoice_street": self.invoice_street,
+            "invoice_zip": self.invoice_zip,
+            "invoice_city": self.invoice_city,
+            "invoice_country": self.invoice_country,
+            "invoice_email": self.invoice_email,
+            "invoice_vat_id": self.invoice_vat_id,
+            "invoice_tax_number": self.invoice_tax_number,
+            "payment_method": self.payment_method,
+            "payment_method_details": self.payment_method_details,
+            "account_country": self.account_country,
+            "account_holder": self.account_holder,
+            "bank_name": self.bank_name,
+            "via_third_party": self.via_third_party,
+            "via_third_party_details": self.via_third_party_details,
         })
     }
 
@@ -436,6 +567,13 @@ struct DeclarationInput {
     /// processing of their data. The server records who and when.
     #[serde(default)]
     payer_informed: bool,
+    /// USt-IdNr. and Steuernummer of the invoice recipient (phase 2,
+    /// 2026-10-06): the only keys of sections 7 and 8 staff write. A key that
+    /// is left out keeps the stored value, `null` or `""` clears it.
+    #[serde(default, deserialize_with = "sent")]
+    invoice_vat_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_tax_number: Option<Option<String>>,
 }
 
 fn default_true() -> bool {
@@ -470,8 +608,10 @@ fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static s
 /// data for a self-payer, no natural-person data for an organisation, no
 /// beneficial owner for own account. `previous` supplies the payer type, the
 /// organisation name and the relationship kind where the body leaves the key
-/// out. The consent to contact the payer is no input: the callers carry it
-/// over.
+/// out, and the lead's answers of sections 7 and 8
+/// ([`Declaration::carry_billing`]), of which the body may set only the two
+/// tax fields. The consent to contact the payer is no input: the callers
+/// carry it over.
 fn declaration_from_input(
     input: &DeclarationInput,
     previous: Option<&Declaration>,
@@ -580,6 +720,17 @@ fn declaration_from_input(
         declaration.relationship_kind = relationship_kind;
         declaration.email = email;
         declaration.phone = text(&input.phone, SHORT_TEXT_MAX)?;
+    }
+    // The lead's answers of sections 7 and 8 survive the save; staff may set
+    // the two tax fields of the invoice recipient.
+    declaration.carry_billing(previous);
+    if let Some(value) = &input.invoice_vat_id {
+        declaration.invoice_vat_id =
+            text(value, INVOICE_VAT_ID_MAX).map_err(|_| "invoice_vat_id_too_long")?;
+    }
+    if let Some(value) = &input.invoice_tax_number {
+        declaration.invoice_tax_number =
+            text(value, INVOICE_TAX_NUMBER_MAX).map_err(|_| "invoice_tax_number_too_long")?;
     }
     Ok(declaration)
 }
@@ -1279,7 +1430,7 @@ pub(crate) async fn carry_over_to_patient(
                UPDATE lead_payer_declarations
                SET patient_id = $2, updated_at = now()
                WHERE lead_id = $1
-               RETURNING payer_kind, acts_on_own_account, source_of_funds,
+               RETURNING payer_kind, acts_on_own_account, source_of_funds, invoice_to,
                          COALESCE(
                              NULLIF(btrim(organisation_name), ''),
                              NULLIF(btrim(concat_ws(' ', first_name, last_name)), '')
@@ -1295,6 +1446,7 @@ pub(crate) async fn carry_over_to_patient(
                        'acts_on_own_account', linked.acts_on_own_account,
                        'source_of_funds', linked.source_of_funds,
                        'payer_name', linked.payer_name,
+                       'invoice_to', linked.invoice_to,
                        'cost_assumption_document_id', (
                            SELECT d.id FROM documents d
                            WHERE d.generated_template_id = 'cost_coverage_declaration'
@@ -1567,10 +1719,15 @@ async fn store_declaration(
                place_of_birth, street, zip, city, country, citizenships, relationship,
                email, phone, payer_informed_at, payer_informed_by,
                identity_changed_at, created_by, updated_by, own_account_answered,
-               payer_type, organisation_name, relationship_kind, contact_consent_at)
+               payer_type, organisation_name, relationship_kind, contact_consent_at,
+               invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city,
+               invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
+               payment_method, payment_method_details, account_country, account_holder,
+               bank_name, via_third_party, via_third_party_details)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
-                   $26, $27, $28, $29)
+                   $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
+                   $40, $41, $42, $43, $44, $45)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                payer_type = EXCLUDED.payer_type,
@@ -1598,6 +1755,22 @@ async fn store_declaration(
                phone = EXCLUDED.phone,
                payer_informed_at = EXCLUDED.payer_informed_at,
                payer_informed_by = EXCLUDED.payer_informed_by,
+               invoice_to = EXCLUDED.invoice_to,
+               invoice_name = EXCLUDED.invoice_name,
+               invoice_street = EXCLUDED.invoice_street,
+               invoice_zip = EXCLUDED.invoice_zip,
+               invoice_city = EXCLUDED.invoice_city,
+               invoice_country = EXCLUDED.invoice_country,
+               invoice_email = EXCLUDED.invoice_email,
+               invoice_vat_id = EXCLUDED.invoice_vat_id,
+               invoice_tax_number = EXCLUDED.invoice_tax_number,
+               payment_method = EXCLUDED.payment_method,
+               payment_method_details = EXCLUDED.payment_method_details,
+               account_country = EXCLUDED.account_country,
+               account_holder = EXCLUDED.account_holder,
+               bank_name = EXCLUDED.bank_name,
+               via_third_party = EXCLUDED.via_third_party,
+               via_third_party_details = EXCLUDED.via_third_party_details,
                identity_changed_at = CASE WHEN $22 THEN clock_timestamp()
                                           ELSE lead_payer_declarations.identity_changed_at END,
                updated_by = EXCLUDED.updated_by,
@@ -1632,6 +1805,22 @@ async fn store_declaration(
     .bind(&declaration.organisation_name)
     .bind(&declaration.relationship_kind)
     .bind(declaration.contact_consent_at)
+    .bind(&declaration.invoice_to)
+    .bind(&declaration.invoice_name)
+    .bind(&declaration.invoice_street)
+    .bind(&declaration.invoice_zip)
+    .bind(&declaration.invoice_city)
+    .bind(&declaration.invoice_country)
+    .bind(&declaration.invoice_email)
+    .bind(&declaration.invoice_vat_id)
+    .bind(&declaration.invoice_tax_number)
+    .bind(&declaration.payment_method)
+    .bind(&declaration.payment_method_details)
+    .bind(&declaration.account_country)
+    .bind(&declaration.account_holder)
+    .bind(&declaration.bank_name)
+    .bind(declaration.via_third_party)
+    .bind(&declaration.via_third_party_details)
     .execute(conn)
     .await
     .map(|_| ())
@@ -1964,6 +2153,9 @@ fn declaration_from_portal(
         email: input.email.clone(),
         phone: input.phone.clone(),
         payer_informed: false,
+        // The tax fields of the invoice recipient are staff's: kept as stored.
+        invoice_vat_id: None,
+        invoice_tax_number: None,
     };
     let mut declaration = declaration_from_input(&staff, previous, today)?;
     declaration.own_account_answered = input.acts_on_own_account.is_some()
@@ -2242,6 +2434,583 @@ pub(crate) async fn preset_patient_order_payer(
     Ok(written)
 }
 
+// ----------------------------------------------------------------------------
+// Lead cabinet: invoice recipient (section 7) and payment route (section 8)
+// ----------------------------------------------------------------------------
+
+/// Who answers section 8 for the one who looks at the cabinet (owner spec,
+/// phase 2): the patient — whoever fills the cabinet — while nobody else pays
+/// or nobody has said who pays yet; the paying parent of a minor when the
+/// caller's login is that parent; otherwise the third party itself, whom the
+/// cabinet does not ask (the payer answers through a link of its own in a
+/// later phase, or to staff).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaymentRouteBy {
+    Patient,
+    Guardian,
+    Payer,
+}
+
+impl PaymentRouteBy {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Patient => "patient",
+            Self::Guardian => "guardian",
+            Self::Payer => "payer",
+        }
+    }
+
+    /// The cabinet asks the caller for the payment route.
+    pub(crate) fn asks(self) -> bool {
+        !matches!(self, Self::Payer)
+    }
+}
+
+/// Why a billing save from the cabinet was refused.
+#[derive(Debug)]
+pub(crate) enum PortalBillingError {
+    /// A value the cabinet has to correct (422 `invalid_field`): the key it
+    /// names (an unknown key as sent) and why.
+    Invalid {
+        field: String,
+        message: &'static str,
+    },
+    /// The caller is not the one who answers section 8 (409
+    /// `payment_route_by_payer`); nothing is saved.
+    RouteByPayer,
+    /// Nobody has said who pays yet: sections 7 and 8 live on the payer
+    /// declaration, so the cabinet answers "who pays" first (409
+    /// `payer_not_declared`).
+    NotDeclared,
+    Database(sqlx::Error),
+}
+
+impl From<sqlx::Error> for PortalBillingError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
+/// Partial update of sections 7 and 8 from the cabinet (only the changed
+/// keys). `null` or an empty string clears a text or a choice;
+/// `via_third_party` is `true`, `false` or `null`. Unknown keys — the two
+/// tax fields of staff above all — are rejected.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PortalBillingPatch {
+    #[serde(default, deserialize_with = "sent")]
+    invoice_to: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_street: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_zip: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_city: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    invoice_email: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    payment_method: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    payment_method_details: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    account_country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    account_holder: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    bank_name: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    via_third_party: Option<Option<bool>>,
+    #[serde(default, deserialize_with = "sent")]
+    via_third_party_details: Option<Option<String>>,
+}
+
+impl PortalBillingPatch {
+    /// Reads the body of the endpoint: only the 14 keys of the cabinet, each
+    /// a text or `null` (`via_third_party` a boolean or `null`). The first
+    /// unknown key or value of the wrong type names its field, as the
+    /// cabinet shows errors per field.
+    pub(crate) fn parse(body: &Value) -> Result<Self, PortalBillingError> {
+        let invalid = |field: &str, message: &'static str| PortalBillingError::Invalid {
+            field: field.to_string(),
+            message,
+        };
+        let Some(object) = body.as_object() else {
+            return Err(invalid("body", "A JSON object is expected"));
+        };
+        for (key, value) in object {
+            let key = key.as_str();
+            if !BILLING_PORTAL_FIELDS.contains(&key) {
+                return Err(invalid(key, "Unknown field"));
+            }
+            let expected = match (key, value) {
+                (_, Value::Null) => true,
+                ("via_third_party", Value::Bool(_)) => true,
+                ("via_third_party", _) => false,
+                (_, Value::String(_)) => true,
+                _ => false,
+            };
+            if !expected {
+                return Err(invalid(
+                    key,
+                    if key == "via_third_party" {
+                        "true, false or null is expected"
+                    } else {
+                        "A text is expected"
+                    },
+                ));
+            }
+        }
+        serde_json::from_value(body.clone())
+            .map_err(|_| invalid("body", "The body could not be read"))
+    }
+
+    /// A key of section 8 is in the body.
+    pub(crate) fn touches_payment_route(&self) -> bool {
+        self.payment_method.is_some()
+            || self.payment_method_details.is_some()
+            || self.account_country.is_some()
+            || self.account_holder.is_some()
+            || self.bank_name.is_some()
+            || self.via_third_party.is_some()
+            || self.via_third_party_details.is_some()
+    }
+}
+
+/// A single-line value of the cabinet: inner whitespace collapsed, ends
+/// trimmed, no control characters, at most `max` characters; empty is
+/// `None`.
+fn billing_text(value: Option<&str>, max: usize) -> Result<Option<String>, &'static str> {
+    let value = value
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if value.chars().count() > max {
+        return Err("Too long");
+    }
+    if value.chars().any(char::is_control) {
+        return Err("Invalid characters");
+    }
+    Ok((!value.is_empty()).then_some(value))
+}
+
+/// A description that may run over several lines: only the ends are
+/// trimmed.
+fn billing_long_text(value: Option<&str>, max: usize) -> Result<Option<String>, &'static str> {
+    let value = value
+        .unwrap_or_default()
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let value = value.trim();
+    if value.chars().count() > max {
+        return Err("Too long");
+    }
+    if value
+        .chars()
+        .any(|ch| ch.is_control() && ch != '\n' && ch != '\t')
+    {
+        return Err("Invalid characters");
+    }
+    Ok((!value.is_empty()).then(|| value.to_string()))
+}
+
+/// One of `values`, or `None` for an empty value.
+fn billing_choice(value: Option<&str>, values: &[&str]) -> Result<Option<String>, &'static str> {
+    let value = value.map(str::trim).unwrap_or_default();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if values.contains(&value) {
+        Ok(Some(value.to_string()))
+    } else {
+        Err("Not one of the allowed values")
+    }
+}
+
+impl Declaration {
+    /// The answers of sections 7 and 8 survive every save that does not
+    /// touch them (the whole row is written each time): copied from
+    /// `previous`, then the two rules of the spec. "To the payer" needs a
+    /// third party and goes when the patient pays himself; section 8 belongs
+    /// to the payer named when it was answered and goes when who pays
+    /// changes or (third party) another person or organisation is named —
+    /// the same rule as for the consent to contact the payer.
+    pub(crate) fn carry_billing(&mut self, previous: Option<&Declaration>) {
+        let Some(previous) = previous else {
+            return;
+        };
+        self.invoice_to = previous.invoice_to.clone();
+        self.invoice_name = previous.invoice_name.clone();
+        self.invoice_street = previous.invoice_street.clone();
+        self.invoice_zip = previous.invoice_zip.clone();
+        self.invoice_city = previous.invoice_city.clone();
+        self.invoice_country = previous.invoice_country.clone();
+        self.invoice_email = previous.invoice_email.clone();
+        self.invoice_vat_id = previous.invoice_vat_id.clone();
+        self.invoice_tax_number = previous.invoice_tax_number.clone();
+        self.payment_method = previous.payment_method.clone();
+        self.payment_method_details = previous.payment_method_details.clone();
+        self.account_country = previous.account_country.clone();
+        self.account_holder = previous.account_holder.clone();
+        self.bank_name = previous.bank_name.clone();
+        self.via_third_party = previous.via_third_party;
+        self.via_third_party_details = previous.via_third_party_details.clone();
+        if !self.is_third_party() && self.invoice_to.as_deref() == Some(INVOICE_TO_PAYER) {
+            self.invoice_to = None;
+        }
+        let same_payer = previous.payer_kind == self.payer_kind
+            && (!self.is_third_party() || previous.payer_key() == self.payer_key());
+        if !same_payer {
+            self.clear_payment_route();
+        }
+        self.clear_dependent_billing();
+    }
+
+    /// Section 8 as nobody answered it.
+    fn clear_payment_route(&mut self) {
+        self.payment_method = None;
+        self.payment_method_details = None;
+        self.account_country = None;
+        self.account_holder = None;
+        self.bank_name = None;
+        self.via_third_party = None;
+        self.via_third_party_details = None;
+    }
+
+    /// The fields that depend on an answer go with any other answer (data
+    /// minimization): the other address only with `other`, the e-mail not
+    /// for the payer, the details only for the method `other`, the account
+    /// only for a bank transfer or a card, the details of a payment through
+    /// a third party only with "yes".
+    fn clear_dependent_billing(&mut self) {
+        if self.invoice_to.as_deref() != Some(INVOICE_TO_OTHER) {
+            self.invoice_name = None;
+            self.invoice_street = None;
+            self.invoice_zip = None;
+            self.invoice_city = None;
+            self.invoice_country = None;
+        }
+        if self.invoice_to.as_deref() == Some(INVOICE_TO_PAYER) {
+            self.invoice_email = None;
+        }
+        if self.payment_method.as_deref() != Some(PAYMENT_METHOD_OTHER) {
+            self.payment_method_details = None;
+        }
+        if !matches!(
+            self.payment_method.as_deref(),
+            Some(PAYMENT_METHOD_BANK_TRANSFER | PAYMENT_METHOD_CARD)
+        ) {
+            self.account_country = None;
+            self.account_holder = None;
+            self.bank_name = None;
+        }
+        if self.via_third_party != Some(true) {
+            self.via_third_party_details = None;
+        }
+    }
+
+    /// What staff look at more closely (GwG): cash, crypto, another method,
+    /// a payment through a third person or a payment service provider. Shown
+    /// in the wizard and printed on the identification sheet; nothing is
+    /// blocked by it.
+    pub(crate) fn payment_route_flags(&self) -> Vec<&'static str> {
+        let mut flags = Vec::new();
+        match self.payment_method.as_deref() {
+            Some(PAYMENT_METHOD_CASH) => flags.push("cash_payment"),
+            Some(PAYMENT_METHOD_CRYPTO) => flags.push("crypto_payment"),
+            Some(PAYMENT_METHOD_OTHER) => flags.push("other_method"),
+            _ => {}
+        }
+        if self.via_third_party == Some(true) {
+            flags.push("third_party_payment");
+        }
+        flags
+    }
+
+    /// Sections 7 and 8 as the cabinet shows them (`billing` of the request
+    /// object): the answers, whether a third party is declared (only then
+    /// "to the payer" is offered), who answers section 8 for the caller and
+    /// the name to pre-fill the account holder with.
+    pub(crate) fn billing_portal_json(
+        &self,
+        payment_route_by: PaymentRouteBy,
+        account_holder_suggestion: Option<&str>,
+    ) -> Value {
+        json!({
+            "invoice_to": self.invoice_to,
+            "invoice_name": self.invoice_name,
+            "invoice_street": self.invoice_street,
+            "invoice_zip": self.invoice_zip,
+            "invoice_city": self.invoice_city,
+            "invoice_country": self.invoice_country,
+            "invoice_email": self.invoice_email,
+            "payer_declared": self.is_third_party(),
+            "payment_route_by": payment_route_by.as_str(),
+            "payment_method": self.payment_method,
+            "payment_method_details": self.payment_method_details,
+            "account_country": self.account_country,
+            "account_holder": self.account_holder,
+            "bank_name": self.bank_name,
+            "via_third_party": self.via_third_party,
+            "via_third_party_details": self.via_third_party_details,
+            "account_holder_suggestion": account_holder_suggestion,
+        })
+    }
+
+    /// Sections 7 and 8 for staff (`billing` of `GET /leads/{id}/portal-intake`):
+    /// the cabinet's keys with the tax fields and the compliance flags, and
+    /// who answers section 8 as seen from the lead's side (`patient` while
+    /// the cabinet asks somebody, `payer` when the third party answers
+    /// itself).
+    pub(crate) fn billing_staff_json(&self, payment_route_by: PaymentRouteBy) -> Value {
+        json!({
+            "invoice_to": self.invoice_to,
+            "invoice_name": self.invoice_name,
+            "invoice_street": self.invoice_street,
+            "invoice_zip": self.invoice_zip,
+            "invoice_city": self.invoice_city,
+            "invoice_country": self.invoice_country,
+            "invoice_email": self.invoice_email,
+            "invoice_vat_id": self.invoice_vat_id,
+            "invoice_tax_number": self.invoice_tax_number,
+            "payment_route_by": payment_route_by.as_str(),
+            "payment_method": self.payment_method,
+            "payment_method_details": self.payment_method_details,
+            "account_country": self.account_country,
+            "account_holder": self.account_holder,
+            "bank_name": self.bank_name,
+            "via_third_party": self.via_third_party,
+            "via_third_party_details": self.via_third_party_details,
+            "compliance_flags": self.payment_route_flags(),
+        })
+    }
+
+    /// Stable text of what the cabinet entered in sections 7 and 8, for the
+    /// "entered by the patient" marker of the lead (the tax fields are
+    /// staff's and not part of it).
+    pub(crate) fn billing_marker_value(&self) -> String {
+        let answers = self.to_json();
+        BILLING_PORTAL_FIELDS
+            .iter()
+            .map(|field| answers[*field].to_string())
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+}
+
+/// `billing` of the request object; the sections as nobody answered them
+/// while there is no declaration.
+pub(crate) fn portal_billing_payload(
+    declaration: Option<&Declaration>,
+    payment_route_by: PaymentRouteBy,
+    account_holder_suggestion: Option<&str>,
+) -> Value {
+    declaration
+        .cloned()
+        .unwrap_or_default()
+        .billing_portal_json(payment_route_by, account_holder_suggestion)
+}
+
+/// Applies the cabinet's patch to the stored declaration; the result is what
+/// gets stored. A wrong choice, country or e-mail, a text over its limit and
+/// "to the payer" without a third party are refused with the key they name;
+/// the fields that depend on another answer are cleared.
+pub(crate) fn apply_billing_patch(
+    current: &Declaration,
+    patch: &PortalBillingPatch,
+) -> Result<Declaration, PortalBillingError> {
+    let invalid = |field: &str, message: &'static str| PortalBillingError::Invalid {
+        field: field.to_string(),
+        message,
+    };
+    let short = |value: &Option<String>, field: &str, max: usize| {
+        billing_text(value.as_deref(), max).map_err(|message| invalid(field, message))
+    };
+    let country = |value: &Option<String>, field: &str| {
+        normalize_country_code(value.as_deref())
+            .map_err(|_| invalid(field, "Use an ISO 3166-1 alpha-2 country code"))
+    };
+    let mut next = current.clone();
+    if let Some(value) = &patch.invoice_to {
+        next.invoice_to = billing_choice(value.as_deref(), INVOICE_TO_VALUES)
+            .map_err(|message| invalid("invoice_to", message))?;
+    }
+    if let Some(value) = &patch.invoice_name {
+        next.invoice_name = short(value, "invoice_name", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.invoice_street {
+        next.invoice_street = short(value, "invoice_street", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.invoice_zip {
+        next.invoice_zip = short(value, "invoice_zip", ZIP_MAX)?;
+    }
+    if let Some(value) = &patch.invoice_city {
+        next.invoice_city = short(value, "invoice_city", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.invoice_country {
+        next.invoice_country = country(value, "invoice_country")?;
+    }
+    if let Some(value) = &patch.invoice_email {
+        let email = short(value, "invoice_email", EMAIL_MAX)?;
+        if email
+            .as_deref()
+            .is_some_and(|email| !is_plausible_email(email))
+        {
+            return Err(invalid("invoice_email", "Invalid e-mail address"));
+        }
+        next.invoice_email = email;
+    }
+    if let Some(value) = &patch.payment_method {
+        next.payment_method = billing_choice(value.as_deref(), PAYMENT_METHODS)
+            .map_err(|message| invalid("payment_method", message))?;
+    }
+    if let Some(value) = &patch.payment_method_details {
+        next.payment_method_details = short(value, "payment_method_details", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.account_country {
+        next.account_country = country(value, "account_country")?;
+    }
+    if let Some(value) = &patch.account_holder {
+        next.account_holder = short(value, "account_holder", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = &patch.bank_name {
+        next.bank_name = short(value, "bank_name", SHORT_TEXT_MAX)?;
+    }
+    if let Some(value) = patch.via_third_party {
+        next.via_third_party = value;
+    }
+    if let Some(value) = &patch.via_third_party_details {
+        next.via_third_party_details = billing_long_text(value.as_deref(), LONG_TEXT_MAX)
+            .map_err(|message| invalid("via_third_party_details", message))?;
+    }
+    // "To the payer" is an answer only while a third party pays.
+    if next.invoice_to.as_deref() == Some(INVOICE_TO_PAYER) && !next.is_third_party() {
+        return Err(invalid(
+            "invoice_to",
+            "The invoice goes to the payer only when a third party pays",
+        ));
+    }
+    next.clear_dependent_billing();
+    Ok(next)
+}
+
+/// The keys of sections 7 and 8 whose stored value differs between two
+/// declarations (the two tax fields included: a save by staff names them in
+/// its audit event as well).
+fn changed_billing_fields(before: &Declaration, after: &Declaration) -> Vec<&'static str> {
+    let (before, after) = (before.to_json(), after.to_json());
+    BILLING_PORTAL_FIELDS
+        .iter()
+        .copied()
+        .chain(["invoice_vat_id", "invoice_tax_number"])
+        .filter(|field| before[*field] != after[*field])
+        .collect()
+}
+
+/// Saves the cabinet's patch of sections 7 and 8 in the caller's transaction
+/// (the row is locked by `lock_my_lead`), with the audit event that names
+/// the changed fields. Returns the declaration when something changed. The
+/// order payer is not touched: section 7 changes where the invoice goes,
+/// never who the Kostenübernehmer of the order is.
+pub(crate) async fn save_billing_from_portal(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+    access_kind: &str,
+    patch: &PortalBillingPatch,
+    payment_route_by: PaymentRouteBy,
+) -> Result<Option<Declaration>, PortalBillingError> {
+    let Some(previous) = load_declaration(conn, lead_id).await? else {
+        return Err(PortalBillingError::NotDeclared);
+    };
+    if !payment_route_by.asks() && patch.touches_payment_route() {
+        return Err(PortalBillingError::RouteByPayer);
+    }
+    let next = apply_billing_patch(&previous, patch)?;
+    let changed = changed_billing_fields(&previous, &next);
+    if changed.is_empty() {
+        return Ok(None);
+    }
+    store_declaration(conn, lead_id, &next, actor, false).await?;
+    audit::write_in_transaction(
+        conn,
+        &audit::domain_event(
+            "lead_portal_update_billing",
+            Some(actor),
+            "lead",
+            Some(lead_id),
+            json!({ "fields": changed, "access_kind": access_kind }),
+        ),
+    )
+    .await?;
+    Ok(Some(next))
+}
+
+/// What the cabinet still needs of sections 7 and 8 before the request can
+/// be sent, in form order: where the invoice goes and, for another address,
+/// the whole address; the payment route only while the caller is asked for
+/// it — the method, its details for `other`, the account for a bank transfer
+/// or a card (the bank only for a transfer), whether a third party is
+/// involved and, if so, who. The e-mail for invoices is never missing.
+pub(crate) fn portal_missing_billing(
+    declaration: Option<&Declaration>,
+    payment_route_by: PaymentRouteBy,
+) -> Vec<&'static str> {
+    let empty = Declaration::default();
+    let declaration = declaration.unwrap_or(&empty);
+    let mut missing = Vec::new();
+    match declaration.invoice_to.as_deref() {
+        None => missing.push("invoice_to"),
+        Some(INVOICE_TO_OTHER) => {
+            for (field, filled) in [
+                ("invoice_name", !blank(&declaration.invoice_name)),
+                ("invoice_street", !blank(&declaration.invoice_street)),
+                ("invoice_zip", !blank(&declaration.invoice_zip)),
+                ("invoice_city", !blank(&declaration.invoice_city)),
+                ("invoice_country", declaration.invoice_country.is_some()),
+            ] {
+                if !filled {
+                    missing.push(field);
+                }
+            }
+        }
+        Some(_) => {}
+    }
+    if !payment_route_by.asks() {
+        return missing;
+    }
+    match declaration.payment_method.as_deref() {
+        None => missing.push("payment_method"),
+        Some(PAYMENT_METHOD_OTHER) if blank(&declaration.payment_method_details) => {
+            missing.push("payment_method_details");
+        }
+        Some(method @ (PAYMENT_METHOD_BANK_TRANSFER | PAYMENT_METHOD_CARD)) => {
+            if declaration.account_country.is_none() {
+                missing.push("account_country");
+            }
+            if blank(&declaration.account_holder) {
+                missing.push("account_holder");
+            }
+            if method == PAYMENT_METHOD_BANK_TRANSFER && blank(&declaration.bank_name) {
+                missing.push("bank_name");
+            }
+        }
+        Some(_) => {}
+    }
+    match declaration.via_third_party {
+        None => missing.push("via_third_party"),
+        Some(true) if blank(&declaration.via_third_party_details) => {
+            missing.push("via_third_party_details");
+        }
+        Some(_) => {}
+    }
+    missing
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2272,6 +3041,8 @@ mod tests {
             email: Some("erika@example.org".into()),
             phone: None,
             payer_informed: true,
+            invoice_vat_id: None,
+            invoice_tax_number: None,
         }
     }
 
@@ -2858,5 +3629,337 @@ mod tests {
         assert_eq!(own["payer_kind"], "self");
         assert!(own["name"].is_null());
         assert!(own["payer_type"].is_null());
+    }
+
+    fn patch(body: Value) -> PortalBillingPatch {
+        PortalBillingPatch::parse(&body).unwrap()
+    }
+
+    fn refused_field(result: Result<Declaration, PortalBillingError>) -> String {
+        match result {
+            Err(PortalBillingError::Invalid { field, .. }) => field,
+            other => panic!("not refused: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_billing_patch_names_the_refused_key_and_clears_what_depends_on_an_answer() {
+        // Unknown keys and wrong types name the key as sent.
+        for (body, field) in [
+            (json!({ "invoice_vat_id": "DE123" }), "invoice_vat_id"),
+            (json!({ "via_third_party": "yes" }), "via_third_party"),
+            (json!({ "invoice_city": 7 }), "invoice_city"),
+            (json!([]), "body"),
+        ] {
+            match PortalBillingPatch::parse(&body) {
+                Err(PortalBillingError::Invalid { field: named, .. }) => assert_eq!(named, field),
+                other => panic!("{body} accepted: {other:?}"),
+            }
+        }
+
+        // Another address: the whole address is kept with `other` only.
+        let own = from_input(&input("self")).unwrap();
+        let other = apply_billing_patch(
+            &own,
+            &patch(json!({
+                "invoice_to": "other",
+                "invoice_name": "  Anna   Muster ",
+                "invoice_street": "Musterweg 1",
+                "invoice_zip": "10115",
+                "invoice_city": "Berlin",
+                "invoice_country": "de",
+                "invoice_email": "rechnung@example.com"
+            })),
+        )
+        .unwrap();
+        assert_eq!(other.invoice_to.as_deref(), Some("other"));
+        assert_eq!(other.invoice_name.as_deref(), Some("Anna Muster"));
+        assert_eq!(other.invoice_country.as_deref(), Some("DE"));
+        assert_eq!(other.invoice_email.as_deref(), Some("rechnung@example.com"));
+        let mine = apply_billing_patch(&other, &patch(json!({ "invoice_to": "self" }))).unwrap();
+        assert_eq!(mine.invoice_to.as_deref(), Some("self"));
+        assert_eq!(mine.invoice_name, None);
+        assert_eq!(mine.invoice_street, None);
+        assert_eq!(mine.invoice_country, None);
+        assert_eq!(
+            mine.invoice_email.as_deref(),
+            Some("rechnung@example.com"),
+            "the e-mail stays for the patient"
+        );
+        // `null` or an empty string clears; "to the payer" needs a third party.
+        let cleared = apply_billing_patch(
+            &mine,
+            &patch(json!({ "invoice_to": null, "invoice_email": "" })),
+        )
+        .unwrap();
+        assert_eq!(cleared.invoice_to, None);
+        assert_eq!(cleared.invoice_email, None);
+        assert_eq!(
+            refused_field(apply_billing_patch(
+                &own,
+                &patch(json!({ "invoice_to": "payer" }))
+            )),
+            "invoice_to"
+        );
+        let third_party = informed(from_input(&input("third_party")).unwrap());
+        let to_payer = apply_billing_patch(
+            &third_party,
+            &patch(json!({ "invoice_to": "payer", "invoice_email": "rechnung@example.com" })),
+        )
+        .unwrap();
+        assert_eq!(to_payer.invoice_to.as_deref(), Some("payer"));
+        assert_eq!(
+            to_payer.invoice_email, None,
+            "the payer's own e-mail is used"
+        );
+        for (body, field) in [
+            (json!({ "invoice_to": "someone" }), "invoice_to"),
+            (json!({ "invoice_country": "Germany" }), "invoice_country"),
+            (json!({ "invoice_email": "no-at-sign" }), "invoice_email"),
+            (
+                json!({ "invoice_zip": "x".repeat(ZIP_MAX + 1) }),
+                "invoice_zip",
+            ),
+            (json!({ "payment_method": "cheque" }), "payment_method"),
+            (json!({ "account_country": "Austria" }), "account_country"),
+            (
+                json!({ "via_third_party_details": "x".repeat(LONG_TEXT_MAX + 1) }),
+                "via_third_party_details",
+            ),
+        ] {
+            assert_eq!(
+                refused_field(apply_billing_patch(&own, &patch(body))),
+                field
+            );
+        }
+
+        // The payment route: the account goes with a transfer or a card, the
+        // details with `other`, the description with "yes".
+        let transfer = apply_billing_patch(
+            &own,
+            &patch(json!({
+                "payment_method": "bank_transfer",
+                "account_country": "de",
+                "account_holder": "Anna Muster",
+                "bank_name": "Musterbank",
+                "via_third_party": true,
+                "via_third_party_details": " Mein Bruder überweist.\r\n "
+            })),
+        )
+        .unwrap();
+        assert_eq!(transfer.account_country.as_deref(), Some("DE"));
+        assert_eq!(
+            transfer.via_third_party_details.as_deref(),
+            Some("Mein Bruder überweist.")
+        );
+        assert_eq!(
+            transfer.payment_route_flags(),
+            ["third_party_payment"],
+            "a transfer through a third person is flagged"
+        );
+        let cash = apply_billing_patch(
+            &transfer,
+            &patch(json!({ "payment_method": "cash", "via_third_party": false })),
+        )
+        .unwrap();
+        assert_eq!(cash.account_country, None);
+        assert_eq!(cash.account_holder, None);
+        assert_eq!(cash.bank_name, None);
+        assert_eq!(cash.via_third_party, Some(false));
+        assert_eq!(cash.via_third_party_details, None);
+        assert_eq!(cash.payment_route_flags(), ["cash_payment"]);
+        let other = apply_billing_patch(
+            &cash,
+            &patch(json!({ "payment_method": "other", "payment_method_details": "Scheck" })),
+        )
+        .unwrap();
+        assert_eq!(other.payment_method_details.as_deref(), Some("Scheck"));
+        assert_eq!(other.payment_route_flags(), ["other_method"]);
+        let crypto =
+            apply_billing_patch(&other, &patch(json!({ "payment_method": "crypto" }))).unwrap();
+        assert_eq!(crypto.payment_method_details, None);
+        assert_eq!(crypto.payment_route_flags(), ["crypto_payment"]);
+        assert!(
+            from_input(&input("self"))
+                .unwrap()
+                .payment_route_flags()
+                .is_empty()
+        );
+
+        // The marker follows the cabinet's keys, never the tax fields.
+        let mut taxed = crypto.clone();
+        taxed.invoice_vat_id = Some("DE123456789".into());
+        assert_eq!(taxed.billing_marker_value(), crypto.billing_marker_value());
+        assert_ne!(cash.billing_marker_value(), crypto.billing_marker_value());
+        assert!(!patch(json!({ "invoice_to": "self" })).touches_payment_route());
+        assert!(patch(json!({ "bank_name": null })).touches_payment_route());
+    }
+
+    #[test]
+    fn the_billing_sections_survive_every_save_and_follow_the_named_payer() {
+        // The cabinet answered both sections for a third party.
+        let stored = apply_billing_patch(
+            &from_input(&input("third_party")).unwrap(),
+            &patch(json!({
+                "invoice_to": "payer",
+                "payment_method": "card",
+                "account_country": "AT",
+                "account_holder": "Erika Muster",
+                "via_third_party": false
+            })),
+        )
+        .unwrap();
+
+        // The staff form of an older client knows none of the keys: all stay.
+        let kept = declaration_from_input(&input("third_party"), Some(&stored), today()).unwrap();
+        assert_eq!(kept, stored);
+        // Staff add the tax fields; `null` clears, an absent key keeps.
+        let mut with_tax = input("third_party");
+        with_tax.invoice_vat_id = Some(Some(" DE123456789 ".into()));
+        with_tax.invoice_tax_number = Some(Some("12/345/67890".into()));
+        let taxed = declaration_from_input(&with_tax, Some(&stored), today()).unwrap();
+        assert_eq!(taxed.invoice_vat_id.as_deref(), Some("DE123456789"));
+        assert_eq!(taxed.invoice_tax_number.as_deref(), Some("12/345/67890"));
+        assert_eq!(taxed.payment_method.as_deref(), Some("card"));
+        let mut cleared = input("third_party");
+        cleared.invoice_vat_id = Some(None);
+        let cleared = declaration_from_input(&cleared, Some(&taxed), today()).unwrap();
+        assert_eq!(cleared.invoice_vat_id, None);
+        assert_eq!(cleared.invoice_tax_number.as_deref(), Some("12/345/67890"));
+        let mut too_long = input("third_party");
+        too_long.invoice_vat_id = Some(Some("x".repeat(INVOICE_VAT_ID_MAX + 1)));
+        assert_eq!(
+            declaration_from_input(&too_long, Some(&taxed), today()),
+            Err("invoice_vat_id_too_long")
+        );
+        let body: DeclarationInput = serde_json::from_value(json!({
+            "payer_kind": "third_party",
+            "invoice_vat_id": null
+        }))
+        .unwrap();
+        assert_eq!(body.invoice_vat_id, Some(None));
+        assert!(body.invoice_tax_number.is_none());
+        // The cabinet's keys are not staff's.
+        assert!(
+            serde_json::from_value::<DeclarationInput>(json!({
+                "payer_kind": "third_party",
+                "invoice_to": "self"
+            }))
+            .is_err()
+        );
+
+        // Another payer is named: section 8 was that payer's answer.
+        let mut renamed = input("third_party");
+        renamed.last_name = Some("Anders".into());
+        let other = declaration_from_input(&renamed, Some(&taxed), today()).unwrap();
+        assert_eq!(other.invoice_to.as_deref(), Some("payer"));
+        assert_eq!(other.payment_method, None);
+        assert_eq!(other.account_holder, None);
+        assert_eq!(other.via_third_party, None);
+        assert_eq!(other.invoice_vat_id.as_deref(), Some("DE123456789"));
+        // A corrected address keeps it.
+        let mut moved = input("third_party");
+        moved.street = Some("Zahlweg 7".into());
+        let moved = declaration_from_input(&moved, Some(&taxed), today()).unwrap();
+        assert_eq!(moved.payment_method.as_deref(), Some("card"));
+
+        // The patient pays himself: "to the payer" is no answer any more and
+        // section 8 goes; the cabinet's save does the same.
+        let own = declaration_from_input(&input("self"), Some(&taxed), today()).unwrap();
+        assert_eq!(own.invoice_to, None);
+        assert_eq!(own.payment_method, None);
+        assert_eq!(own.invoice_vat_id.as_deref(), Some("DE123456789"));
+        let other_address = apply_billing_patch(
+            &taxed,
+            &patch(json!({ "invoice_to": "other", "invoice_name": "Beispiel GmbH" })),
+        )
+        .unwrap();
+        let own = from_portal(Some(&other_address), &portal("self")).unwrap();
+        assert_eq!(own.invoice_to.as_deref(), Some("other"));
+        assert_eq!(own.invoice_name.as_deref(), Some("Beispiel GmbH"));
+        assert_eq!(own.payment_method, None);
+        // Back to the same payer: section 8 was cleared, it does not return.
+        let again = from_portal(Some(&own), &portal_person()).unwrap();
+        assert_eq!(again.payment_method, None);
+        assert_eq!(again.invoice_to.as_deref(), Some("other"));
+    }
+
+    #[test]
+    fn the_cabinet_needs_the_invoice_recipient_and_the_route_of_whoever_answers() {
+        assert_eq!(
+            portal_missing_billing(None, PaymentRouteBy::Patient),
+            ["invoice_to", "payment_method", "via_third_party"]
+        );
+        assert_eq!(
+            portal_missing_billing(None, PaymentRouteBy::Payer),
+            ["invoice_to"]
+        );
+        let own = from_input(&input("self")).unwrap();
+        let other = apply_billing_patch(
+            &own,
+            &patch(json!({
+                "invoice_to": "other",
+                "invoice_name": "Anna Muster",
+                "payment_method": "bank_transfer",
+                "via_third_party": true
+            })),
+        )
+        .unwrap();
+        assert_eq!(
+            portal_missing_billing(Some(&other), PaymentRouteBy::Guardian),
+            [
+                "invoice_street",
+                "invoice_zip",
+                "invoice_city",
+                "invoice_country",
+                "account_country",
+                "account_holder",
+                "bank_name",
+                "via_third_party_details"
+            ]
+        );
+        let card = apply_billing_patch(
+            &other,
+            &patch(json!({
+                "invoice_to": "self",
+                "payment_method": "card",
+                "account_country": "DE",
+                "via_third_party": false
+            })),
+        )
+        .unwrap();
+        assert_eq!(
+            portal_missing_billing(Some(&card), PaymentRouteBy::Patient),
+            ["account_holder"],
+            "the bank is optional for a card"
+        );
+        let described = apply_billing_patch(
+            &card,
+            &patch(json!({ "payment_method": "other", "payment_method_details": "" })),
+        )
+        .unwrap();
+        assert_eq!(
+            portal_missing_billing(Some(&described), PaymentRouteBy::Patient),
+            ["payment_method_details"]
+        );
+        let complete =
+            apply_billing_patch(&described, &patch(json!({ "payment_method": "cash" }))).unwrap();
+        assert!(portal_missing_billing(Some(&complete), PaymentRouteBy::Patient).is_empty());
+
+        // What the cabinet and staff see of it.
+        let shown = complete.billing_portal_json(PaymentRouteBy::Patient, Some("Anna Muster"));
+        assert_eq!(shown["payer_declared"], false);
+        assert_eq!(shown["payment_route_by"], "patient");
+        assert_eq!(shown["account_holder_suggestion"], "Anna Muster");
+        assert_eq!(shown["payment_method"], "cash");
+        assert!(shown.get("invoice_vat_id").is_none());
+        let staff = complete.billing_staff_json(PaymentRouteBy::Patient);
+        assert_eq!(staff["compliance_flags"], json!(["cash_payment"]));
+        assert!(staff["invoice_vat_id"].is_null());
+        assert!(staff.get("payer_declared").is_none());
+        let empty = portal_billing_payload(None, PaymentRouteBy::Payer, None);
+        assert!(empty["invoice_to"].is_null());
+        assert_eq!(empty["payment_route_by"], "payer");
+        assert!(empty["account_holder_suggestion"].is_null());
     }
 }

@@ -260,6 +260,56 @@ export type RepresentativePatch = Partial<
 /** The two uploads of a representative: a copy of the identity document, and the proof of authority. */
 export type RepresentativeUploadKind = "identity" | "authority";
 
+/** Where the invoice goes: to the patient, to the declared payer, or to another address. */
+export type InvoiceTo = "self" | "payer" | "other";
+
+export type PaymentMethod = "bank_transfer" | "card" | "cash" | "crypto" | "other";
+
+/**
+ * Who answers how the treatment is paid (contract phase 2, D6): the patient
+ * (nobody else pays), the paying parent whose login fills in the request, or
+ * the payer, whom GMED asks on its own — the cabinet then asks nothing.
+ */
+export type PaymentRouteBy = "patient" | "guardian" | "payer";
+
+/**
+ * Invoice recipient and payment route (owner spec "Patientenformular",
+ * sections 7 and 8). Both live on the payer declaration; the server clears
+ * what does not belong to the chosen answer. Absent on an older server.
+ */
+export type LeadRequestBilling = {
+  invoice_to: InvoiceTo | null;
+  /** The address the invoice goes to; only with `other`. */
+  invoice_name: string | null;
+  invoice_street: string | null;
+  invoice_zip: string | null;
+  invoice_city: string | null;
+  invoice_country: string | null;
+  /** Only with `self` or `other`; the contact address is used when empty. */
+  invoice_email: string | null;
+  /** A third party is declared as payer: the answer `payer` is offered only then. */
+  payer_declared: boolean;
+  payment_route_by: PaymentRouteBy;
+  payment_method: PaymentMethod | null;
+  /** Only with the method `other`. */
+  payment_method_details: string | null;
+  /** The account the payment comes from; only with a bank transfer or a card. */
+  account_country: string | null;
+  account_holder: string | null;
+  bank_name: string | null;
+  /** The payment goes through a third person or a payment service provider. */
+  via_third_party: boolean | null;
+  via_third_party_details: string | null;
+  /** The name of the person who pays, offered for the account holder; `null` for `payer`. */
+  account_holder_suggestion: string | null;
+};
+
+/** The keys of the billing the cabinet writes: everything but what the server computes. */
+export type BillingKey = Exclude<keyof LeadRequestBilling, "payer_declared" | "payment_route_by" | "account_holder_suggestion">;
+
+/** Only the changed keys: `""` clears a text or a choice, `null` an answer. */
+export type BillingPatch = Partial<Record<BillingKey, string | boolean | null>>;
+
 /** One request (lead) the login fills in: its own or, as a parent, a child's. */
 export type LeadRequest = {
   lead_id: string;
@@ -280,6 +330,8 @@ export type LeadRequest = {
   identity_documents?: LeadRequestDocument[];
   /** Who acts for the lead; absent on an older server. `minor` says which of the two blocks applies. */
   representation?: LeadRequestRepresentation;
+  /** Invoice recipient and payment route; absent on an older server. */
+  billing?: LeadRequestBilling;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -392,6 +444,18 @@ export function uploadLeadRepresentativeDocument(
   return apiFetch<LeadRequest>(`${representative(leadId, representativeId)}/${kind}-document`, {
     method: "POST",
     body: form,
+  });
+}
+
+/**
+ * Saves the changed keys of the invoice recipient and the payment route. The
+ * server answers 422 `invalid_field` with the key it refuses, and 409
+ * `payment_route_by_payer` when the payment route is the payer's to answer.
+ */
+export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
+    method: "POST",
+    body: JSON.stringify(patch),
   });
 }
 

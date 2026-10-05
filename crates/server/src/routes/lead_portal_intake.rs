@@ -28,6 +28,11 @@
 //! representative or legal guardian, the parents or the guardian of a minor —
 //! is stated on the same page; that part lives in
 //! [`crate::routes::lead_representatives`], and its routes are registered here.
+//! Where the invoice goes and how the payer will pay (sections 7 and 8, phase
+//! 2, 2026-10-06) are patched into the payer declaration
+//! ([`crate::routes::lead_payer::save_billing_from_portal`]); who is asked for
+//! the payment route depends on who looks at the cabinet
+//! ([`payment_route_by`]).
 //!
 //! A login that reaches only requests is in the lead cabinet
 //! (`/me.portal_mode = "lead"`); [`lead_portal_guard`] closes the rest of the
@@ -51,7 +56,10 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
-use crate::routes::lead_payer::{self, PortalPayerError, PortalPayerInput};
+use crate::routes::lead_payer::{
+    self, PaymentRouteBy, PortalBillingError, PortalBillingPatch, PortalPayerError,
+    PortalPayerInput,
+};
 use crate::routes::lead_representatives;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -254,6 +262,10 @@ pub fn router() -> Router<AppState> {
             post(update_my_personal_data),
         )
         .route("/me/lead-requests/{lead_id}/payer", post(update_my_payer))
+        .route(
+            "/me/lead-requests/{lead_id}/billing",
+            post(update_my_billing),
+        )
         .route(
             "/me/lead-requests/{lead_id}/identification",
             post(update_my_identification),
@@ -592,6 +604,10 @@ const EDITABLE_FIELDS: [&str; 17] = [
 /// Key of the "who pays" answer in `leads.portal_field_updates`: like a
 /// personal data field it says when the patient last changed it.
 const PAYER_MARKER: &str = "payer";
+/// Key of the answers to sections 7 and 8 (invoice recipient, payment route)
+/// in `leads.portal_field_updates`; separate from [`PAYER_MARKER`], so a
+/// billing save leaves "who pays — from the patient" as it is.
+const BILLING_MARKER: &str = "billing";
 
 /// Fields counted in "N of M filled" (the middle name is optional for everyone;
 /// of the insurance block only the answer whether there is one, because the
@@ -1630,17 +1646,47 @@ impl UploadKind {
     }
 }
 
+/// Who answers section 8 (the payment route) for the one who looks at the
+/// cabinet: the patient — whoever fills the cabinet — while nobody has said
+/// who pays or the patient pays himself; the paying parent of a minor
+/// ([`lead_representatives::payer_same_person`]) when `caller` is that
+/// parent's login; any other third party answers itself and is not asked
+/// here. Without a caller (the staff view) the answer says whether the
+/// cabinet asks somebody at all: `patient` while the paying parent has a
+/// cabinet login, else `payer`.
+pub(crate) fn payment_route_by(
+    payer: Option<&lead_payer::Declaration>,
+    representation: &lead_representatives::Representation,
+    caller: Option<Uuid>,
+) -> PaymentRouteBy {
+    let Some(payer) = payer.filter(|payer| payer.is_third_party()) else {
+        return PaymentRouteBy::Patient;
+    };
+    let parent = lead_representatives::payer_same_person(representation, Some(payer))
+        .and_then(|id| representation.find(id));
+    match (parent, caller) {
+        (Some(parent), Some(caller)) if parent.login_user_ids.contains(&caller) => {
+            PaymentRouteBy::Guardian
+        }
+        (Some(parent), None) if parent.has_login() => PaymentRouteBy::Patient,
+        _ => PaymentRouteBy::Payer,
+    }
+}
+
 /// Everything still missing before the request can be sent, as the keys of
 /// `progress.missing_for_submit`: the personal data, who pays, then the
 /// statements for the identification in form order. `representation` is what
 /// [`lead_representatives::missing_for_submit`] says about who acts for the
-/// lead; the form asks it after the identity document.
+/// lead; the form asks it after the identity document. Where the invoice goes
+/// and, for whoever is asked, the payment route come after the own-interest
+/// question ([`lead_payer::portal_missing_billing`]).
 fn missing_for_submit(
     data: &PersonalData,
     payer: Option<&lead_payer::Declaration>,
     identification: &Identification,
     identity_document_uploaded: bool,
     representation: Vec<String>,
+    payment_route_by: PaymentRouteBy,
     today: NaiveDate,
 ) -> Vec<String> {
     let mut missing = data.missing_for_submit();
@@ -1654,6 +1700,7 @@ fn missing_for_submit(
     missing.extend(
         lead_payer::portal_missing_own_account(payer)
             .into_iter()
+            .chain(lead_payer::portal_missing_billing(payer, payment_route_by))
             .chain(identification.missing_legal())
             .map(str::to_string),
     );
@@ -1927,12 +1974,38 @@ pub(crate) async fn request_payload(
     let documents = uploads_of(UploadKind::Medical);
     let identity_documents = uploads_of(UploadKind::Identity);
     let today = crate::app_time::today();
+    // Who is asked for the payment route, and whose name the account holder
+    // is pre-filled with: the lead's, or the paying parent's.
+    let route_by = payment_route_by(
+        payer.as_ref(),
+        &representation.representation,
+        Some(user_id),
+    );
+    let account_holder_suggestion = match route_by {
+        PaymentRouteBy::Patient => Some(
+            [data.first_name.trim(), data.last_name.trim()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .filter(|name| !name.is_empty()),
+        PaymentRouteBy::Guardian => representation
+            .representation
+            .representatives
+            .iter()
+            .find(|person| person.login_user_ids.contains(&user_id))
+            .map(lead_representatives::Representative::name)
+            .filter(|name| !name.is_empty()),
+        PaymentRouteBy::Payer => None,
+    };
     let missing = missing_for_submit(
         &data,
         payer.as_ref(),
         &identification,
         !identity_documents.is_empty(),
         lead_representatives::missing_for_submit(&representation, today),
+        route_by,
         today,
     );
     let mut consents = Map::new();
@@ -1969,6 +2042,11 @@ pub(crate) async fn request_payload(
         },
         "payer": lead_payer::portal_payload(payer.as_ref()),
         "payer_self_template": payer_self_template,
+        "billing": lead_payer::portal_billing_payload(
+            payer.as_ref(),
+            route_by,
+            account_holder_suggestion.as_deref(),
+        ),
         "identification": identification.to_json(),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, today),
         "representation": lead_representatives::portal_payload(&representation, user_id),
@@ -2314,6 +2392,137 @@ async fn update_my_payer(
         "lead.portal_updated",
         lead_id,
         json!({ "change": "payer", "access_kind": kind.as_str() }),
+    )
+    .await;
+    match request_payload(&state, lead_id, auth.user_id, kind).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal(error, "load request"),
+    }
+}
+
+/// `POST /me/lead-requests/{lead_id}/billing`: autosave of where the invoice
+/// goes (section 7) and how the payer will pay (section 8), only the changed
+/// keys. Both land in the payer declaration; the payer of the lead's orders
+/// (the Kostenübernehmer) is not touched. A key of section 8 from a login
+/// that is not asked for it — the third party answers itself — is refused
+/// as a whole (409 `payment_route_by_payer`); without an answer who pays
+/// there is nothing to patch (409 `payer_not_declared`). The audit event
+/// names the changed fields, never their values.
+async fn update_my_billing(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<Value>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient(&auth) {
+        return response;
+    }
+    let invalid = |field: &str, message: &str| {
+        coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_field",
+            message,
+            json!({ "field": field }),
+        )
+    };
+    let patch = match PortalBillingPatch::parse(&body) {
+        Ok(patch) => patch,
+        Err(PortalBillingError::Invalid { field, message }) => return invalid(&field, message),
+        Err(_) => return invalid("body", "The body could not be read"),
+    };
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return not_found(),
+        Err(error) => return internal(error, "lock request"),
+    };
+    // Who is asked for the payment route, judged on the stored payer.
+    let payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(payer) => payer,
+        Err(error) => return internal(error, "load payer"),
+    };
+    let representation = match lead_representatives::load(&mut tx, lead_id).await {
+        Ok(representation) => representation.unwrap_or_default(),
+        Err(error) => return internal(error, "load representation"),
+    };
+    let route_by = payment_route_by(
+        payer.as_ref(),
+        &representation.representation,
+        Some(auth.user_id),
+    );
+    let saved = match lead_payer::save_billing_from_portal(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        kind.as_str(),
+        &patch,
+        route_by,
+    )
+    .await
+    {
+        Ok(saved) => saved,
+        Err(PortalBillingError::Invalid { field, message }) => return invalid(&field, message),
+        Err(PortalBillingError::RouteByPayer) => {
+            return coded(
+                StatusCode::CONFLICT,
+                "payment_route_by_payer",
+                "The payer states the payment route; the cabinet does not ask for it",
+                json!({}),
+            );
+        }
+        Err(PortalBillingError::NotDeclared) => {
+            return coded(
+                StatusCode::CONFLICT,
+                "payer_not_declared",
+                "Please answer who pays first",
+                json!({}),
+            );
+        }
+        Err(PortalBillingError::Database(error)) => return internal(error, "save billing"),
+    };
+    let Some(declaration) = saved else {
+        drop(tx);
+        return match request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal(error, "load request"),
+        };
+    };
+    let marker = json!({
+        BILLING_MARKER: {
+            "at": Utc::now(),
+            "by": auth.user_id,
+            "kind": kind.as_str(),
+            "hash": value_marker(
+                lead_id,
+                BILLING_MARKER,
+                Some(&declaration.billing_marker_value()),
+            ),
+        }
+    });
+    if let Err(error) = sqlx::query(
+        r#"UPDATE leads
+           SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(marker)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "mark billing");
+    }
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit billing");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": BILLING_MARKER, "access_kind": kind.as_str() }),
     )
     .await;
     match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -3220,6 +3429,11 @@ async fn submit_my_lead_request(
         &identification,
         identity_uploaded,
         lead_representatives::missing_for_submit(&representation, today),
+        payment_route_by(
+            payer.as_ref(),
+            &representation.representation,
+            Some(auth.user_id),
+        ),
         today,
     );
     if !missing.is_empty() {
@@ -3418,8 +3632,9 @@ async fn notify_lead_staff(state: &AppState, lead_id: Uuid, kind: &str, title: &
 /// `GET /leads/{lead_id}/portal-intake`: who fills step 1, which fields came
 /// from the patient, progress, consents, uploads and the guardian logins.
 /// Upload details only for roles with medical access; Sales sees counts. The
-/// lead's statements and who acts for the lead (`representation`) only for
-/// the roles that read the payer declaration.
+/// lead's statements, who acts for the lead (`representation`) and where the
+/// invoice goes and how the payer pays (`billing`, with the compliance flags)
+/// only for the roles that read the payer declaration.
 async fn get_lead_portal_intake(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3453,30 +3668,43 @@ async fn get_lead_portal_intake(
         .unwrap_or_else(|_| json!({}));
     // The payer stated in the cabinet, while it is still what the patient
     // entered (staff may have changed it since in the compliance step).
-    let payer_marker = {
-        let declaration = match state.db.acquire().await {
-            Ok(mut conn) => lead_payer::load_declaration(&mut conn, lead_id).await,
-            Err(error) => Err(error),
-        };
-        let declaration = match declaration {
-            Ok(declaration) => declaration,
-            Err(error) => return internal(error, "load payer"),
-        };
-        declaration.and_then(|declaration| {
-            let update = updates.get(PAYER_MARKER)?;
-            let current = value_marker(
-                lead_id,
-                PAYER_MARKER,
-                Some(&lead_payer::portal_marker_value(&declaration)),
-            );
-            (update.get("hash").and_then(Value::as_str) == Some(current.as_str())).then(|| {
-                json!({
-                    "at": update.get("at").cloned().unwrap_or(Value::Null),
-                    "access_kind": update.get("kind").cloned().unwrap_or(Value::Null),
-                })
+    let declaration = match state.db.acquire().await {
+        Ok(mut conn) => lead_payer::load_declaration(&mut conn, lead_id).await,
+        Err(error) => Err(error),
+    };
+    let declaration = match declaration {
+        Ok(declaration) => declaration,
+        Err(error) => return internal(error, "load payer"),
+    };
+    let payer_marker = declaration.as_ref().and_then(|declaration| {
+        let update = updates.get(PAYER_MARKER)?;
+        let current = value_marker(
+            lead_id,
+            PAYER_MARKER,
+            Some(&lead_payer::portal_marker_value(declaration)),
+        );
+        (update.get("hash").and_then(Value::as_str) == Some(current.as_str())).then(|| {
+            json!({
+                "at": update.get("at").cloned().unwrap_or(Value::Null),
+                "access_kind": update.get("kind").cloned().unwrap_or(Value::Null),
             })
         })
-    };
+    });
+    // When the lead last changed sections 7 and 8, while they still are what
+    // the lead entered.
+    let billing_updated_at = declaration.as_ref().and_then(|declaration| {
+        let update = updates.get(BILLING_MARKER)?;
+        let current = value_marker(
+            lead_id,
+            BILLING_MARKER,
+            Some(&declaration.billing_marker_value()),
+        );
+        if update.get("hash").and_then(Value::as_str) == Some(current.as_str()) {
+            update.get("at").cloned()
+        } else {
+            None
+        }
+    });
     let all_uploads = match sqlx::query(
         r#"SELECT u.document_id, u.kind, u.created_at, u.access_kind, u.reviewed_at,
                   d.original_filename, d.auto_name, d.signed_at,
@@ -3533,25 +3761,34 @@ async fn get_lead_portal_intake(
             })
         })
         .collect();
-    // Who acts for the lead, for the same roles as the statements.
-    let (representation, representation_updated_at) = if statements_visible {
-        let loaded = match state.db.acquire().await {
-            Ok(mut conn) => lead_representatives::load(&mut conn, lead_id).await,
-            Err(error) => Err(error),
-        };
-        match loaded {
-            Ok(loaded) => {
-                let loaded = loaded.unwrap_or_default();
-                (
-                    lead_representatives::staff_payload(&loaded),
-                    lead_representatives::updated_at(&loaded, &updates),
-                )
+    // Who acts for the lead, for the same roles as the statements; with it
+    // where the invoice goes and how the payer will pay (sections 7 and 8).
+    let (representation, representation_updated_at, billing, billing_updated_at) =
+        if statements_visible {
+            let loaded = match state.db.acquire().await {
+                Ok(mut conn) => lead_representatives::load(&mut conn, lead_id).await,
+                Err(error) => Err(error),
+            };
+            match loaded {
+                Ok(loaded) => {
+                    let loaded = loaded.unwrap_or_default();
+                    let route_by =
+                        payment_route_by(declaration.as_ref(), &loaded.representation, None);
+                    (
+                        lead_representatives::staff_payload(&loaded),
+                        lead_representatives::updated_at(&loaded, &updates),
+                        declaration
+                            .clone()
+                            .unwrap_or_default()
+                            .billing_staff_json(route_by),
+                        billing_updated_at,
+                    )
+                }
+                Err(error) => return internal(error, "load representation"),
             }
-            Err(error) => return internal(error, "load representation"),
-        }
-    } else {
-        (Value::Null, None)
-    };
+        } else {
+            (Value::Null, None, Value::Null, None)
+        };
     let consents = match sqlx::query(
         r#"SELECT c.id, c.consent_type, c.granted_at, c.revoked_at,
                   c.context->>'text_version' AS version,
@@ -3659,6 +3896,8 @@ async fn get_lead_portal_intake(
         "identity_documents": identity_documents,
         "representation": representation,
         "representation_updated_at": representation_updated_at,
+        "billing": billing,
+        "billing_updated_at": billing_updated_at,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
@@ -4398,7 +4637,9 @@ mod tests {
         data.city = Some("Berlin".into());
         data.country = Some("DE".into());
         // Who acts for the lead is asked after the identity document; the
-        // keys come from `lead_representatives::missing_for_submit`.
+        // keys come from `lead_representatives::missing_for_submit`. Where
+        // the invoice goes and the payment route come after the own-interest
+        // question (phase 2).
         let representation = || vec!["has_representative".to_string()];
         assert_eq!(
             missing_for_submit(
@@ -4407,6 +4648,7 @@ mod tests {
                 &Identification::default(),
                 false,
                 representation(),
+                PaymentRouteBy::Patient,
                 today()
             ),
             vec![
@@ -4421,6 +4663,9 @@ mod tests {
                 "id_document_upload",
                 "has_representative",
                 "payer_own_account",
+                "invoice_to",
+                "payment_method",
+                "via_third_party",
                 "pep_self",
                 "pep_related",
                 "high_risk_country",
@@ -4455,13 +4700,24 @@ mod tests {
             sanctions_links: Some(true),
             ..Default::default()
         };
+        // The third party answers the payment route itself: of the billing
+        // only where the invoice goes is asked here.
         assert_eq!(
-            missing_for_submit(&data, Some(&payer), &stated, true, Vec::new(), today()),
+            missing_for_submit(
+                &data,
+                Some(&payer),
+                &stated,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                today()
+            ),
             vec![
                 "payer_relationship_kind",
                 "payer_contact_consent",
                 "id_valid_until",
                 "payer_beneficial_owner",
+                "invoice_to",
                 "pep_self_details",
                 "high_risk_country_code",
                 "sanctions_links_details",
@@ -4481,11 +4737,127 @@ mod tests {
             beneficial_owner_name: Some("Viktor Zahler".into()),
             relationship_kind: Some("relative".into()),
             contact_consent_at: Some(Utc::now()),
+            invoice_to: Some("payer".into()),
             ..payer
         };
         assert!(
-            missing_for_submit(&data, Some(&payer), &complete, true, Vec::new(), today())
-                .is_empty()
+            missing_for_submit(
+                &data,
+                Some(&payer),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                today()
+            )
+            .is_empty()
+        );
+        // A paying parent is asked for the route like the patient.
+        assert_eq!(
+            missing_for_submit(
+                &data,
+                Some(&payer),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Guardian,
+                today()
+            ),
+            vec!["payment_method", "via_third_party"]
+        );
+    }
+
+    #[test]
+    fn the_payment_route_is_asked_of_the_patient_or_the_paying_parent() {
+        let parent_id = Uuid::new_v4();
+        let login = Uuid::new_v4();
+        let parent =
+            |email: Option<&str>, logins: Vec<Uuid>| lead_representatives::Representative {
+                id: parent_id,
+                slot: Some("rep1"),
+                role: "legal_representative",
+                relation: Some("mother".into()),
+                first_name: "Anna".into(),
+                last_name: "Muster".into(),
+                date_of_birth: NaiveDate::from_ymd_opt(1985, 3, 2),
+                email: email.map(str::to_string),
+                phone: None,
+                login_user_ids: logins,
+                has_data: false,
+                extras: Default::default(),
+            };
+        let minor = |people: Vec<lead_representatives::Representative>| {
+            lead_representatives::Representation {
+                minor: true,
+                answers: Default::default(),
+                representatives: people,
+            }
+        };
+        let anna_pays = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some("person".into()),
+            first_name: Some("Anna".into()),
+            last_name: Some("Muster".into()),
+            email: Some("Anna.Muster@example.com".into()),
+            ..Default::default()
+        };
+        let own = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Default::default()
+        };
+
+        // Nobody else pays, or nobody said who pays: whoever fills the cabinet.
+        let adult = lead_representatives::Representation::default();
+        assert_eq!(
+            payment_route_by(None, &adult, Some(login)),
+            PaymentRouteBy::Patient
+        );
+        assert_eq!(
+            payment_route_by(Some(&own), &adult, Some(login)),
+            PaymentRouteBy::Patient
+        );
+        // The paying parent with the login is asked; the other parent, an
+        // unrelated third party and a parent without a login are not.
+        let with_login = minor(vec![parent(Some("anna.muster@example.com"), vec![login])]);
+        assert_eq!(
+            payment_route_by(Some(&anna_pays), &with_login, Some(login)),
+            PaymentRouteBy::Guardian
+        );
+        assert_eq!(
+            payment_route_by(Some(&anna_pays), &with_login, Some(Uuid::new_v4())),
+            PaymentRouteBy::Payer
+        );
+        let without_login = minor(vec![parent(Some("anna.muster@example.com"), Vec::new())]);
+        assert_eq!(
+            payment_route_by(Some(&anna_pays), &without_login, Some(login)),
+            PaymentRouteBy::Payer
+        );
+        let viktor = lead_payer::Declaration {
+            first_name: Some("Viktor".into()),
+            last_name: Some("Zahler".into()),
+            email: Some("viktor.zahler@example.com".into()),
+            ..anna_pays.clone()
+        };
+        assert_eq!(
+            payment_route_by(Some(&viktor), &with_login, Some(login)),
+            PaymentRouteBy::Payer
+        );
+        // Staff: whether the cabinet asks somebody at all.
+        assert_eq!(
+            payment_route_by(Some(&anna_pays), &with_login, None),
+            PaymentRouteBy::Patient
+        );
+        assert_eq!(
+            payment_route_by(Some(&anna_pays), &without_login, None),
+            PaymentRouteBy::Payer
+        );
+        assert_eq!(
+            payment_route_by(Some(&viktor), &with_login, None),
+            PaymentRouteBy::Payer
+        );
+        assert_eq!(
+            payment_route_by(Some(&own), &with_login, None),
+            PaymentRouteBy::Patient
         );
     }
 

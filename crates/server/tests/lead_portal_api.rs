@@ -204,11 +204,25 @@ fn declared() -> Option<Value> {
     Some(json!({ "declared_correct": true }))
 }
 
+/// Where the invoice goes and how the patient pays (sections 7 and 8), as a
+/// self-paying adult answers them.
+fn complete_billing() -> Value {
+    json!({
+        "invoice_to": "self",
+        "payment_method": "bank_transfer",
+        "account_country": "DE",
+        "account_holder": "Anna Muster",
+        "bank_name": "Musterbank",
+        "via_third_party": false
+    })
+}
+
 /// Fills in everything "send to the manager" needs, as the cabinet does: the
-/// personal data, who pays (the patient, in the own interest), the statements
-/// for the identification, that nobody acts for the (adult) patient, the
-/// request consent and a copy of the identity document. Returns the request
-/// as the last save answered it.
+/// personal data, who pays (the patient, in the own interest), where the
+/// invoice goes and how the patient pays, the statements for the
+/// identification, that nobody acts for the (adult) patient, the request
+/// consent and a copy of the identity document. Returns the request as the
+/// last save answered it.
 async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &str) -> Value {
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     for (part, body) in [
@@ -228,6 +242,7 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
             "payer",
             json!({ "payer_kind": "self", "acts_on_own_account": true }),
         ),
+        ("billing", complete_billing()),
         ("identification", complete_identification()),
         (
             "representation",
@@ -688,8 +703,9 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     // Who pays (owner request 2026-10-05), the statements for the GwG
-    // identification and whether somebody acts for the patient are part of
-    // what the manager needs, in form order.
+    // identification, whether somebody acts for the patient, and where the
+    // invoice goes and how the patient pays (phase 2) are part of what the
+    // manager needs, in form order.
     let still_missing = json!([
         "payer_kind",
         "birth_place",
@@ -703,6 +719,9 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         "has_representative",
         "under_guardianship",
         "payer_own_account",
+        "invoice_to",
+        "payment_method",
+        "via_third_party",
         "pep_self",
         "pep_related",
         "high_risk_country",
@@ -753,7 +772,10 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         json!([
             "id_document_upload",
             "has_representative",
-            "under_guardianship"
+            "under_guardianship",
+            "invoice_to",
+            "payment_method",
+            "via_third_party"
         ]),
         "{body}"
     );
@@ -765,6 +787,26 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         &format!("{request}/representation"),
         &patient,
         Some(json!({ "has_representative": false, "under_guardianship": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!([
+            "id_document_upload",
+            "invoice_to",
+            "payment_method",
+            "via_third_party"
+        ]),
+        "{body}"
+    );
+    // Where the invoice goes and how the patient pays (phase 2).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/billing"),
+        &patient,
+        Some(complete_billing()),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -1222,6 +1264,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     assert!(stored["contact_consent_at"].is_string(), "{declaration}");
     let mut confirmed = stored.clone();
     confirmed["payer_informed"] = json!(true);
+    // The lead's keys of sections 7 and 8 are not staff's to send (the two
+    // tax fields are).
     for key in [
         "payer_informed_at",
         "payer_informed_by",
@@ -1230,6 +1274,20 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "patient_id",
         "created_at",
         "updated_at",
+        "invoice_to",
+        "invoice_name",
+        "invoice_street",
+        "invoice_zip",
+        "invoice_city",
+        "invoice_country",
+        "invoice_email",
+        "payment_method",
+        "payment_method_details",
+        "account_country",
+        "account_holder",
+        "bank_name",
+        "via_third_party",
+        "via_third_party_details",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }
@@ -2799,4 +2857,547 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["access_kind"], "guardian", "{body}");
     assert!(body["payer_self_template"].is_null(), "{body}");
+}
+
+/// The keys of sections 7 and 8 in `progress.missing_for_submit`.
+fn missing_for_the_billing(body: &Value) -> Vec<&str> {
+    body["progress"]["missing_for_submit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|key| {
+            key.starts_with("invoice_")
+                || key.starts_with("payment_method")
+                || key.starts_with("account_")
+                || *key == "bank_name"
+                || key.starts_with("via_third_party")
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Anna", "anna.billing@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let billing = format!("{request}/billing");
+    let payer = format!("{request}/payer");
+    let intake = format!("/api/v1/leads/{lead_id}/portal-intake");
+    let declaration = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let manager = app.staff("patient_manager");
+
+    // The request object always carries the sections; without an answer who
+    // pays the patient is asked, and nothing can be patched yet.
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["billing"],
+        json!({
+            "invoice_to": null, "invoice_name": null, "invoice_street": null, "invoice_zip": null,
+            "invoice_city": null, "invoice_country": null, "invoice_email": null,
+            "payer_declared": false,
+            "payment_route_by": "patient",
+            "payment_method": null, "payment_method_details": null, "account_country": null,
+            "account_holder": null, "bank_name": null, "via_third_party": null,
+            "via_third_party_details": null,
+            "account_holder_suggestion": "Anna Portal"
+        }),
+        "{body}"
+    );
+    assert_eq!(
+        missing_for_the_billing(&body),
+        ["invoice_to", "payment_method", "via_third_party"],
+        "{body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "invoice_to": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_declared", "{body}");
+    // Staff do not use the patient endpoint; another person's request does
+    // not exist for this login.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &billing,
+        &manager,
+        Some(json!({ "invoice_to": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (other_lead, _, _) = lead_with_login(&app, "Olga", "olga.billing@example.com").await;
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{other_lead}/billing"),
+        &patient,
+        Some(json!({ "invoice_to": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The patient pays himself: "to the payer" is no answer, the rest is.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payer_declared"], false, "{body}");
+    for (body, field) in [
+        (json!({ "invoice_to": "payer" }), "invoice_to"),
+        (json!({ "invoice_to": "somewhere" }), "invoice_to"),
+        (json!({ "invoice_country": "Germany" }), "invoice_country"),
+        (json!({ "invoice_email": "no-at-sign" }), "invoice_email"),
+        (json!({ "invoice_zip": "x".repeat(21) }), "invoice_zip"),
+        (json!({ "payment_method": "cheque" }), "payment_method"),
+        (json!({ "account_country": "Austria" }), "account_country"),
+        (json!({ "via_third_party": "yes" }), "via_third_party"),
+        (json!({ "invoice_vat_id": "DE123" }), "invoice_vat_id"),
+        (json!({ "payer_kind": "self" }), "payer_kind"),
+    ] {
+        let (status, refused) = json_request(router, "POST", &billing, &patient, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["code"], "invalid_field", "{refused}");
+        assert_eq!(refused["field"], field, "{refused}");
+    }
+    let before = audit_count(pool, "lead_portal_update_billing", lead_id).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({
+            "invoice_to": "other",
+            "invoice_name": " Anna  Muster ",
+            "invoice_street": "Musterweg 1",
+            "invoice_zip": "10115",
+            "invoice_city": "Berlin",
+            "invoice_email": "rechnung@example.com",
+            "payment_method": "bank_transfer",
+            "account_country": "de",
+            "account_holder": "Anna Muster",
+            "via_third_party": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let shown = &body["billing"];
+    assert_eq!(shown["invoice_to"], "other", "{body}");
+    assert_eq!(shown["invoice_name"], "Anna Muster", "{body}");
+    assert_eq!(shown["account_country"], "DE", "{body}");
+    assert_eq!(shown["via_third_party"], true, "{body}");
+    assert_eq!(shown["payment_route_by"], "patient", "{body}");
+    assert_eq!(
+        missing_for_the_billing(&body),
+        ["invoice_country", "bank_name", "via_third_party_details"],
+        "{body}"
+    );
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_billing", lead_id).await,
+        before + 1
+    );
+    // The audit event names the fields, never the values.
+    let (audited_by, context): (Option<Uuid>, Value) = sqlx::query_as(
+        r#"SELECT user_id, context FROM audit_log
+           WHERE action = 'lead_portal_update_billing' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited_by, Some(user_id));
+    assert_eq!(context["access_kind"], "self", "{context}");
+    assert!(
+        context["fields"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("account_holder")),
+        "{context}"
+    );
+    assert!(!context.to_string().contains("Musterweg"), "{context}");
+    // The same values again change nothing.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "invoice_to": "other", "account_country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_billing", lead_id).await,
+        before + 1
+    );
+
+    // Staff see the answers, the flags and when the lead entered them; the
+    // "who pays — from the patient" marker is untouched by it.
+    let (status, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{staff}");
+    assert_eq!(staff["patient_payer"]["access_kind"], "self", "{staff}");
+    assert!(staff["billing_updated_at"].is_string(), "{staff}");
+    let seen = &staff["billing"];
+    assert_eq!(seen["invoice_to"], "other", "{staff}");
+    assert_eq!(seen["invoice_name"], "Anna Muster", "{staff}");
+    assert_eq!(seen["invoice_email"], "rechnung@example.com", "{staff}");
+    assert_eq!(seen["payment_method"], "bank_transfer", "{staff}");
+    assert_eq!(seen["payment_route_by"], "patient", "{staff}");
+    assert_eq!(seen["compliance_flags"], json!(["third_party_payment"]));
+    assert!(seen["invoice_vat_id"].is_null(), "{staff}");
+    assert!(seen.get("payer_declared").is_none(), "{staff}");
+    assert!(seen.get("account_holder_suggestion").is_none(), "{staff}");
+    let (status, concierge) =
+        json_request(router, "GET", &intake, &app.staff("concierge"), None).await;
+    assert_eq!(status, StatusCode::OK, "{concierge}");
+    assert!(concierge["billing"].is_null(), "{concierge}");
+    assert!(concierge["billing_updated_at"].is_null(), "{concierge}");
+
+    // Cash and crypto are flagged; "to me" drops the other address and keeps
+    // the e-mail; `null` clears; "no" drops the description.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({
+            "invoice_to": "self",
+            "payment_method": "crypto",
+            "via_third_party": false,
+            "via_third_party_details": "stray text"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let shown = &body["billing"];
+    assert!(shown["invoice_name"].is_null(), "{body}");
+    assert!(shown["invoice_street"].is_null(), "{body}");
+    assert_eq!(shown["invoice_email"], "rechnung@example.com", "{body}");
+    assert!(shown["account_country"].is_null(), "{body}");
+    assert!(shown["account_holder"].is_null(), "{body}");
+    assert!(shown["via_third_party_details"].is_null(), "{body}");
+    assert!(missing_for_the_billing(&body).is_empty(), "{body}");
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(
+        staff["billing"]["compliance_flags"],
+        json!(["crypto_payment"]),
+        "{staff}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "payment_method": "cash", "invoice_email": null })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["billing"]["invoice_email"].is_null(), "{body}");
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(
+        staff["billing"]["compliance_flags"],
+        json!(["cash_payment"]),
+        "{staff}"
+    );
+
+    // Staff add the tax fields; the lead's answers survive their save, and
+    // the marker says the sections are still the lead's.
+    let (status, stored) = json_request(router, "GET", &declaration, &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    assert_eq!(stored["declaration"]["payment_method"], "cash", "{stored}");
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &declaration,
+        &manager,
+        Some(json!({
+            "payer_kind": "self",
+            "acts_on_own_account": true,
+            "source_of_funds": "savings",
+            "invoice_vat_id": " DE123456789 ",
+            "invoice_tax_number": "12/345/67890"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["invoice_to"], "self", "{saved}");
+    assert_eq!(saved["declaration"]["payment_method"], "cash", "{saved}");
+    assert_eq!(saved["declaration"]["invoice_vat_id"], "DE123456789");
+    assert_eq!(saved["declaration"]["invoice_tax_number"], "12/345/67890");
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(staff["billing"]["invoice_vat_id"], "DE123456789", "{staff}");
+    assert!(
+        staff["billing_updated_at"].is_string(),
+        "the tax fields are not the lead's: {staff}"
+    );
+    assert_eq!(staff["patient_payer"]["access_kind"], "self", "{staff}");
+
+    // A third party pays: the cabinet's answers of section 8 belonged to the
+    // patient as payer and go; where the invoice goes stays, "to the payer"
+    // is offered, and the third party answers the route itself — the lead
+    // is not asked, and may not answer for it.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "citizenships": ["AT"],
+            "relationship_kind": "friend",
+            "email": "viktor.zahler@example.com",
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let shown = &body["billing"];
+    assert_eq!(shown["invoice_to"], "self", "{body}");
+    assert_eq!(shown["payer_declared"], true, "{body}");
+    assert_eq!(shown["payment_route_by"], "payer", "{body}");
+    assert!(shown["payment_method"].is_null(), "{body}");
+    assert!(shown["via_third_party"].is_null(), "{body}");
+    assert!(shown["account_holder_suggestion"].is_null(), "{body}");
+    assert!(missing_for_the_billing(&body).is_empty(), "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "invoice_to": "payer", "payment_method": "bank_transfer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payment_route_by_payer", "{body}");
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(
+        body["billing"]["invoice_to"], "self",
+        "nothing saved: {body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "invoice_to": "payer", "invoice_email": "rechnung@example.com" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    assert!(
+        body["billing"]["invoice_email"].is_null(),
+        "the payer's own e-mail is used: {body}"
+    );
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(staff["billing"]["payment_route_by"], "payer", "{staff}");
+    assert_eq!(staff["billing"]["compliance_flags"], json!([]), "{staff}");
+    assert_eq!(staff["billing"]["invoice_vat_id"], "DE123456789", "{staff}");
+
+    // Back to "I pay myself": "to the payer" is no answer any more.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "patient", "{body}");
+    assert_eq!(
+        missing_for_the_billing(&body),
+        ["invoice_to", "payment_method", "via_third_party"],
+        "{body}"
+    );
+    let stored: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT invoice_to, payment_method, invoice_vat_id FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (None, None, Some("DE123456789".to_string())));
+}
+
+#[tokio::test]
+async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+    let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "date_of_birth": "2016-04-05",
+            "email": "mia.route@example.com",
+            "trusted_contacts": [
+                { "id": mother, "name": "Anna Muster", "relation": "mother",
+                  "email": "anna.route@example.com", "birth_date": "1985-03-02" },
+                { "id": father, "name": "Ben Muster", "relation": "father",
+                  "email": "ben.route@example.com", "birth_date": "1983-01-02" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let child: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let mut logins = Vec::new();
+    for contact in [mother, father] {
+        let (status, issued) = json_request(
+            router,
+            "POST",
+            &format!("/api/v1/leads/{child}/portal-guardians"),
+            &pm,
+            Some(json!({ "trusted_contact_id": contact })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{issued}");
+        let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+        logins.push(bearer(user, "patient"));
+    }
+    let (anna, ben) = (&logins[0], &logins[1]);
+    let request = format!("/api/v1/me/lead-requests/{child}");
+    let billing = format!("{request}/billing");
+    let intake = format!("/api/v1/leads/{child}/portal-intake");
+
+    // The mother pays (as a parent): the cabinet asks her for the route and
+    // pre-fills her name; the father is not asked and may not answer for her.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        anna,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "relationship_kind": "parent",
+            "first_name": "Anna",
+            "last_name": "Muster",
+            "date_of_birth": "1985-03-02",
+            "email": "Anna.Route@example.com",
+            "citizenships": ["DE"],
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
+    assert_eq!(body["billing"]["payer_declared"], true, "{body}");
+    assert_eq!(
+        body["billing"]["account_holder_suggestion"], "Anna Muster",
+        "{body}"
+    );
+    assert_eq!(
+        missing_for_the_billing(&body),
+        ["invoice_to", "payment_method", "via_third_party"],
+        "{body}"
+    );
+    let (status, body) = json_request(router, "GET", &request, ben, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
+    assert!(
+        body["billing"]["account_holder_suggestion"].is_null(),
+        "{body}"
+    );
+    assert_eq!(missing_for_the_billing(&body), ["invoice_to"], "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        ben,
+        Some(json!({ "via_third_party": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payment_route_by_payer", "{body}");
+    // Where the invoice goes is the request's answer: either parent.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        ben,
+        Some(json!({ "invoice_to": "payer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        anna,
+        Some(json!({
+            "payment_method": "card",
+            "account_country": "DE",
+            "account_holder": "Anna Muster",
+            "via_third_party": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
+    assert!(missing_for_the_billing(&body).is_empty(), "{body}");
+    let (_, body) = json_request(router, "GET", &request, ben, None).await;
+    assert!(missing_for_the_billing(&body).is_empty(), "{body}");
+    assert_eq!(body["billing"]["payment_method"], "card", "{body}");
+
+    // Staff: the cabinet asked the paying parent, so the answers are shown.
+    let (status, staff) = json_request(router, "GET", &intake, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{staff}");
+    assert_eq!(staff["billing"]["payment_route_by"], "patient", "{staff}");
+    assert_eq!(staff["billing"]["payment_method"], "card", "{staff}");
+    assert_eq!(staff["billing"]["account_holder"], "Anna Muster", "{staff}");
+    assert!(staff["billing_updated_at"].is_string(), "{staff}");
+
+    // The father pays instead: the route belonged to the mother and goes; the
+    // father is asked now, the mother no longer.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        ben,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "relationship_kind": "parent",
+            "first_name": "Ben",
+            "last_name": "Muster",
+            "date_of_birth": "1983-01-02",
+            "email": "ben.route@example.com",
+            "citizenships": ["DE"],
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    assert!(body["billing"]["payment_method"].is_null(), "{body}");
+    assert_eq!(
+        body["billing"]["account_holder_suggestion"], "Ben Muster",
+        "{body}"
+    );
+    let (_, body) = json_request(router, "GET", &request, anna, None).await;
+    assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
 }

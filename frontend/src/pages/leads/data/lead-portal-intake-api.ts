@@ -1,5 +1,7 @@
 import { apiFetch } from "@/lib/api";
 
+import { INVOICE_TO_VALUES, PAYMENT_METHODS, type InvoiceTo, type PaymentMethod } from "../model/lead-payer";
+
 export type Step1FillMode = "staff" | "patient";
 
 /** A step-1 field whose current value the patient entered in the portal. */
@@ -153,6 +155,60 @@ export type LeadRepresentation = {
   representatives: LeadRepresentative[];
 };
 
+/**
+ * Who answers section 8 (payment route) of the form, as the server computes
+ * it for the staff view: `patient` while the patient pays (the lead or a
+ * parent answers in the cabinet), `payer` for any third party (the payer is
+ * asked through an own link; the keys stay empty until then).
+ */
+export type LeadPaymentRouteBy = "patient" | "payer";
+
+/**
+ * What the server flags for a compliance check from the payment route:
+ * cash, crypto, another method, or a payment through a third person or a
+ * payment service provider. Shown amber; staff decide.
+ */
+export const LEAD_COMPLIANCE_FLAGS = ["cash_payment", "crypto_payment", "other_method", "third_party_payment"] as const;
+
+export type LeadComplianceFlag = (typeof LEAD_COMPLIANCE_FLAGS)[number];
+
+/**
+ * Sections 7 (invoice recipient) and 8 (payment route) of the GwG form as the
+ * lead answered them in the cabinet, plus the two staff fields of the payer
+ * declaration (USt-IdNr., Steuernummer) and the compliance flags the server
+ * derives. Staff read the answers; they edit only the two staff fields, in
+ * the payer section.
+ */
+export type LeadPortalBilling = {
+  /** `self`, `payer` or `other`; null while the lead has not answered. */
+  invoice_to: InvoiceTo | null;
+  /** Name and address on the invoice; only with `other`. */
+  invoice_name: string | null;
+  invoice_street: string | null;
+  invoice_zip: string | null;
+  invoice_city: string | null;
+  /** ISO 3166-1 alpha-2. */
+  invoice_country: string | null;
+  /** E-mail for invoices; only with `self` or `other`. */
+  invoice_email: string | null;
+  /** Staff fields of the payer declaration. */
+  invoice_vat_id: string | null;
+  invoice_tax_number: string | null;
+  payment_route_by: LeadPaymentRouteBy;
+  /** `bank_transfer`, `card`, `cash`, `crypto` or `other`; null while unanswered. */
+  payment_method: PaymentMethod | null;
+  /** Only with `other`. */
+  payment_method_details: string | null;
+  /** ISO code; only with `bank_transfer` or `card`. */
+  account_country: string | null;
+  account_holder: string | null;
+  bank_name: string | null;
+  /** Payment through a third person or a payment service provider; null while unanswered. */
+  via_third_party: boolean | null;
+  via_third_party_details: string | null;
+  compliance_flags: LeadComplianceFlag[];
+};
+
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
 export type LeadPortalIntake = {
   lead_id: string;
@@ -186,6 +242,14 @@ export type LeadPortalIntake = {
   representation: LeadRepresentation | null;
   /** Last change of the representation by the lead or a parent; null when nothing was entered. */
   representation_updated_at: string | null;
+  /**
+   * Invoice recipient and payment route (sections 7–8 of the form); null when
+   * the server does not send them (an older backend, or a role that may not
+   * read the payer block).
+   */
+  billing: LeadPortalBilling | null;
+  /** Last change of sections 7–8 by the lead while nobody changed the stored answers since. */
+  billing_updated_at: string | null;
 };
 
 export type LeadGuardianAccessIssued = {
@@ -233,6 +297,8 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     identity_documents: normalizeIdentityDocuments(raw.identity_documents),
     representation: normalizeLeadRepresentation(raw.representation),
     representation_updated_at: textOrNull(raw.representation_updated_at),
+    billing: normalizeLeadPortalBilling(raw.billing),
+    billing_updated_at: textOrNull(raw.billing_updated_at),
   };
 }
 
@@ -346,6 +412,37 @@ export function normalizeLeadRepresentation(value: unknown): LeadRepresentation 
           return representative ? [representative] : [];
         })
       : [],
+  };
+}
+
+/**
+ * Sections 7–8 with every key present; null when the server sent none (an
+ * older backend, or a role that may not read them). An unknown enum value
+ * reads as "not answered"; an unknown flag is dropped.
+ */
+export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const flags: unknown[] = Array.isArray(raw.compliance_flags) ? raw.compliance_flags : [];
+  return {
+    invoice_to: INVOICE_TO_VALUES.find((item) => item === raw.invoice_to) ?? null,
+    invoice_name: textOrNull(raw.invoice_name),
+    invoice_street: textOrNull(raw.invoice_street),
+    invoice_zip: textOrNull(raw.invoice_zip),
+    invoice_city: textOrNull(raw.invoice_city),
+    invoice_country: textOrNull(raw.invoice_country),
+    invoice_email: textOrNull(raw.invoice_email),
+    invoice_vat_id: textOrNull(raw.invoice_vat_id),
+    invoice_tax_number: textOrNull(raw.invoice_tax_number),
+    payment_route_by: raw.payment_route_by === "payer" ? "payer" : "patient",
+    payment_method: PAYMENT_METHODS.find((item) => item === raw.payment_method) ?? null,
+    payment_method_details: textOrNull(raw.payment_method_details),
+    account_country: textOrNull(raw.account_country),
+    account_holder: textOrNull(raw.account_holder),
+    bank_name: textOrNull(raw.bank_name),
+    via_third_party: answerOrNull(raw.via_third_party),
+    via_third_party_details: textOrNull(raw.via_third_party_details),
+    compliance_flags: LEAD_COMPLIANCE_FLAGS.filter((flag) => flags.includes(flag)),
   };
 }
 

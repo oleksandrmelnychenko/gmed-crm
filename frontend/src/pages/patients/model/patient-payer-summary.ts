@@ -6,7 +6,10 @@
  * computed by `GET /patients/{id}/payer-summary`; the card is read-only — the
  * declaration itself is edited in the lead wizard, the payer of an order or
  * an invoice there. No GwG answer (own account, beneficial owner, source of
- * funds, citizenships, date of birth) is part of the answer.
+ * funds, citizenships, date of birth) is part of the answer; of the form's
+ * sections 7–8 the card shows where the invoice goes and USt-IdNr. /
+ * Steuernummer (billing data), never the payment route (compliance evidence,
+ * which stays in the wizard).
  */
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { ApiRequestError } from "@/lib/api";
@@ -22,17 +25,21 @@ import {
   type LeadIdentificationStatus,
 } from "@/pages/leads/model/lead-identification";
 import {
+  INVOICE_TO_VALUES,
   PAYER_RELATIONSHIP_KINDS,
   PAYER_TYPES,
+  invoiceTaxLine,
+  invoiceToLabel,
   payerRelationshipKindLabel,
   payerTypeLabel,
+  type InvoiceTo,
   type PayerKind,
   type PayerRelationshipKind,
   type PayerType,
   type Tx,
 } from "@/pages/leads/model/lead-payer";
 
-export type { Tx };
+export type { InvoiceTo, Tx };
 
 /** The lead whose declaration counts: the most recently converted one. */
 export type PatientPayerSource = {
@@ -65,6 +72,24 @@ export type PatientPayerDeclaration = {
   contact_consent_at: string | null;
   /** When the payer was informed about the processing of their data (Art. 14 DSGVO). */
   payer_informed_at: string | null;
+  /**
+   * Section 7 of the form, where the invoice goes as the lead chose it:
+   * `self`, `payer` or `other`; null while unanswered; absent (undefined) on
+   * a server that does not send section 7 — the card shows no line then.
+   * The payment route (section 8) is never part of the answer.
+   */
+  invoice_to?: InvoiceTo | null;
+  /** Name and address on the invoice; only with `other`. */
+  invoice_name: string | null;
+  invoice_street: string | null;
+  invoice_zip: string | null;
+  invoice_city: string | null;
+  invoice_country: string | null;
+  /** E-mail for invoices; with `self` or `other`. */
+  invoice_email: string | null;
+  /** The staff fields of section 7. */
+  invoice_vat_id: string | null;
+  invoice_tax_number: string | null;
 };
 
 export type ContractingPartyRepresentative = {
@@ -94,6 +119,7 @@ export const INVOICE_RECIPIENT_SOURCES = [
   "order",
   "default_payer",
   "payer_declaration",
+  "invoice_address",
   "contracting_party",
   "none",
 ] as const;
@@ -103,6 +129,7 @@ export type InvoiceRecipientSource = (typeof INVOICE_RECIPIENT_SOURCES)[number];
 /** Who an invoice of the patient would be addressed to today. */
 export type PatientInvoiceRecipient = {
   source: InvoiceRecipientSource;
+  /** `contracting_party`, `cost_bearer`, `invoice_address` (the party at another address) or null. */
   role: string | null;
   /** `patient`, `relation`, `payer_patient` or `contact`. */
   kind: string | null;
@@ -163,6 +190,10 @@ function isRecipientSource(value: unknown): value is InvoiceRecipientSource {
   return (INVOICE_RECIPIENT_SOURCES as readonly unknown[]).includes(value);
 }
 
+function isInvoiceTo(value: unknown): value is InvoiceTo {
+  return (INVOICE_TO_VALUES as readonly unknown[]).includes(value);
+}
+
 function normalizeSource(value: unknown): PatientPayerSource | null {
   const record = asRecord(value);
   const leadId = text(record?.lead_id);
@@ -199,6 +230,16 @@ function normalizeDeclaration(value: unknown): PatientPayerDeclaration | null {
     phone: thirdParty ? text(record.phone) : null,
     contact_consent_at: thirdParty ? text(record.contact_consent_at) : null,
     payer_informed_at: thirdParty ? text(record.payer_informed_at) : null,
+    // Section 7 applies to a self-payer as well; a server without it sends no key.
+    ...(Object.hasOwn(record, "invoice_to") ? { invoice_to: isInvoiceTo(record.invoice_to) ? record.invoice_to : null } : {}),
+    invoice_name: text(record.invoice_name),
+    invoice_street: text(record.invoice_street),
+    invoice_zip: text(record.invoice_zip),
+    invoice_city: text(record.invoice_city),
+    invoice_country: text(record.invoice_country),
+    invoice_email: text(record.invoice_email),
+    invoice_vat_id: text(record.invoice_vat_id),
+    invoice_tax_number: text(record.invoice_tax_number),
   };
 }
 
@@ -365,6 +406,53 @@ export function payerInformedLabel(declaration: PatientPayerDeclaration, tx: Tx)
   return day ? `${tx("да", "ja")}, ${day}` : tx("нет", "nein");
 }
 
+/**
+ * The line "Счёт направляется" (section 7): where the invoice goes as the
+ * lead chose it and, for another address, the name and the address the lead
+ * gave; the e-mail for invoices when given (not used by the invoice itself).
+ */
+export type InvoiceToStatement = {
+  /** "пациенту", "плательщику", "по другому адресу" or "не указано". */
+  label: string;
+  /** Only with `other`. */
+  name: string | null;
+  /** "street, zip city, country name"; only with `other` and a part at hand. */
+  address: string | null;
+  email: string | null;
+};
+
+/** `null` when the server does not send section 7 (an older backend). */
+export function invoiceToStatement(
+  declaration: PatientPayerDeclaration | null | undefined,
+  tx: Tx,
+  lang: string,
+): InvoiceToStatement | null {
+  if (!declaration || declaration.invoice_to === undefined) return null;
+  const other = declaration.invoice_to === "other";
+  const address = other
+    ? postalAddressLine(
+        {
+          street: declaration.invoice_street,
+          zip: declaration.invoice_zip,
+          city: declaration.invoice_city,
+          country: declaration.invoice_country,
+        },
+        lang,
+      )
+    : "—";
+  return {
+    label: invoiceToLabel(declaration.invoice_to, tx),
+    name: other ? declaration.invoice_name : null,
+    address: address === "—" ? null : address,
+    email: declaration.invoice_to === "payer" ? null : declaration.invoice_email,
+  };
+}
+
+/** "USt-IdNr. DE123456789 · Steuernummer 12/345/67890"; `null` while neither is set. */
+export function invoiceTaxStatement(declaration: PatientPayerDeclaration | null | undefined): string | null {
+  return invoiceTaxLine(declaration) || null;
+}
+
 /** Whether the contracting party is the legal representatives of a minor. */
 export function contractingPartyIsRepresentatives(party: PatientContractingParty): boolean {
   return party.kind === "legal_representatives";
@@ -383,11 +471,17 @@ export function contractingPartyLabel(party: PatientContractingParty, tx: Tx): s
   return `${tx("Законные представители: ", "Gesetzliche Vertreter: ")}${names}`;
 }
 
-/** The muted note under the invoice recipient: where the recipient comes from. */
+/**
+ * The muted note under the invoice recipient: where the recipient comes
+ * from. An `invoice_address` is the party at another address the lead gave
+ * in section 7 — not a Kostenübernehmer, so the note never calls it one.
+ */
 export function invoiceRecipientSourceNote(source: InvoiceRecipientSource, tx: Tx): string {
   switch (source) {
     case "payer_declaration":
       return tx("по декларации плательщика", "laut Zahlererklärung");
+    case "invoice_address":
+      return tx("адрес для счетов по декларации", "Rechnungsanschrift laut Erklärung");
     case "default_payer":
       return tx("плательщик по умолчанию", "Standardzahler");
     case "contracting_party":

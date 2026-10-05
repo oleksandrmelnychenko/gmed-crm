@@ -17,7 +17,13 @@
 //! a patient may have several converted leads, and the evidence of a
 //! converted lead lives among the patient's documents. The GwG answers (own
 //! account, beneficial owner, source of funds, citizenships, date and place of
-//! birth) are returned to nobody; they stay in the lead wizard.
+//! birth) are returned to nobody; they stay in the lead wizard. Of the
+//! lead's form the card shows section 7 — where the invoice goes, the other
+//! address, the e-mail for invoices, the USt-IdNr. and Steuernummer staff
+//! added (`Declaration::billing_json`) — to every viewer of the card; the
+//! payment route (section 8) is compliance evidence and never part of the
+//! answer. The recipient's `source` and `role` may read `invoice_address`:
+//! the party at the other address the lead named.
 //!
 //! Access: `invoices.view` and access to the patient's financials
 //! ([`patient_financials::ensure_patient_access`]); `identification` only for

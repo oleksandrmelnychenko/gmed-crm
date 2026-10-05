@@ -72,6 +72,7 @@ import {
   type RequestQueue,
   type Step,
 } from "./lead-request-parts";
+import { BillingSections } from "./lead-request-billing";
 import { PayerSection } from "./lead-request-payer-section";
 import { RepresentationSection } from "./lead-request-representation";
 import { SendStep } from "./lead-request-send-step";
@@ -389,12 +390,13 @@ function LeadRequestView({
 }
 
 /** The parts of step "data" that save on their own; the footer shows one state for all. */
-type SavePart = "personal" | "payer" | "identification" | "representation";
+type SavePart = "personal" | "payer" | "identification" | "representation" | "billing";
 
 /**
  * Step "data" in the order of the GwG form (owner spec 2026-10-05): consent
  * and contact channels, person, address, contact, identity document, who acts
- * for the lead, insurance, who pays, legal questions.
+ * for the lead, insurance, who pays, invoice recipient and payment route,
+ * legal questions.
  */
 function PersonalDataStep({
   request,
@@ -420,6 +422,7 @@ function PersonalDataStep({
     payer: "idle",
     identification: "idle",
     representation: "idle",
+    billing: "idle",
   });
   const [fieldError, setFieldError] = useState<{ field: string; message: string } | null>(null);
   const guardian = request.access_kind === "guardian";
@@ -436,6 +439,7 @@ function PersonalDataStep({
     (state: SaveState) => setSaveState("representation", state),
     [setSaveState],
   );
+  const setBillingSaveState = useCallback((state: SaveState) => setSaveState("billing", state), [setSaveState]);
 
   const save = useCallback(
     (snapshot: PersonalDraft) => {
@@ -811,6 +815,19 @@ function PersonalDataStep({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={setPayerSaveState}
+        />
+      ) : null}
+
+      {/* Invoice recipient and payment route; an older server does not know them. */}
+      {request.billing ? (
+        <BillingSections
+          request={request}
+          billing={request.billing}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={setBillingSaveState}
         />
       ) : null}
 
