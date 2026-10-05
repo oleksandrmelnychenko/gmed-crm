@@ -1,4 +1,4 @@
-import { AlertTriangle, Mail } from "lucide-react";
+import { AlertTriangle, ChevronRight, Mail } from "lucide-react";
 import type { ReactNode } from "react";
 
 import {
@@ -161,10 +161,30 @@ export function patientColumnGroupLabels(
   );
 }
 
+/** The chevron that opens a patient's login row (like the leads table). */
+export type PatientRowExpansion = {
+  isExpanded: (patientId: string) => boolean;
+  toggle: (patientId: string) => void;
+  lang: string;
+};
+
+const PORTAL_STATUS_DOT: Record<string, string> = {
+  disabled: "bg-rose-500",
+  never_logged_in: "bg-amber-400",
+  active: "bg-emerald-500",
+};
+
+function portalDotState(patient: PatientSummary): string | null {
+  const account = patient.portal_account;
+  if (!account) return null;
+  if (!account.is_active) return "disabled";
+  return account.last_login_at ? "active" : "never_logged_in";
+}
+
 export function buildPatientColumns(
   tr: PatientColumnTranslations,
   rows: readonly PatientSummary[] = [],
-  options: { showBalance?: boolean } = {},
+  options: { showBalance?: boolean; expansion?: PatientRowExpansion } = {},
 ): ColumnDef<PatientSummary>[] {
   const dyn = deriveDynamicOptions(rows);
 
@@ -214,13 +234,45 @@ export function buildPatientColumns(
       align: "left",
       cellClassName: "min-w-0 whitespace-normal text-left",
       group: "identity",
-      render: (p: PatientSummary) => (
-        <div className="flex h-full min-w-0 items-center justify-start overflow-hidden">
-          <div className="line-clamp-2 min-w-0 break-words text-left font-mono text-xs font-normal text-foreground">
-            {patientDisplayName(p)}
+      render: (p: PatientSummary) => {
+        // The login row is offered to the roles that receive the login state.
+        const expansion = p.portal_account !== undefined ? options.expansion : undefined;
+        const expanded = expansion?.isExpanded(p.id) ?? false;
+        const de = expansion?.lang === "de";
+        const dot = portalDotState(p);
+        return (
+          <div className="flex h-full min-w-0 items-center justify-start gap-1 overflow-hidden">
+            {expansion ? (
+              <button
+                type="button"
+                className="flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-expanded={expanded}
+                aria-label={
+                  de
+                    ? expanded ? "Portalzugang ausblenden" : "Portalzugang anzeigen"
+                    : expanded ? "Скрыть доступ пациента" : "Показать доступ пациента"
+                }
+                data-testid={`patient-expand-${p.id}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  expansion.toggle(p.id);
+                }}
+              >
+                <ChevronRight
+                  className={cn("size-3.5 transition-transform", expanded && "rotate-90")}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
+            <div className="line-clamp-2 min-w-0 break-words text-left font-mono text-xs font-normal text-foreground">
+              {patientDisplayName(p)}
+            </div>
+            {dot ? (
+              <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", PORTAL_STATUS_DOT[dot])} />
+            ) : null}
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       id: "functional_labels",

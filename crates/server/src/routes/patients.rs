@@ -2403,7 +2403,13 @@ async fn list_patients(
         }
     }
 
-    let rows = sqlx::query(
+    // The login row and the subscription are shown to the roles that manage
+    // patient access (owner request 2026-10-05).
+    let include_portal_access = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager
+    );
+    let list_sql = format!(
         r#"WITH source_allocations AS (
                SELECT allocation.advance_invoice_id,
                       COALESCE(SUM(allocation.amount_gross), 0) AS allocated
@@ -2519,9 +2525,29 @@ async fn list_patients(
                        WHEN COALESCE(financial.account_balance, 0) > 0 THEN 'debit'
                        WHEN COALESCE(financial.account_balance, 0) < 0 THEN 'credit'
                        ELSE 'settled'
-                   END AS account_balance_side
+                   END AS account_balance_side,
+                   portal.id AS portal_user_id,
+                   portal.email AS portal_email,
+                   portal.is_active AS portal_active,
+                   portal.password_reset_required AS portal_password_change_pending,
+                   portal.last_login_at AS portal_last_login_at,
+                   portal.login_emailed_at AS portal_login_emailed_at,
+                   subscription.package_key AS subscription_package_key,
+                   subscription.name AS subscription_name,
+                   subscription.status AS subscription_status,
+                   subscription.starts_on AS subscription_starts_on,
+                   subscription.ends_on AS subscription_ends_on
            FROM patients p
            LEFT JOIN financial_positions financial ON financial.patient_id = p.id
+           LEFT JOIN LATERAL ({login_sql}) portal ON true
+           LEFT JOIN LATERAL (
+               SELECT sp.package_key, sp.name, psp.status, psp.starts_on, psp.ends_on
+               FROM patient_service_packages psp
+               JOIN service_packages sp ON sp.id = psp.package_id
+               WHERE psp.patient_id = p.id AND psp.status IN ('active', 'paused', 'draft')
+               ORDER BY (psp.status = 'active') DESC, psp.assigned_at DESC
+               LIMIT 1
+           ) subscription ON true
            WHERE (
                 ($5::text IS NOT NULL AND p.lifecycle_status = $5)
                 OR (
@@ -2587,20 +2613,22 @@ async fn list_patients(
              )
            ORDER BY p.created_at DESC
            LIMIT 100"#,
-    )
-    .bind(active_only)
-    .bind(search_pattern)
-    .bind(provider_id)
-    .bind(doctor_id)
-    .bind(lifecycle)
-    .bind(include_financial_balance)
-    .bind(requires_patient_assignment)
-    .bind(&baseline_patient_ids)
-    .bind(&allowed_record_ids)
-    .bind(&record_rule_ids)
-    .bind(all_view_decision)
-    .fetch_all(&state.db)
-    .await;
+        login_sql = crate::routes::patient_portal_access::PATIENT_PORTAL_LOGIN_SQL,
+    );
+    let rows = sqlx::query(&list_sql)
+        .bind(active_only)
+        .bind(search_pattern)
+        .bind(provider_id)
+        .bind(doctor_id)
+        .bind(lifecycle)
+        .bind(include_financial_balance)
+        .bind(requires_patient_assignment)
+        .bind(&baseline_patient_ids)
+        .bind(&allowed_record_ids)
+        .bind(&record_rule_ids)
+        .bind(all_view_decision)
+        .fetch_all(&state.db)
+        .await;
 
     match rows {
         Ok(rows) => {
@@ -2623,7 +2651,7 @@ async fn list_patients(
                     continue;
                 }
 
-                patients.push(build_patient_summary_json(
+                let mut summary = build_patient_summary_json(
                     &auth,
                     &policies,
                     PatientSummaryInput {
@@ -2668,7 +2696,15 @@ async fn list_patients(
                             )
                         })?,
                     },
-                ));
+                );
+                if include_portal_access && let Value::Object(map) = &mut summary {
+                    map.insert(
+                        "portal_account".to_string(),
+                        patient_portal_account_summary(&r),
+                    );
+                    map.insert("subscription".to_string(), patient_subscription_summary(&r));
+                }
+                patients.push(summary);
             }
             Ok(Json(patients))
         }
@@ -10911,6 +10947,66 @@ struct PatientDetailInput {
     lifecycle_status: String,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The patient's portal login in the list (`null` without one), like the
+/// login row of the leads table.
+fn patient_portal_account_summary(row: &PgRow) -> Value {
+    match row
+        .try_get::<Option<Uuid>, _>("portal_user_id")
+        .ok()
+        .flatten()
+    {
+        Some(user_id) => json!({
+            "user_id": user_id,
+            "email": row.try_get::<Option<String>, _>("portal_email").ok().flatten(),
+            "is_active": row
+                .try_get::<Option<bool>, _>("portal_active")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            "password_change_pending": row
+                .try_get::<Option<bool>, _>("portal_password_change_pending")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            "last_login_at": row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_last_login_at")
+                .ok()
+                .flatten(),
+            "login_emailed_at": row
+                .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_login_emailed_at")
+                .ok()
+                .flatten(),
+        }),
+        None => Value::Null,
+    }
+}
+
+/// The patient's current subscription — the account type (owner request
+/// 2026-10-05): GMED One, GMED Reserve or the organisation of a treatment.
+fn patient_subscription_summary(row: &PgRow) -> Value {
+    match row
+        .try_get::<Option<String>, _>("subscription_package_key")
+        .ok()
+        .flatten()
+    {
+        Some(package_key) => json!({
+            "kind": crate::routes::service_packages::subscription_kind(&package_key),
+            "package_key": package_key,
+            "name": row.try_get::<Option<String>, _>("subscription_name").ok().flatten(),
+            "status": row.try_get::<Option<String>, _>("subscription_status").ok().flatten(),
+            "starts_on": row
+                .try_get::<Option<chrono::NaiveDate>, _>("subscription_starts_on")
+                .ok()
+                .flatten(),
+            "ends_on": row
+                .try_get::<Option<chrono::NaiveDate>, _>("subscription_ends_on")
+                .ok()
+                .flatten(),
+        }),
+        None => Value::Null,
+    }
 }
 
 fn build_patient_summary_json(

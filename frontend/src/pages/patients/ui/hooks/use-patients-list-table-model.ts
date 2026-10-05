@@ -5,12 +5,13 @@ import { buildSearchIndex, searchWithIndex } from "@/components/data-table/searc
 import { applySort } from "@/components/data-table/sort-logic";
 import type { ColumnDef, FilterPredicate, SortStack } from "@/components/data-table/types";
 
-import { buildPatientColumns } from "../patients-columns";
+import { buildPatientColumns, type PatientRowExpansion } from "../patients-columns";
 import type { PatientSummary } from "../../model/list-model";
 
 type UsePatientsListTableModelArgs = {
   canViewFinancialBalance: boolean;
   deferredSearch: string;
+  expansion?: PatientRowExpansion;
   filterPredicates: FilterPredicate[];
   frozenColumns: string[];
   patients: PatientSummary[];
@@ -28,6 +29,7 @@ type PatientsMetrics = {
 export function usePatientsListTableModel({
   canViewFinancialBalance,
   deferredSearch,
+  expansion,
   filterPredicates,
   frozenColumns,
   patients,
@@ -48,8 +50,8 @@ export function usePatientsListTableModel({
   }, [patients]);
 
   const baseColumns = useMemo(
-    () => buildPatientColumns(tr, patients, { showBalance: canViewFinancialBalance }),
-    [canViewFinancialBalance, tr, patients],
+    () => buildPatientColumns(tr, patients, { showBalance: canViewFinancialBalance, expansion }),
+    [canViewFinancialBalance, expansion, tr, patients],
   );
 
   const columns = useMemo(() => {

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, type ReactNode } from "react";
 
 import { DataTable } from "@/components/data-table/data-table";
 import { SplitView } from "@/components/data-table/split-view";
@@ -35,6 +35,8 @@ type PatientsTableSurfaceProps = {
   onOpenPatient: (patientId: string) => void;
   onSortChange: (value: SortStack) => void;
   rows: PatientSummary[];
+  /** The expanded login row of a patient, if open. */
+  renderRowDetail?: (row: PatientSummary) => ReactNode | null;
   selectedId: string;
   sortStack: SortStack;
   t: Record<string, string>;
@@ -59,6 +61,7 @@ export function PatientsTableSurface({
   onOpenPatient,
   onSortChange,
   rows,
+  renderRowDetail,
   selectedId,
   sortStack,
   t,
@@ -115,6 +118,7 @@ export function PatientsTableSurface({
         }}
         density={density}
         rowId={(patient) => patient.id}
+        renderRowDetail={renderRowDetail}
         activeRowId={selectedId}
         onRowClick={(patient) => onOpenPatient(patient.id)}
         loading={loading}

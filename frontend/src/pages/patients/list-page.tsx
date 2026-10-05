@@ -1,6 +1,7 @@
 import {
   lazy,
   Suspense,
+  useCallback,
   useMemo,
   useState,
 } from "react";
@@ -33,6 +34,7 @@ import {
   collectPatientInsuranceTypeOptions,
   filterPatientsByInsuranceType,
   patientPermissions,
+  type PatientSummary,
 } from "./model/list-model";
 import { usePatientDetailSheetData } from "./data/use-patient-detail-sheet-data";
 import { usePatientsListData } from "./data/use-patients-list-data";
@@ -41,6 +43,8 @@ import { usePatientsListTableModel } from "./ui/hooks/use-patients-list-table-mo
 import { usePatientsListViewState } from "./ui/hooks/use-patients-list-view-state";
 import { PatientsListToolbar } from "./ui/list/patients-list-toolbar";
 import { PatientsTableSurface } from "./ui/list/patients-table-surface";
+import { PatientPortalAccessDetail } from "./ui/list/patient-portal-access";
+import { canIssueLeadPortalPassword } from "@/pages/leads/model/lead-portal-access";
 import { useProviderTaxonomyNodes } from "@/pages/providers/data/use-provider-taxonomy-nodes";
 
 const loadCreatePatientSheet = () => import("./ui/sheets/create-patient-sheet");
@@ -200,7 +204,7 @@ function PatientsPageSheets({
 
 function PatientsPageContent() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string> & { uiText?: Record<string, string> };
   const { staffGo } = useStaffNavigate();
   const permissions = useMemo(() => patientPermissions(user), [user]);
@@ -273,9 +277,42 @@ function PatientsPageContent() {
     () => staff.filter((member) => canAssignTarget(user?.role, member.role)),
     [staff, user?.role]
   );
+  // Rows opened with the chevron before the name show the patient's login
+  // and account type (owner request 2026-10-05).
+  const [expandedPatientIds, setExpandedPatientIds] = useState<ReadonlySet<string>>(() => new Set());
+  const togglePatientExpanded = useCallback((patientId: string) => {
+    setExpandedPatientIds((current) => {
+      const next = new Set(current);
+      if (next.has(patientId)) next.delete(patientId);
+      else next.add(patientId);
+      return next;
+    });
+  }, []);
+  const rowExpansion = useMemo(
+    () => ({
+      isExpanded: (patientId: string) => expandedPatientIds.has(patientId),
+      toggle: togglePatientExpanded,
+      lang,
+    }),
+    [expandedPatientIds, lang, togglePatientExpanded],
+  );
+  const canIssuePortalPassword = canIssueLeadPortalPassword(user?.role);
+  const renderPatientRowDetail = useCallback(
+    (row: PatientSummary) =>
+      expandedPatientIds.has(row.id) && row.portal_account !== undefined ? (
+        <PatientPortalAccessDetail
+          patient={row}
+          lang={lang}
+          canIssue={canIssuePortalPassword}
+          onChanged={refreshList}
+        />
+      ) : null,
+    [canIssuePortalPassword, expandedPatientIds, lang, refreshList],
+  );
   const { columns, sortedAndFilteredPatients } = usePatientsListTableModel({
     canViewFinancialBalance: permissions.canViewFinancialBalance,
     deferredSearch,
+    expansion: rowExpansion,
     filterPredicates,
     frozenColumns,
     patients,
@@ -469,6 +506,7 @@ function PatientsPageContent() {
 
         <PatientsTableSurface
           columns={columns}
+          renderRowDetail={renderPatientRowDetail}
           density={density}
           detailOpen={detailOpen}
           detailPaneProps={{

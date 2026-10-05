@@ -616,4 +616,68 @@ test.describe("patients data-table", () => {
     await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
     await expect(patientGrid(page).getByText("PT-0001")).not.toBeVisible();
   });
+
+  test("a patient row shows the login and the account type and issues a new password", async ({ page }) => {
+    const anna = {
+      ...patients[0],
+      portal_account: {
+        user_id: "user-anna",
+        email: "anna@example.com",
+        is_active: true,
+        password_change_pending: false,
+        last_login_at: "2026-10-04T08:30:00Z",
+        login_emailed_at: null,
+      },
+      subscription: {
+        kind: "gmed_reserve",
+        package_key: "gmed_reserve_programm_35to49_1",
+        name: "GMED Reserve Membership Programm (35 to 49 y.o.)",
+        status: "active",
+        starts_on: "2026-10-01",
+        ends_on: "2027-09-30",
+      },
+    };
+    const issued: string[] = [];
+    await page.route((url) => url.pathname === "/api/v1/patients", (route) => json(route, [anna, patients[1]]));
+    await page.route(
+      (url) => url.pathname === `/api/v1/patients/${anna.id}/portal-login-email`,
+      (route) => json(route, {
+        available: false,
+        reason_code: "mittaro_api_key_missing",
+        can_send: true,
+        default_language: "de",
+        lead_language: "de",
+        sent: [],
+      }),
+    );
+    await page.route(
+      (url) => url.pathname === `/api/v1/patients/${anna.id}/portal-account`,
+      (route) => {
+        issued.push(route.request().method());
+        return json(route, {
+          user_id: "user-anna",
+          email: "anna@example.com",
+          created: false,
+          one_time_password: "Kq7-mP2x-Rw9t",
+        });
+      },
+    );
+    await openPatientsAsCeo(page);
+
+    await patientGrid(page).getByTestId(`patient-expand-${anna.id}`).click();
+    const row = page.getByTestId("patient-portal-access").first();
+    await expect(row).toBeVisible();
+    await expect(row.getByTestId("patient-account-type")).toContainText("GMED Reserve");
+    await expect(row.getByTestId("patient-account-type")).toContainText("30.09.2027");
+    await expect(row).toContainText("anna@example.com");
+    // Patients have no GwG sheet in this row.
+    await expect(row.getByText("Doku-Bogen GwG")).toHaveCount(0);
+    // A row without login data from the server has no chevron.
+    await expect(patientGrid(page).getByTestId(`patient-expand-${patients[1].id}`)).toHaveCount(0);
+
+    await row.getByTestId("patient-portal-issue").click();
+    await page.getByRole("button", { name: /Passwort ausgeben|Выдать пароль/ }).click();
+    await expect(page.getByTestId("portal-credentials-password")).toHaveText("Kq7-mP2x-Rw9t");
+    expect(issued).toEqual(["POST"]);
+  });
 });

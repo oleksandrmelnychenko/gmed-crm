@@ -23,6 +23,22 @@ use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
+/// The account type a package stands for (owner decision 2026-10-05): the
+/// three tariffs GMED One, GMED Reserve (any age variant) and the
+/// organisation of a treatment; anything else is `other`.
+pub(crate) fn subscription_kind(package_key: &str) -> &'static str {
+    let key = package_key.trim().to_ascii_lowercase();
+    if key.starts_with("gmed_one") {
+        "gmed_one"
+    } else if key.starts_with("gmed_reserve") {
+        "gmed_reserve"
+    } else if key.starts_with("treatment") {
+        "treatment"
+    } else {
+        "other"
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/me/subscriptions", get(list_my_subscriptions))
@@ -41,6 +57,10 @@ pub fn router() -> Router<AppState> {
         .route(
             "/service-packages/{package_id}/price-versions/{price_version_id}",
             post(update_service_package_price_version).delete(delete_service_package_price_version),
+        )
+        .route(
+            "/orders/{order_id}/subscription",
+            get(get_order_subscription).post(set_order_subscription),
         )
         .route(
             "/patients/{patient_id}/service-packages",
@@ -1925,6 +1945,50 @@ async fn list_my_subscriptions(
     .into_response()
 }
 
+/// Assigns a package to a patient with the price of the version valid on
+/// `starts_on` ($5). Binds: patient, order, package, status, starts_on,
+/// ends_on, payer name/e-mail/phone/relationship, portal_visible, notes,
+/// assigned_by. Returns the new id, or no row for an inactive package.
+const INSERT_PATIENT_PACKAGE_SQL: &str = r#"INSERT INTO patient_service_packages (
+                patient_id, order_id, package_id, status, starts_on, ends_on,
+                payer_contact_name, payer_contact_email, payer_contact_phone,
+                payer_contact_relationship, portal_visible, notes, assigned_by,
+                package_price_version_id, base_price_net_snapshot,
+                base_price_vat_snapshot, base_price_gross_snapshot,
+                currency_snapshot, tax_profile_id_snapshot
+           )
+           SELECT $1, $2, package.id, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                  price.id,
+                  COALESCE(price.base_price_net, package.base_price_net),
+                  COALESCE(price.base_price_vat, package.base_price_vat),
+                  COALESCE(price.base_price_gross, package.base_price_gross),
+                  UPPER(COALESCE(price.currency, package.currency)),
+                  CASE
+                      WHEN price.id IS NOT NULL THEN price.tax_profile_id
+                      ELSE package.tax_profile_id
+                  END
+           FROM service_packages package
+           LEFT JOIN LATERAL (
+               SELECT version.id, version.base_price_net, version.base_price_vat,
+                      version.base_price_gross, version.currency, version.tax_profile_id
+               FROM service_package_price_versions version
+               WHERE version.package_id = package.id
+                 AND version.valid_from <= COALESCE($5, CURRENT_DATE)
+                 AND (version.valid_to IS NULL OR version.valid_to >= COALESCE($5, CURRENT_DATE))
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) price ON true
+           WHERE package.id = $3
+             AND package.is_active
+             AND (
+                   price.id IS NOT NULL
+                   OR (
+                       package.valid_from <= COALESCE($5, CURRENT_DATE)
+                       AND (package.valid_to IS NULL OR package.valid_to >= COALESCE($5, CURRENT_DATE))
+                   )
+             )
+           RETURNING id"#;
+
 async fn assign_patient_service_package(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -1967,64 +2031,24 @@ async fn assign_patient_service_package(
         }
     }
 
-    match sqlx::query(
-        r#"INSERT INTO patient_service_packages (
-                patient_id, order_id, package_id, status, starts_on, ends_on,
-                payer_contact_name, payer_contact_email, payer_contact_phone,
-                payer_contact_relationship, portal_visible, notes, assigned_by,
-                package_price_version_id, base_price_net_snapshot,
-                base_price_vat_snapshot, base_price_gross_snapshot,
-                currency_snapshot, tax_profile_id_snapshot
-           )
-           SELECT $1, $2, package.id, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                  price.id,
-                  COALESCE(price.base_price_net, package.base_price_net),
-                  COALESCE(price.base_price_vat, package.base_price_vat),
-                  COALESCE(price.base_price_gross, package.base_price_gross),
-                  UPPER(COALESCE(price.currency, package.currency)),
-                  CASE
-                      WHEN price.id IS NOT NULL THEN price.tax_profile_id
-                      ELSE package.tax_profile_id
-                  END
-           FROM service_packages package
-           LEFT JOIN LATERAL (
-               SELECT version.id, version.base_price_net, version.base_price_vat,
-                      version.base_price_gross, version.currency, version.tax_profile_id
-               FROM service_package_price_versions version
-               WHERE version.package_id = package.id
-                 AND version.valid_from <= COALESCE($5, CURRENT_DATE)
-                 AND (version.valid_to IS NULL OR version.valid_to >= COALESCE($5, CURRENT_DATE))
-               ORDER BY version.valid_from DESC, version.created_at DESC
-               LIMIT 1
-           ) price ON true
-           WHERE package.id = $3
-             AND package.is_active
-             AND (
-                   price.id IS NOT NULL
-                   OR (
-                       package.valid_from <= COALESCE($5, CURRENT_DATE)
-                       AND (package.valid_to IS NULL OR package.valid_to >= COALESCE($5, CURRENT_DATE))
-                   )
-             )
-           RETURNING id"#,
-    )
-    .bind(patient_id)
-    .bind(body.order_id)
-    .bind(body.package_id)
-    .bind(status)
-    .bind(starts_on)
-    .bind(ends_on)
-    .bind(normalize_optional(body.payer_contact_name.as_deref()))
-    .bind(normalize_optional(body.payer_contact_email.as_deref()))
-    .bind(normalize_optional(body.payer_contact_phone.as_deref()))
-    .bind(normalize_optional(
-        body.payer_contact_relationship.as_deref(),
-    ))
-    .bind(body.portal_visible.unwrap_or(true))
-    .bind(normalize_optional(body.notes.as_deref()))
-    .bind(auth.user_id)
-    .fetch_optional(&state.db)
-    .await
+    match sqlx::query(INSERT_PATIENT_PACKAGE_SQL)
+        .bind(patient_id)
+        .bind(body.order_id)
+        .bind(body.package_id)
+        .bind(status)
+        .bind(starts_on)
+        .bind(ends_on)
+        .bind(normalize_optional(body.payer_contact_name.as_deref()))
+        .bind(normalize_optional(body.payer_contact_email.as_deref()))
+        .bind(normalize_optional(body.payer_contact_phone.as_deref()))
+        .bind(normalize_optional(
+            body.payer_contact_relationship.as_deref(),
+        ))
+        .bind(body.portal_visible.unwrap_or(true))
+        .bind(normalize_optional(body.notes.as_deref()))
+        .bind(auth.user_id)
+        .fetch_optional(&state.db)
+        .await
     {
         Ok(Some(row)) => {
             let patient_service_package_id = row.try_get::<Uuid, _>("id").unwrap_or_default();
@@ -2498,5 +2522,301 @@ async fn update_overage_approval(
                 "Failed to update overage approval",
             )
         }
+    }
+}
+
+/// The tariffs an order can carry (owner decision 2026-10-05): GMED One,
+/// GMED Reserve and the organisation of a treatment.
+fn is_order_tariff(package_key: &str) -> bool {
+    subscription_kind(package_key) != "other"
+}
+
+/// The patient of an order, or 422 for an order without one (a lead's
+/// order before conversion).
+async fn order_patient(state: &AppState, order_id: Uuid) -> Result<Uuid, axum::response::Response> {
+    match sqlx::query_scalar::<_, Option<Uuid>>("SELECT patient_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_optional(&state.db)
+        .await
+    {
+        Ok(Some(Some(patient_id))) => Ok(patient_id),
+        Ok(Some(None)) => Err(err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "The order has no patient yet",
+        )),
+        Ok(None) => Err(err(StatusCode::NOT_FOUND, "Order not found")),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "load order patient");
+            Err(err(StatusCode::INTERNAL_SERVER_ERROR, "Failed"))
+        }
+    }
+}
+
+/// The tariff chosen for an order and the tariffs on offer.
+async fn order_subscription_payload(
+    state: &AppState,
+    order_id: Uuid,
+    can_edit: bool,
+) -> Result<Value, sqlx::Error> {
+    let current = sqlx::query(
+        r#"SELECT psp.id, psp.package_id, psp.status, psp.starts_on, psp.ends_on,
+                  sp.package_key, sp.name
+           FROM patient_service_packages psp
+           JOIN service_packages sp ON sp.id = psp.package_id
+           WHERE psp.order_id = $1 AND psp.status IN ('draft', 'active', 'paused')
+           ORDER BY psp.assigned_at DESC
+           LIMIT 1"#,
+    )
+    .bind(order_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let options = sqlx::query(
+        r#"SELECT id, package_key, name, base_price_gross, currency
+           FROM service_packages
+           WHERE is_active
+           ORDER BY name"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    Ok(serde_json::json!({
+        "current": current.map(|row| {
+            let package_key: String = row.try_get("package_key").unwrap_or_default();
+            serde_json::json!({
+                "patient_service_package_id": row.try_get::<Uuid, _>("id").ok(),
+                "package_id": row.try_get::<Uuid, _>("package_id").ok(),
+                "kind": subscription_kind(&package_key),
+                "package_key": package_key,
+                "name": row.try_get::<String, _>("name").ok(),
+                "status": row.try_get::<String, _>("status").ok(),
+                "starts_on": row.try_get::<Option<NaiveDate>, _>("starts_on").ok().flatten(),
+                "ends_on": row.try_get::<Option<NaiveDate>, _>("ends_on").ok().flatten(),
+            })
+        }),
+        "options": options
+            .iter()
+            .filter_map(|row| {
+                let package_key: String = row.try_get("package_key").ok()?;
+                is_order_tariff(&package_key).then(|| {
+                    serde_json::json!({
+                        "id": row.try_get::<Uuid, _>("id").ok(),
+                        "kind": subscription_kind(&package_key),
+                        "package_key": package_key,
+                        "name": row.try_get::<String, _>("name").ok(),
+                        "base_price_gross": row
+                            .try_get::<Decimal, _>("base_price_gross")
+                            .ok()
+                            .map(decimal_to_string),
+                        "currency": row.try_get::<String, _>("currency").ok(),
+                    })
+                })
+            })
+            .collect::<Vec<_>>(),
+        "can_edit": can_edit,
+    }))
+}
+
+fn may_set_order_subscription(role: Role) -> bool {
+    role.can(Capability::OrdersEdit) || can_manage_patient_packages(role)
+}
+
+/// `GET /orders/{id}/subscription`: the order's tariff (the patient's
+/// account type) and the tariffs on offer.
+async fn get_order_subscription(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+) -> axum::response::Response {
+    if let Err(response) = auth.require_capability(Capability::OrdersView) {
+        return response;
+    }
+    let patient_id = match order_patient(&state, order_id).await {
+        Ok(patient_id) => patient_id,
+        Err(response) => return response,
+    };
+    match crate::routes::patients::has_patient_access(&state, &auth, patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    match order_subscription_payload(&state, order_id, may_set_order_subscription(auth.role)).await
+    {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "load order subscription");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct SetOrderSubscriptionRequest {
+    /// `null` removes the order's tariff.
+    package_id: Option<Uuid>,
+    starts_on: Option<String>,
+    ends_on: Option<String>,
+}
+
+/// `POST /orders/{id}/subscription`: chooses the order's tariff. It becomes
+/// the patient's subscription (account type) linked to the order; choosing
+/// another tariff or none cancels the previous one of this order.
+async fn set_order_subscription(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(order_id): Path<Uuid>,
+    Json(body): Json<SetOrderSubscriptionRequest>,
+) -> axum::response::Response {
+    if !may_set_order_subscription(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let patient_id = match order_patient(&state, order_id).await {
+        Ok(patient_id) => patient_id,
+        Err(response) => return response,
+    };
+    match crate::routes::patients::has_patient_edit_access(&state, &auth, patient_id).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
+        Err(response) => return response,
+    }
+    let starts_on = match parse_optional_date(body.starts_on.as_deref(), "starts_on") {
+        Ok(value) => value.unwrap_or_else(crate::app_time::today),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let ends_on = match parse_optional_date(body.ends_on.as_deref(), "ends_on") {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    if ends_on.is_some_and(|ends_on| ends_on < starts_on) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ends_on must not be before starts_on",
+        );
+    }
+    if let Some(package_id) = body.package_id {
+        let package_key = sqlx::query_scalar::<_, String>(
+            "SELECT package_key FROM service_packages WHERE id = $1 AND is_active",
+        )
+        .bind(package_id)
+        .fetch_optional(&state.db)
+        .await;
+        match package_key {
+            Ok(Some(key)) if is_order_tariff(&key) => {}
+            Ok(_) => {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "Choose GMED One, GMED Reserve or the organisation of a treatment",
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %order_id, "check tariff");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    }
+
+    let result: Result<(), sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        sqlx::query("SELECT id FROM orders WHERE id = $1 FOR UPDATE")
+            .bind(order_id)
+            .execute(&mut *tx)
+            .await?;
+        let current = sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT package_id FROM patient_service_packages
+               WHERE order_id = $1 AND status IN ('draft', 'active', 'paused')"#,
+        )
+        .bind(order_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        // Choosing the tariff the order already has changes nothing.
+        if let Some(package_id) = body.package_id
+            && current.len() == 1
+            && current[0] == package_id
+        {
+            return tx.commit().await;
+        }
+        sqlx::query(
+            r#"UPDATE patient_service_packages
+               SET status = 'cancelled', updated_at = now()
+               WHERE order_id = $1 AND status IN ('draft', 'active', 'paused')"#,
+        )
+        .bind(order_id)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(package_id) = body.package_id {
+            sqlx::query(INSERT_PATIENT_PACKAGE_SQL)
+                .bind(patient_id)
+                .bind(Some(order_id))
+                .bind(package_id)
+                .bind("active")
+                .bind(Some(starts_on))
+                .bind(ends_on)
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .bind(None::<String>)
+                .bind(true)
+                .bind(None::<String>)
+                .bind(auth.user_id)
+                .fetch_one(&mut *tx)
+                .await?;
+        }
+        crate::audit::write_in_transaction(
+            &mut tx,
+            &crate::audit::domain_event(
+                "set_order_subscription",
+                Some(auth.user_id),
+                "order",
+                Some(order_id),
+                serde_json::json!({
+                    "patient_id": patient_id,
+                    "package_id": body.package_id,
+                    "replaced_package_ids": current,
+                    "starts_on": starts_on,
+                    "ends_on": ends_on,
+                }),
+            ),
+        )
+        .await?;
+        tx.commit().await
+    }
+    .await;
+    if let Err(error) = result {
+        tracing::error!(%error, %order_id, "set order subscription");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to set the tariff",
+        );
+    }
+    crate::realtime::publish_patient_event(
+        &state,
+        Some(auth.user_id),
+        "service_package.assigned",
+        patient_id,
+        serde_json::json!({ "order_id": order_id, "package_id": body.package_id }),
+    )
+    .await;
+    match order_subscription_payload(&state, order_id, true).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "load order subscription");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+        }
+    }
+}
+
+#[cfg(test)]
+mod subscription_tests {
+    use super::*;
+
+    #[test]
+    fn the_three_tariffs_are_the_account_types() {
+        assert_eq!(subscription_kind("gmed_one_programm"), "gmed_one");
+        assert_eq!(
+            subscription_kind("gmed_reserve_programm_35to49_1"),
+            "gmed_reserve"
+        );
+        assert_eq!(subscription_kind("treatment_ambulant_5"), "treatment");
+        assert_eq!(subscription_kind("vip_concierge"), "other");
+        assert!(is_order_tariff("GMED_ONE_Programm"));
+        assert!(!is_order_tariff("vip_concierge"));
     }
 }

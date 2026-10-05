@@ -245,7 +245,13 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
         assert_eq!(message["subject"], "Ваш доступ до порталу пацієнта GMED");
         for part in ["text", "html"] {
             let content = message[part].as_str().unwrap();
-            assert!(content.contains(&password), "{part}");
+            // The HTML part escapes the password (it may contain & or <).
+            let shown = if part == "html" {
+                gmed_server::mail::templates::escape_html(&password)
+            } else {
+                password.clone()
+            };
+            assert!(content.contains(&shown), "{part}");
             assert!(content.contains("https://console.gmed-health.test/login"));
             assert!(content.contains("Olena Mailtest"));
         }

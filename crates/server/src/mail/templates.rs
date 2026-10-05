@@ -111,6 +111,17 @@ fn non_empty(value: Option<&str>) -> Option<&str> {
     value.map(str::trim).filter(|value| !value.is_empty())
 }
 
+/// Whose login an e-mail describes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginAudience {
+    /// The lead fills in the request.
+    Lead,
+    /// A parent fills in a minor's request.
+    Guardian,
+    /// A patient uses the portal (appointments, documents, invoices).
+    Patient,
+}
+
 /// Sign-in data of a lead's portal login (or of a parent filling in a minor's
 /// request), sent on a staff member's click.
 #[derive(Debug, Clone)]
@@ -123,8 +134,8 @@ pub struct PortalLoginEmail<'a> {
     pub login_url: &'a str,
     /// The request is deleted after this day unless it moves on.
     pub complete_by: Option<NaiveDate>,
-    /// A parent filling in a minor's request.
-    pub for_guardian: bool,
+    /// Who the login belongs to: the wording differs.
+    pub audience: LoginAudience,
     pub agency: &'a AgencyIdentity,
     /// The GMED logo on the console ([`logo_url`]); without it the header
     /// shows the text wordmark.
@@ -159,6 +170,7 @@ struct LoginCopy {
     greeting: &'static str,
     intro: &'static str,
     intro_guardian: &'static str,
+    intro_patient: &'static str,
     credentials_heading: &'static str,
     login_label: &'static str,
     password_label: &'static str,
@@ -180,6 +192,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             greeting: "Guten Tag,",
             intro: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
             intro_guardian: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein und laden Sie die Unterlagen hoch.",
+            intro_patient: "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Dort finden Sie Ihre Termine, Dokumente und Rechnungen und erreichen Ihr Betreuungsteam.",
             credentials_heading: "Ihre Anmeldedaten",
             login_label: "Benutzername",
             password_label: "Passwort",
@@ -198,6 +211,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             greeting: "Hello,",
             intro: "Your access to the GMED patient portal is ready. Please enter your personal details there and upload your documents.",
             intro_guardian: "Your access to the GMED patient portal is ready. Please enter the details of the request for your child there and upload the documents.",
+            intro_patient: "Your access to the GMED patient portal is ready. There you find your appointments, documents and invoices and reach your care team.",
             credentials_heading: "Your sign-in details",
             login_label: "Login",
             password_label: "Password",
@@ -216,6 +230,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             greeting: "Здравствуйте!",
             intro: "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там свои данные и загрузите документы.",
             intro_guardian: "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там данные заявки для вашего ребёнка и загрузите документы.",
+            intro_patient: "Ваш доступ в портал пациента GMED готов. Там вы найдёте свои записи, документы и счета и сможете связаться со своей командой сопровождения.",
             credentials_heading: "Данные для входа",
             login_label: "Логин",
             password_label: "Пароль",
@@ -234,6 +249,7 @@ fn login_copy(language: MailLanguage) -> LoginCopy {
             greeting: "Вітаємо!",
             intro: "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
             intro_guardian: "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там дані заявки для вашої дитини та завантажте документи.",
+            intro_patient: "Ваш доступ до порталу пацієнта GMED готовий. Там ви знайдете свої записи, документи й рахунки та зможете зв'язатися зі своєю командою супроводу.",
             credentials_heading: "Дані для входу",
             login_label: "Логін",
             password_label: "Пароль",
@@ -271,10 +287,10 @@ pub fn portal_login(email: &PortalLoginEmail<'_>) -> RenderedEmail {
     } else {
         copy.greeting_named.replace("{name}", name)
     };
-    let intro = if email.for_guardian {
-        copy.intro_guardian
-    } else {
-        copy.intro
+    let intro = match email.audience {
+        LoginAudience::Lead => copy.intro,
+        LoginAudience::Guardian => copy.intro_guardian,
+        LoginAudience::Patient => copy.intro_patient,
     };
     let complete_by = email.complete_by.map(|date| {
         copy.complete_by
@@ -622,7 +638,7 @@ mod tests {
             password: "Kq7-mP2x-Rw9t",
             login_url: "https://console.gmed-health.com/login",
             complete_by: NaiveDate::from_ymd_opt(2026, 10, 19),
-            for_guardian: false,
+            audience: LoginAudience::Lead,
             agency: &agency,
             logo_url: Some("https://console.gmed-health.com/gmed-logo.png"),
         })
@@ -693,7 +709,7 @@ mod tests {
             password: "Kq7-mP2x-Rw9t",
             login_url: "https://console.gmed-health.com/login",
             complete_by: None,
-            for_guardian: false,
+            audience: LoginAudience::Lead,
             agency: &agency,
             logo_url: None,
         })
@@ -712,7 +728,7 @@ mod tests {
             password: "a<b>&'\"",
             login_url: "https://console.gmed-health.com/login?x=\"><script>",
             complete_by: None,
-            for_guardian: false,
+            audience: LoginAudience::Lead,
             agency: &agency,
             logo_url: Some("https://console.gmed-health.com/gmed-logo.png?\"><script>"),
         });
@@ -738,7 +754,7 @@ mod tests {
             password: "Kq7-mP2x-Rw9t",
             login_url: "https://console.gmed-health.com/login",
             complete_by: None,
-            for_guardian: true,
+            audience: LoginAudience::Guardian,
             agency: &agency,
             logo_url: None,
         });
@@ -774,5 +790,24 @@ mod tests {
             assert!(email.html.contains("Max &lt;Admin&gt;"));
             assert!(email.html.contains("gmed-logo.png"));
         }
+    }
+
+    #[test]
+    fn a_patient_e_mail_names_the_portal_instead_of_a_request() {
+        let agency = AgencyIdentity::default();
+        let email = portal_login(&PortalLoginEmail {
+            language: MailLanguage::De,
+            recipient_name: "Anna Muster",
+            login: "anna@example.test",
+            password: "Kq7-mP2x-Rw9t",
+            login_url: "https://console.gmed-health.com/login",
+            complete_by: None,
+            audience: LoginAudience::Patient,
+            agency: &agency,
+            logo_url: None,
+        });
+        assert!(email.text.contains("Termine, Dokumente und Rechnungen"));
+        assert!(!email.text.contains("laden Sie Ihre Unterlagen hoch"));
+        assert!(email.text.contains("Kq7-mP2x-Rw9t"));
     }
 }

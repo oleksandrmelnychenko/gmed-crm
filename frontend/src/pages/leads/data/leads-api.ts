@@ -121,9 +121,29 @@ export type LeadLoginEmailInfo = {
   available: boolean;
   reason_code: string;
   can_send: boolean;
+  /** The language of the lead or patient, unless the dialog picks another. */
+  default_language?: LeadLoginEmailLanguage | null;
   lead_language: LeadLoginEmailLanguage | null;
   sent: LeadLoginEmailRecord[];
 };
+
+/** Whose login a sign-in e-mail is about: a lead's (or a parent's) or a patient's. */
+export type PortalLoginTarget = { kind: "lead" | "patient"; id: string };
+
+function loginEmailPath(target: PortalLoginTarget) {
+  return `/${target.kind === "patient" ? "patients" : "leads"}/${target.id}/portal-login-email`;
+}
+
+export function fetchPortalLoginEmails(target: PortalLoginTarget) {
+  return apiFetch<LeadLoginEmailInfo>(loginEmailPath(target));
+}
+
+export function sendPortalLoginEmail(
+  target: PortalLoginTarget,
+  body: { user_id: string; password: string; language: LeadLoginEmailLanguage },
+) {
+  return postJson<LeadLoginEmailSent>(loginEmailPath(target), body);
+}
 
 export type LeadLoginEmailSent = {
   sent_to: string;

@@ -253,6 +253,7 @@ import { OrderEconomicsTable } from "./ui/order-economics-table";
 import { OrderExistingPatientDocuments } from "./ui/order-existing-patient-documents";
 import { OrderGroupPanel } from "./ui/order-group-panel";
 import { OrderPipelinePanel } from "./ui/order-pipeline-panel";
+import { OrderSubscriptionCard } from "./ui/order-subscription-card";
 import { ScopedOrderDetail } from "./ui/scoped-order-detail";
 import { OrderInterpreterCallout } from "./ui/order-interpreter-callout";
 import { ExternalInvoiceAllocationSheet } from "./ui/external-invoice-allocation-sheet";
@@ -4302,6 +4303,9 @@ function useOrdersPageContent() {
                 <div ref={orderSectionAnchorRef} className="scroll-mt-4" />
                 {shouldRenderOrderSection("overview") ? (
                   <>
+                    {orderDetail.patient_id ? (
+                      <OrderSubscriptionCard orderId={orderDetail.id} lang={lang} />
+                    ) : null}
                     <SectionCard
                       title={lang === "de" ? "Auftrag auf einen Blick" : "Главное о заказе"}
                       description={

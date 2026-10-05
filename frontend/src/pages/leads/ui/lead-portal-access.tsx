@@ -20,8 +20,10 @@ import { downloadDocumentFile, fetchDocuments, generateDocument } from "@/pages/
 
 import {
   fetchLeadLoginEmails,
+  fetchPortalLoginEmails,
   issueLeadPortalAccess,
   sendLeadLoginEmail,
+  sendPortalLoginEmail,
   type LeadLoginEmailInfo,
   type LeadLoginEmailSent,
   type LeadPortalAccountIssued,
@@ -56,7 +58,7 @@ const MESSAGE_LANGUAGES: { value: PatientMessageLanguage; label: string }[] = [
 ];
 
 /** One labelled fact of the portal row: small caption above, value below. */
-function PortalFact({
+export function PortalFact({
   label,
   className,
   testId,
@@ -442,12 +444,16 @@ export function LeadPortalAccessDetail({
   );
 }
 
-/** A freshly issued password; `leadId` and `userId` allow sending it by e-mail. */
+/**
+ * A freshly issued password; `userId` with `leadId` or `patientId` allows
+ * sending it by e-mail.
+ */
 export type PortalCredentials = {
   email: string;
   password: string;
   firstName: string;
   leadId?: string;
+  patientId?: string;
   userId?: string;
 };
 
@@ -531,12 +537,14 @@ function PortalCredentialsContent({
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailSent, setEmailSent] = useState<LeadLoginEmailSent | null>(null);
   const [emailError, setEmailError] = useState("");
-  const { leadId, userId } = credentials;
+  const { leadId, patientId, userId } = credentials;
+  const targetKind = leadId ? "lead" : patientId ? "patient" : null;
+  const targetId = leadId ?? patientId ?? null;
 
   useEffect(() => {
-    if (!leadId || !userId) return;
+    if (!targetKind || !targetId || !userId) return;
     let cancelled = false;
-    fetchLeadLoginEmails(leadId)
+    fetchPortalLoginEmails({ kind: targetKind, id: targetId })
       .then((info) => {
         if (!cancelled) setEmailInfo(info);
       })
@@ -546,11 +554,12 @@ function PortalCredentialsContent({
     return () => {
       cancelled = true;
     };
-  }, [leadId, userId]);
+  }, [targetKind, targetId, userId]);
 
-  // Without a language from the caller, the lead's own language applies.
+  // Without a language from the caller, the person's own language applies.
+  const personLanguage = emailInfo?.default_language ?? emailInfo?.lead_language ?? null;
   const language: PatientMessageLanguage =
-    !languageChosen && emailInfo?.lead_language ? emailInfo.lead_language : messageLanguage;
+    !languageChosen && personLanguage ? personLanguage : messageLanguage;
 
   // On failure the text is selected so it can be copied with Ctrl+C.
   async function copy(key: string, text: string, event: { currentTarget: Element }) {
@@ -566,12 +575,15 @@ function PortalCredentialsContent({
   }
 
   async function sendByEmail() {
-    if (!leadId || !userId) return;
+    if (!targetKind || !targetId || !userId) return;
     setEmailBusy(true);
     setEmailError("");
     try {
       setEmailSent(
-        await sendLeadLoginEmail(leadId, { user_id: userId, password: credentials.password, language }),
+        await sendPortalLoginEmail(
+          { kind: targetKind, id: targetId },
+          { user_id: userId, password: credentials.password, language },
+        ),
       );
     } catch (error) {
       setEmailSent(null);
@@ -586,7 +598,7 @@ function PortalCredentialsContent({
 
   const loginUrl = typeof window === "undefined" ? "/login" : `${window.location.origin}/login`;
   const message = portalCredentialsMessage({ ...credentials, loginUrl, language });
-  const canEmail = Boolean(leadId && userId && emailInfo?.can_send);
+  const canEmail = Boolean(targetId && userId && emailInfo?.can_send);
 
   return (
     <div className="space-y-4 text-sm">

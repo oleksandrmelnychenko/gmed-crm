@@ -2963,8 +2963,13 @@ pub(crate) async fn anonymize_patient_identity(
     anon: &str,
     legal_status_patch: Value,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    // The log of sign-in e-mails names the address, so it goes in the same
+    // statement as the identity.
     sqlx::query(
-        r#"UPDATE patients
+        r#"WITH removed_login_emails AS (
+               DELETE FROM portal_login_emails WHERE patient_id = $1
+           )
+           UPDATE patients
            SET patient_id = $2,
                title = NULL,
                first_name = $2,

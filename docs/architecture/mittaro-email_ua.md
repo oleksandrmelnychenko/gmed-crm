@@ -39,18 +39,23 @@
 
 ## Що зробити власнику (один раз на акаунт)
 
-1. Зареєструвати акаунт Mittaro (`app.mittaro.de/registrieren`), вибрати тариф (від безкоштовного, 2 000 листів на місяць) і підписати AVV (Auftragsverarbeitungsvertrag, ст. 28 DSGVO).
-2. Додати домен `gmed-health.com` і внести записи DNS, які покаже Mittaro (DNS домену — у Vercel):
-   - SPF: в домені вже є `v=spf1 include:_spf.protonmail.ch ~all`. Запис SPF має бути один, тож include Mittaro дописується в той самий запис, а не окремим TXT.
-   - DKIM і Return-Path — нові записи з панелі Mittaro.
-   - DMARC — за наявності не змінювати; Mittaro перевіряє всі записи постійно.
-3. Створити API-ключ (показується один раз) і ввести його в консолі: «API-подключения» → «E-Mail · Mittaro» разом з адресою відправника; надіслати тестовий лист собі. Спершу на DEV, потім на PROD (на кожному сервері своє підключення).
-4. Додати Mittaro до переліку обробників у Verzeichnis von Verarbeitungstätigkeiten (вид даних: ім'я, e-mail, дані для входу; мета: доступ до порталу заявки).
+Стан домену на 05.10.2026: пошта `gmed-health.com` — Proton (MX `mail.protonmail.ch`), SPF `v=spf1 include:_spf.protonmail.ch ~all`, DMARC `v=DMARC1; p=quarantine`. Через `p=quarantine` лист без правильних DKIM/SPF потрапить у спам, тому домен треба підтвердити до першої відправки. DNS домену — у Vercel (`ns1/ns2.vercel-dns.com`).
+
+1. **Акаунт.** Зареєструватися на `app.mittaro.de/registrieren` (безкоштовний тариф: 2 000 листів на місяць, без картки; далі Starter 10 000 за 9 €/міс). У налаштуваннях укласти AVV (Auftragsverarbeitungsvertrag, ст. 28 DSGVO).
+2. **Домен.** У Mittaro: **Domains** → додати `gmed-health.com`. Панель покаже три записи з точними значеннями (вони свої для кожного домену):
+   - **DKIM** — TXT на `<selektor>._domainkey.gmed-health.com` (значення з панелі);
+   - **SPF** — TXT на `gmed-health.com`. Окремий другий SPF-запис створювати не можна: include Mittaro дописується в наявний запис Proton, наприклад `v=spf1 include:_spf.protonmail.ch include:spf.mittaro.de ~all` (точну назву include взяти з панелі);
+   - **Return-Path / bounce** — MX на `bounce.gmed-health.com` (значення з панелі). Це піддомен, тож на пошту Proton для `@gmed-health.com` він не впливає.
+3. **Внести записи у Vercel.** Vercel → Domains → `gmed-health.com` → DNS Records: додати DKIM-TXT і MX для `bounce`, а наявний SPF-TXT відредагувати. DMARC не змінювати.
+4. **Перевірка.** У Mittaro натиснути перевірку домену; DNS оновлюється від кількох хвилин до кількох годин. Mittaro надалі сам стежить за записами і попереджає про зміни.
+5. **API-ключ.** **API-Keys** → створити ключ лише з правом `emails:send`; він показується один раз.
+6. **Консоль GMED.** «API-подключения» → «E-Mail · Mittaro»: ключ, відправник (наприклад `zugang@gmed-health.com`, адреса на підтвердженому домені; окрема скринька в Proton для неї не потрібна) і за бажанням адреса для відповідей (наприклад `info@gmed-health.com` — вона має існувати в Proton). «Сохранить», потім «Отправить тестовое письмо» собі. Спершу на DEV, потім на PROD: на кожному сервері своє підключення.
+7. **Документація DSGVO.** Додати Mittaro до Verzeichnis von Verarbeitungstätigkeiten (дані: ім'я, e-mail, дані для входу; мета: доступ до порталу пацієнта/заявки).
 
 ## Що лишається в GMED
 
-- Таблиця `portal_login_emails`: кому, коли, мова, хто відправив, статус, id повідомлення Mittaro або код помилки. Вміст листа й пароль не зберігаються. Рядки видаляються разом із лідом ([Löschkonzept](../compliance/04_loeschkonzept.md)).
-- Аудит: `send_lead_portal_login_email` / `send_lead_portal_login_email_failed` з id входу, мовою, id повідомлення — без адреси й пароля.
+- Таблиця `portal_login_emails`: кому, коли, мова, хто відправив, статус, id повідомлення Mittaro або код помилки; рядок належить ліду або пацієнту. Вміст листа й пароль не зберігаються. Рядки видаляються разом із лідом і під час анонімізації пацієнта ([Löschkonzept](../compliance/04_loeschkonzept.md)).
+- Аудит: `send_lead_portal_login_email` / `send_patient_portal_login_email` (і `…_failed`) з id входу, мовою, id повідомлення — без адреси й пароля.
 
 ## Відкрите
 

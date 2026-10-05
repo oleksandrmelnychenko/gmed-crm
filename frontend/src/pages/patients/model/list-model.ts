@@ -23,6 +23,34 @@ export type PatientSummary = {
   is_active: boolean;
   lifecycle_status?: "prospective" | "active" | "inactive" | "deleted";
   created_at: string;
+  /**
+   * The patient's portal login (`null` without one). Only sent to the CEO,
+   * the CEO assistant and patient managers — `undefined` for everyone else.
+   */
+  portal_account?: PatientPortalAccountSummary | null;
+  /** The current subscription — the account type; same audience. */
+  subscription?: PatientSubscriptionSummary | null;
+};
+
+export type PatientPortalAccountSummary = {
+  user_id: string;
+  email: string | null;
+  is_active: boolean;
+  password_change_pending: boolean;
+  last_login_at: string | null;
+  login_emailed_at: string | null;
+};
+
+/** The three tariffs an order can carry (owner decision 2026-10-05). */
+export type SubscriptionKind = "gmed_one" | "gmed_reserve" | "treatment" | "other";
+
+export type PatientSubscriptionSummary = {
+  kind: SubscriptionKind;
+  package_key: string;
+  name: string | null;
+  status: "draft" | "active" | "paused" | null;
+  starts_on: string | null;
+  ends_on: string | null;
 };
 
 export type PatientDetail = PatientSummary & {
@@ -551,3 +579,17 @@ export function canAssignTarget(managerRole: string | undefined, targetRole: str
       return false;
   }
 }
+
+const SUBSCRIPTION_KIND_LABELS: Record<SubscriptionKind, { ru: string; de: string }> = {
+  gmed_one: { ru: "GMED One", de: "GMED One" },
+  gmed_reserve: { ru: "GMED Reserve", de: "GMED Reserve" },
+  treatment: { ru: "Организация лечения", de: "Organisation der Behandlung" },
+  other: { ru: "Пакет", de: "Paket" },
+};
+
+/** "GMED Reserve", "GMED One", … for the account type of a subscription. */
+export function subscriptionKindLabel(subscription: { kind: SubscriptionKind }, lang: string): string {
+  const label = SUBSCRIPTION_KIND_LABELS[subscription.kind] ?? SUBSCRIPTION_KIND_LABELS.other;
+  return lang === "de" ? label.de : label.ru;
+}
+
