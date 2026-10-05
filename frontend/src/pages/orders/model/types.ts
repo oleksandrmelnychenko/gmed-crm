@@ -12,7 +12,6 @@ export type LeistungBillingStatus =
   | "awaiting_payment"
   | "partially_paid"
   | "paid";
-export type BillingReleaseStatus = "pending" | "granted" | "denied";
 export type PackageCoverageStatus = "unknown" | "covered" | "not_covered";
 export type DebtManagementStatus =
   | "not_required"
@@ -368,15 +367,10 @@ export type OrderProcessGates = {
   overdue_invoice_count: number;
   outstanding_balance?: string | null;
   debt_management?: OrderDebtManagement | null;
-  billing_release_status: BillingReleaseStatus;
-  billing_release_note: string | null;
-  billing_released_by: string | null;
-  billing_released_at: string | null;
   package_coverage_status: PackageCoverageStatus;
   package_coverage_note: string | null;
   package_coverage_decided_by: string | null;
   package_coverage_decided_at: string | null;
-  financial_gate_ready: boolean;
   contract_gate_ready: boolean;
   signed_patient: boolean;
   signed_agency: boolean;
@@ -615,8 +609,6 @@ export type OrderProcessGateFormState = {
   debtNextReviewAt: string;
   debtLastContactAt: string;
   debtResolutionNote: string;
-  billingReleaseStatus: BillingReleaseStatus;
-  billingReleaseNote: string;
   packageCoverageStatus: PackageCoverageStatus;
   packageCoverageNote: string;
 };

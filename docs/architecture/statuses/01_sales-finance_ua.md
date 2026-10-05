@@ -121,7 +121,7 @@
 
 | Поле | Значення (RU / DE) |
 |---|---|
-| `billing_release_status` | `pending` Ожидается/Ausstehend · `granted` Разрешено/Freigegeben · `denied` Отклонено/Abgelehnt |
+| ~~`billing_release_status`~~ | прибрано (рішення власника 2026-10-05): ручного дозволу бухгалтерії на замовлення немає; допуск до виконання дають відсутність боргового блокування і підписане замовлення або покриття пакетом |
 | `package_coverage_status` | `unknown` Неизвестно/Unbekannt · `covered` Покрыто/Abgedeckt · `not_covered` Не покрыто/Nicht abgedeckt |
 | `treatment_plan_status` | `draft` Черновик/Entwurf · `agreed` Согласовано/Abgestimmt · `correction_requested` Запрошена корректировка/Korrektur angefragt · `finalized` Финализировано/Finalisiert |
 | `preparation_documents_status` | `pending` Документы ожидаются · `sent` Документы отправлены · `not_required` Документы не требуются (DE: Dokumente ausstehend/versendet/nicht erforderlich) |

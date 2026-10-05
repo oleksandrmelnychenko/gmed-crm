@@ -29,8 +29,6 @@ export function isOrderReadinessGateApplicable(
 }
 
 const EXACT_REASON_KEYS: Record<string, string> = {
-  "Billing release is not granted and package coverage is not confirmed":
-    "orders_blocking_billing_release_package_coverage",
   "Order signatures are still incomplete":
     "orders_blocking_signatures_incomplete",
   "Advance invoice exists but payment is still missing":
@@ -277,20 +275,6 @@ const FOLLOWUP_MILESTONE_REASONS = new Set([
   "1-month follow-up must be completed or marked not required",
   "6-month follow-up must be completed or marked not required",
 ]);
-
-const BILLING_RELEASE_REASON =
-  "Billing release is not granted and package coverage is not confirmed";
-
-/**
- * The blocker is decided by billing (the billing release), so a user without
- * invoice finance rights can only wait for it: no action is offered to them.
- */
-export function orderBlockingReasonWaitsForBilling(
-  reason: string,
-  canDecideBillingRelease: boolean,
-): boolean {
-  return reason === BILLING_RELEASE_REASON && !canDecideBillingRelease;
-}
 
 /** DOM id of the follow-up milestone planner (see `OrderFollowupMilestones`). */
 export const FOLLOWUP_MILESTONES_ANCHOR_ID = "order-followup-milestones";

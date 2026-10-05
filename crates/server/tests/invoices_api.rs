@@ -160,23 +160,20 @@ async fn set_order_process_gates(
     pool: &PgPool,
     order_id: Uuid,
     actor_id: Uuid,
-    billing_release_status: &str,
+    // The billing release is gone (owner decision 2026-10-05); callers still
+    // name the former value.
+    _billing_release_status: &str,
     package_coverage_status: &str,
 ) {
     sqlx::query(
         r#"UPDATE orders
-           SET billing_release_status = $2,
-               billing_release_note = 'test gate',
-               billing_released_by = CASE WHEN $2 = 'granted' THEN $3 ELSE NULL END,
-               billing_released_at = CASE WHEN $2 = 'granted' THEN now() ELSE NULL END,
-               package_coverage_status = $4,
+           SET package_coverage_status = $3,
                package_coverage_note = 'test package gate',
-               package_coverage_decided_by = $3,
+               package_coverage_decided_by = $2,
                package_coverage_decided_at = now()
            WHERE id = $1"#,
     )
     .bind(order_id)
-    .bind(billing_release_status)
     .bind(actor_id)
     .bind(package_coverage_status)
     .execute(pool)

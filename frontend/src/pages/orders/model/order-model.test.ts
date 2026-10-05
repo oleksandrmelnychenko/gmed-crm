@@ -79,7 +79,6 @@ describe("order workspace dates", () => {
 
   it("prefills debt follow-up times in Berlin time", () => {
     const form = orderProcessGatesToForm({
-      billing_release_status: "pending",
       package_coverage_status: "not_required",
       debt_management: {
         status: "in_follow_up",

@@ -122,7 +122,6 @@ import {
   isOrderReadinessGateApplicable,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
-  orderBlockingReasonWaitsForBilling,
   resolveOrderBlockingReason,
 } from "./model/blocking-reasons";
 import {
@@ -720,14 +719,6 @@ function useOrdersPageContent() {
     }),
     [l],
   );
-  const billingReleaseLabels = useMemo(
-    () => ({
-      pending: l("orders_ausstehend"),
-      granted: l("orders_freigegeben"),
-      denied: l("orders_abgelehnt"),
-    }),
-    [l],
-  );
   const packageCoverageLabels = useMemo(
     () => ({
       unknown: l("orders_unbekannt"),
@@ -778,8 +769,6 @@ function useOrdersPageContent() {
   const frameworkContractStatusLabel = (value: string) =>
     labelFor(value, frameworkContractStatusLabels);
   const debtStatusLabel = (value: string) => labelFor(value, debtStatusLabels);
-  const billingReleaseLabel = (value: string) =>
-    labelFor(value, billingReleaseLabels);
   const packageCoverageLabel = (value: string) =>
     labelFor(value, packageCoverageLabels);
   const leistungStatusLabel = (value: string) =>
@@ -1107,10 +1096,6 @@ function useOrdersPageContent() {
       processGateForm.debtNextReviewAt, processGateForm.debtLastContactAt, processGateForm.debtResolutionNote],
     [initialProcessGateForm.debtStatus, initialProcessGateForm.debtNote, initialProcessGateForm.debtOwnerUserId,
       initialProcessGateForm.debtNextReviewAt, initialProcessGateForm.debtLastContactAt, initialProcessGateForm.debtResolutionNote],
-  );
-  const billingReleaseDirty = Boolean(orderDetail) && hasFormChanges(
-    [processGateForm.billingReleaseStatus, processGateForm.billingReleaseNote],
-    [initialProcessGateForm.billingReleaseStatus, initialProcessGateForm.billingReleaseNote],
   );
   const packageCoverageDirty = Boolean(orderDetail) && hasFormChanges(
     [processGateForm.packageCoverageStatus, processGateForm.packageCoverageNote],
@@ -2762,28 +2747,6 @@ function useOrdersPageContent() {
     setDebtManagementSheetOpen(true);
   }
 
-  async function handleSaveBillingRelease() {
-    if (!selectedOrderId || processGateBusy || !billingReleaseDirty) return;
-
-    setProcessGateBusy(true);
-    setProcessGateError(null);
-    try {
-      await updateOrderProcessGates(selectedOrderId, {
-        billing_release_status: processGateForm.billingReleaseStatus,
-        billing_release_note: optString(processGateForm.billingReleaseNote),
-      });
-      triggerReload();
-    } catch (error) {
-      setProcessGateError(
-        error instanceof Error
-          ? error.message
-          : l("orders_error_update_billing_release"),
-      );
-    } finally {
-      setProcessGateBusy(false);
-    }
-  }
-
   async function handleSavePackageCoverage() {
     if (!selectedOrderId || processGateBusy || !packageCoverageDirty) return;
 
@@ -3828,7 +3791,7 @@ function useOrdersPageContent() {
       ) : null}
 
       <Sheet
-        dirty={phaseDirty || billingReleaseDirty || packageCoverageDirty || planningDirty || executionDirty || followupDirty}
+        dirty={phaseDirty || packageCoverageDirty || planningDirty || executionDirty || followupDirty}
         open={!isOrderRouteDetail && Boolean(selectedOrderId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -4282,37 +4245,8 @@ function useOrdersPageContent() {
                           {orderNextStepReasons.map((reason, index) => {
                             const targetSection = orderBlockingReasonSection(reason);
                             const targetAnchor = orderBlockingReasonAnchor(reason);
-                            // Billing decides the billing release: whoever cannot
-                            // decide it sees that it is waiting, without an action.
-                            const waitsForBilling = orderBlockingReasonWaitsForBilling(
-                              reason,
-                              hasCapability(user, "invoices.finance"),
-                            );
                             return (
                               <li key={reason}>
-                                {waitsForBilling ? (
-                                  <div
-                                    className="flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3"
-                                    data-testid="order-blocker-waits-for-billing"
-                                  >
-                                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
-                                      {index + 1}
-                                    </span>
-                                    <span className="min-w-0 flex-1 text-sm leading-5">
-                                      <span className="block font-medium text-foreground">
-                                        {localizedBlockingReason(reason)}
-                                      </span>
-                                      <span className="mt-0.5 block text-xs text-muted-foreground">
-                                        {lang === "de"
-                                          ? "Wartet auf die Buchhaltung: Die Freigabe erteilt Billing. Sie müssen hier nichts tun."
-                                          : "Ждёт бухгалтерию: разрешение выдаёт Billing. От вас здесь ничего не требуется."}
-                                      </span>
-                                    </span>
-                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
-                                      {lang === "de" ? "Wartet auf Billing" : "Ждёт бухгалтерию"}
-                                    </span>
-                                  </div>
-                                ) : (
                                 <button
                                   type="button"
                                   className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
@@ -4346,7 +4280,6 @@ function useOrdersPageContent() {
                                     <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
                                   </span>
                                 </button>
-                                )}
                               </li>
                             );
                           })}
@@ -4949,12 +4882,6 @@ function useOrdersPageContent() {
                           }
                         />
                         <OrderSummaryLine
-                          label={l("orders_billing_release")}
-                          value={billingReleaseLabel(
-                            orderDetail.process_gates.billing_release_status,
-                          )}
-                        />
-                        <OrderSummaryLine
                           label={l("orders_paketdeckung")}
                           value={packageCoverageLabel(
                             orderDetail.process_gates.package_coverage_status,
@@ -5113,76 +5040,6 @@ function useOrdersPageContent() {
                             </div>
                           ) : null}
                         </div>
-
-                        {hasCapability(user, "invoices.finance") ? (
-                          <div className="rounded-2xl border border-border p-4">
-                            <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("orders_billing_release"))}
-                            </div>
-                            <div className="mt-1 text-sm text-muted-foreground">
-                              {l("orders_billing_entscheidet_ob_die_durchfuhrung_ausserhalb_der_p")}
-                            </div>
-                            <div className="mt-4 space-y-3">
-                              <NativeComboboxSelect
-                                value={processGateForm.billingReleaseStatus}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    billingReleaseStatus: event.target.value as OrderProcessGateFormState["billingReleaseStatus"],
-                                  }))
-                                }
-                                className={selectClassName}
-                              >
-                                <option value="pending">{billingReleaseLabel("pending")}</option>
-                                <option value="granted">{billingReleaseLabel("granted")}</option>
-                                <option value="denied">{billingReleaseLabel("denied")}</option>
-                              </NativeComboboxSelect>
-                              <textarea
-                                value={processGateForm.billingReleaseNote}
-                                onChange={(event) =>
-                                  setProcessGateForm((current) => ({
-                                    ...current,
-                                    billingReleaseNote: event.target.value,
-                                  }))
-                                }
-                                className={textareaClassName}
-                                placeholder={l("orders_billing_notiz")}
-                              />
-                              <div className="flex justify-end">
-                                <Button
-                                  type="button"
-                                  onClick={() =>
-                                    void handleSaveBillingRelease()
-                                  }
-                                  disabled={processGateBusy || !billingReleaseDirty}
-                                >
-                                  {processGateBusy ? (
-                                    <LoaderCircle className="mr-2 size-4 animate-spin" />
-                                  ) : null}
-                                  {l("orders_billing_gate_speichern")}
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-                        ) : (
-                          <div
-                            className="rounded-2xl border border-border bg-muted/20 p-4"
-                            data-testid="order-billing-release-readonly"
-                          >
-                            <div className="text-sm font-semibold text-foreground">
-                              {titleWithDot(l("orders_billing_release"))}
-                            </div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {orderDetail.process_gates.billing_release_status === "granted"
-                                ? lang === "de"
-                                  ? "Billing hat die Durchführung freigegeben."
-                                  : "Бухгалтерия разрешила выполнение."
-                                : lang === "de"
-                                  ? `Wartet auf die Buchhaltung (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Die Freigabe erteilt Billing; bei einem bestehenden Paket kann stattdessen die Paketdeckung bestätigt werden.`
-                                  : `Ждёт бухгалтерию (${billingReleaseLabel(orderDetail.process_gates.billing_release_status)}). Разрешение выдаёт бухгалтерия; при действующем пакете вместо этого можно подтвердить покрытие пакетом.`}
-                            </p>
-                          </div>
-                        )}
 
                         {permissions.canManagePhase ? (
                           <div className="rounded-2xl border border-border p-4">

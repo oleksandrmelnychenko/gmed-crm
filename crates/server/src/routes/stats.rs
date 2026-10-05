@@ -135,7 +135,6 @@ struct BillingRiskSummary {
     high_alerts: i64,
     medium_alerts: i64,
     overdue_invoice_count: i64,
-    blocked_orders: i64,
     outstanding_balance_total: String,
     exposure_gap_total: String,
 }
@@ -153,7 +152,6 @@ struct BillingRiskAlert {
     reasons: Vec<String>,
     reason_details: Vec<RiskReasonDetail>,
     phase: String,
-    billing_release_status: String,
     package_coverage_status: String,
     overdue_invoice_count: i64,
     unpaid_advance_invoice_count: i64,
@@ -170,10 +168,6 @@ struct RiskReasonDetail {
     count: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     amount: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    billing_release_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    package_coverage_status: Option<String>,
 }
 
 impl RiskReasonDetail {
@@ -182,8 +176,6 @@ impl RiskReasonDetail {
             code,
             count: None,
             amount: None,
-            billing_release_status: None,
-            package_coverage_status: None,
         }
     }
 
@@ -198,14 +190,6 @@ impl RiskReasonDetail {
         Self {
             amount: Some(amount),
             ..Self::code(code)
-        }
-    }
-
-    fn billing_blocked(billing_release_status: String, package_coverage_status: String) -> Self {
-        Self {
-            billing_release_status: Some(billing_release_status),
-            package_coverage_status: Some(package_coverage_status),
-            ..Self::code("risk.billing.reason.billing_release_blocked")
         }
     }
 }
@@ -5347,7 +5331,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                 p.first_name,
                 p.last_name,
                 o.phase,
-                o.billing_release_status,
                 o.package_coverage_status,
                 COALESCE(ss.service_gross, 0) AS service_gross,
                 COALESCE(inv.invoiced_total, 0) AS invoiced_total,
@@ -5367,10 +5350,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                         COALESCE(ss.service_gross, 0) > COALESCE(inv.invoiced_total, 0)
                     AND o.phase IN ('execution', 'closure', 'followup')
                  )
-                 OR (
-                        o.billing_release_status <> 'granted'
-                    AND o.package_coverage_status <> 'covered'
-                 )
               )
             ORDER BY
                 COALESCE(inv.overdue_invoice_count, 0) DESC,
@@ -5386,7 +5365,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
     let mut high_alerts = 0;
     let mut medium_alerts = 0;
     let mut overdue_invoice_count = 0;
-    let mut blocked_orders = 0;
     let mut outstanding_balance_total = Decimal::ZERO;
     let mut exposure_gap_total = Decimal::ZERO;
 
@@ -5405,9 +5383,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
         .trim()
         .to_string();
         let phase = row.try_get::<String, _>("phase").unwrap_or_default();
-        let billing_release_status = row
-            .try_get::<String, _>("billing_release_status")
-            .unwrap_or_else(|_| "pending".to_string());
         let package_coverage_status = row
             .try_get::<String, _>("package_coverage_status")
             .unwrap_or_else(|_| "unknown".to_string());
@@ -5455,14 +5430,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
                 decimal_to_string(exposure_gap),
             ));
         }
-        let blocked_order =
-            billing_release_status != "granted" && package_coverage_status != "covered";
-        if blocked_order {
-            reason_details.push(RiskReasonDetail::billing_blocked(
-                billing_release_status.clone(),
-                package_coverage_status.clone(),
-            ));
-        }
 
         if reason_details.is_empty() {
             continue;
@@ -5470,8 +5437,7 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
 
         let severity = if overdue_invoices > 0 || outstanding_balance >= Decimal::from(5000) {
             "urgent"
-        } else if unpaid_advance_invoice_count > 0 || exposure_gap > Decimal::ZERO || blocked_order
-        {
+        } else if unpaid_advance_invoice_count > 0 || exposure_gap > Decimal::ZERO {
             "high"
         } else {
             "medium"
@@ -5481,9 +5447,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
             "urgent" => urgent_alerts += 1,
             "high" => high_alerts += 1,
             _ => medium_alerts += 1,
-        }
-        if blocked_order {
-            blocked_orders += 1;
         }
         overdue_invoice_count += overdue_invoices;
         outstanding_balance_total += outstanding_balance;
@@ -5504,7 +5467,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
             reasons,
             reason_details,
             phase,
-            billing_release_status,
             package_coverage_status,
             overdue_invoice_count: overdue_invoices,
             unpaid_advance_invoice_count,
@@ -5534,7 +5496,6 @@ async fn load_billing_risks(state: &AppState) -> Result<BillingRiskPayload, sqlx
             high_alerts,
             medium_alerts,
             overdue_invoice_count,
-            blocked_orders,
             outstanding_balance_total: decimal_to_string(outstanding_balance_total),
             exposure_gap_total: decimal_to_string(exposure_gap_total),
         },

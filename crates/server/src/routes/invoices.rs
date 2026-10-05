@@ -6431,7 +6431,6 @@ async fn get_patient_billing_workspace(
                     'status', patient_order.status,
                     'phase', patient_order.phase,
                     'currency', UPPER(patient_order.currency),
-                    'billing_release_status', patient_order.billing_release_status,
                     'package_coverage_status', patient_order.package_coverage_status,
                     'cancellation_reason', patient_order.cancellation_reason,
                     'termination_settlement', (

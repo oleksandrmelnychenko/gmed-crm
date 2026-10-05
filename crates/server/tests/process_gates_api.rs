@@ -491,6 +491,8 @@ async fn overdue_debt_remains_visible_without_blocking_execution() {
         .await
         .unwrap();
 
+    // No billing release is needed (owner decision 2026-10-05); a request with
+    // only the former fields changes nothing.
     let (status, _) = json_request(
         &app,
         "POST",
@@ -502,7 +504,32 @@ async fn overdue_debt_remains_visible_without_blocking_execution() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (status, ready) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ready}");
+    assert!(
+        ready["process_gates"]
+            .get("billing_release_status")
+            .is_none()
+    );
+    assert!(
+        !ready["process_gates"]["blocking_reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason
+                .as_str()
+                .unwrap_or_default()
+                .contains("Billing release")),
+        "{ready}"
+    );
 
     sqlx::query(
         r#"INSERT INTO invoices (

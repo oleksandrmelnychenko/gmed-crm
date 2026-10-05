@@ -107,11 +107,7 @@ async fn seed_order(pool: &PgPool, patient_id: Uuid, created_by: Uuid, tag: &str
     .unwrap();
     sqlx::query(
         r#"UPDATE orders
-           SET billing_release_status = 'granted',
-               billing_release_note = 'test gate',
-               billing_released_by = $2,
-               billing_released_at = now(),
-               package_coverage_status = 'not_covered',
+           SET package_coverage_status = 'not_covered',
                package_coverage_note = 'test package gate',
                package_coverage_decided_by = $2,
                package_coverage_decided_at = now()

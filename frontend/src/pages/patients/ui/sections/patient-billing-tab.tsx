@@ -27,7 +27,6 @@ type BillingOrder = {
   status: string;
   phase: string;
   currency: string;
-  billing_release_status: string;
   package_coverage_status: string;
   services: Array<{ id: string; status: string }>;
   cancellation_reason?: string | null;

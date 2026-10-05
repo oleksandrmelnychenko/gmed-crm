@@ -225,8 +225,6 @@ export function blankOrderProcessGateForm(): OrderProcessGateFormState {
     debtNextReviewAt: "",
     debtLastContactAt: "",
     debtResolutionNote: "",
-    billingReleaseStatus: "pending",
-    billingReleaseNote: "",
     packageCoverageStatus: "unknown",
     packageCoverageNote: "",
   };
@@ -287,8 +285,6 @@ export function orderProcessGatesToForm(
       processGates.debt_management?.last_contact_at,
     ),
     debtResolutionNote: processGates.debt_management?.resolution_note ?? "",
-    billingReleaseStatus: processGates.billing_release_status,
-    billingReleaseNote: processGates.billing_release_note ?? "",
     packageCoverageStatus: processGates.package_coverage_status,
     packageCoverageNote: processGates.package_coverage_note ?? "",
   };

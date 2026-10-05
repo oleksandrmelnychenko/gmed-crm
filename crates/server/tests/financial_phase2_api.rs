@@ -101,12 +101,11 @@ async fn seed_order(pool: &PgPool, patient_id: Uuid, created_by: Uuid, tag: &str
     sqlx::query_scalar(
         r#"INSERT INTO orders (
                 order_number, patient_id, phase, status, created_by,
-                billing_release_status, billing_released_by, billing_released_at,
                 package_coverage_status, package_coverage_decided_by,
                 package_coverage_decided_at
            ) VALUES (
                 $1, $2, 'execution', 'active', $3,
-                'granted', $3, now(), 'not_covered', $3, now()
+                'not_covered', $3, now()
            ) RETURNING id"#,
     )
     .bind(format!("ORD-{tag}"))

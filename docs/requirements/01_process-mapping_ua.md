@@ -78,8 +78,8 @@
    - якщо є борг, кейс переходить у debt-management сценарій;
    - якщо боргу немає, можна створювати нове замовлення.
 5. Для нового замовлення:
-   - потрібна freigabe від Abrechnung;
-   - якщо Abrechnung не дає freigabe, перевіряється чи **замовлення покривається існуючим пакетом послуг** (Paketleistung);
+   - ~~потрібна freigabe від Abrechnung~~ — **прибрано рішенням власника 2026-10-05**: окремого дозволу бухгалтерії немає, замовлення допускають борги (debt hold), підписи й оплата;
+   - перевіряється, чи **замовлення покривається існуючим пакетом послуг** (Paketleistung);
    - якщо покривається — замовлення проходить без окремого кошторису;
    - якщо не покривається — запускаються стандартні договірні та фінансові перевірки (Auftrag + Kostenvoranschlag → підпис → оплата).
 
@@ -150,7 +150,7 @@
 - `Quote paid when required?`
 - `Data valid?`
 - `Debt exists?`
-- `Billing approval granted?`
+- ~~`Billing approval granted?`~~ (прибрано 2026-10-05)
 - `Order covered by existing package?`
 - `Non-medical services needed?`
 - `Plan correction needed?`

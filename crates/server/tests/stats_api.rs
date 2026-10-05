@@ -1429,13 +1429,11 @@ async fn billing_risks_count_released_invoices_not_drafts() {
     let patient_id = seed_patient(&pool, admin_id, &tag, "DE").await;
     let draft_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-d"), "active").await;
     let sent_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-s"), "active").await;
-    sqlx::query(
-        "UPDATE orders SET billing_release_status = 'granted', phase = 'intake' WHERE id = ANY($1)",
-    )
-    .bind(vec![draft_order, sent_order])
-    .execute(&pool)
-    .await
-    .unwrap();
+    sqlx::query("UPDATE orders SET phase = 'intake' WHERE id = ANY($1)")
+        .bind(vec![draft_order, sent_order])
+        .execute(&pool)
+        .await
+        .unwrap();
     seed_invoice(
         &pool,
         draft_order,

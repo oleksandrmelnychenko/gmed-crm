@@ -184,10 +184,9 @@ async fn fixture(tag_prefix: &str) -> Option<Fixture> {
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (
                order_number, patient_id, contract_id, phase, status, currency, created_by,
-               billing_release_status, billing_released_by, billing_released_at,
                package_coverage_status, package_coverage_decided_by, package_coverage_decided_at
            ) VALUES ($1, $2, $3::uuid, 'execution', 'active', 'EUR', $4,
-                     'granted', $4, now(), 'not_covered', $4, now())
+                     'not_covered', $4, now())
            RETURNING id"#,
     )
     .bind(format!("ORD-{tag}"))

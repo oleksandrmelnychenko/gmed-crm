@@ -246,8 +246,6 @@ struct StatusRequest {
 
 #[derive(Deserialize)]
 struct UpdateOrderProcessGatesRequest {
-    billing_release_status: Option<String>,
-    billing_release_note: Option<String>,
     package_coverage_status: Option<String>,
     package_coverage_note: Option<String>,
 }
@@ -1084,10 +1082,6 @@ fn is_valid_order_status(value: &str) -> bool {
     matches!(value, "active" | "paused" | "completed" | "cancelled")
 }
 
-fn is_valid_billing_release_status(value: &str) -> bool {
-    matches!(value, "pending" | "granted" | "denied")
-}
-
 fn is_valid_package_coverage_status(value: &str) -> bool {
     matches!(value, "unknown" | "covered" | "not_covered")
 }
@@ -1775,11 +1769,7 @@ async fn load_order_process_readiness(
     patient_id: Option<Uuid>,
 ) -> Result<OrderProcessReadiness, axum::response::Response> {
     let gate_row = sqlx::query(
-        r#"SELECT billing_release_status,
-                  billing_release_note,
-                  billing_released_by,
-                  billing_released_at,
-                  package_coverage_status,
+        r#"SELECT package_coverage_status,
                   package_coverage_note,
                   package_coverage_decided_by,
                   package_coverage_decided_at,
@@ -1856,15 +1846,6 @@ async fn load_order_process_readiness(
         )
     })?;
 
-    let billing_release_status: String = gate_row
-        .try_get("billing_release_status")
-        .unwrap_or_else(|_| "pending".to_string());
-    let billing_release_note: Option<String> =
-        gate_row.try_get("billing_release_note").unwrap_or_default();
-    let billing_released_by: Option<Uuid> =
-        gate_row.try_get("billing_released_by").unwrap_or_default();
-    let billing_released_at: Option<chrono::DateTime<chrono::Utc>> =
-        gate_row.try_get("billing_released_at").unwrap_or_default();
     let package_coverage_status: String = gate_row
         .try_get("package_coverage_status")
         .unwrap_or_else(|_| "unknown".to_string());
@@ -1900,8 +1881,9 @@ async fn load_order_process_readiness(
     )
     .await?;
     let debt_hold = debt_management.blocking;
-    let financial_gate_ready =
-        billing_release_status == "granted" || package_coverage_status == "covered";
+    // No manual billing release (owner decision 2026-10-05): debts, the signed
+    // order (or a covering package) and the payment tracking already decide
+    // whether an order may go ahead.
     let contract_gate_ready =
         package_coverage_status == "covered" || (signed_patient && signed_agency);
     let payment_gate_required = package_coverage_status != "covered" && advance_invoice_count > 0;
@@ -1911,11 +1893,6 @@ async fn load_order_process_readiness(
     let mut blocking_reasons = Vec::new();
     if let Some(reason) = debt_management.blocking_reason.clone() {
         blocking_reasons.push(reason);
-    }
-    if !financial_gate_ready {
-        blocking_reasons.push(
-            "Billing release is not granted and package coverage is not confirmed".to_string(),
-        );
     }
     if !contract_gate_ready {
         blocking_reasons.push("Order signatures are still incomplete".to_string());
@@ -1939,15 +1916,10 @@ async fn load_order_process_readiness(
             "overdue_invoice_count": overdue_invoice_count,
             "outstanding_balance": outstanding_balance.round_cents().normalize().to_string(),
             "debt_management": debt_management.payload,
-            "billing_release_status": billing_release_status,
-            "billing_release_note": billing_release_note,
-            "billing_released_by": billing_released_by,
-            "billing_released_at": billing_released_at.map(|value| value.to_rfc3339()),
             "package_coverage_status": package_coverage_status,
             "package_coverage_note": package_coverage_note,
             "package_coverage_decided_by": package_coverage_decided_by,
             "package_coverage_decided_at": package_coverage_decided_at.map(|value| value.to_rfc3339()),
-            "financial_gate_ready": financial_gate_ready,
             "contract_gate_ready": contract_gate_ready,
             "signed_patient": signed_patient,
             "signed_agency": signed_agency,
@@ -6618,23 +6590,14 @@ async fn update_process_gates(
         Err(resp) => return resp,
     }
 
-    let billing_release_status = body
-        .billing_release_status
-        .map(|value| value.to_lowercase());
     let package_coverage_status = body
         .package_coverage_status
         .map(|value| value.to_lowercase());
 
-    if billing_release_status.is_none() && package_coverage_status.is_none() {
+    if package_coverage_status.is_none() {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "No process gate changes supplied",
-        );
-    }
-    if billing_release_status.is_some() && !matches!(auth.role, Role::Billing | Role::Ceo) {
-        return err(
-            StatusCode::FORBIDDEN,
-            "Only billing or CEO may decide billing release",
         );
     }
     if package_coverage_status.is_some() && !matches!(auth.role, Role::PatientManager | Role::Ceo) {
@@ -6644,14 +6607,6 @@ async fn update_process_gates(
         );
     }
 
-    if let Some(ref value) = billing_release_status
-        && !is_valid_billing_release_status(value)
-    {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "Invalid billing_release_status",
-        );
-    }
     if let Some(ref value) = package_coverage_status
         && !is_valid_package_coverage_status(value)
     {
@@ -6669,29 +6624,21 @@ async fn update_process_gates(
 
     match sqlx::query(
         r#"UPDATE orders
-           SET billing_release_status = COALESCE($2, billing_release_status),
-               billing_release_note = CASE WHEN $2 IS NOT NULL THEN $3 ELSE billing_release_note END,
-               billing_released_by = CASE WHEN $2 IS NOT NULL THEN $4 ELSE billing_released_by END,
-               billing_released_at = CASE WHEN $2 IS NOT NULL THEN now() ELSE billing_released_at END,
-               package_coverage_status = COALESCE($5, package_coverage_status),
-               package_coverage_note = CASE WHEN $5 IS NOT NULL THEN $6 ELSE package_coverage_note END,
-               package_coverage_decided_by = CASE WHEN $5 IS NOT NULL THEN $4 ELSE package_coverage_decided_by END,
-               package_coverage_decided_at = CASE WHEN $5 IS NOT NULL THEN now() ELSE package_coverage_decided_at END
+           SET package_coverage_status = COALESCE($2, package_coverage_status),
+               package_coverage_note = CASE WHEN $2 IS NOT NULL THEN $3 ELSE package_coverage_note END,
+               package_coverage_decided_by = CASE WHEN $2 IS NOT NULL THEN $4 ELSE package_coverage_decided_by END,
+               package_coverage_decided_at = CASE WHEN $2 IS NOT NULL THEN now() ELSE package_coverage_decided_at END
            WHERE id = $1"#,
     )
     .bind(order_id)
-    .bind(billing_release_status.clone())
-    .bind(body.billing_release_note.clone())
-    .bind(auth.user_id)
     .bind(package_coverage_status.clone())
     .bind(body.package_coverage_note.clone())
+    .bind(auth.user_id)
     .execute(&state.db)
     .await
     {
         Ok(result) if result.rows_affected() > 0 => {
             let realtime_payload = serde_json::json!({
-                "billing_release_status": billing_release_status,
-                "billing_release_note": body.billing_release_note,
                 "package_coverage_status": package_coverage_status,
                 "package_coverage_note": body.package_coverage_note,
             });
