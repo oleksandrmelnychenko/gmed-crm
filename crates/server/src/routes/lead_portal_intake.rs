@@ -511,11 +511,13 @@ async fn my_lead_access(
 
 const PERSONAL_DATA_COLUMNS: &str = "l.first_name, l.middle_name, l.last_name, l.date_of_birth, \
      l.legal_sex, l.citizenships, l.street_address, l.zip_code, l.city, l.country, l.phone, \
-     l.primary_language";
+     l.primary_language, l.has_insurance, l.insurance_type, l.insurance_provider, \
+     l.insurance_number, l.insurance_covers_germany";
 
 /// Fields the patient may edit (API keys = column names). The e-mail is the
-/// login and stays with staff.
-const EDITABLE_FIELDS: [&str; 12] = [
+/// login and stays with staff. The insurance block is the one of wizard step 1
+/// (owner request 2026-10-05).
+const EDITABLE_FIELDS: [&str; 17] = [
     "first_name",
     "middle_name",
     "last_name",
@@ -528,10 +530,17 @@ const EDITABLE_FIELDS: [&str; 12] = [
     "country",
     "phone",
     "primary_language",
+    "has_insurance",
+    "insurance_type",
+    "insurance_provider",
+    "insurance_number",
+    "insurance_covers_germany",
 ];
 
-/// Fields counted in "N of M filled" (the middle name is optional for everyone).
-pub(crate) const PROGRESS_FIELDS: [&str; 11] = [
+/// Fields counted in "N of M filled" (the middle name is optional for everyone;
+/// of the insurance block only the answer whether there is one, because the
+/// rest depends on it).
+pub(crate) const PROGRESS_FIELDS: [&str; 12] = [
     "first_name",
     "last_name",
     "date_of_birth",
@@ -543,6 +552,7 @@ pub(crate) const PROGRESS_FIELDS: [&str; 11] = [
     "country",
     "phone",
     "primary_language",
+    "has_insurance",
 ];
 
 /// Fields that must be filled before the data can be sent to the manager.
@@ -559,6 +569,9 @@ const SUBMIT_REQUIRED_FIELDS: [&str; 9] = [
 ];
 
 const LEGAL_SEX_VALUES: [&str; 4] = ["female", "male", "diverse", "no_entry"];
+/// Same values as the staff wizard and `patients.insurance_type`.
+const INSURANCE_TYPE_VALUES: [&str; 4] = ["private", "public", "foreign", "self_pay"];
+const INSURANCE_COVERAGE_VALUES: [&str; 3] = ["yes", "no", "not_sure"];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PersonalData {
@@ -574,6 +587,11 @@ pub(crate) struct PersonalData {
     country: Option<String>,
     phone: Option<String>,
     primary_language: Option<String>,
+    has_insurance: Option<bool>,
+    insurance_type: Option<String>,
+    insurance_provider: Option<String>,
+    insurance_number: Option<String>,
+    insurance_covers_germany: Option<String>,
 }
 
 fn non_empty(value: Option<String>) -> Option<String> {
@@ -604,6 +622,14 @@ impl PersonalData {
             country: text("country"),
             phone: text("phone"),
             primary_language: text("primary_language"),
+            has_insurance: row
+                .try_get::<Option<bool>, _>("has_insurance")
+                .ok()
+                .flatten(),
+            insurance_type: text("insurance_type"),
+            insurance_provider: text("insurance_provider"),
+            insurance_number: text("insurance_number"),
+            insurance_covers_germany: text("insurance_covers_germany"),
         }
     }
 
@@ -624,6 +650,13 @@ impl PersonalData {
             "country" => self.country.clone(),
             "phone" => self.phone.clone(),
             "primary_language" => self.primary_language.clone(),
+            "has_insurance" => self
+                .has_insurance
+                .map(|value| if value { "yes" } else { "no" }.to_string()),
+            "insurance_type" => self.insurance_type.clone(),
+            "insurance_provider" => self.insurance_provider.clone(),
+            "insurance_number" => self.insurance_number.clone(),
+            "insurance_covers_germany" => self.insurance_covers_germany.clone(),
             _ => None,
         };
         value.filter(|value| !value.trim().is_empty())
@@ -658,6 +691,11 @@ impl PersonalData {
             "country": self.country,
             "phone": self.phone,
             "primary_language": self.primary_language,
+            "has_insurance": self.has_insurance,
+            "insurance_type": self.insurance_type,
+            "insurance_provider": self.insurance_provider,
+            "insurance_number": self.insurance_number,
+            "insurance_covers_germany": self.insurance_covers_germany,
         })
     }
 }
@@ -680,6 +718,12 @@ pub(crate) struct PersonalDataPatch {
     country: Option<String>,
     phone: Option<String>,
     primary_language: Option<String>,
+    /// "yes", "no" or empty (not stated).
+    has_insurance: Option<String>,
+    insurance_type: Option<String>,
+    insurance_provider: Option<String>,
+    insurance_number: Option<String>,
+    insurance_covers_germany: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -705,6 +749,22 @@ fn clean_text(
         return Err(field_error(field, "Invalid characters"));
     }
     Ok((!value.is_empty()).then_some(value))
+}
+
+/// One of `allowed`, or nothing for an empty value.
+fn one_of(
+    value: &str,
+    field: &'static str,
+    allowed: &[&str],
+) -> Result<Option<String>, FieldError> {
+    let value = value.trim().to_lowercase();
+    if value.is_empty() {
+        Ok(None)
+    } else if allowed.contains(&value.as_str()) {
+        Ok(Some(value))
+    } else {
+        Err(field_error(field, "Invalid value"))
+    }
 }
 
 fn required_name(value: &str, field: &'static str) -> Result<String, FieldError> {
@@ -819,6 +879,38 @@ pub(crate) fn apply_personal_data_patch(
             return Err(field_error("primary_language", "Use a language code"));
         };
     }
+    if let Some(value) = &patch.has_insurance {
+        next.has_insurance = match value.trim().to_lowercase().as_str() {
+            "" => None,
+            "yes" => Some(true),
+            "no" => Some(false),
+            _ => return Err(field_error("has_insurance", "Invalid value")),
+        };
+    }
+    if let Some(value) = &patch.insurance_type {
+        next.insurance_type = one_of(value, "insurance_type", &INSURANCE_TYPE_VALUES)?;
+    }
+    if let Some(value) = &patch.insurance_provider {
+        next.insurance_provider = clean_text(value, "insurance_provider", 200)?;
+    }
+    if let Some(value) = &patch.insurance_number {
+        next.insurance_number = clean_text(value, "insurance_number", 100)?;
+    }
+    if let Some(value) = &patch.insurance_covers_germany {
+        next.insurance_covers_germany = one_of(
+            value,
+            "insurance_covers_germany",
+            &INSURANCE_COVERAGE_VALUES,
+        )?;
+    }
+    // "No insurance" means self-payer, as in the staff wizard: the details of
+    // an insurance cannot stay next to it.
+    if next.has_insurance == Some(false) {
+        next.insurance_type = Some("self_pay".to_string());
+        next.insurance_provider = None;
+        next.insurance_number = None;
+        next.insurance_covers_germany = None;
+    }
     Ok(next)
 }
 
@@ -917,7 +1009,25 @@ async fn request_payload(
 ) -> Result<Value, sqlx::Error> {
     let row = sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.created_at, l.qualification_status,
-                  l.compliance_status, l.portal_submitted_at
+                  l.compliance_status, l.portal_submitted_at,
+                  -- The patient changed the data or the documents after
+                  -- sending: only then "send again" makes sense.
+                  l.portal_submitted_at IS NOT NULL AND (
+                      EXISTS (
+                          SELECT 1
+                          FROM jsonb_each(
+                              CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
+                                   THEN l.portal_field_updates ELSE '{{}}'::jsonb END
+                          ) AS field(name, entry)
+                          WHERE (field.entry->>'at')::timestamptz > l.portal_submitted_at
+                      )
+                      OR EXISTS (
+                          SELECT 1 FROM lead_portal_uploads pu
+                          WHERE pu.lead_id = l.id
+                            AND (pu.created_at > l.portal_submitted_at
+                                 OR pu.withdrawn_at > l.portal_submitted_at)
+                      )
+                  ) AS changed_since_submit
            FROM leads l
            WHERE l.id = $1"#
     ))
@@ -1008,6 +1118,9 @@ async fn request_payload(
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
             .flatten(),
+        "changed_since_submit": row
+            .try_get::<bool, _>("changed_since_submit")
+            .unwrap_or(false),
         "retention_deadline_at": deadline,
     }))
 }
@@ -1184,6 +1297,11 @@ async fn update_my_personal_data(
                country = $11,
                phone = $12,
                primary_language = $13,
+               has_insurance = $16,
+               insurance_type = $17,
+               insurance_provider = $18,
+               insurance_number = $19,
+               insurance_covers_germany = $20,
                -- The wizard and older readers still use the single
                -- registration country: the first citizenship.
                wizard_state = CASE
@@ -1211,6 +1329,11 @@ async fn update_my_personal_data(
     .bind(&next.primary_language)
     .bind(citizenships_changed)
     .bind(Value::Object(markers))
+    .bind(next.has_insurance)
+    .bind(&next.insurance_type)
+    .bind(&next.insurance_provider)
+    .bind(&next.insurance_number)
+    .bind(&next.insurance_covers_germany)
     .execute(&mut *tx)
     .await
     {
@@ -2558,6 +2681,102 @@ mod tests {
         data.middle_name = Some("Maria".into());
         data.phone = Some("+49 30 1234567".into());
         assert_eq!(data.filled_count(), 3);
+        // Of the insurance block only the answer counts, and it is not needed to send.
+        data.has_insurance = Some(false);
+        data.insurance_type = Some("self_pay".into());
+        assert_eq!(data.filled_count(), 4);
+        assert_eq!(PROGRESS_FIELDS.len(), 12);
+        assert!(!data.missing_for_submit().contains(&"has_insurance"));
+    }
+
+    #[test]
+    fn insurance_follows_the_staff_wizard() {
+        let insured = apply_personal_data_patch(
+            &anna(),
+            &PersonalDataPatch {
+                has_insurance: Some("yes".into()),
+                insurance_type: Some("Private".into()),
+                insurance_provider: Some("  Allianz   Care ".into()),
+                insurance_number: Some("A-123".into()),
+                insurance_covers_germany: Some("not_sure".into()),
+                ..Default::default()
+            },
+            today(),
+        )
+        .unwrap();
+        assert_eq!(insured.has_insurance, Some(true));
+        assert_eq!(insured.insurance_type.as_deref(), Some("private"));
+        assert_eq!(insured.insurance_provider.as_deref(), Some("Allianz Care"));
+        assert_eq!(
+            insured.insurance_covers_germany.as_deref(),
+            Some("not_sure")
+        );
+        assert_eq!(
+            changed_fields(&anna(), &insured),
+            vec![
+                "has_insurance",
+                "insurance_type",
+                "insurance_provider",
+                "insurance_number",
+                "insurance_covers_germany"
+            ]
+        );
+
+        // "No insurance" is the self-payer: the details go.
+        let self_payer = apply_personal_data_patch(
+            &insured,
+            &PersonalDataPatch {
+                has_insurance: Some("no".into()),
+                ..Default::default()
+            },
+            today(),
+        )
+        .unwrap();
+        assert_eq!(self_payer.has_insurance, Some(false));
+        assert_eq!(self_payer.insurance_type.as_deref(), Some("self_pay"));
+        assert_eq!(self_payer.insurance_provider, None);
+        assert_eq!(self_payer.insurance_number, None);
+        assert_eq!(self_payer.insurance_covers_germany, None);
+
+        // An empty answer is "not stated"; the details stay as entered.
+        let unstated = apply_personal_data_patch(
+            &insured,
+            &PersonalDataPatch {
+                has_insurance: Some(String::new()),
+                ..Default::default()
+            },
+            today(),
+        )
+        .unwrap();
+        assert_eq!(unstated.has_insurance, None);
+        assert_eq!(unstated.insurance_provider.as_deref(), Some("Allianz Care"));
+
+        for (patch, field) in [
+            (
+                PersonalDataPatch {
+                    has_insurance: Some("maybe".into()),
+                    ..Default::default()
+                },
+                "has_insurance",
+            ),
+            (
+                PersonalDataPatch {
+                    insurance_type: Some("gold".into()),
+                    ..Default::default()
+                },
+                "insurance_type",
+            ),
+            (
+                PersonalDataPatch {
+                    insurance_covers_germany: Some("partly".into()),
+                    ..Default::default()
+                },
+                "insurance_covers_germany",
+            ),
+        ] {
+            let error = apply_personal_data_patch(&anna(), &patch, today()).unwrap_err();
+            assert_eq!(error.field, field);
+        }
     }
 
     #[test]

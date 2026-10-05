@@ -5786,7 +5786,8 @@ async fn manual_lead_gets_a_patient_login() {
     .unwrap();
     assert_eq!(
         (role.as_str(), name.as_str(), is_active, reset_required),
-        ("patient", "Anna Portal", true, true)
+        // No forced password change: the lead keeps the issued password.
+        ("patient", "Anna Portal", true, false)
     );
     let audited: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM audit_log WHERE action = 'create_lead_portal_account' AND entity_id = $1)",
@@ -5807,7 +5808,7 @@ async fn manual_lead_gets_a_patient_login() {
         .find(|item| item["id"] == lead_id.to_string())
         .expect("lead in list");
     assert_eq!(row["portal_account"]["is_active"], true, "{row}");
-    assert_eq!(row["portal_account"]["password_change_pending"], true);
+    assert_eq!(row["portal_account"]["password_change_pending"], false);
     assert!(row["portal_account"]["last_login_at"].is_null());
 
     // Sales creates leads too, but does not get the password.
@@ -5844,7 +5845,7 @@ async fn manual_lead_gets_a_patient_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{state}");
     assert_eq!(state["account"]["email"], "bert.portal@example.com");
-    assert_eq!(state["account"]["password_change_pending"], true);
+    assert_eq!(state["account"]["password_change_pending"], false);
     assert_eq!(state["can_issue_password"], false);
 
     let (status, _) = json_request(
@@ -5870,6 +5871,14 @@ async fn manual_lead_gets_a_patient_login() {
     assert_eq!(issued["created"], false);
     let second_password = issued["one_time_password"].as_str().unwrap();
     assert_ne!(second_password, first_password);
+    let forced: bool = sqlx::query_scalar(
+        "SELECT u.password_reset_required FROM leads l JOIN users u ON u.id = l.portal_user_id WHERE l.id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(!forced, "a new password is not forced to change either");
 }
 
 /// Login addresses are unique: a lead may not take the address of any

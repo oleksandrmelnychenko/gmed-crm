@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   BrowserRouter,
+  Outlet,
   Routes,
   Route,
   useLocation,
@@ -16,7 +17,7 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import "dayjs/locale/de";
 import "dayjs/locale/ru";
 import { AppAdapterDayjs } from "@/lib/app-date-adapter";
-import { AuthProvider } from "@/lib/auth";
+import { AuthProvider, useAuth } from "@/lib/auth";
 import { RealtimeProvider } from "@/lib/realtime";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppLayout } from "@/components/layout";
@@ -397,6 +398,16 @@ class RouteErrorBoundary extends Component<
   }
 }
 
+/**
+ * The legal notice is public. A signed-in patient or lead reads it inside the
+ * portal, with the menu, instead of on the bare page that leads "back to login".
+ */
+function LegalNoticeRoute() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen bg-background" />;
+  return user?.role === "patient" && !user.password_change_required ? <AppLayout /> : <Outlet />;
+}
+
 function AppRoutes() {
   const location = useLocation();
 
@@ -408,7 +419,9 @@ function AppRoutes() {
       <Suspense fallback={<div className="min-h-screen bg-background" />}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/legal" element={<LegalNoticePage />} />
+          <Route path="/legal" element={<LegalNoticeRoute />}>
+            <Route index element={<LegalNoticePage />} />
+          </Route>
           <Route path="/account/password-required" element={<AccountPasswordRequiredPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />

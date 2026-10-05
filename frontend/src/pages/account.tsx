@@ -33,17 +33,19 @@ function useUiText() {
 export function AccountPage() {
   const { l } = useUiText();
   const { user } = useAuth();
-  // The lead cabinet keeps the account to profile, language and password.
+  // The lead cabinet keeps the account to profile and language. A lead signs
+  // in with the password the manager issued and does not change it here
+  // (owner decision 2026-10-05); a lost one is replaced by staff.
   const leadCabinet = isLeadPortalUser(user);
   return (
     <div className="space-y-4" data-testid="account-page">
       <PageHeader title={l("account_title")} description={l("account_subtitle")} />
       <ProfileSection />
-      <Section title={l("account_password_title")}>
-        <ChangePasswordForm />
-      </Section>
       {leadCabinet ? null : (
         <>
+          <Section title={l("account_password_title")}>
+            <ChangePasswordForm />
+          </Section>
           <Section title={l("twofactor_title")}>
             <TwoFactorSection />
           </Section>

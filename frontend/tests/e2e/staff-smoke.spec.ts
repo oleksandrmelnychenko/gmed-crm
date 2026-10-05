@@ -3051,7 +3051,7 @@ test.describe("lead onboarding wizard", () => {
     await credentials.getByRole("button", { name: "Nachricht kopieren" }).click();
     await expect
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-      .toContain("Einmalpasswort: Kq7-mP2x-Rw9t");
+      .toContain("Passwort: Kq7-mP2x-Rw9t");
     await credentials.getByRole("button", { name: "Fertig" }).click();
     await expect(credentials).toBeHidden();
 

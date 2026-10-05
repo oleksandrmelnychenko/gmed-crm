@@ -18,6 +18,12 @@ export type LeadRequestPersonalData = {
   country: string | null;
   phone: string | null;
   primary_language: string | null;
+  /** The insurance block of wizard step 1 (owner request 2026-10-05). */
+  has_insurance: boolean | null;
+  insurance_type: string | null;
+  insurance_provider: string | null;
+  insurance_number: string | null;
+  insurance_covers_germany: string | null;
 };
 
 export type LeadRequestConsent = {
@@ -51,6 +57,8 @@ export type LeadRequest = {
   max_documents: number;
   consents: Record<string, LeadRequestConsent>;
   submitted_at: string | null;
+  /** Data or documents changed after sending; absent on an older server. */
+  changed_since_submit?: boolean;
   retention_deadline_at: string | null;
 };
 

@@ -6859,7 +6859,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section title={tx("Страхование", "Versicherung")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Есть страхование", "Versicherung vorhanden")}>
+                <Field label={tx("Есть страхование", "Versicherung vorhanden")} portalField="has_insurance">
                   <NativeComboboxSelect
                     name="has_insurance"
                     value={draft.hasInsurance}
@@ -6886,6 +6886,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Тип страхования", "Versicherungsart")}
+                  portalField="insurance_type"
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceType")}
                   errorId={`${MASTER_FIELD_IDS.insuranceType}-error`}
@@ -6910,6 +6911,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Страховая компания", "Versicherer")}
+                  portalField="insurance_provider"
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceProvider")}
                   errorId={`${MASTER_FIELD_IDS.insuranceProvider}-error`}
@@ -6928,6 +6930,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label={tx("Номер полиса", "Versicherungsnummer")}
+                  portalField="insurance_number"
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceNumber")}
                   errorId={`${MASTER_FIELD_IDS.insuranceNumber}-error`}
@@ -6945,7 +6948,7 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("insuranceNumber", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Покрывает лечение в Германии", "Deckung in Deutschland")}>
+                <Field label={tx("Покрывает лечение в Германии", "Deckung in Deutschland")} portalField="insurance_covers_germany">
                   <NativeComboboxSelect
                     name="insurance_covers_germany"
                     value={draft.insuranceCoversGermany}
