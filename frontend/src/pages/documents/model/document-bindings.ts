@@ -90,6 +90,7 @@ const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "privacy_information",
   "privacy_consents",
   "enhanced_due_diligence",
+  "gwg_identification",
 ]);
 
 const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([

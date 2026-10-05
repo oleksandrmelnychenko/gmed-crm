@@ -70,6 +70,12 @@ import {
   payerReadinessReasonSteps,
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
+import {
+  GWG_IDENTIFICATION_TEMPLATE,
+  currentGwgSheet,
+  gwgSheetRequest,
+  type GwgSheetSubject,
+} from "../model/gwg-identification";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
@@ -381,7 +387,8 @@ type WizardDocumentKind =
   | "confidentiality_release"
   | "privacy_information"
   | "privacy_consents"
-  | "enhanced_due_diligence";
+  | "enhanced_due_diligence"
+  | "gwg_identification";
 type CommercialDocumentKind =
   | "framework_contract"
   | "single_order"
@@ -2009,6 +2016,7 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   const templateId = item.generated_template_id?.trim().toLowerCase();
   if (templateId === "privacy_information") return "privacy_information";
   if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
+  if (templateId === GWG_IDENTIFICATION_TEMPLATE) return "gwg_identification";
 
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
   if (complianceKind === "identity" || complianceKind === "confidentiality_release") {
@@ -2053,6 +2061,8 @@ function wizardDocumentComplianceKind(document: DocumentItem): DocumentComplianc
   if (document.generated_template_id === "framework_contract") return "framework_contract";
   const kind = wizardDocumentKind(document);
   if (kind === "privacy_consents") return "dsgvo";
+  // An internal GwG record touches no compliance flag of the lead.
+  if (kind === "gwg_identification") return "other";
   return kind === "privacy_information" ? null : kind;
 }
 
@@ -3806,6 +3816,7 @@ export function LeadWizard({
       privacy_information: [],
       privacy_consents: [],
       enhanced_due_diligence: [],
+      gwg_identification: [],
     };
     const seenDocumentIds = new Set<string>();
     [...currentPatientEvidence, ...documents].forEach((item) => {
@@ -5043,6 +5054,39 @@ export function LeadWizard({
     } catch (nextError) {
       if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
       else showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
+   * The GwG identification sheet of the patient or of the third-party payer.
+   * The server fills it from the lead, so the wizard is saved first; a new
+   * sheet replaces the current one of the same person as its next version.
+   */
+  async function generateGwgIdentificationSheet(subject: GwgSheetSubject) {
+    if (!draft) return;
+    setBusy(`generate-gwg_identification-${subject}`);
+    setError("");
+    try {
+      if (!(await save("documents", false))) return;
+      const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
+      if (!targetLeadId) return;
+      const generated = await generateDocument(
+        gwgSheetRequest({
+          leadId: targetLeadId,
+          subject,
+          orderId: order?.id,
+          orderNumber: order?.order_number,
+          replaceDocumentId: currentGwgSheet(wizardDocuments.gwg_identification, subject)?.id,
+        }),
+      );
+      const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}&include_archived_versions=true`);
+      setDocuments(nextDocuments);
+      const generatedDocument = nextDocuments.find((document) => document.id === generated.id);
+      if (generatedDocument) await openOrDownloadDocument(generatedDocument, true);
+    } catch (nextError) {
+      showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -7270,6 +7314,69 @@ ${serviceCommentLines.join("\n")}`
                     tx={tx}
                     onOpen={(document) => void openOrDownloadDocument(document)}
                     onDownload={(document) => void downloadDocument(document)}
+                    onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                    onChanged={() => { void refreshDocumentsState(); }}
+                  />
+                </Section>
+              ) : null}
+              {leadId ? (
+                <Section
+                  className={WIZARD_DOCUMENT_SECTION_CLASS}
+                  title={tx("Лист идентификации по GwG", "Dokumentationsbogen natürliche Personen (GwG)")}
+                  accessory={(
+                    <span className="inline-flex flex-wrap justify-end gap-2" data-testid="gwg-identification-actions">
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={isBusy}
+                        onClick={() => void generateGwgIdentificationSheet("contract_partner")}
+                      >
+                        {busy === "generate-gwg_identification-contract_partner"
+                          ? <LoaderCircle className="size-3.5 animate-spin" />
+                          : <FileText className="size-3.5" />}
+                        {currentGwgSheet(wizardDocuments.gwg_identification, "contract_partner")
+                          ? tx("Обновить для пациента", "Für Patient/in aktualisieren")
+                          : tx("Сформировать для пациента", "Für Patient/in erstellen")}
+                      </Button>
+                      {payer.data?.declaration?.payer_kind === "third_party" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 rounded-lg"
+                          disabled={isBusy}
+                          onClick={() => void generateGwgIdentificationSheet("payer")}
+                        >
+                          {busy === "generate-gwg_identification-payer"
+                            ? <LoaderCircle className="size-3.5 animate-spin" />
+                            : <FileText className="size-3.5" />}
+                          {currentGwgSheet(wizardDocuments.gwg_identification, "payer")
+                            ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
+                            : tx("Для плательщика", "Für Kostenübernehmer erstellen")}
+                        </Button>
+                      ) : null}
+                    </span>
+                  )}
+                >
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {tx(
+                      "Заполняется из заявки: личные данные, гражданство, адрес, документ, представители, плательщик и ответы AML. На каждого человека свой лист; подписывает сотрудник GMED.",
+                      "Wird aus der Anfrage ausgefüllt: Personalien, Staatsangehörigkeit, Anschrift, Ausweis, Vertreter, Kostenträger und AML-Angaben. Je Person ein eigener Bogen; es unterschreibt die Bearbeiterin / der Bearbeiter von GMED.",
+                    )}
+                  </p>
+                  <WizardDocumentRows
+                    documents={wizardDocuments.gwg_identification}
+                    complianceKind="other"
+                    emptyLabel={tx("Лист ещё не создан", "Bogen wurde noch nicht erstellt")}
+                    lang={lang}
+                    busy={busy}
+                    disabled={isBusy}
+                    tx={tx}
+                    onOpen={(document) => void openOrDownloadDocument(document)}
+                    onDownload={(document) => void downloadDocument(document)}
+                    onSign={(document, kind) => void signDocument(document.id, kind)}
                     onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
                     onChanged={() => { void refreshDocumentsState(); }}
                   />

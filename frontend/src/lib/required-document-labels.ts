@@ -127,6 +127,7 @@ const DOCUMENT_ART_LABEL_CODES = [
   "privacy_consents",
   "privacy_information",
   "enhanced_due_diligence",
+  "gwg_identification",
   "consent_data_release",
 ] as const;
 

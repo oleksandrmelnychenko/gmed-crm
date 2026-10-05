@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Check, Copy, KeyRound, LoaderCircle, Mail, UserRound } from "lucide-react";
+import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +16,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lead } from "@/lib/api/types";
 import { copyText, selectElementText } from "@/lib/copy-text";
 import { cn } from "@/lib/utils";
+import { downloadDocumentFile, fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
 
 import {
   fetchLeadLoginEmails,
@@ -34,6 +35,7 @@ import {
   portalCredentialsMessage,
   type PatientMessageLanguage,
 } from "../model/lead-portal-access";
+import { currentGwgSheet, gwgSheetRequest } from "../model/gwg-identification";
 import { leadErrorMessage } from "../model/leads-model";
 import {
   fetchLeadPortalIntake,
@@ -135,6 +137,33 @@ export function LeadPortalAccessDetail({
     };
   }, [canOffer, lead.id]);
 
+  const [sheetBusy, setSheetBusy] = useState(false);
+
+  /**
+   * The GwG identification sheet of the patient, filled by the server from
+   * what the lead entered, as a file. It replaces the current sheet as its
+   * next version, so the lead keeps one.
+   */
+  async function downloadGwgSheet() {
+    setSheetBusy(true);
+    setError("");
+    try {
+      const existing = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(lead.id)}`);
+      const generated = await generateDocument(
+        gwgSheetRequest({
+          leadId: lead.id,
+          subject: "contract_partner",
+          replaceDocumentId: currentGwgSheet(existing, "contract_partner")?.id,
+        }),
+      );
+      await downloadDocumentFile(generated.id, generated.original_filename || generated.auto_name);
+    } catch (nextError) {
+      setError(leadErrorMessage(nextError, (ru, deText) => (de ? deText : ru)));
+    } finally {
+      setSheetBusy(false);
+    }
+  }
+
   const mailReady = emailInfo?.available === true && emailInfo.can_send === true;
   const language: PatientMessageLanguage = emailLanguage ?? emailInfo?.lead_language ?? "de";
 
@@ -227,6 +256,21 @@ export function LeadPortalAccessDetail({
           >
             <Mail className="size-3.5" />
             {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
+          </Button>
+        ) : null}
+        {canIssue ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
+            disabled={busy || sheetBusy}
+            title={de ? "Dokumentationsbogen natürliche Personen (GwG), aus der Anfrage ausgefüllt" : "Лист идентификации по GwG, заполненный из заявки"}
+            onClick={() => void downloadGwgSheet()}
+            data-testid="lead-gwg-sheet"
+          >
+            {sheetBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+            Doku-Bogen GwG
           </Button>
         ) : null}
         {emailNotice ? (

@@ -1470,6 +1470,21 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         text_block_keys: &[],
     },
     DocumentTemplateDefinition {
+        id: "gwg_identification",
+        label: "Dokumentationsbogen natürliche Personen (GwG)",
+        description: "Interner Dokumentationsbogen zur Identifizierung des Vertragspartners nach dem Geldwäschegesetz, aus den Angaben der Anfrage ausgefüllt.",
+        art: "gwg_identification",
+        category: "compliance_aml",
+        default_auto_name: "Dokumentationsbogen natürliche Personen",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
         id: "consent_data_release_child",
         label: "Einverständniserklärung · Kind (zwei Sorgeberechtigte)",
         description: "DSGVO-Datenübermittlung und Schweigepflichtsentbindung für ein minderjähriges Kind mit zwei Sorgeberechtigten.",
@@ -2623,6 +2638,224 @@ struct DocumentBindingOverrides {
     consent_telegram: Option<bool>,
     #[serde(default)]
     aml_enhanced_due_diligence: Option<AmlEnhancedDueDiligenceBindings>,
+    #[serde(default)]
+    gwg_identification: Option<GwgIdentificationBindings>,
+}
+
+/// The one choice of the identification sheet; everything else is read from
+/// the lead when the sheet is generated.
+#[derive(Deserialize, Serialize, Default, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GwgIdentificationBindings {
+    /// `payer` for the third-party payer of the lead; otherwise the patient.
+    subject: Option<String>,
+}
+
+/// One contract partner on the GwG identification sheet ("Dokumentationsbogen
+/// für natürliche Personen", federal form of the supervisory authorities,
+/// Stand Mai 2025): who the person is, who acts for them, the beneficial
+/// owner and the answers that decide on enhanced due diligence.
+#[derive(Default, Clone)]
+struct GwgIdentificationSheet {
+    /// "Patient" or the third-party payer.
+    role: &'static str,
+    first_name: String,
+    last_name: String,
+    birth_date: Option<NaiveDate>,
+    birth_place: Option<String>,
+    /// ISO codes.
+    citizenships: Vec<String>,
+    street: Option<String>,
+    zip: Option<String>,
+    city: Option<String>,
+    country: Option<String>,
+    /// What the lead record knows about the identity document. Type, number
+    /// and issuing authority are not asked yet; the wizard keeps the expiry.
+    identity_document: Option<String>,
+    /// A passport or identity document is stored with the lead.
+    identity_document_on_file: bool,
+    /// Parents or guardians of a minor: name and relation as entered.
+    representatives: Vec<(String, String)>,
+    /// `None` until the payer declaration says so.
+    acts_on_own_account: Option<bool>,
+    beneficial_owner_name: Option<String>,
+    beneficial_owner_note: Option<String>,
+    /// Questions 5 a) to d) of the form.
+    increased_risk: bool,
+    politically_exposed: bool,
+    high_risk_third_country: bool,
+    unusual_transaction: bool,
+    reviewer_name: String,
+    review_date: NaiveDate,
+}
+
+/// Reads the sheet of the patient or of the third-party payer from the lead:
+/// personal data, the payer declaration and the AML answers of the wizard.
+async fn load_gwg_identification_sheet(
+    state: &AppState,
+    lead_id: Uuid,
+    for_payer: bool,
+    reviewer: Uuid,
+) -> Result<GwgIdentificationSheet, axum::response::Response> {
+    let failed = |error: sqlx::Error, what: &'static str| {
+        tracing::error!(%error, %lead_id, what, "load GwG identification sheet");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the identification sheet data",
+        )
+    };
+    let row = sqlx::query(
+        r#"SELECT l.first_name, l.last_name, l.date_of_birth, l.citizenships,
+                  l.street_address, l.zip_code, l.city, l.country,
+                  l.trusted_contacts, l.wizard_state,
+                  EXISTS (
+                      SELECT 1 FROM documents d
+                      WHERE d.lead_id = l.id
+                        AND d.file_deleted_at IS NULL
+                        AND d.status <> 'archived'
+                        AND (d.compliance_kind = 'identity'
+                             OR lower(d.art) IN ('identity', 'passport', 'passport_scan', 'reisepass'))
+                  ) AS identity_on_file,
+                  (SELECT u.name FROM users u WHERE u.id = $2) AS reviewer_name
+           FROM leads l
+           WHERE l.id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(reviewer)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| failed(error, "lead"))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
+    let declaration = {
+        let mut conn = state
+            .db
+            .acquire()
+            .await
+            .map_err(|error| failed(error, "connection"))?;
+        super::lead_payer::load_declaration(&mut conn, lead_id)
+            .await
+            .map_err(|error| failed(error, "payer declaration"))?
+    };
+    let text = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let wizard_state = row
+        .try_get::<Option<Value>, _>("wizard_state")
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null);
+    let aml = wizard_state
+        .get("aml_enhanced_due_diligence")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<AmlEnhancedDueDiligenceBindings>(value).ok())
+        .unwrap_or_default();
+    let today = crate::app_time::today();
+
+    let mut sheet = GwgIdentificationSheet {
+        reviewer_name: text("reviewer_name").unwrap_or_default(),
+        review_date: today,
+        politically_exposed: aml.pep_contract_partner || aml.pep_beneficial_owner,
+        unusual_transaction: aml.unusual_complex_or_large
+            || aml.unusual_pattern
+            || aml.no_lawful_purpose,
+        ..GwgIdentificationSheet::default()
+    };
+    let mut risk_countries: Vec<String> = Vec::new();
+    if for_payer {
+        let Some(payer) = declaration.as_ref().filter(|declaration| {
+            declaration.payer_kind == super::lead_payer::PAYER_KIND_THIRD_PARTY
+        }) else {
+            return Err(err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "The lead has no third-party payer",
+            ));
+        };
+        sheet.role = "Kostenübernehmer (dritte Person)";
+        sheet.first_name = payer.first_name.clone().unwrap_or_default();
+        sheet.last_name = payer.last_name.clone().unwrap_or_default();
+        sheet.birth_date = payer.date_of_birth;
+        sheet.birth_place = payer.place_of_birth.clone();
+        sheet.citizenships = payer.citizenships.clone();
+        sheet.street = payer.street.clone();
+        sheet.zip = payer.zip.clone();
+        sheet.city = payer.city.clone();
+        sheet.country = payer.country.clone();
+        risk_countries.extend(payer.country.clone());
+        risk_countries.extend(payer.citizenships.iter().cloned());
+    } else {
+        sheet.role = "Patient/in";
+        sheet.first_name = text("first_name").unwrap_or_default();
+        sheet.last_name = text("last_name").unwrap_or_default();
+        sheet.birth_date = row
+            .try_get::<Option<NaiveDate>, _>("date_of_birth")
+            .ok()
+            .flatten();
+        sheet.citizenships = row
+            .try_get::<Vec<String>, _>("citizenships")
+            .unwrap_or_default();
+        sheet.street = text("street_address");
+        sheet.zip = text("zip_code");
+        sheet.city = text("city");
+        sheet.country = text("country");
+        sheet.identity_document = wizard_state
+            .get("passport_expiry")
+            .and_then(Value::as_str)
+            .and_then(|value| NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d").ok())
+            .map(|expiry| format!("gültig bis {}", expiry.format("%d.%m.%Y")));
+        sheet.identity_document_on_file =
+            row.try_get::<bool, _>("identity_on_file").unwrap_or(false);
+        if super::leads::is_minor_on(sheet.birth_date, today) {
+            let contacts = row
+                .try_get::<Option<Value>, _>("trusted_contacts")
+                .ok()
+                .flatten()
+                .unwrap_or(Value::Null);
+            for contact in contacts.as_array().into_iter().flatten() {
+                let field = |key: &str| {
+                    contact
+                        .get(key)
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_string()
+                };
+                let (name, relation) = (field("name"), field("relation"));
+                if !name.is_empty() && crate::sanctions::screening::is_guardian_relation(&relation)
+                {
+                    sheet.representatives.push((name, relation));
+                }
+            }
+        }
+        if let Some(declaration) = declaration.as_ref() {
+            sheet.acts_on_own_account = Some(declaration.acts_on_own_account);
+            sheet.beneficial_owner_name = declaration.beneficial_owner_name.clone();
+            sheet.beneficial_owner_note = declaration.beneficial_owner_note.clone();
+        }
+        risk_countries.extend(sheet.country.clone());
+        risk_countries.extend(sheet.citizenships.iter().cloned());
+        risk_countries.extend(
+            wizard_state
+                .get("registration_country")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        );
+    }
+    sheet.high_risk_third_country = aml.high_risk_country_transaction
+        || aml.high_risk_country_resident
+        || !aml.triggered_countries.is_empty()
+        || risk_countries
+            .iter()
+            .any(|country| super::leads::is_enhanced_due_diligence_country(country));
+    sheet.increased_risk = aml.internal_risk_analysis
+        || aml.individual_review
+        || matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
+        || sheet.high_risk_third_country
+        || sheet.politically_exposed;
+    Ok(sheet)
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -4104,6 +4337,7 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
             | "privacy_consents"
             | "privacy_information"
             | "enhanced_due_diligence"
+            | "gwg_identification"
     )
 }
 
@@ -4123,6 +4357,7 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
             | "privacy_consents"
             | "privacy_information"
             | "enhanced_due_diligence"
+            | "gwg_identification"
             | "consent_data_release_child"
             | "consent_data_release_single"
             | "cost_coverage_declaration"
@@ -6398,6 +6633,7 @@ fn default_generated_document_name(
         ("cost_estimate", _) => "Vorläufige Kostenkalkulation",
         ("privacy_information", _) => "Informationsblatt zum Datenschutz",
         ("enhanced_due_diligence", _) => "Durchführung verstärkter Sorgfaltspflichten",
+        ("gwg_identification", _) => "Dokumentationsbogen natürliche Personen",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
         ("consent_data_release_child" | "consent_data_release_single", "en") => {
@@ -6433,6 +6669,7 @@ fn generated_typed_document_number(
         "privacy_consents" | "consent_data_release_child" | "consent_data_release_single" => "EW",
         "privacy_information" => "DS",
         "enhanced_due_diligence" => "AML",
+        "gwg_identification" => "GWG",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -15604,6 +15841,62 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "gwg_identification" => {
+            let Some(lead_uuid) = lead_id else {
+                return err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The identification sheet is generated for a lead",
+                );
+            };
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let for_payer = bindings
+                .gwg_identification
+                .as_ref()
+                .and_then(|binding| binding.subject.as_deref())
+                .map(str::trim)
+                == Some("payer");
+            let sheet =
+                match load_gwg_identification_sheet(&state, lead_uuid, for_payer, auth.user_id)
+                    .await
+                {
+                    Ok(sheet) => sheet,
+                    Err(resp) => return resp,
+                };
+            let preview = admin_preview_html(
+                "Dokumentationsbogen natürliche Personen (GwG)",
+                &[
+                    format!("{} {}", sheet.first_name, sheet.last_name)
+                        .trim()
+                        .to_string(),
+                    generated_doc_id.clone(),
+                ],
+            );
+            let pdf_bytes = match build_gwg_identification_pdf(
+                &sheet,
+                &agency,
+                generated_order_reference(
+                    bindings.order_number.as_deref(),
+                    order_number.as_deref(),
+                ),
+                &generated_doc_id,
+            ) {
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?lead_id,
+                        "build GwG identification sheet PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
             let guardian_relations = sqlx::query(
@@ -19762,6 +20055,313 @@ fn build_enhanced_due_diligence_pdf(
             reviewer_name,
         ),
         reviewer_name,
+        "agency",
+    );
+
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// "[X] Ja   [ ] Nein" answer of one question of section 5.
+fn gwg_yes_no_line(layout: &mut TreatmentPlanPdfLayout, question: &str, yes: bool) {
+    layout.text_block_justified(
+        question,
+        10.0,
+        false,
+        3.0,
+        TreatmentPlanPdfColor::Body,
+        1.0,
+        0.0,
+    );
+    layout.text_block(
+        &format!(
+            "[{}]  Ja      [{}]  Nein",
+            if yes { "X" } else { " " },
+            if yes { " " } else { "X" }
+        ),
+        10.0,
+        true,
+        9.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.8,
+    );
+}
+
+/// The GwG identification sheet of one natural person in the GMED layout. It
+/// follows the sections of the federal form; what does not apply to an agency
+/// (goods traders, art dealers, estate agents) is named once, not listed.
+fn build_gwg_identification_pdf(
+    sheet: &GwgIdentificationSheet,
+    agency: &AgencyContractSettings,
+    order_number: Option<&str>,
+    document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let date = |value: Option<NaiveDate>| value.map(|date| date.format("%d.%m.%Y").to_string());
+    let full_name = format!("{} {}", sheet.first_name.trim(), sheet.last_name.trim())
+        .trim()
+        .to_string();
+    let listed_name = match (sheet.last_name.trim(), sheet.first_name.trim()) {
+        ("", "") => "—".to_string(),
+        (last, "") => last.to_string(),
+        ("", first) => first.to_string(),
+        (last, first) => format!("{last}, {first}"),
+    };
+    let review_date = sheet.review_date.format("%d.%m.%Y").to_string();
+    let reviewer = aml_binding_value(Some(sheet.reviewer_name.as_str()));
+
+    adult_legal_document_header(
+        &mut layout,
+        "Dokumentationsbogen",
+        "Identifizierung natürlicher Personen nach dem Geldwäschegesetz (GwG)",
+    );
+    layout.text_block_centered(
+        "für Verpflichtete aus dem Nichtfinanzsektor (§ 2 Abs. 1 Nrn. 6, 8, 13, 14, 16 GwG)",
+        9.5,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        2.0,
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            ("Name, Vorname", listed_name),
+            ("Rolle in der Geschäftsbeziehung", sheet.role.to_string()),
+            ("Aufzeichnende Stelle", agency.name.clone()),
+            ("Bearbeiter/in", reviewer.to_string()),
+            (
+                "Auftrags-/Rechnungs-Nr.",
+                order_number
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or("—")
+                    .to_string(),
+            ),
+            ("Datum", review_date.clone()),
+        ],
+    );
+
+    admin_heading(&mut layout, "1. Identifizierung des Vertragspartners");
+    aml_checkbox_line(
+        &mut layout,
+        sheet.identity_document_on_file,
+        "Die erforderliche Kopie/Fotografie bzw. der Scan des Ausweisdokuments des Vertragspartners wurde erstellt und ist beigefügt; das Dokument ist gültig.",
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Vor- und Nachname",
+        Some(full_name.as_str()).filter(|name| !name.is_empty()),
+    );
+    let birth = match (
+        date(sheet.birth_date),
+        sheet.birth_place.as_deref().map(str::trim),
+    ) {
+        (Some(day), Some(place)) if !place.is_empty() => Some(format!("{day}, {place}")),
+        (Some(day), _) => Some(format!("{day}, Geburtsort: —")),
+        (None, Some(place)) if !place.is_empty() => Some(format!("—, {place}")),
+        _ => None,
+    };
+    aml_labeled_value(&mut layout, "Geburtsdatum, Geburtsort", birth.as_deref());
+    let citizenships = sheet
+        .citizenships
+        .iter()
+        .map(|code| german_document_country(code))
+        .collect::<Vec<_>>()
+        .join(", ");
+    aml_labeled_value(
+        &mut layout,
+        "Staatsangehörigkeit(en)",
+        Some(citizenships.as_str()).filter(|value| !value.is_empty()),
+    );
+    let address = [
+        sheet.street.clone(),
+        Some(
+            [sheet.zip.clone(), sheet.city.clone()]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .filter(|value| !value.trim().is_empty()),
+        sheet.country.as_deref().map(german_document_country),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|part| part.trim().to_string())
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(", ");
+    aml_labeled_value(
+        &mut layout,
+        "Wohnanschrift",
+        Some(address.as_str()).filter(|value| !value.is_empty()),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Ausweisdokument (Art, Nummer, ausstellende Behörde)",
+        sheet.identity_document.as_deref(),
+    );
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Oder: Die Überprüfung der Identität erfolgte anhand eines elektronischen Identitätsnachweises, einer qualifizierten elektronischen Signatur oder eines notifizierten elektronischen Identifizierungssystems (Nachweis ist beigefügt).",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Bei Betreuten: Kopie der Bestellungsurkunde des Betreuers sowie eine Kopie des Ausweisdokuments des Betreuers sind beigefügt.",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Oder: Der Vertragspartner wurde bereits identifiziert am ____________; die Daten wurden aufgezeichnet und treffen ohne ersichtliche Zweifel weiterhin zu.",
+    );
+
+    admin_heading(
+        &mut layout,
+        "2. Für den Vertragspartner auftretende Person (Vertreter/Bote)",
+    );
+    if sheet.representatives.is_empty() {
+        aml_labeled_value(
+            &mut layout,
+            "Vor- und Nachname",
+            Some("Keine – der Vertragspartner handelt selbst."),
+        );
+    } else {
+        for (name, relation) in &sheet.representatives {
+            let line = if relation.trim().is_empty() {
+                name.clone()
+            } else {
+                format!("{name} ({relation})")
+            };
+            aml_labeled_value(&mut layout, "Vor- und Nachname", Some(line.as_str()));
+        }
+        aml_checkbox_line(
+            &mut layout,
+            false,
+            "Die erforderliche Kopie/Fotografie bzw. der Scan des Ausweisdokuments der auftretenden Person wurde erstellt und ist beigefügt; das Dokument ist gültig.",
+        );
+        aml_labeled_value(&mut layout, "Nachweis der Vertretungsberechtigung", None);
+    }
+
+    admin_heading(
+        &mut layout,
+        "3. Feststellung und Identifizierung des wirtschaftlich Berechtigten (wB)",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        sheet.acts_on_own_account == Some(true),
+        "Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse und nicht auf fremde Veranlassung.",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        sheet.acts_on_own_account == Some(false),
+        "Der Vertragspartner handelt auf Veranlassung oder im wirtschaftlichen Interesse der nachfolgend aufgeführten natürlichen Person.",
+    );
+    if sheet.acts_on_own_account == Some(false) {
+        aml_labeled_value(
+            &mut layout,
+            "Name, Vorname des wirtschaftlich Berechtigten",
+            sheet.beneficial_owner_name.as_deref(),
+        );
+        aml_labeled_value(
+            &mut layout,
+            "Weitere Angaben (Geburtsdatum, Geburtsort, Anschrift)",
+            sheet.beneficial_owner_note.as_deref(),
+        );
+    }
+    aml_labeled_value(
+        &mut layout,
+        "Getroffene Maßnahmen zur Ermittlung des wB",
+        sheet
+            .acts_on_own_account
+            .map(|_| "Befragung des Vertragspartners (Erklärung zum Kostenträger in der Anfrage)"),
+    );
+
+    admin_heading(&mut layout, "4. Hintergrund der Geschäftsbeziehung");
+    aml_checkbox_line(
+        &mut layout,
+        true,
+        "Der Zweck und die Art der angestrebten Geschäftsbeziehung ergeben sich zweifelsfrei aus dem Typ der Geschäftsbeziehung: Organisation und Koordination medizinischer Behandlungen in Deutschland.",
+    );
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Der Zweck und die Art der angestrebten Geschäftsbeziehung wurden wie folgt ermittelt: ____________",
+    );
+
+    admin_heading(
+        &mut layout,
+        "5. Prüfung der Anwendung von verstärkten Sorgfaltspflichten",
+    );
+    gwg_yes_no_line(
+        &mut layout,
+        "a) Besteht bei der Geschäftsbeziehung aufgrund der unternehmensinternen Risikoanalyse bzw. einer Einzelfallprüfung ein erhöhtes Risiko?",
+        sheet.increased_risk,
+    );
+    gwg_yes_no_line(
+        &mut layout,
+        "b) Handelt es sich bei dem Vertragspartner oder dem wirtschaftlich Berechtigten um eine politisch exponierte Person, ein unmittelbares Familienmitglied dieser Person oder eine ihr bekanntermaßen nahestehende Person?",
+        sheet.politically_exposed,
+    );
+    gwg_yes_no_line(
+        &mut layout,
+        "c) Ist an der Geschäftsbeziehung ein von der EU-Kommission gelisteter Drittstaat mit hohem Risiko oder eine in diesem Drittstaat ansässige natürliche oder juristische Person beteiligt?",
+        sheet.high_risk_third_country,
+    );
+    gwg_yes_no_line(
+        &mut layout,
+        "d) Handelt es sich um eine Transaktion, die besonders komplex oder ungewöhnlich groß ist, einem ungewöhnlichen Transaktionsmuster folgt oder keinen offensichtlichen wirtschaftlichen oder rechtmäßigen Zweck hat?",
+        sheet.unusual_transaction,
+    );
+    let any_yes = sheet.increased_risk
+        || sheet.politically_exposed
+        || sheet.high_risk_third_country
+        || sheet.unusual_transaction;
+    layout.text_block_justified(
+        if any_yes {
+            "Mindestens eine Frage ist mit „Ja“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist zusätzlich auszufüllen."
+        } else {
+            "Keine Frage ist mit „Ja“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist nicht erforderlich."
+        },
+        9.5,
+        true,
+        3.0,
+        TreatmentPlanPdfColor::Body,
+        1.0,
+        1.0,
+    );
+
+    admin_heading(&mut layout, "6. Grund der Aufzeichnung");
+    aml_checkbox_line(&mut layout, true, "Begründung einer Geschäftsbeziehung");
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Transaktion im Wert von 15.000 € oder mehr außerhalb einer bestehenden Geschäftsbeziehung",
+    );
+    aml_checkbox_line(&mut layout, false, "Zweifel an den Identitätsangaben");
+    aml_checkbox_line(
+        &mut layout,
+        false,
+        "Verdacht auf Geldwäsche oder Terrorismusfinanzierung",
+    );
+    layout.text_block_justified(
+        "Die Identifizierungspflichten für Güterhändler, Kunstvermittler, Kunstlagerhalter und Immobilienmakler treffen auf diese Geschäftsbeziehung nicht zu. Grundlage: bundeseinheitlicher Vordruck der Geldwäscheaufsichtsbehörden (Stand Mai 2025); für jede natürliche Person wird ein gesonderter Bogen geführt.",
+        8.5,
+        false,
+        3.0,
+        TreatmentPlanPdfColor::Muted,
+        1.5,
+        1.0,
+    );
+
+    legal_signature_line(
+        &mut layout,
+        // The name stands under the signature line; beside the date it would be cut off.
+        &format!("Datum: {review_date}"),
+        reviewer,
         "agency",
     );
 
@@ -29023,6 +29623,74 @@ mod tests {
         assert!(text.contains("Nachweise zur Herkunft der Vermögenswerte"));
         assert!(text.contains("1. Kaufvertrag.pdf (hochgeladen am 30.07.2026)"));
         assert!(text.contains("2. Dokument"));
+    }
+
+    #[test]
+    fn gwg_identification_sheet_carries_the_lead_data_and_the_answers() {
+        let sheet = super::GwgIdentificationSheet {
+            role: "Patient/in",
+            first_name: "Anna".to_string(),
+            last_name: "Beispiel".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(1988, 5, 1),
+            citizenships: vec!["UA".to_string(), "DE".to_string()],
+            street: Some("Musterweg 1".to_string()),
+            zip: Some("10115".to_string()),
+            city: Some("Berlin".to_string()),
+            country: Some("DE".to_string()),
+            identity_document: Some("gültig bis 01.02.2031".to_string()),
+            identity_document_on_file: true,
+            acts_on_own_account: Some(false),
+            beneficial_owner_name: Some("Viktor Zahler".to_string()),
+            increased_risk: true,
+            politically_exposed: true,
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 5).unwrap(),
+            ..Default::default()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &sheet,
+            &legal_test_agency(),
+            Some("A-20261005-0001"),
+            "GWG-20261005-UNITTEST0001",
+        )
+        .unwrap();
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261005-UNITTEST0001");
+
+        assert!(text.contains("Identifizierung natürlicher Personen"));
+        assert!(text.contains("Beispiel, Anna"));
+        assert!(text.contains("Patient/in"));
+        assert!(text.contains("01.05.1988"));
+        assert!(text.contains("Ukraine, Deutschland"));
+        assert!(text.contains("Musterweg 1"));
+        assert!(text.contains("gültig bis 01.02.2031"));
+        assert!(text.contains("A-20261005-0001"));
+        assert!(text.contains("Bearbeiter Beispiel"));
+        // The beneficial owner is named because the patient does not act on own account.
+        assert!(text.contains("Viktor Zahler"));
+        // A "yes" in section 5 asks for the enhanced due diligence sheet.
+        assert!(text.contains("ist zusätzlich auszufüllen"));
+        assert!(text.contains("Begründung einer Geschäftsbeziehung"));
+
+        // Nobody acts for an adult; without a "yes" the annex is not needed.
+        let plain = super::GwgIdentificationSheet {
+            increased_risk: false,
+            politically_exposed: false,
+            acts_on_own_account: Some(true),
+            beneficial_owner_name: None,
+            ..sheet
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &plain,
+            &legal_test_agency(),
+            None,
+            "GWG-20261005-UNITTEST0002",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261005-UNITTEST0002");
+        assert!(text.contains("der Vertragspartner handelt selbst"));
+        assert!(text.contains("ist nicht erforderlich"));
+        assert!(!text.contains("Viktor Zahler"));
     }
 
     fn parents_as_party() -> super::ContractingDoc {

@@ -232,9 +232,13 @@ fn signer_policy_for_parts(
     {
         return SignerPolicy::PayerAndAgency;
     }
-    if matches!(generated_template_id, Some("enhanced_due_diligence"))
-        || matches!(compliance_kind, Some("enhanced_due_diligence"))
+    // Internal GwG records: only the GMED staff member who filled them signs.
+    if matches!(
+        generated_template_id,
+        Some("enhanced_due_diligence" | "gwg_identification")
+    ) || matches!(compliance_kind, Some("enhanced_due_diligence"))
         || art == "enhanced_due_diligence"
+        || art == "gwg_identification"
     {
         return SignerPolicy::AgencyOnly;
     }

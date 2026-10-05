@@ -128,6 +128,7 @@ pub(super) fn invitation_label(
         "privacy_information" => "Datenschutzinformation",
         "cost_estimate" => "Vorläufige medizinische Kostenkalkulation",
         "enhanced_due_diligence" => "Sorgfaltspflichten-Dokumentation",
+        "gwg_identification" => "Dokumentationsbogen nach dem Geldwäschegesetz",
         "appointment_confirmation" => "Terminbestätigung",
         _ => "Dokument",
     }

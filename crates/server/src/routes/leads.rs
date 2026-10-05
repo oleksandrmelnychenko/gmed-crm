@@ -787,7 +787,7 @@ struct LeadConversionReadiness {
     payload: Value,
 }
 
-fn is_enhanced_due_diligence_country(value: &str) -> bool {
+pub(crate) fn is_enhanced_due_diligence_country(value: &str) -> bool {
     let normalized = value.trim();
     if normalized.is_empty() {
         return false;

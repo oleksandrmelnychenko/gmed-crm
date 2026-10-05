@@ -639,3 +639,87 @@ async fn new_lead_and_patient_card_keep_several_citizenships() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
+
+#[tokio::test]
+async fn the_gwg_identification_sheet_is_filled_from_the_lead_and_its_payer() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let ceo = app.bearer("ceo");
+    let generate = |subject: Option<&str>| {
+        let mut body = json!({
+            "template_id": "gwg_identification",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active"
+        });
+        if let Some(subject) = subject {
+            body["bindings"] = json!({ "gwg_identification": { "subject": subject } });
+        }
+        body
+    };
+
+    // Sales may work the lead but does not create its legal documents.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.bearer("sales"),
+        Some(generate(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The patient's sheet needs nothing typed: it is read from the lead.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let (template, art, lead): (Option<String>, String, Option<Uuid>) =
+        sqlx::query_as("SELECT generated_template_id, art, lead_id FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(template.as_deref(), Some("gwg_identification"));
+    assert_eq!(art, "gwg_identification");
+    assert_eq!(lead, Some(lead_id));
+
+    // Without a third-party payer there is no payer sheet.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate(Some("payer"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &ceo,
+        Some(third_party_payer()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate(Some("payer"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let payer_document = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    assert_ne!(payer_document, document_id);
+}
