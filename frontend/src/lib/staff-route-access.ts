@@ -363,11 +363,11 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/admin/signatures",
     roles: ["ceo", "it_admin"],
     capability: "admin.signatures",
-    nav: { section: "admin", labelKey: "nav_signatures" },
+    // No menu item: the old address forwards to the API connections page.
   },
-  // Access keys of external services are entered on one page, listed next to
-  // the signature settings (owner request 2026-10-05). The signature provider
-  // is its first block, hence the same roles and capability.
+  // The one menu item for external services (owner decision 2026-10-05): a
+  // tab per service. The signature provider is its first tab, hence the same
+  // roles and capability.
   {
     id: "admin/api-connections",
     match: "prefix",

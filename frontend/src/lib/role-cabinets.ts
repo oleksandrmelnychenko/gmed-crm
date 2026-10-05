@@ -70,10 +70,10 @@ const SECURITY = define("admin/security", "/admin/security", "nav_security", "ad
 const SETTINGS = define("admin/settings", "/admin/settings", "settings_title", "admin.settings");
 const ACTIVITY = define("admin/activity", "/admin/activity", "nav_activity", "admin.activity");
 const HEALTH = define("admin/health", "/admin/health", "nav_health", "admin.health");
-const SIGNATURES = define(
-  "admin/signatures",
-  "/admin/signatures",
-  "nav_signatures",
+const API_CONNECTIONS = define(
+  "admin/api-connections",
+  "/admin/api-connections",
+  "nav_api_connections",
   "admin.signatures",
 );
 const DATEV = define("admin/datev", "/admin/datev", "nav_datev", "datev.admin");
@@ -92,7 +92,7 @@ export const ROLE_PRIMARY_MODULES: Readonly<Record<string, readonly RoleCabinetM
   ceo_assistant: [TASK_MANAGER, APPOINTMENTS, PATIENTS, REPORTS],
   teamlead_interpreter: [APPOINTMENTS, INTERPRETERS, DOCUMENTS, TASK_MANAGER],
   interpreter: [APPOINTMENTS, DOCUMENTS, TASK_MANAGER, HOURS],
-  it_admin: [USERS, SECURITY, SETTINGS, ACTIVITY, HEALTH, SIGNATURES, DATEV, INCIDENTS],
+  it_admin: [USERS, SECURITY, SETTINGS, ACTIVITY, HEALTH, API_CONNECTIONS, DATEV, INCIDENTS],
 };
 
 /** Primary modules of `role` that the given capabilities (or the role mirror) open. */

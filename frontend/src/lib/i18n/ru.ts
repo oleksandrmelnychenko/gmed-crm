@@ -38,7 +38,6 @@ export const ru = {
   nav_admin: "Система",
   nav_section_security: "Доступ и безопасность",
   nav_section_dsgvo: "DSGVO и инциденты",
-  nav_signatures: "Электронная подпись",
   nav_api_connections: "API-подключения",
   nav_users_roles: "Пользователи и роли",
   nav_access_matrix: "Матрица доступа",

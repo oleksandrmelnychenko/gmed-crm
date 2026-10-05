@@ -222,7 +222,6 @@ describe("staff route access by capability", () => {
       "/admin/settings",
       "/admin/activity",
       "/admin/health",
-      "/admin/signatures",
       "/admin/api-connections",
       "/admin/notifications",
       "/admin/announcements",
@@ -320,7 +319,6 @@ describe("staff route access by capability", () => {
         "interpreter",
       ],
       "/company-finance": ["ceo", "ceo_assistant", "billing"],
-      "/admin/signatures": ["ceo", "it_admin"],
       "/admin/api-connections": ["ceo", "it_admin"],
       "/admin/users": ["ceo", "it_admin"],
       "/leads": ["ceo", "ceo_assistant", "patient_manager", "concierge", "sales"],
@@ -396,7 +394,7 @@ describe("staff route access by capability", () => {
       "admin/settings",
       "admin/activity",
       "admin/health",
-      "admin/signatures",
+      "admin/api-connections",
       "admin/datev",
       "incidents",
     ]);
@@ -409,12 +407,12 @@ describe("staff route access by capability", () => {
     }
   });
 
-  it("lists the signature provider's API access right under the electronic signature", () => {
+  it("keeps one menu item for the external services: API connections", () => {
     for (const role of ["ceo", "it_admin"]) {
-      const admin = listStaffNavItems(role)
-        .filter((item) => item.section === "admin")
-        .map((item) => item.id);
-      expect(admin[admin.indexOf("admin/signatures") + 1], role).toBe("admin/api-connections");
+      expect(nav(role), role).toContain("/admin/api-connections");
+      // The former signature page has no item of its own; its address forwards.
+      expect(nav(role), role).not.toContain("/admin/signatures");
+      expect(canAccessStaffRoute(role, "/admin/signatures"), role).toBe(true);
     }
     expect(nav("ceo_assistant")).not.toContain("/admin/api-connections");
     expect(canAccessStaffRoute("billing", "/admin/api-connections")).toBe(false);

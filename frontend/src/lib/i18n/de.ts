@@ -38,7 +38,6 @@ export const de = {
   nav_admin: "System",
   nav_section_security: "Zugang & Sicherheit",
   nav_section_dsgvo: "DSGVO & Vorfälle",
-  nav_signatures: "Elektronische Signatur",
   nav_api_connections: "API-Verbindungen",
   nav_users_roles: "Benutzer & Rollen",
   nav_access_matrix: "Zugriffsmatrix",
