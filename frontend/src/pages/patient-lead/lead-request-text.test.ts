@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import { cabinetLocale, formatFileSize, languageName } from "./lead-request-model";
-import { LEAD_CABINET_LANGS, asLeadCabinetLang, leadRequestText, resolveLeadCabinetLang } from "./lead-request-text";
+import {
+  LEAD_CABINET_LANGS,
+  asLeadCabinetLang,
+  leadRequestText,
+  payerFieldLabel,
+  resolveLeadCabinetLang,
+  submitFieldLabel,
+} from "./lead-request-text";
 
 describe("lead cabinet languages", () => {
   it("speaks DE, EN, UA and RU", () => {
@@ -40,6 +47,16 @@ describe("lead cabinet languages", () => {
     expect(formatFileSize(1536, "en")).toBe("2 KB");
     expect(languageName("de", "en")).toBe("German");
     expect(languageName("de", "uk")).toBe("Німецька");
+  });
+
+  it("names payer fields with the patient's labels and marks them in the missing list", () => {
+    const de = leadRequestText("de");
+    expect(payerFieldLabel(de, "payer_last_name")).toBe(de.fields.last_name);
+    expect(payerFieldLabel(de, "payer_street")).toBe(de.fields.street_address);
+    expect(submitFieldLabel(de, "date_of_birth")).toBe("Geburtsdatum");
+    expect(submitFieldLabel(de, "payer_kind")).toBe("Wer übernimmt die Kosten der Behandlung?");
+    expect(submitFieldLabel(de, "payer_citizenships")).toBe("Zahlende Person: Staatsangehörigkeit(en)");
+    expect(submitFieldLabel(leadRequestText("uk"), "payer_last_name")).toBe("Платник: Прізвище");
   });
 
   it("has every text in every language", () => {

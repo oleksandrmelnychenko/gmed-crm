@@ -1,6 +1,12 @@
 import { cachedLanguageDisplayNames } from "@/lib/intl-cache";
 
-import type { LeadRequest, LeadRequestPersonalData, PersonalDataPatch } from "./lead-request-api";
+import type {
+  LeadRequest,
+  LeadRequestPayer,
+  LeadRequestPayerInput,
+  LeadRequestPersonalData,
+  PersonalDataPatch,
+} from "./lead-request-api";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -125,10 +131,95 @@ export function rejectedValue(field: string, draft: PersonalDraft): RejectedValu
   return { field: field as PersonalField, value: normalized(field as PersonalField, draft) };
 }
 
+/** The "who pays" block as the patient types it. */
+export type PayerDraft = {
+  /** "self", "third_party" or "" (not answered yet). */
+  payer_kind: string;
+  first_name: string;
+  last_name: string;
+  date_of_birth: string;
+  citizenships: string[];
+  relationship: string;
+  street: string;
+  zip: string;
+  city: string;
+  country: string;
+  phone: string;
+  email: string;
+};
+
+/** Keys of the payer block in `progress.missing_for_submit` and in field errors. */
+export type PayerField =
+  | "payer_kind"
+  | "payer_first_name"
+  | "payer_last_name"
+  | "payer_date_of_birth"
+  | "payer_citizenships"
+  | "payer_relationship"
+  | "payer_street"
+  | "payer_zip"
+  | "payer_city"
+  | "payer_country"
+  | "payer_phone"
+  | "payer_email";
+
+export const PAYER_FIELDS: PayerField[] = [
+  "payer_kind",
+  "payer_first_name",
+  "payer_last_name",
+  "payer_date_of_birth",
+  "payer_citizenships",
+  "payer_relationship",
+  "payer_street",
+  "payer_zip",
+  "payer_city",
+  "payer_country",
+  "payer_phone",
+  "payer_email",
+];
+
+export function draftFromPayer(payer: LeadRequestPayer | null | undefined): PayerDraft {
+  return {
+    payer_kind: payer?.payer_kind ?? "",
+    first_name: payer?.first_name ?? "",
+    last_name: payer?.last_name ?? "",
+    date_of_birth: payer?.date_of_birth ?? "",
+    citizenships: [...(payer?.citizenships ?? [])],
+    relationship: payer?.relationship ?? "",
+    street: payer?.street ?? "",
+    zip: payer?.zip ?? "",
+    city: payer?.city ?? "",
+    country: payer?.country ?? "",
+    phone: payer?.phone ?? "",
+    email: payer?.email ?? "",
+  };
+}
+
+/**
+ * What is sent for the payer block: nothing until the question is answered,
+ * only the answer for "I pay myself" (the server drops another person's data),
+ * and for a third party every filled value.
+ */
+export function payerInput(draft: PayerDraft): LeadRequestPayerInput | null {
+  if (draft.payer_kind === "self") return { payer_kind: "self" };
+  if (draft.payer_kind !== "third_party") return null;
+  const input: LeadRequestPayerInput = { payer_kind: "third_party" };
+  const texts = ["first_name", "last_name", "date_of_birth", "relationship", "street", "zip", "city", "country", "phone", "email"] as const;
+  for (const field of texts) {
+    const value = draft[field].trim().replace(/\s+/g, " ");
+    if (value) input[field] = value;
+  }
+  if (draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
+  return input;
+}
+
+/** Field of the personal data or of the payer block. */
+export type SubmitField = PersonalField | PayerField;
+
 /** Fields still missing for "send to the manager", in form order. */
-export function missingForSubmit(request: Pick<LeadRequest, "progress">): PersonalField[] {
+export function missingForSubmit(request: Pick<LeadRequest, "progress">): SubmitField[] {
   const missing = new Set(request.progress.missing_for_submit);
-  return PERSONAL_FIELDS.filter((field) => missing.has(field));
+  return [...PERSONAL_FIELDS, ...PAYER_FIELDS].filter((field) => missing.has(field));
 }
 
 export function consentGiven(request: Pick<LeadRequest, "consents">, purpose: string): boolean {

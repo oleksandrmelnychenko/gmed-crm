@@ -1255,7 +1255,64 @@ async fn save_payer_declaration(
         drop(tx);
         return get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await;
     }
-    if let Err(error) = sqlx::query(
+    if let Err(error) = store_declaration(
+        &mut tx,
+        lead_id,
+        &declaration,
+        auth.user_id,
+        identity_changed,
+    )
+    .await
+    {
+        return database_error(error, "save payer declaration");
+    }
+    let mut event = audit::domain_diff_event(
+        "update_lead_payer_declaration",
+        Some(auth.user_id),
+        "lead",
+        Some(lead_id),
+        previous
+            .as_ref()
+            .map(Declaration::to_json)
+            .unwrap_or(Value::Null),
+        declaration.to_json(),
+    );
+    event.context = json!({
+        "lead_id": lead_id,
+        "payer_kind": declaration.payer_kind,
+        "identity_changed": identity_changed,
+        "missing": declaration.missing().iter().map(|reason| reason.code()).collect::<Vec<_>>(),
+    });
+    if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
+        return database_error(error, "audit payer declaration");
+    }
+    if let Err(error) = sync_order_payers(&mut tx, lead_id, &declaration, auth.user_id).await {
+        return database_error(error, "sync order payer");
+    }
+    if let Err(error) = tx.commit().await {
+        return database_error(error, "commit payer declaration");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.updated",
+        lead_id,
+        json!({ "payer_declaration_updated": true }),
+    )
+    .await;
+    get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await
+}
+
+/// Writes the declaration of a lead. `identity_changed` dates the payer
+/// named in a cost assumption document (see `identity_changed_at`).
+async fn store_declaration(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+    actor: Uuid,
+    identity_changed: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
         r#"INSERT INTO lead_payer_declarations (
                lead_id, payer_kind, acts_on_own_account, beneficial_owner_name,
                beneficial_owner_note, source_of_funds, source_of_funds_description,
@@ -1312,18 +1369,218 @@ async fn save_payer_declaration(
     .bind(&declaration.relationship)
     .bind(&declaration.email)
     .bind(&declaration.phone)
-    .bind(auth.user_id)
+    .bind(actor)
     .bind(identity_changed)
     .bind(declaration.payer_informed_at)
     .bind(declaration.payer_informed_by)
-    .execute(&mut *tx)
+    .execute(conn)
     .await
-    {
-        return database_error(error, "save payer declaration");
+    .map(|_| ())
+}
+
+// ----------------------------------------------------------------------------
+// Lead cabinet: the patient states who pays
+// ----------------------------------------------------------------------------
+
+/// What the patient (or a parent of a minor) states in the lead cabinet: who
+/// pays and, for a third party, who that is (owner request 2026-10-05). The
+/// GwG part of the declaration — own account, beneficial owner, source of
+/// funds, the Art. 14 confirmation — stays with staff and is kept as it is.
+/// The data land in the same declaration, so the sanctions screening and the
+/// country policy see the payer the moment the cabinet saves it.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PortalPayerInput {
+    payer_kind: String,
+    first_name: Option<String>,
+    last_name: Option<String>,
+    date_of_birth: Option<String>,
+    street: Option<String>,
+    zip: Option<String>,
+    city: Option<String>,
+    country: Option<String>,
+    #[serde(default)]
+    citizenships: Vec<String>,
+    relationship: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+}
+
+pub(crate) enum PortalPayerError {
+    /// A value the cabinet has to correct: error code and the field it names.
+    Invalid {
+        code: &'static str,
+        field: &'static str,
+    },
+    Database(sqlx::Error),
+}
+
+impl From<sqlx::Error> for PortalPayerError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
     }
+}
+
+/// The cabinet field a validation code of [`declaration_from_input`] names.
+fn portal_field_of(code: &str) -> &'static str {
+    match code {
+        "payer_kind_invalid" => "payer_kind",
+        "payer_date_of_birth_invalid" => "payer_date_of_birth",
+        "payer_email_invalid" => "payer_email",
+        "payer_country_invalid" => "payer_country",
+        "payer_citizenships_invalid" => "payer_citizenships",
+        _ => "payer",
+    }
+}
+
+impl Declaration {
+    /// The person named as payer: a different one has not been informed yet
+    /// and has another place of birth.
+    fn person_key(&self) -> Value {
+        json!([self.first_name, self.last_name, self.date_of_birth])
+    }
+
+    /// The part of the declaration the lead cabinet shows and edits.
+    fn portal_json(&self) -> Value {
+        json!({
+            "payer_kind": self.payer_kind,
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "date_of_birth": self.date_of_birth.map(|date| date.format("%Y-%m-%d").to_string()),
+            "street": self.street,
+            "zip": self.zip,
+            "city": self.city,
+            "country": self.country,
+            "citizenships": self.citizenships,
+            "relationship": self.relationship,
+            "email": self.email,
+            "phone": self.phone,
+        })
+    }
+}
+
+/// The declaration of a lead without the order and document state.
+pub(crate) async fn load_declaration(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<Declaration>, sqlx::Error> {
+    Ok(sqlx::query(&format!(
+        "SELECT {DECLARATION_COLUMNS} FROM lead_payer_declarations WHERE lead_id = $1"
+    ))
+    .bind(lead_id)
+    .fetch_optional(conn)
+    .await?
+    .as_ref()
+    .map(Declaration::from_row))
+}
+
+/// The cabinet's view of the declaration; `null` until the question is answered.
+pub(crate) fn portal_payload(declaration: Option<&Declaration>) -> Value {
+    declaration.map_or(Value::Null, Declaration::portal_json)
+}
+
+/// What the cabinet still needs before the request can be sent: the answer
+/// who pays and, for a third party, the name and the citizenships — the
+/// least the sanctions screening and the country policy work with. The rest
+/// of the identity is completed with staff.
+pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static str> {
+    let Some(declaration) = declaration else {
+        return vec!["payer_kind"];
+    };
+    let mut missing = Vec::new();
+    if declaration.is_third_party() {
+        if blank(&declaration.first_name) {
+            missing.push("payer_first_name");
+        }
+        if blank(&declaration.last_name) {
+            missing.push("payer_last_name");
+        }
+        if declaration.citizenships.is_empty() {
+            missing.push("payer_citizenships");
+        }
+    }
+    missing
+}
+
+/// Stable text of what the cabinet entered, for the "entered by the patient"
+/// marker of the lead.
+pub(crate) fn portal_marker_value(declaration: &Declaration) -> String {
+    declaration.portal_json().to_string()
+}
+
+/// Merges the cabinet's answer into the stored declaration. Staff fields are
+/// kept; the place of birth and the Art. 14 confirmation belong to the person
+/// named before and go when the cabinet names somebody else.
+fn declaration_from_portal(
+    previous: Option<&Declaration>,
+    input: &PortalPayerInput,
+    today: NaiveDate,
+) -> Result<Declaration, &'static str> {
+    let staff = DeclarationInput {
+        payer_kind: input.payer_kind.clone(),
+        acts_on_own_account: previous.is_none_or(|previous| previous.acts_on_own_account),
+        beneficial_owner_name: previous.and_then(|previous| previous.beneficial_owner_name.clone()),
+        beneficial_owner_note: previous.and_then(|previous| previous.beneficial_owner_note.clone()),
+        source_of_funds: previous.and_then(|previous| previous.source_of_funds.clone()),
+        source_of_funds_description: previous
+            .and_then(|previous| previous.source_of_funds_description.clone()),
+        source_of_funds_document_id: previous
+            .and_then(|previous| previous.source_of_funds_document_id),
+        first_name: input.first_name.clone(),
+        last_name: input.last_name.clone(),
+        date_of_birth: input.date_of_birth.clone(),
+        place_of_birth: None,
+        street: input.street.clone(),
+        zip: input.zip.clone(),
+        city: input.city.clone(),
+        country: input.country.clone(),
+        citizenships: input.citizenships.clone(),
+        relationship: input.relationship.clone(),
+        email: input.email.clone(),
+        phone: input.phone.clone(),
+        payer_informed: false,
+    };
+    let mut declaration = declaration_from_input(&staff, today)?;
+    if let Some(previous) = previous
+        && previous.is_third_party()
+        && declaration.is_third_party()
+        && previous.person_key() == declaration.person_key()
+    {
+        declaration.place_of_birth = previous.place_of_birth.clone();
+        declaration.payer_informed_at = previous.payer_informed_at;
+        declaration.payer_informed_by = previous.payer_informed_by;
+    }
+    Ok(declaration)
+}
+
+/// Saves the cabinet's answer in the caller's transaction, with its audit
+/// event and the payer of the lead's orders. Returns the declaration when
+/// something changed.
+pub(crate) async fn save_from_portal(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+    access_kind: &str,
+    input: &PortalPayerInput,
+    today: NaiveDate,
+) -> Result<Option<Declaration>, PortalPayerError> {
+    let previous = load_declaration(conn, lead_id).await?;
+    let declaration = declaration_from_portal(previous.as_ref(), input, today).map_err(|code| {
+        PortalPayerError::Invalid {
+            code,
+            field: portal_field_of(code),
+        }
+    })?;
+    if previous.as_ref() == Some(&declaration) {
+        return Ok(None);
+    }
+    let identity_changed = previous
+        .as_ref()
+        .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
+    store_declaration(conn, lead_id, &declaration, actor, identity_changed).await?;
     let mut event = audit::domain_diff_event(
-        "update_lead_payer_declaration",
-        Some(auth.user_id),
+        "lead_portal_update_payer_declaration",
+        Some(actor),
         "lead",
         Some(lead_id),
         previous
@@ -1336,26 +1593,12 @@ async fn save_payer_declaration(
         "lead_id": lead_id,
         "payer_kind": declaration.payer_kind,
         "identity_changed": identity_changed,
+        "access_kind": access_kind,
         "missing": declaration.missing().iter().map(|reason| reason.code()).collect::<Vec<_>>(),
     });
-    if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
-        return database_error(error, "audit payer declaration");
-    }
-    if let Err(error) = sync_order_payers(&mut tx, lead_id, &declaration, auth.user_id).await {
-        return database_error(error, "sync order payer");
-    }
-    if let Err(error) = tx.commit().await {
-        return database_error(error, "commit payer declaration");
-    }
-    crate::realtime::publish_lead_event(
-        &state,
-        Some(auth.user_id),
-        "lead.updated",
-        lead_id,
-        json!({ "payer_declaration_updated": true }),
-    )
-    .await;
-    get_payer_declaration(State(state), Extension(auth), Path(lead_id)).await
+    audit::write_in_transaction(conn, &event).await?;
+    sync_order_payers(conn, lead_id, &declaration, actor).await?;
+    Ok(Some(declaration))
 }
 
 /// The declaration is the source of the payer of the lead's orders while the

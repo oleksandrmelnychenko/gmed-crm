@@ -29,7 +29,9 @@ import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
+import type { PatientFieldMarker } from "../data/lead-portal-intake-api";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
+import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 import {
   EMPTY_PAYER_DECLARATION_FORM,
@@ -117,6 +119,7 @@ export function LeadPayerDeclarationSection({
   tx,
   onSave,
   errorText,
+  patientMarker,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -128,6 +131,8 @@ export function LeadPayerDeclarationSection({
   tx: Tx;
   onSave: (form: PayerDeclarationForm) => Promise<unknown>;
   errorText: (error: unknown) => string;
+  /** Set while the payer is the one the patient stated in the lead cabinet. */
+  patientMarker?: PatientFieldMarker | null;
 }) {
   const [form, setForm] = useState<PayerDeclarationForm>(EMPTY_PAYER_DECLARATION_FORM);
   const [dirty, setDirty] = useState(false);
@@ -217,6 +222,7 @@ export function LeadPayerDeclarationSection({
             <StatusBadge tone={data?.status.complete ? "success" : "warning"}>
               {data?.status.complete ? tx("Заполнено", "Vollständig") : tx("Не заполнено", "Unvollständig")}
             </StatusBadge>
+            {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
           </span>
         )}
         accessory={canEdit ? (

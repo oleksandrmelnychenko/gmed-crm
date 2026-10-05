@@ -7248,6 +7248,7 @@ ${serviceCommentLines.join("\n")}`
                   canEdit
                   lang={lang}
                   tx={tx}
+                  patientMarker={step1Portal.intake?.patient_payer ?? null}
                   errorText={(nextError) => errorText(nextError, tx)}
                   onSave={async (form) => {
                     const saved = await payer.save(form);

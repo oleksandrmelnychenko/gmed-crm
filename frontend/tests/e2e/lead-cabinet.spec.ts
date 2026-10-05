@@ -35,8 +35,10 @@ function leadRequest() {
     progress: {
       filled: 2,
       total: 12,
-      missing_for_submit: ["date_of_birth", "legal_sex", "citizenships", "street_address", "zip_code", "city", "country"],
+      missing_for_submit: ["date_of_birth", "legal_sex", "citizenships", "street_address", "zip_code", "city", "country", "payer_kind"],
     },
+    // Who pays; null until the question is answered.
+    payer: null as Record<string, unknown> | null,
     minor: false,
     documents: [] as Record<string, unknown>[],
     max_documents: 30,
@@ -83,7 +85,18 @@ function recompute(request: ReturnType<typeof leadRequest>) {
     const value = data[field];
     return Array.isArray(value) ? value.length > 0 : Boolean(value);
   };
-  request.progress.missing_for_submit = SUBMIT_FIELDS.filter((field) => !filled(field));
+  // Like the server: the answer, and for another person the name and the citizenships.
+  const payer = request.payer;
+  const payerMissing = !payer
+    ? ["payer_kind"]
+    : payer.payer_kind === "third_party"
+      ? [
+          ...(payer.first_name ? [] : ["payer_first_name"]),
+          ...(payer.last_name ? [] : ["payer_last_name"]),
+          ...(Array.isArray(payer.citizenships) && payer.citizenships.length > 0 ? [] : ["payer_citizenships"]),
+        ]
+      : [];
+  request.progress.missing_for_submit = [...SUBMIT_FIELDS.filter((field) => !filled(field)), ...payerMissing];
   request.progress.filled = [
     "first_name", "last_name", ...SUBMIT_FIELDS, "phone", "primary_language",
   ].filter(filled).length + (data.has_insurance == null ? 0 : 1);
@@ -98,7 +111,14 @@ async function setup(
   request.personal_data.primary_language = options.primaryLanguage ?? null;
   // The language saved on the account; a new lead login has none.
   const accountLanguage = options.accountLanguage === undefined ? "de" : options.accountLanguage;
-  const calls = { personalData: [] as Record<string, unknown>[], consents: [] as string[], uploads: 0, submits: 0, blocked: [] as string[] };
+  const calls = {
+    personalData: [] as Record<string, unknown>[],
+    payer: [] as Record<string, unknown>[],
+    consents: [] as string[],
+    uploads: 0,
+    submits: 0,
+    blocked: [] as string[],
+  };
 
   await page.addInitScript(() => {
     localStorage.setItem("gmed_lang", "de");
@@ -135,6 +155,28 @@ async function setup(
       if ("has_insurance" in patch) {
         request.personal_data.has_insurance = patch.has_insurance === "yes" ? true : patch.has_insurance === "no" ? false : null;
       }
+      if (request.submitted_at) request.changed_since_submit = true;
+      recompute(request);
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/payer" && method === "POST") {
+      const input = req.postDataJSON() as Record<string, unknown>;
+      calls.payer.push(input);
+      // The answer replaces the block: what is not sent is empty.
+      request.payer = {
+        first_name: null,
+        last_name: null,
+        date_of_birth: null,
+        street: null,
+        zip: null,
+        city: null,
+        country: null,
+        citizenships: [],
+        relationship: null,
+        email: null,
+        phone: null,
+        ...input,
+      };
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
@@ -233,6 +275,7 @@ test.describe("lead cabinet", () => {
     // Date of birth, sex, citizenship and country are still missing.
     await expect(send).toBeDisabled();
     await expect(page.getByTestId("lead-request-send")).toContainText("Geburtsdatum");
+    await expect(page.getByTestId("lead-request-send")).toContainText("Wer übernimmt die Kosten der Behandlung?");
 
     await page.getByRole("button", { name: "Angaben ändern" }).click();
     await setDatePickerValue(page.locator("#lead-request-date_of_birth"), "1988-05-01");
@@ -245,6 +288,12 @@ test.describe("lead cabinet", () => {
     await page.locator("#lead-request-citizenships").click();
     await page.getByRole("option", { name: "Deutschland" }).first().click();
     await expect.poll(() => calls.personalData.some((patch) => Array.isArray(patch.citizenships))).toBe(true);
+    await page
+      .getByTestId("lead-request-payer")
+      .getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" })
+      .click();
+    await page.getByRole("option", { name: "Ich selbst" }).click();
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
 
     await page.getByRole("button", { name: "Weiter" }).click();
     await page.getByRole("button", { name: "Weiter" }).click();
@@ -280,12 +329,54 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
   });
 
+  test("another person as payer is named with name and citizenship before sending", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const question = payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" });
+
+    // Another person's fields exist only when another person pays.
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
+    await question.click();
+    await page.getByRole("option", { name: "Eine andere Person" }).click();
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party" });
+    await expect(payer).toContainText("Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.");
+
+    // The send step says what the manager still needs about that person.
+    await page.locator('[data-step="send"]').click();
+    const summary = page.getByTestId("lead-request-send");
+    await expect(summary).toContainText("Zahlende Person: Vorname");
+    await expect(summary).toContainText("Zahlende Person: Nachname");
+    await expect(summary).toContainText("Zahlende Person: Staatsangehörigkeit(en)");
+
+    await page.locator('[data-step="data"]').click();
+    await expect(question).toContainText("Eine andere Person");
+    await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
+    await payer.getByRole("textbox", { name: "Nachname" }).fill(" Zahler ");
+    await page.locator("#lead-request-payer_citizenships").click();
+    await page.getByRole("option", { name: "Ukraine" }).first().click();
+    await payer.getByRole("textbox", { name: "Ort" }).fill("München");
+    // The block is saved as a whole, trimmed, without the empty fields.
+    await expect
+      .poll(() => calls.payer.at(-1))
+      .toEqual({ payer_kind: "third_party", first_name: "Viktor", last_name: "Zahler", city: "München", citizenships: ["UA"] });
+    await page.locator('[data-step="send"]').click();
+    await expect(summary).not.toContainText("Zahlende Person");
+
+    // "I pay myself" sends only the answer and hides the other person again.
+    await page.locator('[data-step="data"]').click();
+    await question.click();
+    await page.getByRole("option", { name: "Ich selbst" }).click();
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
+  });
+
   test("no insurance means self-payer and hides the details", async ({ page }) => {
     const { calls } = await setup(page, "lead");
     await page.goto("/");
     const insurance = page.getByTestId("lead-request-insurance");
     await insurance.getByRole("combobox", { name: "Krankenversicherung vorhanden?" }).click();
-    await page.getByRole("option", { name: "Nein, ich zahle selbst" }).click();
+    await page.getByRole("option", { name: "Nein", exact: true }).click();
     await expect.poll(() => calls.personalData.at(-1)).toMatchObject({ has_insurance: "no", insurance_type: "self_pay" });
     await expect(insurance.getByRole("combobox", { name: "Versicherungsart" })).toHaveCount(0);
     await expect(insurance.getByRole("textbox", { name: "Versicherungsnummer" })).toHaveCount(0);

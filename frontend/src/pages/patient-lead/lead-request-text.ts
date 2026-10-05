@@ -1,6 +1,6 @@
 import type { Lang } from "@/lib/i18n";
 
-import type { PersonalField } from "./lead-request-model";
+import type { PayerField, PersonalField, SubmitField } from "./lead-request-model";
 
 /**
  * Texts of the lead cabinet in DE, EN, UA and RU (the rest of the patient
@@ -79,7 +79,56 @@ export type LeadRequestText = {
   insuranceCoverageOptions: { yes: string; no: string; not_sure: string };
   /** After sending, when the request was changed: why to send again. */
   changedAfterSend: string;
+  /** "Who pays" (owner request 2026-10-05). */
+  sectionPayer: string;
+  payerQuestion: string;
+  payerOptions: { self: string; third_party: string };
+  /** The same answers when a parent fills in the request of a child. */
+  payerOptionsGuardian: { self: string; third_party: string };
+  payerIntro: string;
+  payerInformHint: string;
+  /** Prefix of a payer field in the list of what is still missing. */
+  payerPerson: string;
+  payerRelationship: string;
+  payerEmail: string;
 };
+
+/** Label of a payer field; identity and address reuse the patient's labels. */
+export function payerFieldLabel(text: LeadRequestText, field: PayerField): string {
+  switch (field) {
+    case "payer_kind":
+      return text.payerQuestion;
+    case "payer_first_name":
+      return text.fields.first_name;
+    case "payer_last_name":
+      return text.fields.last_name;
+    case "payer_date_of_birth":
+      return text.fields.date_of_birth;
+    case "payer_citizenships":
+      return text.fields.citizenships;
+    case "payer_relationship":
+      return text.payerRelationship;
+    case "payer_street":
+      return text.fields.street_address;
+    case "payer_zip":
+      return text.fields.zip_code;
+    case "payer_city":
+      return text.fields.city;
+    case "payer_country":
+      return text.fields.country;
+    case "payer_phone":
+      return text.fields.phone;
+    case "payer_email":
+      return text.payerEmail;
+  }
+}
+
+/** A field in the list of what is still missing before sending. */
+export function submitFieldLabel(text: LeadRequestText, field: SubmitField): string {
+  if (!field.startsWith("payer_")) return text.fields[field as PersonalField];
+  const label = payerFieldLabel(text, field as PayerField);
+  return field === "payer_kind" ? label : `${text.payerPerson}: ${label}`;
+}
 
 const de: LeadRequestText = {
   title: "Ihre Anfrage",
@@ -180,11 +229,21 @@ const de: LeadRequestText = {
   stepOf: (index, total) => `Schritt ${index} von ${total}`,
   sectionInsurance: "Versicherung",
   notStated: "Keine Angabe",
-  insuranceAnswerOptions: { yes: "Ja", no: "Nein, ich zahle selbst" },
+  insuranceAnswerOptions: { yes: "Ja", no: "Nein" },
   insuranceTypeOptions: { private: "Privat", public: "Gesetzlich", foreign: "Ausländische Versicherung" },
   insuranceCoverageOptions: { yes: "Ja", no: "Nein", not_sure: "Weiß ich nicht" },
   changedAfterSend:
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
+  sectionPayer: "Wer zahlt",
+  payerQuestion: "Wer übernimmt die Kosten der Behandlung?",
+  payerOptions: { self: "Ich selbst", third_party: "Eine andere Person" },
+  payerOptionsGuardian: { self: "Die Patientin / der Patient selbst", third_party: "Eine andere Person (zum Beispiel ein Elternteil)" },
+  payerIntro: "Bitte nennen Sie die Person, die die Kosten übernimmt. Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.",
+  payerInformHint:
+    "Bitte sagen Sie dieser Person, dass Sie uns ihre Daten für die Kostenübernahme mitgeteilt haben.",
+  payerPerson: "Zahlende Person",
+  payerRelationship: "Beziehung zur Patientin / zum Patienten",
+  payerEmail: "E-Mail",
 };
 
 const ru: LeadRequestText = {
@@ -285,11 +344,20 @@ const ru: LeadRequestText = {
   stepOf: (index, total) => `Шаг ${index} из ${total}`,
   sectionInsurance: "Страхование",
   notStated: "Не указано",
-  insuranceAnswerOptions: { yes: "Да", no: "Нет, оплачиваю сам(а)" },
+  insuranceAnswerOptions: { yes: "Да", no: "Нет" },
   insuranceTypeOptions: { private: "Частное", public: "Государственное", foreign: "Иностранное" },
   insuranceCoverageOptions: { yes: "Да", no: "Нет", not_sure: "Не знаю" },
   changedAfterSend:
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
+  sectionPayer: "Кто оплачивает",
+  payerQuestion: "Кто оплачивает лечение?",
+  payerOptions: { self: "Я сам(а)", third_party: "Другой человек" },
+  payerOptionsGuardian: { self: "Сам пациент", third_party: "Другой человек (например, один из родителей)" },
+  payerIntro: "Укажите, пожалуйста, человека, который оплачивает лечение. По закону мы обязаны знать, кто платит.",
+  payerInformHint: "Пожалуйста, сообщите этому человеку, что вы передали нам его данные для оформления оплаты.",
+  payerPerson: "Плательщик",
+  payerRelationship: "Кем приходится пациенту",
+  payerEmail: "E-mail",
 };
 
 const uk: LeadRequestText = {
@@ -390,11 +458,20 @@ const uk: LeadRequestText = {
   stepOf: (index, total) => `Крок ${index} з ${total}`,
   sectionInsurance: "Страхування",
   notStated: "Не вказано",
-  insuranceAnswerOptions: { yes: "Так", no: "Ні, плачу самостійно" },
+  insuranceAnswerOptions: { yes: "Так", no: "Ні" },
   insuranceTypeOptions: { private: "Приватне", public: "Державне", foreign: "Іноземне" },
   insuranceCoverageOptions: { yes: "Так", no: "Ні", not_sure: "Не знаю" },
   changedAfterSend:
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
+  sectionPayer: "Хто оплачує",
+  payerQuestion: "Хто оплачує лікування?",
+  payerOptions: { self: "Я сам(а)", third_party: "Інша людина" },
+  payerOptionsGuardian: { self: "Сам пацієнт", third_party: "Інша людина (наприклад, хтось із батьків)" },
+  payerIntro: "Вкажіть, будь ласка, людину, яка оплачує лікування. За законом ми зобов'язані знати, хто платить.",
+  payerInformHint: "Будь ласка, повідомте цій людині, що ви передали нам її дані для оформлення оплати.",
+  payerPerson: "Платник",
+  payerRelationship: "Ким доводиться пацієнту",
+  payerEmail: "E-mail",
 };
 
 const en: LeadRequestText = {
@@ -495,11 +572,20 @@ const en: LeadRequestText = {
   stepOf: (index, total) => `Step ${index} of ${total}`,
   sectionInsurance: "Insurance",
   notStated: "Not specified",
-  insuranceAnswerOptions: { yes: "Yes", no: "No, I pay myself" },
+  insuranceAnswerOptions: { yes: "Yes", no: "No" },
   insuranceTypeOptions: { private: "Private", public: "Statutory (public)", foreign: "Foreign" },
   insuranceCoverageOptions: { yes: "Yes", no: "No", not_sure: "Not sure" },
   changedAfterSend:
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
+  sectionPayer: "Who pays",
+  payerQuestion: "Who pays for the treatment?",
+  payerOptions: { self: "I do", third_party: "Another person" },
+  payerOptionsGuardian: { self: "The patient", third_party: "Another person (for example a parent)" },
+  payerIntro: "Please name the person who pays for the treatment. We are required by law to know who pays.",
+  payerInformHint: "Please let this person know that you gave us their details for the payment arrangements.",
+  payerPerson: "Payer",
+  payerRelationship: "Relationship to the patient",
+  payerEmail: "E-mail",
 };
 
 /** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */

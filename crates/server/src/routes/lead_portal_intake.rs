@@ -41,6 +41,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
+use crate::routes::lead_payer::{self, PortalPayerError, PortalPayerInput};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -240,6 +241,7 @@ pub fn router() -> Router<AppState> {
             "/me/lead-requests/{lead_id}/personal-data",
             post(update_my_personal_data),
         )
+        .route("/me/lead-requests/{lead_id}/payer", post(update_my_payer))
         .route("/me/lead-requests/{lead_id}/consent", post(give_consent))
         .route(
             "/me/lead-requests/{lead_id}/consent/revoke",
@@ -536,6 +538,10 @@ const EDITABLE_FIELDS: [&str; 17] = [
     "insurance_number",
     "insurance_covers_germany",
 ];
+
+/// Key of the "who pays" answer in `leads.portal_field_updates`: like a
+/// personal data field it says when the patient last changed it.
+const PAYER_MARKER: &str = "payer";
 
 /// Fields counted in "N of M filled" (the middle name is optional for everyone;
 /// of the insurance block only the answer whether there is one, because the
@@ -1035,6 +1041,12 @@ async fn request_payload(
     .fetch_one(&state.db)
     .await?;
     let data = PersonalData::from_row(&row);
+    let payer = {
+        let mut conn = state.db.acquire().await?;
+        lead_payer::load_declaration(&mut conn, lead_id).await?
+    };
+    let mut missing_for_submit = data.missing_for_submit();
+    missing_for_submit.extend(lead_payer::portal_missing(payer.as_ref()));
     let uploads = sqlx::query(
         r#"SELECT u.document_id, u.created_at, u.reviewed_at, u.uploaded_by,
                   d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id
@@ -1108,8 +1120,9 @@ async fn request_payload(
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
-            "missing_for_submit": data.missing_for_submit(),
+            "missing_for_submit": missing_for_submit,
         },
+        "payer": lead_payer::portal_payload(payer.as_ref()),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "documents": documents,
         "max_documents": MAX_PORTAL_UPLOADS,
@@ -1362,6 +1375,96 @@ async fn update_my_personal_data(
         "lead.portal_updated",
         lead_id,
         json!({ "change": "personal_data", "fields": changed, "access_kind": kind.as_str() }),
+    )
+    .await;
+    match request_payload(&state, lead_id, auth.user_id, kind).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(error) => internal(error, "load request"),
+    }
+}
+
+/// `POST /me/lead-requests/{lead_id}/payer`: who pays, and for a third party
+/// who that is. The answer is part of the lead's payer declaration, so the
+/// sanctions screening and the country policy pick the payer up from there.
+async fn update_my_payer(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(input): Json<PortalPayerInput>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient(&auth) {
+        return response;
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let (kind, _) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
+        Ok(None) => return not_found(),
+        Err(error) => return internal(error, "lock request"),
+    };
+    let saved = match lead_payer::save_from_portal(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        kind.as_str(),
+        &input,
+        crate::app_time::today(),
+    )
+    .await
+    {
+        Ok(saved) => saved,
+        Err(PortalPayerError::Invalid { code, field }) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                code,
+                "Invalid payer data",
+                json!({ "field": field }),
+            );
+        }
+        Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
+    };
+    let Some(declaration) = saved else {
+        drop(tx);
+        return match request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => internal(error, "load request"),
+        };
+    };
+    let marker = json!({
+        PAYER_MARKER: {
+            "at": Utc::now(),
+            "by": auth.user_id,
+            "kind": kind.as_str(),
+            "hash": value_marker(
+                lead_id,
+                PAYER_MARKER,
+                Some(&lead_payer::portal_marker_value(&declaration)),
+            ),
+        }
+    });
+    if let Err(error) = sqlx::query(
+        r#"UPDATE leads
+           SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(marker)
+    .execute(&mut *tx)
+    .await
+    {
+        return internal(error, "mark payer");
+    }
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit payer");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "payer", "access_kind": kind.as_str() }),
     )
     .await;
     match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -1993,7 +2096,12 @@ async fn submit_my_lead_request(
         Err(error) => return internal(error, "lock request"),
     };
     let data = PersonalData::from_row(&row);
-    let missing = data.missing_for_submit();
+    let payer = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(payer) => payer,
+        Err(error) => return internal(error, "load payer"),
+    };
+    let mut missing = data.missing_for_submit();
+    missing.extend(lead_payer::portal_missing(payer.as_ref()));
     if !missing.is_empty() {
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2196,6 +2304,32 @@ async fn get_lead_portal_intake(
     let updates: Value = row
         .try_get("portal_field_updates")
         .unwrap_or_else(|_| json!({}));
+    // The payer stated in the cabinet, while it is still what the patient
+    // entered (staff may have changed it since in the compliance step).
+    let payer_marker = {
+        let declaration = match state.db.acquire().await {
+            Ok(mut conn) => lead_payer::load_declaration(&mut conn, lead_id).await,
+            Err(error) => Err(error),
+        };
+        let declaration = match declaration {
+            Ok(declaration) => declaration,
+            Err(error) => return internal(error, "load payer"),
+        };
+        declaration.and_then(|declaration| {
+            let update = updates.get(PAYER_MARKER)?;
+            let current = value_marker(
+                lead_id,
+                PAYER_MARKER,
+                Some(&lead_payer::portal_marker_value(&declaration)),
+            );
+            (update.get("hash").and_then(Value::as_str) == Some(current.as_str())).then(|| {
+                json!({
+                    "at": update.get("at").cloned().unwrap_or(Value::Null),
+                    "access_kind": update.get("kind").cloned().unwrap_or(Value::Null),
+                })
+            })
+        })
+    };
     let uploads = match sqlx::query(
         r#"SELECT u.document_id, u.created_at, u.access_kind, u.reviewed_at,
                   c.granted_at AS consent_given_at, c.revoked_at AS consent_revoked_at,
@@ -2302,6 +2436,7 @@ async fn get_lead_portal_intake(
         "lead_id": lead_id,
         "fill_mode": fill_mode,
         "patient_fields": patient_field_markers(lead_id, &data, &updates),
+        "patient_payer": payer_marker,
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),

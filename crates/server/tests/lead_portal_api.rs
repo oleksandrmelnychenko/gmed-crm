@@ -576,6 +576,26 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // Who pays is part of what the manager needs (owner request 2026-10-05).
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!(["payer_kind"]),
+        "{body}"
+    );
+    let (status, body) = json_request(router, "POST", &submit, &patient, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "personal_data_incomplete");
+    assert_eq!(body["missing"], json!(["payer_kind"]), "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
     let (status, body) = json_request(router, "POST", &submit, &patient, None).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "inquiry_consent_required");
@@ -696,6 +716,364 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
 }
 
 /// A minor lead with a mother as trusted contact; returns (lead, contact id).
+async fn screening_queued_at(
+    pool: &PgPool,
+    lead_id: Uuid,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    sqlx::query_scalar(
+        "SELECT queued_at FROM sanctions_screening_queue WHERE subject_type = 'lead' AND subject_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap()
+}
+
+async fn clear_screening_queue(pool: &PgPool, lead_id: Uuid) {
+    sqlx::query(
+        "DELETE FROM sanctions_screening_queue WHERE subject_type = 'lead' AND subject_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_screening() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Petra", "petra.payer@example.com").await;
+    let (other_lead, _, _) = lead_with_login(&app, "Olga", "olga.payer@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let payer = format!("{request}/payer");
+    let manager = app.staff("patient_manager");
+
+    // Nothing is stated yet.
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["payer"].is_null(), "{body}");
+    assert!(
+        body["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_kind")),
+        "{body}"
+    );
+
+    // The patient's own name and citizenships from the cabinet are screened.
+    clear_screening_queue(pool, lead_id).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["UA", "DE"], "country": "DE" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        screening_queued_at(pool, lead_id).await.is_some(),
+        "a cabinet edit of the citizenships queues the lead for screening"
+    );
+
+    // Staff recorded the GwG part before; the cabinet must not lose it.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        Some(json!({
+            "payer_kind": "self",
+            "acts_on_own_account": true,
+            "source_of_funds": "savings"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Another person's request does not exist for this login.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{other_lead}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Staff do not use the patient endpoint.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &payer,
+        &manager,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Wrong values name the field; unknown keys (the staff part) are refused.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "third_party", "date_of_birth": "2999-01-01" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "payer_date_of_birth_invalid", "{body}");
+    assert_eq!(body["field"], "payer_date_of_birth", "{body}");
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self", "source_of_funds": "other" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A third party pays: name and citizenships are the least to send.
+    clear_screening_queue(pool, lead_id).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "third_party", "first_name": " Viktor " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "third_party", "{body}");
+    assert_eq!(body["payer"]["first_name"], "Viktor", "{body}");
+    let missing = body["progress"]["missing_for_submit"].as_array().unwrap();
+    assert!(missing.contains(&json!("payer_last_name")), "{body}");
+    assert!(missing.contains(&json!("payer_citizenships")), "{body}");
+    assert!(!missing.contains(&json!("payer_first_name")), "{body}");
+    assert!(
+        screening_queued_at(pool, lead_id).await.is_some(),
+        "the payer named in the cabinet queues the lead for screening"
+    );
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "1970-05-06",
+            "citizenships": ["ua", "DE", "UA"],
+            "street": "Zahlweg 5",
+            "zip": "80331",
+            "city": "München",
+            "country": "de",
+            "relationship": "Bruder",
+            "email": "viktor.zahler@example.com",
+            "phone": "+49 89 000000"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["citizenships"], json!(["UA", "DE"]), "{body}");
+    assert_eq!(body["payer"]["country"], "DE", "{body}");
+    assert!(
+        !body["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field
+                .as_str()
+                .is_some_and(|field| field.starts_with("payer"))),
+        "{body}"
+    );
+    // The cabinet does not see the staff part.
+    assert!(body["payer"].get("source_of_funds").is_none(), "{body}");
+
+    // It is the lead's one declaration: staff see the same payer, the GwG
+    // answers they gave are kept, and the change is audited as the patient's.
+    let (status, declaration) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{declaration}");
+    let stored = &declaration["declaration"];
+    assert_eq!(stored["payer_kind"], "third_party", "{declaration}");
+    assert_eq!(stored["last_name"], "Zahler", "{declaration}");
+    assert_eq!(stored["citizenships"], json!(["UA", "DE"]), "{declaration}");
+    assert_eq!(stored["source_of_funds"], "savings", "{declaration}");
+    assert_eq!(stored["acts_on_own_account"], true, "{declaration}");
+    assert!(stored["payer_informed_at"].is_null(), "{declaration}");
+    let updated_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT updated_by FROM lead_payer_declarations WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(updated_by, Some(user_id));
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_payer_declaration", lead_id).await,
+        2
+    );
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(intake["patient_payer"]["access_kind"], "self", "{intake}");
+    assert!(intake["patient_payer"]["at"].is_string(), "{intake}");
+
+    // The same answer again changes nothing.
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "1970-05-06",
+            "citizenships": ["UA", "DE"],
+            "street": "Zahlweg 5",
+            "zip": "80331",
+            "city": "München",
+            "country": "DE",
+            "relationship": "Bruder",
+            "email": "viktor.zahler@example.com",
+            "phone": "+49 89 000000"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_payer_declaration", lead_id).await,
+        2
+    );
+
+    // Staff confirm that the payer was informed (Art. 14 DSGVO). A corrected
+    // address keeps the confirmation; another person named as payer loses it.
+    let mut confirmed = stored.clone();
+    confirmed["payer_informed"] = json!(true);
+    for key in [
+        "payer_informed_at",
+        "payer_informed_by",
+        "patient_id",
+        "created_at",
+        "updated_at",
+    ] {
+        confirmed.as_object_mut().unwrap().remove(key);
+    }
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        Some(confirmed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["declaration"]["payer_informed_at"].is_string(),
+        "{body}"
+    );
+    // Staff changed the record: it is no longer "as the patient entered it".
+    let informed =
+        |declaration: &Value| declaration["declaration"]["payer_informed_at"].is_string();
+    let portal_payer = |last_name: &str, street: &str| {
+        json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": last_name,
+            "date_of_birth": "1970-05-06",
+            "citizenships": ["UA", "DE"],
+            "street": street,
+            "zip": "80331",
+            "city": "München",
+            "country": "DE"
+        })
+    };
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(portal_payer("Zahler", "Zahlweg 7")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, declaration) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        None,
+    )
+    .await;
+    assert!(informed(&declaration), "{declaration}");
+    assert_eq!(
+        declaration["declaration"]["street"], "Zahlweg 7",
+        "{declaration}"
+    );
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(portal_payer("Anders", "Zahlweg 7")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, declaration) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &manager,
+        None,
+    )
+    .await;
+    assert!(!informed(&declaration), "{declaration}");
+    assert_eq!(
+        declaration["declaration"]["source_of_funds"], "savings",
+        "{declaration}"
+    );
+
+    // "I pay myself" removes the other person's data (data minimisation).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["payer_kind"], "self", "{body}");
+    assert!(body["payer"]["last_name"].is_null(), "{body}");
+    assert_eq!(body["payer"]["citizenships"], json!([]), "{body}");
+    let names: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT first_name, last_name FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(names, (None, None));
+}
+
 async fn minor_lead(app: &TestApp, child: &str, mother_email: &str) -> (Uuid, Uuid) {
     let contact_id = Uuid::new_v4();
     let (status, created) = json_request(

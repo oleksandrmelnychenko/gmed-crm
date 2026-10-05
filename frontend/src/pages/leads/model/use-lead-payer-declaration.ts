@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { useRealtimeSubscription } from "@/lib/realtime";
+
 import { fetchLeadPayerDeclaration, saveLeadPayerDeclaration } from "../data/lead-payer-api";
 import {
   payerDeclarationPayload,
@@ -56,6 +58,12 @@ export function useLeadPayerDeclaration(leadId: string | null | undefined, enabl
     setData(null);
     void reload();
   }, [reload]);
+
+  // The patient states who pays in the lead cabinet: show it at once.
+  useRealtimeSubscription(["lead.portal_updated"], (event) => {
+    if (!enabled || !leadId || event.entity_id !== leadId) return;
+    if (event.payload?.change === "payer") void reload();
+  });
 
   return { data, loading, error, reload, save };
 }

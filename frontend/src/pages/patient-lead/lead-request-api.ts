@@ -26,6 +26,41 @@ export type LeadRequestPersonalData = {
   insurance_covers_germany: string | null;
 };
 
+/**
+ * Who pays, as stated in the cabinet (owner request 2026-10-05). A third
+ * party is named with identity and citizenships; staff complete the rest.
+ */
+export type LeadRequestPayer = {
+  payer_kind: "self" | "third_party";
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  citizenships: string[];
+  relationship: string | null;
+  email: string | null;
+  phone: string | null;
+};
+
+/** What the cabinet sends: the whole answer, empty values left out. */
+export type LeadRequestPayerInput = {
+  payer_kind: "self" | "third_party";
+  first_name?: string;
+  last_name?: string;
+  date_of_birth?: string;
+  street?: string;
+  zip?: string;
+  city?: string;
+  country?: string;
+  citizenships?: string[];
+  relationship?: string;
+  email?: string;
+  phone?: string;
+};
+
 export type LeadRequestConsent = {
   type: string;
   version: string;
@@ -52,6 +87,8 @@ export type LeadRequest = {
   created_at: string;
   personal_data: LeadRequestPersonalData;
   progress: { filled: number; total: number; missing_for_submit: string[] };
+  /** `null` until the question is answered; absent on an older server. */
+  payer?: LeadRequestPayer | null;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -75,6 +112,13 @@ export function saveLeadPersonalData(leadId: string, patch: PersonalDataPatch): 
   return apiFetch<LeadRequest>(`${base(leadId)}/personal-data`, {
     method: "POST",
     body: JSON.stringify(patch),
+  });
+}
+
+export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
+    method: "POST",
+    body: JSON.stringify(payer),
   });
 }
 

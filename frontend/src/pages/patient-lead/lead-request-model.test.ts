@@ -5,9 +5,11 @@ import {
   canSubmit,
   changedSinceSubmit,
   consentText,
+  draftFromPayer,
   draftFromPersonalData,
   formatFileSize,
   missingForSubmit,
+  payerInput,
   personalDataPatch,
   rejectedValue,
   withInsuranceAnswer,
@@ -153,6 +155,53 @@ describe("lead request send step", () => {
     };
     expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T09:00:00Z" }] })).toBe(false);
     expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T10:00:00Z" }] })).toBe(true);
+  });
+
+  it("sends who pays as a whole answer", () => {
+    // Not answered yet: nothing to send.
+    expect(payerInput(draftFromPayer(null))).toBeNull();
+    expect(payerInput(draftFromPayer(undefined))).toBeNull();
+    const other = {
+      ...draftFromPayer(null),
+      payer_kind: "third_party",
+      first_name: "  Viktor ",
+      last_name: "Zahler",
+      citizenships: ["UA", "DE"],
+      city: " München  Ost ",
+    };
+    // Trimmed, empty fields left out.
+    expect(payerInput(other)).toEqual({
+      payer_kind: "third_party",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      city: "München Ost",
+      citizenships: ["UA", "DE"],
+    });
+    // "I pay myself" carries no data of another person, whatever was typed before.
+    expect(payerInput({ ...other, payer_kind: "self" })).toEqual({ payer_kind: "self" });
+    // What the server returned is the same answer again.
+    const stored = draftFromPayer({
+      payer_kind: "third_party",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      date_of_birth: null,
+      street: null,
+      zip: null,
+      city: "München Ost",
+      country: null,
+      citizenships: ["UA", "DE"],
+      relationship: null,
+      email: null,
+      phone: null,
+    });
+    expect(payerInput(stored)).toEqual(payerInput(other));
+  });
+
+  it("lists missing payer fields after the personal data", () => {
+    const missing = missingForSubmit({
+      progress: { filled: 3, total: 12, missing_for_submit: ["payer_last_name", "city", "payer_kind", "unknown"] },
+    });
+    expect(missing).toEqual(["city", "payer_kind", "payer_last_name"]);
   });
 
   it("formats file sizes", () => {
