@@ -106,8 +106,10 @@ export function LeadPortalAccessDetail({
 
   return (
     <div className="space-y-3 px-4 py-3 text-xs" data-testid="lead-portal-access">
-      {/* Head line: what this is, its state, and the one action. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+      {/* Head line: what this is, its state, and the one action right beside
+          the state (the row is as wide as the table, so a button at its far
+          end is out of sight). */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="text-[13px] font-semibold text-foreground">{de ? "Patientenportal" : "Портал пациента"}</span>
@@ -117,7 +119,7 @@ export function LeadPortalAccessDetail({
           <Button
             type="button"
             size="sm"
-            className="h-8 gap-1.5 rounded-md text-xs"
+            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
             disabled={busy}
             onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
           >
