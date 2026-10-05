@@ -365,15 +365,16 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     capability: "admin.signatures",
     nav: { section: "admin", labelKey: "nav_signatures" },
   },
-  // The API access of the signature provider has its own menu item next to
-  // the signature settings (owner request 2026-10-05); same roles, same capability.
+  // Access keys of external services are entered on one page, listed next to
+  // the signature settings (owner request 2026-10-05). The signature provider
+  // is its first block, hence the same roles and capability.
   {
-    id: "admin/signature-api",
+    id: "admin/api-connections",
     match: "prefix",
-    path: "/admin/signature-api",
+    path: "/admin/api-connections",
     roles: ["ceo", "it_admin"],
     capability: "admin.signatures",
-    nav: { section: "admin", labelKey: "nav_signature_api" },
+    nav: { section: "admin", labelKey: "nav_api_connections" },
   },
   {
     id: "admin/notifications",

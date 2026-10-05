@@ -51,7 +51,7 @@ describe("staff route access by capability", () => {
       "/admin/access",
       "/admin/settings",
       "/admin/signatures",
-      "/admin/signature-api",
+      "/admin/api-connections",
       "/admin/datev",
       "/personnel",
       "/personnel/employee-1",
@@ -223,7 +223,7 @@ describe("staff route access by capability", () => {
       "/admin/activity",
       "/admin/health",
       "/admin/signatures",
-      "/admin/signature-api",
+      "/admin/api-connections",
       "/admin/notifications",
       "/admin/announcements",
       "/admin/custom-fields",
@@ -321,7 +321,7 @@ describe("staff route access by capability", () => {
       ],
       "/company-finance": ["ceo", "ceo_assistant", "billing"],
       "/admin/signatures": ["ceo", "it_admin"],
-      "/admin/signature-api": ["ceo", "it_admin"],
+      "/admin/api-connections": ["ceo", "it_admin"],
       "/admin/users": ["ceo", "it_admin"],
       "/leads": ["ceo", "ceo_assistant", "patient_manager", "concierge", "sales"],
       // feedback.view; capture stays behind feedback.capture on the page.
@@ -414,10 +414,10 @@ describe("staff route access by capability", () => {
       const admin = listStaffNavItems(role)
         .filter((item) => item.section === "admin")
         .map((item) => item.id);
-      expect(admin[admin.indexOf("admin/signatures") + 1], role).toBe("admin/signature-api");
+      expect(admin[admin.indexOf("admin/signatures") + 1], role).toBe("admin/api-connections");
     }
-    expect(nav("ceo_assistant")).not.toContain("/admin/signature-api");
-    expect(canAccessStaffRoute("billing", "/admin/signature-api")).toBe(false);
+    expect(nav("ceo_assistant")).not.toContain("/admin/api-connections");
+    expect(canAccessStaffRoute("billing", "/admin/api-connections")).toBe(false);
   });
 
   it("leaves whole sections empty for roles outside them", () => {
