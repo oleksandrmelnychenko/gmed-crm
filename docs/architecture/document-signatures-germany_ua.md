@@ -451,8 +451,13 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
 
 - Перелік документів із виключеною електронною формою; чи потрібні інші
   (напр. Verbraucherdarlehen, Schuldbeitritt споживача до кредиту).
-- Чи достатньо AES для згод (DSGVO, Schweigepflichtsentbindung) і кошторисів;
-  чи потребує нове формулювання платника (Schuldbeitritt) QES.
+- Рівні підпису — рішення власника 2026-10-05: QES для договорів, замовлень,
+  документів платника (Kostenübernahme/Schuldbeitritt, анкета платника) і
+  всього, чим особу ідентифікують за GwG; AES достатньо для згод (DSGVO,
+  Schweigepflichtsentbindung), кошторисів і внутрішніх бланків GwG, які
+  підписує лише співробітник GMED (`enhanced_due_diligence`,
+  `gwg_identification`); SES не пропонується. Юридичне підтвердження цього
+  поділу лишається за юристом.
 - Widerrufsbelehrung для договорів на відстані: у шаблонах її немає, власних
   текстів ми не створювали — **відкрите правове питання**.
 - Чи достатньо листа Skribble про завершення як «dauerhafter Datenträger» і

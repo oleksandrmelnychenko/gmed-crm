@@ -14,8 +14,12 @@
 //!   patient, health or document content (Art. 9 DSGVO, § 203 StGB).
 use super::provider::Level;
 
-/// Templates and document types that may be signed with an AES.
-const AES_ALLOWED: [&str; 9] = [
+/// Templates and document types that may be signed with an AES (owner
+/// decision 2026-10-05): consents and cost estimates, where no written form
+/// is required, and the internal GwG records that only a GMED staff member
+/// signs. Contracts, orders, the payer's documents and everything that
+/// identifies a person need a QES; a simple signature (SES) is never offered.
+const AES_ALLOWED: [&str; 11] = [
     "confidentiality_release",
     "privacy_consents",
     "privacy_consent",
@@ -25,6 +29,8 @@ const AES_ALLOWED: [&str; 9] = [
     "consent",
     "order_cost_estimate",
     "cost_estimate",
+    "enhanced_due_diligence",
+    "gwg_identification",
 ];
 
 /// Templates whose informational companion is mandatory (Art. 13/14 DSGVO
@@ -254,6 +260,12 @@ mod tests {
             Level::Qes
         );
         assert_eq!(minimum_level(None, "other"), Level::Qes);
+        // Internal GwG records are signed by a GMED staff member only.
+        assert_eq!(
+            minimum_level(Some("gwg_identification"), "gwg_identification"),
+            Level::Aes
+        );
+        assert_eq!(minimum_level(None, "enhanced_due_diligence"), Level::Aes);
         assert_eq!(
             package_minimum_level([
                 (Some("privacy_consents"), "consent"),
