@@ -39,19 +39,24 @@ describe("customer release notes", () => {
     expect(development.builtAt).toBe("2026-08-10T10:15:00Z");
     expect(development.title.ru).toBe("Обновления за 10.08.2026");
     expect(development.title.de).toBe("Aktualisierungen vom 10.08.2026");
-    expect(development.notes[0]).toMatchObject({
-      commit: "26ad6fa",
-      title: { ru: "E-Rechnung: счета в формате ZUGFeRD" },
-    });
+    // Newer notes are added on top: a known note is looked up, not pinned to the first place.
+    expect(development.notes).toContainEqual(
+      expect.objectContaining({
+        commit: "26ad6fa",
+        title: expect.objectContaining({ ru: "E-Rechnung: счета в формате ZUGFeRD" }),
+      }),
+    );
     expect(production.channel).toBe("production");
     expect(production.build).toBe("prod-17");
     expect(production.builtAt).toBe("2026-08-11T11:30:00Z");
     expect(production.title.ru).toBe("Релиз от 11.08.2026");
     expect(production.title.de).toBe("Release vom 11.08.2026");
-    expect(production.notes[0]).toMatchObject({
-      commit: "26ad6fa",
-      title: { ru: "E-Rechnung: счета в формате ZUGFeRD" },
-    });
+    expect(production.notes).toContainEqual(
+      expect.objectContaining({
+        commit: "26ad6fa",
+        title: expect.objectContaining({ ru: "E-Rechnung: счета в формате ZUGFeRD" }),
+      }),
+    );
   });
 
   it("dates the build in German time, whatever the browser zone, and avoids invalid-date labels", () => {
