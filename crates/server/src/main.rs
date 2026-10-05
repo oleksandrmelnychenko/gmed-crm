@@ -64,6 +64,7 @@ async fn main() {
     .with_audit_sender(audit_sender)
     .with_medication_ai(cfg.medication_ai)
     .with_machine_translation(cfg.machine_translation)
+    .with_mailer(cfg.mail)
     .with_document_signatures(signature_provider);
     gmed_server::document_signatures::spawn_worker(app_state.clone());
     gmed_server::routes::invoices::spawn_auto_dunning_scheduler(app_state.clone());

@@ -7,8 +7,9 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use crate::audit::AuditSender;
-use crate::config::{MachineTranslationConfig, MedicationAiConfig};
+use crate::config::{MachineTranslationConfig, MailConfig, MedicationAiConfig};
 use crate::crypto::KeyRegistry;
+use crate::mail::Mailer;
 use crate::realtime::RealtimeEvent;
 use crate::services::machine_translation::MachineTranslator;
 use crate::services::medication_ai_provider::MedicationAiProvider;
@@ -26,6 +27,7 @@ pub struct AppState {
     pub audit_sender: AuditSender,
     pub medication_ai: Arc<MedicationAiProvider>,
     pub machine_translation: Arc<MachineTranslator>,
+    pub mailer: Arc<Mailer>,
     pub document_signatures: Option<Arc<crate::document_signatures::provider::Provider>>,
     pub document_signature_cache: Arc<crate::document_signatures::connection::Cache>,
 }
@@ -64,6 +66,7 @@ impl AppState {
             machine_translation: Arc::new(MachineTranslator::new(
                 MachineTranslationConfig::default(),
             )),
+            mailer: Arc::new(Mailer::new(MailConfig::default())),
             document_signatures: None,
             document_signature_cache: Arc::new(Mutex::new(None)),
         }
@@ -83,6 +86,11 @@ impl AppState {
 
     pub fn with_machine_translation(mut self, config: MachineTranslationConfig) -> Self {
         self.machine_translation = Arc::new(MachineTranslator::new(config));
+        self
+    }
+
+    pub fn with_mailer(mut self, config: MailConfig) -> Self {
+        self.mailer = Arc::new(Mailer::new(config));
         self
     }
 

@@ -242,6 +242,11 @@ pub(crate) async fn disable_for_lead_in_tx(
     lead_id: Uuid,
     processed_by: Option<Uuid>,
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    // The log of sign-in e-mails names the recipients' addresses.
+    sqlx::query("DELETE FROM portal_login_emails WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&mut **tx)
+        .await?;
     crate::routes::lead_portal_intake::purge_portal_intake_in_tx(tx, lead_id).await?;
     crate::routes::lead_portal_guardians::revoke_for_purged_lead_in_tx(tx, lead_id, processed_by)
         .await?;

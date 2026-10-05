@@ -205,7 +205,7 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
-import { PortalCredentialsDialog } from "./lead-portal-access";
+import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
 import {
   PatientDataPendingNotice,
   PatientUpdatedBanner,
@@ -2840,12 +2840,7 @@ export function LeadWizard({
   const [commercialQuoteError, setCommercialQuoteError] = useState("");
   const [autosaveStatus, setAutosaveStatus] = useState<AutosaveStatus>("idle");
   // One-time password of the patient login created with the lead; shown once.
-  const [issuedPortalAccess, setIssuedPortalAccess] = useState<{
-    email: string;
-    password: string;
-    firstName: string;
-    language: string;
-  } | null>(null);
+  const [issuedPortalAccess, setIssuedPortalAccess] = useState<(PortalCredentials & { language: string }) | null>(null);
   const [autosaveError, setAutosaveError] = useState("");
   const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -4354,6 +4349,8 @@ export function LeadWizard({
               password: portalPassword,
               firstName: snapshot.draft.firstName.trim(),
               language: snapshot.draft.language,
+              leadId: created.id,
+              userId: created.portal_account.user_id,
             });
           }
         }

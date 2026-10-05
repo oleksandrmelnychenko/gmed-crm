@@ -32,6 +32,47 @@ pub struct Config {
     /// Optional offline machine-translation drafts for the document
     /// translation workspace, served by the internal translation service.
     pub machine_translation: MachineTranslationConfig,
+    /// Outgoing e-mail through Mittaro (transactional e-mail API hosted in
+    /// Germany). Without an API key no e-mail is sent.
+    pub mail: MailConfig,
+}
+
+/// Default send endpoint of the Mittaro API.
+pub const MITTARO_DEFAULT_API_URL: &str = "https://api.mittaro.de/v1/emails";
+
+#[derive(Clone, Default)]
+pub struct MailConfig {
+    /// `tx_live_…` key from the Mittaro dashboard.
+    pub mittaro_api_key: Option<SecretString>,
+    /// Send endpoint; [`MITTARO_DEFAULT_API_URL`] unless overridden.
+    pub mittaro_api_url: Option<String>,
+    /// Sender on a domain verified at Mittaro, e.g. `zugang@gmed-health.com`.
+    pub from: Option<String>,
+    pub reply_to: Option<String>,
+    /// Origin of the staff/patient console the e-mails link to, e.g.
+    /// `https://console.gmed-health.com`.
+    pub console_url: Option<String>,
+}
+
+fn env_text(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// The console origin for links in e-mails: `GMED_CONSOLE_URL`, otherwise the
+/// first `https://` entry of `CORS_ORIGIN` (the console itself).
+fn console_url_from(explicit: Option<String>, cors_origin: &str) -> Option<String> {
+    explicit
+        .or_else(|| {
+            cors_origin
+                .split(',')
+                .map(str::trim)
+                .find(|origin| origin.starts_with("https://"))
+                .map(str::to_string)
+        })
+        .map(|url| url.trim_end_matches('/').to_string())
 }
 
 #[derive(Clone, Default)]
@@ -152,12 +193,33 @@ impl Config {
             panic!("GMED_OPENAI_MODEL contains unsupported characters");
         }
 
+        let cors_origin =
+            std::env::var("CORS_ORIGIN").unwrap_or_else(|_| "http://localhost:8080".into());
+        let mittaro_api_url = env_text("GMED_MITTARO_API_URL");
+        let console_url = console_url_from(env_text("GMED_CONSOLE_URL"), &cors_origin);
+        for (name, url) in [
+            ("GMED_MITTARO_API_URL", &mittaro_api_url),
+            ("GMED_CONSOLE_URL", &console_url),
+        ] {
+            if let Some(url) = url
+                && !url.starts_with("https://")
+            {
+                panic!("{name} must be an https:// URL");
+            }
+        }
+        let mail = MailConfig {
+            mittaro_api_key: env_text("GMED_MITTARO_API_KEY").map(SecretString::from),
+            mittaro_api_url,
+            from: env_text("GMED_MAIL_FROM"),
+            reply_to: env_text("GMED_MAIL_REPLY_TO"),
+            console_url,
+        };
+
         Self {
             database_url: std::env::var("DATABASE_URL").expect("DATABASE_URL must be set"),
             listen_addr: SocketAddr::from(([0, 0, 0, 0], port)),
             jwt_secret,
-            cors_origin: std::env::var("CORS_ORIGIN")
-                .unwrap_or_else(|_| "http://localhost:8080".into()),
+            cors_origin,
             message_key_registry,
             audit_ip_salt,
             metrics_listen,
@@ -173,6 +235,33 @@ impl Config {
             machine_translation: MachineTranslationConfig {
                 service_url: machine_translation_url,
             },
+            mail,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn console_url_falls_back_to_the_first_https_cors_origin() {
+        assert_eq!(
+            console_url_from(
+                None,
+                "http://localhost:5173, https://console.gmed-health.com/"
+            )
+            .as_deref(),
+            Some("https://console.gmed-health.com")
+        );
+        assert_eq!(
+            console_url_from(
+                Some("https://console-dev.gmed-health.com".into()),
+                "https://other.example"
+            )
+            .as_deref(),
+            Some("https://console-dev.gmed-health.com")
+        );
+        assert_eq!(console_url_from(None, "http://localhost:8080"), None);
     }
 }

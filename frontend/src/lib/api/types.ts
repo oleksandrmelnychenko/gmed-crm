@@ -73,6 +73,8 @@ export interface LeadPortalAccountSummary {
   /** The one-time password has not been replaced yet. */
   password_change_pending: boolean;
   last_login_at: string | null;
+  /** Last sign-in e-mail sent to the lead's own login. */
+  login_emailed_at?: string | null;
 }
 
 export interface ConvertLeadResponse {

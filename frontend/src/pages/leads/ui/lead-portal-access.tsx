@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { Check, Copy, KeyRound, LoaderCircle, UserRound } from "lucide-react";
+import { Check, Copy, KeyRound, LoaderCircle, Mail, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,11 +17,19 @@ import type { Lead } from "@/lib/api/types";
 import { copyText, selectElementText } from "@/lib/copy-text";
 import { cn } from "@/lib/utils";
 
-import { issueLeadPortalAccess, type LeadPortalAccountIssued } from "../data/leads-api";
+import {
+  fetchLeadLoginEmails,
+  issueLeadPortalAccess,
+  sendLeadLoginEmail,
+  type LeadLoginEmailInfo,
+  type LeadLoginEmailSent,
+  type LeadPortalAccountIssued,
+} from "../data/leads-api";
 import {
   leadPortalStatus,
   leadPortalStatusLabel,
   leadPortalStatusTone,
+  loginEmailErrorMessage,
   patientMessageLanguage,
   portalCredentialsMessage,
   type PatientMessageLanguage,
@@ -142,6 +150,11 @@ export function LeadPortalAccessDetail({
           <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
             {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
           </PortalFact>
+          {lead.portal_account?.login_emailed_at ? (
+            <PortalFact label={de ? "Zugang per E-Mail" : "Доступ по e-mail"}>
+              {formatAppDateTime(lead.portal_account.login_emailed_at)}
+            </PortalFact>
+          ) : null}
           {lead.retention_deadline_at && status !== "disabled" ? (
             <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{formatAppDate(lead.retention_deadline_at)}</PortalFact>
           ) : null}
@@ -206,7 +219,13 @@ export function LeadPortalAccessDetail({
       <PortalCredentialsDialog
         credentials={
           issued?.one_time_password
-            ? { email: issued.email, password: issued.one_time_password, firstName: lead.first_name }
+            ? {
+                email: issued.email,
+                password: issued.one_time_password,
+                firstName: lead.first_name,
+                leadId: lead.id,
+                userId: issued.user_id,
+              }
             : null
         }
         created={issued?.created ?? false}
@@ -217,9 +236,19 @@ export function LeadPortalAccessDetail({
   );
 }
 
+/** A freshly issued password; `leadId` and `userId` allow sending it by e-mail. */
+export type PortalCredentials = {
+  email: string;
+  password: string;
+  firstName: string;
+  leadId?: string;
+  userId?: string;
+};
+
 /**
- * Shows a one-time password exactly once, with copy actions and a ready text
- * in the patient's language. Closing it discards the password.
+ * Shows a one-time password exactly once, with copy actions, a ready text in
+ * the patient's language and, where Mittaro is set up, "send by e-mail".
+ * Closing it discards the password.
  */
 export function PortalCredentialsDialog({
   credentials,
@@ -228,47 +257,18 @@ export function PortalCredentialsDialog({
   defaultLanguage,
   onClose,
 }: {
-  credentials: { email: string; password: string; firstName: string } | null;
+  credentials: PortalCredentials | null;
   created: boolean;
   lang: Lang;
   defaultLanguage?: string | null;
   onClose: () => void;
 }) {
   const de = lang === "de";
-  const [copied, setCopied] = useState<string | null>(null);
-  const [messageLanguage, setMessageLanguage] = useState<PatientMessageLanguage>(
-    patientMessageLanguage(defaultLanguage),
-  );
-
-  const [copyFailed, setCopyFailed] = useState<string | null>(null);
-
-  // On failure the text is selected so it can be copied with Ctrl+C.
-  async function copy(key: string, text: string, event: { currentTarget: Element }) {
-    const dialog = event.currentTarget.closest("[role='dialog']");
-    if (await copyText(text, dialog)) {
-      setCopied(key);
-      setCopyFailed(null);
-      return;
-    }
-    setCopied(null);
-    setCopyFailed(key);
-    selectElementText(dialog?.querySelector(`[data-copy-source='${key}']`));
-  }
-
-  const loginUrl = typeof window === "undefined" ? "/login" : `${window.location.origin}/login`;
-  const message = credentials
-    ? portalCredentialsMessage({ ...credentials, loginUrl, language: messageLanguage })
-    : "";
-
   return (
     <Dialog
       open={credentials !== null}
       onOpenChange={(open) => {
-        if (!open) {
-          setCopied(null);
-          setCopyFailed(null);
-          onClose();
-        }
+        if (!open) onClose();
       }}
     >
       <DialogContent className="max-w-lg">
@@ -289,68 +289,196 @@ export function PortalCredentialsDialog({
           </DialogDescription>
         </DialogHeader>
         {credentials ? (
-          <div className="space-y-4 text-sm">
-            <dl className="grid grid-cols-[6rem_1fr_auto] items-center gap-x-3 gap-y-2">
-              <dt className="text-muted-foreground">{de ? "Login" : "Логин"}</dt>
-              <dd className="select-all truncate" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
-              <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("email", credentials.email, event)} />
-              <dt className="text-muted-foreground">{de ? "Passwort" : "Пароль"}</dt>
-              <dd className="select-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
-              <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("password", credentials.password, event)} />
-            </dl>
-            <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">
-                  {de ? "Nachricht an den Patienten" : "Сообщение для пациента"}
-                </span>
-                <div className="flex gap-1" role="group" aria-label={de ? "Sprache" : "Язык"}>
-                  {MESSAGE_LANGUAGES.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      aria-pressed={messageLanguage === option.value}
-                      className={
-                        messageLanguage === option.value
-                          ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                          : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
-                      }
-                      onClick={() => setMessageLanguage(option.value)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <pre className="select-all whitespace-pre-wrap break-words font-sans text-xs text-foreground" data-copy-source="message">{message}</pre>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 rounded-md text-xs"
-                onClick={(event) => void copy("message", message, event)}
-              >
-                {copied === "message" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-                {de ? "Nachricht kopieren" : "Скопировать сообщение"}
-              </Button>
-            </div>
-            <p className="min-h-4 text-xs" role="status" aria-live="polite">
-              {copied ? (
-                <span className="text-emerald-700">{de ? "Kopiert" : "Скопировано"}</span>
-              ) : copyFailed ? (
-                <span className="text-amber-700">
-                  {de
-                    ? "Kopieren hat der Browser blockiert – Text ist markiert, mit Strg+C kopieren"
-                    : "Браузер не дал скопировать — текст выделен, скопируйте его через Ctrl+C"}
-                </span>
-              ) : null}
-            </p>
-          </div>
+          // A new password starts with a fresh state (language, copy and e-mail status).
+          <PortalCredentialsContent
+            key={`${credentials.userId ?? credentials.email}:${credentials.password}`}
+            credentials={credentials}
+            lang={lang}
+            defaultLanguage={defaultLanguage}
+          />
         ) : null}
         <DialogFooter>
           <DialogClose render={<Button type="button">{de ? "Fertig" : "Готово"}</Button>} />
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function PortalCredentialsContent({
+  credentials,
+  lang,
+  defaultLanguage,
+}: {
+  credentials: PortalCredentials;
+  lang: Lang;
+  defaultLanguage?: string | null;
+}) {
+  const de = lang === "de";
+  const [copied, setCopied] = useState<string | null>(null);
+  const [copyFailed, setCopyFailed] = useState<string | null>(null);
+  const [messageLanguage, setMessageLanguage] = useState<PatientMessageLanguage>(
+    patientMessageLanguage(defaultLanguage),
+  );
+  const [languageChosen, setLanguageChosen] = useState(Boolean(defaultLanguage));
+  const [emailInfo, setEmailInfo] = useState<LeadLoginEmailInfo | null>(null);
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailSent, setEmailSent] = useState<LeadLoginEmailSent | null>(null);
+  const [emailError, setEmailError] = useState("");
+  const { leadId, userId } = credentials;
+
+  useEffect(() => {
+    if (!leadId || !userId) return;
+    let cancelled = false;
+    fetchLeadLoginEmails(leadId)
+      .then((info) => {
+        if (!cancelled) setEmailInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setEmailInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leadId, userId]);
+
+  // Without a language from the caller, the lead's own language applies.
+  const language: PatientMessageLanguage =
+    !languageChosen && emailInfo?.lead_language ? emailInfo.lead_language : messageLanguage;
+
+  // On failure the text is selected so it can be copied with Ctrl+C.
+  async function copy(key: string, text: string, event: { currentTarget: Element }) {
+    const dialog = event.currentTarget.closest("[role='dialog']");
+    if (await copyText(text, dialog)) {
+      setCopied(key);
+      setCopyFailed(null);
+      return;
+    }
+    setCopied(null);
+    setCopyFailed(key);
+    selectElementText(dialog?.querySelector(`[data-copy-source='${key}']`));
+  }
+
+  async function sendByEmail() {
+    if (!leadId || !userId) return;
+    setEmailBusy(true);
+    setEmailError("");
+    try {
+      setEmailSent(
+        await sendLeadLoginEmail(leadId, { user_id: userId, password: credentials.password, language }),
+      );
+    } catch (error) {
+      setEmailSent(null);
+      setEmailError(
+        loginEmailErrorMessage(error, lang)
+          ?? leadErrorMessage(error, (ru, deText) => (de ? deText : ru)),
+      );
+    } finally {
+      setEmailBusy(false);
+    }
+  }
+
+  const loginUrl = typeof window === "undefined" ? "/login" : `${window.location.origin}/login`;
+  const message = portalCredentialsMessage({ ...credentials, loginUrl, language });
+  const canEmail = Boolean(leadId && userId && emailInfo?.can_send);
+
+  return (
+    <div className="space-y-4 text-sm">
+      <dl className="grid grid-cols-[6rem_1fr_auto] items-center gap-x-3 gap-y-2">
+        <dt className="text-muted-foreground">{de ? "Login" : "Логин"}</dt>
+        <dd className="select-all truncate" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
+        <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("email", credentials.email, event)} />
+        <dt className="text-muted-foreground">{de ? "Passwort" : "Пароль"}</dt>
+        <dd className="select-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
+        <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("password", credentials.password, event)} />
+      </dl>
+      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-xs text-muted-foreground">
+            {de ? "Nachricht an den Patienten" : "Сообщение для пациента"}
+          </span>
+          <div className="flex gap-1" role="group" aria-label={de ? "Sprache" : "Язык"}>
+            {MESSAGE_LANGUAGES.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={language === option.value}
+                className={
+                  language === option.value
+                    ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                    : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                }
+                onClick={() => {
+                  setMessageLanguage(option.value);
+                  setLanguageChosen(true);
+                }}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <pre className="select-all whitespace-pre-wrap break-words font-sans text-xs text-foreground" data-copy-source="message">{message}</pre>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 rounded-md text-xs"
+            onClick={(event) => void copy("message", message, event)}
+          >
+            {copied === "message" ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+            {de ? "Nachricht kopieren" : "Скопировать сообщение"}
+          </Button>
+          {canEmail && emailInfo?.available ? (
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 gap-1.5 rounded-md text-xs"
+              disabled={emailBusy}
+              onClick={() => void sendByEmail()}
+              data-testid="portal-credentials-send-email"
+            >
+              {emailBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
+              {de ? `An ${credentials.email} senden` : `Отправить на ${credentials.email}`}
+            </Button>
+          ) : null}
+        </div>
+        {canEmail && emailInfo && !emailInfo.available ? (
+          <p className="text-xs text-muted-foreground">
+            {de
+              ? "Der E-Mail-Versand (Mittaro) ist nicht eingerichtet – Zugang bitte per Nachricht weitergeben."
+              : "Отправка e-mail (Mittaro) не настроена — передайте доступ сообщением."}
+          </p>
+        ) : null}
+        <p className="text-xs empty:hidden" role="status" aria-live="polite" data-testid="portal-credentials-email-status">
+          {emailSent ? (
+            <span className="text-emerald-700">
+              {emailSent.replayed
+                ? de
+                  ? `Diese E-Mail wurde bereits an ${emailSent.sent_to} gesendet – kein zweites Mal.`
+                  : `Это письмо уже было отправлено на ${emailSent.sent_to} — повторно не отправляем.`
+                : de
+                  ? `Gesendet an ${emailSent.sent_to} · ${formatAppDateTime(emailSent.sent_at)}`
+                  : `Отправлено на ${emailSent.sent_to} · ${formatAppDateTime(emailSent.sent_at)}`}
+            </span>
+          ) : emailError ? (
+            <span className="text-rose-700">{emailError}</span>
+          ) : null}
+        </p>
+      </div>
+      <p className="min-h-4 text-xs" role="status" aria-live="polite">
+        {copied ? (
+          <span className="text-emerald-700">{de ? "Kopiert" : "Скопировано"}</span>
+        ) : copyFailed ? (
+          <span className="text-amber-700">
+            {de
+              ? "Kopieren hat der Browser blockiert – Text ist markiert, mit Strg+C kopieren"
+              : "Браузер не дал скопировать — текст выделен, скопируйте его через Ctrl+C"}
+          </span>
+        ) : null}
+      </p>
+    </div>
   );
 }
 
@@ -391,7 +519,7 @@ export function LeadGuardianAccess({
   const [intake, setIntake] = useState<LeadPortalIntake | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [issued, setIssued] = useState<{ email: string; password: string; created: boolean } | null>(null);
+  const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string } | null>(null);
   const [notice, setNotice] = useState("");
 
   const load = useCallback(async () => {
@@ -414,7 +542,12 @@ export function LeadGuardianAccess({
       const result = await action();
       if ("one_time_password" in result) {
         if (result.one_time_password) {
-          setIssued({ email: result.email, password: result.one_time_password, created: result.created });
+          setIssued({
+            email: result.email,
+            password: result.one_time_password,
+            created: result.created,
+            userId: result.user_id,
+          });
         } else if (result.reused) {
           setNotice(tx(
             "У родителя уже есть вход: он войдёт со своим паролем и увидит эту заявку.",
@@ -516,7 +649,11 @@ export function LeadGuardianAccess({
       {notice ? <p className="text-emerald-700">{notice}</p> : null}
       {error ? <p className="text-rose-700">{error}</p> : null}
       <PortalCredentialsDialog
-        credentials={issued ? { email: issued.email, password: issued.password, firstName: "" } : null}
+        credentials={
+          issued
+            ? { email: issued.email, password: issued.password, firstName: "", leadId: lead.id, userId: issued.userId }
+            : null
+        }
         created={issued?.created ?? false}
         lang={lang}
         onClose={() => setIssued(null)}
