@@ -1,12 +1,16 @@
 import type { Lang } from "@/lib/i18n";
 
-import type {
-  ContactChannel,
-  IdentificationField,
-  LegalQuestion,
-  PayerField,
-  PersonalField,
-  SubmitField,
+import type { PayerType } from "./lead-request-api";
+import {
+  organisationPayerType,
+  type ContactChannel,
+  type IdentificationField,
+  type LegalQuestion,
+  type OrganisationPayerType,
+  type PayerField,
+  type PersonalField,
+  type RelationshipKind,
+  type SubmitField,
 } from "./lead-request-model";
 
 /**
@@ -88,14 +92,35 @@ export type LeadRequestText = {
   sectionPayer: string;
   payerQuestion: string;
   payerOptions: { self: string; third_party: string };
-  /** The same answers when a parent fills in the request of a child. */
-  payerOptionsGuardian: { self: string; third_party: string };
+  /**
+   * The same answers when a parent fills in the request of a child; `guardian`
+   * ("I pay") is offered when the parent's own data are on file.
+   */
+  payerOptionsGuardian: { self: string; guardian: string; third_party: string };
   payerIntro: string;
+  /** For a natural person as payer: that person has to be told. */
   payerInformHint: string;
   /** Prefix of a payer field in the list of what is still missing. */
   payerPerson: string;
+  /** What the third party is, and the name of one that is not a natural person. */
+  payerTypeQuestion: string;
+  payerTypeOptions: Record<PayerType, string>;
+  payerOrganisationName: Record<OrganisationPayerType, string>;
   payerRelationship: string;
+  payerRelationshipOptions: Record<RelationshipKind, string>;
+  /** The relationship in words, asked with "other". */
+  payerRelationshipOther: string;
+  /** Address labels of a company, organisation or insurer: its seat. */
+  payerSeatStreet: string;
+  payerSeatCountry: string;
   payerEmail: string;
+  /** The consent that GMED contacts the payer and tells them the patient's name. */
+  payerConsentLabel: string;
+  /** The same when a parent fills in the request of a child: the name is the child's. */
+  payerConsentLabelGuardian: string;
+  payerConsentHint: string;
+  /** The consent in the summary and in the list of what is still missing. */
+  payerConsentShort: string;
   /** Own economic interest (GwG), part of "who pays". */
   ownAccountQuestion: string;
   beneficialOwner: string;
@@ -134,11 +159,25 @@ export type LeadRequestText = {
   declarationGivenAt: (dateTime: string) => string;
 };
 
-/** Label of a payer field; identity and address reuse the patient's labels. */
-export function payerFieldLabel(text: LeadRequestText, field: PayerField, guardian = false): string {
+/**
+ * Label of a payer field; identity and address reuse the patient's labels.
+ * `payerType` is what the third party is: a company, organisation or insurer
+ * has a name of its kind and a seat instead of a residence.
+ */
+export function payerFieldLabel(
+  text: LeadRequestText,
+  field: PayerField,
+  guardian = false,
+  payerType: string | null | undefined = null,
+): string {
+  const organisation = organisationPayerType(payerType);
   switch (field) {
     case "payer_kind":
       return text.payerQuestion;
+    case "payer_type":
+      return text.payerTypeQuestion;
+    case "payer_organisation_name":
+      return text.payerOrganisationName[organisation ?? "organisation"];
     case "payer_first_name":
       return text.fields.first_name;
     case "payer_last_name":
@@ -147,20 +186,24 @@ export function payerFieldLabel(text: LeadRequestText, field: PayerField, guardi
       return text.fields.date_of_birth;
     case "payer_citizenships":
       return text.fields.citizenships;
+    case "payer_relationship_kind":
     case "payer_relationship":
       return text.payerRelationship;
     case "payer_street":
-      return text.fields.street_address;
+      return organisation ? text.payerSeatStreet : text.fields.street_address;
     case "payer_zip":
       return text.fields.zip_code;
     case "payer_city":
       return text.fields.city;
     case "payer_country":
-      return text.fields.country;
+      return organisation ? text.payerSeatCountry : text.fields.country;
     case "payer_phone":
       return text.fields.phone;
     case "payer_email":
       return text.payerEmail;
+    // The name passed on is the patient's: a parent reads it so.
+    case "payer_contact_consent":
+      return guardian ? text.payerConsentLabelGuardian : text.payerConsentLabel;
     // The own economic interest is asked about the patient: a parent reads it so.
     case "payer_own_account":
       return guardian ? text.ownAccountQuestionGuardian : text.ownAccountQuestion;
@@ -192,13 +235,24 @@ const LEGAL_TOPIC_OF: Partial<Record<SubmitField, LegalQuestion>> = {
 /**
  * A field in the list of what is still missing before sending. Fields of a
  * section whose labels do not speak for themselves carry the section's name.
+ * `payerType` is what the stated third-party payer is (see `payerFieldLabel`).
  */
-export function submitFieldLabel(text: LeadRequestText, field: SubmitField, guardian = false): string {
+export function submitFieldLabel(
+  text: LeadRequestText,
+  field: SubmitField,
+  guardian = false,
+  payerType: string | null | undefined = null,
+): string {
   if (field in text.fields) return text.fields[field as PersonalField];
   if (field === "payer_kind" || field === "payer_own_account" || field === "payer_beneficial_owner") {
     return payerFieldLabel(text, field, guardian);
   }
-  if (field.startsWith("payer_")) return `${text.payerPerson}: ${payerFieldLabel(text, field as PayerField)}`;
+  // The consent is a sentence: the list names it. "Other" still needs the relationship in words.
+  if (field === "payer_contact_consent") return `${text.payerPerson}: ${text.payerConsentShort}`;
+  if (field === "payer_relationship") return `${text.payerPerson}: ${text.payerRelationship} – ${text.payerRelationshipOther}`;
+  if (field.startsWith("payer_")) {
+    return `${text.payerPerson}: ${payerFieldLabel(text, field as PayerField, guardian, payerType)}`;
+  }
   if (field === "payment_background") return `${text.payerPerson}: ${text.identificationFields.payment_background}`;
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
   const topic = LEGAL_TOPIC_OF[field];
@@ -315,14 +369,49 @@ const de: LeadRequestText = {
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
   sectionPayer: "Wer zahlt",
   payerQuestion: "Wer übernimmt die Kosten der Behandlung?",
-  payerOptions: { self: "Ich selbst", third_party: "Eine andere Person" },
-  payerOptionsGuardian: { self: "Die Patientin / der Patient selbst", third_party: "Eine andere Person (zum Beispiel ein Elternteil)" },
-  payerIntro: "Bitte nennen Sie die Person, die die Kosten übernimmt. Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.",
+  payerOptions: { self: "Ich selbst", third_party: "Eine andere Person oder Organisation" },
+  payerOptionsGuardian: {
+    self: "Die Patientin / der Patient selbst",
+    guardian: "Ich zahle (als Elternteil)",
+    third_party: "Eine andere Person oder Organisation",
+  },
+  payerIntro: "Bitte nennen Sie, wer die Kosten übernimmt. Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.",
   payerInformHint:
     "Bitte sagen Sie dieser Person, dass Sie uns ihre Daten für die Kostenübernahme mitgeteilt haben.",
-  payerPerson: "Zahlende Person",
+  payerPerson: "Zahler",
+  payerTypeQuestion: "Wer ist der Zahler?",
+  payerTypeOptions: {
+    person: "Privatperson",
+    company: "Unternehmen",
+    organisation: "Organisation",
+    insurance: "Versicherung",
+  },
+  payerOrganisationName: {
+    company: "Name des Unternehmens",
+    organisation: "Name der Organisation",
+    insurance: "Name der Versicherung",
+  },
   payerRelationship: "Beziehung zur Patientin / zum Patienten",
+  payerRelationshipOptions: {
+    spouse: "Ehepartner/in",
+    parent: "Elternteil",
+    child: "Kind",
+    relative: "Sonstige/r Verwandte/r",
+    employer: "Arbeitgeber",
+    friend: "Freund/in",
+    business_partner: "Geschäftspartner/in",
+    other: "Sonstige",
+  },
+  payerRelationshipOther: "Bitte angeben",
+  payerSeatStreet: "Sitz (Straße und Hausnummer)",
+  payerSeatCountry: "Land des Sitzes",
   payerEmail: "E-Mail",
+  payerConsentLabel:
+    "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr meinen Namen mitteilt.",
+  payerConsentLabelGuardian:
+    "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr den Namen der Patientin / des Patienten mitteilt.",
+  payerConsentHint: "Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.",
+  payerConsentShort: "Einverständnis zur Kontaktaufnahme",
   ownAccountQuestion: "Handeln Sie im eigenen wirtschaftlichen Interesse?",
   beneficialOwner: "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)",
   ownAccountQuestionGuardian: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?",
@@ -494,13 +583,48 @@ const ru: LeadRequestText = {
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
   sectionPayer: "Кто оплачивает",
   payerQuestion: "Кто оплачивает лечение?",
-  payerOptions: { self: "Я сам(а)", third_party: "Другой человек" },
-  payerOptionsGuardian: { self: "Сам пациент", third_party: "Другой человек (например, один из родителей)" },
-  payerIntro: "Укажите, пожалуйста, человека, который оплачивает лечение. По закону мы обязаны знать, кто платит.",
+  payerOptions: { self: "Я сам(а)", third_party: "Другой человек или организация" },
+  payerOptionsGuardian: {
+    self: "Сам пациент",
+    guardian: "Оплачиваю я (как один из родителей)",
+    third_party: "Другой человек или организация",
+  },
+  payerIntro: "Укажите, пожалуйста, кто оплачивает лечение. По закону мы обязаны знать, кто платит.",
   payerInformHint: "Пожалуйста, сообщите этому человеку, что вы передали нам его данные для оформления оплаты.",
   payerPerson: "Плательщик",
+  payerTypeQuestion: "Кто является плательщиком?",
+  payerTypeOptions: {
+    person: "Частное лицо",
+    company: "Компания",
+    organisation: "Организация",
+    insurance: "Страховая компания",
+  },
+  payerOrganisationName: {
+    company: "Название компании",
+    organisation: "Название организации",
+    insurance: "Название страховой компании",
+  },
   payerRelationship: "Кем приходится пациенту",
+  payerRelationshipOptions: {
+    spouse: "Супруг / супруга",
+    parent: "Мать / отец",
+    child: "Сын / дочь",
+    relative: "Другой родственник",
+    employer: "Работодатель",
+    friend: "Друг / подруга",
+    business_partner: "Деловой партнёр",
+    other: "Другое",
+  },
+  payerRelationshipOther: "Укажите, пожалуйста",
+  payerSeatStreet: "Местонахождение (улица и дом)",
+  payerSeatCountry: "Страна местонахождения",
   payerEmail: "E-mail",
+  payerConsentLabel:
+    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им моё имя.",
+  payerConsentLabelGuardian:
+    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им имя пациента.",
+  payerConsentHint: "Без этого согласия мы не вправе обращаться к плательщику.",
+  payerConsentShort: "Согласие на контакт",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
   beneficialOwner: "В чьих интересах вы действуете? (имя, дата рождения, место рождения, адрес)",
   ownAccountQuestionGuardian: "Пациент действует в собственных экономических интересах?",
@@ -675,13 +799,48 @@ const uk: LeadRequestText = {
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
   sectionPayer: "Хто оплачує",
   payerQuestion: "Хто оплачує лікування?",
-  payerOptions: { self: "Я сам(а)", third_party: "Інша людина" },
-  payerOptionsGuardian: { self: "Сам пацієнт", third_party: "Інша людина (наприклад, хтось із батьків)" },
-  payerIntro: "Вкажіть, будь ласка, людину, яка оплачує лікування. За законом ми зобов'язані знати, хто платить.",
+  payerOptions: { self: "Я сам(а)", third_party: "Інша людина або організація" },
+  payerOptionsGuardian: {
+    self: "Сам пацієнт",
+    guardian: "Оплачую я (як один із батьків)",
+    third_party: "Інша людина або організація",
+  },
+  payerIntro: "Вкажіть, будь ласка, хто оплачує лікування. За законом ми зобов'язані знати, хто платить.",
   payerInformHint: "Будь ласка, повідомте цій людині, що ви передали нам її дані для оформлення оплати.",
   payerPerson: "Платник",
+  payerTypeQuestion: "Хто є платником?",
+  payerTypeOptions: {
+    person: "Приватна особа",
+    company: "Компанія",
+    organisation: "Організація",
+    insurance: "Страхова компанія",
+  },
+  payerOrganisationName: {
+    company: "Назва компанії",
+    organisation: "Назва організації",
+    insurance: "Назва страхової компанії",
+  },
   payerRelationship: "Ким доводиться пацієнту",
+  payerRelationshipOptions: {
+    spouse: "Чоловік / дружина",
+    parent: "Мати / батько",
+    child: "Син / донька",
+    relative: "Інший родич",
+    employer: "Роботодавець",
+    friend: "Друг / подруга",
+    business_partner: "Діловий партнер",
+    other: "Інше",
+  },
+  payerRelationshipOther: "Вкажіть, будь ласка",
+  payerSeatStreet: "Місцезнаходження (вулиця і будинок)",
+  payerSeatCountry: "Країна місцезнаходження",
   payerEmail: "E-mail",
+  payerConsentLabel:
+    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй моє ім'я.",
+  payerConsentLabelGuardian:
+    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй ім'я пацієнта.",
+  payerConsentHint: "Без цієї згоди ми не маємо права звертатися до платника.",
+  payerConsentShort: "Згода на контакт",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
   beneficialOwner: "В чиїх інтересах ви дієте? (ім'я, дата народження, місце народження, адреса)",
   ownAccountQuestionGuardian: "Пацієнт діє у власних економічних інтересах?",
@@ -856,13 +1015,48 @@ const en: LeadRequestText = {
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
   sectionPayer: "Who pays",
   payerQuestion: "Who pays for the treatment?",
-  payerOptions: { self: "I do", third_party: "Another person" },
-  payerOptionsGuardian: { self: "The patient", third_party: "Another person (for example a parent)" },
-  payerIntro: "Please name the person who pays for the treatment. We are required by law to know who pays.",
+  payerOptions: { self: "I do", third_party: "Another person or organisation" },
+  payerOptionsGuardian: {
+    self: "The patient",
+    guardian: "I pay (as a parent)",
+    third_party: "Another person or organisation",
+  },
+  payerIntro: "Please tell us who pays for the treatment. We are required by law to know who pays.",
   payerInformHint: "Please let this person know that you gave us their details for the payment arrangements.",
   payerPerson: "Payer",
+  payerTypeQuestion: "Who is the payer?",
+  payerTypeOptions: {
+    person: "Private person",
+    company: "Company",
+    organisation: "Organisation",
+    insurance: "Insurer",
+  },
+  payerOrganisationName: {
+    company: "Name of the company",
+    organisation: "Name of the organisation",
+    insurance: "Name of the insurer",
+  },
   payerRelationship: "Relationship to the patient",
+  payerRelationshipOptions: {
+    spouse: "Spouse",
+    parent: "Parent",
+    child: "Child",
+    relative: "Other relative",
+    employer: "Employer",
+    friend: "Friend",
+    business_partner: "Business partner",
+    other: "Other",
+  },
+  payerRelationshipOther: "Please specify",
+  payerSeatStreet: "Registered office (street and number)",
+  payerSeatCountry: "Country of the registered office",
   payerEmail: "E-mail",
+  payerConsentLabel:
+    "I agree that GMED contacts this person or organisation about covering the costs and tells them my name.",
+  payerConsentLabelGuardian:
+    "I agree that GMED contacts this person or organisation about covering the costs and tells them the patient's name.",
+  payerConsentHint: "Without this consent we may not approach the payer.",
+  payerConsentShort: "Consent to contact",
   ownAccountQuestion: "Are you acting in your own economic interest?",
   beneficialOwner: "In whose interest are you acting? (name, date of birth, place of birth, address)",
   ownAccountQuestionGuardian: "Is the patient acting in their own economic interest?",

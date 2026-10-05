@@ -1045,7 +1045,9 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
-    // A third party pays: name and citizenships are the least to send.
+    // A third party pays: name and citizenships are the least to send, with
+    // the relationship to the patient and the consent to contact the payer.
+    // Without a payer type it is a person (older clients).
     clear_screening_queue(pool, lead_id).await;
     let (status, body) = json_request(
         router,
@@ -1057,10 +1059,16 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["payer"]["payer_kind"], "third_party", "{body}");
+    assert_eq!(body["payer"]["payer_type"], "person", "{body}");
     assert_eq!(body["payer"]["first_name"], "Viktor", "{body}");
     let missing = body["progress"]["missing_for_submit"].as_array().unwrap();
     assert!(missing.contains(&json!("payer_last_name")), "{body}");
     assert!(missing.contains(&json!("payer_citizenships")), "{body}");
+    assert!(
+        missing.contains(&json!("payer_relationship_kind")),
+        "{body}"
+    );
+    assert!(missing.contains(&json!("payer_contact_consent")), "{body}");
     assert!(!missing.contains(&json!("payer_first_name")), "{body}");
     assert!(
         screening_queued_at(pool, lead_id).await.is_some(),
@@ -1082,15 +1090,18 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
             "zip": "80331",
             "city": "München",
             "country": "de",
-            "relationship": "Bruder",
+            "relationship_kind": "relative",
             "email": "viktor.zahler@example.com",
-            "phone": "+49 89 000000"
+            "phone": "+49 89 000000",
+            "contact_consent": true
         })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["payer"]["citizenships"], json!(["UA", "DE"]), "{body}");
     assert_eq!(body["payer"]["country"], "DE", "{body}");
+    assert_eq!(body["payer"]["relationship_kind"], "relative", "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_string(), "{body}");
     assert!(
         !body["progress"]["missing_for_submit"]
             .as_array()
@@ -1164,9 +1175,10 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
             "zip": "80331",
             "city": "München",
             "country": "DE",
-            "relationship": "Bruder",
+            "relationship_kind": "relative",
             "email": "viktor.zahler@example.com",
-            "phone": "+49 89 000000"
+            "phone": "+49 89 000000",
+            "contact_consent": true
         })),
     )
     .await;
@@ -1178,11 +1190,14 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
 
     // Staff confirm that the payer was informed (Art. 14 DSGVO). A corrected
     // address keeps the confirmation; another person named as payer loses it.
+    // The lead's consent to contact the payer is read-only for staff.
+    assert!(stored["contact_consent_at"].is_string(), "{declaration}");
     let mut confirmed = stored.clone();
     confirmed["payer_informed"] = json!(true);
     for key in [
         "payer_informed_at",
         "payer_informed_by",
+        "contact_consent_at",
         "own_account_answered",
         "patient_id",
         "created_at",
@@ -1241,6 +1256,12 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         declaration["declaration"]["street"], "Zahlweg 7",
         "{declaration}"
     );
+    // The consent to contact this payer stays as well: neither the staff
+    // save nor a cabinet save without the checkbox key removed it.
+    assert_eq!(
+        declaration["declaration"]["contact_consent_at"], stored["contact_consent_at"],
+        "{declaration}"
+    );
     let (status, _) = json_request(
         router,
         "POST",
@@ -1259,6 +1280,10 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     )
     .await;
     assert!(!informed(&declaration), "{declaration}");
+    assert!(
+        declaration["declaration"]["contact_consent_at"].is_null(),
+        "the consent was given for the payer named before: {declaration}"
+    );
     assert_eq!(
         declaration["declaration"]["source_of_funds"], "savings",
         "{declaration}"
@@ -2178,4 +2203,504 @@ async fn purging_a_lead_clears_the_portal_intake() {
     let (status, _) = json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
     // The login itself is switched off with the lead.
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// The payer keys of `progress.missing_for_submit`, with the reason why the
+/// third party pays.
+fn missing_for_the_payer(body: &Value) -> Vec<&str> {
+    body["progress"]["missing_for_submit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|key| key.starts_with("payer") || *key == "payment_background")
+        .collect()
+}
+
+#[tokio::test]
+async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, patient) =
+        lead_with_login(&app, "Paula", "paula.organisation@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let payer = format!("{request}/payer");
+    let submit = format!("{request}/submit");
+    let declaration = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let manager = app.staff("patient_manager");
+    // The rest of the request is complete: only the payer block decides.
+    fill_in_complete_request(router, lead_id, &patient).await;
+    // The company as the cabinet sends it; `extra` adds or replaces keys.
+    let company = |extra: Value| {
+        let mut body = json!({
+            "payer_kind": "third_party",
+            "payer_type": "company",
+            "organisation_name": " Beispiel GmbH ",
+            "street": "Ringstr. 9",
+            "zip": "1010",
+            "city": "Wien",
+            "email": "kosten@example.com"
+        });
+        for (key, value) in extra.as_object().unwrap() {
+            body[key.as_str()] = value.clone();
+        }
+        body
+    };
+
+    // A refused value names its field.
+    for (extra, code, field) in [
+        (
+            json!({ "payer_type": "club" }),
+            "payer_type_invalid",
+            "payer_type",
+        ),
+        (
+            json!({ "organisation_name": "x".repeat(201) }),
+            "payer_organisation_name_too_long",
+            "payer_organisation_name",
+        ),
+        (
+            json!({ "relationship_kind": "neighbour" }),
+            "payer_relationship_kind_invalid",
+            "payer_relationship_kind",
+        ),
+    ] {
+        let (status, body) =
+            json_request(router, "POST", &payer, &patient, Some(company(extra))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], code, "{body}");
+        assert_eq!(body["field"], field, "{body}");
+    }
+
+    // A company pays: its name instead of a person. What the form still
+    // carries of a person is dropped, not even checked.
+    clear_screening_queue(pool, lead_id).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(json!({
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "2999-01-01",
+            "citizenships": ["AT"]
+        }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["payer_type"], "company", "{body}");
+    assert_eq!(
+        body["payer"]["organisation_name"], "Beispiel GmbH",
+        "{body}"
+    );
+    for key in ["first_name", "last_name", "date_of_birth"] {
+        assert!(body["payer"][key].is_null(), "{key}: {body}");
+    }
+    assert_eq!(body["payer"]["citizenships"], json!([]), "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    assert_eq!(
+        missing_for_the_payer(&body),
+        [
+            "payer_relationship_kind",
+            "payer_country",
+            "payer_contact_consent",
+            "payment_background"
+        ],
+        "{body}"
+    );
+    assert!(
+        screening_queued_at(pool, lead_id).await.is_some(),
+        "an organisation named in the cabinet queues the lead for screening"
+    );
+
+    // The relationship is chosen from a list; "other" asks for the words,
+    // and the words belong to "other" only.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(
+            json!({ "country": "at", "relationship_kind": "other" }),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["country"], "AT", "{body}");
+    assert_eq!(
+        missing_for_the_payer(&body),
+        [
+            "payer_relationship",
+            "payer_contact_consent",
+            "payment_background"
+        ],
+        "{body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(json!({
+            "country": "AT",
+            "relationship_kind": "other",
+            "relationship": " Stiftung der Familie "
+        }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["relationship_kind"], "other", "{body}");
+    assert_eq!(
+        body["payer"]["relationship"], "Stiftung der Familie",
+        "{body}"
+    );
+    let employer = json!({
+        "country": "AT",
+        "relationship_kind": "employer",
+        "relationship": "Stiftung der Familie"
+    });
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(employer.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["relationship_kind"], "employer", "{body}");
+    assert!(body["payer"]["relationship"].is_null(), "{body}");
+
+    // Why the company pays is one of the lead's statements.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(json!({ "payment_background": "Mein Arbeitgeber übernimmt die Kosten." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!(["payer_contact_consent"]),
+        "{body}"
+    );
+
+    // Without the consent that GMED contacts the payer nothing is sent.
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "personal_data_incomplete", "{body}");
+    assert_eq!(body["missing"], json!(["payer_contact_consent"]), "{body}");
+
+    // The consent is recorded once: the same answer again, or a save that
+    // leaves the checkbox out, keeps its time.
+    let mut agreed = employer.clone();
+    agreed["contact_consent"] = json!(true);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(agreed.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let consent_at = body["payer"]["contact_consent_at"].clone();
+    assert!(consent_at.is_string(), "{body}");
+    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
+    let audited = audit_count(pool, "lead_portal_update_payer_declaration", lead_id).await;
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(company(agreed.clone())),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["contact_consent_at"], consent_at, "{body}");
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_payer_declaration", lead_id).await,
+        audited,
+        "the same answer changes nothing"
+    );
+    let mut moved = employer.clone();
+    moved["street"] = json!("Ringstr. 11");
+    let (status, body) = json_request(router, "POST", &payer, &patient, Some(company(moved))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["street"], "Ringstr. 11", "{body}");
+    assert_eq!(body["payer"]["contact_consent_at"], consent_at, "{body}");
+
+    // Staff read the consent and the new answers. Their form may leave the
+    // new keys out (older clients): everything stays, the consent too. They
+    // cannot set the consent themselves.
+    let (status, stored) = json_request(router, "GET", &declaration, &manager, None).await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    assert_eq!(stored["declaration"]["payer_type"], "company", "{stored}");
+    assert!(
+        stored["declaration"]["contact_consent_at"].is_string(),
+        "{stored}"
+    );
+    let staff_form = json!({
+        "payer_kind": "third_party",
+        "acts_on_own_account": true,
+        "source_of_funds": "business_income",
+        "street": "Ringstr. 11",
+        "zip": "1010",
+        "city": "Wien",
+        "country": "AT",
+        "email": "kosten@example.com",
+        "payer_informed": true
+    });
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &declaration,
+        &manager,
+        Some(staff_form.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let kept = &saved["declaration"];
+    assert_eq!(kept["payer_type"], "company", "{saved}");
+    assert_eq!(kept["organisation_name"], "Beispiel GmbH", "{saved}");
+    assert_eq!(kept["relationship_kind"], "employer", "{saved}");
+    assert_eq!(kept["source_of_funds"], "business_income", "{saved}");
+    assert_eq!(
+        kept["contact_consent_at"], stored["declaration"]["contact_consent_at"],
+        "{saved}"
+    );
+    let mut with_consent = staff_form;
+    with_consent["contact_consent_at"] = json!("2026-10-05T09:20:00Z");
+    let (status, _) =
+        json_request(router, "POST", &declaration, &manager, Some(with_consent)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // With the consent the request goes to the manager.
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["submitted_at"].is_string(), "{body}");
+    assert_eq!(body["payer"]["contact_consent_at"], consent_at, "{body}");
+
+    // The lead can take the consent back; it is then missing again.
+    let mut withdrawn = employer.clone();
+    withdrawn["street"] = json!("Ringstr. 11");
+    withdrawn["contact_consent"] = json!(false);
+    let (status, body) =
+        json_request(router, "POST", &payer, &patient, Some(company(withdrawn))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    assert_eq!(
+        missing_for_the_payer(&body),
+        ["payer_contact_consent"],
+        "{body}"
+    );
+    let (status, body) =
+        json_request(router, "POST", &payer, &patient, Some(company(agreed))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_string(), "{body}");
+
+    // Another payer is named and the checkbox is not sent: the consent was
+    // given for the company, not for this person.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "citizenships": ["AT"],
+            "relationship_kind": "friend"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["payer_type"], "person", "{body}");
+    assert!(body["payer"]["organisation_name"].is_null(), "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    assert_eq!(
+        missing_for_the_payer(&body),
+        ["payer_contact_consent"],
+        "{body}"
+    );
+
+    // "I pay myself": nothing of the third party stays.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self", "contact_consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for key in [
+        "payer_type",
+        "organisation_name",
+        "relationship_kind",
+        "contact_consent_at",
+    ] {
+        assert!(body["payer"][key].is_null(), "{key}: {body}");
+    }
+    let cleared: (Option<String>, Option<String>, Option<String>, bool) = sqlx::query_as(
+        "SELECT payer_type, organisation_name, relationship_kind, contact_consent_at IS NULL
+         FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(cleared, (None, None, None, true));
+}
+
+#[tokio::test]
+async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pm = app.staff("patient_manager");
+
+    // The lead's own login has nobody to prefill.
+    let (adult, _, patient) = lead_with_login(&app, "Tom", "tom.template@example.com").await;
+    let (status, body) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{adult}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["access_kind"], "self", "{body}");
+    assert!(body["payer_self_template"].is_null(), "{body}");
+
+    // A minor with two parents; the mother gets the login.
+    let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Lena",
+            "last_name": "Kind",
+            "date_of_birth": "2016-04-05",
+            "email": "lena.child@example.com",
+            "trusted_contacts": [
+                {
+                    "id": mother,
+                    "name": "Olga Maria Kind",
+                    "relation": "mother",
+                    "email": "olga.template@example.com",
+                    "phone": "+49 30 000000",
+                    "birth_date": "1985-03-04",
+                    "address": "Musterweg 1, 10115 Berlin"
+                },
+                {
+                    "id": father,
+                    "name": "Pavel Kind",
+                    "relation": "father",
+                    "email": "pavel.template@example.com",
+                    "phone": "+49 30 111111",
+                    "birth_date": "1983-01-02"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let child: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/portal-guardians"),
+        &pm,
+        Some(json!({ "trusted_contact_id": mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(guardian, "patient");
+    let request = format!("/api/v1/me/lead-requests/{child}");
+
+    // The template is the contact the login was issued for: name split at
+    // the last space, date of birth, e-mail and phone. Never the address,
+    // and nothing of the other parent.
+    let (status, body) = json_request(router, "GET", &request, &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["access_kind"], "guardian", "{body}");
+    let template = body["payer_self_template"].clone();
+    assert_eq!(
+        template,
+        json!({
+            "first_name": "Olga Maria",
+            "last_name": "Kind",
+            "date_of_birth": "1985-03-04",
+            "email": "olga.template@example.com",
+            "phone": "+49 30 000000"
+        }),
+        "{body}"
+    );
+    let (_, list) = json_request(router, "GET", "/api/v1/me/lead-requests", &parent, None).await;
+    assert_eq!(
+        list["requests"][0]["payer_self_template"], template,
+        "{list}"
+    );
+
+    // "I pay (as a parent)" is an ordinary third-party answer made of the
+    // template; nothing else is stored for it.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &parent,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "relationship_kind": "parent",
+            "first_name": template["first_name"],
+            "last_name": template["last_name"],
+            "date_of_birth": template["date_of_birth"],
+            "email": template["email"],
+            "phone": template["phone"],
+            "citizenships": ["DE"],
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["relationship_kind"], "parent", "{body}");
+    assert_eq!(body["payer"]["first_name"], "Olga Maria", "{body}");
+    assert_eq!(body["payer"]["last_name"], "Kind", "{body}");
+    assert_eq!(body["payer"]["date_of_birth"], "1985-03-04", "{body}");
+    assert!(body["payer"]["street"].is_null(), "{body}");
+    assert_eq!(body["payer_self_template"], template, "{body}");
+    assert!(
+        !missing_for_the_payer(&body)
+            .iter()
+            .any(|key| key.starts_with("payer_") && *key != "payer_own_account"),
+        "{body}"
+    );
+
+    // The contact is gone from the lead: the login still reaches the request,
+    // but there is nobody to prefill (never the other parent).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/update"),
+        &pm,
+        Some(json!({ "trusted_contacts": [
+            { "id": father, "name": "Pavel Kind", "relation": "father", "email": "pavel.template@example.com" }
+        ] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(router, "GET", &request, &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["access_kind"], "guardian", "{body}");
+    assert!(body["payer_self_template"].is_null(), "{body}");
 }

@@ -4,6 +4,10 @@ import { ApiRequestError } from "@/lib/api";
 
 import {
   EMPTY_PAYER_DECLARATION_FORM,
+  PAYER_RELATIONSHIP_KINDS,
+  PAYER_TYPES,
+  declaredPayerType,
+  isOrganisationPayerForm,
   normalizePayerDeclarationResponse,
   payerAmlCountries,
   payerDeclarationPayload,
@@ -11,12 +15,17 @@ import {
   payerFormMissing,
   payerGateErrorText,
   payerReadinessReasonLabels,
+  payerReasonLabel,
+  payerRelationshipKindLabel,
+  payerRelationshipTextShown,
   payerSignatureSequence,
+  payerTypeLabel,
   type PayerDeclaration,
   type PayerDeclarationStatus,
 } from "./lead-payer";
 
 const tx = (ru: string) => ru;
+const de = (_ru: string, german: string) => german;
 
 const thirdParty: PayerDeclaration = {
   payer_kind: "third_party",
@@ -40,6 +49,32 @@ const thirdParty: PayerDeclaration = {
   phone: null,
   payer_informed_at: "2026-10-03T10:00:00Z",
   payer_informed_by: "00000000-0000-0000-0000-000000000001",
+};
+
+/** The same person as a server that stores the payer type answers. */
+const typedPerson: PayerDeclaration = {
+  ...thirdParty,
+  payer_type: "person",
+  organisation_name: null,
+  relationship_kind: "child",
+  relationship: null,
+  contact_consent_at: "2026-10-05T09:30:00Z",
+};
+
+/** A company: a name and a seat, no personal identity. */
+const company: PayerDeclaration = {
+  ...thirdParty,
+  payer_type: "company",
+  organisation_name: "Beispiel GmbH",
+  first_name: null,
+  last_name: null,
+  date_of_birth: null,
+  place_of_birth: null,
+  citizenships: [],
+  relationship_kind: "employer",
+  relationship: null,
+  email: "office@example.com",
+  contact_consent_at: null,
 };
 
 const status = (patch: Partial<PayerDeclarationStatus> = {}): PayerDeclarationStatus => ({
@@ -95,6 +130,250 @@ describe("payer declaration form", () => {
     expect(payerFormMissing({ ...payerDeclarationToForm(thirdParty), citizenships: [], payerInformed: false }))
       .toEqual(["payer_identity_incomplete", "payer_not_informed"]);
     expect(payerFormMissing(payerDeclarationToForm(thirdParty))).toEqual([]);
+  });
+});
+
+describe("payer type: person, company, organisation or insurer", () => {
+  it("reads a third party without a type as a person", () => {
+    expect(declaredPayerType(thirdParty)).toBe("person");
+    expect(declaredPayerType({ ...thirdParty, payer_type: null })).toBe("person");
+    expect(declaredPayerType(company)).toBe("company");
+    // Nobody but the patient pays: there is no payer to have a type.
+    expect(declaredPayerType({ ...company, payer_kind: "self" })).toBeNull();
+    expect(declaredPayerType(null)).toBeNull();
+  });
+
+  it("maps a person of a typed server to the form and back", () => {
+    const form = payerDeclarationToForm(typedPerson);
+    expect(form).toMatchObject({
+      kind: "third_party",
+      payerType: "person",
+      organisationName: "",
+      relationshipKind: "child",
+      relationship: "",
+      firstName: "Erika",
+      payerTypeSupport: "supported",
+    });
+    expect(isOrganisationPayerForm(form)).toBe(false);
+    expect(payerDeclarationPayload(form)).toMatchObject({
+      payer_kind: "third_party",
+      payer_type: "person",
+      organisation_name: null,
+      relationship_kind: "child",
+      relationship: null,
+      first_name: "Erika",
+      last_name: "Muster",
+      date_of_birth: "1970-05-01",
+      citizenships: ["DE", "IR"],
+      street: "Hauptstr. 1",
+    });
+  });
+
+  it("maps a company to the form and back without a personal identity", () => {
+    const form = payerDeclarationToForm(company);
+    expect(form).toMatchObject({
+      payerType: "company",
+      organisationName: "Beispiel GmbH",
+      relationshipKind: "employer",
+      firstName: "",
+      citizenships: [],
+      street: "Hauptstr. 1",
+      country: "DE",
+      payerTypeSupport: "supported",
+    });
+    expect(isOrganisationPayerForm(form)).toBe(true);
+    expect(payerDeclarationPayload(form)).toMatchObject({
+      payer_kind: "third_party",
+      payer_type: "company",
+      organisation_name: "Beispiel GmbH",
+      relationship_kind: "employer",
+      relationship: null,
+      first_name: null,
+      last_name: null,
+      date_of_birth: null,
+      place_of_birth: null,
+      citizenships: [],
+      street: "Hauptstr. 1",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+      email: "office@example.com",
+      payer_informed: true,
+    });
+  });
+
+  it("clears the personal identity when a person becomes an organisation, and keeps it in the form", () => {
+    const form = { ...payerDeclarationToForm(typedPerson), payerType: "insurance" as const, organisationName: " Beispiel Versicherung AG " };
+    const payload = payerDeclarationPayload(form);
+    expect(payload).toMatchObject({
+      payer_type: "insurance",
+      organisation_name: "Beispiel Versicherung AG",
+      first_name: null,
+      last_name: null,
+      date_of_birth: null,
+      place_of_birth: null,
+      citizenships: [],
+      street: "Hauptstr. 1",
+    });
+    // Switching back before the save brings the person back.
+    expect(payerDeclarationPayload({ ...form, payerType: "person" })).toMatchObject({
+      payer_type: "person",
+      organisation_name: null,
+      first_name: "Erika",
+      citizenships: ["DE", "IR"],
+    });
+  });
+
+  it("clears type, name and relationship for a self-payer on a typed server", () => {
+    const payload = payerDeclarationPayload({ ...payerDeclarationToForm(company), kind: "self" });
+    expect(payload).toMatchObject({
+      payer_kind: "self",
+      payer_type: null,
+      organisation_name: null,
+      relationship_kind: null,
+      relationship: null,
+      street: null,
+    });
+  });
+
+  it("never sends the lead's contact consent", () => {
+    for (const declaration of [typedPerson, company, thirdParty]) {
+      const payload = payerDeclarationPayload(payerDeclarationToForm(declaration));
+      expect(Object.keys(payload).filter((key) => key.includes("consent"))).toEqual([]);
+    }
+  });
+
+  it("sends none of the new keys to an older server", () => {
+    // `thirdParty` has no `payer_type` key: the server does not know it.
+    const form = payerDeclarationToForm(thirdParty);
+    expect(form).toMatchObject({ payerType: "person", relationshipKind: "", payerTypeSupport: "unsupported" });
+    const payload = payerDeclarationPayload(form);
+    for (const key of ["payer_type", "organisation_name", "relationship_kind"]) {
+      expect(payload).not.toHaveProperty(key);
+    }
+    // The form is the one for a person, whatever its state says.
+    const forced = { ...form, payerType: "company" as const, organisationName: "Beispiel GmbH", relationshipKind: "employer" as const };
+    expect(isOrganisationPayerForm(forced)).toBe(false);
+    const forcedPayload = payerDeclarationPayload(forced);
+    expect(forcedPayload).not.toHaveProperty("payer_type");
+    expect(forcedPayload).toMatchObject({ first_name: "Erika", relationship: "Tochter", citizenships: ["DE", "IR"] });
+    expect(payerFormMissing(forced)).toEqual([]);
+  });
+
+  it("before the first save sends the new keys only when staff stated them", () => {
+    const person = {
+      ...payerDeclarationToForm(thirdParty),
+      payerTypeSupport: "unknown" as const,
+    };
+    expect(EMPTY_PAYER_DECLARATION_FORM.payerTypeSupport).toBe("unknown");
+    expect(payerDeclarationPayload(person)).not.toHaveProperty("payer_type");
+    expect(payerDeclarationPayload({ ...EMPTY_PAYER_DECLARATION_FORM, kind: "self" })).not.toHaveProperty("payer_type");
+    expect(payerDeclarationPayload({ ...person, relationshipKind: "friend" })).toMatchObject({
+      payer_type: "person",
+      organisation_name: null,
+      relationship_kind: "friend",
+      relationship: null,
+    });
+    expect(payerDeclarationPayload({ ...person, payerType: "organisation", organisationName: "Beispiel e. V." })).toMatchObject({
+      payer_type: "organisation",
+      organisation_name: "Beispiel e. V.",
+      relationship_kind: null,
+      first_name: null,
+    });
+  });
+
+  it("asks the free-text relationship for \"other\" and keeps an earlier text visible", () => {
+    const form = payerDeclarationToForm(typedPerson);
+    expect(payerRelationshipTextShown(form, typedPerson)).toBe(false);
+    expect(payerRelationshipTextShown({ ...form, relationshipKind: "other" }, typedPerson)).toBe(true);
+    expect(payerDeclarationPayload({ ...form, relationshipKind: "other", relationship: " Nachbarin " })).toMatchObject({
+      relationship_kind: "other",
+      relationship: "Nachbarin",
+    });
+    // A kind that says it all drops the text, also one typed a moment ago.
+    expect(payerDeclarationPayload({ ...form, relationshipKind: "spouse", relationship: "Nachbarin" })).toMatchObject({
+      relationship_kind: "spouse",
+      relationship: null,
+    });
+
+    // Typed by staff before the kinds existed: shown and kept until a kind replaces it.
+    const earlier: PayerDeclaration = { ...typedPerson, relationship_kind: null, relationship: "Tochter" };
+    const earlierForm = payerDeclarationToForm(earlier);
+    expect(earlierForm).toMatchObject({ relationshipKind: "", relationship: "Tochter" });
+    expect(payerRelationshipTextShown(earlierForm, earlier)).toBe(true);
+    expect(payerRelationshipTextShown({ ...earlierForm, relationship: "" }, earlier)).toBe(true);
+    expect(payerDeclarationPayload(earlierForm)).toMatchObject({ relationship_kind: null, relationship: "Tochter" });
+    expect(payerRelationshipTextShown({ ...earlierForm, relationshipKind: "child" }, earlier)).toBe(false);
+
+    // Nothing stored and nothing typed: only the select.
+    const blank: PayerDeclaration = { ...typedPerson, relationship_kind: null, relationship: null };
+    expect(payerRelationshipTextShown(payerDeclarationToForm(blank), blank)).toBe(false);
+    // An older server has only the text.
+    expect(payerRelationshipTextShown(payerDeclarationToForm(thirdParty), thirdParty)).toBe(true);
+  });
+
+  it("requires the name and the seat of an organisation instead of a personal identity", () => {
+    const form = payerDeclarationToForm(company);
+    expect(payerFormMissing(form)).toEqual([]);
+    expect(payerFormMissing({ ...form, organisationName: "  " })).toEqual(["payer_identity_incomplete"]);
+    for (const key of ["street", "zip", "city", "country"] as const) {
+      expect(payerFormMissing({ ...form, [key]: "" })).toEqual(["payer_identity_incomplete"]);
+    }
+    expect(payerFormMissing({ ...form, payerInformed: false })).toEqual(["payer_not_informed"]);
+    // A person still needs the personal identity; a name of an organisation does not help.
+    const person = { ...form, payerType: "person" as const };
+    expect(payerFormMissing(person)).toEqual(["payer_identity_incomplete"]);
+    expect(payerFormMissing({ ...payerDeclarationToForm(typedPerson), citizenships: [] }))
+      .toEqual(["payer_identity_incomplete"]);
+    expect(payerFormMissing(payerDeclarationToForm(typedPerson))).toEqual([]);
+  });
+
+  it("words the incomplete identity for the payer type and keeps unknown codes readable", () => {
+    const personText = payerReasonLabel("payer_identity_incomplete", tx, "person");
+    expect(personText).toBe("Заполните данные плательщика: имя, дату рождения, адрес, гражданство");
+    for (const type of ["company", "organisation", "insurance"] as const) {
+      expect(payerReasonLabel("payer_identity_incomplete", tx, type))
+        .toBe("Заполните данные плательщика: название и юридический адрес");
+    }
+    expect(payerReasonLabel("payer_identity_incomplete", de, "company"))
+      .toBe("Angaben zum Kostenübernehmer ergänzen: Name und Sitz (Anschrift)");
+    // Without the type (readiness list, signature gate) the text covers both.
+    const neutral = payerReasonLabel("payer_identity_incomplete", tx);
+    expect(neutral).toContain("гражданство");
+    expect(neutral).toContain("название и юридический адрес");
+    expect(payerReadinessReasonLabels(tx)["Third-party payer details are incomplete"]).toBe(neutral);
+    expect(payerReasonLabel("a_code_of_tomorrow", tx, "company")).toBe("Проверьте данные плательщика");
+    expect(payerReasonLabel("a_code_of_tomorrow", de)).toBe("Angaben zum Zahler prüfen");
+  });
+
+  it("labels every payer type and relationship kind in both languages", () => {
+    expect(PAYER_TYPES.map((value) => payerTypeLabel(value, tx)))
+      .toEqual(["Частное лицо", "Компания", "Организация", "Страховая"]);
+    expect(PAYER_TYPES.map((value) => payerTypeLabel(value, de)))
+      .toEqual(["Privatperson", "Unternehmen", "Organisation", "Versicherung"]);
+    expect(PAYER_RELATIONSHIP_KINDS).toEqual([
+      "spouse", "parent", "child", "relative", "employer", "friend", "business_partner", "other",
+    ]);
+    for (const translate of [tx, de]) {
+      const labels = PAYER_RELATIONSHIP_KINDS.map((value) => payerRelationshipKindLabel(value, translate));
+      expect(labels.every(Boolean)).toBe(true);
+      expect(new Set(labels).size).toBe(PAYER_RELATIONSHIP_KINDS.length);
+    }
+  });
+
+  it("keeps the type, the name, the kind and the consent of a server response", () => {
+    const normalized = normalizePayerDeclarationResponse({ declaration: company, status: {} });
+    expect(normalized?.declaration).toMatchObject({
+      payer_type: "company",
+      organisation_name: "Beispiel GmbH",
+      relationship_kind: "employer",
+      contact_consent_at: null,
+    });
+    // The seat of an organisation still feeds the AML country risk.
+    expect(payerAmlCountries(normalized)).toEqual(["DE"]);
+    // An older response stays without the key, so the form knows the server.
+    const older = normalizePayerDeclarationResponse({ declaration: thirdParty, status: {} });
+    expect(older?.declaration).not.toHaveProperty("payer_type");
   });
 });
 

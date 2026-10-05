@@ -754,3 +754,268 @@ async fn the_gwg_identification_sheet_is_filled_from_the_lead_and_its_payer() {
     let payer_document = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
     assert_ne!(payer_document, document_id);
 }
+
+/// A company as the payer. The body still carries a person, as a form does
+/// after the payer type was switched.
+fn organisation_payer() -> Value {
+    json!({
+        "payer_kind": "third_party",
+        "payer_type": "company",
+        "organisation_name": " Beispiel GmbH ",
+        "acts_on_own_account": true,
+        "source_of_funds": "business_income",
+        "first_name": "Erika",
+        "last_name": "Zahler",
+        "date_of_birth": "1970-05-01",
+        "place_of_birth": "Wien",
+        "citizenships": ["AT"],
+        "street": "Ringstr. 9",
+        "zip": "1010",
+        "city": "Wien",
+        "country": "at",
+        "relationship_kind": "employer",
+        "relationship": "Arbeitgeberin",
+        "email": "kosten@example.org",
+        "payer_informed": true
+    })
+}
+
+/// Name, role, country and relationship of the payer on an order.
+async fn order_payer(
+    pool: &PgPool,
+    order_id: Uuid,
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+) {
+    sqlx::query_as(
+        "SELECT payer_contact_name, payer_role, payer_address_country, payer_contact_relationship
+         FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_organisation_pays_under_its_name_and_staff_keep_what_their_form_leaves_out() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let (_, order_id) = seed_lead_order(&app, lead_id).await;
+    let pm = app.bearer("patient_manager");
+    let ceo = app.bearer("ceo");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let generate = |template: &str, subject: Option<&str>| {
+        let mut body = json!({
+            "template_id": template,
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active"
+        });
+        if template == "cost_coverage_declaration" {
+            body["order_id"] = json!(order_id);
+        }
+        if let Some(subject) = subject {
+            body["bindings"] = json!({ "gwg_identification": { "subject": subject } });
+        }
+        body
+    };
+
+    for (key, value, code) in [
+        ("payer_type", "club", "payer_type_invalid"),
+        (
+            "relationship_kind",
+            "neighbour",
+            "payer_relationship_kind_invalid",
+        ),
+    ] {
+        let mut body = organisation_payer();
+        body[key] = json!(value);
+        let (status, error) = json_request(&app, "POST", &path, &pm, Some(body)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["error"], code);
+    }
+    // Only the lead agrees in the cabinet that GMED contacts the payer.
+    let mut body = organisation_payer();
+    body["contact_consent_at"] = json!("2026-10-05T09:20:00Z");
+    let (status, _) = json_request(&app, "POST", &path, &pm, Some(body)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // A company is named by its name and its seat; nothing of a natural
+    // person is kept, and the words of the relationship belong to "other".
+    let (status, saved) = json_request(&app, "POST", &path, &pm, Some(organisation_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let declaration = &saved["declaration"];
+    assert_eq!(declaration["payer_type"], "company", "{saved}");
+    assert_eq!(declaration["organisation_name"], "Beispiel GmbH", "{saved}");
+    assert_eq!(declaration["relationship_kind"], "employer", "{saved}");
+    for key in [
+        "first_name",
+        "last_name",
+        "date_of_birth",
+        "place_of_birth",
+        "relationship",
+        "contact_consent_at",
+    ] {
+        assert!(declaration[key].is_null(), "{key}: {saved}");
+    }
+    assert_eq!(declaration["citizenships"], json!([]), "{saved}");
+    assert_eq!(declaration["country"], "AT", "{saved}");
+    assert!(declaration["payer_informed_at"].is_string(), "{saved}");
+    assert_eq!(
+        saved["status"]["missing"],
+        json!(["cost_assumption_missing"]),
+        "name and seat complete the identity of an organisation"
+    );
+    assert_eq!(saved["status"]["aml_countries"], json!(["AT"]), "{saved}");
+    let person: (Option<String>, Option<String>, Vec<String>) = sqlx::query_as(
+        "SELECT first_name, last_name, citizenships FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(person, (None, None, Vec::new()));
+
+    // The organisation is the payer of the lead's order, under its name.
+    assert_eq!(
+        order_payer(pool, order_id).await,
+        (
+            Some("Beispiel GmbH".into()),
+            Some("cost_bearer".into()),
+            Some("AT".into()),
+            Some("Arbeitgeber".into())
+        )
+    );
+
+    // The Kostenübernahmeerklärung names it without a date of birth.
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate("cost_coverage_declaration", None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let (_, current) = json_request(&app, "GET", &path, &pm, None).await;
+    assert_eq!(
+        current["status"]["missing"],
+        json!(["cost_assumption_unsigned"]),
+        "{current}"
+    );
+
+    // The identification sheet is the form for natural persons: none for the
+    // company, the patient's own as before.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate("gwg_identification", Some("payer"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(
+        refused["code"], "payer_is_not_a_natural_person",
+        "{refused}"
+    );
+    assert_eq!(
+        refused["error"], "payer_is_not_a_natural_person",
+        "{refused}"
+    );
+    let (status, sheet) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate("gwg_identification", None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+
+    // The staff form of an older client sends none of the new keys: the
+    // type, the name and the relationship stay.
+    let mut older_form = organisation_payer();
+    for key in ["payer_type", "organisation_name", "relationship_kind"] {
+        older_form.as_object_mut().unwrap().remove(key);
+    }
+    older_form["street"] = json!("Ringstr. 11");
+    let (status, kept) = json_request(&app, "POST", &path, &pm, Some(older_form)).await;
+    assert_eq!(status, StatusCode::OK, "{kept}");
+    let declaration = &kept["declaration"];
+    assert_eq!(declaration["payer_type"], "company", "{kept}");
+    assert_eq!(declaration["organisation_name"], "Beispiel GmbH", "{kept}");
+    assert_eq!(declaration["relationship_kind"], "employer", "{kept}");
+    assert_eq!(declaration["street"], "Ringstr. 11", "{kept}");
+    assert!(declaration["first_name"].is_null(), "{kept}");
+    assert_eq!(
+        kept["status"]["missing"],
+        json!(["cost_assumption_outdated"]),
+        "another seat: the generated declaration names another payer"
+    );
+
+    // Another name is another payer, on the order as well.
+    let mut renamed = organisation_payer();
+    renamed["organisation_name"] = json!("Beispiel Holding GmbH");
+    renamed["payer_type"] = json!("organisation");
+    let (status, changed) = json_request(&app, "POST", &path, &pm, Some(renamed)).await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    assert_eq!(
+        changed["declaration"]["payer_type"], "organisation",
+        "{changed}"
+    );
+    assert_eq!(
+        order_payer(pool, order_id).await.0.as_deref(),
+        Some("Beispiel Holding GmbH")
+    );
+
+    // A person after all: the name of the organisation goes, the person's
+    // data count again, and the payer gets an identification sheet.
+    let mut person = organisation_payer();
+    person["payer_type"] = json!("person");
+    let (status, changed) = json_request(&app, "POST", &path, &pm, Some(person)).await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let declaration = &changed["declaration"];
+    assert_eq!(declaration["payer_type"], "person", "{changed}");
+    assert!(declaration["organisation_name"].is_null(), "{changed}");
+    assert_eq!(declaration["first_name"], "Erika", "{changed}");
+    assert_eq!(declaration["citizenships"], json!(["AT"]), "{changed}");
+    assert_eq!(
+        order_payer(pool, order_id).await.0.as_deref(),
+        Some("Erika Zahler")
+    );
+    let (status, sheet) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &ceo,
+        Some(generate("gwg_identification", Some("payer"))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+
+    // The patient pays: nothing of the third party stays.
+    let (status, own) = json_request(
+        &app,
+        "POST",
+        &path,
+        &pm,
+        Some(json!({"payer_kind": "self", "source_of_funds": "employment"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    let cleared: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT payer_type, organisation_name, relationship_kind
+         FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(cleared, (None, None, None));
+}

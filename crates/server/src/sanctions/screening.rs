@@ -5,7 +5,9 @@
 //! * for a minor patient, the lead's trusted contacts whose relation is
 //!   parent or guardian (`lead_guardian`);
 //! * the third-party payer of a lead (`lead_payer`) from
-//!   `lead_payer_declarations` — see [`load_payer_subjects`];
+//!   `lead_payer_declarations`: a person, or a company, an organisation or an
+//!   insurer screened as an organisation by its name — see
+//!   [`payer_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
 //!
@@ -377,23 +379,49 @@ pub async fn load_payer_rows(db: &gmed_db::DbPool, lead_ids: &[Uuid]) -> HashMap
     by_lead
 }
 
-/// Third-party payers among a lead's declarations. A payer without a first
-/// name is screened as an organisation against list entities.
+/// Third-party payers among a lead's declarations.
+///
+/// A company, an organisation or an insurer (`payer_type` other than
+/// `person`) is screened against list entities by its name: the name goes
+/// into `last_name`, which is where the matcher reads an organisation's whole
+/// name, and its seat country is the residence. A person is screened by first
+/// and last name, date of birth and citizenships; a person without a first
+/// name is screened as an organisation, as before the payer type existed.
 pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
     let mut subjects = Vec::new();
     for (position, row) in rows.iter().enumerate() {
         if json_text(row, "payer_kind") != "third_party" {
             continue;
         }
-        let first_name = json_text(row, "first_name");
+        let payer_type = json_text(row, "payer_type");
         let organisation_name = ["organisation_name", "organization_name", "company_name"]
             .iter()
             .map(|key| json_text(row, key))
             .find(|value| !value.is_empty());
-        let (organisation, last_name) = match (first_name.is_empty(), organisation_name) {
-            (true, Some(name)) => (true, name),
-            (true, None) => (true, json_text(row, "last_name")),
-            (false, _) => (false, json_text(row, "last_name")),
+        let subject = if !payer_type.is_empty() && payer_type != "person" {
+            Subject {
+                first_name: String::new(),
+                middle_name: None,
+                last_name: organisation_name.unwrap_or_default(),
+                date_of_birth: None,
+                citizenships: Vec::new(),
+                organisation: true,
+            }
+        } else {
+            let first_name = json_text(row, "first_name");
+            let (organisation, last_name) = match (first_name.is_empty(), organisation_name) {
+                (true, Some(name)) => (true, name),
+                (true, None) => (true, json_text(row, "last_name")),
+                (false, _) => (false, json_text(row, "last_name")),
+            };
+            Subject {
+                first_name,
+                middle_name: None,
+                last_name,
+                date_of_birth: json_date(row, "date_of_birth"),
+                citizenships: json_codes(row, "citizenships"),
+                organisation,
+            }
         };
         let subject_ref = match row.get("id") {
             Some(Value::String(id)) => id.clone(),
@@ -405,14 +433,7 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
             lead_id: Some(lead_id),
             patient_id: None,
             subject_ref,
-            subject: Subject {
-                first_name,
-                middle_name: None,
-                last_name,
-                date_of_birth: json_date(row, "date_of_birth"),
-                citizenships: json_codes(row, "citizenships"),
-                organisation,
-            },
+            subject,
             residence: json_codes(row, "country"),
             relation: Some("payer".to_string()),
         });
@@ -1130,6 +1151,76 @@ mod tests {
             ..base.clone()
         };
         assert_ne!(subject_fingerprint(&base), subject_fingerprint(&born));
+    }
+
+    #[test]
+    fn an_organisation_payer_is_an_organisation_subject_with_its_seat() {
+        let lead_id = Uuid::new_v4();
+        let subjects = payer_subjects(
+            lead_id,
+            &[
+                json!({ "payer_kind": "self" }),
+                json!({
+                    "payer_kind": "third_party",
+                    "payer_type": "company",
+                    "organisation_name": " Beispiel Shipping GmbH ",
+                    // Nothing of a person counts for an organisation.
+                    "first_name": "Viktor",
+                    "last_name": "Zahler",
+                    "date_of_birth": "1970-05-06",
+                    "citizenships": ["AT"],
+                    "country": "CY"
+                }),
+                json!({
+                    "payer_kind": "third_party",
+                    "payer_type": "person",
+                    "first_name": "Viktor",
+                    "last_name": "Zahler",
+                    "date_of_birth": "1970-05-06",
+                    "citizenships": ["AT"],
+                    "country": "DE"
+                }),
+                // A row of an older server: no type, a person.
+                json!({
+                    "payer_kind": "third_party",
+                    "first_name": "Erika",
+                    "last_name": "Zahler"
+                }),
+            ],
+        );
+        assert_eq!(subjects.len(), 3, "a self-payer is no subject");
+        assert!(
+            subjects
+                .iter()
+                .all(|record| record.kind == SubjectKind::LeadPayer
+                    && record.lead_id == Some(lead_id))
+        );
+
+        let company = &subjects[0];
+        assert!(company.subject.organisation);
+        assert_eq!(company.subject.first_name, "");
+        assert_eq!(company.subject.last_name, "Beispiel Shipping GmbH");
+        assert_eq!(company.subject.date_of_birth, None);
+        assert!(company.subject.citizenships.is_empty());
+        assert_eq!(company.residence, ["CY"]);
+        assert_eq!(company.countries(), ["CY"]);
+        assert!(company.subject.is_screenable());
+        assert_eq!(company.snapshot()["organisation"], true);
+
+        let person = &subjects[1];
+        assert!(!person.subject.organisation);
+        assert_eq!(person.subject.first_name, "Viktor");
+        assert_eq!(person.subject.last_name, "Zahler");
+        assert_eq!(
+            person.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1970, 5, 6)
+        );
+        assert_eq!(person.countries(), ["AT", "DE"]);
+        assert!(!subjects[2].subject.organisation);
+        assert_ne!(
+            subject_fingerprint(&company.subject),
+            subject_fingerprint(&person.subject)
+        );
     }
 
     #[test]

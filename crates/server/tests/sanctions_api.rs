@@ -633,6 +633,119 @@ async fn guardians_of_minors_and_patients_are_screened() {
     );
 }
 
+async fn lead_is_queued(app: &TestApp, lead_id: Uuid) -> bool {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM sanctions_screening_queue
+                        WHERE subject_type = 'lead' AND subject_id = $1)",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn an_organisation_payer_is_queued_and_screened_as_an_organisation() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let lead_id = insert_lead(
+        &app,
+        "Anna",
+        "Beispiel",
+        Some("1990-02-02"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    assert_eq!(lead_status(&app, lead_id).await["screening"], "clear");
+    assert!(!lead_is_queued(&app, lead_id).await);
+    let declaration = format!("/leads/{lead_id}/payer-declaration");
+    let company = |name: &str| {
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "company",
+            "organisation_name": name,
+            "source_of_funds": "business_income",
+            "street": "Hafenstr. 1",
+            "zip": "3030",
+            "city": "Limassol",
+            "country": "CY"
+        })
+    };
+
+    // A person with the words of the listed company as a name is no match:
+    // persons are compared with persons only.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &declaration,
+        &app.pm(),
+        Some(json!({
+            "payer_kind": "third_party",
+            "first_name": "Polartek",
+            "last_name": "Shipping",
+            "source_of_funds": "savings"
+        })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(lead_is_queued(&app, lead_id).await);
+    assert_eq!(lead_status(&app, lead_id).await["screening"], "clear");
+
+    // The company named as the payer queues the lead and is screened against
+    // the listed entities by its name; the seat is its residence.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &declaration,
+        &app.pm(),
+        Some(company("Polartek Shipping LLC")),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(
+        lead_is_queued(&app, lead_id).await,
+        "a change of the payer type and the organisation name queues the lead"
+    );
+    let status = lead_status(&app, lead_id).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = open_hits(&app).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let hit = &hits[0];
+    assert_eq!(hit["subject_kind"], "lead_payer");
+    assert_eq!(hit["subject_snapshot"]["organisation"], true, "{hit}");
+    let subject = &hit["current_subject"];
+    assert_eq!(subject["organisation"], true, "{hit}");
+    assert_eq!(subject["first_name"], "", "{hit}");
+    assert_eq!(subject["last_name"], "Polartek Shipping LLC", "{hit}");
+    assert!(subject["date_of_birth"].is_null(), "{hit}");
+    assert_eq!(subject["citizenships"], json!([]), "{hit}");
+    assert_eq!(subject["residence"], json!(["CY"]), "{hit}");
+
+    // Only the name changes: the lead is queued again, and the other company
+    // no longer matches.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &declaration,
+        &app.pm(),
+        Some(company("Nordwind Logistik GmbH")),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(lead_is_queued(&app, lead_id).await);
+    lead_status(&app, lead_id).await;
+    let still_matches: bool =
+        sqlx::query_scalar("SELECT still_matches FROM sanctions_hits WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert!(!still_matches);
+}
+
 #[tokio::test]
 async fn blocked_country_needs_the_ceo_to_lift_it_for_the_lead() {
     let Some(app) = test_app().await else {

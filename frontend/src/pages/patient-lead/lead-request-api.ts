@@ -26,6 +26,9 @@ export type LeadRequestPersonalData = {
   insurance_covers_germany: string | null;
 };
 
+/** What a third-party payer is: a natural person, or a company, organisation or insurer. */
+export type PayerType = "person" | "company" | "organisation" | "insurance";
+
 /**
  * Who pays, as stated in the cabinet (owner request 2026-10-05). A third
  * party is named with identity and citizenships; staff complete the rest.
@@ -40,6 +43,7 @@ export type LeadRequestPayer = {
   city: string | null;
   country: string | null;
   citizenships: string[];
+  /** Free text; with `relationship_kind` only for the kind `other`. */
   relationship: string | null;
   email: string | null;
   phone: string | null;
@@ -49,6 +53,17 @@ export type LeadRequestPayer = {
    */
   acts_on_own_account?: boolean | null;
   beneficial_owner?: string | null;
+  /**
+   * The payer block of the owner spec, sections 5 and 6: what the third party
+   * is (`null` for "I pay myself"), the name of a company, organisation or
+   * insurer, the relationship from the list, and when the lead agreed that
+   * GMED contacts the payer. All four are absent on an older server.
+   */
+  payer_type?: PayerType | null;
+  organisation_name?: string | null;
+  /** `spouse`, `parent`, `child`, `relative`, `employer`, `friend`, `business_partner` or `other`. */
+  relationship_kind?: string | null;
+  contact_consent_at?: string | null;
 };
 
 /** What the cabinet sends: the whole answer, empty values left out. */
@@ -69,6 +84,25 @@ export type LeadRequestPayerInput = {
   acts_on_own_account?: boolean;
   /** Sent with the answer "no" only. */
   beneficial_owner?: string;
+  /** Sent with a third party to a server that knows the payer type. */
+  payer_type?: PayerType;
+  organisation_name?: string;
+  relationship_kind?: string;
+  /** `true` records the consent (the first time stays), `false` removes it. */
+  contact_consent?: boolean;
+};
+
+/**
+ * A parent's own data for the answer "I pay (as a parent)", taken from the
+ * lead's trusted contact the login is linked to. A single-word name is the
+ * last name: the first name is then empty.
+ */
+export type PayerSelfTemplate = {
+  first_name: string | null;
+  last_name: string | null;
+  date_of_birth: string | null;
+  email: string | null;
+  phone: string | null;
 };
 
 /**
@@ -140,6 +174,11 @@ export type LeadRequest = {
   progress: { filled: number; total: number; missing_for_submit: string[] };
   /** `null` until the question is answered; absent on an older server. */
   payer?: LeadRequestPayer | null;
+  /**
+   * For a parent's login linked to a trusted contact of the lead; otherwise
+   * `null`. Absent on a server that does not know the payer type yet.
+   */
+  payer_self_template?: PayerSelfTemplate | null;
   /** The statements for the identification; absent on an older server. */
   identification?: LeadRequestIdentification;
   /** Photos or scans of the identity document; never among `documents` (medical). */

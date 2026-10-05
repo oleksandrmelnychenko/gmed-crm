@@ -15,6 +15,11 @@
 //!   named order jointly and severally, the patient stays liable;
 //! - feeds the AML country risk with residence and citizenships.
 //!
+//! The third party is a natural person, or a company, an organisation or an
+//! insurer (`payer_type`, owner spec "Patientenformular", 2026-10-05): an
+//! organisation is named by `organisation_name`, has no natural-person data,
+//! and its address is its seat.
+//!
 //! Hard gate: GMED countersigns the framework contract or the order of a lead
 //! (contract status `signed`, order `signed_agency`, a framework contract
 //! marked signed, an electronic signature request with an agency signer) only
@@ -30,8 +35,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
-use serde::Deserialize;
+use chrono::{DateTime, NaiveDate, SecondsFormat, SubsecRound, Utc};
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
 use uuid::Uuid;
@@ -48,6 +53,26 @@ use gmed_domain::role::Role;
 
 pub const PAYER_KIND_SELF: &str = "self";
 pub const PAYER_KIND_THIRD_PARTY: &str = "third_party";
+
+/// A third-party payer who is a natural person; the other types are
+/// organisations.
+pub const PAYER_TYPE_PERSON: &str = "person";
+/// Who a third-party payer is (`payer_type`).
+pub const PAYER_TYPES: &[&str] = &[PAYER_TYPE_PERSON, "company", "organisation", "insurance"];
+
+/// Relationship of the payer to the patient (`relationship_kind`). `other` is
+/// described in the free text `relationship`.
+pub const RELATIONSHIP_KINDS: &[&str] = &[
+    "spouse",
+    "parent",
+    "child",
+    "relative",
+    "employer",
+    "friend",
+    "business_partner",
+    RELATIONSHIP_KIND_OTHER,
+];
+const RELATIONSHIP_KIND_OTHER: &str = "other";
 
 /// Categories of the source of funds (Herkunft der Mittel).
 pub const SOURCE_OF_FUNDS: &[&str] = &[
@@ -94,15 +119,24 @@ pub(crate) struct Declaration {
     pub source_of_funds: Option<String>,
     pub source_of_funds_description: Option<String>,
     pub source_of_funds_document_id: Option<Uuid>,
+    /// Who the third party is ([`PAYER_TYPES`]); `None` for a self-payer.
+    pub payer_type: Option<String>,
+    /// Name of the company, organisation or insurer; `None` for a person.
+    pub organisation_name: Option<String>,
     pub first_name: Option<String>,
     pub last_name: Option<String>,
     pub date_of_birth: Option<NaiveDate>,
     pub place_of_birth: Option<String>,
+    /// Address of the person, or the seat of the organisation.
     pub street: Option<String>,
     pub zip: Option<String>,
     pub city: Option<String>,
     pub country: Option<String>,
     pub citizenships: Vec<String>,
+    /// Relationship to the patient ([`RELATIONSHIP_KINDS`]).
+    pub relationship_kind: Option<String>,
+    /// The relationship in words: for the kind `other`, and what was entered
+    /// before the list existed.
     pub relationship: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
@@ -110,23 +144,44 @@ pub(crate) struct Declaration {
     /// the payer's data (Art. 14 DSGVO: the data come from the patient side).
     pub payer_informed_at: Option<DateTime<Utc>>,
     pub payer_informed_by: Option<Uuid>,
+    /// When the lead agreed in the cabinet that GMED contacts the payer about
+    /// the costs and tells the payer the lead's name. Only the lead gives or
+    /// removes this consent.
+    pub contact_consent_at: Option<DateTime<Utc>>,
 }
 
 const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
      beneficial_owner_name, beneficial_owner_note, source_of_funds, source_of_funds_description, \
-     source_of_funds_document_id, first_name, last_name, date_of_birth, place_of_birth, \
-     street, zip, city, country, citizenships, relationship, email, phone, \
-     payer_informed_at, payer_informed_by, identity_changed_at, patient_id, created_at, \
-     updated_at";
+     source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
+     date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
+     relationship_kind, relationship, email, phone, payer_informed_at, payer_informed_by, \
+     contact_consent_at, identity_changed_at, patient_id, created_at, updated_at";
 
 impl Declaration {
     pub(crate) fn is_third_party(&self) -> bool {
         self.payer_kind == PAYER_KIND_THIRD_PARTY
     }
 
+    /// A company, an organisation or an insurer pays: no natural person.
+    pub(crate) fn is_organisation(&self) -> bool {
+        self.is_third_party()
+            && self
+                .payer_type
+                .as_deref()
+                .is_some_and(|payer_type| payer_type != PAYER_TYPE_PERSON)
+    }
+
     fn from_row(row: &PgRow) -> Self {
+        let payer_kind: String = row.try_get("payer_kind").unwrap_or_default();
+        // A third party without a type is a person (rows of older servers).
+        let payer_type = row
+            .try_get::<Option<String>, _>("payer_type")
+            .unwrap_or_default()
+            .or_else(|| {
+                (payer_kind == PAYER_KIND_THIRD_PARTY).then(|| PAYER_TYPE_PERSON.to_string())
+            });
         Self {
-            payer_kind: row.try_get("payer_kind").unwrap_or_default(),
+            payer_kind,
             acts_on_own_account: row.try_get("acts_on_own_account").unwrap_or(true),
             own_account_answered: row.try_get("own_account_answered").unwrap_or(false),
             beneficial_owner_name: row.try_get("beneficial_owner_name").unwrap_or_default(),
@@ -138,6 +193,8 @@ impl Declaration {
             source_of_funds_document_id: row
                 .try_get("source_of_funds_document_id")
                 .unwrap_or_default(),
+            payer_type,
+            organisation_name: row.try_get("organisation_name").unwrap_or_default(),
             first_name: row.try_get("first_name").unwrap_or_default(),
             last_name: row.try_get("last_name").unwrap_or_default(),
             date_of_birth: row.try_get("date_of_birth").unwrap_or_default(),
@@ -147,32 +204,64 @@ impl Declaration {
             city: row.try_get("city").unwrap_or_default(),
             country: row.try_get("country").unwrap_or_default(),
             citizenships: row.try_get("citizenships").unwrap_or_default(),
+            relationship_kind: row.try_get("relationship_kind").unwrap_or_default(),
             relationship: row.try_get("relationship").unwrap_or_default(),
             email: row.try_get("email").unwrap_or_default(),
             phone: row.try_get("phone").unwrap_or_default(),
             payer_informed_at: row.try_get("payer_informed_at").unwrap_or_default(),
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
+            contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
         }
     }
 
     /// Who pays, as the order payer record (a free-text contact with the
-    /// payer's address, role `cost_bearer`).
+    /// payer's address, role `cost_bearer`) and in the cost assumption
+    /// declaration: the name of the organisation, or first and last name.
     fn payer_name(&self) -> Option<String> {
-        let name = [self.first_name.as_deref(), self.last_name.as_deref()]
-            .into_iter()
-            .flatten()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-            .join(" ");
+        let name = if self.is_organisation() {
+            self.organisation_name
+                .as_deref()
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            [self.first_name.as_deref(), self.last_name.as_deref()]
+                .into_iter()
+                .flatten()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         (!name.is_empty()).then_some(name)
     }
 
+    /// The relationship to the patient in words, for the order payer record:
+    /// the free text, otherwise the chosen kind in German like the documents.
+    fn relationship_label(&self) -> Option<String> {
+        if !blank(&self.relationship) {
+            return self.relationship.clone();
+        }
+        let label = match self.relationship_kind.as_deref()? {
+            "spouse" => "Ehepartner/in",
+            "parent" => "Elternteil",
+            "child" => "Kind",
+            "relative" => "Verwandte/r",
+            "employer" => "Arbeitgeber",
+            "friend" => "Freund/in",
+            "business_partner" => "Geschäftspartner/in",
+            _ => return None,
+        };
+        Some(label.to_string())
+    }
+
     /// The fields that name the payer: a change makes an earlier
-    /// Kostenübernahmeerklärung name the wrong person.
+    /// Kostenübernahmeerklärung name the wrong person or organisation.
     fn identity_key(&self) -> Value {
         json!([
             self.payer_kind,
+            self.payer_type,
+            self.organisation_name,
             self.first_name,
             self.last_name,
             self.date_of_birth,
@@ -193,6 +282,8 @@ impl Declaration {
             "source_of_funds": self.source_of_funds,
             "source_of_funds_description": self.source_of_funds_description,
             "source_of_funds_document_id": self.source_of_funds_document_id,
+            "payer_type": self.payer_type,
+            "organisation_name": self.organisation_name,
             "first_name": self.first_name,
             "last_name": self.last_name,
             "date_of_birth": self.date_of_birth.map(|date| date.format("%Y-%m-%d").to_string()),
@@ -202,11 +293,13 @@ impl Declaration {
             "city": self.city,
             "country": self.country,
             "citizenships": self.citizenships,
+            "relationship_kind": self.relationship_kind,
             "relationship": self.relationship,
             "email": self.email,
             "phone": self.phone,
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
             "payer_informed_by": self.payer_informed_by,
+            "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
         })
     }
 
@@ -221,16 +314,20 @@ impl Declaration {
         if self.source_of_funds.is_none() || !source_described {
             reasons.push(PayerReason::SourceOfFundsMissing);
         }
-        if self.is_third_party()
-            && (blank(&self.first_name)
+        // An organisation is identified by its name and seat, a person by
+        // name, date of birth, address and citizenship.
+        let address_incomplete =
+            blank(&self.street) || blank(&self.zip) || blank(&self.city) || self.country.is_none();
+        let identity_incomplete = if self.is_organisation() {
+            blank(&self.organisation_name) || address_incomplete
+        } else {
+            blank(&self.first_name)
                 || blank(&self.last_name)
                 || self.date_of_birth.is_none()
-                || blank(&self.street)
-                || blank(&self.zip)
-                || blank(&self.city)
-                || self.country.is_none()
-                || self.citizenships.is_empty())
-        {
+                || address_incomplete
+                || self.citizenships.is_empty()
+        };
+        if self.is_third_party() && identity_incomplete {
             reasons.push(PayerReason::PayerIdentityIncomplete);
         }
         if self.is_third_party() && self.payer_informed_at.is_none() {
@@ -255,6 +352,14 @@ struct DeclarationInput {
     source_of_funds: Option<String>,
     source_of_funds_description: Option<String>,
     source_of_funds_document_id: Option<Uuid>,
+    /// Payer type, organisation name and relationship kind (2026-10-05): a
+    /// key that is left out keeps the stored value, because the staff form of
+    /// older clients does not send it; `null` clears it (a third party
+    /// without a type is a person).
+    #[serde(default, deserialize_with = "sent")]
+    payer_type: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    organisation_name: Option<Option<String>>,
     first_name: Option<String>,
     last_name: Option<String>,
     date_of_birth: Option<String>,
@@ -265,6 +370,8 @@ struct DeclarationInput {
     country: Option<String>,
     #[serde(default)]
     citizenships: Vec<String>,
+    #[serde(default, deserialize_with = "sent")]
+    relationship_kind: Option<Option<String>>,
     relationship: Option<String>,
     email: Option<String>,
     phone: Option<String>,
@@ -276,6 +383,16 @@ struct DeclarationInput {
 
 fn default_true() -> bool {
     true
+}
+
+/// A key that is present in the body, also with `null`; an absent key stays
+/// `None`.
+fn sent<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static str> {
@@ -293,9 +410,14 @@ fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static s
 /// Validates and normalizes a submitted declaration. An incomplete
 /// declaration may be saved; [`Declaration::missing`] says what is missing.
 /// Fields that do not apply are cleared (data minimization): no third-party
-/// data for a self-payer, no beneficial owner for own account.
+/// data for a self-payer, no natural-person data for an organisation, no
+/// beneficial owner for own account. `previous` supplies the payer type, the
+/// organisation name and the relationship kind where the body leaves the key
+/// out. The consent to contact the payer is no input: the callers carry it
+/// over.
 fn declaration_from_input(
     input: &DeclarationInput,
+    previous: Option<&Declaration>,
     today: NaiveDate,
 ) -> Result<Declaration, &'static str> {
     let payer_kind = input.payer_kind.trim();
@@ -326,15 +448,55 @@ fn declaration_from_input(
         declaration.beneficial_owner_note = None;
     }
     if declaration.is_third_party() {
-        let date_of_birth = match text(&input.date_of_birth, SHORT_TEXT_MAX)? {
-            None => None,
-            Some(value) => Some(
-                NaiveDate::parse_from_str(&value, "%Y-%m-%d")
-                    .map_err(|_| "payer_date_of_birth_invalid")?,
-            ),
+        // A sent key wins; an absent one keeps what is stored for the third
+        // party.
+        let stored = previous.filter(|previous| previous.is_third_party());
+        let payer_type = match &input.payer_type {
+            Some(value) => text(value, SHORT_TEXT_MAX).map_err(|_| "payer_type_invalid")?,
+            None => stored.and_then(|stored| stored.payer_type.clone()),
+        }
+        .unwrap_or_else(|| PAYER_TYPE_PERSON.to_string());
+        if !PAYER_TYPES.contains(&payer_type.as_str()) {
+            return Err("payer_type_invalid");
+        }
+        let relationship_kind = match &input.relationship_kind {
+            Some(value) => {
+                text(value, SHORT_TEXT_MAX).map_err(|_| "payer_relationship_kind_invalid")?
+            }
+            None => stored.and_then(|stored| stored.relationship_kind.clone()),
         };
-        if date_of_birth.is_some_and(|date| date > today) {
-            return Err("payer_date_of_birth_invalid");
+        if relationship_kind
+            .as_deref()
+            .is_some_and(|kind| !RELATIONSHIP_KINDS.contains(&kind))
+        {
+            return Err("payer_relationship_kind_invalid");
+        }
+        if payer_type == PAYER_TYPE_PERSON {
+            let date_of_birth = match text(&input.date_of_birth, SHORT_TEXT_MAX)? {
+                None => None,
+                Some(value) => Some(
+                    NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+                        .map_err(|_| "payer_date_of_birth_invalid")?,
+                ),
+            };
+            if date_of_birth.is_some_and(|date| date > today) {
+                return Err("payer_date_of_birth_invalid");
+            }
+            declaration.first_name = text(&input.first_name, SHORT_TEXT_MAX)?;
+            declaration.last_name = text(&input.last_name, SHORT_TEXT_MAX)?;
+            declaration.date_of_birth = date_of_birth;
+            declaration.place_of_birth = text(&input.place_of_birth, SHORT_TEXT_MAX)?;
+            declaration.citizenships = normalize_citizenships(&input.citizenships)
+                .map_err(|_| "payer_citizenships_invalid")?;
+        } else {
+            // A company, an organisation or an insurer: the name instead of
+            // the natural-person data, which are not even validated.
+            declaration.organisation_name = match &input.organisation_name {
+                Some(value) => {
+                    text(value, SHORT_TEXT_MAX).map_err(|_| "payer_organisation_name_too_long")?
+                }
+                None => stored.and_then(|stored| stored.organisation_name.clone()),
+            };
         }
         let email = text(&input.email, SHORT_TEXT_MAX)?;
         if email
@@ -343,18 +505,22 @@ fn declaration_from_input(
         {
             return Err("payer_email_invalid");
         }
-        declaration.first_name = text(&input.first_name, SHORT_TEXT_MAX)?;
-        declaration.last_name = text(&input.last_name, SHORT_TEXT_MAX)?;
-        declaration.date_of_birth = date_of_birth;
-        declaration.place_of_birth = text(&input.place_of_birth, SHORT_TEXT_MAX)?;
+        declaration.payer_type = Some(payer_type);
         declaration.street = text(&input.street, SHORT_TEXT_MAX)?;
         declaration.zip = text(&input.zip, SHORT_TEXT_MAX)?;
         declaration.city = text(&input.city, SHORT_TEXT_MAX)?;
         declaration.country = normalize_country_code(input.country.as_deref())
             .map_err(|_| "payer_country_invalid")?;
-        declaration.citizenships = normalize_citizenships(&input.citizenships)
-            .map_err(|_| "payer_citizenships_invalid")?;
-        declaration.relationship = text(&input.relationship, SHORT_TEXT_MAX)?;
+        // The words describe the kind `other`; with any other kind they go.
+        declaration.relationship = if relationship_kind
+            .as_deref()
+            .is_none_or(|kind| kind == RELATIONSHIP_KIND_OTHER)
+        {
+            text(&input.relationship, SHORT_TEXT_MAX)?
+        } else {
+            None
+        };
+        declaration.relationship_kind = relationship_kind;
         declaration.email = email;
         declaration.phone = text(&input.phone, SHORT_TEXT_MAX)?;
     }
@@ -935,7 +1101,9 @@ pub(crate) async fn check_signature_request(
 
 /// The third-party payer a Kostenübernahmeerklärung of a lead names.
 pub(crate) struct CostAssumptionPayer {
+    /// First and last name, or the name of the organisation.
     pub name: String,
+    /// A person's date of birth; an organisation has none.
     pub date_of_birth: Option<NaiveDate>,
     pub street: Option<String>,
     pub zip: Option<String>,
@@ -1055,7 +1223,10 @@ pub(crate) async fn carry_over_to_patient(
                SET patient_id = $2, updated_at = now()
                WHERE lead_id = $1
                RETURNING payer_kind, acts_on_own_account, source_of_funds,
-                         NULLIF(btrim(concat_ws(' ', first_name, last_name)), '') AS payer_name
+                         COALESCE(
+                             NULLIF(btrim(organisation_name), ''),
+                             NULLIF(btrim(concat_ws(' ', first_name, last_name)), '')
+                         ) AS payer_name
            )
            UPDATE patients p
            SET legal_status = jsonb_set(
@@ -1174,18 +1345,6 @@ async fn save_payer_declaration(
     if let Err(response) = auth.require_capability(Capability::LeadsEdit) {
         return response;
     }
-    let mut declaration = match declaration_from_input(&body, crate::app_time::today()) {
-        Ok(declaration) => declaration,
-        Err(code) => {
-            return error(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                code,
-                "Invalid payer declaration",
-            );
-        }
-    };
-    // The staff form always states the own-account answer.
-    declaration.own_account_answered = true;
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return database_error(error, "begin payer declaration"),
@@ -1220,6 +1379,31 @@ async fn save_payer_declaration(
     {
         return error(StatusCode::CONFLICT, "lead_deleted", "The lead is deleted");
     }
+    // The stored declaration first: it supplies what the body leaves out.
+    let previous = match load_payer_state(&mut tx, lead_id).await {
+        Ok(payer) => payer.declaration,
+        Err(error) => return database_error(error, "load previous payer declaration"),
+    };
+    let mut declaration =
+        match declaration_from_input(&body, previous.as_ref(), crate::app_time::today()) {
+            Ok(declaration) => declaration,
+            Err(code) => {
+                return error(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    code,
+                    "Invalid payer declaration",
+                );
+            }
+        };
+    // The staff form always states the own-account answer.
+    declaration.own_account_answered = true;
+    // Only the lead gives or removes the consent to contact the payer: staff
+    // keep it as long as a third party pays.
+    if declaration.is_third_party() {
+        declaration.contact_consent_at = previous
+            .as_ref()
+            .and_then(|previous| previous.contact_consent_at);
+    }
     if let Some(document_id) = declaration.source_of_funds_document_id {
         let prospect: Option<Uuid> = lead.try_get("prospect_patient_id").unwrap_or_default();
         match sqlx::query_scalar::<_, bool>(
@@ -1245,10 +1429,6 @@ async fn save_payer_declaration(
             Err(error) => return database_error(error, "validate source of funds document"),
         }
     }
-    let previous = match load_payer_state(&mut tx, lead_id).await {
-        Ok(payer) => payer.declaration,
-        Err(error) => return database_error(error, "load previous payer declaration"),
-    };
     if body.payer_informed && declaration.is_third_party() {
         // The first confirmation keeps its time and author.
         let earlier = previous
@@ -1329,11 +1509,17 @@ async fn store_declaration(
                source_of_funds_document_id, first_name, last_name, date_of_birth,
                place_of_birth, street, zip, city, country, citizenships, relationship,
                email, phone, payer_informed_at, payer_informed_by,
-               identity_changed_at, created_by, updated_by, own_account_answered)
+               identity_changed_at, created_by, updated_by, own_account_answered,
+               payer_type, organisation_name, relationship_kind, contact_consent_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                   $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25)
+                   $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
+                   $26, $27, $28, $29)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
+               payer_type = EXCLUDED.payer_type,
+               organisation_name = EXCLUDED.organisation_name,
+               relationship_kind = EXCLUDED.relationship_kind,
+               contact_consent_at = EXCLUDED.contact_consent_at,
                acts_on_own_account = EXCLUDED.acts_on_own_account,
                own_account_answered = EXCLUDED.own_account_answered,
                beneficial_owner_name = EXCLUDED.beneficial_owner_name,
@@ -1385,6 +1571,10 @@ async fn store_declaration(
     .bind(declaration.payer_informed_at)
     .bind(declaration.payer_informed_by)
     .bind(declaration.own_account_answered)
+    .bind(&declaration.payer_type)
+    .bind(&declaration.organisation_name)
+    .bind(&declaration.relationship_kind)
+    .bind(declaration.contact_consent_at)
     .execute(conn)
     .await
     .map(|_| ())
@@ -1402,10 +1592,18 @@ async fn store_declaration(
 /// owner, the Art. 14 confirmation — stays with staff and is kept as it is.
 /// The data land in the same declaration, so the sanctions screening and the
 /// country policy see the payer the moment the cabinet saves it.
+///
+/// The body is the whole "who pays" answer: a payer field that is left out is
+/// cleared. Only the own-interest answer and the contact consent are kept
+/// when their keys are left out.
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalPayerInput {
     payer_kind: String,
+    /// Who the third party is; left out means a person (older clients).
+    payer_type: Option<String>,
+    /// Name of the company, organisation or insurer.
+    organisation_name: Option<String>,
     first_name: Option<String>,
     last_name: Option<String>,
     date_of_birth: Option<String>,
@@ -1415,9 +1613,16 @@ pub(crate) struct PortalPayerInput {
     country: Option<String>,
     #[serde(default)]
     citizenships: Vec<String>,
+    relationship_kind: Option<String>,
+    /// Only for the kind `other`.
     relationship: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    /// The checkbox "GMED may contact the payer about the costs and tell
+    /// them my name": `true` records the consent with the current time unless
+    /// one is recorded for this payer, `false` removes it. Left out: the
+    /// stored consent stays.
+    contact_consent: Option<bool>,
     /// "Do you act in your own economic interest?" Left out: the stored
     /// answer stays.
     acts_on_own_account: Option<bool>,
@@ -1445,6 +1650,9 @@ impl From<sqlx::Error> for PortalPayerError {
 fn portal_field_of(code: &str) -> &'static str {
     match code {
         "payer_kind_invalid" => "payer_kind",
+        "payer_type_invalid" => "payer_type",
+        "payer_organisation_name_too_long" => "payer_organisation_name",
+        "payer_relationship_kind_invalid" => "payer_relationship_kind",
         "payer_date_of_birth_invalid" => "payer_date_of_birth",
         "payer_email_invalid" => "payer_email",
         "payer_country_invalid" => "payer_country",
@@ -1455,16 +1663,25 @@ fn portal_field_of(code: &str) -> &'static str {
 }
 
 impl Declaration {
-    /// The person named as payer: a different one has not been informed yet
-    /// and has another place of birth.
-    fn person_key(&self) -> Value {
-        json!([self.first_name, self.last_name, self.date_of_birth])
+    /// The person or organisation named as payer: a different one has not
+    /// been informed yet, has another place of birth, and the lead has not
+    /// agreed that GMED contacts it.
+    fn payer_key(&self) -> Value {
+        json!([
+            self.payer_type,
+            self.organisation_name,
+            self.first_name,
+            self.last_name,
+            self.date_of_birth,
+        ])
     }
 
     /// The part of the declaration the lead cabinet shows and edits.
     fn portal_json(&self) -> Value {
         json!({
             "payer_kind": self.payer_kind,
+            "payer_type": self.payer_type,
+            "organisation_name": self.organisation_name,
             "first_name": self.first_name,
             "last_name": self.last_name,
             "date_of_birth": self.date_of_birth.map(|date| date.format("%Y-%m-%d").to_string()),
@@ -1473,9 +1690,12 @@ impl Declaration {
             "city": self.city,
             "country": self.country,
             "citizenships": self.citizenships,
+            "relationship_kind": self.relationship_kind,
             "relationship": self.relationship,
             "email": self.email,
             "phone": self.phone,
+            // Like the other times of the request object.
+            "contact_consent_at": self.contact_consent_at,
             // `null` until somebody answered the question.
             "acts_on_own_account": self.own_account_answered.then_some(self.acts_on_own_account),
             "beneficial_owner": self
@@ -1507,23 +1727,44 @@ pub(crate) fn portal_payload(declaration: Option<&Declaration>) -> Value {
 }
 
 /// What the cabinet still needs before the request can be sent: the answer
-/// who pays and, for a third party, the name and the citizenships — the
-/// least the sanctions screening and the country policy work with. The rest
-/// of the identity is completed with staff.
+/// who pays and, for a third party, the least the sanctions screening and
+/// the country policy work with — the name and the citizenships of a person,
+/// the name and the seat country of an organisation —, the relationship to
+/// the patient and the consent that GMED contacts the payer. The rest of the
+/// identity is completed with staff.
 pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static str> {
     let Some(declaration) = declaration else {
         return vec!["payer_kind"];
     };
     let mut missing = Vec::new();
     if declaration.is_third_party() {
-        if blank(&declaration.first_name) {
-            missing.push("payer_first_name");
+        if declaration.is_organisation() {
+            if blank(&declaration.organisation_name) {
+                missing.push("payer_organisation_name");
+            }
+        } else {
+            if blank(&declaration.first_name) {
+                missing.push("payer_first_name");
+            }
+            if blank(&declaration.last_name) {
+                missing.push("payer_last_name");
+            }
+            if declaration.citizenships.is_empty() {
+                missing.push("payer_citizenships");
+            }
         }
-        if blank(&declaration.last_name) {
-            missing.push("payer_last_name");
+        match declaration.relationship_kind.as_deref() {
+            None => missing.push("payer_relationship_kind"),
+            Some(RELATIONSHIP_KIND_OTHER) if blank(&declaration.relationship) => {
+                missing.push("payer_relationship");
+            }
+            Some(_) => {}
         }
-        if declaration.citizenships.is_empty() {
-            missing.push("payer_citizenships");
+        if declaration.is_organisation() && declaration.country.is_none() {
+            missing.push("payer_country");
+        }
+        if declaration.contact_consent_at.is_none() {
+            missing.push("payer_contact_consent");
         }
     }
     missing
@@ -1552,8 +1793,12 @@ pub(crate) fn portal_marker_value(declaration: &Declaration) -> String {
 }
 
 /// Merges the cabinet's answer into the stored declaration. Staff fields are
-/// kept; the place of birth and the Art. 14 confirmation belong to the person
-/// named before and go when the cabinet names somebody else.
+/// kept; the place of birth, the Art. 14 confirmation and the consent to
+/// contact the payer belong to the payer named before and go when the cabinet
+/// names somebody else (another person, organisation or payer type).
+///
+/// Consent to contact the payer: `true` records it at `now` unless one is
+/// recorded for this payer, `false` removes it, no key keeps it.
 ///
 /// Own economic interest: without the answer in the body the stored answer
 /// and the named person stay. With it, the named person is what the cabinet
@@ -1563,6 +1808,7 @@ fn declaration_from_portal(
     previous: Option<&Declaration>,
     input: &PortalPayerInput,
     today: NaiveDate,
+    now: DateTime<Utc>,
 ) -> Result<Declaration, &'static str> {
     if input
         .beneficial_owner
@@ -1588,6 +1834,9 @@ fn declaration_from_portal(
             .and_then(|previous| previous.source_of_funds_description.clone()),
         source_of_funds_document_id: previous
             .and_then(|previous| previous.source_of_funds_document_id),
+        // The cabinet states the whole payer: nothing is taken over.
+        payer_type: Some(input.payer_type.clone()),
+        organisation_name: Some(input.organisation_name.clone()),
         first_name: input.first_name.clone(),
         last_name: input.last_name.clone(),
         date_of_birth: input.date_of_birth.clone(),
@@ -1597,12 +1846,13 @@ fn declaration_from_portal(
         city: input.city.clone(),
         country: input.country.clone(),
         citizenships: input.citizenships.clone(),
+        relationship_kind: Some(input.relationship_kind.clone()),
         relationship: input.relationship.clone(),
         email: input.email.clone(),
         phone: input.phone.clone(),
         payer_informed: false,
     };
-    let mut declaration = declaration_from_input(&staff, today)?;
+    let mut declaration = declaration_from_input(&staff, previous, today)?;
     declaration.own_account_answered = input.acts_on_own_account.is_some()
         || previous.is_some_and(|previous| previous.own_account_answered);
     if previous
@@ -1610,14 +1860,24 @@ fn declaration_from_portal(
     {
         declaration.beneficial_owner_note = None;
     }
-    if let Some(previous) = previous
-        && previous.is_third_party()
-        && declaration.is_third_party()
-        && previous.person_key() == declaration.person_key()
-    {
+    // What is recorded for the payer named before, if it is still the one.
+    let same_payer = previous.filter(|previous| {
+        previous.is_third_party()
+            && declaration.is_third_party()
+            && previous.payer_key() == declaration.payer_key()
+    });
+    if let Some(previous) = same_payer {
         declaration.place_of_birth = previous.place_of_birth.clone();
         declaration.payer_informed_at = previous.payer_informed_at;
         declaration.payer_informed_by = previous.payer_informed_by;
+    }
+    if declaration.is_third_party() {
+        let recorded = same_payer.and_then(|previous| previous.contact_consent_at);
+        declaration.contact_consent_at = match input.contact_consent {
+            Some(true) => Some(recorded.unwrap_or(now)),
+            Some(false) => None,
+            None => recorded,
+        };
     }
     Ok(declaration)
 }
@@ -1634,12 +1894,16 @@ pub(crate) async fn save_from_portal(
     today: NaiveDate,
 ) -> Result<Option<Declaration>, PortalPayerError> {
     let previous = load_declaration(conn, lead_id).await?;
-    let declaration = declaration_from_portal(previous.as_ref(), input, today).map_err(|code| {
-        PortalPayerError::Invalid {
-            code,
-            field: portal_field_of(code),
-        }
-    })?;
+    // The precision the database keeps, so the stored consent time is the
+    // one the "entered by the patient" marker was made from.
+    let now = Utc::now().trunc_subsecs(6);
+    let declaration =
+        declaration_from_portal(previous.as_ref(), input, today, now).map_err(|code| {
+            PortalPayerError::Invalid {
+                code,
+                field: portal_field_of(code),
+            }
+        })?;
     if previous.as_ref() == Some(&declaration) {
         return Ok(None);
     }
@@ -1699,7 +1963,7 @@ async fn sync_order_payers(
                     contact_name: Some(name),
                     contact_email: declaration.email.clone(),
                     contact_phone: declaration.phone.clone(),
-                    contact_relationship: declaration.relationship.clone(),
+                    contact_relationship: declaration.relationship_label(),
                     notes: previous.notes.clone(),
                     address_street: declaration.street.clone(),
                     address_zip: declaration.zip.clone(),
@@ -1793,6 +2057,9 @@ mod tests {
             source_of_funds: Some("employment".into()),
             source_of_funds_description: None,
             source_of_funds_document_id: None,
+            // Like the staff form of an older client: the keys are left out.
+            payer_type: None,
+            organisation_name: None,
             first_name: Some(" Erika ".into()),
             last_name: Some("Muster".into()),
             date_of_birth: Some("1970-05-01".into()),
@@ -1802,6 +2069,7 @@ mod tests {
             city: Some("Berlin".into()),
             country: Some("de".into()),
             citizenships: vec!["de".into(), "AT".into()],
+            relationship_kind: None,
             relationship: Some("Tochter".into()),
             email: Some("erika@example.org".into()),
             phone: None,
@@ -1813,15 +2081,33 @@ mod tests {
         NaiveDate::from_ymd_opt(2026, 10, 3).unwrap()
     }
 
+    fn now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-03T09:20:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    /// A first save: nothing stored.
+    fn from_input(input: &DeclarationInput) -> Result<Declaration, &'static str> {
+        declaration_from_input(input, None, today())
+    }
+
+    fn from_portal(
+        previous: Option<&Declaration>,
+        input: &PortalPayerInput,
+    ) -> Result<Declaration, &'static str> {
+        declaration_from_portal(previous, input, today(), now())
+    }
+
     #[test]
     fn self_payer_needs_only_the_source_of_funds() {
-        let declaration = declaration_from_input(&input("self"), today()).unwrap();
+        let declaration = from_input(&input("self")).unwrap();
         assert!(declaration.first_name.is_none(), "third-party data dropped");
         assert!(declaration.citizenships.is_empty());
         assert!(declaration.missing().is_empty());
         let mut missing = input("self");
         missing.source_of_funds = None;
-        let declaration = declaration_from_input(&missing, today()).unwrap();
+        let declaration = from_input(&missing).unwrap();
         assert_eq!(declaration.missing(), [PayerReason::SourceOfFundsMissing]);
     }
 
@@ -1829,20 +2115,15 @@ mod tests {
     fn other_source_of_funds_needs_a_description() {
         let mut value = input("self");
         value.source_of_funds = Some("other".into());
-        let declaration = declaration_from_input(&value, today()).unwrap();
+        let declaration = from_input(&value).unwrap();
         assert_eq!(declaration.missing(), [PayerReason::SourceOfFundsMissing]);
         value.source_of_funds_description = Some("Stipendium".into());
-        assert!(
-            declaration_from_input(&value, today())
-                .unwrap()
-                .missing()
-                .is_empty()
-        );
+        assert!(from_input(&value).unwrap().missing().is_empty());
     }
 
     #[test]
     fn third_party_payer_is_normalized_and_needs_identity() {
-        let declaration = declaration_from_input(&input("third_party"), today()).unwrap();
+        let declaration = from_input(&input("third_party")).unwrap();
         assert_eq!(declaration.first_name.as_deref(), Some("Erika"));
         assert_eq!(declaration.country.as_deref(), Some("DE"));
         assert_eq!(declaration.citizenships, ["DE", "AT"]);
@@ -1850,7 +2131,7 @@ mod tests {
         assert!(informed(declaration).missing().is_empty());
         let mut incomplete = input("third_party");
         incomplete.citizenships.clear();
-        let declaration = informed(declaration_from_input(&incomplete, today()).unwrap());
+        let declaration = informed(from_input(&incomplete).unwrap());
         assert_eq!(
             declaration.missing(),
             [PayerReason::PayerIdentityIncomplete]
@@ -1867,52 +2148,35 @@ mod tests {
     fn beneficial_owner_is_required_when_not_on_own_account() {
         let mut value = input("self");
         value.acts_on_own_account = false;
-        let declaration = declaration_from_input(&value, today()).unwrap();
+        let declaration = from_input(&value).unwrap();
         assert_eq!(declaration.missing(), [PayerReason::BeneficialOwnerMissing]);
         value.acts_on_own_account = true;
         value.beneficial_owner_name = Some("Someone".into());
-        let declaration = declaration_from_input(&value, today()).unwrap();
+        let declaration = from_input(&value).unwrap();
         assert!(declaration.beneficial_owner_name.is_none());
     }
 
     #[test]
     fn invalid_values_are_rejected() {
         let mut value = input("someone");
-        assert_eq!(
-            declaration_from_input(&value, today()),
-            Err("payer_kind_invalid")
-        );
+        assert_eq!(from_input(&value), Err("payer_kind_invalid"));
         value = input("third_party");
         value.source_of_funds = Some("lottery".into());
-        assert_eq!(
-            declaration_from_input(&value, today()),
-            Err("source_of_funds_invalid")
-        );
+        assert_eq!(from_input(&value), Err("source_of_funds_invalid"));
         value = input("third_party");
         value.country = Some("Germany".into());
-        assert_eq!(
-            declaration_from_input(&value, today()),
-            Err("payer_country_invalid")
-        );
+        assert_eq!(from_input(&value), Err("payer_country_invalid"));
         value = input("third_party");
         value.date_of_birth = Some("2030-01-01".into());
-        assert_eq!(
-            declaration_from_input(&value, today()),
-            Err("payer_date_of_birth_invalid")
-        );
+        assert_eq!(from_input(&value), Err("payer_date_of_birth_invalid"));
         value = input("third_party");
         value.email = Some("no-at-sign".into());
-        assert_eq!(
-            declaration_from_input(&value, today()),
-            Err("payer_email_invalid")
-        );
+        assert_eq!(from_input(&value), Err("payer_email_invalid"));
     }
 
     fn third_party_state(document: CostAssumptionDocument) -> PayerState {
         PayerState {
-            declaration: Some(informed(
-                declaration_from_input(&input("third_party"), today()).unwrap(),
-            )),
+            declaration: Some(informed(from_input(&input("third_party")).unwrap())),
             cost_assumption: document,
             lead_citizenships: vec!["UA".into()],
             ..PayerState::default()
@@ -1981,7 +2245,7 @@ mod tests {
     #[test]
     fn the_cabinet_answers_the_own_account_question() {
         // Who pays alone does not answer it.
-        let unanswered = declaration_from_portal(None, &portal("self"), today()).unwrap();
+        let unanswered = from_portal(None, &portal("self")).unwrap();
         assert!(!unanswered.own_account_answered);
         assert_eq!(
             portal_missing_own_account(Some(&unanswered)),
@@ -1994,7 +2258,7 @@ mod tests {
         let mut answer = portal("self");
         answer.acts_on_own_account = Some(false);
         answer.beneficial_owner = Some("  ".into());
-        let no = declaration_from_portal(Some(&unanswered), &answer, today()).unwrap();
+        let no = from_portal(Some(&unanswered), &answer).unwrap();
         assert!(no.own_account_answered);
         assert!(!no.acts_on_own_account);
         assert_eq!(
@@ -2002,7 +2266,7 @@ mod tests {
             ["payer_beneficial_owner"]
         );
         answer.beneficial_owner = Some(" Viktor Zahler, 06.05.1970, Wien ".into());
-        let named = declaration_from_portal(Some(&no), &answer, today()).unwrap();
+        let named = from_portal(Some(&no), &answer).unwrap();
         assert_eq!(
             named.beneficial_owner_name.as_deref(),
             Some("Viktor Zahler, 06.05.1970, Wien")
@@ -2018,14 +2282,14 @@ mod tests {
         // and staff's further details with them.
         let mut with_note = named.clone();
         with_note.beneficial_owner_note = Some("Onkel".into());
-        let kept = declaration_from_portal(Some(&with_note), &portal("self"), today()).unwrap();
+        let kept = from_portal(Some(&with_note), &portal("self")).unwrap();
         assert_eq!(kept, with_note);
 
         // "Yes" has nobody to name.
         let mut yes = portal("self");
         yes.acts_on_own_account = Some(true);
         yes.beneficial_owner = Some("Viktor Zahler".into());
-        let own = declaration_from_portal(Some(&with_note), &yes, today()).unwrap();
+        let own = from_portal(Some(&with_note), &yes).unwrap();
         assert!(own.acts_on_own_account && own.own_account_answered);
         assert_eq!(own.beneficial_owner_name, None);
         assert_eq!(own.beneficial_owner_note, None);
@@ -2035,23 +2299,323 @@ mod tests {
 
         // Another person named: the details of the previous one go.
         answer.beneficial_owner = Some("Erika Anders".into());
-        let other = declaration_from_portal(Some(&with_note), &answer, today()).unwrap();
+        let other = from_portal(Some(&with_note), &answer).unwrap();
         assert_eq!(other.beneficial_owner_name.as_deref(), Some("Erika Anders"));
         assert_eq!(other.beneficial_owner_note, None);
 
         answer.beneficial_owner = Some("x".repeat(LONG_TEXT_MAX + 1));
-        let error = declaration_from_portal(None, &answer, today()).unwrap_err();
+        let error = from_portal(None, &answer).unwrap_err();
         assert_eq!(portal_field_of(error), "payer_beneficial_owner");
     }
 
     #[test]
     fn identity_key_changes_only_with_the_payer() {
-        let declaration = declaration_from_input(&input("third_party"), today()).unwrap();
+        let declaration = from_input(&input("third_party")).unwrap();
         let mut other = declaration.clone();
         other.email = Some("new@example.org".into());
         other.source_of_funds = Some("savings".into());
         assert_eq!(declaration.identity_key(), other.identity_key());
         other.last_name = Some("Anders".into());
         assert_ne!(declaration.identity_key(), other.identity_key());
+
+        // The type and the name of an organisation name the payer as well.
+        let company = from_input(&organisation("company", "Beispiel GmbH")).unwrap();
+        let renamed = from_input(&organisation("company", "Beispiel Holding GmbH")).unwrap();
+        let insurer = from_input(&organisation("insurance", "Beispiel GmbH")).unwrap();
+        assert_ne!(company.identity_key(), renamed.identity_key());
+        assert_ne!(company.identity_key(), insurer.identity_key());
+        assert_ne!(company.identity_key(), declaration.identity_key());
+    }
+
+    fn organisation(payer_type: &str, name: &str) -> DeclarationInput {
+        DeclarationInput {
+            payer_type: Some(Some(payer_type.into())),
+            organisation_name: Some(Some(name.into())),
+            ..input("third_party")
+        }
+    }
+
+    #[test]
+    fn an_organisation_payer_has_a_name_and_a_seat_and_no_person_data() {
+        // The natural-person fields of the body are dropped, not even checked.
+        let mut value = organisation("company", " Beispiel GmbH ");
+        value.date_of_birth = Some("not a date".into());
+        value.place_of_birth = Some("Wien".into());
+        value.citizenships = vec!["XX".into()];
+        let declaration = from_input(&value).unwrap();
+        assert!(declaration.is_organisation());
+        assert_eq!(declaration.payer_type.as_deref(), Some("company"));
+        assert_eq!(
+            declaration.organisation_name.as_deref(),
+            Some("Beispiel GmbH")
+        );
+        assert_eq!(declaration.first_name, None);
+        assert_eq!(declaration.last_name, None);
+        assert_eq!(declaration.date_of_birth, None);
+        assert_eq!(declaration.place_of_birth, None);
+        assert!(declaration.citizenships.is_empty());
+        // The address stays: it is the seat, and its country counts for AML.
+        assert_eq!(declaration.street.as_deref(), Some("Hauptstr. 1"));
+        assert_eq!(declaration.country.as_deref(), Some("DE"));
+        assert_eq!(declaration.email.as_deref(), Some("erika@example.org"));
+        assert_eq!(declaration.payer_name().as_deref(), Some("Beispiel GmbH"));
+        assert_eq!(declaration.to_json()["organisation_name"], "Beispiel GmbH");
+        assert_eq!(declaration.missing(), [PayerReason::PayerNotInformed]);
+        assert!(informed(declaration).missing().is_empty());
+
+        // Staff completeness: the name and the whole seat.
+        let mut no_seat = organisation("insurance", "Beispiel Versicherung AG");
+        no_seat.city = None;
+        assert_eq!(
+            informed(from_input(&no_seat).unwrap()).missing(),
+            [PayerReason::PayerIdentityIncomplete]
+        );
+        let unnamed = informed(from_input(&organisation("organisation", " ")).unwrap());
+        assert_eq!(unnamed.payer_name(), None);
+        assert_eq!(unnamed.missing(), [PayerReason::PayerIdentityIncomplete]);
+
+        // A person again: the organisation name goes.
+        let person = from_input(&organisation("person", "Beispiel GmbH")).unwrap();
+        assert!(!person.is_organisation());
+        assert_eq!(person.organisation_name, None);
+        assert_eq!(person.payer_name().as_deref(), Some("Erika Muster"));
+
+        // A self-payer has nothing of a third party.
+        let mut own = organisation("company", "Beispiel GmbH");
+        own.payer_kind = PAYER_KIND_SELF.into();
+        own.relationship_kind = Some(Some("employer".into()));
+        let own = from_input(&own).unwrap();
+        assert_eq!(own.payer_type, None);
+        assert_eq!(own.organisation_name, None);
+        assert_eq!(own.relationship_kind, None);
+        assert_eq!(own.street, None);
+
+        assert_eq!(
+            from_input(&organisation("club", "Beispiel e. V.")),
+            Err("payer_type_invalid")
+        );
+        assert_eq!(
+            from_input(&organisation("company", &"x".repeat(SHORT_TEXT_MAX + 1))),
+            Err("payer_organisation_name_too_long")
+        );
+    }
+
+    #[test]
+    fn a_staff_save_keeps_what_its_body_leaves_out() {
+        let mut first = organisation("company", "Beispiel GmbH");
+        first.relationship_kind = Some(Some("employer".into()));
+        let stored = from_input(&first).unwrap();
+
+        // The staff form of an older client: none of the new keys.
+        let kept = declaration_from_input(&input("third_party"), Some(&stored), today()).unwrap();
+        assert_eq!(kept.payer_type.as_deref(), Some("company"));
+        assert_eq!(kept.organisation_name.as_deref(), Some("Beispiel GmbH"));
+        assert_eq!(kept.relationship_kind.as_deref(), Some("employer"));
+        assert_eq!(kept.first_name, None, "still an organisation");
+        assert_eq!(kept, stored);
+
+        // `null` clears: a third party without a type is a person.
+        let mut cleared = input("third_party");
+        cleared.payer_type = Some(None);
+        cleared.relationship_kind = Some(None);
+        let person = declaration_from_input(&cleared, Some(&stored), today()).unwrap();
+        assert_eq!(person.payer_type.as_deref(), Some(PAYER_TYPE_PERSON));
+        assert_eq!(person.organisation_name, None);
+        assert_eq!(person.relationship_kind, None);
+        assert_eq!(person.first_name.as_deref(), Some("Erika"));
+
+        // What a self-payer's row holds is nothing to take over.
+        let own = from_input(&input("self")).unwrap();
+        let named = declaration_from_input(&input("third_party"), Some(&own), today()).unwrap();
+        assert_eq!(named.payer_type.as_deref(), Some(PAYER_TYPE_PERSON));
+
+        // In the body: a key left out is not a key with `null`.
+        let body: DeclarationInput =
+            serde_json::from_value(json!({ "payer_kind": "third_party" })).unwrap();
+        assert!(body.payer_type.is_none());
+        assert!(body.organisation_name.is_none());
+        assert!(body.relationship_kind.is_none());
+        let body: DeclarationInput = serde_json::from_value(json!({
+            "payer_kind": "third_party",
+            "payer_type": null,
+            "organisation_name": "Beispiel GmbH",
+            "relationship_kind": "friend"
+        }))
+        .unwrap();
+        assert_eq!(body.payer_type, Some(None));
+        assert_eq!(body.organisation_name, Some(Some("Beispiel GmbH".into())));
+        assert_eq!(body.relationship_kind, Some(Some("friend".into())));
+        // The consent to contact the payer is the lead's: staff cannot set it.
+        assert!(
+            serde_json::from_value::<DeclarationInput>(json!({
+                "payer_kind": "third_party",
+                "contact_consent_at": "2026-10-03T09:20:00Z"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn the_relationship_is_a_kind_and_words_only_for_other() {
+        let mut value = input("third_party");
+        value.relationship_kind = Some(Some("parent".into()));
+        let declaration = from_input(&value).unwrap();
+        assert_eq!(declaration.relationship_kind.as_deref(), Some("parent"));
+        assert_eq!(
+            declaration.relationship, None,
+            "the words belong to `other`"
+        );
+        assert_eq!(
+            declaration.relationship_label().as_deref(),
+            Some("Elternteil")
+        );
+
+        value.relationship_kind = Some(Some("other".into()));
+        let declaration = from_input(&value).unwrap();
+        assert_eq!(declaration.relationship.as_deref(), Some("Tochter"));
+        assert_eq!(declaration.relationship_label().as_deref(), Some("Tochter"));
+
+        // Entered before the list existed: the words stay without a kind.
+        let earlier = from_input(&input("third_party")).unwrap();
+        assert_eq!(earlier.relationship_kind, None);
+        assert_eq!(earlier.relationship.as_deref(), Some("Tochter"));
+
+        value.relationship_kind = Some(Some("neighbour".into()));
+        assert_eq!(from_input(&value), Err("payer_relationship_kind_invalid"));
+    }
+
+    fn portal_person() -> PortalPayerInput {
+        PortalPayerInput {
+            first_name: Some("Viktor".into()),
+            last_name: Some("Zahler".into()),
+            citizenships: vec!["AT".into()],
+            ..portal("third_party")
+        }
+    }
+
+    #[test]
+    fn the_cabinet_names_a_person_or_an_organisation_and_what_is_missing() {
+        // Left out, the type is a person (older clients).
+        let person = from_portal(None, &portal_person()).unwrap();
+        assert_eq!(person.payer_type.as_deref(), Some(PAYER_TYPE_PERSON));
+        assert_eq!(
+            portal_missing(Some(&person)),
+            ["payer_relationship_kind", "payer_contact_consent"]
+        );
+
+        // "Other" asks for the words.
+        let mut answer = portal_person();
+        answer.relationship_kind = Some("other".into());
+        answer.contact_consent = Some(true);
+        let other = from_portal(Some(&person), &answer).unwrap();
+        assert_eq!(portal_missing(Some(&other)), ["payer_relationship"]);
+        answer.relationship = Some(" Nachbar ".into());
+        let complete = from_portal(Some(&other), &answer).unwrap();
+        assert_eq!(complete.relationship.as_deref(), Some("Nachbar"));
+        assert!(portal_missing(Some(&complete)).is_empty());
+
+        // A company pays: its name and seat country instead of the person,
+        // whose data are dropped even when the body still carries them.
+        let company = PortalPayerInput {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            ..portal_person()
+        };
+        let organisation = from_portal(Some(&complete), &company).unwrap();
+        assert!(organisation.is_organisation());
+        assert_eq!(organisation.first_name, None);
+        assert_eq!(organisation.last_name, None);
+        assert!(organisation.citizenships.is_empty());
+        assert_eq!(
+            portal_missing(Some(&organisation)),
+            [
+                "payer_relationship_kind",
+                "payer_country",
+                "payer_contact_consent"
+            ]
+        );
+        let shown = organisation.portal_json();
+        assert_eq!(shown["payer_type"], "company");
+        assert_eq!(shown["organisation_name"], "Beispiel GmbH");
+        assert!(shown["relationship_kind"].is_null());
+        assert!(shown["contact_consent_at"].is_null());
+
+        let unnamed = PortalPayerInput {
+            payer_type: Some("insurance".into()),
+            relationship_kind: Some("business_partner".into()),
+            country: Some("de".into()),
+            contact_consent: Some(true),
+            ..portal("third_party")
+        };
+        let insurer = from_portal(None, &unnamed).unwrap();
+        assert_eq!(portal_missing(Some(&insurer)), ["payer_organisation_name"]);
+        let shown = insurer.portal_json();
+        assert_eq!(shown["relationship_kind"], "business_partner");
+        assert_eq!(shown["contact_consent_at"], "2026-10-03T09:20:00Z");
+
+        // A refused value names its field.
+        for (refused, code, field) in [
+            (
+                PortalPayerInput {
+                    payer_type: Some("club".into()),
+                    ..portal("third_party")
+                },
+                "payer_type_invalid",
+                "payer_type",
+            ),
+            (
+                PortalPayerInput {
+                    payer_type: Some("company".into()),
+                    organisation_name: Some("x".repeat(SHORT_TEXT_MAX + 1)),
+                    ..portal("third_party")
+                },
+                "payer_organisation_name_too_long",
+                "payer_organisation_name",
+            ),
+            (
+                PortalPayerInput {
+                    relationship_kind: Some("neighbour".into()),
+                    ..portal("third_party")
+                },
+                "payer_relationship_kind_invalid",
+                "payer_relationship_kind",
+            ),
+        ] {
+            let error = from_portal(None, &refused).unwrap_err();
+            assert_eq!((error, portal_field_of(error)), (code, field));
+        }
+    }
+
+    #[test]
+    fn the_contact_consent_is_recorded_once_and_belongs_to_the_named_payer() {
+        let later = now() + chrono::Duration::hours(2);
+        let save = |previous: &Declaration, input: &PortalPayerInput| {
+            declaration_from_portal(Some(previous), input, today(), later).unwrap()
+        };
+        let mut answer = portal_person();
+        answer.contact_consent = Some(true);
+        let agreed = from_portal(None, &answer).unwrap();
+        assert_eq!(agreed.contact_consent_at, Some(now()));
+
+        // Recorded once: the same answer later keeps the first time, and so
+        // does a save that leaves the key out.
+        assert_eq!(save(&agreed, &answer), agreed);
+        answer.contact_consent = None;
+        answer.street = Some("Zahlweg 7".into());
+        assert_eq!(save(&agreed, &answer).contact_consent_at, Some(now()));
+
+        // Somebody else is named: the consent was not given for that payer.
+        answer.last_name = Some("Anders".into());
+        assert_eq!(save(&agreed, &answer).contact_consent_at, None);
+        answer.contact_consent = Some(true);
+        let other = save(&agreed, &answer);
+        assert_eq!(other.contact_consent_at, Some(later));
+
+        // `false` removes it; a self-payer has nobody to contact.
+        answer.contact_consent = Some(false);
+        assert_eq!(save(&other, &answer).contact_consent_at, None);
+        let mut own = portal("self");
+        own.contact_consent = Some(true);
+        assert_eq!(save(&agreed, &own).contact_consent_at, None);
     }
 }

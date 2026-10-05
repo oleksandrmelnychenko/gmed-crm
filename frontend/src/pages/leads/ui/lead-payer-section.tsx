@@ -35,12 +35,18 @@ import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 import {
   EMPTY_PAYER_DECLARATION_FORM,
+  PAYER_RELATIONSHIP_KINDS,
   PAYER_SECTION_ID,
+  PAYER_TYPES,
   SOURCE_OF_FUNDS,
+  isOrganisationPayerForm,
   payerDeclarationToForm,
   payerFormMissing,
   payerReasonLabel,
+  payerRelationshipKindLabel,
+  payerRelationshipTextShown,
   payerSignatureSequence,
+  payerTypeLabel,
   sourceOfFundsLabel,
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
@@ -107,6 +113,11 @@ function PayerCheckbox({
  * beneficial owner, the source of funds and the third-party payer's data. The
  * form is saved explicitly; the server records the declaration with an audit
  * row and makes a third party the payer of the lead's orders.
+ *
+ * A third party is a private person (personal identity, address,
+ * citizenships) or a company, an organisation or an insurer (name and seat).
+ * The lead's consent that GMED contacts the payer is shown, never edited:
+ * only the lead gives it in the cabinet.
  */
 export function LeadPayerDeclarationSection({
   leadId,
@@ -158,8 +169,14 @@ export function LeadPayerDeclarationSection({
 
   const readOnly = disabled || !canEdit || busy !== null;
   const thirdParty = form.kind === "third_party";
+  // An older server knows neither the payer type nor the relationship kind
+  // nor the lead's contact consent: the form then stays the one for a person.
+  const typed = form.payerTypeSupport !== "unsupported";
+  const organisation = isOrganisationPayerForm(form);
+  const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
   const missing = payerFormMissing(form);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
+  const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
 
   async function save() {
     if (!form.kind) {
@@ -211,6 +228,34 @@ export function LeadPayerDeclarationSection({
       setBusy(null);
     }
   }
+
+  // The address of a person, the seat of an organisation: same fields, placed
+  // differently in the form.
+  const addressFields = (
+    <>
+      <PayerField label={tx("Улица и дом", "Straße und Hausnummer")} required>
+        <Input className={inputClass} value={form.street} disabled={readOnly} onChange={(event) => patch("street", event.target.value)} />
+      </PayerField>
+      <PayerField label={tx("Почтовый индекс", "Postleitzahl")} required>
+        <Input className={inputClass} value={form.zip} disabled={readOnly} onChange={(event) => patch("zip", event.target.value)} />
+      </PayerField>
+      <PayerField label={tx("Город", "Ort")} required>
+        <Input className={inputClass} value={form.city} disabled={readOnly} onChange={(event) => patch("city", event.target.value)} />
+      </PayerField>
+      <PayerField label={organisation ? tx("Страна", "Land") : tx("Страна проживания", "Wohnsitzland")} required>
+        <CountrySelect
+          value={form.country}
+          lang={lang}
+          className={selectClass}
+          disabled={readOnly}
+          aria-label={organisation
+            ? tx("Страна юридического адреса плательщика", "Sitzland des Kostenübernehmers")
+            : tx("Страна проживания плательщика", "Wohnsitzland des Kostenübernehmers")}
+          onChange={(value) => patch("country", value ?? "")}
+        />
+      </PayerField>
+    </>
+  );
 
   return (
     <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
@@ -368,56 +413,97 @@ export function LeadPayerDeclarationSection({
               {tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
             </div>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <PayerField label={tx("Имя", "Vorname")} required>
-                <Input className={inputClass} value={form.firstName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("firstName", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Фамилия", "Nachname")} required>
-                <Input className={inputClass} value={form.lastName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("lastName", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Дата рождения", "Geburtsdatum")} required>
-                <Input className={inputClass} type="date" max={appDateKey()} value={form.birthDate} disabled={readOnly} onChange={(event) => patch("birthDate", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Место рождения", "Geburtsort")}>
-                <Input className={inputClass} value={form.placeOfBirth} disabled={readOnly} onChange={(event) => patch("placeOfBirth", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Улица и дом", "Straße und Hausnummer")} required>
-                <Input className={inputClass} value={form.street} disabled={readOnly} onChange={(event) => patch("street", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Почтовый индекс", "Postleitzahl")} required>
-                <Input className={inputClass} value={form.zip} disabled={readOnly} onChange={(event) => patch("zip", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Город", "Ort")} required>
-                <Input className={inputClass} value={form.city} disabled={readOnly} onChange={(event) => patch("city", event.target.value)} />
-              </PayerField>
-              <PayerField label={tx("Страна проживания", "Wohnsitzland")} required>
-                <CountrySelect
-                  value={form.country}
-                  lang={lang}
-                  className={selectClass}
-                  disabled={readOnly}
-                  aria-label={tx("Страна проживания плательщика", "Wohnsitzland des Kostenübernehmers")}
-                  onChange={(value) => patch("country", value ?? "")}
-                />
-              </PayerField>
-              <PayerField label={tx("Гражданство", "Staatsangehörigkeit")} required>
-                <CitizenshipMultiSelect
-                  value={form.citizenships}
-                  placeholder={tx("Гражданство", "Staatsangehörigkeit")}
-                  className={selectClass}
-                  disabled={readOnly}
-                  invalid={form.citizenships.length === 0 && dirty}
-                  onChange={(next) => patch("citizenships", next)}
-                />
-              </PayerField>
-              <PayerField label={tx("Кем приходится пациенту", "Beziehung zum Patienten")}>
-                <Input className={inputClass} value={form.relationship} disabled={readOnly} onChange={(event) => patch("relationship", event.target.value)} />
-              </PayerField>
+              {typed ? (
+                <PayerField label={tx("Тип плательщика", "Art des Zahlers")} required>
+                  <NativeComboboxSelect
+                    value={form.payerType}
+                    className={selectClass}
+                    disabled={readOnly}
+                    aria-label={tx("Тип плательщика", "Art des Zahlers")}
+                    onChange={(event) => {
+                      const next = PAYER_TYPES.find((value) => value === event.target.value);
+                      if (next) patch("payerType", next);
+                    }}
+                  >
+                    {PAYER_TYPES.map((value) => (
+                      <option key={value} value={value}>{payerTypeLabel(value, tx)}</option>
+                    ))}
+                  </NativeComboboxSelect>
+                </PayerField>
+              ) : null}
+              {organisation ? (
+                <PayerField label={tx("Название", "Name")} className="lg:col-span-2" required>
+                  <Input className={inputClass} value={form.organisationName} maxLength={200} disabled={readOnly} autoComplete="off" onChange={(event) => patch("organisationName", event.target.value)} />
+                </PayerField>
+              ) : (
+                <>
+                  <PayerField label={tx("Имя", "Vorname")} required>
+                    <Input className={inputClass} value={form.firstName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("firstName", event.target.value)} />
+                  </PayerField>
+                  <PayerField label={tx("Фамилия", "Nachname")} required>
+                    <Input className={inputClass} value={form.lastName} disabled={readOnly} autoComplete="off" onChange={(event) => patch("lastName", event.target.value)} />
+                  </PayerField>
+                  <PayerField label={tx("Дата рождения", "Geburtsdatum")} required>
+                    <Input className={inputClass} type="date" max={appDateKey()} value={form.birthDate} disabled={readOnly} onChange={(event) => patch("birthDate", event.target.value)} />
+                  </PayerField>
+                  <PayerField label={tx("Место рождения", "Geburtsort")}>
+                    <Input className={inputClass} value={form.placeOfBirth} disabled={readOnly} onChange={(event) => patch("placeOfBirth", event.target.value)} />
+                  </PayerField>
+                  {addressFields}
+                  <PayerField label={tx("Гражданство", "Staatsangehörigkeit")} required>
+                    <CitizenshipMultiSelect
+                      value={form.citizenships}
+                      placeholder={tx("Гражданство", "Staatsangehörigkeit")}
+                      className={selectClass}
+                      disabled={readOnly}
+                      invalid={form.citizenships.length === 0 && dirty}
+                      onChange={(next) => patch("citizenships", next)}
+                    />
+                  </PayerField>
+                </>
+              )}
+              {typed ? (
+                <PayerField label={tx("Кем приходится пациенту", "Beziehung zum Patienten")}>
+                  <NativeComboboxSelect
+                    value={form.relationshipKind}
+                    className={selectClass}
+                    disabled={readOnly}
+                    aria-label={tx("Кем приходится пациенту", "Beziehung zum Patienten")}
+                    onChange={(event) => patch(
+                      "relationshipKind",
+                      PAYER_RELATIONSHIP_KINDS.find((value) => value === event.target.value) ?? "",
+                    )}
+                  >
+                    <option value="">{tx("Выберите", "Auswählen")}</option>
+                    {PAYER_RELATIONSHIP_KINDS.map((value) => (
+                      <option key={value} value={value}>{payerRelationshipKindLabel(value, tx)}</option>
+                    ))}
+                  </NativeComboboxSelect>
+                </PayerField>
+              ) : null}
+              {relationshipTextShown ? (
+                <PayerField
+                  label={typed
+                    ? tx("Кем приходится — уточнение", "Beziehung – nähere Angabe")
+                    : tx("Кем приходится пациенту", "Beziehung zum Patienten")}
+                >
+                  <Input className={inputClass} value={form.relationship} disabled={readOnly} onChange={(event) => patch("relationship", event.target.value)} />
+                </PayerField>
+              ) : null}
               <PayerField label={tx("Электронная почта", "E-Mail")}>
                 <Input className={inputClass} type="email" value={form.email} disabled={readOnly} onChange={(event) => patch("email", event.target.value)} />
               </PayerField>
               <PayerField label={tx("Телефон", "Telefon")}>
                 <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} onChange={(event) => patch("phone", event.target.value)} />
               </PayerField>
+              {organisation ? (
+                <fieldset className="col-span-full min-w-0 space-y-3">
+                  <legend className="text-xs font-semibold text-foreground">
+                    {tx("Юридический адрес", "Sitz")}
+                  </legend>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{addressFields}</div>
+                </fieldset>
+              ) : null}
             </div>
             <div className="border-t border-border/70">
               <PayerCheckbox
@@ -434,6 +520,22 @@ export function LeadPayerDeclarationSection({
                 )}
               />
             </div>
+            {typed ? (
+              <p className="text-xs text-muted-foreground" data-testid="lead-payer-contact-consent">
+                {tx(
+                  "Согласие пациента на передачу контактов плательщику:",
+                  "Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:",
+                )}
+                {" "}
+                {contactConsentAt ? (
+                  <span className="font-mono text-foreground">{formatAppDateTime(contactConsentAt)}</span>
+                ) : (
+                  <span className="font-medium text-amber-700 dark:text-amber-300">
+                    {tx("ещё не дано", "noch nicht erteilt")}
+                  </span>
+                )}
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
               {tx(
                 "Плательщик подписывает согласие на оплату (Kostenübernahmeerklärung, присоединение к долгу). Документ создаётся на шаге «Договор и смета», когда заказ уже есть.",
@@ -448,7 +550,7 @@ export function LeadPayerDeclarationSection({
             {missing.map((code) => (
               <li key={code} className="flex items-start gap-1.5">
                 <Circle aria-hidden="true" className="mt-1 size-2 shrink-0" />
-                {payerReasonLabel(code, tx)}
+                {payerReasonLabel(code, tx, thirdParty ? form.payerType : null)}
               </li>
             ))}
           </ul>

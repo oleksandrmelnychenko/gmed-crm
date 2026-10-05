@@ -36,6 +36,9 @@ function leadRequest() {
     progress: { filled: 2, total: 12, missing_for_submit: [] as string[] },
     // Who pays; null until the question is answered.
     payer: null as Record<string, unknown> | null,
+    // A parent's own data for "I pay (as a parent)"; null without a linked trusted
+    // contact. A server that does not know the payer type yet does not send the key.
+    payer_self_template: null as Record<string, unknown> | null | undefined,
     // The lead's own statements for the GwG identification: always an object.
     identification: {
       salutation: null,
@@ -128,15 +131,34 @@ function recompute(request: ReturnType<typeof leadRequest>) {
     const value = data[field];
     return Array.isArray(value) ? value.length > 0 : Boolean(value);
   };
-  // Like the server: the answer, and for another person the name and the citizenships.
+  // Like the server: the answer, and for a third party who that is — a person
+  // with name and citizenships, or a company, organisation or insurer with its
+  // name and the country of its seat — the relationship to the patient and the
+  // consent to contact the payer. An older server knows only the person.
   const payer = request.payer;
+  const typed = payer != null && "payer_type" in payer;
+  const organisation = typed && payer.payer_type !== "person";
   const payerMissing = !payer
     ? ["payer_kind"]
     : payer.payer_kind === "third_party"
       ? [
-          ...(payer.first_name ? [] : ["payer_first_name"]),
-          ...(payer.last_name ? [] : ["payer_last_name"]),
-          ...(Array.isArray(payer.citizenships) && payer.citizenships.length > 0 ? [] : ["payer_citizenships"]),
+          ...(organisation
+            ? [
+                ...(payer.organisation_name ? [] : ["payer_organisation_name"]),
+                ...(payer.country ? [] : ["payer_country"]),
+              ]
+            : [
+                ...(payer.first_name ? [] : ["payer_first_name"]),
+                ...(payer.last_name ? [] : ["payer_last_name"]),
+                ...(Array.isArray(payer.citizenships) && payer.citizenships.length > 0 ? [] : ["payer_citizenships"]),
+              ]),
+          ...(typed
+            ? [
+                ...(payer.relationship_kind ? [] : ["payer_relationship_kind"]),
+                ...(payer.relationship_kind === "other" && !payer.relationship ? ["payer_relationship"] : []),
+                ...(payer.contact_consent_at ? [] : ["payer_contact_consent"]),
+              ]
+            : []),
         ]
       : [];
   const missing = [...SUBMIT_FIELDS.filter((field) => !filled(field)), ...payerMissing];
@@ -214,8 +236,29 @@ function completeRequest(request: ReturnType<typeof leadRequest>) {
     phone: null,
     acts_on_own_account: true,
     beneficial_owner: null,
+    payer_type: null,
+    organisation_name: null,
+    relationship_kind: null,
+    contact_consent_at: null,
   };
   request.consents.lead_inquiry_processing.given_at = "2026-10-03T09:15:00Z";
+}
+
+/** A complete request whose payer is another person; `payer` changes what is stored about that payer. */
+function completeRequestWithPayer(request: ReturnType<typeof leadRequest>, payer: Record<string, unknown> = {}) {
+  completeRequest(request);
+  request.payer = {
+    ...request.payer,
+    payer_kind: "third_party",
+    payer_type: "person",
+    first_name: "Viktor",
+    last_name: "Zahler",
+    citizenships: ["UA"],
+    relationship_kind: "parent",
+    contact_consent_at: "2026-10-03T09:16:00Z",
+    ...payer,
+  };
+  request.identification.payment_background = "Mein Vater unterstützt mich.";
 }
 
 /** Picks an option of one of the cabinet's selects (a searchable combobox). */
@@ -310,11 +353,19 @@ async function setup(
     if (path === "/me/lead-requests/lead-1/payer" && method === "POST") {
       const input = req.postDataJSON() as Record<string, unknown>;
       calls.payer.push(input);
+      // Like the older server: a key it does not know is refused.
+      if (
+        request.payer_self_template === undefined &&
+        ["payer_type", "organisation_name", "relationship_kind", "contact_consent"].some((key) => key in input)
+      ) {
+        return route.fulfill({ status: 422, json: { error: "Unprocessable", message: "Unknown field" } });
+      }
       // The own economic interest: left out, the stored answer stays; the
       // named person is kept for a "no" only.
       const ownAccount = "acts_on_own_account" in input ? input.acts_on_own_account : request.payer?.acts_on_own_account ?? null;
       // The answer replaces the block: what is not sent is empty.
-      request.payer = {
+      const { contact_consent: consent, ...answer } = input;
+      const stored: Record<string, unknown> = {
         first_name: null,
         last_name: null,
         date_of_birth: null,
@@ -326,10 +377,33 @@ async function setup(
         relationship: null,
         email: null,
         phone: null,
-        ...input,
+        ...answer,
         acts_on_own_account: ownAccount,
         beneficial_owner: ownAccount === false ? input.beneficial_owner || null : null,
       };
+      if (request.payer_self_template !== undefined) {
+        // A server that knows the payer type: a third party without one is a
+        // person; an organisation has a name and no data of a natural person;
+        // the relationship in words belongs to "other" (or to an older client
+        // that sends no kind); the consent is recorded with `true`, removed
+        // with `false` and kept when the key is left out.
+        const thirdParty = input.payer_kind === "third_party";
+        const type = thirdParty ? (input.payer_type ?? "person") : null;
+        const kind = thirdParty ? (input.relationship_kind ?? null) : null;
+        const consentBefore = thirdParty ? (request.payer?.contact_consent_at ?? null) : null;
+        Object.assign(stored, {
+          payer_type: type,
+          organisation_name: type && type !== "person" ? (input.organisation_name ?? null) : null,
+          relationship_kind: kind,
+          relationship: thirdParty && (kind === null || kind === "other") ? (input.relationship ?? null) : null,
+          contact_consent_at:
+            !thirdParty || consent === false ? null : consent === true ? (consentBefore ?? "2026-10-03T09:16:00Z") : consentBefore,
+        });
+        if (type && type !== "person") {
+          Object.assign(stored, { first_name: null, last_name: null, date_of_birth: null, citizenships: [] });
+        }
+      }
+      request.payer = stored;
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
@@ -606,50 +680,369 @@ test.describe("lead cabinet", () => {
 
     // Another person's fields exist only when another person pays.
     await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
-    await question.click();
-    await page.getByRole("option", { name: "Eine andere Person" }).click();
-    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party" });
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toHaveCount(0);
+    await choose(page, question, "Eine andere Person oder Organisation");
+    // A third party is a private person unless the patient says otherwise.
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toContainText("Privatperson");
+    await expect
+      .poll(() => calls.payer.at(-1))
+      .toEqual({ payer_kind: "third_party", payer_type: "person", contact_consent: false });
     await expect(payer).toContainText("Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.");
 
     // The send step says what the manager still needs about that person.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing).toContainText("Zahlende Person: Vorname");
-    await expect(missing).toContainText("Zahlende Person: Nachname");
-    await expect(missing).toContainText("Zahlende Person: Staatsangehörigkeit(en)");
-    await expect(missing).toContainText("Zahlende Person: Warum zahlt diese Person?");
+    await expect(missing).toContainText("Zahler: Vorname");
+    await expect(missing).toContainText("Zahler: Nachname");
+    await expect(missing).toContainText("Zahler: Staatsangehörigkeit(en)");
+    await expect(missing).toContainText("Zahler: Beziehung zur Patientin / zum Patienten");
+    await expect(missing).toContainText("Zahler: Warum zahlt diese Person?");
+    await expect(missing).toContainText("Zahler: Einverständnis zur Kontaktaufnahme");
 
     await page.locator('[data-step="data"]').click();
-    await expect(question).toContainText("Eine andere Person");
+    await expect(question).toContainText("Eine andere Person oder Organisation");
     await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
     await payer.getByRole("textbox", { name: "Nachname" }).fill(" Zahler ");
     await page.locator("#lead-request-payer_citizenships").click();
     await page.getByRole("option", { name: "Ukraine" }).first().click();
     await payer.getByRole("textbox", { name: "Ort", exact: true }).fill("München");
     // The block is saved as a whole, trimmed, without the empty fields.
-    await expect
-      .poll(() => calls.payer.at(-1))
-      .toEqual({ payer_kind: "third_party", first_name: "Viktor", last_name: "Zahler", city: "München", citizenships: ["UA"] });
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      city: "München",
+      citizenships: ["UA"],
+      contact_consent: false,
+    });
+    // The relationship is chosen from the list, and the payer may be contacted only with the consent.
+    await choose(page, payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Elternteil");
+    await payer.getByTestId("lead-request-payer-consent").getByRole("checkbox").check();
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ relationship_kind: "parent", contact_consent: true });
     // Why that person pays is one of the statements for the identification.
     await payer.getByRole("textbox", { name: "Warum zahlt diese Person?" }).fill("Mein Vater unterstützt mich.");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ payment_background: "Mein Vater unterstützt mich." });
     await page.locator('[data-step="send"]').click();
-    await expect(missing).not.toContainText("Zahlende Person");
+    await expect(missing).not.toContainText("Zahler:");
     // The summary names the person who pays.
     const paying = page.getByTestId("lead-request-summary-payer");
-    await expect(paying).toContainText("Eine andere Person");
+    await expect(paying).toContainText("Eine andere Person oder Organisation");
+    await expect(paying).toContainText("Privatperson");
     await expect(paying).toContainText("Viktor");
+    await expect(paying).toContainText("Elternteil");
     await expect(paying).toContainText("Mein Vater unterstützt mich.");
 
     // "I pay myself" sends only the answer, hides the other person again and
     // takes back why that person pays.
     await page.locator('[data-step="data"]').click();
-    await question.click();
-    await page.getByRole("option", { name: "Ich selbst" }).click();
+    await choose(page, question, "Ich selbst");
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
     await expect.poll(() => calls.identification.at(-1)).toEqual({ payment_background: "" });
     await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
     await expect(payer.getByRole("textbox", { name: "Warum zahlt diese Person?" })).toHaveCount(0);
+    await expect(payer.getByTestId("lead-request-payer-consent")).toHaveCount(0);
+    // What was typed about the person comes back with the answer; the consent is asked again.
+    await choose(page, question, "Eine andere Person oder Organisation");
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveValue("Zahler");
+    await expect(payer.getByTestId("lead-request-payer-consent").getByRole("checkbox")).not.toBeChecked();
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "third_party", last_name: "Zahler", contact_consent: false });
+  });
+
+  test("a company as payer is named by its name and its seat, not as a person", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const type = payer.getByRole("combobox", { name: "Wer ist der Zahler?" });
+    const missing = page.getByTestId("lead-request-missing");
+
+    await choose(page, payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Eine andere Person oder Organisation");
+    await payer.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
+    await payer.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Musterstraße 1");
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_type: "person", first_name: "Viktor" });
+
+    // A company has a name and a seat; the fields of a natural person are gone, with what was typed in them.
+    await choose(page, type, "Unternehmen");
+    await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveCount(0);
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveCount(0);
+    await expect(page.locator("#lead-request-payer_date_of_birth")).toHaveCount(0);
+    await expect(page.locator("#lead-request-payer_citizenships")).toHaveCount(0);
+    await expect(payer.getByRole("textbox", { name: "Name des Unternehmens" })).toBeVisible();
+    await expect(payer.getByRole("textbox", { name: "Sitz (Straße und Hausnummer)" })).toHaveValue("Musterstraße 1");
+    await expect(payer).not.toContainText("Bitte sagen Sie dieser Person");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "company",
+      street: "Musterstraße 1",
+      contact_consent: false,
+    });
+
+    // Without the name and the country of the seat the request cannot be sent.
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toContainText("Zahler: Name des Unternehmens");
+    await expect(missing).toContainText("Zahler: Land des Sitzes");
+    await expect(missing).toContainText("Zahler: Beziehung zur Patientin / zum Patienten");
+    await expect(missing).not.toContainText("Zahler: Vorname");
+    await expect(missing).not.toContainText("Zahler: Staatsangehörigkeit(en)");
+
+    await page.locator('[data-step="data"]').click();
+    await expect(type).toContainText("Unternehmen");
+    await payer.getByRole("textbox", { name: "Name des Unternehmens" }).fill(" Beispiel GmbH ");
+    await choose(page, payer.getByRole("combobox", { name: "Land des Sitzes" }), "Deutschland");
+    await choose(page, payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Arbeitgeber");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "company",
+      organisation_name: "Beispiel GmbH",
+      relationship_kind: "employer",
+      street: "Musterstraße 1",
+      country: "DE",
+      contact_consent: false,
+    });
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).not.toContainText("Name des Unternehmens");
+    await expect(missing).not.toContainText("Land des Sitzes");
+    const paying = page.getByTestId("lead-request-summary-payer");
+    await expect(paying).toContainText("Unternehmen");
+    await expect(paying).toContainText("Beispiel GmbH");
+    await expect(paying).toContainText("Arbeitgeber");
+    await expect(paying).toContainText("Sitz (Straße und Hausnummer)");
+    await expect(paying).not.toContainText("Vorname");
+
+    // An insurer is named the same way; a private person has no name of an organisation.
+    await page.locator('[data-step="data"]').click();
+    await choose(page, type, "Versicherung");
+    await expect(payer.getByRole("textbox", { name: "Name der Versicherung" })).toHaveValue("Beispiel GmbH");
+    await choose(page, type, "Privatperson");
+    await expect(payer.getByRole("textbox", { name: "Name der Versicherung" })).toHaveCount(0);
+    await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveValue("");
+    await expect(payer.getByRole("textbox", { name: "Straße und Hausnummer", exact: true })).toHaveValue("Musterstraße 1");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      relationship_kind: "employer",
+      street: "Musterstraße 1",
+      country: "DE",
+      contact_consent: false,
+    });
+  });
+
+  test("the relationship 'other' asks what it is", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const relationship = payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" });
+    const inWords = payer.getByRole("textbox", { name: "Bitte angeben" });
+    const missing = page.getByTestId("lead-request-missing");
+
+    await choose(page, payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Eine andere Person oder Organisation");
+    // The list of the owner's form, in its order.
+    await relationship.click();
+    await expect(page.getByRole("option")).toHaveText([
+      "Auswählen",
+      "Ehepartner/in",
+      "Elternteil",
+      "Kind",
+      "Sonstige/r Verwandte/r",
+      "Arbeitgeber",
+      "Freund/in",
+      "Geschäftspartner/in",
+      "Sonstige",
+    ]);
+    await expect(inWords).toHaveCount(0);
+    await page.getByRole("option", { name: "Sonstige", exact: true }).click();
+    await expect(inWords).toBeVisible();
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      relationship_kind: "other",
+      contact_consent: false,
+    });
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toContainText("Zahler: Beziehung zur Patientin / zum Patienten – Bitte angeben");
+
+    await page.locator('[data-step="data"]').click();
+    await expect(relationship).toContainText("Sonstige");
+    await inWords.fill("Nachbar");
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ relationship_kind: "other", relationship: "Nachbar" });
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).not.toContainText("Beziehung zur Patientin / zum Patienten");
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Nachbar");
+
+    // A relationship of the list needs no words: the text goes with the answer.
+    await page.locator('[data-step="data"]').click();
+    await choose(page, relationship, "Freund/in");
+    await expect(inWords).toHaveCount(0);
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      relationship_kind: "friend",
+      contact_consent: false,
+    });
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Freund/in");
+    await expect(page.getByTestId("lead-request-summary-payer")).not.toContainText("Nachbar");
+  });
+
+  test("the payer may be contacted only with the consent, and the request needs it", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => completeRequestWithPayer(request, { contact_consent_at: null }),
+    });
+    await page.goto("/");
+    const consent = page.getByTestId("lead-request-payer-consent");
+    const missing = page.getByTestId("lead-request-missing");
+    const send = page.getByTestId("lead-request-submit");
+    const declaration = page.getByTestId("lead-request-declaration").getByRole("checkbox");
+
+    await expect(consent).toContainText(
+      "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr meinen Namen mitteilt.",
+    );
+    await expect(consent).toContainText("Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.");
+    await expect(consent.getByRole("checkbox")).not.toBeChecked();
+
+    // Everything else is there: the consent alone keeps the request from being sent.
+    await page.locator('[data-step="send"]').click();
+    await expect(missing.getByRole("listitem")).toHaveText(["Zahler: Einverständnis zur Kontaktaufnahme"]);
+    await expect(page.getByTestId("lead-request-summary-payer")).not.toContainText("Einverständnis zur Kontaktaufnahme");
+    await declaration.check();
+    await expect(send).toBeDisabled();
+
+    await page.locator('[data-step="data"]').click();
+    await consent.getByRole("checkbox").check();
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      relationship_kind: "parent",
+      citizenships: ["UA"],
+      contact_consent: true,
+      acts_on_own_account: true,
+    });
+    await expect(consent).toContainText("Zugestimmt am 03.10.2026");
+
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toHaveCount(0);
+    const paying = page.getByTestId("lead-request-summary-payer");
+    await expect(paying).toContainText("Einverständnis zur Kontaktaufnahme");
+    await expect(paying).toContainText("Zugestimmt am 03.10.2026");
+    await declaration.check();
+    await send.click();
+    await expect(page.getByTestId("lead-request-sent")).toContainText("03.10.2026");
+
+    // Taken back, the consent is removed on the server and missing again.
+    await page.getByRole("button", { name: "Angaben ändern" }).click();
+    await expect(consent.getByRole("checkbox")).toBeChecked();
+    await consent.getByRole("checkbox").uncheck();
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ contact_consent: false });
+    await expect(consent).not.toContainText("Zugestimmt am");
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toContainText("Zahler: Einverständnis zur Kontaktaufnahme");
+    await expect(page.getByTestId("lead-request-changed")).toBeVisible();
+  });
+
+  test("a parent may answer 'I pay' and finds the own data filled in", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => {
+        request.access_kind = "guardian";
+        // The parent's login is linked to a trusted contact of the child's request.
+        request.payer_self_template = {
+          first_name: "Maria",
+          last_name: "Muster",
+          date_of_birth: "1985-04-12",
+          email: "maria.muster@example.com",
+          phone: "+49 30 7654321",
+        };
+      },
+    });
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const question = payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" });
+
+    await question.click();
+    await expect(page.getByRole("option")).toHaveText([
+      "Auswählen",
+      "Die Patientin / der Patient selbst",
+      "Ich zahle (als Elternteil)",
+      "Eine andere Person oder Organisation",
+    ]);
+    await page.getByRole("option", { name: "Ich zahle (als Elternteil)" }).click();
+
+    // The parent's own data are there and stay editable; who the payer is and
+    // how the payer is related to the patient is said by the answer.
+    await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveValue("Maria");
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
+    await expect(page.locator("#lead-request-payer_date_of_birth")).toHaveValue("12.04.1985");
+    await expect(payer.getByRole("textbox", { name: "Telefon" })).toHaveValue("+49 30 7654321");
+    await expect(payer.getByRole("textbox", { name: "E-Mail" })).toHaveValue("maria.muster@example.com");
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toHaveCount(0);
+    await expect(payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" })).toHaveCount(0);
+    await expect(payer).not.toContainText("Bitte sagen Sie dieser Person");
+    // The name passed on to a payer is the child's: the consent says so.
+    await expect(payer.getByTestId("lead-request-payer-consent")).toContainText("den Namen der Patientin / des Patienten");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Maria",
+      last_name: "Muster",
+      date_of_birth: "1985-04-12",
+      relationship_kind: "parent",
+      phone: "+49 30 7654321",
+      email: "maria.muster@example.com",
+      contact_consent: false,
+    });
+
+    await payer.getByRole("textbox", { name: "Telefon" }).fill("+49 30 1112223");
+    await page.locator("#lead-request-payer_citizenships").click();
+    await page.getByRole("option", { name: "Ukraine" }).first().click();
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ phone: "+49 30 1112223", citizenships: ["UA"] });
+    await expect(question).toContainText("Ich zahle (als Elternteil)");
+
+    // The answer is shown again after a reload, and in the summary.
+    await page.reload();
+    await expect(question).toContainText("Ich zahle (als Elternteil)");
+    await expect(payer.getByRole("textbox", { name: "Telefon" })).toHaveValue("+49 30 1112223");
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toHaveCount(0);
+    await page.locator('[data-step="send"]').click();
+    const paying = page.getByTestId("lead-request-summary-payer");
+    await expect(paying).toContainText("Ich zahle (als Elternteil)");
+    await expect(paying).toContainText("Maria");
+    await expect(paying).toContainText("Elternteil");
+
+    // Another person or organisation is somebody else: the parent's data do not stay.
+    await page.locator('[data-step="data"]').click();
+    await choose(page, question, "Eine andere Person oder Organisation");
+    await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveValue("");
+    await expect(payer.getByRole("textbox", { name: "Telefon" })).toHaveValue("");
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toContainText("Privatperson");
+    await expect(payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" })).toContainText("Auswählen");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party", payer_type: "person", contact_consent: false });
+  });
+
+  test("a server without the payer type asks for a person as before", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => {
+        // An older server sends neither the template nor the new keys of the payer, and refuses them.
+        request.payer_self_template = undefined;
+      },
+    });
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+
+    await choose(page, payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Eine andere Person oder Organisation");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party" });
+    await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toHaveCount(0);
+    await expect(payer.getByTestId("lead-request-payer-consent")).toHaveCount(0);
+    await payer.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
+    await payer.getByRole("textbox", { name: "Beziehung zur Patientin / zum Patienten" }).fill("Vater");
+    await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party", last_name: "Zahler", relationship: "Vater" });
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    await page.locator('[data-step="send"]').click();
+    const missing = page.getByTestId("lead-request-missing");
+    await expect(missing).toContainText("Zahler: Vorname");
+    await expect(missing).not.toContainText("Einverständnis zur Kontaktaufnahme");
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Vater");
+    await expect(page.getByTestId("lead-request-summary-payer")).not.toContainText("Privatperson");
   });
 
   test("the identity document is uploaded only after the request consent", async ({ page }) => {
@@ -853,6 +1246,14 @@ test.describe("lead cabinet", () => {
     await expect(
       page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?" }),
     ).toBeVisible();
+    // Without the parent's own data on file the two usual answers are offered.
+    await page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }).click();
+    await expect(page.getByRole("option")).toHaveText([
+      "Auswählen",
+      "Die Patientin / der Patient selbst",
+      "Eine andere Person oder Organisation",
+    ]);
+    await page.keyboard.press("Escape");
     await page.locator('[data-step="send"]').click();
     await expect(page.getByTestId("lead-request-summary-legal")).toContainText("Übt die Patientin / der Patient");
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Die Patientin / der Patient selbst");
@@ -866,6 +1267,7 @@ test.describe("lead cabinet", () => {
         const older = request as { identification?: unknown; identity_documents?: unknown };
         older.identification = undefined;
         older.identity_documents = undefined;
+        request.payer_self_template = undefined;
         request.payer = { payer_kind: "self" };
       },
     });
@@ -1058,6 +1460,67 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-legal-pep_related").getByRole("textbox")).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(1);
     expect(await widestOverhang(page, "lead-request-data")).toBeLessThanOrEqual(1);
+  });
+
+  test("the payer block fits a phone screen", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setup(page, "lead", {
+      prepare: (request) =>
+        completeRequestWithPayer(request, {
+          payer_type: "organisation",
+          organisation_name: "Gemeinnützige-Beispielstiftung-für-internationale-Patientenhilfe e. V.",
+          first_name: null,
+          last_name: null,
+          citizenships: [],
+          relationship_kind: "other",
+          relationship: "Stipendiengeberin-der-Patientin-seit-dem-Studium",
+          street: "Musterstraße 1",
+          country: "DE",
+          email: "kontakt@beispielstiftung.example.com",
+        }),
+    });
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const overflow = () =>
+      page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+    // An organisation with its long name, the relationship in words and the consent with its hint.
+    await expect(payer.getByRole("textbox", { name: "Name der Organisation" })).toBeVisible();
+    await expect(payer.getByRole("textbox", { name: "Bitte angeben" })).toBeVisible();
+    await expect(payer.getByTestId("lead-request-payer-consent")).toContainText("Zugestimmt am 03.10.2026");
+    expect(await overflow()).toBeLessThanOrEqual(1);
+    expect(await widestOverhang(page, "lead-request-data")).toBeLessThanOrEqual(1);
+    // The fields are stacked: each is as wide as the block, none is squeezed beside another.
+    const width = async (locator: Locator) => Math.round((await locator.boundingBox())?.width ?? 0);
+    const blockWidth = await width(payer);
+    for (const field of ["payer_organisation_name", "payer_relationship", "payer_street", "payer_zip", "payer_city", "payer_phone", "payer_email"]) {
+      expect(await width(page.locator(`#lead-request-${field}`)), field).toBe(blockWidth);
+    }
+    // The list of relationships opens inside the screen.
+    await payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }).click();
+    const optionEdge = await page
+      .getByRole("option", { name: "Sonstige/r Verwandte/r" })
+      .evaluate((node) => node.getBoundingClientRect().right);
+    expect(optionEdge).toBeLessThanOrEqual(390);
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("option")).toHaveCount(0);
+    expect(await overflow()).toBeLessThanOrEqual(1);
+
+    // A private person: more fields, the same width.
+    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Privatperson");
+    await expect(payer.getByRole("textbox", { name: "Nachname" })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(1);
+    expect(await widestOverhang(page, "lead-request-data")).toBeLessThanOrEqual(1);
+
+    // The summary wraps the long name and the long relationship.
+    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Organisation");
+    await payer.getByRole("textbox", { name: "Name der Organisation" }).fill("Gemeinnützige-Beispielstiftung-für-internationale-Patientenhilfe e. V.");
+    // Leaving the step saves the last entry.
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Gemeinnützige-Beispielstiftung");
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Stipendiengeberin");
+    expect(await overflow()).toBeLessThanOrEqual(1);
+    expect(await widestOverhang(page, "lead-request-send")).toBeLessThanOrEqual(1);
   });
 
   test("the summary of a complete request fits a phone screen", async ({ page }) => {

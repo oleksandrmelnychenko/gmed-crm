@@ -7342,7 +7342,8 @@ ${serviceCommentLines.join("\n")}`
                           ? tx("Обновить для пациента", "Für Patient/in aktualisieren")
                           : tx("Сформировать для пациента", "Für Patient/in erstellen")}
                       </Button>
-                      {payer.data?.declaration?.payer_kind === "third_party" ? (
+                      {payer.data?.declaration?.payer_kind === "third_party"
+                        && (payer.data.declaration.payer_type ?? "person") === "person" ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -7358,6 +7359,15 @@ ${serviceCommentLines.join("\n")}`
                             ? tx("Обновить для плательщика", "Für Kostenübernehmer aktualisieren")
                             : tx("Для плательщика", "Für Kostenübernehmer erstellen")}
                         </Button>
+                      ) : null}
+                      {payer.data?.declaration?.payer_kind === "third_party"
+                        && (payer.data.declaration.payer_type ?? "person") !== "person" ? (
+                        <span className="self-center text-xs text-muted-foreground" data-testid="gwg-identification-payer-organisation">
+                          {tx(
+                            "Для организации лист для физических лиц не формируется",
+                            "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
+                          )}
+                        </span>
                       ) : null}
                     </span>
                   )}

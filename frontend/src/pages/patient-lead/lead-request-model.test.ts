@@ -1,25 +1,33 @@
 import { describe, expect, it } from "vitest";
 
-import type { LeadRequest, LeadRequestIdentification } from "./lead-request-api";
+import type { LeadRequest, LeadRequestIdentification, LeadRequestPayer } from "./lead-request-api";
 import {
   canSubmit,
   changedSinceSubmit,
   combinedSaveState,
   consentText,
+  draftAnswer,
   draftFromIdentification,
   draftFromPayer,
   draftFromPersonalData,
   formatFileSize,
   identificationPatch,
+  knowsPayerType,
   missingForSubmit,
+  organisationPayerType,
+  payerAnswer,
   payerInput,
+  payerTypeOf,
   personalDataPatch,
   rejectedValue,
   stillRejectedIdentification,
   withContactChannel,
   withInsuranceAnswer,
   withLegalAnswer,
+  withPayerAnswer,
+  withPayerType,
   withRejectedIdentification,
+  withRelationshipKind,
 } from "./lead-request-model";
 
 const personal = {
@@ -204,6 +212,26 @@ describe("lead request identification autosave", () => {
   });
 });
 
+/** A third party as the server stores it once it is named: a person, nothing else stated yet. */
+const storedPayer: LeadRequestPayer = {
+  payer_kind: "third_party",
+  first_name: null,
+  last_name: null,
+  date_of_birth: null,
+  street: null,
+  zip: null,
+  city: null,
+  country: null,
+  citizenships: [],
+  relationship: null,
+  email: null,
+  phone: null,
+  payer_type: "person",
+  organisation_name: null,
+  relationship_kind: null,
+  contact_consent_at: null,
+};
+
 describe("lead request send step", () => {
   it("lists the missing fields in form order and needs the request consent", () => {
     expect(missingForSubmit(request())).toEqual(["date_of_birth", "street_address"]);
@@ -290,32 +318,276 @@ describe("lead request send step", () => {
       citizenships: ["UA", "DE"],
       city: " München  Ost ",
     };
-    // Trimmed, empty fields left out.
+    // Trimmed, empty fields left out. A third party not said to be anything else is a
+    // person, and the consent to contact the payer goes along, given or not.
     expect(payerInput(other)).toEqual({
       payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      city: "München Ost",
+      citizenships: ["UA", "DE"],
+      contact_consent: false,
+    });
+    // "I pay myself" carries no data of another person, whatever was typed before.
+    expect(payerInput({ ...other, payer_kind: "self", contact_consent: true })).toEqual({ payer_kind: "self" });
+    // What the server returned is the same answer again.
+    const stored = draftFromPayer({
+      ...storedPayer,
       first_name: "Viktor",
       last_name: "Zahler",
       city: "München Ost",
       citizenships: ["UA", "DE"],
     });
-    // "I pay myself" carries no data of another person, whatever was typed before.
-    expect(payerInput({ ...other, payer_kind: "self" })).toEqual({ payer_kind: "self" });
-    // What the server returned is the same answer again.
-    const stored = draftFromPayer({
+    expect(payerInput(stored)).toEqual(payerInput(other));
+  });
+
+  it("names a person with the relationship and the consent", () => {
+    const person = draftFromPayer({
+      ...storedPayer,
+      first_name: "Viktor",
+      last_name: "Zahler",
+      date_of_birth: "1960-02-03",
+      citizenships: ["UA"],
+      relationship_kind: "parent",
+      contact_consent_at: "2026-10-05T09:20:00Z",
+    });
+    expect(person).toMatchObject({ payer_type: "person", relationship_kind: "parent", contact_consent: true });
+    expect(payerInput(person)).toEqual({
       payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      date_of_birth: "1960-02-03",
+      citizenships: ["UA"],
+      relationship_kind: "parent",
+      contact_consent: true,
+    });
+    // A name of an organisation typed by mistake is not a person's.
+    expect(payerInput({ ...person, organisation_name: "Beispiel GmbH" })).toEqual(payerInput(person));
+    // The consent taken back is sent as such, so the server removes it.
+    expect(payerInput({ ...person, contact_consent: false })).toMatchObject({ contact_consent: false });
+
+    // "Other" says the relationship in words; any other kind carries no text.
+    const other = withRelationshipKind(person, "other");
+    expect(payerInput({ ...other, relationship: "  Nachbar " })).toMatchObject({
+      relationship_kind: "other",
+      relationship: "Nachbar",
+    });
+    expect(payerInput(other)).not.toHaveProperty("relationship");
+    const friend = withRelationshipKind({ ...other, relationship: "Nachbar" }, "friend");
+    expect(friend.relationship).toBe("");
+    expect(payerInput(friend)).toMatchObject({ relationship_kind: "friend" });
+    expect(payerInput(friend)).not.toHaveProperty("relationship");
+    // No kind chosen: nothing of the relationship is sent.
+    expect(payerInput(withRelationshipKind(friend, ""))).not.toHaveProperty("relationship_kind");
+
+    // A text stored before the list existed stays until a kind is chosen, and shows with "other".
+    const before = draftFromPayer({ ...storedPayer, relationship: "Vater" });
+    expect(payerInput(before)).toMatchObject({ relationship: "Vater" });
+    expect(payerInput(before)).not.toHaveProperty("relationship_kind");
+    expect(withRelationshipKind(before, "other").relationship).toBe("Vater");
+    expect(withRelationshipKind(before, "parent").relationship).toBe("");
+  });
+
+  it("names a company, organisation or insurer instead of a person", () => {
+    const person = {
+      ...draftFromPayer(null),
+      payer_kind: "third_party",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      date_of_birth: "1960-02-03",
+      citizenships: ["UA"],
+      relationship_kind: "employer",
+      street: "Musterstraße 1",
+      country: "DE",
+      email: "kontakt@example.com",
+      contact_consent: true,
+    };
+    // The data of a natural person go with the answer, as on the server; seat and contact stay.
+    // The consent was given for the person: for the company it is asked again.
+    const company = withPayerType(person, "company");
+    expect(company).toMatchObject({
+      payer_type: "company",
+      first_name: "",
+      last_name: "",
+      date_of_birth: "",
+      citizenships: [],
+      relationship_kind: "employer",
+      street: "Musterstraße 1",
+      country: "DE",
+      email: "kontakt@example.com",
+      contact_consent: false,
+    });
+    // The same answer again changes nothing; a third party not said to be anything else is a person.
+    expect(withPayerType(person, "person")).toBe(person);
+    expect(withPayerType(company, "company")).toBe(company);
+    expect(payerInput({ ...company, organisation_name: "  Beispiel   GmbH " })).toEqual({
+      payer_kind: "third_party",
+      payer_type: "company",
+      organisation_name: "Beispiel GmbH",
+      relationship_kind: "employer",
+      street: "Musterstraße 1",
+      country: "DE",
+      email: "kontakt@example.com",
+      contact_consent: false,
+    });
+    // An insurer is named the same way: the name stays.
+    const insurer = withPayerType({ ...company, organisation_name: "Beispiel Versicherung AG" }, "insurance");
+    expect(insurer.organisation_name).toBe("Beispiel Versicherung AG");
+    expect(payerInput(insurer)).toMatchObject({ payer_type: "insurance", organisation_name: "Beispiel Versicherung AG" });
+    // Back to a person: the name of the organisation goes.
+    const again = withPayerType(insurer, "person");
+    expect(again).toMatchObject({ payer_type: "person", organisation_name: "", first_name: "" });
+    expect(payerInput(again)).not.toHaveProperty("organisation_name");
+
+    // What the server stored for an organisation is the same answer again.
+    const stored = draftFromPayer({
+      ...storedPayer,
+      payer_type: "organisation",
+      organisation_name: "Beispiel Stiftung",
+      country: "CH",
+      relationship_kind: "other",
+      relationship: "Stipendium",
+      contact_consent_at: "2026-10-05T09:20:00Z",
+    });
+    expect(payerInput(stored)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "organisation",
+      organisation_name: "Beispiel Stiftung",
+      relationship_kind: "other",
+      relationship: "Stipendium",
+      country: "CH",
+      contact_consent: true,
+    });
+    expect(organisationPayerType("organisation")).toBe("organisation");
+    expect(organisationPayerType("person")).toBeNull();
+    expect(organisationPayerType(null)).toBeNull();
+    expect(payerTypeOf({ payer_type: undefined })).toBe("person");
+  });
+
+  it("fills a parent's own data in for 'I pay (as a parent)'", () => {
+    const template = {
+      first_name: "Maria",
+      last_name: "Muster",
+      date_of_birth: "1985-04-12",
+      email: "maria.muster@example.com",
+      phone: null,
+    };
+    const empty = draftFromPayer(null, template);
+    expect(draftAnswer(empty)).toBe("");
+    const parent = withPayerAnswer({ ...empty, acts_on_own_account: "yes" }, "guardian", template);
+    expect(draftAnswer(parent)).toBe("guardian");
+    // Stored as a third party: a person, the patient's parent. The consent is still to give.
+    expect(payerInput(parent)).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Maria",
+      last_name: "Muster",
+      date_of_birth: "1985-04-12",
+      relationship_kind: "parent",
+      email: "maria.muster@example.com",
+      contact_consent: false,
+      acts_on_own_account: true,
+    });
+    // The data stay editable, and the answer stays the parent's while the form is open.
+    const edited = { ...parent, phone: "+49 30 7654321", citizenships: ["UA"], contact_consent: true };
+    expect(draftAnswer(edited)).toBe("guardian");
+    expect(payerInput(edited)).toMatchObject({ phone: "+49 30 7654321", citizenships: ["UA"], contact_consent: true });
+
+    // "The patient" hides them; back at "I pay" they are there again, the consent is asked anew.
+    const self = withPayerAnswer(edited, "self", template);
+    expect(payerInput(self)).toEqual({ payer_kind: "self", acts_on_own_account: true });
+    expect(withPayerAnswer(self, "guardian", template)).toMatchObject({
+      payer_kind: "third_party",
+      guardian_pays: true,
+      phone: "+49 30 7654321",
+      citizenships: ["UA"],
+      contact_consent: false,
+    });
+    // Another person or organisation is somebody else: nothing of the parent stays.
+    for (const from of [edited, self]) {
+      const other = withPayerAnswer(from, "third_party", template);
+      expect(draftAnswer(other)).toBe("third_party");
+      expect(payerInput(other)).toEqual({
+        payer_kind: "third_party",
+        payer_type: "person",
+        contact_consent: false,
+        acts_on_own_account: true,
+      });
+    }
+    // And the parent's answer replaces what was typed about another person.
+    const viktor = { ...withPayerAnswer(empty, "third_party", template), first_name: "Viktor", street: "Musterstraße 1" };
+    expect(withPayerAnswer(viktor, "guardian", template)).toMatchObject({ first_name: "Maria", street: "", guardian_pays: true });
+
+    // The same answer again changes nothing; without the own data on file there is no third answer.
+    expect(withPayerAnswer(edited, "guardian", template)).toBe(edited);
+    expect(draftAnswer(withPayerAnswer(empty, "guardian", null))).toBe("third_party");
+    // What was typed about another person stays while "I pay myself" hides it; the consent does not.
+    const back = withPayerAnswer(withPayerAnswer({ ...viktor, contact_consent: true }, "self"), "third_party");
+    expect(back).toMatchObject({ first_name: "Viktor", street: "Musterstraße 1", contact_consent: false });
+  });
+
+  it("shows a stored payer as the first answer it was given as", () => {
+    const template = { first_name: "Maria", last_name: "Muster", date_of_birth: null, email: null, phone: null };
+    const parent = {
+      ...storedPayer,
+      first_name: "Maria",
+      last_name: " Muster ",
+      relationship_kind: "parent",
+    };
+    expect(payerAnswer(null, template)).toBe("");
+    expect(payerAnswer({ ...storedPayer, payer_kind: "self", payer_type: null }, template)).toBe("self");
+    // A person, the patient's parent, with the name of the parent's own data: "I pay (as a parent)".
+    expect(payerAnswer(parent, template)).toBe("guardian");
+    expect(draftFromPayer(parent, template).guardian_pays).toBe(true);
+    expect(draftAnswer(draftFromPayer(parent, template))).toBe("guardian");
+    // Anybody else is another person or organisation: another name, another relationship, a company.
+    expect(payerAnswer({ ...parent, first_name: "Viktor" }, template)).toBe("third_party");
+    expect(payerAnswer({ ...parent, last_name: "Zahler" }, template)).toBe("third_party");
+    expect(payerAnswer({ ...parent, relationship_kind: "relative" }, template)).toBe("third_party");
+    expect(payerAnswer({ ...parent, payer_type: "company" }, template)).toBe("third_party");
+    // Without the own data on file (not a parent's login, no trusted contact) there is no such answer.
+    expect(payerAnswer(parent, null)).toBe("third_party");
+    expect(payerAnswer(parent)).toBe("third_party");
+    expect(draftFromPayer(parent).guardian_pays).toBe(false);
+    // A name of one word is the last name; the first name is then empty on both sides.
+    const oneWord = { ...template, first_name: "" };
+    expect(payerAnswer({ ...parent, first_name: null }, oneWord)).toBe("guardian");
+  });
+
+  it("asks an older server for a person as before", () => {
+    const older = {
+      payer_kind: "third_party" as const,
       first_name: "Viktor",
       last_name: "Zahler",
       date_of_birth: null,
       street: null,
       zip: null,
-      city: "München Ost",
+      city: null,
       country: null,
-      citizenships: ["UA", "DE"],
-      relationship: null,
+      citizenships: ["UA"],
+      relationship: "Vater",
       email: null,
       phone: null,
+    };
+    // An answered question shows by its keys what the server knows.
+    expect(knowsPayerType({ payer: older })).toBe(false);
+    expect(knowsPayerType({ payer: { ...older, payer_type: "person" } })).toBe(true);
+    expect(knowsPayerType({ payer: { ...older, payer_kind: "self", payer_type: null } })).toBe(true);
+    // Before the answer, the key every such server sends does.
+    expect(knowsPayerType({ payer: null })).toBe(false);
+    expect(knowsPayerType({ payer: null, payer_self_template: null })).toBe(true);
+    // None of the new keys is sent: such a server refuses what it does not know.
+    const draft = { ...draftFromPayer(older), payer_type: "company", organisation_name: "Beispiel GmbH", contact_consent: true };
+    expect(payerInput(draft, false)).toEqual({
+      payer_kind: "third_party",
+      first_name: "Viktor",
+      last_name: "Zahler",
+      relationship: "Vater",
+      citizenships: ["UA"],
     });
-    expect(payerInput(stored)).toEqual(payerInput(other));
+    expect(payerInput(draftFromPayer(older), false)).toEqual(payerInput(draft, false));
   });
 
   it("lists missing payer fields after the personal data", () => {
@@ -323,6 +595,31 @@ describe("lead request send step", () => {
       progress: { filled: 3, total: 12, missing_for_submit: ["payer_last_name", "city", "payer_kind", "unknown"] },
     });
     expect(missing).toEqual(["city", "payer_kind", "payer_last_name"]);
+    // An organisation as payer, the relationship and the consent, in the order of the block.
+    const organisation = missingForSubmit({
+      progress: {
+        filled: 3,
+        total: 12,
+        missing_for_submit: [
+          "payer_own_account",
+          "payer_contact_consent",
+          "payment_background",
+          "payer_country",
+          "payer_relationship",
+          "payer_relationship_kind",
+          "payer_organisation_name",
+        ],
+      },
+    });
+    expect(organisation).toEqual([
+      "payer_organisation_name",
+      "payer_relationship_kind",
+      "payer_relationship",
+      "payer_country",
+      "payment_background",
+      "payer_contact_consent",
+      "payer_own_account",
+    ]);
   });
 
   it("sends the own economic interest with the answer who pays", () => {

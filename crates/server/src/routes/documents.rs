@@ -2710,7 +2710,9 @@ struct GwgIdentificationSheet {
 /// personal data, the lead's own statements from the cabinet (place of birth,
 /// identity document, the legal questions), the payer declaration and the AML
 /// answers of the wizard. A "yes" of the lead to the PEP or the high-risk
-/// country question counts like staff's own answer in section 5.
+/// country question counts like staff's own answer in section 5. A payer that
+/// is a company, an organisation or an insurer has no such sheet: 422
+/// `payer_is_not_a_natural_person`.
 async fn load_gwg_identification_sheet(
     state: &AppState,
     lead_id: Uuid,
@@ -2807,6 +2809,20 @@ async fn load_gwg_identification_sheet(
                 "The lead has no third-party payer",
             ));
         };
+        // The sheet is the form for natural persons. A company, an
+        // organisation or an insurer needs the form for legal entities, which
+        // is not generated here.
+        if payer.is_organisation() {
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "payer_is_not_a_natural_person",
+                    "code": "payer_is_not_a_natural_person",
+                    "message": "The payer is not a natural person: this identification sheet is for natural persons only",
+                })),
+            )
+                .into_response());
+        }
         sheet.role = "Kostenübernehmer (dritte Person)";
         sheet.first_name = payer.first_name.clone().unwrap_or_default();
         sheet.last_name = payer.last_name.clone().unwrap_or_default();

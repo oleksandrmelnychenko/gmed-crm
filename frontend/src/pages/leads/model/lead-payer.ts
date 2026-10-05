@@ -6,6 +6,9 @@
  * payer, identity, residence and citizenships. A third-party payer signs a
  * Kostenübernahmeerklärung (Schuldbeitritt); GMED countersigns the contract and
  * the order only after the client and the payer (server-side gate).
+ *
+ * A third-party payer is a private person or a company, an organisation or an
+ * insurer: those have a name and a seat instead of a personal identity.
  */
 import { ApiRequestError } from "@/lib/api";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
@@ -13,6 +16,25 @@ import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select"
 export type Tx = (ru: string, de: string) => string;
 
 export type PayerKind = "self" | "third_party";
+
+/** What a third-party payer is; every type but `person` is an organisation. */
+export const PAYER_TYPES = ["person", "company", "organisation", "insurance"] as const;
+
+export type PayerType = (typeof PAYER_TYPES)[number];
+
+/** How the payer is related to the patient; `other` is described in free text. */
+export const PAYER_RELATIONSHIP_KINDS = [
+  "spouse",
+  "parent",
+  "child",
+  "relative",
+  "employer",
+  "friend",
+  "business_partner",
+  "other",
+] as const;
+
+export type PayerRelationshipKind = (typeof PAYER_RELATIONSHIP_KINDS)[number];
 
 export const SOURCE_OF_FUNDS = [
   "employment",
@@ -49,6 +71,13 @@ export type PayerDeclaration = {
   phone: string | null;
   payer_informed_at: string | null;
   payer_informed_by: string | null;
+  /** Absent on an older server; a third party without a type is a person. */
+  payer_type?: PayerType | null;
+  /** Name of the company, organisation or insurer. */
+  organisation_name?: string | null;
+  relationship_kind?: PayerRelationshipKind | null;
+  /** When the lead agreed that GMED contacts the payer; only the lead gives it. */
+  contact_consent_at?: string | null;
   patient_id?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -146,7 +175,21 @@ export type PayerDeclarationForm = {
   email: string;
   phone: string;
   payerInformed: boolean;
+  /** Only meaningful for a third party; a person unless stated otherwise. */
+  payerType: PayerType;
+  /** Name of the company, organisation or insurer. */
+  organisationName: string;
+  relationshipKind: PayerRelationshipKind | "";
+  payerTypeSupport: PayerTypeSupport;
 };
+
+/**
+ * Whether the server stores the payer type, the organisation name and the
+ * relationship kind. A loaded declaration tells: it carries `payer_type` or,
+ * on an older server, does not — that server rejects the unknown keys, so
+ * they are neither offered nor sent. Without a declaration it is unknown.
+ */
+export type PayerTypeSupport = "supported" | "unsupported" | "unknown";
 
 export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   kind: "",
@@ -169,10 +212,57 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   email: "",
   phone: "",
   payerInformed: false,
+  payerType: "person",
+  organisationName: "",
+  relationshipKind: "",
+  payerTypeSupport: "unknown",
 };
 
 function isSourceOfFunds(value: string | null | undefined): value is SourceOfFunds {
   return (SOURCE_OF_FUNDS as readonly string[]).includes(value ?? "");
+}
+
+function isPayerType(value: unknown): value is PayerType {
+  return (PAYER_TYPES as readonly unknown[]).includes(value);
+}
+
+function isRelationshipKind(value: unknown): value is PayerRelationshipKind {
+  return (PAYER_RELATIONSHIP_KINDS as readonly unknown[]).includes(value);
+}
+
+/**
+ * What the third-party payer of a declaration is: `null` when the patient
+ * pays (or nothing is declared), a person when no type is stored.
+ */
+export function declaredPayerType(
+  declaration: Pick<PayerDeclaration, "payer_kind" | "payer_type"> | null | undefined,
+): PayerType | null {
+  if (declaration?.payer_kind !== "third_party") return null;
+  return isPayerType(declaration.payer_type) ? declaration.payer_type : "person";
+}
+
+/** Whether the form describes a company, an organisation or an insurer. */
+export function isOrganisationPayerForm(
+  form: Pick<PayerDeclarationForm, "kind" | "payerType" | "payerTypeSupport">,
+): boolean {
+  return form.kind === "third_party"
+    && form.payerTypeSupport !== "unsupported"
+    && form.payerType !== "person";
+}
+
+/**
+ * Whether the free-text relationship is asked beside the kind: for "other",
+ * and without a kind as long as there is a text — one staff typed before the
+ * kinds existed stays visible (also while it is being cleared).
+ */
+export function payerRelationshipTextShown(
+  form: Pick<PayerDeclarationForm, "relationship" | "relationshipKind" | "payerTypeSupport">,
+  declaration?: Pick<PayerDeclaration, "relationship" | "relationship_kind"> | null,
+): boolean {
+  if (form.payerTypeSupport === "unsupported" || form.relationshipKind === "other") return true;
+  if (form.relationshipKind !== "") return false;
+  const storedWithoutKind = !declaration?.relationship_kind && Boolean(declaration?.relationship?.trim());
+  return storedWithoutKind || form.relationship.trim() !== "";
 }
 
 /** The stored declaration as form values; an empty form when none exists. */
@@ -201,16 +291,52 @@ export function payerDeclarationToForm(
     email: declaration.email ?? "",
     phone: declaration.phone ?? "",
     payerInformed: Boolean(declaration.payer_informed_at),
+    payerType: declaredPayerType(declaration) ?? "person",
+    organisationName: declaration.organisation_name ?? "",
+    relationshipKind: isRelationshipKind(declaration.relationship_kind) ? declaration.relationship_kind : "",
+    payerTypeSupport: Object.hasOwn(declaration, "payer_type") ? "supported" : "unsupported",
   };
+}
+
+/** The keys of the save body an older server does not know. */
+export type PayerTypePayload = {
+  payer_type: PayerType | null;
+  organisation_name: string | null;
+  relationship_kind: PayerRelationshipKind | null;
+};
+
+/**
+ * Whether the save body carries the payer type keys: always for a server
+ * known to store them, never for an older one. Before the first save the
+ * server is unknown, so they go out only when staff stated something an
+ * older server could not keep (an organisation or a relationship kind).
+ */
+function sendsPayerType(form: PayerDeclarationForm): boolean {
+  if (form.payerTypeSupport !== "unknown") return form.payerTypeSupport === "supported";
+  return form.kind === "third_party" && (form.payerType !== "person" || form.relationshipKind !== "");
 }
 
 /**
  * Body of POST /leads/{id}/payer-declaration. Fields that do not apply are
- * sent empty; the server clears them as well (data minimization).
+ * sent empty; the server clears them as well (data minimization): no personal
+ * identity for an organisation, no free-text relationship beside a kind that
+ * says it all. The lead's contact consent is never part of it.
  */
 export function payerDeclarationPayload(form: PayerDeclarationForm) {
   const text = (value: string) => value.trim() || null;
   const thirdParty = form.kind === "third_party";
+  const organisation = isOrganisationPayerForm(form);
+  const person = thirdParty && !organisation;
+  const relationshipText = form.payerTypeSupport === "unsupported"
+    || form.relationshipKind === ""
+    || form.relationshipKind === "other";
+  const typed: Partial<PayerTypePayload> = sendsPayerType(form)
+    ? {
+        payer_type: thirdParty ? form.payerType : null,
+        organisation_name: organisation ? text(form.organisationName) : null,
+        relationship_kind: thirdParty ? form.relationshipKind || null : null,
+      }
+    : {};
   return {
     payer_kind: form.kind || "self",
     acts_on_own_account: form.actsOnOwnAccount,
@@ -219,20 +345,45 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
     source_of_funds: form.sourceOfFunds || null,
     source_of_funds_description: text(form.sourceOfFundsDescription),
     source_of_funds_document_id: form.sourceOfFundsDocumentId || null,
-    first_name: thirdParty ? text(form.firstName) : null,
-    last_name: thirdParty ? text(form.lastName) : null,
-    date_of_birth: thirdParty ? form.birthDate || null : null,
-    place_of_birth: thirdParty ? text(form.placeOfBirth) : null,
+    first_name: person ? text(form.firstName) : null,
+    last_name: person ? text(form.lastName) : null,
+    date_of_birth: person ? form.birthDate || null : null,
+    place_of_birth: person ? text(form.placeOfBirth) : null,
     street: thirdParty ? text(form.street) : null,
     zip: thirdParty ? text(form.zip) : null,
     city: thirdParty ? text(form.city) : null,
     country: thirdParty ? form.country || null : null,
-    citizenships: thirdParty ? normalizeCitizenships(form.citizenships) : [],
-    relationship: thirdParty ? text(form.relationship) : null,
+    citizenships: person ? normalizeCitizenships(form.citizenships) : [],
+    relationship: thirdParty && relationshipText ? text(form.relationship) : null,
     email: thirdParty ? text(form.email) : null,
     phone: thirdParty ? text(form.phone) : null,
     payer_informed: thirdParty && form.payerInformed,
+    ...typed,
   };
+}
+
+export function payerTypeLabel(value: PayerType, tx: Tx) {
+  const labels: Record<PayerType, string> = {
+    person: tx("Частное лицо", "Privatperson"),
+    company: tx("Компания", "Unternehmen"),
+    organisation: tx("Организация", "Organisation"),
+    insurance: tx("Страховая", "Versicherung"),
+  };
+  return labels[value];
+}
+
+export function payerRelationshipKindLabel(value: PayerRelationshipKind, tx: Tx) {
+  const labels: Record<PayerRelationshipKind, string> = {
+    spouse: tx("Супруг / супруга", "Ehepartner/in"),
+    parent: tx("Родитель", "Elternteil"),
+    child: tx("Сын / дочь", "Kind"),
+    relative: tx("Другой родственник", "Andere/r Verwandte/r"),
+    employer: tx("Работодатель", "Arbeitgeber"),
+    friend: tx("Друг / подруга", "Freund/in"),
+    business_partner: tx("Деловой партнёр", "Geschäftspartner/in"),
+    other: tx("Другое (уточните)", "Sonstiges (bitte angeben)"),
+  };
+  return labels[value];
 }
 
 export function sourceOfFundsLabel(value: SourceOfFunds, tx: Tx) {
@@ -247,13 +398,40 @@ export function sourceOfFundsLabel(value: SourceOfFunds, tx: Tx) {
   return labels[value];
 }
 
-/** Localized text for a payer reason code of the server. */
-export function payerReasonLabel(code: string, tx: Tx) {
+/**
+ * What "the payer's details are incomplete" asks for: the personal identity
+ * of a person, the name and the seat of an organisation. Where the payer type
+ * is not at hand (readiness list, signature gate) the text names both.
+ */
+function payerIdentityIncompleteLabel(tx: Tx, payerType?: PayerType | null) {
+  if (payerType === "person") {
+    return tx(
+      "Заполните данные плательщика: имя, дату рождения, адрес, гражданство",
+      "Angaben zum Kostenübernehmer ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit",
+    );
+  }
+  if (payerType) {
+    return tx(
+      "Заполните данные плательщика: название и юридический адрес",
+      "Angaben zum Kostenübernehmer ergänzen: Name und Sitz (Anschrift)",
+    );
+  }
+  return tx(
+    "Заполните данные плательщика: имя, дату рождения, адрес, гражданство (для организации — название и юридический адрес)",
+    "Angaben zum Kostenübernehmer ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit (bei Organisationen: Name und Sitz)",
+  );
+}
+
+/**
+ * Localized text for a payer reason code of the server. With the payer type
+ * the incomplete identity is worded for that type.
+ */
+export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | null) {
   const labels: Record<string, string> = {
     payer_declaration_missing: tx("Заполните раздел «Кто платит»", "Angaben „Wer zahlt“ ausfüllen"),
     payer_beneficial_owner_missing: tx("Укажите, в чьих интересах действует клиент", "Wirtschaftlich Berechtigten angeben"),
     payer_source_of_funds_missing: tx("Укажите источник средств", "Herkunft der Mittel angeben"),
-    payer_identity_incomplete: tx("Заполните данные плательщика: имя, дату рождения, адрес, гражданство", "Angaben zum Kostenübernehmer ergänzen: Name, Geburtsdatum, Anschrift, Staatsangehörigkeit"),
+    payer_identity_incomplete: payerIdentityIncompleteLabel(tx, payerType),
     payer_not_informed: tx("Подтвердите, что плательщик проинформирован об обработке его данных", "Bestätigen, dass der Kostenübernehmer über die Verarbeitung seiner Daten informiert wurde"),
     cost_assumption_missing: tx("Создайте согласие плательщика (Kostenübernahmeerklärung)", "Kostenübernahmeerklärung erstellen"),
     cost_assumption_outdated: tx("Плательщик изменён — создайте новое согласие плательщика", "Kostenübernehmer geändert – neue Kostenübernahmeerklärung erstellen"),
@@ -364,8 +542,17 @@ export function payerFormMissing(form: PayerDeclarationForm): string[] {
     missing.push("payer_source_of_funds_missing");
   }
   if (form.kind === "third_party") {
-    const identity = [form.firstName, form.lastName, form.birthDate, form.street, form.zip, form.city, form.country];
-    if (identity.some((value) => !value.trim()) || form.citizenships.length === 0) {
+    // A person is identified personally, an organisation by its name; both
+    // need the address (for an organisation the seat).
+    const organisation = isOrganisationPayerForm(form);
+    const identity = organisation
+      ? [form.organisationName]
+      : [form.firstName, form.lastName, form.birthDate];
+    const address = [form.street, form.zip, form.city, form.country];
+    if (
+      [...identity, ...address].some((value) => !value.trim())
+      || (!organisation && form.citizenships.length === 0)
+    ) {
       missing.push("payer_identity_incomplete");
     }
     if (!form.payerInformed) missing.push("payer_not_informed");

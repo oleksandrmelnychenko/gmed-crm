@@ -7,6 +7,8 @@ import type {
   LeadRequestPayer,
   LeadRequestPayerInput,
   LeadRequestPersonalData,
+  PayerSelfTemplate,
+  PayerType,
   PersonalDataPatch,
 } from "./lead-request-api";
 
@@ -133,14 +135,50 @@ export function rejectedValue(field: string, draft: PersonalDraft): RejectedValu
   return { field: field as PersonalField, value: normalized(field as PersonalField, draft) };
 }
 
+/** What a third-party payer can be, in the order of the form. */
+export const PAYER_TYPES = ["person", "company", "organisation", "insurance"] as const satisfies readonly PayerType[];
+
+/** A payer that is not a natural person. */
+export type OrganisationPayerType = Exclude<PayerType, "person">;
+
+/** How the payer is related to the patient, in the order of the form; `other` asks for a text. */
+export const RELATIONSHIP_KINDS = [
+  "spouse",
+  "parent",
+  "child",
+  "relative",
+  "employer",
+  "friend",
+  "business_partner",
+  "other",
+] as const;
+
+export type RelationshipKind = (typeof RELATIONSHIP_KINDS)[number];
+
+/**
+ * The first answer of the block as the form offers it. A parent's login with
+ * its own data on file gets the third answer "I pay (as a parent)", which is
+ * stored as a third party: a person, the patient's parent.
+ */
+export type PayerAnswer = "" | "self" | "guardian" | "third_party";
+
 /** The "who pays" block as the patient types it. */
 export type PayerDraft = {
   /** "self", "third_party" or "" (not answered yet). */
   payer_kind: string;
+  /** A parent's answer "I pay": the payer named below is the parent, not another person. */
+  guardian_pays: boolean;
+  /** "person", "company", "organisation" or "insurance"; "" counts as a person, as on the server. */
+  payer_type: string;
+  /** Name of the company, organisation or insurer. */
+  organisation_name: string;
   first_name: string;
   last_name: string;
   date_of_birth: string;
   citizenships: string[];
+  /** One of `RELATIONSHIP_KINDS` or "" (not chosen yet). */
+  relationship_kind: string;
+  /** The relationship in words; asked with the kind "other". */
   relationship: string;
   street: string;
   zip: string;
@@ -148,6 +186,8 @@ export type PayerDraft = {
   country: string;
   phone: string;
   email: string;
+  /** The lead agrees that GMED contacts the payer and tells them the lead's name. */
+  contact_consent: boolean;
   /** Own economic interest: "yes", "no" or "" (not answered yet). */
   acts_on_own_account: string;
   /** In whose interest the patient acts; asked with the answer "no". */
@@ -157,10 +197,13 @@ export type PayerDraft = {
 /** Keys of the payer block in `progress.missing_for_submit` and in field errors. */
 export type PayerField =
   | "payer_kind"
+  | "payer_type"
+  | "payer_organisation_name"
   | "payer_first_name"
   | "payer_last_name"
   | "payer_date_of_birth"
   | "payer_citizenships"
+  | "payer_relationship_kind"
   | "payer_relationship"
   | "payer_street"
   | "payer_zip"
@@ -168,15 +211,19 @@ export type PayerField =
   | "payer_country"
   | "payer_phone"
   | "payer_email"
+  | "payer_contact_consent"
   | "payer_own_account"
   | "payer_beneficial_owner";
 
 export const PAYER_FIELDS: PayerField[] = [
   "payer_kind",
+  "payer_type",
+  "payer_organisation_name",
   "payer_first_name",
   "payer_last_name",
   "payer_date_of_birth",
   "payer_citizenships",
+  "payer_relationship_kind",
   "payer_relationship",
   "payer_street",
   "payer_zip",
@@ -184,6 +231,7 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_country",
   "payer_phone",
   "payer_email",
+  "payer_contact_consent",
   "payer_own_account",
   "payer_beneficial_owner",
 ];
@@ -197,13 +245,73 @@ function booleanFromAnswer(answer: string): boolean | null {
   return answer === "yes" ? true : answer === "no" ? false : null;
 }
 
-export function draftFromPayer(payer: LeadRequestPayer | null | undefined): PayerDraft {
+/** A one-line text as it is sent and compared: trimmed, runs of spaces as one. */
+function oneLine(value: string | null | undefined): string {
+  return (value ?? "").trim().replace(/\s+/g, " ");
+}
+
+/**
+ * Whether the server knows the payer type, the relationship list and the
+ * consent to contact the payer. An answered question shows it by its keys;
+ * before that, the template key does, which every such server sends. An older
+ * server refuses keys it does not know, so the cabinet then asks as before.
+ */
+export function knowsPayerType(request: Pick<LeadRequest, "payer" | "payer_self_template">): boolean {
+  return request.payer ? request.payer.payer_type !== undefined : request.payer_self_template !== undefined;
+}
+
+/** The kind of organisation that pays; `null` for a natural person, also while the type is not stated. */
+export function organisationPayerType(type: string | null | undefined): OrganisationPayerType | null {
+  return type === "company" || type === "organisation" || type === "insurance" ? type : null;
+}
+
+/** The payer type of a third party: not stated counts as a person, as on the server. */
+export function payerTypeOf(payer: { payer_type?: string | null }): PayerType {
+  return organisationPayerType(payer.payer_type) ?? "person";
+}
+
+/**
+ * Which first answer a stored payer is shown as. "I pay (as a parent)" is not
+ * stored as such: it is a person, the patient's parent, with the name of the
+ * parent's own data (`template`). Anybody else is "another person or
+ * organisation", also the parent after the name was changed.
+ */
+export function payerAnswer(
+  payer: LeadRequestPayer | null | undefined,
+  template: PayerSelfTemplate | null | undefined = null,
+): PayerAnswer {
+  if (!payer) return "";
+  if (payer.payer_kind !== "third_party") return "self";
+  const parent =
+    Boolean(template) &&
+    payerTypeOf(payer) === "person" &&
+    payer.relationship_kind === "parent" &&
+    oneLine(payer.first_name) === oneLine(template?.first_name) &&
+    oneLine(payer.last_name) === oneLine(template?.last_name);
+  return parent ? "guardian" : "third_party";
+}
+
+/** The first answer as chosen in the form. */
+export function draftAnswer(draft: Pick<PayerDraft, "payer_kind" | "guardian_pays">): PayerAnswer {
+  if (draft.payer_kind === "third_party") return draft.guardian_pays ? "guardian" : "third_party";
+  return draft.payer_kind === "self" ? "self" : "";
+}
+
+/** `template`: the own data of a parent's login, for the answer "I pay (as a parent)". */
+export function draftFromPayer(
+  payer: LeadRequestPayer | null | undefined,
+  template: PayerSelfTemplate | null | undefined = null,
+): PayerDraft {
   return {
     payer_kind: payer?.payer_kind ?? "",
+    guardian_pays: payerAnswer(payer, template) === "guardian",
+    payer_type: payer?.payer_type ?? "",
+    organisation_name: payer?.organisation_name ?? "",
     first_name: payer?.first_name ?? "",
     last_name: payer?.last_name ?? "",
     date_of_birth: payer?.date_of_birth ?? "",
     citizenships: [...(payer?.citizenships ?? [])],
+    relationship_kind: payer?.relationship_kind ?? "",
     relationship: payer?.relationship ?? "",
     street: payer?.street ?? "",
     zip: payer?.zip ?? "",
@@ -211,28 +319,135 @@ export function draftFromPayer(payer: LeadRequestPayer | null | undefined): Paye
     country: payer?.country ?? "",
     phone: payer?.phone ?? "",
     email: payer?.email ?? "",
+    contact_consent: Boolean(payer?.contact_consent_at),
     acts_on_own_account: answerFromBoolean(payer?.acts_on_own_account),
     beneficial_owner: payer?.beneficial_owner ?? "",
   };
 }
 
+/** Nobody named: what the block holds about a third party, empty. */
+function withoutPayerParty(draft: PayerDraft): PayerDraft {
+  return {
+    ...draft,
+    guardian_pays: false,
+    payer_type: "",
+    organisation_name: "",
+    first_name: "",
+    last_name: "",
+    date_of_birth: "",
+    citizenships: [],
+    relationship_kind: "",
+    relationship: "",
+    street: "",
+    zip: "",
+    city: "",
+    country: "",
+    phone: "",
+    email: "",
+  };
+}
+
+/**
+ * The draft after the first answer. Another answer names another payer, so
+ * the consent to contact the payer is asked again. "I pay (as a parent)"
+ * fills the parent's own data in, which stay editable; "another person or
+ * organisation" does not keep them. What was typed about another person
+ * stays while "I pay myself" hides it, as before.
+ */
+export function withPayerAnswer(
+  draft: PayerDraft,
+  answer: string,
+  template: PayerSelfTemplate | null | undefined = null,
+): PayerDraft {
+  if (answer === draftAnswer(draft)) return draft;
+  const next: PayerDraft = { ...draft, contact_consent: false };
+  if (answer === "guardian" && template) {
+    // Back from another answer the parent's own entries are still there.
+    if (draft.guardian_pays) return { ...next, payer_kind: "third_party" };
+    return {
+      ...withoutPayerParty(next),
+      payer_kind: "third_party",
+      guardian_pays: true,
+      payer_type: "person",
+      first_name: template.first_name ?? "",
+      last_name: template.last_name ?? "",
+      date_of_birth: template.date_of_birth ?? "",
+      relationship_kind: "parent",
+      phone: template.phone ?? "",
+      email: template.email ?? "",
+    };
+  }
+  if (answer === "third_party" || answer === "guardian") {
+    return draft.guardian_pays
+      ? { ...withoutPayerParty(next), payer_kind: "third_party" }
+      : { ...next, payer_kind: "third_party" };
+  }
+  return { ...next, payer_kind: answer === "self" ? "self" : "" };
+}
+
+/**
+ * The draft after "who is the payer?". A company, organisation or insurer has
+ * a name and no data of a natural person, and the other way round: what does
+ * not apply goes, and so does the consent, which was given for the payer
+ * named before (the server does the same).
+ */
+export function withPayerType(draft: PayerDraft, type: string): PayerDraft {
+  if (type === payerTypeOf(draft)) return draft;
+  const next: PayerDraft = { ...draft, payer_type: type, contact_consent: false };
+  if (organisationPayerType(type)) {
+    return { ...next, first_name: "", last_name: "", date_of_birth: "", citizenships: [] };
+  }
+  return { ...next, organisation_name: "" };
+}
+
+/** The draft after the relationship was chosen: the text belongs to "other" only. */
+export function withRelationshipKind(draft: PayerDraft, kind: string): PayerDraft {
+  return { ...draft, relationship_kind: kind, relationship: kind === "other" ? draft.relationship : "" };
+}
+
 /**
  * What is sent for the payer block: nothing until the question is answered,
  * only the answer for "I pay myself" (the server drops another person's data),
- * and for a third party every filled value. The own economic interest goes
- * with either answer once it is stated; "no" always carries the named person
- * (also empty, so a removed text is removed on the server).
+ * and for a third party every filled value: the name of an organisation or
+ * the data of a person, never both. The consent to contact the payer always
+ * goes with a third party, given or not. The own economic interest goes with
+ * either answer once it is stated; "no" always carries the named person (also
+ * empty, so a removed text is removed on the server).
+ *
+ * `typed` is false for a server that does not know the payer type yet (see
+ * `knowsPayerType`): it gets the answer of before, a person with the
+ * relationship in words.
  */
-export function payerInput(draft: PayerDraft): LeadRequestPayerInput | null {
+export function payerInput(draft: PayerDraft, typed = true): LeadRequestPayerInput | null {
   if (draft.payer_kind !== "self" && draft.payer_kind !== "third_party") return null;
   const input: LeadRequestPayerInput = { payer_kind: draft.payer_kind };
   if (draft.payer_kind === "third_party") {
-    const texts = ["first_name", "last_name", "date_of_birth", "relationship", "street", "zip", "city", "country", "phone", "email"] as const;
-    for (const field of texts) {
-      const value = draft[field].trim().replace(/\s+/g, " ");
+    const type = typed ? payerTypeOf(draft) : "person";
+    const put = (
+      field: "organisation_name" | "first_name" | "last_name" | "date_of_birth" | "relationship" | "street" | "zip" | "city" | "country" | "phone" | "email",
+    ) => {
+      const value = oneLine(draft[field]);
       if (value) input[field] = value;
+    };
+    if (typed) input.payer_type = type;
+    if (type === "person") {
+      put("first_name");
+      put("last_name");
+      put("date_of_birth");
+    } else {
+      put("organisation_name");
     }
-    if (draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
+    if (typed && draft.relationship_kind) input.relationship_kind = draft.relationship_kind;
+    // In words for "other"; a text stored before the list existed stays until a kind is chosen.
+    if (!typed || !draft.relationship_kind || draft.relationship_kind === "other") put("relationship");
+    put("street");
+    put("zip");
+    put("city");
+    put("country");
+    put("phone");
+    put("email");
+    if (type === "person" && draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
+    if (typed) input.contact_consent = draft.contact_consent;
   }
   if (draft.acts_on_own_account === "yes") {
     input.acts_on_own_account = true;
@@ -468,10 +683,13 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "insurance_covers_germany",
   // Who pays
   "payer_kind",
+  "payer_type",
+  "payer_organisation_name",
   "payer_first_name",
   "payer_last_name",
   "payer_date_of_birth",
   "payer_citizenships",
+  "payer_relationship_kind",
   "payer_relationship",
   "payer_street",
   "payer_zip",
@@ -480,6 +698,7 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "payer_phone",
   "payer_email",
   "payment_background",
+  "payer_contact_consent",
   "payer_own_account",
   "payer_beneficial_owner",
   // Legal questions

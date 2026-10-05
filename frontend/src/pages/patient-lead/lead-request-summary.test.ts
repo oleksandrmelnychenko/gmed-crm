@@ -54,11 +54,15 @@ function request(overrides: Partial<LeadRequest> = {}): LeadRequest {
       city: "München",
       country: "DE",
       citizenships: ["UA"],
-      relationship: "Vater",
+      relationship: null,
       email: null,
       phone: null,
       acts_on_own_account: false,
       beneficial_owner: "Viktor Zahler, 03.02.1960, Kyiv",
+      payer_type: "person",
+      organisation_name: null,
+      relationship_kind: "parent",
+      contact_consent_at: "2026-10-05T09:25:00Z",
     },
     identification: {
       salutation: "ms",
@@ -162,15 +166,17 @@ describe("lead request summary", () => {
       "Deckt Behandlung in Deutschland": "Weiß ich nicht",
     });
     expect(rows(groups, "payer")).toEqual({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person",
+      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      "Wer ist der Zahler?": "Privatperson",
       Vorname: "Viktor",
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
       "Staatsangehörigkeit(en)": "Ukraine",
-      "Beziehung zur Patientin / zum Patienten": "Vater",
+      "Beziehung zur Patientin / zum Patienten": "Elternteil",
       Ort: "München",
       Wohnsitzland: "Deutschland",
       "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
+      "Einverständnis zur Kontaktaufnahme": "Zugestimmt am 05.10.2026 11:25",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
     });
@@ -228,10 +234,116 @@ describe("lead request summary", () => {
     });
   });
 
+  it("names a company, organisation or insurer by its name and its seat", () => {
+    const company = request({
+      payer: {
+        ...request().payer!,
+        payer_type: "company",
+        organisation_name: "Beispiel GmbH",
+        // What the server has dropped for an organisation.
+        first_name: null,
+        last_name: null,
+        date_of_birth: null,
+        citizenships: [],
+        street: "Musterstraße 1",
+        relationship_kind: "employer",
+        contact_consent_at: null,
+        acts_on_own_account: true,
+        beneficial_owner: null,
+      },
+    });
+    expect(rows(requestSummary(company, de, "de"), "payer")).toEqual({
+      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      "Wer ist der Zahler?": "Unternehmen",
+      "Name des Unternehmens": "Beispiel GmbH",
+      "Beziehung zur Patientin / zum Patienten": "Arbeitgeber",
+      "Sitz (Straße und Hausnummer)": "Musterstraße 1",
+      Ort: "München",
+      "Land des Sitzes": "Deutschland",
+      "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
+      // The consent not given yet is left to the missing list.
+      "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Ja",
+    });
+    const insurer = request({
+      payer: { ...company.payer!, payer_type: "insurance", relationship_kind: "other", relationship: " Auslandskrankenversicherung " },
+    });
+    expect(rows(requestSummary(insurer, leadRequestText("en"), "en"), "payer")).toMatchObject({
+      "Who is the payer?": "Insurer",
+      "Name of the insurer": "Beispiel GmbH",
+      // "Other" is shown in the person's own words.
+      "Relationship to the patient": "Auslandskrankenversicherung",
+      "Country of the registered office": "Germany",
+    });
+    // "Other" without the words yet, and a text stored before the list existed.
+    const other = request({ payer: { ...request().payer!, relationship_kind: "other", relationship: null } });
+    expect(rows(requestSummary(other, de, "de"), "payer")["Beziehung zur Patientin / zum Patienten"]).toBe("Sonstige");
+    const before = request({ payer: { ...request().payer!, relationship_kind: null, relationship: "Vater" } });
+    expect(rows(requestSummary(before, de, "de"), "payer")["Beziehung zur Patientin / zum Patienten"]).toBe("Vater");
+  });
+
+  it("shows a parent's own answer 'I pay' as it was given", () => {
+    const parent = request({
+      access_kind: "guardian",
+      payer_self_template: { first_name: "Maria", last_name: "Muster", date_of_birth: null, email: null, phone: null },
+      payer: { ...request().payer!, first_name: "Maria", last_name: "Muster" },
+    });
+    expect(rows(requestSummary(parent, de, "de"), "payer")).toMatchObject({
+      "Wer übernimmt die Kosten der Behandlung?": "Ich zahle (als Elternteil)",
+      "Wer ist der Zahler?": "Privatperson",
+      Vorname: "Maria",
+      "Beziehung zur Patientin / zum Patienten": "Elternteil",
+    });
+    // Another name is another person; so is the same name in a request of one's own.
+    const other = request({ ...parent, payer: { ...parent.payer!, first_name: "Viktor" } });
+    expect(rows(requestSummary(other, de, "de"), "payer")["Wer übernimmt die Kosten der Behandlung?"]).toBe(
+      "Eine andere Person oder Organisation",
+    );
+    expect(
+      rows(requestSummary(request({ ...parent, access_kind: "self" }), de, "de"), "payer")[
+        "Wer übernimmt die Kosten der Behandlung?"
+      ],
+    ).toBe("Eine andere Person oder Organisation");
+  });
+
+  it("shows a payer of a server without the payer type as before", () => {
+    // Only the keys such a server sends: the relationship is a text, there is no type and no consent.
+    const older = request({
+      payer: {
+        payer_kind: "third_party",
+        first_name: "Viktor",
+        last_name: "Zahler",
+        date_of_birth: "1960-02-03",
+        street: null,
+        zip: null,
+        city: "München",
+        country: "DE",
+        citizenships: ["UA"],
+        relationship: "Vater",
+        email: null,
+        phone: null,
+        acts_on_own_account: false,
+        beneficial_owner: "Viktor Zahler, 03.02.1960, Kyiv",
+      },
+    });
+    expect(rows(requestSummary(older, de, "de"), "payer")).toEqual({
+      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      Vorname: "Viktor",
+      Nachname: "Zahler",
+      Geburtsdatum: "03.02.1960",
+      "Staatsangehörigkeit(en)": "Ukraine",
+      "Beziehung zur Patientin / zum Patienten": "Vater",
+      Ort: "München",
+      Wohnsitzland: "Deutschland",
+      "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
+      "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
+      "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
+    });
+  });
+
   it("speaks of the patient when a parent fills in the request of a child", () => {
     const groups = requestSummary(request({ access_kind: "guardian" }), de, "de");
     expect(rows(groups, "payer")).toMatchObject({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person (zum Beispiel ein Elternteil)",
+      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
       "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?": "Nein",
     });
     expect(Object.keys(rows(groups, "legal"))).toContain(de.identificationFieldsGuardian.pep_self);

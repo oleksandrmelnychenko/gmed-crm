@@ -109,7 +109,7 @@ export function SendStep({
             <p className="font-medium">{text.missingTitle}</p>
             <ul className="mt-1 list-inside list-disc">
               {missing.map((field) => (
-                <li key={field}>{submitFieldLabel(text, field, guardian)}</li>
+                <li key={field}>{submitFieldLabel(text, field, guardian, request.payer?.payer_type)}</li>
               ))}
               {!inquiryConsent ? <li>{text.inquiryConsentMissing}</li> : null}
             </ul>

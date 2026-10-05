@@ -1,8 +1,17 @@
 import { countryLabel } from "@/components/ui/country-select";
-import { formatAppDate } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest } from "./lead-request-api";
-import { LEGAL_DETAILS, LEGAL_QUESTIONS, answerFromBoolean, languageName } from "./lead-request-model";
+import {
+  LEGAL_DETAILS,
+  LEGAL_QUESTIONS,
+  answerFromBoolean,
+  languageName,
+  organisationPayerType,
+  payerAnswer,
+  payerTypeOf,
+  type PayerField,
+} from "./lead-request-model";
 import { identificationFieldLabel, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /** One statement in the summary; a row without a label is an entry of a list (a file). */
@@ -111,24 +120,44 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
 
   if (payer !== undefined) {
     const thirdParty = payer?.payer_kind === "third_party" ? payer : null;
+    // A parent's own answer "I pay" is stored as a third party; it is shown as it was given.
+    const answer = payerAnswer(payer, guardian ? request.payer_self_template : null);
+    const payerLabel = (field: PayerField) => payerFieldLabel(text, field, guardian, thirdParty?.payer_type);
+    const thirdPartyRows = (party: NonNullable<typeof thirdParty>): Array<[string, string | null | undefined]> => {
+      // A company, organisation or insurer has a name; a person has an identity.
+      const named: Array<[string, string | null | undefined]> = organisationPayerType(party.payer_type)
+        ? [[payerLabel("payer_organisation_name"), party.organisation_name]]
+        : [
+            [payerLabel("payer_first_name"), party.first_name],
+            [payerLabel("payer_last_name"), party.last_name],
+            [payerLabel("payer_date_of_birth"), formatAppDate(party.date_of_birth)],
+            [payerLabel("payer_citizenships"), countries(party.citizenships)],
+          ];
+      // In words for "other" and for a text stored before the list existed.
+      const kind = option(text.payerRelationshipOptions, party.relationship_kind);
+      const relationship =
+        party.relationship_kind && party.relationship_kind !== "other" ? kind : party.relationship?.trim() || kind;
+      return [
+        // An older server does not know the type; it is then not shown.
+        [payerLabel("payer_type"), party.payer_type === undefined ? "" : text.payerTypeOptions[payerTypeOf(party)]],
+        ...named,
+        [payerLabel("payer_relationship"), relationship],
+        [payerLabel("payer_street"), party.street],
+        [payerLabel("payer_zip"), party.zip],
+        [payerLabel("payer_city"), party.city],
+        [payerLabel("payer_country"), country(party.country)],
+        [payerLabel("payer_phone"), party.phone],
+        [payerLabel("payer_email"), party.email],
+        [identificationLabel("payment_background"), identification?.payment_background],
+        [
+          text.payerConsentShort,
+          party.contact_consent_at ? text.consentGivenAt(formatAppDateTime(party.contact_consent_at)) : "",
+        ],
+      ];
+    };
     group("payer", text.sectionPayer, [
-      [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, payer?.payer_kind)],
-      ...(thirdParty
-        ? ([
-            [payerFieldLabel(text, "payer_first_name"), thirdParty.first_name],
-            [payerFieldLabel(text, "payer_last_name"), thirdParty.last_name],
-            [payerFieldLabel(text, "payer_date_of_birth"), formatAppDate(thirdParty.date_of_birth)],
-            [payerFieldLabel(text, "payer_citizenships"), countries(thirdParty.citizenships)],
-            [payerFieldLabel(text, "payer_relationship"), thirdParty.relationship],
-            [payerFieldLabel(text, "payer_street"), thirdParty.street],
-            [payerFieldLabel(text, "payer_zip"), thirdParty.zip],
-            [payerFieldLabel(text, "payer_city"), thirdParty.city],
-            [payerFieldLabel(text, "payer_country"), country(thirdParty.country)],
-            [payerFieldLabel(text, "payer_phone"), thirdParty.phone],
-            [payerFieldLabel(text, "payer_email"), thirdParty.email],
-            [identificationLabel("payment_background"), identification?.payment_background],
-          ] satisfies Array<[string, string | null | undefined]>)
-        : []),
+      [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer)],
+      ...(thirdParty ? thirdPartyRows(thirdParty) : []),
       [payerFieldLabel(text, "payer_own_account", guardian), yesNo(payer?.acts_on_own_account)],
       [
         payerFieldLabel(text, "payer_beneficial_owner", guardian),

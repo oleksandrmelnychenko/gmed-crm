@@ -5,8 +5,13 @@ import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
-import { inputClass, selectClass, textareaClass } from "@/components/record-workspace/primitives/design-tokens";
-import { appDateKey } from "@/lib/app-time-zone";
+import {
+  checkboxClass,
+  inputClass,
+  selectClass,
+  textareaClass,
+} from "@/components/record-workspace/primitives/design-tokens";
+import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import { saveLeadPayer, type LeadRequest } from "./lead-request-api";
@@ -17,21 +22,39 @@ import {
 } from "./lead-request-identification";
 import {
   PAYER_FIELDS,
+  PAYER_TYPES,
+  RELATIONSHIP_KINDS,
+  draftAnswer,
   draftFromPayer,
+  knowsPayerType,
   payerInput,
+  payerTypeOf,
+  withPayerAnswer,
+  withPayerType,
+  withRelationshipKind,
   type PayerDraft,
   type PayerField,
   type SaveState,
 } from "./lead-request-model";
-import { LabeledField, YesNoSelect, errorBody, useAutosave, type RequestQueue } from "./lead-request-parts";
+import {
+  LabeledField,
+  RequiredMark,
+  YesNoSelect,
+  errorBody,
+  useAutosave,
+  type RequestQueue,
+} from "./lead-request-parts";
 import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
- * "Who pays" (owner request 2026-10-05): the patient, or another person who
- * is then named. The answer is saved as a whole; the server keeps it in the
- * lead's payer declaration, where the sanctions screening picks it up. With
- * the GwG statements (`identification`) the block also asks for the own
- * economic interest and, for another person, why that person pays.
+ * "Who pays" (owner request 2026-10-05; owner spec "Patientenformular",
+ * sections 5 and 6): the patient, or a third party that is then named — a
+ * person, or a company, organisation or insurer — with the relationship to
+ * the patient and the consent that GMED may contact that payer. The answer is
+ * saved as a whole; the server keeps it in the lead's payer declaration, where
+ * the sanctions screening picks it up. With the GwG statements
+ * (`identification`) the block also asks for the own economic interest and,
+ * for a third party, why that payer pays.
  */
 export function PayerSection({
   request,
@@ -51,19 +74,23 @@ export function PayerSection({
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
 }) {
-  const [draft, setDraft] = useState<PayerDraft>(() => draftFromPayer(request.payer));
+  const guardian = request.access_kind === "guardian";
+  // An older server knows only a person as payer, with the relationship in words.
+  const typed = knowsPayerType(request);
+  // A parent's own data on file: the parent may answer "I pay".
+  const template = guardian && typed ? (request.payer_self_template ?? null) : null;
+  const [draft, setDraft] = useState<PayerDraft>(() => draftFromPayer(request.payer, template));
   const savedRef = useRef<PayerDraft>(draftFromPayer(request.payer));
   const rejectedRef = useRef<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
-  const guardian = request.access_kind === "guardian";
   const options = guardian ? text.payerOptionsGuardian : text.payerOptions;
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
       void enqueue(async () => {
-        const input = payerInput(snapshot);
+        const input = payerInput(snapshot, typed);
         const key = JSON.stringify(input);
-        if (key === JSON.stringify(payerInput(savedRef.current))) {
+        if (key === JSON.stringify(payerInput(savedRef.current, typed))) {
           // Back at the saved answer: an answer the server refused in between is no error any more.
           if (rejectedRef.current !== null) {
             rejectedRef.current = null;
@@ -90,7 +117,7 @@ export function PayerSection({
         }
       });
     },
-    [enqueue, onChange, onSaveState, request.lead_id],
+    [enqueue, onChange, onSaveState, request.lead_id, typed],
   );
 
   useAutosave(draft, save);
@@ -98,11 +125,17 @@ export function PayerSection({
   const set = <K extends keyof PayerDraft>(field: K, value: PayerDraft[K]) => {
     setDraft((current) => ({ ...current, [field]: value }));
   };
-  const setPayerKind = (kind: string) => {
-    set("payer_kind", kind);
-    // Why another person pays is a question about that person only.
-    if (kind !== "third_party" && identification?.draft.payment_background) identification.set("payment_background", "");
+  const answer = draftAnswer(draft);
+  const setAnswer = (next: string) => {
+    if (next === answer) return;
+    setDraft((current) => withPayerAnswer(current, next, template));
+    // Why somebody pays was said about the payer of the answer before.
+    if (identification?.draft.payment_background) identification.set("payment_background", "");
   };
+  const thirdParty = draft.payer_kind === "third_party";
+  const payerType = typed ? payerTypeOf(draft) : "person";
+  const organisation = payerType !== "person";
+  const consentAt = request.payer?.contact_consent_at ?? null;
   const errorFor = (field: PayerField) => (fieldError === field ? text.invalidField : undefined);
   const fieldProps = (field: PayerField) => ({
     id: `lead-request-${field}`,
@@ -111,7 +144,7 @@ export function PayerSection({
   });
   const field = (name: PayerField, required = false, className?: string) => ({
     id: `lead-request-${name}`,
-    label: payerFieldLabel(text, name, guardian),
+    label: payerFieldLabel(text, name, guardian, payerType),
     error: errorFor(name),
     required,
     className,
@@ -124,79 +157,139 @@ export function PayerSection({
           <NativeComboboxSelect
             {...fieldProps("payer_kind")}
             className={selectClass}
-            value={draft.payer_kind}
-            onChange={(event) => setPayerKind(event.target.value)}
+            value={answer}
+            onChange={(event) => setAnswer(event.target.value)}
           >
             <option value="">{text.choose}</option>
             <option value="self">{options.self}</option>
+            {template ? <option value="guardian">{text.payerOptionsGuardian.guardian}</option> : null}
             <option value="third_party">{options.third_party}</option>
           </NativeComboboxSelect>
         </LabeledField>
-        {/* Another person's data exist only when another person pays. */}
-        {draft.payer_kind === "third_party" ? (
+        {/* A third party's data exist only when a third party pays. */}
+        {thirdParty ? (
           <>
             <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerIntro}</p>
-            <LabeledField {...field("payer_first_name", true)}>
-              <Input
-                {...fieldProps("payer_first_name")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.first_name}
-                onChange={(event) => set("first_name", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_last_name", true)}>
-              <Input
-                {...fieldProps("payer_last_name")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.last_name}
-                onChange={(event) => set("last_name", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_citizenships", true)}>
-              <CitizenshipMultiSelect
-                id="lead-request-payer_citizenships"
-                value={draft.citizenships}
-                lang={lang}
-                placeholder={text.citizenshipsPlaceholder}
-                invalid={Boolean(errorFor("payer_citizenships"))}
-                onChange={(next) => set("citizenships", next)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_date_of_birth")}>
-              <Input
-                key={`payer_date_of_birth-${lang}`}
-                {...fieldProps("payer_date_of_birth")}
-                className={inputClass}
-                type="date"
-                autoComplete="off"
-                pickerLang={asLeadCabinetLang(lang) ?? undefined}
-                max={appDateKey()}
-                value={draft.date_of_birth}
-                onChange={(event) => set("date_of_birth", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_relationship", false, "sm:col-span-2")}>
-              <Input
-                {...fieldProps("payer_relationship")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.relationship}
-                onChange={(event) => set("relationship", event.target.value)}
-              />
-            </LabeledField>
-            {identification ? (
-              <IdentificationFormField
-                form={identification}
-                field="payment_background"
-                text={text}
-                required
-                className="sm:col-span-2"
-              >
-                <IdentificationTextArea form={identification} field="payment_background" />
-              </IdentificationFormField>
+            {/* "I pay (as a parent)" has said both: a person, the patient's parent. */}
+            {typed && !draft.guardian_pays ? (
+              <LabeledField {...field("payer_type", true, "sm:col-span-2")}>
+                <NativeComboboxSelect
+                  {...fieldProps("payer_type")}
+                  className={selectClass}
+                  value={payerType}
+                  onChange={(event) => setDraft((current) => withPayerType(current, event.target.value))}
+                >
+                  {PAYER_TYPES.map((value) => (
+                    <option key={value} value={value}>
+                      {text.payerTypeOptions[value]}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </LabeledField>
             ) : null}
+            {organisation ? (
+              // A company, organisation or insurer is named; it has no date of birth and no citizenship.
+              <LabeledField {...field("payer_organisation_name", true, "sm:col-span-2")}>
+                <Input
+                  {...fieldProps("payer_organisation_name")}
+                  className={inputClass}
+                  autoComplete="off"
+                  maxLength={200}
+                  value={draft.organisation_name}
+                  onChange={(event) => set("organisation_name", event.target.value)}
+                />
+              </LabeledField>
+            ) : (
+              <>
+                <LabeledField {...field("payer_first_name", true)}>
+                  <Input
+                    {...fieldProps("payer_first_name")}
+                    className={inputClass}
+                    autoComplete="off"
+                    value={draft.first_name}
+                    onChange={(event) => set("first_name", event.target.value)}
+                  />
+                </LabeledField>
+                <LabeledField {...field("payer_last_name", true)}>
+                  <Input
+                    {...fieldProps("payer_last_name")}
+                    className={inputClass}
+                    autoComplete="off"
+                    value={draft.last_name}
+                    onChange={(event) => set("last_name", event.target.value)}
+                  />
+                </LabeledField>
+                <LabeledField {...field("payer_citizenships", true)}>
+                  <CitizenshipMultiSelect
+                    id="lead-request-payer_citizenships"
+                    value={draft.citizenships}
+                    lang={lang}
+                    placeholder={text.citizenshipsPlaceholder}
+                    invalid={Boolean(errorFor("payer_citizenships"))}
+                    onChange={(next) => set("citizenships", next)}
+                  />
+                </LabeledField>
+                <LabeledField {...field("payer_date_of_birth")}>
+                  <Input
+                    key={`payer_date_of_birth-${lang}`}
+                    {...fieldProps("payer_date_of_birth")}
+                    className={inputClass}
+                    type="date"
+                    autoComplete="off"
+                    pickerLang={asLeadCabinetLang(lang) ?? undefined}
+                    max={appDateKey()}
+                    value={draft.date_of_birth}
+                    onChange={(event) => set("date_of_birth", event.target.value)}
+                  />
+                </LabeledField>
+              </>
+            )}
+            {!typed ? (
+              <LabeledField {...field("payer_relationship", false, "sm:col-span-2")}>
+                <Input
+                  {...fieldProps("payer_relationship")}
+                  className={inputClass}
+                  autoComplete="off"
+                  value={draft.relationship}
+                  onChange={(event) => set("relationship", event.target.value)}
+                />
+              </LabeledField>
+            ) : draft.guardian_pays ? null : (
+              <>
+                <LabeledField {...field("payer_relationship_kind", true)}>
+                  <NativeComboboxSelect
+                    {...fieldProps("payer_relationship_kind")}
+                    className={selectClass}
+                    value={draft.relationship_kind}
+                    onChange={(event) => setDraft((current) => withRelationshipKind(current, event.target.value))}
+                  >
+                    <option value="">{text.choose}</option>
+                    {RELATIONSHIP_KINDS.map((value) => (
+                      <option key={value} value={value}>
+                        {text.payerRelationshipOptions[value]}
+                      </option>
+                    ))}
+                  </NativeComboboxSelect>
+                </LabeledField>
+                {/* "Other" says in words what the list does not offer. */}
+                {draft.relationship_kind === "other" ? (
+                  <LabeledField
+                    id="lead-request-payer_relationship"
+                    label={text.payerRelationshipOther}
+                    error={errorFor("payer_relationship")}
+                    required
+                  >
+                    <Input
+                      {...fieldProps("payer_relationship")}
+                      className={inputClass}
+                      autoComplete="off"
+                      value={draft.relationship}
+                      onChange={(event) => set("relationship", event.target.value)}
+                    />
+                  </LabeledField>
+                ) : null}
+              </>
+            )}
             <LabeledField {...field("payer_street", false, "sm:col-span-2")}>
               <Input
                 {...fieldProps("payer_street")}
@@ -224,12 +317,13 @@ export function PayerSection({
                 onChange={(event) => set("city", event.target.value)}
               />
             </LabeledField>
-            <LabeledField {...field("payer_country")}>
+            {/* The country of the seat is what the screening of an organisation works with. */}
+            <LabeledField {...field("payer_country", organisation)}>
               <CountrySelect
                 value={draft.country || null}
                 lang={lang}
                 className={selectClass}
-                aria-label={payerFieldLabel(text, "payer_country")}
+                aria-label={payerFieldLabel(text, "payer_country", guardian, payerType)}
                 onChange={(code) => set("country", code ?? "")}
               />
             </LabeledField>
@@ -253,7 +347,60 @@ export function PayerSection({
                 onChange={(event) => set("email", event.target.value)}
               />
             </LabeledField>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerInformHint}</p>
+            {/* Another natural person has to be told; a parent who pays is the one typing. */}
+            {!organisation && !draft.guardian_pays ? (
+              <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerInformHint}</p>
+            ) : null}
+            {identification ? (
+              <IdentificationFormField
+                form={identification}
+                field="payment_background"
+                text={text}
+                required
+                className="sm:col-span-2"
+              >
+                <IdentificationTextArea form={identification} field="payment_background" />
+              </IdentificationFormField>
+            ) : null}
+            {typed ? (
+              // The consent is part of the answer: it is saved with it, and it is needed to send.
+              <div
+                className="space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3 sm:col-span-2"
+                data-testid="lead-request-payer-consent"
+              >
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    id="lead-request-payer_contact_consent"
+                    className={cn(checkboxClass, "mt-0.5")}
+                    checked={draft.contact_consent}
+                    aria-invalid={Boolean(errorFor("payer_contact_consent")) || undefined}
+                    aria-describedby={
+                      errorFor("payer_contact_consent")
+                        ? "lead-request-payer_contact_consent-hint lead-request-payer_contact_consent-error"
+                        : "lead-request-payer_contact_consent-hint"
+                    }
+                    onChange={(event) => set("contact_consent", event.target.checked)}
+                  />
+                  <span className="min-w-0 leading-snug">
+                    {payerFieldLabel(text, "payer_contact_consent", guardian)}
+                    <RequiredMark />
+                  </span>
+                </label>
+                {/* Indented to the text of the label: the checkbox and its gap. */}
+                <div className="space-y-1 pl-7 text-xs text-muted-foreground">
+                  {draft.contact_consent && consentAt ? <p>{text.consentGivenAt(formatAppDateTime(consentAt))}</p> : null}
+                  <p id="lead-request-payer_contact_consent-hint" className="leading-5">
+                    {text.payerConsentHint}
+                  </p>
+                </div>
+                {errorFor("payer_contact_consent") ? (
+                  <p id="lead-request-payer_contact_consent-error" role="alert" className="text-xs text-destructive">
+                    {errorFor("payer_contact_consent")}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </>
         ) : null}
         {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
@@ -268,7 +415,7 @@ export function PayerSection({
                 // The server keeps an answer once given; it can be changed, not taken back.
                 keepAnswer
                 invalid={Boolean(errorFor("payer_own_account"))}
-                onChange={(answer) => set("acts_on_own_account", answer)}
+                onChange={(ownAccount) => set("acts_on_own_account", ownAccount)}
               />
             </LabeledField>
             {draft.acts_on_own_account === "no" ? (

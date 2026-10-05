@@ -1674,6 +1674,71 @@ where
     .await
 }
 
+/// "I pay (as a parent)": what the form puts into the payer fields when the
+/// parent names himself — first and last name, date of birth, e-mail and
+/// phone of a trusted contact. Only these: never the address or the relation.
+/// The name is split at the last space; a single word is the last name.
+fn payer_template_from_contact(contact: &Value) -> Value {
+    let text = |key: &str| {
+        contact
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    };
+    let name = text("name")
+        .unwrap_or_default()
+        .split_whitespace()
+        .collect::<Vec<_>>();
+    let (first_name, last_name) = match name.split_last() {
+        Some((last, given)) => (given.join(" "), (*last).to_string()),
+        None => (String::new(), String::new()),
+    };
+    json!({
+        "first_name": first_name,
+        "last_name": last_name,
+        "date_of_birth": text("birth_date")
+            .and_then(|value| NaiveDate::parse_from_str(value, "%Y-%m-%d").ok())
+            .map(|date| date.format("%Y-%m-%d").to_string()),
+        "email": text("email"),
+        "phone": text("phone"),
+    })
+}
+
+/// The payer template of a parent's login: made from the trusted contact of
+/// the lead the login was issued for. `None` when the login is linked to no
+/// contact of this lead (any more). Nothing is stored for it.
+async fn guardian_payer_template<'e, E>(
+    executor: E,
+    lead_id: Uuid,
+    user_id: Uuid,
+) -> Result<Option<Value>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    let contact: Option<Value> = sqlx::query_scalar(
+        r#"SELECT contact.entry
+           FROM lead_portal_access a
+           JOIN leads l ON l.id = a.lead_id
+           CROSS JOIN LATERAL jsonb_array_elements(
+               CASE WHEN jsonb_typeof(l.trusted_contacts) = 'array'
+                    THEN l.trusted_contacts ELSE '[]'::jsonb END
+           ) AS contact(entry)
+           WHERE a.lead_id = $1
+             AND a.user_id = $2
+             AND a.kind = 'guardian'
+             AND a.revoked_at IS NULL
+             AND lower(contact.entry->>'id') = a.trusted_contact_id::text
+           ORDER BY a.created_at DESC
+           LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .bind(user_id)
+    .fetch_optional(executor)
+    .await?;
+    Ok(contact.as_ref().map(payer_template_from_contact))
+}
+
 /// The request page of one lead for the portal.
 async fn request_payload(
     state: &AppState,
@@ -1714,6 +1779,10 @@ async fn request_payload(
         lead_payer::load_declaration(&mut conn, lead_id).await?
     };
     let (identification, _) = load_identification(&state.db, lead_id).await?;
+    let payer_self_template = match kind {
+        AccessKind::Guardian => guardian_payer_template(&state.db, lead_id, user_id).await?,
+        AccessKind::Own => None,
+    };
     let uploads = sqlx::query(
         r#"SELECT u.document_id, u.kind, u.created_at, u.reviewed_at, u.uploaded_by,
                   d.original_filename, d.auto_name, d.file_size, d.mime_type, d.patient_id,
@@ -1800,6 +1869,7 @@ async fn request_payload(
             "missing_for_submit": missing,
         },
         "payer": lead_payer::portal_payload(payer.as_ref()),
+        "payer_self_template": payer_self_template,
         "identification": identification.to_json(),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "documents": documents,
@@ -2056,8 +2126,10 @@ async fn update_my_personal_data(
 }
 
 /// `POST /me/lead-requests/{lead_id}/payer`: who pays, and for a third party
-/// who that is. The answer is part of the lead's payer declaration, so the
-/// sanctions screening and the country policy pick the payer up from there.
+/// who that is (a person or an organisation), how the payer is related to the
+/// patient and whether GMED may contact the payer. The answer is part of the
+/// lead's payer declaration, so the sanctions screening and the country
+/// policy pick the payer up from there.
 async fn update_my_payer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -4130,7 +4202,8 @@ mod tests {
             ]
         );
 
-        // A "yes" asks for its details, a third-party payer for the background,
+        // A "yes" asks for its details, a third-party payer for the
+        // relationship, the consent to contact the payer and the background,
         // "no" to the own interest for the person, and a document that has
         // expired since it was entered is missing again.
         let payer = lead_payer::Declaration {
@@ -4159,6 +4232,8 @@ mod tests {
         assert_eq!(
             missing_for_submit(&data, Some(&payer), &stated, true, today()),
             vec![
+                "payer_relationship_kind",
+                "payer_contact_consent",
                 "id_valid_until",
                 "payer_beneficial_owner",
                 "pep_self_details",
@@ -4178,9 +4253,47 @@ mod tests {
         };
         let payer = lead_payer::Declaration {
             beneficial_owner_name: Some("Viktor Zahler".into()),
+            relationship_kind: Some("relative".into()),
+            contact_consent_at: Some(Utc::now()),
             ..payer
         };
         assert!(missing_for_submit(&data, Some(&payer), &complete, true, today()).is_empty());
+    }
+
+    #[test]
+    fn a_parent_as_payer_is_prefilled_from_the_trusted_contact_without_the_address() {
+        let template = payer_template_from_contact(&json!({
+            "id": "5d0c1f0e-0000-4000-8000-000000000001",
+            "name": "  Olga Maria  Kind ",
+            "relation": "mother",
+            "email": " olga.kind@example.com ",
+            "phone": "+49 30 000000",
+            "birth_date": "1985-03-04",
+            "address": "Musterweg 1, 10115 Berlin"
+        }));
+        assert_eq!(
+            template,
+            json!({
+                "first_name": "Olga Maria",
+                "last_name": "Kind",
+                "date_of_birth": "1985-03-04",
+                "email": "olga.kind@example.com",
+                "phone": "+49 30 000000"
+            })
+        );
+        // A single word is the last name; what is not known is null.
+        assert_eq!(
+            payer_template_from_contact(
+                &json!({ "name": "Kind", "birth_date": "", "phone": null })
+            ),
+            json!({
+                "first_name": "",
+                "last_name": "Kind",
+                "date_of_birth": null,
+                "email": null,
+                "phone": null
+            })
+        );
     }
 
     #[test]
