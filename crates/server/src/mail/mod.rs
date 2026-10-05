@@ -11,10 +11,12 @@
 //! Without `GMED_MITTARO_API_KEY`, `GMED_MAIL_FROM` and a console URL the
 //! mailer reports `not_configured` and nothing is sent.
 
+pub mod connection;
 pub mod templates;
 
 use std::time::Duration;
 
+use axum::{http::StatusCode, response::IntoResponse};
 use secrecy::{ExposeSecret, SecretString};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -84,6 +86,83 @@ impl MailError {
             Self::Unavailable(_) | Self::Request | Self::InvalidResponse => "mail_unavailable",
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MailerSummary {
+    pub sender: String,
+    pub reply_to: Option<String>,
+    /// `…` and the last four characters of the API key.
+    pub key_hint: String,
+}
+
+/// `…` and the last four characters: enough to recognise a key, useless to
+/// anyone who reads it.
+pub fn key_hint(key: &str) -> String {
+    let tail: String = key
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("…{tail}")
+}
+
+/// JSON error with a code the console translates.
+pub fn coded(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        axum::Json(json!({
+            "error": status.canonical_reason().unwrap_or("error"),
+            "code": code,
+            "message": message,
+        })),
+    )
+        .into_response()
+}
+
+/// HTTP answer for a delivery failure.
+pub fn error_response(error: &MailError) -> axum::response::Response {
+    let status = match error {
+        MailError::NotConfigured => StatusCode::SERVICE_UNAVAILABLE,
+        MailError::QuotaReached => StatusCode::TOO_MANY_REQUESTS,
+        MailError::Unavailable(_) | MailError::Request | MailError::InvalidResponse => {
+            StatusCode::SERVICE_UNAVAILABLE
+        }
+        MailError::Rejected(_) | MailError::InvalidMessage(_) => StatusCode::BAD_GATEWAY,
+    };
+    coded(status, error.code(), &error.to_string())
+}
+
+/// Company identity for e-mail footers; a missing setting drops its line.
+pub async fn agency_identity(db: &gmed_db::DbPool) -> templates::AgencyIdentity {
+    let rows: Vec<(String, Option<String>)> = sqlx::query_as(
+        r#"SELECT key, value #>> '{}'
+           FROM system_settings
+           WHERE key IN ('agency_name', 'agency_address', 'agency_phone',
+                         'agency_email', 'agency_website')"#,
+    )
+    .fetch_all(db)
+    .await
+    .unwrap_or_else(|error| {
+        tracing::warn!(%error, "agency identity for e-mail footer");
+        Vec::new()
+    });
+    let mut agency = templates::AgencyIdentity::default();
+    for (key, value) in rows {
+        let value = value.map(|value| value.trim().to_string());
+        match key.as_str() {
+            "agency_name" => agency.name = value,
+            "agency_address" => agency.address = value,
+            "agency_phone" => agency.phone = value,
+            "agency_email" => agency.email = value,
+            "agency_website" => agency.website = value,
+            _ => {}
+        }
+    }
+    agency
 }
 
 #[derive(Clone)]
@@ -162,10 +241,36 @@ impl Mailer {
         }
     }
 
+    /// A mailer that sends nothing, e.g. after "disconnect" on the API
+    /// connections page.
+    pub fn off(reason_code: &'static str) -> Self {
+        Self {
+            state: MailerState::NotConfigured { reason_code },
+        }
+    }
+
     /// Origin of the console the e-mails link to, without a trailing slash.
     pub fn console_url(&self) -> Option<&str> {
         match &self.state {
             MailerState::Ready { console_url, .. } => Some(console_url),
+            MailerState::NotConfigured { .. } => None,
+        }
+    }
+
+    /// Sender, reply-to and the last four characters of the key, for the
+    /// API connections page. The key itself never leaves the server.
+    pub fn summary(&self) -> Option<MailerSummary> {
+        match &self.state {
+            MailerState::Ready {
+                from,
+                reply_to,
+                api_key,
+                ..
+            } => Some(MailerSummary {
+                sender: from.clone(),
+                reply_to: reply_to.clone(),
+                key_hint: key_hint(api_key.expose_secret()),
+            }),
             MailerState::NotConfigured { .. } => None,
         }
     }

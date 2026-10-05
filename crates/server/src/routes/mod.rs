@@ -145,6 +145,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(documents::router())
         .merge(personnel::router())
         .merge(crate::document_signatures::router())
+        .merge(crate::mail::connection::router())
         .merge(feedback::router())
         .merge(announcements::router())
         .merge(user_notifications::router())

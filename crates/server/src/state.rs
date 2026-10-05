@@ -27,7 +27,14 @@ pub struct AppState {
     pub audit_sender: AuditSender,
     pub medication_ai: Arc<MedicationAiProvider>,
     pub machine_translation: Arc<MachineTranslator>,
+    /// Mailer from the `GMED_MITTARO_*` environment. Senders use
+    /// [`crate::mail::connection::current_mailer`], which prefers the
+    /// connection saved on the API connections page.
     pub mailer: Arc<Mailer>,
+    /// The environment mail settings (API URL and console URL also apply to a
+    /// connection saved in the database).
+    pub mail_config: Arc<MailConfig>,
+    pub mail_connection_cache: Arc<crate::mail::connection::Cache>,
     pub document_signatures: Option<Arc<crate::document_signatures::provider::Provider>>,
     pub document_signature_cache: Arc<crate::document_signatures::connection::Cache>,
 }
@@ -67,6 +74,8 @@ impl AppState {
                 MachineTranslationConfig::default(),
             )),
             mailer: Arc::new(Mailer::new(MailConfig::default())),
+            mail_config: Arc::new(MailConfig::default()),
+            mail_connection_cache: Arc::new(Mutex::new(None)),
             document_signatures: None,
             document_signature_cache: Arc::new(Mutex::new(None)),
         }
@@ -90,7 +99,8 @@ impl AppState {
     }
 
     pub fn with_mailer(mut self, config: MailConfig) -> Self {
-        self.mailer = Arc::new(Mailer::new(config));
+        self.mailer = Arc::new(Mailer::new(config.clone()));
+        self.mail_config = Arc::new(config);
         self
     }
 

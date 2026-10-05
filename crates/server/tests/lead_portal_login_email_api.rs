@@ -345,3 +345,159 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
             .unwrap();
     assert_eq!(remaining, 0);
 }
+
+#[tokio::test]
+async fn the_api_connections_page_saves_the_key_encrypted_over_the_environment() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let ceo_id = seed_user(pool, "mail-connection", "ceo").await;
+    let manager_id = seed_user(pool, "mail-connection", "patient_manager").await;
+    let ceo = bearer(ceo_id, "ceo");
+    let manager = bearer(manager_id, "patient_manager");
+
+    let (api_url, fake) = start_fake_mittaro().await;
+    let state = suite.state.clone().with_mailer(MailConfig {
+        mittaro_api_key: Some(SecretString::from("tx_live_envkey0000")),
+        mittaro_api_url: Some(api_url),
+        from: Some("env@gmed-health.test".into()),
+        reply_to: None,
+        console_url: Some("https://console.gmed-health.test".into()),
+    });
+    let app = gmed_server::build_app_for_role_contract_tests(state).layer(Extension(ConnectInfo(
+        SocketAddr::from(([127, 0, 0, 1], 41001)),
+    )));
+
+    // Only the roles of the API connections page.
+    let (status, _) = json_request(&app, "GET", "/api/v1/mail/connection", &manager, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, info) = json_request(&app, "GET", "/api/v1/mail/connection", &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["source"], "environment");
+    assert_eq!(info["configured"], true);
+    assert_eq!(info["sender"], "env@gmed-health.test");
+    assert_eq!(info["key_hint"], "…0000");
+
+    // Without a saved key the key is required; a wrong key shape is refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({ "sender": "zugang@gmed-health.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "mail_api_key_required");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({ "api_key": "sk_live_wrong", "sender": "zugang@gmed-health.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body["code"], "mail_api_key_invalid");
+
+    let (status, info) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({
+            "api_key": "tx_live_dbkeyAB12",
+            "sender": " Zugang@GMED-health.test ",
+            "reply_to": "info@gmed-health.test",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["source"], "database");
+    assert_eq!(info["sender"], "zugang@gmed-health.test");
+    assert_eq!(info["reply_to"], "info@gmed-health.test");
+    assert_eq!(info["key_hint"], "…AB12");
+    assert!(!info.to_string().contains("tx_live_dbkeyAB12"));
+    let ciphertext: Vec<u8> = sqlx::query_scalar("SELECT ciphertext FROM mail_provider_connection")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&ciphertext).contains("dbkeyAB12"),
+        "the key is stored encrypted"
+    );
+
+    // The test letter goes out with the saved key, to the signed-in user.
+    let (status, sent) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection/test",
+        &ceo,
+        Some(json!({ "language": "ru" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["sent_to"], "mail-connection-ceo@example.com");
+    {
+        let received = fake.received.lock().unwrap();
+        let (headers, message) = received.last().unwrap();
+        assert_eq!(headers["authorization"], "Bearer tx_live_dbkeyAB12");
+        assert_eq!(message["from"], "zugang@gmed-health.test");
+        assert_eq!(message["reply_to"], "info@gmed-health.test");
+        assert_eq!(message["subject"], "GMED: тестовое письмо");
+    }
+
+    // Changing only the sender keeps the saved key.
+    let (status, info) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection",
+        &ceo,
+        Some(json!({ "sender": "portal@gmed-health.test" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["key_hint"], "…AB12");
+    assert_eq!(info["reply_to"], Value::Null);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection/test",
+        &ceo,
+        Some(json!({ "to": "someone@example.com" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    {
+        let received = fake.received.lock().unwrap();
+        let (headers, message) = received.last().unwrap();
+        assert_eq!(headers["authorization"], "Bearer tx_live_dbkeyAB12");
+        assert_eq!(message["from"], "portal@gmed-health.test");
+        assert_eq!(message["to"], "someone@example.com");
+    }
+
+    // Disconnecting switches e-mail off, also over the key in the environment.
+    let (status, info) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection/disconnect",
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["source"], "disconnected");
+    assert_eq!(info["configured"], false);
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/mail/connection/test",
+        &ceo,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["code"], "mail_not_configured");
+}

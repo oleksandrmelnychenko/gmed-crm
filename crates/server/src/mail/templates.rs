@@ -319,58 +319,56 @@ pub fn portal_login(email: &PortalLoginEmail<'_>) -> RenderedEmail {
     }
 }
 
-fn login_html(
-    email: &PortalLoginEmail<'_>,
-    copy: &LoginCopy,
-    greeting: &str,
-    intro: &str,
-    complete_by: Option<&str>,
-    footer: &[String],
-) -> String {
-    let url = escape_html(email.login_url);
-    let paragraph = |content: &str| {
-        format!(
-            r#"<p style="margin:0 0 16px;font:15px/1.6 {FONT};color:{INK};">{}</p>"#,
-            escape_html(content)
-        )
-    };
-    let complete_by = complete_by
-        .map(|value| {
-            format!(
-                r#"<p style="margin:0 0 16px;padding:12px 14px;border-left:3px solid {BRAND};background:{BRAND_SOFT};font:14px/1.55 {FONT};color:{INK};">{}</p>"#,
-                escape_html(value)
-            )
-        })
-        .unwrap_or_default();
-    let footer = footer
+fn paragraph(content: &str) -> String {
+    format!(
+        r#"<p style="margin:0 0 16px;font:15px/1.6 {FONT};color:{INK};">{}</p>"#,
+        escape_html(content)
+    )
+}
+
+fn note(content: &str) -> String {
+    format!(
+        r#"<p style="margin:0 0 16px;padding:12px 14px;border-left:3px solid {BRAND};background:{BRAND_SOFT};font:14px/1.55 {FONT};color:{INK};">{}</p>"#,
+        escape_html(content)
+    )
+}
+
+fn small(content: &str, margin_bottom: u32) -> String {
+    format!(
+        r#"<p style="margin:0 0 {margin_bottom}px;font:13px/1.55 {FONT};color:{MUTED};">{}</p>"#,
+        escape_html(content)
+    )
+}
+
+/// The branded frame every GMED e-mail shares: orange rule, logo with a label,
+/// the white card with `body` (already HTML) and the agency footer.
+struct Shell<'a> {
+    language: MailLanguage,
+    subject: &'a str,
+    preheader: &'a str,
+    /// Next to the logo, e.g. "Patientenportal".
+    label: &'a str,
+    logo_url: Option<&'a str>,
+    footer: &'a [String],
+    automatic: &'a str,
+}
+
+fn shell(frame: &Shell<'_>, body: &str) -> String {
+    let footer = frame
+        .footer
         .iter()
         .map(|line| escape_html(line))
         .collect::<Vec<_>>()
         .join("<br>");
     // The alt text carries the wordmark's look when a client blocks images.
     let wordmark_style = format!("font:800 26px/1 {FONT};letter-spacing:3px;color:{INK};");
-    let brand_mark = match email.logo_url {
+    let brand_mark = match frame.logo_url {
         Some(logo) => format!(
             r#"<img src="{}" width="{LOGO_WIDTH}" height="{LOGO_HEIGHT}" alt="GMED" style="display:block;border:0;outline:none;text-decoration:none;width:{LOGO_WIDTH}px;height:auto;{wordmark_style}">"#,
             escape_html(logo)
         ),
         None => "GMED".to_string(),
     };
-    // Label above the value: fits a phone without squeezing the value, and
-    // the password never wraps, so it is copied in one piece.
-    let credential_row = |label: &str, value: &str, mono: bool| {
-        let value_style = if mono {
-            format!("font:600 18px/1.4 {MONO};letter-spacing:1px;white-space:nowrap;")
-        } else {
-            format!("font:600 15px/1.4 {FONT};overflow-wrap:anywhere;word-break:break-word;")
-        };
-        format!(
-            r#"<tr><td style="padding:8px 0 0;font:12px/1.4 {FONT};color:{MUTED};">{}</td></tr><tr><td style="padding:2px 0 6px;{value_style}color:{INK};">{}</td></tr>"#,
-            escape_html(label),
-            escape_html(value)
-        )
-    };
-
     format!(
         r#"<!DOCTYPE html>
 <html lang="{lang}">
@@ -390,11 +388,59 @@ fn login_html(
 <tr><td style="padding:28px 32px 8px;">
 <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>
 <td style="vertical-align:middle;padding-right:16px;{wordmark_style}">{brand_mark}</td>
-<td style="vertical-align:middle;padding-left:14px;border-left:1px solid #e4e4e7;font:13px/1.2 {FONT};color:{MUTED};">{portal}</td>
+<td style="vertical-align:middle;padding-left:14px;border-left:1px solid #e4e4e7;font:13px/1.2 {FONT};color:{MUTED};">{label}</td>
 </tr></table>
 </td></tr>
 <tr><td style="padding:24px 32px 8px;">
-<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{greeting}</p>
+{body}
+</td></tr>
+<tr><td style="padding:18px 32px 24px;border-top:1px solid #e4e4e7;font:12px/1.6 {FONT};color:{MUTED};">
+{footer}{footer_break}{automatic}
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
+"#,
+        lang = frame.language.code(),
+        subject = escape_html(frame.subject),
+        preheader = escape_html(frame.preheader),
+        label = escape_html(frame.label),
+        footer_break = if frame.footer.is_empty() {
+            ""
+        } else {
+            "<br><br>"
+        },
+        automatic = escape_html(frame.automatic),
+    )
+}
+
+fn login_html(
+    email: &PortalLoginEmail<'_>,
+    copy: &LoginCopy,
+    greeting: &str,
+    intro: &str,
+    complete_by: Option<&str>,
+    footer: &[String],
+) -> String {
+    let url = escape_html(email.login_url);
+    // Label above the value: fits a phone without squeezing the value, and
+    // the password never wraps, so it is copied in one piece.
+    let credential_row = |label: &str, value: &str, mono: bool| {
+        let value_style = if mono {
+            format!("font:600 18px/1.4 {MONO};letter-spacing:1px;white-space:nowrap;")
+        } else {
+            format!("font:600 15px/1.4 {FONT};overflow-wrap:anywhere;word-break:break-word;")
+        };
+        format!(
+            r#"<tr><td style="padding:8px 0 0;font:12px/1.4 {FONT};color:{MUTED};">{}</td></tr><tr><td style="padding:2px 0 6px;{value_style}color:{INK};">{}</td></tr>"#,
+            escape_html(label),
+            escape_html(value)
+        )
+    };
+    let body = format!(
+        r#"<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{greeting}</p>
 {intro}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;background:{BRAND_SOFT};border:1px solid {BRAND_BORDER};border-radius:10px;">
 <tr><td style="padding:16px 20px;">
@@ -412,22 +458,8 @@ fn login_html(
 </tr></table>
 <p style="margin:0 0 20px;font:13px/1.5 {FONT};color:{MUTED};">{link_hint}<br><a href="{url}" target="_blank" rel="noopener" style="color:{BRAND};word-break:break-all;">{url}</a></p>
 {complete_by}
-<p style="margin:0 0 12px;font:13px/1.55 {FONT};color:{MUTED};">{keep_safe}</p>
-<p style="margin:0 0 24px;font:13px/1.55 {FONT};color:{MUTED};">{not_you}</p>
-</td></tr>
-<tr><td style="padding:18px 32px 24px;border-top:1px solid #e4e4e7;font:12px/1.6 {FONT};color:{MUTED};">
-{footer}{footer_break}{automatic}
-</td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>
-"#,
-        lang = email.language.code(),
-        subject = escape_html(copy.subject),
-        preheader = escape_html(copy.preheader),
-        portal = escape_html(copy.portal),
+{keep_safe}
+{not_you}"#,
         greeting = escape_html(greeting),
         intro = paragraph(intro),
         credentials_heading = escape_html(copy.credentials_heading),
@@ -435,11 +467,136 @@ fn login_html(
         password_row = credential_row(copy.password_label, email.password, true),
         button = escape_html(copy.button),
         link_hint = escape_html(copy.link_hint),
-        keep_safe = escape_html(copy.keep_safe),
-        not_you = escape_html(copy.not_you),
-        footer_break = if footer.is_empty() { "" } else { "<br><br>" },
-        automatic = escape_html(copy.automatic),
+        complete_by = complete_by.map(note).unwrap_or_default(),
+        keep_safe = small(copy.keep_safe, 12),
+        not_you = small(copy.not_you, 24),
+    );
+    shell(
+        &Shell {
+            language: email.language,
+            subject: copy.subject,
+            preheader: copy.preheader,
+            label: copy.portal,
+            logo_url: email.logo_url,
+            footer,
+            automatic: copy.automatic,
+        },
+        &body,
     )
+}
+
+/// The test letter of the API connections page: proves that the saved Mittaro
+/// key and sender work, without any personal data of patients.
+#[derive(Debug, Clone)]
+pub struct ConnectionTestEmail<'a> {
+    pub language: MailLanguage,
+    /// Who pressed "send test letter".
+    pub requested_by: &'a str,
+    /// When, already formatted (`DD.MM.YYYY HH:MM`, Berlin).
+    pub requested_at: &'a str,
+    pub sender: &'a str,
+    pub agency: &'a AgencyIdentity,
+    pub logo_url: Option<&'a str>,
+}
+
+struct TestCopy {
+    subject: &'static str,
+    label: &'static str,
+    heading: &'static str,
+    body: &'static str,
+    requested: &'static str,
+    sender: &'static str,
+    automatic: &'static str,
+}
+
+fn test_copy(language: MailLanguage) -> TestCopy {
+    match language {
+        MailLanguage::De => TestCopy {
+            subject: "GMED: Testnachricht des E-Mail-Versands",
+            label: "E-Mail-Versand",
+            heading: "Der E-Mail-Versand funktioniert.",
+            body: "Diese Testnachricht wurde über Mittaro mit dem in der GMED-Konsole gespeicherten Zugang versendet. So sehen auch die Nachrichten an Patientinnen und Patienten aus.",
+            requested: "Angefordert von {name} am {at}.",
+            sender: "Absender: {sender}",
+            automatic: "Diese E-Mail wurde automatisch versendet.",
+        },
+        MailLanguage::En => TestCopy {
+            subject: "GMED: e-mail delivery test",
+            label: "E-mail delivery",
+            heading: "E-mail delivery works.",
+            body: "This test message was sent through Mittaro with the access saved in the GMED console. Messages to patients look the same.",
+            requested: "Requested by {name} on {at}.",
+            sender: "Sender: {sender}",
+            automatic: "This e-mail was sent automatically.",
+        },
+        MailLanguage::Ru => TestCopy {
+            subject: "GMED: тестовое письмо",
+            label: "Отправка e-mail",
+            heading: "Отправка e-mail работает.",
+            body: "Это тестовое письмо отправлено через Mittaro с доступом, сохранённым в консоли GMED. Так же выглядят письма пациентам.",
+            requested: "Запросил(а) {name}, {at}.",
+            sender: "Отправитель: {sender}",
+            automatic: "Это письмо отправлено автоматически.",
+        },
+        MailLanguage::Uk => TestCopy {
+            subject: "GMED: тестовий лист",
+            label: "Надсилання e-mail",
+            heading: "Надсилання e-mail працює.",
+            body: "Цей тестовий лист надіслано через Mittaro з доступом, збереженим у консолі GMED. Так само виглядають листи пацієнтам.",
+            requested: "Запит від {name}, {at}.",
+            sender: "Відправник: {sender}",
+            automatic: "Цей лист надіслано автоматично.",
+        },
+    }
+}
+
+pub fn connection_test(email: &ConnectionTestEmail<'_>) -> RenderedEmail {
+    let copy = test_copy(email.language);
+    let requested = copy
+        .requested
+        .replace("{name}", email.requested_by.trim())
+        .replace("{at}", email.requested_at);
+    let sender = copy.sender.replace("{sender}", email.sender);
+    let footer = email.agency.lines();
+    let mut text = vec![
+        copy.heading.to_string(),
+        String::new(),
+        copy.body.to_string(),
+        String::new(),
+        requested.clone(),
+        sender.clone(),
+        String::new(),
+        "-- ".to_string(),
+    ];
+    text.extend(footer.iter().cloned());
+    text.push(copy.automatic.to_string());
+    let body = format!(
+        r#"<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{heading}</p>
+{body}
+{requested}
+{sender}"#,
+        heading = escape_html(copy.heading),
+        body = paragraph(copy.body),
+        requested = note(&requested),
+        sender = small(&sender, 24),
+    );
+    let html = shell(
+        &Shell {
+            language: email.language,
+            subject: copy.subject,
+            preheader: copy.heading,
+            label: copy.label,
+            logo_url: email.logo_url,
+            footer: &footer,
+            automatic: copy.automatic,
+        },
+        &body,
+    );
+    RenderedEmail {
+        subject: copy.subject.to_string(),
+        text: text.join("\n"),
+        html,
+    }
 }
 
 #[cfg(test)]
@@ -588,5 +745,34 @@ mod tests {
         assert!(email.text.starts_with("Вітаємо!\n"));
         assert!(email.text.contains("для вашої дитини"));
         assert!(!email.text.contains("заповніть дані до"));
+    }
+
+    #[test]
+    fn the_connection_test_letter_names_sender_and_requester_in_every_language() {
+        let agency = agency();
+        for language in [
+            MailLanguage::De,
+            MailLanguage::En,
+            MailLanguage::Ru,
+            MailLanguage::Uk,
+        ] {
+            let email = connection_test(&ConnectionTestEmail {
+                language,
+                requested_by: "Max <Admin>",
+                requested_at: "05.10.2026 17:30",
+                sender: "zugang@gmed-health.com",
+                agency: &agency,
+                logo_url: Some("https://console.gmed-health.com/gmed-logo.png"),
+            });
+            assert!(email.subject.starts_with("GMED"));
+            for part in [&email.text, &email.html] {
+                assert!(part.contains("zugang@gmed-health.com"), "{language:?}");
+                assert!(part.contains("05.10.2026 17:30"), "{language:?}");
+                assert!(part.contains("80331 München"));
+            }
+            assert!(email.text.contains("Max <Admin>"));
+            assert!(email.html.contains("Max &lt;Admin&gt;"));
+            assert!(email.html.contains("gmed-logo.png"));
+        }
     }
 }
