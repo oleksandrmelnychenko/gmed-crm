@@ -111,12 +111,83 @@ export function LeadPortalAccessDetail({
   const intake = lead.portal_intake ?? null;
   const canCreate = status === "none" && Boolean(lead.email);
   const canReset = status !== "none" && status !== "disabled";
+  const canOffer = canIssue && (canCreate || canReset);
+
+  // Whether the sign-in data can go out by e-mail, and the lead's language.
+  // `undefined` while loading; `null` when the answer could not be read.
+  const [emailInfo, setEmailInfo] = useState<LeadLoginEmailInfo | null | undefined>(undefined);
+  const [emailConfirmOpen, setEmailConfirmOpen] = useState(false);
+  const [emailLanguage, setEmailLanguage] = useState<PatientMessageLanguage | null>(null);
+  const [emailNotice, setEmailNotice] = useState("");
+
+  useEffect(() => {
+    if (!canOffer) return;
+    let cancelled = false;
+    fetchLeadLoginEmails(lead.id)
+      .then((info) => {
+        if (!cancelled) setEmailInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setEmailInfo(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canOffer, lead.id]);
+
+  const mailReady = emailInfo?.available === true && emailInfo.can_send === true;
+  const language: PatientMessageLanguage = emailLanguage ?? emailInfo?.lead_language ?? "de";
+
+  /**
+   * One click instead of "new password, then send": the stored hash cannot be
+   * e-mailed, so a new password is issued and goes out at once. If the e-mail
+   * fails, the password is already the new one — the usual window shows it.
+   */
+  async function issueAndEmail() {
+    setBusy(true);
+    setError("");
+    setEmailNotice("");
+    let result: LeadPortalAccountIssued | null = null;
+    try {
+      result = await issueLeadPortalAccess(lead.id);
+      if (!result.one_time_password) throw new Error("no password issued");
+      const sent = await sendLeadLoginEmail(lead.id, {
+        user_id: result.user_id,
+        password: result.one_time_password,
+        language,
+      });
+      setEmailConfirmOpen(false);
+      setEmailNotice(
+        de
+          ? `Zugang gesendet an ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`
+          : `Доступ отправлен на ${sent.sent_to} · ${formatAppDateTime(sent.sent_at)}`,
+      );
+    } catch (nextError) {
+      setEmailConfirmOpen(false);
+      const reason =
+        loginEmailErrorMessage(nextError, lang)
+        ?? leadErrorMessage(nextError, (ru, deText) => (de ? deText : ru));
+      if (result?.one_time_password) {
+        setIssued(result);
+        setError(
+          de
+            ? `E-Mail nicht gesendet: ${reason}. Das neue Passwort gilt bereits – bitte aus dem Fenster weitergeben oder dort erneut senden.`
+            : `Письмо не отправлено: ${reason}. Новый пароль уже действует — передайте его из окна или отправьте оттуда ещё раз.`,
+        );
+      } else {
+        setError(reason);
+      }
+    } finally {
+      setBusy(false);
+      if (result) onChanged?.();
+    }
+  }
 
   return (
     <div className="space-y-3 px-4 py-3 text-xs" data-testid="lead-portal-access">
-      {/* Head line: what this is, its state, and the one action right beside
-          the state (the row is as wide as the table, so a button at its far
-          end is out of sight). */}
+      {/* Head line: what this is, its state, and the actions right beside the
+          state (the row is as wide as the table, so a button at its far end
+          is out of sight). */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -140,6 +211,28 @@ export function LeadPortalAccessDetail({
                 ? "Zugang anlegen"
                 : "Создать доступ"}
           </Button>
+        ) : null}
+        {canOffer ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
+            disabled={busy || emailInfo === undefined}
+            onClick={() => {
+              setEmailNotice("");
+              setEmailConfirmOpen(true);
+            }}
+            data-testid="lead-portal-send-email"
+          >
+            <Mail className="size-3.5" />
+            {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
+          </Button>
+        ) : null}
+        {emailNotice ? (
+          <span className="text-emerald-700" role="status" data-testid="lead-portal-email-notice">
+            {emailNotice}
+          </span>
         ) : null}
       </div>
       {status !== "none" ? (
@@ -212,6 +305,75 @@ export function LeadPortalAccessDetail({
               {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
               {de ? "Passwort ausgeben" : "Выдать пароль"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={emailConfirmOpen} onOpenChange={(open) => !busy && setEmailConfirmOpen(open)}>
+        <DialogContent className="max-w-md" data-testid="lead-portal-email-dialog">
+          <DialogHeader>
+            <DialogTitle>{de ? "Zugang per E-Mail senden?" : "Отправить доступ на e-mail?"}</DialogTitle>
+            <DialogDescription>
+              {!mailReady
+                ? de
+                  ? "Der E-Mail-Versand ist nicht eingerichtet. Mittaro wird unter „API-Verbindungen“ → „E-Mail“ verbunden; bis dahin den Zugang per Nachricht weitergeben."
+                  : "Отправка e-mail не настроена. Mittaro подключается в разделе «API-подключения» → «E-Mail»; пока передайте доступ сообщением."
+                : canReset
+                  ? de
+                    ? `Der Patient erhält ein neues Passwort: Das bisherige funktioniert danach nicht mehr, offene Sitzungen des Patienten werden beendet. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${lead.email}.`
+                    : `Пациент получит новый пароль: старый перестанет работать, открытые сессии пациента будут завершены. Письмо с адресом входа, логином и паролем уйдёт на ${lead.email}.`
+                  : de
+                    ? `Der Zugang wird angelegt. Die E-Mail mit Anmeldeadresse, Login und Passwort geht an ${lead.email}.`
+                    : `Доступ будет создан. Письмо с адресом входа, логином и паролем уйдёт на ${lead.email}.`}
+            </DialogDescription>
+          </DialogHeader>
+          {mailReady ? (
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="text-muted-foreground">{de ? "Sprache der E-Mail" : "Язык письма"}</span>
+              <div className="flex gap-1" role="group" aria-label={de ? "Sprache der E-Mail" : "Язык письма"}>
+                {MESSAGE_LANGUAGES.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={language === option.value}
+                    className={
+                      language === option.value
+                        ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
+                        : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
+                    }
+                    onClick={() => setEmailLanguage(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <DialogClose
+              render={
+                <Button type="button" variant="outline" disabled={busy}>
+                  {mailReady ? (de ? "Abbrechen" : "Отмена") : de ? "Schließen" : "Закрыть"}
+                </Button>
+              }
+            />
+            {mailReady ? (
+              <Button
+                type="button"
+                disabled={busy}
+                onClick={() => void issueAndEmail()}
+                data-testid="lead-portal-email-confirm"
+              >
+                {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : <Mail className="mr-2 size-4" />}
+                {canReset
+                  ? de
+                    ? "Passwort ausgeben und senden"
+                    : "Выдать пароль и отправить"
+                  : de
+                    ? "Zugang anlegen und senden"
+                    : "Создать доступ и отправить"}
+              </Button>
+            ) : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>
