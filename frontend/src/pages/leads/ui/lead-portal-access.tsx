@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Check, Copy, KeyRound, LoaderCircle, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,7 @@ import { StatusBadge } from "@/components/record-workspace/recipes/status-badge"
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lead } from "@/lib/api/types";
 import { copyText, selectElementText } from "@/lib/copy-text";
+import { cn } from "@/lib/utils";
 
 import { issueLeadPortalAccess, type LeadPortalAccountIssued } from "../data/leads-api";
 import {
@@ -26,7 +27,6 @@ import {
   type PatientMessageLanguage,
 } from "../model/lead-portal-access";
 import { leadErrorMessage } from "../model/leads-model";
-import { portalProgressText } from "../model/lead-portal-intake";
 import {
   fetchLeadPortalIntake,
   issueLeadGuardianAccess,
@@ -44,6 +44,26 @@ const MESSAGE_LANGUAGES: { value: PatientMessageLanguage; label: string }[] = [
   { value: "uk", label: "UA" },
   { value: "ru", label: "RU" },
 ];
+
+/** One labelled fact of the portal row: small caption above, value below. */
+function PortalFact({
+  label,
+  className,
+  testId,
+  children,
+}: {
+  label: string;
+  className?: string;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("min-w-0", className)} data-testid={testId}>
+      <dt className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-[13px] font-medium leading-snug text-foreground">{children}</dd>
+    </div>
+  );
+}
 
 /** Expanded row of the leads table: the state of the lead's patient login. */
 export function LeadPortalAccessDetail({
@@ -80,35 +100,69 @@ export function LeadPortalAccessDetail({
   }
 
   const lastLogin = lead.portal_account?.last_login_at;
+  const intake = lead.portal_intake ?? null;
   const canCreate = status === "none" && Boolean(lead.email);
   const canReset = status !== "none" && status !== "disabled";
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 text-xs" data-testid="lead-portal-access">
-      <div className="flex items-center gap-2">
-        <UserRound className="size-4 text-muted-foreground" aria-hidden="true" />
-        <span className="text-muted-foreground">{de ? "Patientenportal" : "Портал пациента"}</span>
-        <StatusBadge tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusBadge>
+    <div className="space-y-3 px-4 py-3 text-xs" data-testid="lead-portal-access">
+      {/* Head line: what this is, its state, and the one action. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="text-[13px] font-semibold text-foreground">{de ? "Patientenportal" : "Портал пациента"}</span>
+          <StatusBadge tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusBadge>
+        </div>
+        {canIssue && (canCreate || canReset) ? (
+          <Button
+            type="button"
+            size="sm"
+            className="h-8 gap-1.5 rounded-md text-xs"
+            disabled={busy}
+            onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
+          >
+            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+            {canReset
+              ? de
+                ? "Neues Passwort"
+                : "Новый пароль"
+              : de
+                ? "Zugang anlegen"
+                : "Создать доступ"}
+          </Button>
+        ) : null}
       </div>
       {status !== "none" ? (
-        <>
-          <span>
-            <span className="text-muted-foreground">{de ? "Letzte Anmeldung: " : "Последний вход: "}</span>
-            {lastLogin ? formatAppDateTime(lastLogin) : "—"}
-          </span>
-          <span>
-            <span className="text-muted-foreground">{de ? "Login: " : "Логин: "}</span>
-            {lead.email ?? "—"}
-          </span>
+        <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-7">
+          <PortalFact label={de ? "Login" : "Логин"} className="col-span-2 sm:col-span-1 xl:col-span-2">
+            <span className="break-all">{lead.email ?? "—"}</span>
+          </PortalFact>
+          <PortalFact label={de ? "Letzte Anmeldung" : "Последний вход"}>
+            {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
+          </PortalFact>
           {lead.retention_deadline_at && status !== "disabled" ? (
-            <span>
-              <span className="text-muted-foreground">{de ? "Zugang bis: " : "Доступ до: "}</span>
-              {formatAppDate(lead.retention_deadline_at)}
-            </span>
+            <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{formatAppDate(lead.retention_deadline_at)}</PortalFact>
           ) : null}
-        </>
+          {intake ? (
+            <>
+              <PortalFact label={de ? "Fragebogen" : "Анкета"} testId="lead-portal-progress">
+                {de ? `${intake.filled} von ${intake.total} Feldern` : `${intake.filled} из ${intake.total} полей`}
+                <span aria-hidden="true" className="mt-1 block h-1 w-24 overflow-hidden rounded-full bg-muted">
+                  <span
+                    className="block h-full rounded-full bg-[var(--brand)]"
+                    style={{ width: `${intake.total > 0 ? Math.round((intake.filled / intake.total) * 100) : 0}%` }}
+                  />
+                </span>
+              </PortalFact>
+              <PortalFact label={de ? "Dokumente" : "Документы"}>{intake.documents}</PortalFact>
+              <PortalFact label={de ? "Gesendet" : "Отправлено"}>
+                {intake.submitted_at ? formatAppDateTime(intake.submitted_at) : de ? "noch nicht" : "ещё нет"}
+              </PortalFact>
+            </>
+          ) : null}
+        </dl>
       ) : (
-        <span className="text-muted-foreground">
+        <p className="text-muted-foreground">
           {lead.email
             ? de
               ? "Für diesen Lead wurde noch kein Zugang angelegt."
@@ -116,37 +170,9 @@ export function LeadPortalAccessDetail({
             : de
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
-        </span>
-      )}
-      {canIssue && (canCreate || canReset) ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="ml-auto h-7 gap-1.5 rounded-md text-xs"
-          disabled={busy}
-          onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
-        >
-          {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
-          {canReset
-            ? de
-              ? "Neues Passwort"
-              : "Новый пароль"
-            : de
-              ? "Zugang anlegen"
-              : "Создать доступ"}
-        </Button>
-      ) : null}
-      {error ? <p className="w-full text-rose-700">{error}</p> : null}
-      {lead.portal_intake && (status !== "none" || lead.portal_intake.guardians > 0) ? (
-        <p className="w-full text-muted-foreground" data-testid="lead-portal-progress">
-          {portalProgressText(
-            { ...lead.portal_intake, submitted_at: lead.portal_intake.submitted_at },
-            (ru, deText) => (de ? deText : ru),
-            formatAppDateTime,
-          ).join(" · ")}
         </p>
-      ) : null}
+      )}
+      {error ? <p className="text-rose-700">{error}</p> : null}
       <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>

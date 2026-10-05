@@ -13,7 +13,7 @@ import { DocumentSignaturePanel, type PackagePreviewSelection } from "./document
 import { SignatureDocumentPreview, type SignaturePreviewSource } from "./signature-document-preview";
 import { refreshSignatureSummaries, useSignatureSummary } from "../data/use-signature-summary";
 import type { SignatureRequest, SignatureState } from "../data/document-signature-api";
-import { signaturePresentation } from "./signature-status";
+import { isInformationalDocument, signaturePresentation } from "./signature-status";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
 // Sending needs document access as CEO or Patient Manager on the server. IT
@@ -78,6 +78,8 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
   const overlay = useContext(OverlayDirtyContext);
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
+  // The card holds PDFs, but all of them are informational attachments.
+  const [informationalOnly, setInformationalOnly] = useState(false);
   const [selectedId, setSelectedId] = useState(documentId ?? "");
   const [loading, setLoading] = useState(!documentId);
   const [error, setError] = useState(false);
@@ -116,7 +118,13 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
     if (leadId) params.set("lead_id", leadId);
     void apiFetch<DocumentItem[]>(`/documents?${params}`, { forceFresh: true })
       .then(rows => {
-        if (!cancelled) setDocuments(rows.filter(row => row.has_stored_file && row.mime_type?.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf"));
+        if (cancelled) return;
+        const pdfs = rows.filter(row => row.has_stored_file && row.mime_type?.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf");
+        // An informational document is never the subject of a request: offering
+        // it here led to a composer that could not send anything.
+        const signable = pdfs.filter(row => !isInformationalDocument(row));
+        setDocuments(signable);
+        setInformationalOnly(pdfs.length > 0 && signable.length === 0);
       })
       .catch(() => { if (!cancelled) setError(true); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -147,7 +155,9 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
         {!documentId ? <>
           <p className="text-xs leading-5 text-muted-foreground">{tx("Выберите сохранённый PDF. Запрос подписи относится к выбранному документу.", "Wählen Sie die gespeicherte PDF. Die Signaturanfrage gilt für das ausgewählte Dokument.")}</p>
           {loading ? <p role="status" className="text-sm"><LoaderCircle className="mr-2 inline size-4 animate-spin" />{tx("Загрузка…", "Wird geladen…")}</p> : null}
-          {!loading && !error && documents.length === 0 ? <p className="text-sm">{tx("В этой карточке пока нет сохранённых PDF. Сначала создайте или загрузите документ.", "In dieser Karte gibt es noch keine gespeicherten PDFs. Erstellen oder laden Sie zuerst ein Dokument hoch.")}</p> : null}
+          {!loading && !error && documents.length === 0 ? <p className="text-sm" data-testid="signature-no-documents">{informationalOnly
+            ? tx("Здесь пока есть только информационные документы — их не подписывают. Создайте договор, заказ или согласие: информационные документы уйдут вместе с ними как приложение для ознакомления.", "Hier gibt es bisher nur Informationsdokumente – sie werden nicht unterschrieben. Erstellen Sie Vertrag, Auftrag oder Einwilligung: Die Informationsdokumente gehen als Anlage zur Kenntnisnahme mit.")
+            : tx("В этой карточке пока нет сохранённых PDF. Сначала создайте или загрузите документ.", "In dieser Karte gibt es noch keine gespeicherten PDFs. Erstellen oder laden Sie zuerst ein Dokument hoch.")}</p> : null}
           {documents.length > 0 ? <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Выберите PDF", "PDF auswählen")}
             <NativeComboboxSelect className="h-10 bg-field text-sm font-normal text-foreground" value={selectedId} onChange={event => {
               const nextId = event.target.value;

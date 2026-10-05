@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { SignatureSummary } from "../data/use-signature-summary";
-import { signaturePresentation, signatureStatusText } from "./signature-status";
+import { isInformationalDocument, signaturePresentation, signatureStatusText } from "./signature-status";
+
+describe("isInformationalDocument", () => {
+  it("recognises the attachments that are never signed themselves", () => {
+    expect(isInformationalDocument({ generated_template_id: "privacy_information", art: "contract" })).toBe(true);
+    expect(isInformationalDocument({ generated_template_id: null, art: "Cost_Estimate " })).toBe(true);
+    expect(isInformationalDocument({ generated_template_id: "framework_contract", art: "privacy_information" })).toBe(false);
+    expect(isInformationalDocument({ generated_template_id: "privacy_consents", art: "consent" })).toBe(false);
+    expect(isInformationalDocument({ art: "contract" })).toBe(false);
+  });
+});
 
 describe("signatureStatusText", () => {
   it("names every request status in both languages instead of the raw key", () => {
