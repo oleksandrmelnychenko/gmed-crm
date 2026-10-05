@@ -231,6 +231,12 @@ const AdminSignaturesPage = lazy(() =>
   })),
 );
 
+const AdminSignatureApiPage = lazy(() =>
+  import("@/pages/admin-signatures").then((module) => ({
+    default: module.AdminSignatureApiPage,
+  })),
+);
+
 const AdminDatevPage = lazy(() =>
   import("@/pages/admin-datev").then((module) => ({
     default: module.AdminDatevPage,
@@ -474,6 +480,7 @@ function AppRoutes() {
             <Route path="admin/settings" element={<AdminSettingsPage />} />
             <Route path="admin/datev" element={<AdminDatevPage />} />
             <Route path="admin/signatures" element={<AdminSignaturesPage />} />
+            <Route path="admin/signature-api" element={<AdminSignatureApiPage />} />
             <Route path="personnel" element={<PersonnelPage />} />
             <Route path="personnel/:employeeId" element={<PersonnelEmployeePage />} />
             <Route path="my-personnel-file" element={<MyPersonnelFilePage />} />
