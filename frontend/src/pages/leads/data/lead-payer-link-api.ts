@@ -141,15 +141,6 @@ export type PayerPaymentRoute = {
   asked: boolean;
 };
 
-/** Why the check level is 2 (contract D4). */
-export const PAYER_CHECK_REASONS = [
-  "pep",
-  "high_risk_country",
-  "cash_payment",
-  "crypto_payment",
-  "amount_over_threshold",
-] as const;
-
 /** The questionnaire as staff read it (contract 3.5 plus the staff keys of 4.2). */
 export type StaffPayerQuestionnaire = {
   patient_name: string | null;
@@ -175,8 +166,9 @@ export type StaffPayerQuestionnaire = {
   missing_for_submit: string[];
   declared_correct_at: string | null;
   submitted_at: string | null;
-  /** 1 or 2; null on a server that does not send it. */
+  /** 1 or 2 (2: the enhanced check is required); null on a server that does not send it. */
   check_level: number | null;
+  /** The keys of the enhanced check (owner rule 2026-10-07), see `enhancedCheckReasonLabel`. */
   check_reasons: string[];
   updated_at: string | null;
   adopted_at: string | null;
@@ -190,9 +182,8 @@ export type LeadPayerLinkState = {
   /** E-mail sending (Mittaro) is set up. */
   mail_available: boolean;
   link: PayerLinkInfo | null;
-  /** Decimal string with two places, e.g. "12000.00"; null while not entered. */
+  /** Decimal string with two places, e.g. "12000.00"; null while not entered. Information only. */
   estimated_total_eur: string | null;
-  funds_proof_threshold_eur: number | null;
   questionnaire: StaffPayerQuestionnaire | null;
 };
 
@@ -424,11 +415,6 @@ export function normalizeStaffPayerQuestionnaire(value: unknown): StaffPayerQues
 export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState | null {
   const raw = asRecord(value);
   if (!raw || typeof raw.can_send !== "boolean") return null;
-  const threshold = typeof raw.funds_proof_threshold_eur === "number"
-    ? raw.funds_proof_threshold_eur
-    : typeof raw.funds_proof_threshold_eur === "string" && Number.isFinite(Number(raw.funds_proof_threshold_eur))
-      ? Number(raw.funds_proof_threshold_eur)
-      : null;
   return {
     mode: raw.mode === "link" || raw.mode === "cabinet" ? raw.mode : null,
     can_send: raw.can_send,
@@ -436,7 +422,6 @@ export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState 
     mail_available: raw.mail_available !== false,
     link: normalizeLink(raw.link),
     estimated_total_eur: decimalOrNull(raw.estimated_total_eur),
-    funds_proof_threshold_eur: threshold,
     questionnaire: normalizeStaffPayerQuestionnaire(raw.questionnaire),
   };
 }

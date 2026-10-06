@@ -27,7 +27,6 @@ function state(patch: Record<string, unknown> = {}): LeadPayerLinkState {
     mail_available: true,
     link: null,
     estimated_total_eur: null,
-    funds_proof_threshold_eur: 10000,
     questionnaire: null,
     ...patch,
   })!;
@@ -59,7 +58,8 @@ describe("LeadPayerLinkPanel", () => {
     // The lead speaks Ukrainian: UA is the language of the invitation.
     expect(html).toMatch(/aria-pressed="true"[^>]*>UA</);
     expect(html).toContain("Ожидаемая общая сумма, EUR");
-    expect(html).toContain("плательщик прикладывает подтверждение источника средств");
+    // Owner rule 2026-10-07: the amount is information only, no threshold asks for a proof.
+    expect(html).not.toContain("подтверждение источника средств");
   });
 
   it("shows the sent link, resend and revoke, in German", () => {

@@ -400,8 +400,9 @@ function PayerStatement({ statement, tx }: { statement: PayerStatementRow; tx: T
  * through the own link, or the paying parent in the cabinet — person or
  * organisation, beneficial owners, identity document, relationship, source
  * of funds with the proof, the legal questions (amber on a "yes") — with the
- * check level and its reasons, an amber line while level 2 lacks the proof of
- * funds, and when the payer acknowledged the privacy notice. Read-only.
+ * check level and its reasons (level 2: the enhanced check of the owner's
+ * rule 2026-10-07 is required), an amber line while level 2 lacks the proof
+ * of funds, and when the payer acknowledged the privacy notice. Read-only.
  */
 function PayerAnswersGroup({
   state,
@@ -417,12 +418,7 @@ function PayerAnswersGroup({
   const questionnaire = state.questionnaire;
   if (!questionnaire) return null;
   const groups = payerQuestionnaireGroups(questionnaire, tx, lang, today);
-  const level = payerCheckLevelLine(
-    questionnaire.check_level,
-    questionnaire.check_reasons,
-    tx,
-    state.funds_proof_threshold_eur,
-  );
+  const level = payerCheckLevelLine(questionnaire.check_level, questionnaire.check_reasons, tx);
   const privacy = payerPrivacyLine(questionnaire, tx);
   return (
     <div className="space-y-2.5 rounded-md border border-border/60 bg-background/50 p-2.5" data-testid="lead-gwg-payer">

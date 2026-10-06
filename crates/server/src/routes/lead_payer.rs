@@ -833,8 +833,9 @@ pub(crate) struct PayerState {
 #[derive(Clone, Debug)]
 pub(crate) struct PayerReadiness {
     pub reasons: Vec<PayerReason>,
-    /// Countries for the AML country risk: the lead's citizenships and a
-    /// third-party payer's residence and citizenships.
+    /// The lead's citizenships and a third-party payer's residence and
+    /// citizenships (`status.aml_countries`, information only: whether the
+    /// enhanced check is required decides `lead_enhanced_check`).
     pub aml_countries: Vec<String>,
 }
 

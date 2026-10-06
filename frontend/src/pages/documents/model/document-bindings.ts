@@ -252,7 +252,9 @@ export function validateEnhancedDueDiligenceBindings(
     }
   };
   const riskTier = bindings.riskTier?.trim();
-  if (!["pep", "high_risk", "blacklist"].includes(riskTier ?? "")) {
+  // Owner rule 2026-10-07: a confirmed sanctions match, or a check staff
+  // carry out without any trigger, are tiers of their own.
+  if (!["pep", "high_risk", "blacklist", "sanctions", "individual"].includes(riskTier ?? "")) {
     missing.push(labels.get("riskTier") ?? "Risikostufe");
   }
   requireFields([

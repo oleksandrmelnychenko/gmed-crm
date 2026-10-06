@@ -15,6 +15,7 @@ import {
   type PayerQuestionnaireDocument,
   type StaffPayerQuestionnaire,
 } from "../data/lead-payer-link-api";
+import { enhancedCheckReasonLabel } from "./enhanced-check";
 import {
   answerLabel,
   contactChannelsLabel,
@@ -373,49 +374,34 @@ export function estimatedTotalInput(value: string | null | undefined): string {
   return value ? value.replace(".", ",") : "";
 }
 
-/** "10 000" (RU) / "10.000" (DE): the threshold of the proof of funds. */
+/** "10 000" (RU) / "10.000" (DE): a number with the language's grouping (the owners' shares). */
 function amountLabel(value: number, tx: Tx): string {
   return value.toLocaleString(tx("ru-RU", "de-DE"), { maximumFractionDigits: 2 });
 }
 
-/** The hint below the amount: from which total the proof of funds is required. */
-export function fundsProofThresholdHint(threshold: number | null | undefined, tx: Tx): string {
-  if (threshold === null || threshold === undefined) return "";
-  return tx(
-    `От ${amountLabel(threshold, tx)} EUR плательщик прикладывает подтверждение источника средств`,
-    `Ab ${amountLabel(threshold, tx)} EUR legt der Zahler einen Nachweis der Herkunft der Mittel vor`,
-  );
+/**
+ * Why the check level is what it is, as a short label: the keys of the
+ * enhanced check (owner rule 2026-10-07) — a black-list residence or
+ * citizenship of the patient or the payer, a confirmed sanctions match, and
+ * an open match as information.
+ */
+export function payerCheckReasonLabel(reason: string, tx: Tx): string {
+  return enhancedCheckReasonLabel(reason, tx);
 }
 
-/** Why the check level is 2, as a short label. */
-export function payerCheckReasonLabel(reason: string, tx: Tx, threshold?: number | null): string {
-  switch (reason) {
-    case "pep":
-      return tx("PEP", "PEP");
-    case "high_risk_country":
-      return tx("страна высокого риска", "Hochrisikoland");
-    case "cash_payment":
-      return tx("наличные", "Barzahlung");
-    case "crypto_payment":
-      return tx("криптовалюта", "Kryptowährung");
-    case "amount_over_threshold":
-      return threshold
-        ? tx(`сумма от ${amountLabel(threshold, tx)} EUR`, `Betrag ab ${amountLabel(threshold, tx)} EUR`)
-        : tx("сумма выше порога", "Betrag über dem Schwellenwert");
-    default:
-      return reason;
-  }
-}
-
-/** "Уровень проверки: 2 — PEP, наличные"; "" while the server sends no level. */
+/**
+ * "Prüfstufe: 2 — Wohnsitzland des Zahlers auf der Blacklist"; "" while the
+ * server sends no level. Level 2 means the enhanced check is required and the
+ * payer proves the source of funds; an open sanctions match is named on
+ * either level.
+ */
 export function payerCheckLevelLine(
   level: number | null | undefined,
   reasons: readonly string[],
   tx: Tx,
-  threshold?: number | null,
 ): string {
   if (level !== 1 && level !== 2) return "";
-  const labels = level === 2 ? reasons.map((reason) => payerCheckReasonLabel(reason, tx, threshold)) : [];
+  const labels = reasons.map((reason) => payerCheckReasonLabel(reason, tx));
   return `${tx("Уровень проверки: ", "Prüfstufe: ")}${level}${labels.length > 0 ? ` — ${labels.join(", ")}` : ""}`;
 }
 

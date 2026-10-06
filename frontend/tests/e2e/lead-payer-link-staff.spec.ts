@@ -117,7 +117,6 @@ function freshState(patch: LinkState = {}): LinkState {
     mail_available: true,
     link: null,
     estimated_total_eur: null,
-    funds_proof_threshold_eur: 10000,
     questionnaire: null,
     ...patch,
   };
@@ -141,7 +140,11 @@ function sentLink(patch: LinkState = {}): LinkState {
   };
 }
 
-/** What the payer sent through the link at 12:30: a PEP, level 2, no proof of funds yet. */
+/**
+ * What the payer sent through the link at 12:30: a PEP (a hint) and a second
+ * citizenship on the black list (owner rule 2026-10-07: level 2), no proof of
+ * funds yet.
+ */
 function answeredQuestionnaire(patch: LinkState = {}): LinkState {
   return {
     patient_name: "Mia Muster",
@@ -163,7 +166,7 @@ function answeredQuestionnaire(patch: LinkState = {}): LinkState {
       date_of_birth: "1970-03-02",
       birth_place: "Wien",
       birth_country: "AT",
-      citizenships: ["AT"],
+      citizenships: ["AT", "IR"],
       street: "Musterweg 1",
       zip: "1010",
       city: "Wien",
@@ -193,7 +196,7 @@ function answeredQuestionnaire(patch: LinkState = {}): LinkState {
     declared_correct_at: "2026-10-06T10:30:00Z",
     submitted_at: "2026-10-06T10:30:00Z",
     check_level: 2,
-    check_reasons: ["pep", "amount_over_threshold"],
+    check_reasons: ["payer_citizenship_blacklist"],
     updated_at: "2026-10-06T10:30:00Z",
     adopted_at: "2026-10-06T10:30:00Z",
     ...patch,
@@ -206,7 +209,20 @@ type Calls = {
   estimates: Record<string, unknown>[];
 };
 
-async function mount(page: Page, lang: "ru" | "de", initial: LinkState, portal: Record<string, unknown> = {}) {
+type MountOptions = {
+  /** `GET /leads/{id}/enhanced-check` (owner rule 2026-10-07); unset: the catch-all answer. */
+  enhancedCheck?: Record<string, unknown>;
+  /** The lead's wizard state, e.g. staff's PEP answers. */
+  wizardState?: Record<string, unknown>;
+};
+
+async function mount(
+  page: Page,
+  lang: "ru" | "de",
+  initial: LinkState,
+  portal: Record<string, unknown> = {},
+  options: MountOptions = {},
+) {
   const state = { link: initial, declaration: { ...declaration } as Record<string, unknown> };
   const calls: Calls = { sends: [], revokes: 0, estimates: [] };
   await page.addInitScript((value) => {
@@ -224,7 +240,9 @@ async function mount(page: Page, lang: "ru" | "de", initial: LinkState, portal: 
     } else if (path === "/sanctions/check") {
       response = { status: "clear", list_version_date: "2026-10-01" };
     } else if (path === `/leads/${leadId}`) {
-      response = lead;
+      response = options.wizardState ? { ...lead, wizard_state: options.wizardState } : lead;
+    } else if (path === `/leads/${leadId}/enhanced-check` && options.enhancedCheck) {
+      response = options.enhancedCheck;
     } else if (path === `/leads/${leadId}/portal-intake`) {
       response = {
         lead_id: leadId,
@@ -360,8 +378,9 @@ test("staff send the payer link in the chosen language and enter the expected to
   await expect(informed).toBeChecked();
 
   // The amount is saved when the field is left; German grouping is read.
+  // Information only (owner rule 2026-10-07): no amount asks for a proof of funds.
   const total = panel.getByTestId("lead-payer-estimated-total");
-  await expect(panel).toContainText("Ab 10.000 EUR legt der Zahler einen Nachweis der Herkunft der Mittel vor");
+  await expect(panel).not.toContainText("Nachweis der Herkunft der Mittel vor");
   await total.fill("12.500");
   await total.press("Tab");
   await expect.poll(() => calls.estimates).toEqual([{ estimated_total_eur: "12500.00" }]);
@@ -560,7 +579,9 @@ test("the payer's answers stand after invoice and payment: a PEP in amber, level
   await expect(pep).toHaveAttribute("data-warning", "true");
   await expect(pep).toContainText("Bürgermeister 2019–2024");
   await expect(group.getByTestId("lead-gwg-payer-answer-pep_related")).not.toHaveAttribute("data-warning", "true");
-  await expect(group.getByTestId("lead-gwg-payer-check-level")).toHaveText("Prüfstufe: 2 — PEP, Betrag ab 10.000 EUR");
+  await expect(group.getByTestId("lead-gwg-payer-check-level")).toHaveText(
+    "Prüfstufe: 2 — Staatsangehörigkeit des Zahlers auf der Blacklist",
+  );
   const missingProof = group.getByTestId("lead-payer-funds-proof-missing");
   await expect(missingProof).toHaveText("Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch");
   await expect(missingProof).toHaveClass(/text-amber-700/);
@@ -579,4 +600,60 @@ test("the payer's answers stand after invoice and payment: a PEP in amber, level
   await group.scrollIntoViewIfNeeded();
   await expect(missingProof).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-answers-de-mobile.png"), animations: "disabled" });
+});
+
+test("the enhanced check follows the server's rule: a black-list citizenship requires it, a PEP is a hint", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard } = await mount(
+    page,
+    "de",
+    freshState({ link: sentLink({ status: "submitted" }), questionnaire: answeredQuestionnaire() }),
+    {},
+    {
+      enhancedCheck: { required: true, reasons: ["payer_citizenship_blacklist", "sanctions_review_pending"], countries: ["IR"] },
+      wizardState: { aml_enhanced_due_diligence: { pepContractPartner: true } },
+    },
+  );
+  const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
+  await expect(section).toHaveAttribute("data-required", "true");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toHaveText(
+    "Erforderlich: Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)",
+  );
+  const hints = section.getByTestId("lead-wizard-enhanced-check-hint");
+  await expect(hints).toHaveText([
+    "möglicher Sanktionstreffer wartet auf die Entscheidung",
+    "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",
+  ]);
+  // The documents step names the missing document as long as the rule requires it.
+  await section.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-enhanced-check-required-de-desktop.png"), animations: "disabled" });
+
+  // The sheet opens from the section and says why.
+  await section.getByRole("button", { name: "Prüfung ausfüllen" }).click();
+  const sheet = page.getByTestId("lead-aml-sheet-requirement");
+  await expect(sheet).toContainText("Verstärkte Prüfung erforderlich");
+  await expect(sheet).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
+});
+
+test("a PEP alone leaves the enhanced check voluntary", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard } = await mount(
+    page,
+    "ru",
+    freshState(),
+    {},
+    {
+      enhancedCheck: { required: false, reasons: [], countries: [] },
+      wizardState: { aml_enhanced_due_diligence: { pepContractPartner: true } },
+    },
+  );
+  const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
+  await expect(section).toHaveAttribute("data-required", "false");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Не обязательна");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-hint")).toHaveText(
+    "PEP: по § 15 GwG обычно требуется усиленная проверка — решение за сотрудником",
+  );
+  // Staff may still carry it out: the sheet opens as a voluntary check.
+  await section.getByRole("button", { name: "Заполнить проверку" }).click();
+  await expect(page.getByTestId("lead-aml-sheet-requirement")).toContainText("Добровольная проверка");
 });

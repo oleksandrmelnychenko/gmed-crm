@@ -503,7 +503,8 @@ async fn staff_send_the_link_only_through_the_gate_and_resend_or_revoke_it() {
     assert_eq!(info["mail_available"], true);
     assert!(info["link"].is_null());
     assert!(info["questionnaire"].is_null());
-    assert_eq!(info["funds_proof_threshold_eur"], 10000);
+    // No amount asks for the proof of funds any more (owner rule 2026-10-07).
+    assert!(info.get("funds_proof_threshold_eur").is_none(), "{info}");
     let (status, refused) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["code"], "request_not_submitted");
@@ -1119,8 +1120,9 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         1
     );
 
-    // The identity document; staff's expected total asks for the proof of
-    // funds (check level 2).
+    // The identity document; staff's expected total is information only, a
+    // second citizenship on the black list asks for the proof of funds (the
+    // enhanced check of the owner's rule 2026-10-07: check level 2).
     let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["identity_documents"][0]["can_delete"], true);
@@ -1148,20 +1150,45 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     .await;
     assert_eq!(status, StatusCode::OK, "{estimated}");
     assert_eq!(estimated["estimated_total_eur"], "12000.00");
-    assert_eq!(estimated["questionnaire"]["check_level"], 2);
+    assert_eq!(estimated["questionnaire"]["check_level"], 1, "{estimated}");
+    assert_eq!(estimated["questionnaire"]["check_reasons"], json!([]));
+    assert_eq!(estimated["questionnaire"]["funds_proof_required"], false);
+    // Neither does a public office of the payer or a Russian citizenship.
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({
+            "citizenships": ["AT", "RU"],
+            "pep_self": true,
+            "pep_self_details": "Gemeinderat 2015–2020"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["funds_proof_required"], false, "{body}");
+    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({ "citizenships": ["AT", "IR"], "pep_self": false }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, staff) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(staff["questionnaire"]["check_level"], 2, "{staff}");
     assert_eq!(
-        estimated["questionnaire"]["check_reasons"],
-        json!(["amount_over_threshold"])
+        staff["questionnaire"]["check_reasons"],
+        json!(["payer_citizenship_blacklist"])
     );
     let (_, body) = as_payer(&app, "GET", QUESTIONNAIRE, &headers, None).await;
     assert_eq!(body["funds_proof_required"], true, "{body}");
     assert_eq!(body["missing_for_submit"], json!(["funds_proof_upload"]));
     // The payer never sees the estimate or why the proof is asked for.
     assert!(body.get("estimated_total_eur").is_none(), "{body}");
-    assert!(
-        !body.to_string().contains("amount_over_threshold"),
-        "{body}"
-    );
+    assert!(body.get("check_reasons").is_none(), "{body}");
+    assert!(!body.to_string().contains("blacklist"), "{body}");
     let (status, body) = as_payer(
         &app,
         "POST",
@@ -1578,7 +1605,7 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     assert!(missing.contains(&json!("register_court")));
     assert!(!missing.contains(&json!("beneficial_owners")));
     assert!(!missing.contains(&json!("first_name")));
-    // A seat in a high-risk country makes check level 2.
+    // A seat in a black-list country requires the enhanced check: level 2.
     let (_, info) = with_login(
         &app,
         "GET",
@@ -1590,8 +1617,19 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     assert_eq!(info["questionnaire"]["check_level"], 2, "{info}");
     assert_eq!(
         info["questionnaire"]["check_reasons"],
-        json!(["high_risk_country"])
+        json!(["payer_residence_blacklist"])
     );
+    assert_eq!(info["questionnaire"]["funds_proof_required"], true);
+    let (_, check) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/enhanced-check"),
+        &app.manager(),
+        None,
+    )
+    .await;
+    assert_eq!(check["reasons"], json!(["payer_residence_blacklist"]));
+    assert_eq!(check["countries"], json!(["IR"]));
     // "Nobody over 25 %" clears the list.
     let (status, body) = patch(
         &app,

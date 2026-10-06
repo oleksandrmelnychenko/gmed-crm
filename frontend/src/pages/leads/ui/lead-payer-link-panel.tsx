@@ -13,7 +13,6 @@ import {
 } from "../data/lead-payer-link-api";
 import {
   estimatedTotalInput,
-  fundsProofThresholdHint,
   parseEstimatedTotal,
   payerLinkActions,
   payerLinkCabinetNote,
@@ -231,7 +230,6 @@ export function LeadPayerLinkPanel({
         key={state.estimated_total_eur ?? "none"}
         leadId={leadId}
         stored={state.estimated_total_eur}
-        threshold={state.funds_proof_threshold_eur}
         canEdit={canEdit}
         disabled={disabled}
         tx={tx}
@@ -277,12 +275,12 @@ export function LeadPayerLinkPanel({
 /**
  * The expected total amount in EUR, saved when the field is left; an empty
  * field clears it. The stored value is the field's start (the parent gives a
- * new key when it changes).
+ * new key when it changes). Information for staff only: since the owner's
+ * rule of 2026-10-07 no amount asks the payer for a proof of funds.
  */
 function EstimatedTotalField({
   leadId,
   stored,
-  threshold,
   canEdit,
   disabled,
   tx,
@@ -291,7 +289,6 @@ function EstimatedTotalField({
 }: {
   leadId: string;
   stored: string | null;
-  threshold: number | null;
   canEdit: boolean;
   disabled: boolean;
   tx: Tx;
@@ -302,7 +299,6 @@ function EstimatedTotalField({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const id = `lead-payer-estimated-total-${leadId}`;
-  const hint = fundsProofThresholdHint(threshold, tx);
 
   async function commit() {
     const parsed = parseEstimatedTotal(value);
@@ -345,7 +341,6 @@ function EstimatedTotalField({
           readOnly={!canEdit}
           disabled={disabled || saving}
           aria-invalid={error ? true : undefined}
-          aria-describedby={hint ? `${id}-hint` : undefined}
           data-testid="lead-payer-estimated-total"
           onChange={(event) => {
             setError("");
@@ -360,11 +355,6 @@ function EstimatedTotalField({
         />
         {saving ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-muted-foreground" /> : null}
       </div>
-      {hint ? (
-        <p id={`${id}-hint`} className="text-xs leading-5 text-muted-foreground">
-          {hint}
-        </p>
-      ) : null}
       {error ? (
         <p role="alert" className="text-xs text-destructive" data-testid="lead-payer-estimated-total-error">
           {error}

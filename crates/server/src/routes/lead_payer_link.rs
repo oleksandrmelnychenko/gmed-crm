@@ -65,6 +65,7 @@ use crate::mail::templates::{self, MailLanguage, PayerCodeEmail, PayerInvitation
 use crate::mail::{MailError, OutgoingEmail, error_response};
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
 use crate::routes::invoices::payer::is_plausible_email;
+use crate::routes::lead_enhanced_check::{self, EnhancedCheck};
 use crate::routes::lead_payer::{
     self, Declaration, PaymentRouteBy, PortalBillingError, PortalBillingPatch,
 };
@@ -97,9 +98,6 @@ const CODE_ATTEMPTS: i32 = 5;
 const LOCK_AFTER_FAILED: i32 = 10;
 /// Version of the privacy notice the payer acknowledges.
 pub(crate) const PRIVACY_TEXT_VERSION: &str = "payer-privacy-2026-10-06";
-/// From this expected total (staff's estimate) the payer proves the source of
-/// funds (check level 2; threshold to confirm by the owner).
-pub(crate) const FUNDS_PROOF_THRESHOLD_EUR: i64 = 10_000;
 /// Active payer uploads per lead.
 const MAX_PAYER_UPLOADS: usize = 10;
 const MAX_BENEFICIAL_OWNERS: usize = 10;
@@ -107,15 +105,6 @@ const MAX_BENEFICIAL_OWNERS: usize = 10;
 const MAX_TOTAL_CENTS: i64 = 999_999_999_999;
 /// 100 %, in hundredths.
 const FULL_SHARE: i64 = 10_000;
-
-/// High-risk and blacklisted countries of the lead wizard's AML step
-/// (`AML_HIGH_RISK_COUNTRY_CODES` and `AML_BLACKLIST_COUNTRY_CODES` in
-/// `lead-wizard.tsx`), copied for the payer's check level until both read one
-/// list. The blocked countries of the sanctions policy count as well.
-pub(crate) const AML_HIGH_RISK_COUNTRIES: &[&str] = &[
-    "AF", "DZ", "AO", "BO", "VG", "CI", "CD", "HT", "YE", "CM", "KE", "LA", "LB", "MC", "MM", "NA",
-    "NP", "RU", "SS", "SY", "TT", "VU", "VE", "VN", "KP", "IR",
-];
 
 const LANGUAGES: [&str; 4] = ["de", "en", "ru", "uk"];
 const SALUTATIONS: [&str; 3] = ["mr", "ms", "none"];
@@ -1014,46 +1003,17 @@ fn effective_answers(
     answers
 }
 
-/// The check level of the payer (D4, computed, never stored): 2 when the
-/// payer or a relative is a PEP, a high-risk country is involved (the answer,
-/// or residence, habitual residence, seat or a citizenship in the wizard's
-/// list or among the blocked countries), the payer pays in cash or crypto,
-/// or staff expect a total from 10 000 EUR; else 1. Level 2 asks for the
-/// proof of funds. Another method or a payment through a third party stay
-/// warnings of the payment route (phase 2).
-fn check_level(
-    answers: &Answers,
-    declaration: &Declaration,
-    organisation: bool,
-    estimated_total_cents: Option<i64>,
-    blocked_countries: &[String],
-) -> (u8, Vec<&'static str>) {
-    let mut reasons = Vec::new();
-    if answers.pep_self == Some(true) || answers.pep_related == Some(true) {
-        reasons.push("pep");
-    }
-    let risky = |code: &String| {
-        AML_HIGH_RISK_COUNTRIES.contains(&code.as_str())
-            || blocked_countries.iter().any(|blocked| blocked == code)
-    };
-    let residence_risk = answers
-        .country
-        .iter()
-        .chain(answers.habitual_residence_country.iter())
-        .any(risky);
-    let citizenship_risk = !organisation && answers.citizenships.iter().any(risky);
-    if answers.high_risk_country == Some(true) || residence_risk || citizenship_risk {
-        reasons.push("high_risk_country");
-    }
-    match declaration.payment_method.as_deref() {
-        Some(lead_payer::PAYMENT_METHOD_CASH) => reasons.push("cash_payment"),
-        Some(lead_payer::PAYMENT_METHOD_CRYPTO) => reasons.push("crypto_payment"),
-        _ => {}
-    }
-    if estimated_total_cents.is_some_and(|cents| cents >= FUNDS_PROOF_THRESHOLD_EUR * 100) {
-        reasons.push("amount_over_threshold");
-    }
-    (1 + u8::from(!reasons.is_empty()), reasons)
+/// The check level of the payer (D4, computed, never stored): level 2 when
+/// the enhanced check of the lead is required by the owner's rule of
+/// 2026-10-07 ([`lead_enhanced_check`]: a black-list residence or
+/// citizenship of the patient or of the payer, or a confirmed sanctions match
+/// of either), else level 1. Level 2 asks for the proof of funds. The reasons
+/// are the rule's keys, `sanctions_review_pending` among them as information
+/// on either level. A PEP, a country of the longer high-risk list, cash or
+/// crypto and staff's expected total are information for staff and never
+/// raise the level.
+fn check_level(check: &EnhancedCheck) -> (u8, Vec<&'static str>) {
+    (1 + u8::from(check.required), check.reasons.clone())
 }
 
 /// What the submit needs besides the answers.
@@ -1827,10 +1787,12 @@ struct Questionnaire {
     missing: Vec<&'static str>,
 }
 
+/// `check` is the lead's enhanced check ([`lead_enhanced_check`]) as stored
+/// when the questionnaire is read; it sets the check level.
 fn questionnaire(
     context: &LeadContext,
     viewer: Viewer,
-    blocked_countries: &[String],
+    check: &EnhancedCheck,
     today: NaiveDate,
 ) -> Questionnaire {
     let declaration = context.declaration.clone().unwrap_or_default();
@@ -1902,13 +1864,7 @@ fn questionnaire(
         .filter(|upload| upload.kind == UploadKind::PayerFundsProof.as_str())
         .map(&item)
         .collect();
-    let (level, reasons) = check_level(
-        &answers,
-        &declaration,
-        organisation,
-        statement.estimated_total_cents,
-        blocked_countries,
-    );
+    let (level, reasons) = check_level(check);
     let asked = mode == Mode::Link;
     let missing = missing_for_submit(
         &answers,
@@ -2008,21 +1964,17 @@ impl Questionnaire {
     }
 }
 
-async fn blocked_countries(state: &AppState) -> Result<Vec<String>, sqlx::Error> {
-    crate::sanctions::policy::blocked_countries(&state.db).await
-}
-
 async fn questionnaire_json(
     state: &AppState,
     lead_id: Uuid,
     viewer: Viewer,
 ) -> Result<Value, sqlx::Error> {
-    let blocked = blocked_countries(state).await?;
     let mut conn = state.db.acquire().await?;
     let Some(context) = load_context(&mut conn, lead_id).await? else {
         return Ok(Value::Null);
     };
-    let built = questionnaire(&context, viewer, &blocked, crate::app_time::today());
+    let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+    let built = questionnaire(&context, viewer, &check, crate::app_time::today());
     Ok(match viewer {
         Viewer::Staff => built.to_staff_json(),
         Viewer::Payer | Viewer::Parent(_) => built.to_payer_json(),
@@ -2891,12 +2843,16 @@ async fn submit_in_tx(
     viewer: Viewer,
     lead_id: Uuid,
     declared_correct: bool,
-    blocked: &[String],
 ) -> Result<u8, Response> {
     if context.submitted_at().is_some() {
         return Err(already_submitted());
     }
-    let built = questionnaire(context, viewer, blocked, crate::app_time::today());
+    // The answers are stored as they are typed, so the rule reads the
+    // payer's countries of this submit.
+    let check = lead_enhanced_check::enhanced_check_triggers(conn, lead_id)
+        .await
+        .map_err(database)?;
+    let built = questionnaire(context, viewer, &check, crate::app_time::today());
     if !built.missing.is_empty() {
         return Err(coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -3550,10 +3506,6 @@ async fn link_upload(
     mut multipart: Multipart,
     kind: UploadKind,
 ) -> Response {
-    let blocked = match blocked_countries(&state).await {
-        Ok(blocked) => blocked,
-        Err(error) => return intake::internal(error, "load blocked countries"),
-    };
     let (mut tx, link) = match payer_session(&state, &headers).await {
         Ok(found) => found,
         Err(response) => return response,
@@ -3569,7 +3521,13 @@ async fn link_upload(
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer session");
     }
-    let built = questionnaire(&context, Viewer::Payer, &blocked, crate::app_time::today());
+    // Only the payer's name is read here, which the check level does not touch.
+    let built = questionnaire(
+        &context,
+        Viewer::Payer,
+        &EnhancedCheck::default(),
+        crate::app_time::today(),
+    );
     let payer_name = built
         .answers
         .display_name(built.organisation)
@@ -3750,10 +3708,6 @@ async fn withdraw_upload(
 
 /// `POST /public/payer-link/submit`.
 async fn submit(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
-    let blocked = match blocked_countries(&state).await {
-        Ok(blocked) => blocked,
-        Err(error) => return intake::internal(error, "load blocked countries"),
-    };
     let (mut tx, link) = match payer_session(&state, &headers).await {
         Ok(found) => found,
         Err(response) => return response,
@@ -3771,7 +3725,6 @@ async fn submit(State(state): State<AppState>, headers: HeaderMap, body: Bytes) 
         Viewer::Payer,
         link.lead_id,
         declared_correct(&body),
-        &blocked,
     )
     .await
     {
@@ -4019,10 +3972,6 @@ async fn cabinet_funds_proof(
     if let Err(response) = intake::require_patient(&auth) {
         return response;
     }
-    let blocked = match blocked_countries(&state).await {
-        Ok(blocked) => blocked,
-        Err(error) => return intake::internal(error, "load blocked countries"),
-    };
     let checked = async {
         let mut conn = state.db.acquire().await.map_err(database)?;
         let context = load_context(&mut conn, lead_id)
@@ -4040,10 +3989,11 @@ async fn cabinet_funds_proof(
         Ok(context) => context,
         Err(response) => return response,
     };
+    // Only the parent's name is read here, which the check level does not touch.
     let built = questionnaire(
         &context,
         Viewer::Parent(auth.user_id),
-        &blocked,
+        &EnhancedCheck::default(),
         crate::app_time::today(),
     );
     let payer_name = built
@@ -4104,10 +4054,6 @@ async fn cabinet_submit(
     if let Err(response) = intake::require_patient(&auth) {
         return response;
     }
-    let blocked = match blocked_countries(&state).await {
-        Ok(blocked) => blocked,
-        Err(error) => return intake::internal(error, "load blocked countries"),
-    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return intake::internal(error, "begin"),
@@ -4126,7 +4072,6 @@ async fn cabinet_submit(
         Viewer::Parent(auth.user_id),
         lead_id,
         declared_correct(&body),
-        &blocked,
     )
     .await
     {
@@ -4193,20 +4138,17 @@ async fn newest_link(
 
 /// `GET /leads/{id}/payer-link` (4.2).
 async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Response {
-    let blocked = match blocked_countries(state).await {
-        Ok(blocked) => blocked,
-        Err(error) => return intake::internal(error, "load blocked countries"),
-    };
     let loaded = async {
         let mut conn = state.db.acquire().await?;
         let Some(context) = load_context(&mut conn, lead_id).await? else {
             return Ok(None);
         };
         let link = newest_link(&mut conn, lead_id).await?;
-        Ok::<_, sqlx::Error>(Some((context, link)))
+        let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+        Ok::<_, sqlx::Error>(Some((context, link, check)))
     }
     .await;
-    let (context, link) = match loaded {
+    let (context, link, check) = match loaded {
         Ok(Some(found)) => found,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "load payer link"),
@@ -4230,7 +4172,7 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         })
     });
     let questionnaire_value = context.statement.as_ref().map(|_| {
-        questionnaire(&context, Viewer::Staff, &blocked, crate::app_time::today()).to_staff_json()
+        questionnaire(&context, Viewer::Staff, &check, crate::app_time::today()).to_staff_json()
     });
     Json(json!({
         "mode": context.mode().map(Mode::as_str),
@@ -4238,12 +4180,13 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         "blocked_reason": blocked_reason,
         "mail_available": mail_available,
         "link": link_json,
+        // Information for staff only: the expected total never asks for
+        // the proof of funds (owner rule 2026-10-07).
         "estimated_total_eur": context
             .statement
             .as_ref()
             .and_then(|statement| statement.estimated_total_cents)
             .map(cents_text),
-        "funds_proof_threshold_eur": FUNDS_PROOF_THRESHOLD_EUR,
         "questionnaire": questionnaire_value,
     }))
     .into_response()
@@ -4943,7 +4886,6 @@ pub(crate) async fn submitted_payer(
 /// `payer_link` of `GET /leads/{id}/portal-intake`: how far the link is and
 /// the check level; `null` while no third party is named and nothing exists.
 pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Value, sqlx::Error> {
-    let blocked = blocked_countries(state).await?;
     let mut conn = state.db.acquire().await?;
     let Some(context) = load_context(&mut conn, lead_id).await? else {
         return Ok(Value::Null);
@@ -4955,10 +4897,13 @@ pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Va
         return Ok(Value::Null);
     }
     let now = Utc::now();
-    let level = context
-        .statement
-        .as_ref()
-        .map(|_| questionnaire(&context, Viewer::Staff, &blocked, crate::app_time::today()).level);
+    let level = match context.statement.as_ref() {
+        Some(_) => {
+            let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
+            Some(questionnaire(&context, Viewer::Staff, &check, crate::app_time::today()).level)
+        }
+        None => None,
+    };
     Ok(json!({
         "mode": mode.map(Mode::as_str),
         "status": link
@@ -4977,7 +4922,6 @@ pub(crate) async fn cabinet_summary(
     lead_id: Uuid,
     user_id: Uuid,
 ) -> Result<Value, sqlx::Error> {
-    let blocked = blocked_countries(state).await?;
     let mut conn = state.db.acquire().await?;
     let Some(context) = load_context(&mut conn, lead_id)
         .await?
@@ -4985,10 +4929,11 @@ pub(crate) async fn cabinet_summary(
     else {
         return Ok(Value::Null);
     };
+    let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
     let built = questionnaire(
         &context,
         Viewer::Parent(user_id),
-        &blocked,
+        &check,
         crate::app_time::today(),
     );
     Ok(json!({
@@ -5291,48 +5236,67 @@ mod tests {
     }
 
     #[test]
-    fn the_check_level_names_its_reasons() {
-        let declaration = person_payer();
+    fn the_check_level_follows_the_enhanced_check() {
+        use crate::routes::lead_enhanced_check::{Screening, Subjects, evaluate};
+
+        // Nothing on the black list: level 1, whatever else the payer says.
+        assert_eq!(check_level(&EnhancedCheck::default()), (1, vec![]));
+        let russia = evaluate(&Subjects {
+            patient_citizenships: vec!["RU".into()],
+            payer_residence: vec!["RU".into()],
+            ..Subjects::default()
+        });
+        assert_eq!(check_level(&russia), (1, vec![]), "the high-risk list");
+        // A black-list country of the payer or of the patient: level 2.
+        let payer = evaluate(&Subjects {
+            payer_residence: vec!["AT".into(), "IR".into()],
+            ..Subjects::default()
+        });
+        assert_eq!(check_level(&payer), (2, vec!["payer_residence_blacklist"]));
+        let patient = evaluate(&Subjects {
+            patient_citizenships: vec!["KP".into()],
+            ..Subjects::default()
+        });
+        assert_eq!(
+            check_level(&patient),
+            (2, vec!["patient_citizenship_blacklist"])
+        );
+        // An open match is named, the level stays 1.
+        let pending = evaluate(&Subjects {
+            payer_screening: Screening::ReviewPending,
+            review_pending: true,
+            ..Subjects::default()
+        });
+        assert_eq!(check_level(&pending), (1, vec!["sanctions_review_pending"]));
+    }
+
+    #[test]
+    fn a_pep_cash_and_a_high_total_leave_the_proof_of_funds_optional() {
+        let declaration = Declaration {
+            payment_method: Some("cash".into()),
+            ..person_payer()
+        };
         let answers = Answers {
             country: Some("AT".into()),
             citizenships: vec!["AT".into()],
+            pep_self: Some(true),
+            pep_related: Some(true),
+            high_risk_country: Some(true),
             ..effective_answers(&Answers::default(), &declaration, None)
         };
-        assert_eq!(
-            check_level(&answers, &declaration, false, None, &[]),
-            (1, vec![])
-        );
-        let risky = Answers {
-            pep_related: Some(true),
-            habitual_residence_country: Some("IR".into()),
-            ..answers.clone()
+        let required = |level: u8| Requirements {
+            privacy_acknowledged: true,
+            payer_type: "person",
+            id_uploaded: true,
+            funds_proof_required: level == 2,
+            funds_proof_uploaded: false,
+            payment_route: None,
+            today: today(),
         };
-        let cash = Declaration {
-            payment_method: Some("cash".into()),
-            ..declaration.clone()
-        };
-        assert_eq!(
-            check_level(&risky, &cash, false, Some(1_000_000), &[]),
-            (
-                2,
-                vec![
-                    "pep",
-                    "high_risk_country",
-                    "cash_payment",
-                    "amount_over_threshold"
-                ]
-            )
-        );
-        assert_eq!(
-            check_level(&answers, &declaration, false, Some(999_999), &[]).0,
-            1,
-            "below the threshold"
-        );
-        let blocked = vec!["AT".to_string()];
-        assert_eq!(
-            check_level(&answers, &declaration, false, None, &blocked).1,
-            ["high_risk_country"]
-        );
+        let (level, reasons) = check_level(&EnhancedCheck::default());
+        assert_eq!((level, reasons), (1, vec![]));
+        assert!(!missing_for_submit(&answers, &required(level)).contains(&"funds_proof_upload"));
+        assert!(missing_for_submit(&answers, &required(2)).contains(&"funds_proof_upload"));
     }
 
     #[test]

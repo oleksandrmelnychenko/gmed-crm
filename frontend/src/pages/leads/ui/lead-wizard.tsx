@@ -71,6 +71,18 @@ import {
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
+import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
+import {
+  ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
+  enhancedCheckReasonsText,
+  enhancedCheckRequired,
+  enhancedCheckRiskTier,
+  enhancedCheckTriggers,
+  highRiskCountryHint,
+  pepEnhancedCheckHint,
+  SANCTIONS_REVIEW_PENDING,
+  type LeadEnhancedCheck,
+} from "../model/enhanced-check";
 import { useCan } from "@/lib/permissions";
 import {
   GWG_IDENTIFICATION_TEMPLATE,
@@ -450,11 +462,14 @@ type CommercialFlagKey = keyof CommercialFlagsPatch;
 const ESTIMATED_OUTLAYS_DESCRIPTION = "Voraussichtliche Auslagen";
 const ESTIMATED_OUTLAYS_REFERENCE_SUFFIX = ":estimated-outlays";
 
+// Owner rule 2026-10-07: only the black list (with a confirmed sanctions
+// match, decided by the server) requires the enhanced check; the longer
+// high-risk list is an amber hint for staff.
 const AML_HIGH_RISK_COUNTRY_CODES = new Set([
   "AF", "DZ", "AO", "BO", "VG", "CI", "CD", "HT", "YE", "CM", "KE", "LA",
   "LB", "MC", "MM", "NA", "NP", "RU", "SS", "SY", "TT", "VU", "VE", "VN",
 ]);
-const AML_BLACKLIST_COUNTRY_CODES = new Set(["KP", "IR", "MM"]);
+const AML_BLACKLIST_COUNTRY_CODES = new Set<string>(ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES);
 const AML_COUNTRY_CODE_ALIASES: Record<string, string> = {
   afghanistan: "AF",
   afghanistanischen: "AF",
@@ -525,6 +540,55 @@ function amlRiskForCountries(...values: Array<string | null | undefined>): {
     tier: countries.some((code) => AML_BLACKLIST_COUNTRY_CODES.has(code)) ? "blacklist" : "high_risk",
     countries,
   };
+}
+
+/**
+ * Why the enhanced check is required (owner rule 2026-10-07): the server's
+ * reasons with the black-list countries, or a black-list country the wizard
+ * shows before it is saved; "" while nothing requires it.
+ */
+function amlEnhancedCheckRequiredText(
+  check: LeadEnhancedCheck | null,
+  blacklistCountries: readonly string[],
+  tx: Tx,
+  lang: Lang,
+): string {
+  const triggers = enhancedCheckTriggers(check);
+  const reasons = triggers.length > 0
+    ? enhancedCheckReasonsText(triggers, tx)
+    : blacklistCountries.length > 0
+      ? tx("страна из чёрного списка", "Land auf der Blacklist")
+      : "";
+  if (!reasons) return "";
+  const countries = [...new Set([...(check?.countries ?? []), ...blacklistCountries])]
+    .map((code) => countryLabel(code, lang))
+    .join(", ");
+  return countries ? `${reasons} (${countries})` : reasons;
+}
+
+/** Information next to the check, never a requirement: an open sanctions match, a high-risk country, a PEP. */
+function amlEnhancedCheckHints({
+  check,
+  highRiskCountries,
+  pep,
+  tx,
+  lang,
+}: {
+  check: LeadEnhancedCheck | null;
+  highRiskCountries: readonly string[];
+  pep: boolean;
+  tx: Tx;
+  lang: Lang;
+}): string[] {
+  const hints: string[] = [];
+  if (check?.reasons.includes(SANCTIONS_REVIEW_PENDING)) {
+    hints.push(enhancedCheckReasonsText([SANCTIONS_REVIEW_PENDING], tx));
+  }
+  if (highRiskCountries.length > 0) {
+    hints.push(highRiskCountryHint(highRiskCountries.map((code) => countryLabel(code, lang)).join(", "), tx));
+  }
+  if (pep) hints.push(pepEnhancedCheckHint(tx));
+  return hints;
 }
 
 function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
@@ -2381,7 +2445,8 @@ function documentsValidationIssues(
   documents: Record<WizardDocumentKind, DocumentItem[]>,
   tx: Tx,
   existingChecks?: Map<string, boolean>,
-  payerCountries: readonly string[] = [],
+  /** Owner rule 2026-10-07: the server's enhanced check (or an unsaved black-list country). */
+  amlRequired = false,
 ): ValidationIssue[] {
   if (!draft) return [];
   const issues: ValidationIssue[] = [];
@@ -2431,11 +2496,7 @@ function documentsValidationIssues(
       fieldId: "lead-file-identity",
     });
   }
-  const amlRequired = Boolean(
-    amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries)
-    || draft.amlEnhancedDueDiligence.pepContractPartner
-    || draft.amlEnhancedDueDiligence.pepBeneficialOwner
-  );
+  // A PEP or a country of the high-risk list no longer requires the check.
   if (amlRequired && !documents.enhanced_due_diligence.some((document) => (
     document.signed_at && document.compliance_kind === "enhanced_due_diligence"
   ))) {
@@ -2828,6 +2889,12 @@ export function LeadWizard({
   useEffect(() => {
     if (lead) void reloadPayer();
   }, [lead, reloadPayer]);
+  // Owner rule 2026-10-07: whether the enhanced check is required is the
+  // server's (black-list countries of the patient and the payer, confirmed
+  // sanctions matches). Loaded again after every lead refresh, every "Кто
+  // платит" save and on `lead.portal_updated`.
+  const enhancedCheckVersion = useMemo(() => [lead, payer.data], [lead, payer.data]);
+  const enhancedCheck = useLeadEnhancedCheck(open ? leadId : null, enhancedCheckVersion).check;
   const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
   // A repeat intake (lead opened for an existing patient) keeps its patient
   // review even when reopened from the leads registry, so the patient's valid
@@ -3893,6 +3960,9 @@ export function LeadWizard({
     [order, quotes],
   );
   const quote = orderQuotes[0] ?? null;
+  // Countries of the high-risk list (with the black list) among the
+  // residence, the citizenships and the payer's countries: facts for the
+  // forms and an amber hint. A PEP is a hint too.
   const amlRisk = useMemo(
     () => draft ? amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries) : null,
     [draft?.country, draft?.citizenships, payerCountries],
@@ -3901,7 +3971,33 @@ export function LeadWizard({
     draft?.amlEnhancedDueDiligence.pepContractPartner
     || draft?.amlEnhancedDueDiligence.pepBeneficialOwner,
   );
-  const amlRequired = Boolean(amlRisk || amlPepTriggered);
+  // Owner rule 2026-10-07: only the server's check requires the enhanced
+  // check — or a black-list country shown here before it is saved.
+  const amlBlacklistCountries = useMemo(
+    () => amlRisk?.countries.filter((code) => AML_BLACKLIST_COUNTRY_CODES.has(code)) ?? [],
+    [amlRisk],
+  );
+  const amlRequired = enhancedCheckRequired(enhancedCheck, amlBlacklistCountries);
+  const amlRequiredText = amlEnhancedCheckRequiredText(enhancedCheck, amlBlacklistCountries, tx, lang);
+  const amlHints = amlEnhancedCheckHints({
+    check: enhancedCheck,
+    highRiskCountries: amlRisk?.countries.filter((code) => !AML_BLACKLIST_COUNTRY_CODES.has(code)) ?? [],
+    pep: amlPepTriggered,
+    tx,
+    lang,
+  });
+  const amlDocumentRiskTier = enhancedCheckRiskTier({
+    check: enhancedCheck,
+    blacklistHit: amlBlacklistCountries.length > 0,
+    highRiskHint: Boolean(amlRisk),
+    pep: amlPepTriggered,
+  });
+  // The EDD form asks the country fields for a country tier (the server checks the same).
+  const amlCountryFieldsRequired = amlDocumentRiskTier === "blacklist" || amlDocumentRiskTier === "high_risk";
+  const amlTriggeredCountries = useMemo(
+    () => [...new Set([...(amlRisk?.countries ?? []), ...(enhancedCheck?.countries ?? [])])],
+    [amlRisk, enhancedCheck],
+  );
   const agencyServiceById = useMemo(
     () => new Map(agencyServices.map((service) => [service.id, service])),
     [agencyServices],
@@ -4129,7 +4225,7 @@ export function LeadWizard({
       return issues;
     }
     if (validationContext.kind === "documents") {
-      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, payerCountries);
+      return documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
     }
     if (validationContext.kind === "order") {
       return orderIssues;
@@ -4140,7 +4236,7 @@ export function LeadWizard({
       message: readinessReasonLabel(reason, tx),
       fieldId: readinessReasonFieldId(reason, draft),
     }));
-  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, payerCountries]);
+  }, [draft, masterErrors, orderIssues, tx, validationContext, wizardDocuments, isRepeatIntake, readinessChecks, amlRequired]);
   const visibleOrderErrors = orderValidationAttempted ? orderIssues : [];
   const orderFieldError = (...keys: string[]) =>
     visibleOrderErrors.find((issue) => keys.includes(issue.key))?.message;
@@ -4634,8 +4730,10 @@ export function LeadWizard({
   };
 
   /**
-   * Residence, every citizenship and a third-party payer's countries feed the
-   * AML country risk; the review sheet opens when a new risky country appears.
+   * Residence, every citizenship and a third-party payer's countries are the
+   * facts of the AML forms. Owner rule 2026-10-07: only a new black-list
+   * country requires the check — it fills the reason and opens the review
+   * sheet; a country of the longer high-risk list stays a hint.
    */
   function handleAmlCountryChange(change: {
     country?: string | null;
@@ -4649,7 +4747,9 @@ export function LeadWizard({
       ...citizenships,
       ...(change.payerCountries ?? payerCountries),
     );
-    const newRiskCountry = nextRisk?.countries.some((code) => !amlRisk?.countries.includes(code)) ?? false;
+    const newBlacklistCountry = nextRisk?.countries.some((code) => (
+      AML_BLACKLIST_COUNTRY_CODES.has(code) && !amlRisk?.countries.includes(code)
+    )) ?? false;
     const affectedThirdCountry = nextRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
@@ -4663,10 +4763,12 @@ export function LeadWizard({
         ...current.amlEnhancedDueDiligence,
         affectedThirdCountry,
         highRiskCountryResident: true,
+        // A stated reason answers "erhöhtes Risiko" on the GwG sheet: only
+        // the black list fills it by itself.
         riskReason: current.amlEnhancedDueDiligence.riskReason || (
           nextRisk.tier === "blacklist"
             ? "Bezug zu einem Land der FATF-Liste der Hochrisiko-Jurisdiktionen"
-            : "Wohnsitz oder Registrierung in einem Drittstaat mit erhöhtem Geldwäscherisiko"
+            : ""
         ),
       } : {
         ...current.amlEnhancedDueDiligence,
@@ -4674,14 +4776,14 @@ export function LeadWizard({
         highRiskCountryResident: false,
       },
     } : current);
-    if (nextRisk && newRiskCountry) {
+    if (newBlacklistCountry) {
       setAmlSheetError("");
       setAmlSheetOpen(true);
     }
   }
 
+  /** Opens the enhanced check: required by the rule, or filled voluntarily. */
   function openAmlSheet() {
-    if (!amlRequired) return;
     const affectedThirdCountry = amlRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
@@ -4699,6 +4801,11 @@ export function LeadWizard({
     setAmlSheetOpen(true);
   }
 
+  /**
+   * A PEP is a fact (row b of the GwG sheet) and an amber hint: since the
+   * owner's rule of 2026-10-07 it neither requires the enhanced check nor
+   * fills its reason — staff decide and open the check themselves.
+   */
   function handleAmlPepChange(
     key: "pepContractPartner" | "pepBeneficialOwner",
     checked: boolean,
@@ -4710,22 +4817,8 @@ export function LeadWizard({
       amlEnhancedDueDiligence: {
         ...current.amlEnhancedDueDiligence,
         [key]: checked,
-        riskReason: checked && !current.amlEnhancedDueDiligence.riskReason
-          ? "Politisch exponierte Person (PeP)"
-          : current.amlEnhancedDueDiligence.riskReason,
       },
     } : current);
-    if (checked) {
-      setAmlSheetError("");
-      setAmlSheetOpen(true);
-    } else if (
-      !amlRisk
-      && !(key === "pepContractPartner"
-        ? draft?.amlEnhancedDueDiligence.pepBeneficialOwner
-        : draft?.amlEnhancedDueDiligence.pepContractPartner)
-    ) {
-      setAmlSheetOpen(false);
-    }
   }
 
   const toggleSpecializationWorkType = (workTypeId: string, checked: boolean) => {
@@ -5027,7 +5120,7 @@ export function LeadWizard({
       window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
       return false;
     }
-    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, payerCountries);
+    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
@@ -5274,12 +5367,13 @@ export function LeadWizard({
                 consent_threema: draft.consentThreema,
               }
             : {}),
-          ...(templateId === "enhanced_due_diligence" && amlRequired
+          // Required by the rule or carried out voluntarily: the tier names why.
+          ...(templateId === "enhanced_due_diligence"
             ? {
                 aml_enhanced_due_diligence: {
                   ...draft.amlEnhancedDueDiligence,
-                  riskTier: amlRisk?.tier ?? "pep",
-                  triggeredCountries: amlRisk?.countries ?? [],
+                  riskTier: amlDocumentRiskTier,
+                  triggeredCountries: amlTriggeredCountries,
                 },
               }
             : {}),
@@ -5300,7 +5394,7 @@ export function LeadWizard({
 
   async function submitAmlEnhancedDueDiligence(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!draft || !amlRequired) return;
+    if (!draft) return;
     setAmlSheetError("");
     const generated = await generateLeadComplianceDocument("enhanced_due_diligence");
     if (generated) {
@@ -6960,34 +7054,31 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </div>
               </div>
-              {amlRequired ? (
-                <div className="mt-4">
-                  <Banner tone={amlRisk?.tier === "blacklist" ? "error" : "warning"} withIcon>
+              {amlRequired || amlHints.length > 0 || wizardDocuments.enhanced_due_diligence.length > 0 ? (
+                <div className="mt-4" data-testid="lead-aml-enhanced-check" data-required={amlRequired ? "true" : "false"}>
+                  <Banner tone={amlRequired ? "error" : "warning"} withIcon>
                     <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0">
                         <div className="font-semibold">
-                          {amlRisk?.tier === "blacklist"
-                            ? tx("Чёрный список: требуется усиленная AML-проверка", "Blacklist: verstärkte AML-Prüfung erforderlich")
-                            : amlRisk
-                              ? tx("Страна повышенного риска: требуется AML-проверка", "Hochrisikoland: verstärkte AML-Prüfung erforderlich")
-                              : tx("PEP: требуется усиленная AML-проверка", "PeP: verstärkte AML-Prüfung erforderlich")}
+                          {amlRequired
+                            ? tx("Требуется усиленная AML-проверка", "Verstärkte AML-Prüfung erforderlich")
+                            : tx("Усиленная AML-проверка не обязательна", "Verstärkte AML-Prüfung nicht vorgeschrieben")}
                         </div>
-                        <div className="mt-1 text-xs leading-5">
-                          {[
-                            amlRisk?.countries.map((code) => countryLabel(code, lang)).join(", "),
-                            draft.amlEnhancedDueDiligence.pepContractPartner
-                              ? tx("PEP: клиент", "PeP: Vertragspartner")
-                              : "",
-                            draft.amlEnhancedDueDiligence.pepBeneficialOwner
-                              ? tx("PEP: бенефициар", "PeP: wirtschaftlich Berechtigter")
-                              : "",
-                          ].filter(Boolean).join(" · ")}
-                          {" · Durchführung verstärkter Sorgfaltspflichten (§ 15 GwG)"}
-                        </div>
+                        {amlRequiredText ? (
+                          <div className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-reasons">
+                            {amlRequiredText}
+                            {" · Durchführung verstärkter Sorgfaltspflichten (§ 15 GwG)"}
+                          </div>
+                        ) : null}
+                        {amlHints.map((hint) => (
+                          <div key={hint} className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-hint">
+                            {hint}
+                          </div>
+                        ))}
                       </div>
                       <Button
                         type="button"
-                        variant={amlRisk?.tier === "blacklist" ? "destructive" : "outline"}
+                        variant={amlRequired ? "destructive" : "outline"}
                         size="sm"
                         className="shrink-0"
                         disabled={isBusy}
@@ -7567,19 +7658,45 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Section>
               ) : null}
-              {amlRequired || wizardDocuments.enhanced_due_diligence.length > 0 ? (
+              {/* Always here: required by the owner's rule (2026-10-07) or carried out voluntarily. */}
+              <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
-                  accessory={amlRequired ? (
-                    <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={openAmlSheet}>
+                  accessory={(
+                    <Button
+                      type="button"
+                      variant={amlRequired ? "default" : "outline"}
+                      size="sm"
+                      className="h-8 rounded-lg"
+                      disabled={isBusy}
+                      onClick={openAmlSheet}
+                    >
                       <ShieldCheck className="size-3.5" />
                       {wizardDocuments.enhanced_due_diligence.length > 0
                         ? tx("Создать новую версию", "Neue Version erstellen")
                         : tx("Заполнить проверку", "Prüfung ausfüllen")}
                     </Button>
-                  ) : undefined}
+                  )}
                 >
+                  <div className="mb-2 space-y-1">
+                    <p
+                      className={cn("text-xs leading-5", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}
+                      data-testid="lead-wizard-enhanced-check-status"
+                    >
+                      {amlRequired
+                        ? `${tx("Обязательна", "Erforderlich")}: ${amlRequiredText}`
+                        : tx(
+                          "Не обязательна: нет страны из чёрного списка и подтверждённого совпадения с санкционным списком. Можно провести добровольно.",
+                          "Nicht vorgeschrieben: kein Land der Blacklist und kein bestätigter Sanktionstreffer. Freiwillig möglich.",
+                        )}
+                    </p>
+                    {amlHints.map((hint) => (
+                      <p key={hint} className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-enhanced-check-hint">
+                        {hint}
+                      </p>
+                    ))}
+                  </div>
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}
                     complianceKind="enhanced_due_diligence"
@@ -7595,7 +7712,7 @@ ${serviceCommentLines.join("\n")}`
                     onChanged={() => { void refreshDocumentsState(); }}
                   />
                 </Section>
-              ) : null}
+              </div>
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
@@ -9025,7 +9142,7 @@ ${serviceCommentLines.join("\n")}`
           side="right"
           className="w-full max-w-none gap-0 border-l border-border p-0 sm:max-w-3xl"
         >
-          {draft && amlRequired ? (
+          {draft ? (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={submitAmlEnhancedDueDiligence}>
               <AdminSheetScaffold
                 title={tx("Усиленная AML-проверка (§ 15 GwG)", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
@@ -9043,30 +9160,26 @@ ${serviceCommentLines.join("\n")}`
                 )}
                 bodyWrapperClassName="space-y-6"
               >
-                <div className={cn(
-                  "border-l-4 px-3 py-2.5 text-sm",
-                  amlRisk?.tier === "blacklist"
-                    ? "border-rose-500 bg-rose-50 text-rose-800"
-                    : "border-amber-500 bg-amber-50 text-amber-900",
-                )}>
+                <div
+                  className={cn(
+                    "border-l-4 px-3 py-2.5 text-sm",
+                    amlRequired
+                      ? "border-rose-500 bg-rose-50 text-rose-800"
+                      : "border-amber-500 bg-amber-50 text-amber-900",
+                  )}
+                  data-testid="lead-aml-sheet-requirement"
+                >
                   <div className="font-semibold">
-                    {amlRisk?.tier === "blacklist"
-                      ? tx("Страна из чёрного списка", "Land auf der Blacklist")
-                      : amlRisk
-                        ? tx("Страна повышенного риска", "Hochrisikoland")
-                        : tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
+                    {amlRequired
+                      ? tx("Требуется усиленная проверка", "Verstärkte Prüfung erforderlich")
+                      : tx("Добровольная проверка", "Freiwillige Prüfung")}
                   </div>
-                  <div className="mt-1 text-xs leading-5">
-                    {[
-                      amlRisk?.countries.map((code) => countryLabel(code, lang)).join(", "),
-                      draft.amlEnhancedDueDiligence.pepContractPartner
-                        ? tx("PEP: клиент", "PeP: Vertragspartner")
-                        : "",
-                      draft.amlEnhancedDueDiligence.pepBeneficialOwner
-                        ? tx("PEP: бенефициар", "PeP: wirtschaftlich Berechtigter")
-                        : "",
-                    ].filter(Boolean).join(" · ")}
-                  </div>
+                  {amlRequiredText ? (
+                    <div className="mt-1 text-xs leading-5">{amlRequiredText}</div>
+                  ) : null}
+                  {amlHints.map((hint) => (
+                    <div key={hint} className="mt-1 text-xs leading-5">{hint}</div>
+                  ))}
                 </div>
 
                 <section className="space-y-4">
@@ -9169,35 +9282,35 @@ ${serviceCommentLines.join("\n")}`
                       label={tx("Контрагент проживает или зарегистрирован в такой стране", "Vertragspartner ist dort niedergelassen oder wohnhaft")}
                     />
                   </div>
-                  <Field required={Boolean(amlRisk)} label={tx("Затронутая третья страна", "Betroffener Drittstaat")}>
+                  <Field required={amlCountryFieldsRequired} label={tx("Затронутая третья страна", "Betroffener Drittstaat")}>
                     <Input
                       className={inputClass}
-                      required={Boolean(amlRisk)}
+                      required={amlCountryFieldsRequired}
                       value={draft.amlEnhancedDueDiligence.affectedThirdCountry}
                       onChange={(event) => patchAml("affectedThirdCountry", event.target.value)}
                     />
                   </Field>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field required={Boolean(amlRisk)} label={tx("Дополнительная информация о контрагенте", "Zusätzliche Informationen zum Vertragspartner")}>
-                      <textarea className={textareaClass} required={Boolean(amlRisk)} rows={3} value={draft.amlEnhancedDueDiligence.additionalContractPartnerInfo} onChange={(event) => patchAml("additionalContractPartnerInfo", event.target.value)} />
+                    <Field required={amlCountryFieldsRequired} label={tx("Дополнительная информация о контрагенте", "Zusätzliche Informationen zum Vertragspartner")}>
+                      <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.additionalContractPartnerInfo} onChange={(event) => patchAml("additionalContractPartnerInfo", event.target.value)} />
                     </Field>
                     <Field label={tx("Дополнительная информация о бенефициаре", "Zusätzliche Informationen zum wirtschaftlich Berechtigten")}>
                       <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.additionalBeneficialOwnerInfo} onChange={(event) => patchAml("additionalBeneficialOwnerInfo", event.target.value)} />
                     </Field>
-                    <Field required={Boolean(amlRisk)} label={tx("Планируемый характер деловых отношений", "Angestrebte Art der Geschäftsbeziehung")}>
-                      <textarea className={textareaClass} required={Boolean(amlRisk)} rows={3} value={draft.amlEnhancedDueDiligence.intendedBusinessRelationshipInfo} onChange={(event) => patchAml("intendedBusinessRelationshipInfo", event.target.value)} />
+                    <Field required={amlCountryFieldsRequired} label={tx("Планируемый характер деловых отношений", "Angestrebte Art der Geschäftsbeziehung")}>
+                      <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.intendedBusinessRelationshipInfo} onChange={(event) => patchAml("intendedBusinessRelationshipInfo", event.target.value)} />
                     </Field>
-                    <Field required={Boolean(amlRisk)} label={tx("Активы контрагента", "Vermögenswerte des Vertragspartners")}>
-                      <textarea className={textareaClass} required={Boolean(amlRisk)} rows={3} value={draft.amlEnhancedDueDiligence.contractPartnerAssetInfo} onChange={(event) => patchAml("contractPartnerAssetInfo", event.target.value)} />
+                    <Field required={amlCountryFieldsRequired} label={tx("Активы контрагента", "Vermögenswerte des Vertragspartners")}>
+                      <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.contractPartnerAssetInfo} onChange={(event) => patchAml("contractPartnerAssetInfo", event.target.value)} />
                     </Field>
                     <Field label={tx("Активы бенефициарного владельца", "Vermögenswerte des wirtschaftlich Berechtigten")}>
                       <textarea className={textareaClass} rows={3} value={draft.amlEnhancedDueDiligence.beneficialOwnerAssetInfo} onChange={(event) => patchAml("beneficialOwnerAssetInfo", event.target.value)} />
                     </Field>
-                    <Field required={Boolean(amlRisk)} label={tx("Причины конкретной операции", "Gründe der konkreten Transaktion")}>
-                      <textarea className={textareaClass} required={Boolean(amlRisk)} rows={3} value={draft.amlEnhancedDueDiligence.transactionReasons} onChange={(event) => patchAml("transactionReasons", event.target.value)} />
+                    <Field required={amlCountryFieldsRequired} label={tx("Причины конкретной операции", "Gründe der konkreten Transaktion")}>
+                      <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.transactionReasons} onChange={(event) => patchAml("transactionReasons", event.target.value)} />
                     </Field>
-                    <Field required={Boolean(amlRisk)} label={tx("Планируемое использование активов", "Geplante Verwendung der eingesetzten Vermögenswerte")}>
-                      <textarea className={textareaClass} required={Boolean(amlRisk)} rows={3} value={draft.amlEnhancedDueDiligence.plannedAssetUse} onChange={(event) => patchAml("plannedAssetUse", event.target.value)} />
+                    <Field required={amlCountryFieldsRequired} label={tx("Планируемое использование активов", "Geplante Verwendung der eingesetzten Vermögenswerte")}>
+                      <textarea className={textareaClass} required={amlCountryFieldsRequired} rows={3} value={draft.amlEnhancedDueDiligence.plannedAssetUse} onChange={(event) => patchAml("plannedAssetUse", event.target.value)} />
                     </Field>
                     <Field required label={tx("Согласовавший руководитель", "Zustimmende Führungskraft")}>
                       <Input className={inputClass} required value={draft.amlEnhancedDueDiligence.managerApprovalName} onChange={(event) => patchAml("managerApprovalName", event.target.value)} />

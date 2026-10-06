@@ -234,8 +234,12 @@ type Options = {
   hourlyCodeLimitReached?: boolean;
   /** Wrong codes in total before the link locks (contract: 10). */
   lockAfterWrong?: number;
-  /** The staff's estimate is above the threshold: check level 2. */
-  estimateAboveThreshold?: boolean;
+  /**
+   * The patient's side requires the enhanced check (owner rule 2026-10-07: a
+   * black-list country or a confirmed sanctions match of the patient): check
+   * level 2, whatever the payer answers.
+   */
+  enhancedCheckRequired?: boolean;
   /** Signed in already (a session from an earlier visit of this tab). */
   answers?: Partial<Answers>;
   route?: Partial<Route8>;
@@ -302,13 +306,15 @@ async function setup(page: Page, options: Options = {}) {
     const a = q.answers;
     const r = q.payment_route;
     const organisation = payerType !== "person";
+    // Like the server (owner rule 2026-10-07): only the black list and a
+    // confirmed sanctions match require the enhanced check and so the proof
+    // of funds; a PEP, the high-risk question, cash or crypto do not.
+    const blacklisted = (code: unknown) => typeof code === "string" && ["KP", "IR", "MM"].includes(code);
     const level2 =
-      options.estimateAboveThreshold ||
-      a.pep_self === true ||
-      a.pep_related === true ||
-      a.high_risk_country === true ||
-      r.payment_method === "cash" ||
-      r.payment_method === "crypto";
+      options.enhancedCheckRequired ||
+      blacklisted(a.country) ||
+      blacklisted(a.habitual_residence_country) ||
+      (!organisation && Array.isArray(a.citizenships) && a.citizenships.some(blacklisted));
     q.funds_proof_required = Boolean(level2);
     const missing: string[] = [];
     const need = (...keys: string[]) => {
@@ -1059,7 +1065,7 @@ test.describe("payer link", () => {
     expect(calls.others).toEqual([]);
   });
 
-  test("a public office makes the proof of funds required before the details can be sent", async ({ page }) => {
+  test("a public office alone leaves the proof of funds voluntary", async ({ page }) => {
     const { q, calls } = await setup(page, {
       acknowledged: true,
       answers: { ...completeAnswers("person"), pep_self: null },
@@ -1070,22 +1076,45 @@ test.describe("payer link", () => {
 
     // Only the declarations are open: the form starts there.
     await expect(stepTitle(page)).toHaveText("Erklärungen");
-    await page.getByRole("button", { name: "Zurück" }).click();
-    await page.getByRole("button", { name: "Zurück" }).click();
-    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
-    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("freiwillig");
-    await next(page);
-    await next(page);
-
     const declarations = page.getByTestId("payer-link-step-declarations");
     await choose(page, declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ }), "Ja");
     await declarations.getByRole("textbox", { name: "Amt, Land und Zeitraum" }).fill("Bürgermeister, Österreich, 2020–2024");
     await expect.poll(() => q.answers.pep_self_details).toBe("Bürgermeister, Österreich, 2020–2024");
     expect(merged(calls.patches)).toMatchObject({ pep_self: true });
+    // Owner rule 2026-10-07: a PEP is no trigger of the enhanced check.
+    await expect.poll(() => q.funds_proof_required).toBe(false);
+    await next(page);
+    await expect(page.getByTestId("payer-link-complete")).toHaveText("Alle erforderlichen Angaben sind vorhanden.");
+    await page.getByRole("button", { name: "Zurück" }).click();
+    await page.getByRole("button", { name: "Zurück" }).click();
+    await page.getByRole("button", { name: "Zurück" }).click();
+    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
+    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("freiwillig");
+  });
+
+  test("the enhanced check makes the proof of funds required before the details can be sent", async ({ page }) => {
+    const { calls } = await setup(page, {
+      acknowledged: true,
+      answers: { ...completeAnswers("person"), pep_self: null },
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+      enhancedCheckRequired: true,
+    });
+    await signIn(page);
+
+    // The proof is asked from the start: the form opens at the funds.
+    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
+    await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("erforderlich");
+    for (let index = 0; index < 2; index += 1) await next(page);
+    await expect(stepTitle(page)).toHaveText("Erklärungen");
+    const declarations = page.getByTestId("payer-link-step-declarations");
+    await choose(page, declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ }), "Nein");
+    await expect.poll(() => merged(calls.patches)).toMatchObject({ pep_self: false });
     await next(page);
 
-    // Level 2: the proof is missing, "send" waits for it.
+    // Level 2: the proof is missing, "send" waits for it; the page never says why.
     const missing = page.getByTestId("payer-link-missing");
+    await expect(page.getByTestId("payer-link-page")).not.toContainText("Blacklist");
     await expect(missing).toContainText("Bitte noch ergänzen:");
     await expect(missing.locator("[data-missing-key]")).toHaveText(["Nachweis der Herkunft der Mittel"]);
     await page.getByTestId("payer-link-confirm").check();

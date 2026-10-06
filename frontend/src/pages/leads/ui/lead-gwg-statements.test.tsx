@@ -623,7 +623,10 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
   });
 });
 
-/** The payer's answers through the own link (phase 3a): a PEP, level 2, no proof of funds yet. */
+/**
+ * The payer's answers through the own link (phase 3a): a PEP (a hint) and a
+ * black-list citizenship (owner rule 2026-10-07: level 2), no proof of funds yet.
+ */
 const PAYER_LINK = normalizeLeadPayerLinkState({
   mode: "link",
   can_send: true,
@@ -631,7 +634,6 @@ const PAYER_LINK = normalizeLeadPayerLinkState({
   mail_available: true,
   link: { status: "submitted", email: "viktor.zahler@example.com", sent_at: "2026-10-06T08:00:00Z" },
   estimated_total_eur: "12000.00",
-  funds_proof_threshold_eur: 10000,
   questionnaire: {
     source: "link",
     payer_type: "person",
@@ -657,7 +659,7 @@ const PAYER_LINK = normalizeLeadPayerLinkState({
     missing_for_submit: [],
     submitted_at: "2026-10-06T08:30:00Z",
     check_level: 2,
-    check_reasons: ["pep", "amount_over_threshold"],
+    check_reasons: ["payer_citizenship_blacklist"],
   },
 });
 
@@ -685,7 +687,9 @@ describe("LeadGwgStatements: the payer's answers", () => {
     expect(pep).toContain('data-warning="true"');
     expect(pep).toContain("Bürgermeister 2019–2024");
     expect(statement(html, "lead-gwg-payer-answer-pep_related")).not.toContain('data-warning="true"');
-    expect(part(html, "lead-gwg-payer-check-level", "</p>")).toContain("Prüfstufe: 2 — PEP, Betrag ab 10.000 EUR");
+    expect(part(html, "lead-gwg-payer-check-level", "</p>")).toContain(
+      "Prüfstufe: 2 — Staatsangehörigkeit des Zahlers auf der Blacklist",
+    );
     expect(part(html, "lead-payer-funds-proof-missing", "</p>")).toContain("Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch");
     expect(part(html, "lead-gwg-payer-privacy", "</p>")).toContain("Datenschutzhinweis bestätigt am 06.10.2026 10:06 · Version payer-privacy-2026-10-06 · IP 203.0.113.7");
     // The payer stated section 8: the line says when, and the rows are shown.

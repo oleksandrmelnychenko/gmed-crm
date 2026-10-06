@@ -146,6 +146,12 @@ export function EnhancedDueDiligenceBindingFields({
               <option value="pep">
                 {tx("Политически значимое лицо (PEP)", "Politisch exponierte Person (PeP)")}
               </option>
+              <option value="sanctions">
+                {tx("Подтверждённое совпадение с санкционным списком", "Bestätigter Treffer auf einer Sanktionsliste")}
+              </option>
+              <option value="individual">
+                {tx("Индивидуальная проверка (добровольно)", "Einzelfallprüfung")}
+              </option>
             </NativeComboboxSelect>
           </AmlField>
           <AmlField label={tx("Добавить страну риска", "Auslösendes Land hinzufügen")}>

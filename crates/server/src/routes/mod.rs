@@ -33,6 +33,7 @@ pub mod interpreters;
 pub mod invoice_imports;
 pub mod invoices;
 pub mod key_rotation;
+pub mod lead_enhanced_check;
 pub mod lead_identification;
 pub mod lead_payer;
 pub mod lead_payer_link;
@@ -119,6 +120,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(lead_payer::router())
         .merge(lead_payer_link::router())
         .merge(lead_identification::router())
+        .merge(lead_enhanced_check::router())
         .merge(orders::router())
         .merge(order_intakes::router())
         .merge(patient_financials::router())

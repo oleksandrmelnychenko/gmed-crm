@@ -787,6 +787,10 @@ struct LeadConversionReadiness {
     payload: Value,
 }
 
+/// A country of the longer list of high-risk third countries (with the black
+/// list). Since the owner's rule of 2026-10-07 it is a fact for the GwG
+/// identification sheet ("Hochrisiko-Drittstaat") only; whether the enhanced
+/// check is required decides [`super::lead_enhanced_check`].
 pub(crate) fn is_enhanced_due_diligence_country(value: &str) -> bool {
     let normalized = value.trim();
     if normalized.is_empty() {
@@ -872,22 +876,6 @@ pub(crate) fn is_enhanced_due_diligence_country(value: &str) -> bool {
             | "nordkorea"
             | "iran"
     )
-}
-
-fn lead_requires_enhanced_due_diligence(country: Option<&str>, wizard_state: &Value) -> bool {
-    country.is_some_and(is_enhanced_due_diligence_country)
-        || wizard_state
-            .get("registration_country")
-            .and_then(Value::as_str)
-            .is_some_and(is_enhanced_due_diligence_country)
-        || wizard_state
-            .pointer("/aml_enhanced_due_diligence/pepContractPartner")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        || wizard_state
-            .pointer("/aml_enhanced_due_diligence/pepBeneficialOwner")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
 }
 
 fn readiness_decimal(value: Option<&Value>) -> String {
@@ -1693,14 +1681,9 @@ fn evaluate_lead_conversion_readiness(
 }
 
 fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversionReadinessInput {
-    let country = row
-        .try_get::<Option<String>, _>("country")
-        .unwrap_or_default();
     let wizard_state = row
         .try_get::<Value, _>("wizard_state")
         .unwrap_or_else(|_| json!({}));
-    let enhanced_due_diligence_required =
-        lead_requires_enhanced_due_diligence(country.as_deref(), &wizard_state);
     let quote_line_items = row
         .try_get::<Value, _>("quote_line_items")
         .unwrap_or_else(|_| json!([]));
@@ -1732,7 +1715,8 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         confidentiality_release_signed: row
             .try_get("confidentiality_release_signed")
             .unwrap_or(false),
-        enhanced_due_diligence_required,
+        // Set by `load_lead_conversion_readiness` from the owner's rule.
+        enhanced_due_diligence_required: false,
         enhanced_due_diligence_document_generated: row
             .try_get("enhanced_due_diligence_document_generated")
             .unwrap_or(false),
@@ -2046,13 +2030,23 @@ async fn load_lead_conversion_readiness(
                 "Failed to load lead readiness",
             )
         })?;
-    // Every citizenship and a third-party payer's residence and citizenships
-    // count for the AML country risk, not only the first citizenship.
-    input.enhanced_due_diligence_required |= input
-        .payer
-        .aml_countries
-        .iter()
-        .any(|code| is_enhanced_due_diligence_country(code));
+    // The enhanced check is required only by the owner's rule (2026-10-07):
+    // a black-list residence or citizenship of the patient or the payer, or
+    // a confirmed sanctions match — never by a PEP or the high-risk list.
+    let enhanced_check_failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, lead_id = %lead_id, "load lead enhanced check");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load lead readiness",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(enhanced_check_failed)?;
+    input.enhanced_due_diligence_required =
+        super::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
+            .await
+            .map_err(enhanced_check_failed)?
+            .required;
+    drop(conn);
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
     Ok(Some(evaluate_lead_conversion_readiness(&input)))
 }
@@ -5388,6 +5382,15 @@ async fn create_prospect_patient(
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
 
+    let enhanced_check_required =
+        match super::lead_enhanced_check::enhanced_check_triggers(&mut tx, lead_id).await {
+            Ok(check) => check.required,
+            Err(error) => {
+                tracing::error!(error = %error, lead_id = %lead_id, "load lead enhanced check");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+
     let seq: i64 = match sqlx::query_scalar::<_, i64>("SELECT nextval('patient_id_seq')")
         .fetch_one(&mut *tx)
         .await
@@ -5465,10 +5468,7 @@ async fn create_prospect_patient(
         "document_pack_complete": false,
         "compliance_completed": false,
         "contract_status": "pending",
-        "aml_enhanced_due_diligence_required": lead_requires_enhanced_due_diligence(
-            lead_country.as_deref(),
-            &wizard_state,
-        ),
+        "aml_enhanced_due_diligence_required": enhanced_check_required,
         "aml_enhanced_due_diligence": wizard_state
             .get("aml_enhanced_due_diligence")
             .cloned()
@@ -5992,6 +5992,17 @@ async fn convert_lead(
         .find(|contact| contact.contact_kind == "phone" && !contact.is_primary)
         .map(|contact| contact.value.as_str());
 
+    let enhanced_check_required = match super::lead_enhanced_check::enhanced_check_triggers(
+        &mut tx, lead_id,
+    )
+    .await
+    {
+        Ok(check) => check.required,
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load lead enhanced check for conversion");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let legal_status = json!({
         "dsgvo_signed": true,
         "confidentiality_release_signed": true,
@@ -5999,10 +6010,7 @@ async fn convert_lead(
         "document_pack_complete": true,
         "compliance_completed": true,
         "contract_status": "signed",
-        "aml_enhanced_due_diligence_required": lead_requires_enhanced_due_diligence(
-            lead_country.as_deref(),
-            &wizard_state,
-        ),
+        "aml_enhanced_due_diligence_required": enhanced_check_required,
         "aml_enhanced_due_diligence": wizard_state
             .get("aml_enhanced_due_diligence")
             .cloned()
@@ -9165,31 +9173,16 @@ mod lead_conversion_readiness_tests {
     }
 
     #[test]
-    fn enhanced_due_diligence_country_detection_covers_blacklist_and_high_risk() {
-        assert!(lead_requires_enhanced_due_diligence(
-            Some("DE"),
-            &json!({ "registration_country": "IR" }),
-        ));
-        assert!(lead_requires_enhanced_due_diligence(
-            Some("Russische Föderation"),
-            &json!({}),
-        ));
-        assert!(lead_requires_enhanced_due_diligence(
-            Some("DE"),
-            &json!({
-                "aml_enhanced_due_diligence": {
-                    "pepContractPartner": true
-                }
-            }),
-        ));
-        assert!(!lead_requires_enhanced_due_diligence(
-            Some("DE"),
-            &json!({ "registration_country": "AT" }),
-        ));
+    fn the_high_risk_list_stays_a_fact_of_the_identification_sheet() {
+        // The longer list is no trigger of the enhanced check any more
+        // (`lead_enhanced_check`), but the sheet still names the country.
+        assert!(is_enhanced_due_diligence_country("IR"));
+        assert!(is_enhanced_due_diligence_country("Russische Föderation"));
+        assert!(!is_enhanced_due_diligence_country("AT"));
     }
 
     #[test]
-    fn enhanced_due_diligence_document_is_required_for_risk_country() {
+    fn enhanced_due_diligence_document_is_required_when_the_rule_requires_the_check() {
         let mut input = ready_input();
         input.enhanced_due_diligence_required = true;
 

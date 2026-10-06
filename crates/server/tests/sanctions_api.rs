@@ -183,6 +183,20 @@ async fn lead_status(app: &TestApp, lead_id: Uuid) -> Value {
     body
 }
 
+/// The lead's enhanced check (owner rule 2026-10-07) as staff read it.
+async fn enhanced_check(app: &TestApp, lead_id: Uuid) -> Value {
+    let (status, body) = request(
+        app,
+        "GET",
+        &format!("/leads/{lead_id}/enhanced-check"),
+        &app.pm(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
 async fn open_hits(app: &TestApp) -> Vec<Value> {
     let (status, body) = request(app, "GET", "/sanctions/hits?status=open", &app.ceo(), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -323,6 +337,12 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
         "sanctions_review_pending"
     );
     assert_eq!(status["can_review"], false);
+    // An open possible match is named but does not require the enhanced
+    // check (owner rule 2026-10-07).
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({ "required": false, "reasons": ["sanctions_review_pending"], "countries": [] })
+    );
 
     // The CEO is told, without the person's name in the notification.
     let notification: (String, String) = sqlx::query_as(
@@ -447,6 +467,7 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
     // False positive unblocks; re-screening with the same data keeps it closed.
     let status = lead_status(&app, lead_id).await;
     assert_eq!(status["screening"], "clear", "{status}");
+    assert_eq!(enhanced_check(&app, lead_id).await["reasons"], json!([]));
     let (_, body) = request(
         &app,
         "POST",
@@ -521,6 +542,11 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
     assert_eq!(body["error"], "sanctions_confirmed");
     let status = lead_status(&app, lead_id).await;
     assert_eq!(status["screening"], "confirmed");
+    // A confirmed match requires the enhanced check.
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({ "required": true, "reasons": ["patient_sanctioned"], "countries": [] })
+    );
     // Even a direct database update cannot reopen a decided hit.
     let reopened = sqlx::query("UPDATE sanctions_hits SET status = 'open', decided_by = NULL, decided_at = NULL, decision_reason = NULL WHERE id = $1")
         .bind(Uuid::parse_str(&confirmed_id).unwrap())

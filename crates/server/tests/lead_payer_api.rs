@@ -491,6 +491,20 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
     assert_eq!(payer_audits, 3);
 }
 
+/// `GET /leads/{id}/enhanced-check` as the patient manager.
+async fn enhanced_check(app: &TestApp, lead_id: Uuid) -> Value {
+    let (status, check) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/enhanced-check"),
+        &app.bearer("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{check}");
+    check
+}
+
 #[tokio::test]
 async fn payer_and_citizenship_countries_count_for_the_aml_risk() {
     let Some(app) = test_app().await else { return };
@@ -507,8 +521,58 @@ async fn payer_and_citizenship_countries_count_for_the_aml_risk() {
     };
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert!(edd_passed(&lead), "{lead}");
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({ "required": false, "reasons": [], "countries": [] })
+    );
+    // The readers of the payer declaration only; an unknown lead is 404.
+    for role in ["concierge", "billing"] {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/leads/{lead_id}/enhanced-check"),
+            &app.bearer(role),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/leads/{}/enhanced-check", Uuid::new_v4()),
+        &app.bearer("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // A second citizenship in a high-risk country requires enhanced due diligence.
+    // Owner rule 2026-10-07: a Russian citizenship (the longer high-risk
+    // list) and staff's PEP answers are information only.
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({"citizenships": ["de", "RU"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    sqlx::query(
+        r#"UPDATE leads
+           SET wizard_state = wizard_state
+               || '{"aml_enhanced_due_diligence": {"pepContractPartner": true, "pepBeneficialOwner": true}}'::jsonb
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert!(edd_passed(&lead), "{lead}");
+    assert_eq!(enhanced_check(&app, lead_id).await["required"], false);
+
+    // A second citizenship on the black list requires enhanced due diligence.
     let (status, updated) = json_request(
         &app,
         "POST",
@@ -522,6 +586,14 @@ async fn payer_and_citizenship_countries_count_for_the_aml_risk() {
     assert_eq!(lead["citizenships"], json!(["DE", "IR"]));
     assert_eq!(lead["wizard_state"]["registration_country"], "DE");
     assert!(!edd_passed(&lead), "{lead}");
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({
+            "required": true,
+            "reasons": ["patient_citizenship_blacklist"],
+            "countries": ["IR"],
+        })
+    );
 
     // Back to a low-risk citizenship, but the third-party payer lives in Iran.
     let (status, _) = json_request(
@@ -547,6 +619,60 @@ async fn payer_and_citizenship_countries_count_for_the_aml_risk() {
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(saved["status"]["aml_countries"], json!(["DE", "IR", "AT"]));
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert!(!edd_passed(&lead), "{lead}");
+    assert_eq!(
+        enhanced_check(&app, lead_id).await["reasons"],
+        json!(["payer_residence_blacklist"])
+    );
+
+    // The payer in Russia: information only again.
+    let mut payer = third_party_payer();
+    payer["country"] = json!("RU");
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &pm,
+        Some(payer),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert!(edd_passed(&lead), "{lead}");
+    assert_eq!(enhanced_check(&app, lead_id).await["required"], false);
+
+    // The patient's residence, or the habitual residence stated in the
+    // cabinet, on the black list.
+    sqlx::query("UPDATE leads SET country = 'KP' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({
+            "required": true,
+            "reasons": ["patient_residence_blacklist"],
+            "countries": ["KP"],
+        })
+    );
+    sqlx::query("UPDATE leads SET country = 'DE' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO lead_gwg_declarations (lead_id, habitual_residence_country) VALUES ($1, 'MM')",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        enhanced_check(&app, lead_id).await["reasons"],
+        json!(["patient_residence_blacklist"])
+    );
     let (_, lead) = json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
     assert!(!edd_passed(&lead), "{lead}");
 

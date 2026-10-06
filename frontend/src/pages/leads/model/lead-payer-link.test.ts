@@ -13,7 +13,6 @@ import {
   beneficialOwnerLine,
   estimatedTotalInput,
   fundsProofMissing,
-  fundsProofThresholdHint,
   parseEstimatedTotal,
   payerCheckLevelLine,
   payerCheckReasonLabel,
@@ -106,7 +105,7 @@ function questionnaire(patch: Record<string, unknown> = {}, answers: Record<stri
     declared_correct_at: null,
     submitted_at: null,
     check_level: 2,
-    check_reasons: ["pep", "amount_over_threshold"],
+    check_reasons: ["payer_citizenship_blacklist"],
     updated_at: "2026-10-06T10:20:00Z",
     adopted_at: null,
     ...patch,
@@ -121,7 +120,6 @@ function state(patch: Partial<LeadPayerLinkState> = {}): LeadPayerLinkState {
     mail_available: true,
     link: null,
     estimated_total_eur: null,
-    funds_proof_threshold_eur: 10000,
     questionnaire: null,
     ...patch,
   };
@@ -346,27 +344,27 @@ describe("payer link: expected total", () => {
     }
   });
 
-  it("shows the stored amount with a decimal comma, and the threshold", () => {
+  it("shows the stored amount with a decimal comma", () => {
     expect(estimatedTotalInput("12000.00")).toBe("12000,00");
     expect(estimatedTotalInput(null)).toBe("");
-    expect(fundsProofThresholdHint(10000, de)).toBe(
-      "Ab 10.000 EUR legt der Zahler einen Nachweis der Herkunft der Mittel vor",
-    );
-    expect(fundsProofThresholdHint(null, de)).toBe("");
   });
 });
 
 describe("payer link: check level", () => {
-  it("names level and reasons", () => {
-    expect(payerCheckLevelLine(2, ["pep", "amount_over_threshold"], de, 10000)).toBe(
-      "Prüfstufe: 2 — PEP, Betrag ab 10.000 EUR",
+  it("names level and the reasons of the enhanced check (owner rule 2026-10-07)", () => {
+    expect(payerCheckLevelLine(2, ["payer_residence_blacklist", "patient_sanctioned"], de)).toBe(
+      "Prüfstufe: 2 — Wohnsitzland des Zahlers auf der Blacklist, Patient auf einer Sanktionsliste (bestätigt)",
     );
-    expect(payerCheckLevelLine(2, ["high_risk_country", "cash_payment", "crypto_payment"], ru)).toBe(
-      "Уровень проверки: 2 — страна высокого риска, наличные, криптовалюта",
+    expect(payerCheckLevelLine(2, ["payer_citizenship_blacklist"], ru)).toBe(
+      "Уровень проверки: 2 — гражданство плательщика в чёрном списке",
     );
     expect(payerCheckLevelLine(1, [], de)).toBe("Prüfstufe: 1");
-    expect(payerCheckLevelLine(null, ["pep"], de)).toBe("");
-    expect(payerCheckReasonLabel("amount_over_threshold", de)).toBe("Betrag über dem Schwellenwert");
+    // An open sanctions match is named on level 1 too.
+    expect(payerCheckLevelLine(1, ["sanctions_review_pending"], de)).toBe(
+      "Prüfstufe: 1 — möglicher Sanktionstreffer wartet auf die Entscheidung",
+    );
+    expect(payerCheckLevelLine(null, ["payer_sanctioned"], de)).toBe("");
+    expect(payerCheckReasonLabel("patient_residence_blacklist", de)).toBe("Wohnsitzland des Patienten auf der Blacklist");
   });
 
   it("misses the proof of funds at level 2 only while none is uploaded", () => {
@@ -490,6 +488,7 @@ describe("payer link: the server's answer", () => {
       blocked_reason: "request_not_submitted",
       link: { status: "unknown" },
       estimated_total_eur: 12000,
+      // An older server's threshold is no part of the state any more.
       funds_proof_threshold_eur: "10000",
     });
     expect(value).toEqual({
@@ -499,7 +498,6 @@ describe("payer link: the server's answer", () => {
       mail_available: true,
       link: null,
       estimated_total_eur: "12000.00",
-      funds_proof_threshold_eur: 10000,
       questionnaire: null,
     });
     const q = normalizeStaffPayerQuestionnaire({ answers: { pep_self: "yes", citizenships: ["AT", 3] }, check_level: 3 });

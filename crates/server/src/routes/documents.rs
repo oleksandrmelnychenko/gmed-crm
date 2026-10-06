@@ -3049,7 +3049,7 @@ async fn load_gwg_identification_sheet(
     .await
     .map_err(|error| failed(error, "lead"))?
     .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
-    let (declaration, identification, represented) = {
+    let (declaration, identification, represented, enhanced_check_required) = {
         let mut conn = state
             .db
             .acquire()
@@ -3058,6 +3058,11 @@ async fn load_gwg_identification_sheet(
         let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
             .await
             .map_err(|error| failed(error, "payer declaration"))?;
+        let enhanced_check_required =
+            super::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
+                .await
+                .map_err(|error| failed(error, "enhanced check"))?
+                .required;
         let identification =
             super::lead_identification::load_identification_status(&mut conn, lead_id)
                 .await
@@ -3066,7 +3071,12 @@ async fn load_gwg_identification_sheet(
             .await
             .map_err(|error| failed(error, "representation"))?
             .unwrap_or_default();
-        (declaration, identification, represented)
+        (
+            declaration,
+            identification,
+            represented,
+            enhanced_check_required,
+        )
     };
     let representation = &represented.representation;
     // Whose sheet it is, before anything is read for it.
@@ -3353,32 +3363,28 @@ async fn load_gwg_identification_sheet(
         || risk_countries
             .iter()
             .any(|country| super::leads::is_enhanced_due_diligence_country(country));
-    sheet.increased_risk = gwg_increased_risk(
-        &aml,
-        sheet.high_risk_third_country,
-        sheet.politically_exposed,
-    );
+    sheet.increased_risk = gwg_increased_risk(&aml, enhanced_check_required);
     Ok(sheet)
 }
 
-/// Question a) of the sheet: an increased risk from the internal risk
-/// analysis or an individual review. The wizard's due-diligence form has
-/// "internal risk analysis" ticked by default, so the two boxes count only
-/// with a stated risk reason (QA 2026-10-06); the risk tier, a high-risk
-/// third country and a politically exposed person count on their own.
+/// Question a) of the sheet: an increased risk. "Ja" when the owner's rule
+/// of 2026-10-07 requires the enhanced check ([`super::lead_enhanced_check`]:
+/// a black-list residence or citizenship of the patient or the payer, or a
+/// confirmed sanctions match), or when staff documented a risk in the
+/// wizard's due-diligence form: the internal risk analysis or the individual
+/// review together with a stated risk reason (the form ticks the first box
+/// by default, QA 2026-10-06). A PEP (b) and a high-risk third country (c)
+/// stay facts of their own rows and no longer answer a) by themselves.
 fn gwg_increased_risk(
     aml: &AmlEnhancedDueDiligenceBindings,
-    high_risk_third_country: bool,
-    politically_exposed: bool,
+    enhanced_check_required: bool,
 ) -> bool {
     let risk_reason_stated = aml
         .risk_reason
         .as_deref()
         .is_some_and(|reason| !reason.trim().is_empty());
-    (risk_reason_stated && (aml.internal_risk_analysis || aml.individual_review))
-        || matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
-        || high_risk_third_country
-        || politically_exposed
+    enhanced_check_required
+        || (risk_reason_stated && (aml.internal_risk_analysis || aml.individual_review))
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -20366,6 +20372,10 @@ fn build_enhanced_due_diligence_pdf(
     let risk_tier = match aml.risk_tier.as_deref() {
         Some("blacklist") => "Blacklist / besonders hohes Risiko",
         Some("pep") => "Politisch exponierte Person (PeP)",
+        // Owner rule 2026-10-07: a confirmed sanctions match requires the
+        // check; staff may also carry it out without any trigger.
+        Some("sanctions") => "Bestätigter Treffer auf einer Sanktionsliste",
+        Some("individual") => "Einzelfallprüfung",
         _ => "Drittstaat mit hohem Risiko",
     };
     let review_date = aml
@@ -20948,13 +20958,15 @@ fn build_gwg_identification_pdf(
         "d) Handelt es sich um eine Transaktion, die besonders komplex oder ungewöhnlich groß ist, einem ungewöhnlichen Transaktionsmuster folgt oder keinen offensichtlichen wirtschaftlichen oder rechtmäßigen Zweck hat?",
         sheet.unusual_transaction,
     );
-    let any_yes = sheet.increased_risk
-        || sheet.politically_exposed
-        || sheet.high_risk_third_country
-        || sheet.unusual_transaction;
+    // Owner rule 2026-10-07: the annex follows question a) (the enhanced
+    // check of the rule, or a risk staff documented); b) to d) are facts.
+    let other_yes =
+        sheet.politically_exposed || sheet.high_risk_third_country || sheet.unusual_transaction;
     layout.text_block_justified(
-        if any_yes {
-            "Mindestens eine Frage ist mit „Ja“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist zusätzlich auszufüllen."
+        if sheet.increased_risk {
+            "Frage a) ist mit „Ja“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist zusätzlich auszufüllen."
+        } else if other_yes {
+            "Frage a) ist mit „Nein“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist nach der unternehmensinternen Risikoanalyse nicht erforderlich; die Antworten zu b) bis d) sind oben festgehalten."
         } else {
             "Keine Frage ist mit „Ja“ beantwortet: Der Dokumentationsbogen „Durchführung verstärkter Sorgfaltspflichten“ ist nicht erforderlich."
         },
@@ -30273,46 +30285,48 @@ mod tests {
             internal_risk_analysis: true,
             ..Default::default()
         };
-        assert!(!super::gwg_increased_risk(&ticked, false, false));
+        assert!(!super::gwg_increased_risk(&ticked, false));
         let blank_reason = AmlEnhancedDueDiligenceBindings {
             individual_review: true,
             risk_reason: Some("  ".to_string()),
             ..ticked.clone()
         };
-        assert!(!super::gwg_increased_risk(&blank_reason, false, false));
+        assert!(!super::gwg_increased_risk(&blank_reason, false));
         let with_reason = AmlEnhancedDueDiligenceBindings {
             risk_reason: Some("Ungewöhnlich hohe Vorauszahlung".to_string()),
             ..ticked.clone()
         };
-        assert!(super::gwg_increased_risk(&with_reason, false, false));
+        assert!(super::gwg_increased_risk(&with_reason, false));
         let reviewed = AmlEnhancedDueDiligenceBindings {
             internal_risk_analysis: false,
             individual_review: true,
             ..with_reason.clone()
         };
-        assert!(super::gwg_increased_risk(&reviewed, false, false));
+        assert!(super::gwg_increased_risk(&reviewed, false));
         // A reason without either box is no answer of question a).
         let reason_only = AmlEnhancedDueDiligenceBindings {
             internal_risk_analysis: false,
             ..with_reason
         };
-        assert!(!super::gwg_increased_risk(&reason_only, false, false));
-        // The risk tier, a high-risk third country and a PEP count on their
-        // own.
-        for tier in ["blacklist", "high_risk"] {
+        assert!(!super::gwg_increased_risk(&reason_only, false));
+        // The enhanced check of the owner's rule counts on its own.
+        assert!(super::gwg_increased_risk(&ticked, true));
+    }
+
+    #[test]
+    fn gwg_increased_risk_is_no_longer_set_by_the_risk_tier_or_a_pep() {
+        // Owner rule 2026-10-07: a PEP and a country of the longer high-risk
+        // list stay facts of rows b) and c); a) follows the enhanced check.
+        for tier in ["blacklist", "high_risk", "pep"] {
             let tiered = AmlEnhancedDueDiligenceBindings {
                 risk_tier: Some(tier.to_string()),
+                pep_contract_partner: tier == "pep",
+                high_risk_country_resident: tier == "high_risk",
                 ..Default::default()
             };
-            assert!(super::gwg_increased_risk(&tiered, false, false), "{tier}");
+            assert!(!super::gwg_increased_risk(&tiered, false), "{tier}");
+            assert!(super::gwg_increased_risk(&tiered, true), "{tier}");
         }
-        let standard = AmlEnhancedDueDiligenceBindings {
-            risk_tier: Some("standard".to_string()),
-            ..ticked
-        };
-        assert!(!super::gwg_increased_risk(&standard, false, false));
-        assert!(super::gwg_increased_risk(&standard, true, false));
-        assert!(super::gwg_increased_risk(&standard, false, true));
     }
 
     #[test]
@@ -30404,6 +30418,24 @@ mod tests {
         ));
         assert!(text.contains("(§ 12 Abs. 1 GwG) bestätigt am 04.10.2026"));
         assert!(!text.contains("ausstehend"));
+
+        // A PEP without the enhanced check of the owner's rule (2026-10-07):
+        // row b) says "Ja", the annex follows question a).
+        let pep_only = super::GwgIdentificationSheet {
+            increased_risk: false,
+            ..sheet.clone()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &pep_only,
+            &legal_test_agency(),
+            Some("A-20261005-0001"),
+            "GWG-20261005-UNITTEST0004",
+        )
+        .unwrap();
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261005-UNITTEST0004");
+        assert!(!text.contains("zusätzlich auszufüllen"));
+        assert!(text.contains("Frage a) ist mit"));
 
         // Nobody acts for an adult; without a "yes" the annex is not needed.
         // Of the identity document the sheet names only what is known: here

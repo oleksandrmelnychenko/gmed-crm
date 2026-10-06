@@ -192,7 +192,11 @@ function childRequest(options: { paying: boolean }) {
   };
 }
 
-/** Like the server (contract 3.5, D4): level 2 with a PEP or a high-risk country needs a proof of funds. */
+/**
+ * Like the server (contract 3.5, D4, owner rule 2026-10-07): level 2 — the
+ * enhanced check — needs a proof of funds; here a habitual residence on the
+ * black list triggers it. A PEP or the high-risk question does not.
+ */
 function recompute(value: Questionnaire, representativeMissing: string[]) {
   const answers = value.answers;
   const missing: string[] = [];
@@ -202,7 +206,7 @@ function recompute(value: Questionnaire, representativeMissing: string[]) {
   const sources = answers.funds_sources as string[];
   if (sources.length === 0) missing.push("funds_sources");
   if (sources.includes("other") && !answers.funds_description) missing.push("funds_description");
-  value.funds_proof_required = answers.pep_self === true || answers.pep_related === true || answers.high_risk_country === true;
+  value.funds_proof_required = ["KP", "IR", "MM"].includes(String(answers.habitual_residence_country ?? ""));
   if (value.funds_proof_required && value.funds_proof_documents.length === 0) missing.push("funds_proof_upload");
   for (const [question, details] of LEGAL) {
     if (answers[question] == null) missing.push(question);
@@ -423,21 +427,28 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       await expect(fields.getByRole("textbox", { name: label, exact: true })).toHaveCount(0);
     }
 
-    // A PEP: level 2, the proof of funds becomes required.
+    // A PEP alone: the proof of funds stays optional (owner rule 2026-10-07).
     const proof = section.getByTestId("lead-request-payer-funds-proof");
     await expect(proof).toContainText("optional");
     const legal = section.getByTestId("lead-request-payer-legal");
     await choose(page, legal.getByRole("combobox", { name: /Üben Sie ein hochrangiges öffentliches Amt aus/ }), "Ja");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ pep_self: true });
-    await expect(proof).toHaveAttribute("data-required", "true");
-    await expect(proof).toContainText("erforderlich");
-    await expect(proof).toContainText("Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.");
     await legal.getByRole("textbox", { name: /Amt, Land und Zeitraum/ }).fill("Stadträtin 2020–2024");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ pep_self_details: "Stadträtin 2020–2024" });
     for (const question of [/Ist ein unmittelbares Familienmitglied/, /Haben Sie oder eine beteiligte Person Wohnsitz/, /Bestehen Verbindungen zu Personen/]) {
       await choose(page, legal.getByRole("combobox", { name: question }), "Nein");
     }
     await expect.poll(() => Object.assign({}, ...calls.patches)).toMatchObject({ pep_related: false, high_risk_country: false, sanctions_links: false });
+    await expect(proof).not.toHaveAttribute("data-required", "true");
+    await expect(proof).toContainText("optional");
+    await expect(section.getByTestId("lead-request-payer-missing-own")).toHaveCount(0);
+
+    // A habitual residence on the black list requires the enhanced check: level 2, the proof becomes required.
+    await choose(page, section.getByRole("combobox", { name: /Land des gewöhnlichen Aufenthalts/ }), "Iran");
+    await expect.poll(() => calls.patches.at(-1)).toEqual({ habitual_residence_country: "IR" });
+    await expect(proof).toHaveAttribute("data-required", "true");
+    await expect(proof).toContainText("erforderlich");
+    await expect(proof).toContainText("Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.");
     await expect(section.getByTestId("lead-request-payer-missing-own").getByRole("listitem")).toHaveText(["Nachweis der Herkunft der Mittel"]);
 
     await page.locator("#lead-request-payer-funds-proof-files").setInputFiles({
