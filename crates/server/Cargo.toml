@@ -21,7 +21,7 @@ axum-prometheus = "0.10"
 # emitted from handlers would not flow to the /metrics endpoint.
 metrics = "0.24"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "sync", "process", "time"] }
-tower-http = { version = "0.6", features = ["cors", "trace", "set-header"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "set-header"] }
 tower_governor = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
