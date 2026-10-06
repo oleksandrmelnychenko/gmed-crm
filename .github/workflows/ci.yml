@@ -198,7 +198,7 @@ jobs:
 
       - name: Upload failed live browser diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: operations-live-e2e-diagnostics
           path: |
