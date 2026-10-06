@@ -1,3 +1,5 @@
+import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
@@ -105,20 +107,27 @@ const olderSelfPayer: PayerDeclaration = Object.fromEntries(
   Object.entries(selfPayer).filter(([key]) => !key.startsWith("invoice_")),
 ) as PayerDeclaration;
 
-function renderSection(declaration: PayerDeclaration | null, translate: (ru: string, de: string) => string = tx) {
+function renderSection(
+  declaration: PayerDeclaration | null,
+  translate: (ru: string, de: string) => string = tx,
+  statusPatch: Partial<PayerDeclarationStatus> = {},
+) {
   return renderToStaticMarkup(
-    <LeadPayerDeclarationSection
-      leadId="lead-1"
-      data={declaration === null ? null : { declaration, status: status({ complete: true, agency_blocking: [] }) }}
-      loading={false}
-      loadError={null}
-      disabled={false}
-      canEdit
-      lang={translate === tx ? "ru" : "de"}
-      tx={translate}
-      onSave={async () => undefined}
-      errorText={() => "error"}
-    />,
+    // A third party has a date of birth: the date field needs the pickers' adapter.
+    <LocalizationProvider dateAdapter={AdapterDayjs}>
+      <LeadPayerDeclarationSection
+        leadId="lead-1"
+        data={declaration === null ? null : { declaration, status: status({ complete: true, agency_blocking: [], ...statusPatch }) }}
+        loading={false}
+        loadError={null}
+        disabled={false}
+        canEdit
+        lang={translate === tx ? "ru" : "de"}
+        tx={translate}
+        onSave={async () => undefined}
+        errorText={() => "error"}
+      />
+    </LocalizationProvider>,
   );
 }
 
@@ -177,6 +186,53 @@ describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
     expect(block).toContain("vom Patienten im Portal gewählt");
     expect(block).toContain("USt-IdNr. des Rechnungsempfängers");
     expect(block).toContain("Steuernummer des Rechnungsempfängers");
+  });
+});
+
+describe("LeadPayerDeclarationSection: badge and contact consent", () => {
+  /** A parent of a minor who pays and holds a cabinet login. */
+  const payingParent: PayerDeclaration = {
+    ...selfPayer,
+    payer_kind: "third_party",
+    payer_type: "person",
+    first_name: "Anna",
+    last_name: "Muster",
+    relationship_kind: "parent",
+    contact_consent_at: null,
+  };
+
+  /** The markup of the consent line. */
+  const consentLine = (html: string) => {
+    const start = html.indexOf('data-testid="lead-payer-contact-consent"');
+    return start < 0 ? "" : html.slice(start, html.indexOf("</p>", start));
+  };
+
+  it("needs no consent to pass the contact on when a parent with a login pays", () => {
+    const html = renderSection(payingParent, tx, { contact_consent_required: false });
+    expect(consentLine(html)).toContain("Согласие на передачу контактов: не требуется (платит родитель)");
+    expect(consentLine(html)).not.toContain("ещё не дано");
+    expect(consentLine(renderSection(payingParent, de, { contact_consent_required: false }))).toContain(
+      "Einwilligung zur Kontaktweitergabe: nicht nötig (Elternteil zahlt)",
+    );
+    // Any other payer, and an older server without the key: as before.
+    expect(consentLine(renderSection(payingParent, tx, { contact_consent_required: true }))).toContain("ещё не дано");
+    expect(consentLine(renderSection(payingParent))).toContain("ещё не дано");
+  });
+
+  it("says the section waits for the Kostenübernahmeerklärung when nothing else is missing", () => {
+    const badge = (html: string) => {
+      const start = html.indexOf('data-testid="lead-payer-status-badge"');
+      return html.slice(start, html.indexOf("</span></span>", start));
+    };
+    const waiting = renderSection(payingParent, tx, { complete: false, missing: ["cost_assumption_missing"] });
+    expect(badge(waiting)).toContain("ждёт Kostenübernahmeerklärung");
+    expect(badge(renderSection(payingParent, de, { complete: false, missing: ["cost_assumption_missing"] }))).toContain(
+      "wartet auf Kostenübernahmeerklärung",
+    );
+    expect(badge(renderSection(payingParent, tx, { complete: false, missing: ["payer_not_informed"] }))).toContain(
+      "Не заполнено",
+    );
+    expect(badge(renderSection(payingParent))).toContain("Заполнено");
   });
 });
 

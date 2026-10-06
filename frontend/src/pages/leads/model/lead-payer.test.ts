@@ -22,6 +22,7 @@ import {
   payerRelationshipKindLabel,
   payerRelationshipTextShown,
   payerSignatureSequence,
+  payerStatusBadge,
   payerTypeLabel,
   type PayerDeclaration,
   type PayerDeclarationStatus,
@@ -488,6 +489,22 @@ describe("USt-IdNr. / Steuernummer of the invoice recipient (section 7, staff fi
 });
 
 describe("payer AML and signing order", () => {
+  it("says the section waits for the Kostenübernahmeerklärung when nothing else is missing", () => {
+    const de = (_ru: string, text: string) => text;
+    expect(payerStatusBadge(status({ complete: true, missing: [] }), tx)).toEqual({ tone: "success", label: "Заполнено" });
+    expect(payerStatusBadge(status({ complete: false, missing: ["cost_assumption_missing"] }), tx)).toEqual({
+      tone: "info",
+      label: "ждёт Kostenübernahmeerklärung",
+    });
+    expect(payerStatusBadge(status({ complete: false, missing: ["cost_assumption_missing"] }), de).label).toBe(
+      "wartet auf Kostenübernahmeerklärung",
+    );
+    expect(payerStatusBadge(status({ complete: false, missing: ["payer_not_informed", "cost_assumption_missing"] }), tx))
+      .toEqual({ tone: "warning", label: "Не заполнено" });
+    expect(payerStatusBadge(status({ complete: false, missing: [] }), de).label).toBe("Unvollständig");
+    expect(payerStatusBadge(null, tx).label).toBe("Не заполнено");
+  });
+
   it("feeds residence and citizenships of a third party into the AML risk", () => {
     expect(payerAmlCountries({ declaration: thirdParty, status: status() })).toEqual(["DE", "IR"]);
     expect(payerAmlCountries({ declaration: { ...thirdParty, payer_kind: "self" }, status: status() })).toEqual([]);

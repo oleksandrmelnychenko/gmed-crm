@@ -291,6 +291,13 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
         saved["status"]["missing"],
         json!(["cost_assumption_missing"])
     );
+    // A third party without a cabinet login is contacted only with the
+    // lead's consent (QA 2026-10-06).
+    assert_eq!(saved["status"]["contact_consent_required"], true, "{saved}");
+    assert_eq!(
+        saved["declaration"]["contact_consent_required"], true,
+        "{saved}"
+    );
 
     // The third party became the payer of the lead's order (existing payer model).
     let payer: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(

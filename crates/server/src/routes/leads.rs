@@ -2432,16 +2432,40 @@ async fn create_lead(
     if body.first_name.trim().is_empty() || body.last_name.trim().is_empty() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Name required");
     }
-    // Every manual lead gets a patient login (owner decision 2026-10-03), so
-    // the address is mandatory and must not belong to another account.
-    let Some(portal_email) =
-        crate::routes::lead_portal_account::normalize_portal_email(body.email.as_deref())
-    else {
+    let date_of_birth = match body.date_of_birth.as_deref() {
+        Some(value) if !value.trim().is_empty() => {
+            match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
+                Ok(value) => Some(value),
+                Err(_) => {
+                    return err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "Invalid date_of_birth (YYYY-MM-DD)",
+                    );
+                }
+            }
+        }
+        _ => None,
+    };
+    // Every adult manual lead gets a patient login (owner decision
+    // 2026-10-03), so the address is mandatory and must not belong to another
+    // account. A minor gets no login of their own — the parents get theirs
+    // (QA 2026-10-06, B1-a) —, so the child's address is optional; one that
+    // is given must still be valid.
+    let minor = is_minor_on(date_of_birth, crate::app_time::today());
+    let email_given = body
+        .email
+        .as_deref()
+        .is_some_and(|email| !email.trim().is_empty());
+    let portal_email =
+        crate::routes::lead_portal_account::normalize_portal_email(body.email.as_deref());
+    if portal_email.is_none() && (email_given || !minor) {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "A valid email is required",
         );
-    };
+    }
+    // The address of the patient login: an adult's own.
+    let account_email = portal_email.clone().filter(|_| !minor);
 
     if let Some(creation_key) = body.creation_key {
         match sqlx::query_scalar::<_, Uuid>(
@@ -2463,20 +2487,6 @@ async fn create_lead(
         }
     }
 
-    let date_of_birth = match body.date_of_birth.as_deref() {
-        Some(value) if !value.trim().is_empty() => {
-            match NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d") {
-                Ok(value) => Some(value),
-                Err(_) => {
-                    return err(
-                        StatusCode::UNPROCESSABLE_ENTITY,
-                        "Invalid date_of_birth (YYYY-MM-DD)",
-                    );
-                }
-            }
-        }
-        _ => None,
-    };
     let trusted_contacts = match body.trusted_contacts.as_deref() {
         Some(contacts) => match normalize_trusted_contacts(contacts) {
             Ok(value) => value,
@@ -2498,7 +2508,7 @@ async fn create_lead(
             first_name: body.first_name.trim(),
             last_name: body.last_name.trim(),
             date_of_birth,
-            email: Some(&portal_email),
+            email: portal_email.as_deref(),
             phone: body.phone.as_deref(),
             guardians: &trusted_contacts,
         },
@@ -2510,9 +2520,8 @@ async fn create_lead(
     // A minor gets no login of their own (owner decision 2026-10-03): the
     // parents fill in the data through their account, and the address may be
     // a parent's address that already has one.
-    let creates_portal_account = !is_minor_on(date_of_birth, crate::app_time::today());
-    if creates_portal_account {
-        match crate::routes::lead_portal_account::email_owner(&state.db, &portal_email, None).await
+    if let Some(account_email) = account_email.as_deref() {
+        match crate::routes::lead_portal_account::email_owner(&state.db, account_email, None).await
         {
             Ok(None) => {}
             Ok(Some(owner)) => {
@@ -2544,7 +2553,7 @@ async fn create_lead(
     )
     .bind(body.first_name.trim())
     .bind(body.last_name.trim())
-    .bind(&portal_email)
+    .bind(portal_email.as_deref())
     .bind(body.phone.as_deref())
     .bind(body.source.as_deref())
     .bind(body.country.as_deref())
@@ -2555,17 +2564,17 @@ async fn create_lead(
     .bind(&trusted_contacts)
     .fetch_one(&mut *tx)
     .await;
-    let (id, portal_account) = match inserted {
-        Ok((id, false)) => {
+    let (id, portal_account) = match (inserted, account_email.as_deref()) {
+        (Ok((id, false)), _) => {
             return Json(json!({"id":id,"idempotent_replay":true})).into_response();
         }
-        Ok((id, true)) if !creates_portal_account => (id, None),
-        Ok((id, true)) => {
+        (Ok((id, true)), None) => (id, None),
+        (Ok((id, true)), Some(account_email)) => {
             let name = format!("{} {}", body.first_name.trim(), body.last_name.trim());
             match crate::routes::lead_portal_account::create_for_lead_in_tx(
                 &mut tx,
                 id,
-                &portal_email,
+                account_email,
                 &name,
                 auth.user_id,
             )
@@ -2576,7 +2585,7 @@ async fn create_lead(
                     drop(tx);
                     return match crate::routes::lead_portal_account::email_owner(
                         &state.db,
-                        &portal_email,
+                        account_email,
                         None,
                     )
                     .await
@@ -2593,7 +2602,7 @@ async fn create_lead(
                 }
             }
         }
-        Err(e) => {
+        (Err(e), _) => {
             tracing::error!(error = %e, "create lead");
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
         }

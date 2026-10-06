@@ -28,7 +28,6 @@ import {
   type UploadControl,
 } from "./payer-link-fields";
 import {
-  FUNDS_SOURCES,
   MAX_OWNERS,
   RELATIONSHIP_KINDS,
   emptyOwner,
@@ -260,13 +259,16 @@ export function FundsStep({
           {context.required("funds_sources") ? <RequiredMark /> : null}
         </p>
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {FUNDS_SOURCES.map((source) => (
+          {/* The server's list for the payer type: a company does not earn a salary. */}
+          {context.fundsSources.map((source) => (
             <label key={source} className="flex items-start gap-2 text-sm leading-snug">
               <input
                 type="checkbox"
                 className={cn(checkboxClass, "mt-0.5")}
                 checked={form.draft.funds_sources.includes(source)}
-                onChange={(event) => form.update((draft) => withFundsSource(draft, source, event.target.checked))}
+                onChange={(event) =>
+                  form.update((draft) => withFundsSource(draft, source, event.target.checked, context.fundsSources))
+                }
               />
               <span className="min-w-0">{text.fundsSources[source]}</span>
             </label>

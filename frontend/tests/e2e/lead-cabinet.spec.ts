@@ -286,7 +286,8 @@ function recompute(request: ReturnType<typeof leadRequest>) {
       if (identification[question] == null) missing.push(question);
       else if (identification[question] === true && !identification[details]) missing.push(details);
     }
-    if (payer?.payer_kind === "third_party" && !identification.payment_background) missing.push("payment_background");
+    // Why a third party pays; a paying parent is not asked (SB4).
+    if (payer?.payer_kind === "third_party" && !parentPays && !identification.payment_background) missing.push("payment_background");
   }
   // A server that knows the representation (contract phase 1b-2) needs both answers of an adult.
   const representation = request.representation;
@@ -1284,6 +1285,8 @@ test.describe("lead cabinet", () => {
     await expect(payer).not.toContainText("Bitte sagen Sie dieser Person");
     // The parent is the payer: no consent to be contacted is asked, and none is sent.
     await expect(payer.getByTestId("lead-request-payer-consent")).toHaveCount(0);
+    // Nor why "this person" pays: the parent pays for the own child.
+    await expect(payer.getByRole("textbox", { name: "Warum zahlt diese Person?" })).toHaveCount(0);
     await expect.poll(() => calls.payer.at(-1)).toEqual({
       payer_kind: "third_party",
       payer_type: "person",
@@ -1321,8 +1324,9 @@ test.describe("lead cabinet", () => {
     await expect(paying).toContainText("Ich zahle (als Elternteil)");
     await expect(paying).toContainText("Maria");
     await expect(paying).toContainText("Elternteil");
-    // The consent to contact oneself is never missing.
+    // The consent to contact oneself is never missing, nor why oneself pays.
     await expect(page.getByText("Zahler: Einverständnis zur Kontaktaufnahme")).toHaveCount(0);
+    await expect(page.getByText("Zahler: Warum zahlt diese Person?")).toHaveCount(0);
 
     // Another person or organisation is somebody else: the parent's data do not stay.
     await page.locator('[data-step="data"]').click();
@@ -1332,6 +1336,46 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("combobox", { name: "Wer ist der Zahler?" })).toContainText("Privatperson");
     await expect(payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" })).toContainText("Auswählen");
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "third_party", payer_type: "person", contact_consent: false });
+    // Somebody else pays: why is asked again.
+    await expect(payer.getByRole("textbox", { name: "Warum zahlt diese Person?" })).toBeVisible();
+  });
+
+  test("a child does not pay: 'the patient pays' is not offered for a minor", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        request.access_kind = "guardian";
+        request.minor = true;
+        request.payer_self_template = {
+          first_name: "Maria",
+          last_name: "Muster",
+          date_of_birth: "1985-04-12",
+          email: "maria.muster@example.com",
+          phone: null,
+        };
+      },
+    });
+    await page.goto("/");
+    const question = page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" });
+    await question.click();
+    await expect(page.getByRole("option")).toHaveText([
+      "Auswählen",
+      "Ich zahle (als Elternteil)",
+      "Eine andere Person oder Organisation",
+    ]);
+    await page.keyboard.press("Escape");
+  });
+
+  test("an older request of a minor keeps its stored answer 'the patient pays'", async ({ page }) => {
+    await setup(page, "lead", {
+      prepare: (request) => {
+        request.access_kind = "guardian";
+        request.minor = true;
+        request.payer = { ...(request.payer ?? {}), payer_kind: "self" } as typeof request.payer;
+      },
+    });
+    await page.goto("/");
+    const question = page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" });
+    await expect(question).toContainText("Die Patientin / der Patient selbst");
   });
 
   test("a server without the payer type asks for a person as before", async ({ page }) => {

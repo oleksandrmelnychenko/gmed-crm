@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { asLeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
 
 import type { PayerDocument, PayerType } from "./payer-link-api";
-import type { PayerDraft, PayerField, PayerTextField } from "./payer-link-model";
+import type { FundsSource, PayerDraft, PayerField, PayerTextField } from "./payer-link-model";
 import { LabeledField } from "./payer-link-parts";
 import { fieldLabel, type PayerLinkText } from "./payer-link-text";
 
@@ -30,6 +30,8 @@ export type StepContext = {
   lang: string;
   payerType: PayerType;
   required: (field: PayerField) => boolean;
+  /** The sources of funds offered, in form order (the server's list for the payer type). */
+  fundsSources: readonly FundsSource[];
 };
 
 /** Uploads of one kind, as the form runs them. */

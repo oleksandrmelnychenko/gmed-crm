@@ -576,6 +576,10 @@ pub struct PayerInvitationEmail<'a> {
     pub language: MailLanguage,
     /// The payer's name as the lead entered it (a person or an organisation).
     pub payer_name: &'a str,
+    /// A company, an organisation or an insurer pays (QA 2026-10-06, C7-b):
+    /// a neutral greeting without the organisation's name, and the patient
+    /// named "your organisation" as the paying party.
+    pub organisation: bool,
     /// "First Last" of the patient (the lead).
     pub patient_name: &'a str,
     /// `{console_url}/payer#<token>`; the token is in the fragment only.
@@ -600,10 +604,12 @@ pub struct PayerCodeEmail<'a> {
 struct PayerInvitationCopy {
     subject: &'static str,
     preheader: &'static str,
+    preheader_organisation: &'static str,
     label: &'static str,
     greeting_named: &'static str,
     greeting: &'static str,
     intro: &'static str,
+    intro_organisation: &'static str,
     button: &'static str,
     link_hint: &'static str,
     code_hint: &'static str,
@@ -618,10 +624,12 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
         MailLanguage::De => PayerInvitationCopy {
             subject: "Angaben zur Kostenübernahme – GMED",
             preheader: "Bitte machen Sie Ihre Angaben als zahlende Person",
+            preheader_organisation: "Bitte machen Sie die Angaben zur zahlenden Organisation",
             label: "Kostenübernahme",
             greeting_named: "Guten Tag {name},",
             greeting: "Guten Tag,",
             intro: "{patient} hat Sie als zahlende Person für eine Anfrage bei GMED benannt. Bitte machen Sie Ihre Angaben über den folgenden Link (gültig bis {date}).",
+            intro_organisation: "{patient} hat Ihre Organisation als zahlende Partei für eine Anfrage bei GMED benannt. Bitte machen Sie die Angaben zu Ihrer Organisation über den folgenden Link (gültig bis {date}).",
             button: "Angaben machen",
             link_hint: "Falls die Schaltfläche nicht funktioniert, öffnen Sie diese Adresse:",
             code_hint: "Beim Öffnen senden wir einen Bestätigungscode an diese Adresse.",
@@ -633,10 +641,12 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
         MailLanguage::En => PayerInvitationCopy {
             subject: "Details for the cost coverage – GMED",
             preheader: "Please enter your details as the paying person",
+            preheader_organisation: "Please enter the details of the paying organisation",
             label: "Cost coverage",
             greeting_named: "Hello {name},",
             greeting: "Hello,",
             intro: "{patient} has named you as the paying person for a request to GMED. Please enter your details using the following link (valid until {date}).",
+            intro_organisation: "{patient} has named your organisation as the paying party for a request to GMED. Please enter your organisation's details using the following link (valid until {date}).",
             button: "Enter my details",
             link_hint: "If the button does not work, open this address:",
             code_hint: "When you open the link, we send a confirmation code to this address.",
@@ -648,10 +658,12 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
         MailLanguage::Ru => PayerInvitationCopy {
             subject: "Данные для оплаты расходов – GMED",
             preheader: "Пожалуйста, укажите свои данные как плательщик",
+            preheader_organisation: "Пожалуйста, укажите данные организации-плательщика",
             label: "Оплата расходов",
             greeting_named: "Здравствуйте, {name}!",
             greeting: "Здравствуйте!",
             intro: "{patient} указал(а) вас как плательщика по обращению в GMED. Пожалуйста, укажите свои данные по ссылке ниже (действует до {date}).",
+            intro_organisation: "{patient} указал(а) вашу организацию как плательщика по обращению в GMED. Пожалуйста, укажите данные вашей организации по ссылке ниже (действует до {date}).",
             button: "Указать данные",
             link_hint: "Если кнопка не работает, откройте этот адрес:",
             code_hint: "При открытии ссылки мы отправим код подтверждения на этот адрес.",
@@ -663,10 +675,12 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
         MailLanguage::Uk => PayerInvitationCopy {
             subject: "Дані для оплати витрат – GMED",
             preheader: "Будь ласка, вкажіть свої дані як платник",
+            preheader_organisation: "Будь ласка, вкажіть дані організації-платника",
             label: "Оплата витрат",
             greeting_named: "Вітаємо, {name}!",
             greeting: "Вітаємо!",
             intro: "{patient} вказав(ла) вас як платника за зверненням до GMED. Будь ласка, вкажіть свої дані за посиланням нижче (діє до {date}).",
+            intro_organisation: "{patient} вказав(ла) вашу організацію як платника за зверненням до GMED. Будь ласка, вкажіть дані вашої організації за посиланням нижче (діє до {date}).",
             button: "Вказати дані",
             link_hint: "Якщо кнопка не працює, відкрийте цю адресу:",
             code_hint: "Під час відкриття посилання ми надішлемо код підтвердження на цю адресу.",
@@ -681,14 +695,19 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
 pub fn payer_invitation(email: &PayerInvitationEmail<'_>) -> RenderedEmail {
     let copy = payer_invitation_copy(email.language);
     let name = email.payer_name.trim();
-    let greeting = if name.is_empty() {
+    // An organisation is not greeted by its name.
+    let greeting = if name.is_empty() || email.organisation {
         copy.greeting.to_string()
     } else {
         copy.greeting_named.replace("{name}", name)
     };
+    let (intro, preheader) = if email.organisation {
+        (copy.intro_organisation, copy.preheader_organisation)
+    } else {
+        (copy.intro, copy.preheader)
+    };
     let patient = email.patient_name.trim();
-    let intro = copy
-        .intro
+    let intro = intro
         .replace("{patient}", patient)
         .replace("{date}", &email.expires_on.format("%d.%m.%Y").to_string());
     let controller = non_empty(email.agency.name.as_deref()).unwrap_or("GMED");
@@ -745,7 +764,7 @@ pub fn payer_invitation(email: &PayerInvitationEmail<'_>) -> RenderedEmail {
         &Shell {
             language: email.language,
             subject: copy.subject,
-            preheader: copy.preheader,
+            preheader,
             label: copy.label,
             logo_url: email.logo_url,
             footer: &footer,
@@ -1102,6 +1121,7 @@ mod tests {
             let email = payer_invitation(&PayerInvitationEmail {
                 language,
                 payer_name: "Viktor Zahler",
+                organisation: false,
                 patient_name: "Mia Muster",
                 link_url: "https://console.gmed-health.com/payer#abc123",
                 expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1125,6 +1145,7 @@ mod tests {
         let german = payer_invitation(&PayerInvitationEmail {
             language: MailLanguage::De,
             payer_name: "",
+            organisation: false,
             patient_name: "Mia Muster",
             link_url: "https://console.gmed-health.com/payer#abc123",
             expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1151,6 +1172,106 @@ mod tests {
         );
         for word in ["Diagnose", "Behandlung", "medizin", "Klinik"] {
             assert!(!german.text.contains(word), "{word}");
+        }
+    }
+
+    /// A company, an organisation or an insurer is greeted neutrally, never
+    /// with its name, and the patient named "your organisation" as the paying
+    /// party (QA 2026-10-06, C7-b).
+    #[test]
+    fn an_organisation_payer_is_greeted_neutrally_and_named_as_your_organisation() {
+        let agency = agency();
+        let expected = [
+            (
+                MailLanguage::De,
+                "Guten Tag,\n",
+                "Mia Muster hat Ihre Organisation als zahlende Partei für eine Anfrage bei GMED benannt.",
+                "zahlende Person",
+            ),
+            (
+                MailLanguage::En,
+                "Hello,\n",
+                "Mia Muster has named your organisation as the paying party",
+                "paying person",
+            ),
+            (
+                MailLanguage::Ru,
+                "Здравствуйте!\n",
+                "Mia Muster указал(а) вашу организацию как плательщика",
+                "указал(а) вас как",
+            ),
+            (
+                MailLanguage::Uk,
+                "Вітаємо!\n",
+                "Mia Muster вказав(ла) вашу організацію як платника",
+                "вказав(ла) вас як",
+            ),
+        ];
+        for (language, greeting, intro, person_wording) in expected {
+            let email = payer_invitation(&PayerInvitationEmail {
+                language,
+                payer_name: "Beispiel GmbH",
+                organisation: true,
+                patient_name: "Mia Muster",
+                link_url: "https://console.gmed-health.com/payer#abc123",
+                expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+                privacy_url: "https://console.gmed-health.com/legal#privacy",
+                agency: &agency,
+                logo_url: None,
+            });
+            assert!(email.text.starts_with(greeting), "{language:?}");
+            for part in [&email.text, &email.html] {
+                assert!(!part.contains("Beispiel GmbH"), "{language:?}");
+                assert!(!part.contains(person_wording), "{language:?}");
+                assert!(part.contains("05.11.2026"), "{language:?}");
+                assert!(part.contains("https://console.gmed-health.com/payer#abc123"));
+                assert!(part.contains("GwG"), "{language:?}");
+            }
+            assert!(email.text.contains(intro), "{language:?}");
+        }
+        // A person keeps the greeting with the name.
+        let person = payer_invitation(&PayerInvitationEmail {
+            language: MailLanguage::De,
+            payer_name: "Viktor Zahler",
+            organisation: false,
+            patient_name: "Mia Muster",
+            link_url: "https://console.gmed-health.com/payer#abc123",
+            expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+            privacy_url: "https://console.gmed-health.com/legal#privacy",
+            agency: &agency,
+            logo_url: None,
+        });
+        assert!(person.text.starts_with("Guten Tag Viktor Zahler,\n"));
+        assert!(person.text.contains("hat Sie als zahlende Person"));
+    }
+
+    /// The code e-mail greets nobody and speaks of no person: it fits a
+    /// person and an organisation alike.
+    #[test]
+    fn the_payer_code_e_mail_names_neither_a_person_nor_an_organisation() {
+        let agency = AgencyIdentity::default();
+        for language in [
+            MailLanguage::De,
+            MailLanguage::En,
+            MailLanguage::Ru,
+            MailLanguage::Uk,
+        ] {
+            let email = payer_code(&PayerCodeEmail {
+                language,
+                code: "042917",
+                agency: &agency,
+                logo_url: None,
+            });
+            for word in [
+                "Guten Tag",
+                "zahlende Person",
+                "Hello",
+                "paying person",
+                "Здравствуйте",
+                "Вітаємо",
+            ] {
+                assert!(!email.text.contains(word), "{language:?} {word}");
+            }
         }
     }
 

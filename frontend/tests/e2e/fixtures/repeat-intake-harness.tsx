@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
+import { Toaster } from "../../../src/components/ui/toast";
 import { AuthProvider } from "../../../src/lib/auth";
 import { LeadWizard } from "../../../src/pages/leads/ui/lead-wizard";
 import type { PatientDetail } from "../../../src/pages/patients/model/list-model";
@@ -31,6 +32,8 @@ function Harness() {
     {picker && <RepeatIntakePicker patientId={patient.id} lang={localStorage.getItem("gmed_lang") ?? "ru"} onPick={pick} onClose={() => setPicker(false)} />}
     {open && <LeadWizard creationKey={creationKey} open entryPoint={repeat ? "repeat-patient" : "lead"} createMode={!leadId} leadId={leadId} existingPatient={repeat ? patient : undefined}
       onCreated={setLeadId} onOpenChange={setOpen} />}
+    {/* The app shell shows the toasts of the wizard (e.g. "GwG data removed"). */}
+    <Toaster />
   </>;
 }
 

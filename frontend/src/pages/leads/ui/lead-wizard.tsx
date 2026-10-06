@@ -94,6 +94,7 @@ import {
 } from "../model/lead-trusted-contacts";
 import { useLeadIdentificationStatus } from "../model/use-lead-identification-status";
 import { removeLeadRepresentativeData } from "../data/lead-representation-api";
+import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
@@ -107,6 +108,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
@@ -175,6 +177,7 @@ import {
   daysUntilRetentionDeadline,
   retentionCountdownHint,
   retentionCountdownLabel,
+  withFinalPeriod,
 } from "../appearance/status-appearance";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import {
@@ -260,6 +263,7 @@ import {
   intakeAsksDiscoverySource,
   isMinor,
   isRepeatIntakeLead,
+  namedLanguageOptions,
   prepaymentDueAtPatch,
   repeatIntakePatientId,
   repeatIntakePatientNumber,
@@ -2450,6 +2454,14 @@ function documentsValidationIssues(
   return issues;
 }
 
+/**
+ * A minor's own e-mail is optional: a minor gets no patient login, the
+ * parents get their own access (the server accepts a minor without one).
+ */
+function minorEmailOptional(draft: Pick<Draft, "birthDate">): boolean {
+  return isMinor(draft.birthDate, new Date());
+}
+
 function validateMasterDraft(
   draft: Draft | null,
   tx: Tx,
@@ -2489,9 +2501,10 @@ function validateMasterDraft(
 
   const email = draft.email.trim();
   const phone = draft.phone.trim();
-  if (!repeatIntake && !email) {
+  if (!repeatIntake && !email && !minorEmailOptional(draft)) {
     // A new lead gets a patient login, the address is its user name
-    // (owner decision 2026-10-03).
+    // (owner decision 2026-10-03). A minor gets none: the parents get their
+    // own access, so the child's address is optional (QA 2026-10-06, B1-a).
     errors.email = tx(
       "Обязательное поле — это логин пациента в портале",
       "Pflichtfeld – Login des Patienten im Portal",
@@ -2502,7 +2515,7 @@ function validateMasterDraft(
         "Gültige Telefonnummer eingeben",
       );
     }
-  } else if (!email && !phone) {
+  } else if (repeatIntake && !email && !phone) {
     const contactRequired = tx(
       "Укажите электронную почту или телефон",
       "E-Mail oder Telefonnummer angeben",
@@ -2895,6 +2908,8 @@ export function LeadWizard({
   const [reportWorkTypesExpanded, setReportWorkTypesExpanded] = useState(true);
   const [deleteServiceLine, setDeleteServiceLine] = useState<ServiceLine | null>(null);
   const [deleteDocument, setDeleteDocument] = useState<DocumentItem | null>(null);
+  // The contact whose GwG data staff want to remove: the question is asked first.
+  const [gwgDataRemoval, setGwgDataRemoval] = useState<TrustedContactDraft | null>(null);
   const [deleteReason, setDeleteReason] = useState("");
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
@@ -4859,17 +4874,15 @@ export function LeadWizard({
    */
   const removeRepresentativeGwgData = async (contact: TrustedContactDraft) => {
     if (!leadId) return;
-    const confirmed = window.confirm(tx(
-      `Убрать данные GwG у контакта «${contact.name}»? Сведения, внесённые в кабинете (адрес, гражданство, документ), и привязка загруженных файлов будут удалены. Сам контакт и документы останутся.`,
-      `GwG-Angaben von „${contact.name}“ entfernen? Die im Portal erfassten Angaben (Anschrift, Staatsangehörigkeit, Ausweis) und die Zuordnung der hochgeladenen Dateien werden gelöscht. Der Kontakt und die Dokumente bleiben erhalten.`,
-    ));
-    if (!confirmed) return;
     setBusy(`remove-gwg-data-${contact.id}`);
     setError("");
     try {
       step1Portal.applyRepresentation(await removeLeadRepresentativeData(leadId, contact.id));
       setRepresentationVersion((version) => version + 1);
+      setGwgDataRemoval(null);
+      toast.success(tx(`Данные GwG у контакта «${contact.name}» удалены`, `GwG-Angaben von „${contact.name}“ entfernt`));
     } catch (nextError) {
+      setGwgDataRemoval(null);
       showWizardError(nextError);
     } finally {
       setBusy(null);
@@ -6410,7 +6423,8 @@ ${serviceCommentLines.join("\n")}`
                 : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
             )}
           >
-            <span className="font-semibold">{retentionCountdownLabel(retentionDays, lang)}.</span>{" "}
+            {/* "Löschung in 14 T." already ends with a period. */}
+            <span className="font-semibold">{withFinalPeriod(retentionCountdownLabel(retentionDays, lang))}</span>{" "}
             {retentionCountdownHint(lang)}
           </div>
         ) : null}
@@ -6764,7 +6778,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
                 <Field
                   label="E-Mail"
-                  required={!isRepeatIntake || !draft.phone.trim()}
+                  required={isRepeatIntake ? !draft.phone.trim() : !minorEmailOptional(draft)}
                   error={visibleMasterError("email")}
                   errorId={`${MASTER_FIELD_IDS.email}-error`}
                 >
@@ -6774,14 +6788,31 @@ ${serviceCommentLines.join("\n")}`
                     autoComplete="email"
                     spellCheck={false}
                     type="email"
-                    aria-required={!isRepeatIntake || !draft.phone.trim()}
+                    aria-required={isRepeatIntake ? !draft.phone.trim() : !minorEmailOptional(draft)}
                     aria-invalid={Boolean(visibleMasterError("email"))}
-                    aria-describedby={visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : undefined}
+                    aria-describedby={[
+                      visibleMasterError("email") ? `${MASTER_FIELD_IDS.email}-error` : "",
+                      !isRepeatIntake && minorEmailOptional(draft) ? `${MASTER_FIELD_IDS.email}-minor-hint` : "",
+                    ].filter(Boolean).join(" ") || undefined}
                     className={inputClass}
                     value={draft.email}
                     onBlur={() => touchMasterField("email")}
                     onChange={(event) => patch("email", event.target.value)}
                   />
+                  {!isRepeatIntake && minorEmailOptional(draft) ? (
+                    // Read as the field's description, not as part of its name.
+                    <span
+                      id={`${MASTER_FIELD_IDS.email}-minor-hint`}
+                      aria-hidden="true"
+                      className="block text-[11px] leading-4 text-muted-foreground"
+                      data-testid="lead-wizard-minor-email-hint"
+                    >
+                      {tx(
+                        "Для несовершеннолетнего необязательно: у ребёнка нет своего доступа, родители получают свой",
+                        "Für Minderjährige optional: Das Kind hat keinen eigenen Zugang, die Eltern erhalten ihren",
+                      )}
+                    </span>
+                  ) : null}
                 </Field>
                 <Field
                   label={tx("Телефон", "Telefon")}
@@ -6816,8 +6847,9 @@ ${serviceCommentLines.join("\n")}`
                 <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")} portalField="primary_language">
                   <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
                     <option value="">{tx("Выберите", "Auswählen")}</option>
-                    {draft.language && !LANGUAGE_OPTIONS.some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
-                    {LANGUAGE_OPTIONS.map((item) => <option key={item.value} value={item.value} data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}>{languageLabel(item.value, lang)}</option>)}
+                    {/* Only languages with a name in the UI language; a stored code without one stays visible. */}
+                    {draft.language && !namedLanguageOptions(LANGUAGE_OPTIONS, lang).some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
+                    {namedLanguageOptions(LANGUAGE_OPTIONS, lang).map((item) => <option key={item.value} value={item.value} data-search-text={`${item.value} ${languageLabel(item.value, "ru")} ${languageLabel(item.value, "de")} ${englishLanguageName(item.value)}`}>{languageLabel(item.value, lang)}</option>)}
                   </NativeComboboxSelect>
                 </Field>
                 <Field
@@ -7458,6 +7490,9 @@ ${serviceCommentLines.join("\n")}`
                   onSave={async (form) => {
                     const saved = await payer.save(form);
                     handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
+                    // Another payer or e-mail clears the payment route the payer stated:
+                    // "Данные от пациента" is read afresh, not left stale.
+                    void reloadStep1PortalState();
                     await refreshCommercialState().catch(() => undefined);
                   }}
                 />
@@ -7501,6 +7536,7 @@ ${serviceCommentLines.join("\n")}`
                     disabled={isBusy}
                     tx={tx}
                     errorText={(nextError) => errorText(nextError, tx)}
+                    paymentRoute={step1Portal.intake?.billing ?? null}
                   />
                   <LeadGwgStatements
                     intake={step1Portal.intake}
@@ -7690,7 +7726,7 @@ ${serviceCommentLines.join("\n")}`
                                 className="h-7 text-xs text-destructive hover:text-destructive"
                                 disabled={isBusy}
                                 aria-label={`${tx("Убрать данные GwG", "GwG-Angaben entfernen")}: ${contact.name}`}
-                                onClick={() => void removeRepresentativeGwgData(contact)}
+                                onClick={() => setGwgDataRemoval(contact)}
                               >
                                 {busy === `remove-gwg-data-${contact.id}`
                                   ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" />
@@ -9835,6 +9871,26 @@ ${serviceCommentLines.join("\n")}`
         lang={lang}
         defaultLanguage={issuedPortalAccess?.language}
         onClose={() => setIssuedPortalAccess(null)}
+      />
+      <LeadConfirmDialog
+        open={Boolean(gwgDataRemoval)}
+        testId="lead-gwg-data-remove-dialog"
+        title={tx(
+          `Убрать данные GwG у контакта «${gwgDataRemoval?.name ?? ""}»?`,
+          `GwG-Angaben von „${gwgDataRemoval?.name ?? ""}“ entfernen?`,
+        )}
+        description={tx(
+          "Сведения, внесённые в кабинете (адрес, гражданство, документ), и привязка загруженных файлов будут удалены. Сам контакт и документы останутся.",
+          "Die im Portal erfassten Angaben (Anschrift, Staatsangehörigkeit, Ausweis) und die Zuordnung der hochgeladenen Dateien werden gelöscht. Der Kontakt und die Dokumente bleiben erhalten.",
+        )}
+        confirmLabel={tx("Убрать данные GwG", "GwG-Angaben entfernen")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        destructive
+        busy={Boolean(gwgDataRemoval && busy === `remove-gwg-data-${gwgDataRemoval.id}`)}
+        onConfirm={() => {
+          if (gwgDataRemoval) void removeRepresentativeGwgData(gwgDataRemoval);
+        }}
+        onCancel={() => setGwgDataRemoval(null)}
       />
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">

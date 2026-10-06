@@ -151,4 +151,25 @@ describe("LeadWizardDocumentMetadata", () => {
     expect(html).toContain("5 KB");
     expect(html).not.toContain("data-generated-document-date");
   });
+
+  it("shows a file under 1 KB as \"<1 KB\", never as \"0 KB\"", () => {
+    const render = (fileSize: number) =>
+      renderToStaticMarkup(
+        <LeadWizardDocumentMetadata
+          lang="de"
+          document={{
+            id: "small-1",
+            document_number: undefined,
+            file_size: fileSize,
+            generated_bindings: null,
+            generated_template_id: null,
+            created_at: createdAt,
+          }}
+        />,
+      );
+    expect(render(312)).toContain("&lt;1 KB");
+    expect(render(312)).not.toContain("0 KB");
+    expect(render(1023)).toContain("&lt;1 KB");
+    expect(render(1024)).toContain(">1 KB<");
+  });
 });

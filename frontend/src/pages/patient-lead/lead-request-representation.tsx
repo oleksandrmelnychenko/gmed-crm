@@ -68,6 +68,7 @@ import {
   asLeadCabinetLang,
   representativeFieldLabel,
   representativeHeading,
+  representativeOnFileNote,
   representativeUploadLabel,
   type LeadRequestText,
 } from "./lead-request-text";
@@ -416,7 +417,7 @@ function RepresentativeBlock({
 
   const minor = slot === "rep1" || slot === "rep2";
   const pickerLang = asLeadCabinetLang(lang) ?? undefined;
-  const heading = representativeHeading(text, slot, Boolean(person?.mine));
+  const heading = representativeHeading(text, slot, Boolean(person?.mine), custody);
   const locked = Boolean(person?.email_locked);
   const proof = authorityProofOf(slot, custody);
   const fieldId = (field: RepresentativeField) => `lead-request-${slot}_${field}`;
@@ -840,7 +841,7 @@ export function RepresentationSection({
               className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
               data-testid="lead-request-representative-on-file"
             >
-              {text.representativeOnFile(representativeName(person) || "—")}
+              {representativeOnFileNote(text, representativeName(person) || "—", draft.custody)}
             </p>
           ))}
           {shown.map(block)}

@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 
 import type { PayerAnswers, PayerQuestionnaire, PayerType } from "./payer-link-api";
 import {
+  FUNDS_SOURCES,
   ORGANISATION_MISSING_ORDER,
   PERSON_MISSING_ORDER,
   answersPatch,
   draftFromQuestionnaire,
   emptyOwner,
   fieldOfPayerType,
+  fundsSourceOptions,
   missingByStep,
   ownerProblems,
   ownersPayload,
@@ -542,6 +544,29 @@ describe("autosave body", () => {
     expect(withLegalAnswer(draft, "pep_self", "no").pep_self_details).toBe("");
     expect(withLegalAnswer(draft, "pep_self", "yes").pep_self_details).toBe("Minister");
     expect(withFundsSource(withFundsSource(draft, "other", true), "employment", true).funds_sources).toEqual(["employment", "other"]);
+  });
+
+  it("offers the sources of funds the server lists for the payer type", () => {
+    // An older server sends no list: the persons' list as before.
+    expect(fundsSourceOptions(questionnaire("person"))).toEqual(["employment", "business_income", "savings", "asset_sale", "inheritance_gift", "other"]);
+    const company = { ...questionnaire("company"), funds_source_options: ["business_revenue", "equity", "loan", "insurance_benefit", "donation", "other"] };
+    const options = fundsSourceOptions(company);
+    expect(options).toEqual(["business_revenue", "equity", "loan", "insurance_benefit", "donation", "other"]);
+    // Unknown values are left out; a list of nothing known falls back.
+    expect(fundsSourceOptions({ funds_source_options: ["loan", "lottery", "loan"] })).toEqual(["loan"]);
+    expect(fundsSourceOptions({ funds_source_options: ["lottery"] })).toEqual(FUNDS_SOURCES);
+    // Checked in the order of the offered list; a person's value is dropped for a company.
+    const draft = { ...draftFromQuestionnaire(company), funds_sources: ["employment"] };
+    const chosen = withFundsSource(withFundsSource(draft, "other", true, options), "equity", true, options);
+    expect(chosen.funds_sources).toEqual(["equity", "other"]);
+    // Every source has a label in four languages.
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      for (const source of [...FUNDS_SOURCES, ...options]) {
+        expect(payerLinkText(lang).fundsSources[source]).toBeTruthy();
+      }
+    }
+    expect(payerLinkText("de").fundsSources.business_revenue).toBe("Geschäftstätigkeit / Umsatz");
+    expect(payerLinkText("de").fundsSources.donation).toBe("Spende / Zuwendung");
   });
 });
 

@@ -293,6 +293,27 @@ export function payerAnswer(
   return parent ? "guardian" : "third_party";
 }
 
+/**
+ * Whether "the patient pays" is offered: a child does not pay, so for a
+ * minor only while it is the stored answer of an older request.
+ */
+export function payerSelfOffered(request: Pick<LeadRequest, "minor" | "payer">): boolean {
+  return !request.minor || payerAnswer(request.payer) === "self";
+}
+
+/**
+ * Whether "why does this person pay?" is asked: about a third party, not
+ * about the parent who pays (answer "I pay (as a parent)"). A server that
+ * still lists it as missing for the parent (an older one) gets the field, or
+ * the request could not be sent.
+ */
+export function paymentBackgroundAsked(
+  draft: Pick<PayerDraft, "guardian_pays">,
+  request: Pick<LeadRequest, "progress">,
+): boolean {
+  return !draft.guardian_pays || request.progress.missing_for_submit.includes("payment_background");
+}
+
 /** The first answer as chosen in the form. */
 export function draftAnswer(draft: Pick<PayerDraft, "payer_kind" | "guardian_pays">): PayerAnswer {
   if (draft.payer_kind === "third_party") return draft.guardian_pays ? "guardian" : "third_party";

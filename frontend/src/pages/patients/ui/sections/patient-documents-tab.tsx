@@ -42,6 +42,8 @@ import { useLang, type Lang } from "@/lib/i18n";
 import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { cn } from "@/lib/utils";
 import {
+  documentPartyUpload,
+  documentPartyUploadTypeLabel,
   formatBusinessDocumentNumber,
   FREE_TEXT_DOCUMENT_TEMPLATE_ID,
 } from "@/pages/documents/model/document-model";
@@ -147,6 +149,26 @@ function documentCategoryChipTone(text: string) {
   return DOCUMENT_CATEGORY_CHIP_TONES[
     Math.abs(hash) % DOCUMENT_CATEGORY_CHIP_TONES.length
   ];
+}
+
+/**
+ * The source of a payer's or a legal representative's upload, readable
+ * ("Zahler" instead of the raw "payer"); null for the patient's own files.
+ */
+function partySourceLabel(doc: Pick<DocumentItem, "art" | "source_person">, lang: Lang): string | null {
+  const party = documentPartyUpload(doc);
+  if (party === "payer") return lang === "de" ? "Zahler" : "Плательщик";
+  if (party === "representative") return lang === "de" ? "Gesetzliche/r Vertreter/in" : "Законный представитель";
+  return null;
+}
+
+/**
+ * The type column: a payer's or representative's upload by its art
+ * ("Ausweis (Zahler/in)"), so it never reads as the patient's identity
+ * document; anything else by its category.
+ */
+function documentTypeText(doc: Pick<DocumentItem, "art" | "category">, localize: LocalizeFn): string {
+  return documentPartyUploadTypeLabel(doc.art) ?? (doc.category ? localizeDocumentCode(doc.category, localize) : "");
 }
 
 function compactParty(...parts: Array<string | null | undefined>) {
@@ -393,7 +415,8 @@ export function PatientDocumentsTab({
       label: metaLabel("source", lang),
       value:
         compactParty(
-          doc.source_person?.trim() ? formatDocumentSourceLabel(doc.source_person, t) : null,
+          partySourceLabel(doc, lang)
+            ?? (doc.source_person?.trim() ? formatDocumentSourceLabel(doc.source_person, t) : null),
           doc.source_institution,
         ) || commonNotSet,
     },
@@ -471,8 +494,7 @@ export function PatientDocumentsTab({
       {
         id: "category",
         label: appointmentsTypeLabel,
-        accessor: (doc) =>
-          doc.category ? localizeDocumentCode(doc.category, l) : "",
+        accessor: (doc) => documentTypeText(doc, l),
         filterType: "enum",
         filterOptions: documentCategoryOptions.map((category) => ({
           value: localizeDocumentCode(category, l),
@@ -489,7 +511,7 @@ export function PatientDocumentsTab({
                 documentCategoryChipTone(doc.category),
               )}
             >
-              {localizeDocumentCode(doc.category, l)}
+              {documentTypeText(doc, l)}
             </Badge>
           ) : (
             <span className="text-xs text-muted-foreground">

@@ -47,6 +47,7 @@ import { useAuth } from "@/lib/auth";
 import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
 import { useNavCounters } from "@/lib/use-nav-counters";
 import { useNavState } from "@/lib/nav-state";
+import { usePortalAccountLabel } from "@/lib/portal-account-label";
 import {
   canAccessStaffRoute,
   isLeadPortalUser,
@@ -151,6 +152,8 @@ export function NavPanel() {
   const tr = t as unknown as Record<string, string>;
   const { collapsed, toggle } = useNavState();
   const isPatientPortal = user?.role === "patient";
+  // A parent's login in the lead cabinet is no patient: the cabinet names it.
+  const portalAccountLabel = usePortalAccountLabel(isPatientPortal ? user?.id : null);
   const counters = useNavCounters(
     Boolean(user) && !isPatientPortal,
     Boolean(user && !isPatientPortal && canAccessStaffRoute(user.role, "/leads", user.capabilities)),
@@ -190,7 +193,14 @@ export function NavPanel() {
     >
       {user && (
         <div className={cn("shrink-0", collapsed ? "px-2 pt-3" : "px-3 pt-3")}>
-          <UserCard name={user.name} role={user.role} tr={tr} translations={t} collapsed={collapsed} />
+          <UserCard
+            name={user.name}
+            role={user.role}
+            roleText={portalAccountLabel}
+            tr={tr}
+            translations={t}
+            collapsed={collapsed}
+          />
         </div>
       )}
       <div className={cn("flex-1 py-4", collapsed ? "px-2" : "px-3")}>
@@ -394,17 +404,20 @@ function roleLabel(role: string, dictionary: Record<string, string>, translation
 function UserCard({
   name,
   role,
+  roleText: roleTextOverride,
   tr,
   translations,
   collapsed,
 }: {
   name: string;
   role: string;
+  /** Said instead of the role name (a parent's login in the lead cabinet). */
+  roleText?: string | null;
   tr: Record<string, string>;
   translations: UnknownTranslations;
   collapsed: boolean;
 }) {
-  const roleText = roleLabel(role, tr, translations);
+  const roleText = roleTextOverride || roleLabel(role, tr, translations);
 
   if (collapsed) {
     return (

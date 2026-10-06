@@ -39,6 +39,8 @@ export function sortWizardDocumentsNewestFirst<
 
 function formatFileSize(size: number | null, lang: Lang) {
   if (!size || size <= 0) return "";
+  // A few hundred bytes are not "0 KB".
+  if (size < 1024) return "<1 KB";
   const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
     maximumFractionDigits: size >= 1024 * 1024 ? 1 : 0,
   });

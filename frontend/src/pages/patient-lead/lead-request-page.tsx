@@ -23,6 +23,7 @@ import { inputClass, selectClass } from "@/components/record-workspace/primitive
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { cn } from "@/lib/utils";
 
 import {
@@ -103,7 +104,9 @@ function storedCabinetLang(): LeadCabinetLang | null {
 
 export function LeadRequestPage() {
   const { lang: portalLang, setLang: setPortalLang } = useLang();
-  const accountLang = useAuth().user?.preferred_language ?? null;
+  const { user } = useAuth();
+  const accountLang = user?.preferred_language ?? null;
+  const userId = user?.id ?? null;
   // The cabinet also speaks UA and EN (owner request 2026-10-04): an explicit
   // choice is remembered, otherwise the language the person entered for the
   // request is used, then the portal language.
@@ -146,6 +149,17 @@ export function LeadRequestPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // A parent's login that fills in requests for a child only (and is no
+  // patient of its own): the side bar names it "parent / legal
+  // representative" instead of "patient".
+  const ownPatient = user?.portal_mode === "patient";
+  useEffect(() => {
+    if (!userId || !requests) return;
+    const guardianOnly =
+      !ownPatient && requests.length > 0 && requests.every((request) => request.access_kind === "guardian");
+    setPortalAccountLabel(userId, guardianOnly ? text.accountLabelGuardian : null);
+  }, [ownPatient, requests, text, userId]);
 
   // First visit of a request in German or Russian: the whole portal takes that
   // language once, unless the account already has a language of its own (a

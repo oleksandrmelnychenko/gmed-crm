@@ -10,8 +10,8 @@ import { LEAD_CABINET_LANGS } from "@/pages/patient-lead/lead-request-text";
 
 import type { PayerDocument, PayerQuestionnaire, PayerType } from "./payer-link-api";
 import {
+  ALL_FUNDS_SOURCES,
   CONTACT_CHANNELS,
-  FUNDS_SOURCES,
   LEGAL_DETAILS,
   LEGAL_QUESTIONS,
   draftFromQuestionnaire,
@@ -136,7 +136,7 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
     organisation ? row("industry", draft.industry) : row("occupation", draft.occupation),
     row(
       "funds_sources",
-      FUNDS_SOURCES.filter((source) => draft.funds_sources.includes(source))
+      ALL_FUNDS_SOURCES.filter((source) => draft.funds_sources.includes(source))
         .map((source) => text.fundsSources[source])
         .join(", "),
     ),

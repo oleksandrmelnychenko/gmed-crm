@@ -31,6 +31,7 @@ import {
   LEAD_CABINET_LANGS,
   leadRequestText,
   representativeHeading,
+  representativeOnFileNote,
   representativeUploadLabel,
   submitFieldLabel,
 } from "./lead-request-text";
@@ -134,6 +135,26 @@ describe("who the form asks for", () => {
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       expect(new Set(Object.values(text.representativeCaptions)).size).toBe(4);
+    }
+  });
+
+  it("names a guardian of a child as such, and the further person on file by custody", () => {
+    expect(representativeHeading(de, "rep1", true, "guardian")).toBe("Vormund / Pfleger/in – Sie");
+    expect(representativeHeading(de, "rep1", false, "guardian")).toBe("Vormund / Pfleger/in");
+    // Parents keep their captions.
+    expect(representativeHeading(de, "rep1", true, "joint")).toBe("1. Vertreter/in – Sie");
+    expect(representativeHeading(de, "rep1", true, "sole_parent")).toBe("1. Vertreter/in – Sie");
+    expect(representativeHeading(leadRequestText("en"), "rep1", true, "guardian")).toBe("Guardian / custodian – you");
+    expect(representativeHeading(leadRequestText("uk"), "rep1", true, "guardian")).toBe("Опікун / піклувальник – ви");
+    expect(representativeHeading(leadRequestText("ru"), "rep1", true, "guardian")).toBe("Опекун / попечитель – вы");
+    expect(representativeOnFileNote(de, "Ben Muster", "guardian")).toBe(
+      "Bei GMED ist eine weitere Person mit Sorgerecht hinterlegt: Ben Muster. Bitte sprechen Sie uns an.",
+    );
+    expect(representativeOnFileNote(de, "Ben Muster", "sole_parent")).toBe(
+      "Bei GMED ist eine weitere sorgeberechtigte Person hinterlegt: Ben Muster. Bitte sprechen Sie uns an.",
+    );
+    for (const option of LEAD_CABINET_LANGS) {
+      expect(representativeOnFileNote(leadRequestText(option.value), "Ben", "guardian")).toContain("Ben");
     }
   });
 

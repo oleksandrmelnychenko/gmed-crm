@@ -49,6 +49,7 @@ import {
   payerRelationshipKindLabel,
   payerRelationshipTextShown,
   payerSignatureSequence,
+  payerStatusBadge,
   payerTypeLabel,
   sourceOfFundsLabel,
   type PayerDeclarationForm,
@@ -196,6 +197,7 @@ export function LeadPayerDeclarationSection({
   const organisation = isOrganisationPayerForm(form);
   const relationshipTextShown = payerRelationshipTextShown(form, data?.declaration);
   const missing = payerFormMissing(form);
+  const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
   // Section 7: the lead chose where the invoice goes; an older server does
@@ -292,9 +294,9 @@ export function LeadPayerDeclarationSection({
         title={(
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>{tx("Кто платит", "Wer zahlt")}</span>
-            <StatusBadge tone={data?.status.complete ? "success" : "warning"}>
-              {data?.status.complete ? tx("Заполнено", "Vollständig") : tx("Не заполнено", "Unvollständig")}
-            </StatusBadge>
+            <span className="inline-flex" data-testid="lead-payer-status-badge">
+              <StatusBadge tone={statusBadge.tone}>{statusBadge.label}</StatusBadge>
+            </span>
             {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
           </span>
         )}
@@ -548,7 +550,15 @@ export function LeadPayerDeclarationSection({
                 )}
               />
             </div>
-            {typed ? (
+            {typed && data?.status.contact_consent_required === false ? (
+              // A parent with an own cabinet login pays: nobody else is told the contact.
+              <p className="text-xs text-muted-foreground" data-testid="lead-payer-contact-consent" data-required="false">
+                {tx(
+                  "Согласие на передачу контактов: не требуется (платит родитель)",
+                  "Einwilligung zur Kontaktweitergabe: nicht nötig (Elternteil zahlt)",
+                )}
+              </p>
+            ) : typed ? (
               <p className="text-xs text-muted-foreground" data-testid="lead-payer-contact-consent">
                 {tx(
                   "Согласие пациента на передачу контактов плательщику:",

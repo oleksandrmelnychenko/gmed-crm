@@ -879,6 +879,19 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     );
     assert_eq!(questionnaire["answers"]["first_name"], "Viktor");
     assert!(questionnaire["answers"]["organisation_name"].is_null());
+    // A person chooses from the declaration's sources of funds.
+    assert_eq!(
+        questionnaire["funds_source_options"],
+        json!([
+            "employment",
+            "business_income",
+            "savings",
+            "asset_sale",
+            "inheritance_gift",
+            "other"
+        ]),
+        "{verified}"
+    );
     assert_eq!(questionnaire["payment_route"]["asked"], true);
     assert_eq!(
         questionnaire["payment_route"]["account_holder_suggestion"],
@@ -1459,6 +1472,20 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     .await;
     submit_request(&app, lead_id).await;
     let (token, _) = send_link(&app, lead_id, json!({})).await;
+    // The invitation greets the company neutrally and names "your
+    // organisation" as the paying party (QA 2026-10-06, C7-b).
+    let invitation = app
+        .texts()
+        .into_iter()
+        .rev()
+        .find(|text| text.contains("/payer#"))
+        .expect("an invitation");
+    assert!(invitation.starts_with("Guten Tag,\n"), "{invitation}");
+    assert!(
+        invitation.contains("hat Ihre Organisation als zahlende Partei"),
+        "{invitation}"
+    );
+    assert!(!invitation.contains("Beispiel GmbH"), "{invitation}");
     let (_, opened) = as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
     assert_eq!(opened["payer_type"], "company");
     let session = open_session(&app, &token).await;
@@ -1466,6 +1493,43 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
     let (status, body) = patch(&app, &token, &session, json!({ "first_name": "Viktor" })).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["field"], "first_name");
+    // An organisation chooses from its own sources of funds; a person's
+    // source is refused.
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({ "funds_sources": ["employment"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "invalid_field", "{body}");
+    assert_eq!(body["field"], "funds_sources", "{body}");
+    let (status, body) = patch(
+        &app,
+        &token,
+        &session,
+        json!({ "funds_sources": ["loan", "business_revenue"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["answers"]["funds_sources"],
+        json!(["business_revenue", "loan"]),
+        "{body}"
+    );
+    assert_eq!(
+        body["funds_source_options"],
+        json!([
+            "business_revenue",
+            "equity",
+            "loan",
+            "insurance_benefit",
+            "donation",
+            "other"
+        ]),
+        "{body}"
+    );
     let owner = |first: &str, share: Value| {
         json!({ "first_name": first, "last_name": "Muster", "date_of_birth": "1980-02-03",
                 "country": "de", "share_percent": share })

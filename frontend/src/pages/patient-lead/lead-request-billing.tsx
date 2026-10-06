@@ -283,16 +283,20 @@ export function BillingSections({
                       checked ? "border-[var(--brand)] bg-muted/40" : "border-border",
                     )}
                   >
+                    {/* Named by the visible answer, never by the raw value. */}
                     <input
                       type="radio"
                       id={`lead-request-invoice_to-${target}`}
                       name="lead-request-invoice_to"
                       value={target}
+                      aria-labelledby={`lead-request-invoice_to-${target}-label`}
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       onChange={() => form.update((current) => withInvoiceTo(current, target))}
                     />
-                    <span className="min-w-0">{invoiceToLabel(text, target, guardian, context.routeBy)}</span>
+                    <span id={`lead-request-invoice_to-${target}-label`} className="min-w-0">
+                      {invoiceToLabel(text, target, guardian, context.routeBy)}
+                    </span>
                   </label>
                 );
               })}

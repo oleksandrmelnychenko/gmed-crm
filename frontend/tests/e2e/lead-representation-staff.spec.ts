@@ -632,20 +632,31 @@ test("the GwG data of a contact are removed before the contact itself", async ({
   await page.screenshot({ path: testInfo.outputPath("lead-representation-contacts-ru-mobile.png"), animations: "disabled" });
   await page.setViewportSize({ width: 1440, height: 1100 });
 
-  // Declined: nothing happens.
-  page.once("dialog", (dialog) => void dialog.dismiss());
+  // The app's own dialog asks (no browser confirm(), which a browser may suppress).
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => {
+    nativeDialogs += 1;
+    void dialog.dismiss();
+  });
+  // Declined: nothing happens, the wizard stays open.
   await removeData.click();
+  const question = page.getByTestId("lead-gwg-data-remove-dialog");
+  await expect(question).toBeVisible();
+  await expect(question).toContainText("Убрать данные GwG у контакта «Anna Muster»?");
+  await expect(question).toContainText("Сам контакт и документы останутся.");
+  await question.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(question).toBeHidden();
+  await expect(wizard).toBeVisible();
   expect(calls.removedData).toEqual([]);
 
-  let question = "";
-  page.once("dialog", (dialog) => {
-    question = dialog.message();
-    void dialog.accept();
-  });
   await removeData.click();
+  await question.getByRole("button", { name: "Убрать данные GwG", exact: true }).click();
+  await expect(question).toBeHidden();
   await expect(anna.getByTestId("trusted-contact-gwg-badge")).toHaveCount(0);
-  expect(question).toContain("Убрать данные GwG у контакта «Anna Muster»?");
   expect(calls.removedData).toEqual([ANNA_ID]);
+  expect(nativeDialogs).toBe(0);
+  // Staff see that it worked.
+  await expect(page.getByText("Данные GwG у контакта «Anna Muster» удалены")).toBeVisible();
   // The contact stays and can now be removed as usual.
   await expect(anna.getByRole("button", { name: "Удалить контакт: Anna Muster" })).toBeVisible();
   await expect(removeData).toHaveCount(0);

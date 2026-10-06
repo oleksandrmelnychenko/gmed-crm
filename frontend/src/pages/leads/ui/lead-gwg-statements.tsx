@@ -493,6 +493,22 @@ function PayerAnswersGroup({
 }
 
 /**
+ * The lead changed answers after sending and has not sent them again: what
+ * the block shows is not what the lead confirmed. Nothing on an older server.
+ */
+function ChangedSinceSubmitLine({ intake, tx }: { intake: LeadPortalIntake; tx: Tx }) {
+  if (intake.changed_since_submit !== true) return null;
+  return (
+    <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} role="status" data-testid="lead-gwg-changed-since-submit">
+      {tx(
+        "Пациент изменил данные после отправки — ещё не отправлено повторно",
+        "Die Patientin / der Patient hat Angaben nach dem Senden geändert – noch nicht erneut gesendet",
+      )}
+    </p>
+  );
+}
+
+/**
  * "Данные от пациента" in the GwG section of the wizard: what the lead stated
  * in the cabinet, for staff to check before they sign the identification
  * sheet. Read-only and without requests of its own; nothing is shown until
@@ -543,6 +559,7 @@ export function LeadGwgStatements({
     return (
       <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-gwg-statements">
         <div className="text-xs font-semibold text-foreground">{title}</div>
+        <ChangedSinceSubmitLine intake={intake} tx={tx} />
         <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
           {tx(
             "Пациент ещё не заполнил эти данные в кабинете",
@@ -567,6 +584,7 @@ export function LeadGwgStatements({
         <span className="text-xs font-semibold text-foreground">{title}</span>
         <PatientFieldBadge marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx} />
       </div>
+      <ChangedSinceSubmitLine intake={intake} tx={tx} />
 
       <StatementGroup title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
         <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>

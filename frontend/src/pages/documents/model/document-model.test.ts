@@ -10,6 +10,8 @@ import {
   documentTemplateRequiresOrder,
   documentTemplateSupportsAppointmentContext,
   documentTemplateSupportsOrderContext,
+  documentPartyUpload,
+  documentPartyUploadTypeLabel,
   emptyGenerateForm,
   emptyUploadForm,
   formatBusinessDocumentNumber,
@@ -812,5 +814,27 @@ describe("document intake review", () => {
     } as unknown as DocumentItem;
     expect(reviewEditForm(upload).status).toBe("active");
     expect(reviewEditForm({ ...upload, ursprung: "upload" }).status).toBe("draft");
+  });
+});
+
+describe("uploads of a payer or a legal representative", () => {
+  it("names whose upload it is and its type from the art", () => {
+    expect(documentPartyUpload({ art: "payer_identity", source_person: "payer" })).toBe("payer");
+    expect(documentPartyUpload({ art: "payer_funds_proof", source_person: null })).toBe("payer");
+    // The source alone also says so (an art the list does not know yet).
+    expect(documentPartyUpload({ art: "identity", source_person: "payer" })).toBe("payer");
+    expect(documentPartyUpload({ art: "representative_identity", source_person: "patient_portal" })).toBe("representative");
+    expect(documentPartyUpload({ art: "representative_authority", source_person: "patient_portal" })).toBe("representative");
+    // The patient's own identity document.
+    expect(documentPartyUpload({ art: "identity", source_person: "patient_portal" })).toBeNull();
+    expect(documentPartyUpload({})).toBeNull();
+
+    expect(documentPartyUploadTypeLabel("payer_identity")).toBe("Ausweis (Zahler/in)");
+    expect(documentPartyUploadTypeLabel("payer_funds_proof")).toBe("Nachweis der Mittelherkunft");
+    expect(documentPartyUploadTypeLabel("representative_identity")).toBe("Ausweis (Vertreter/in)");
+    expect(documentPartyUploadTypeLabel("representative_authority")).toBe("Vertretungsnachweis");
+    expect(documentPartyUploadTypeLabel("identity")).toBeNull();
+    expect(documentPartyUploadTypeLabel("cost_estimate")).toBeNull();
+    expect(documentPartyUploadTypeLabel(null)).toBeNull();
   });
 });

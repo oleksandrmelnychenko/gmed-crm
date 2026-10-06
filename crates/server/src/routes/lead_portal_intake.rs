@@ -1737,8 +1737,11 @@ fn missing_for_submit(
             .chain(identification.missing_legal())
             .map(str::to_string),
     );
-    // Why another person pays is asked with a third-party payer only.
+    // Why another person pays is asked with a third-party payer only, and not
+    // of the paying parent's own login: that parent is the one who pays (QA
+    // 2026-10-06, B4).
     if payer.is_some_and(lead_payer::Declaration::is_third_party)
+        && payment_route_by != PaymentRouteBy::Guardian
         && identification.payment_background.is_none()
     {
         missing.push("payment_background".to_string());
@@ -1909,6 +1912,29 @@ where
     }))
 }
 
+/// `changed_since_submit` of the lead `l`: the patient changed the data or
+/// the documents after sending and has not sent again — only then "send
+/// again" makes sense. The cabinet's request and the staff intake (QA
+/// 2026-10-06, A X2) read the same expression.
+const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
+    EXISTS (
+        SELECT 1
+        FROM jsonb_each(
+            CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
+                 THEN l.portal_field_updates ELSE '{}'::jsonb END
+        ) AS field(name, entry)
+        WHERE (field.entry->>'at')::timestamptz > l.portal_submitted_at
+    )
+    OR EXISTS (
+        SELECT 1 FROM lead_portal_uploads pu
+        WHERE pu.lead_id = l.id
+          -- The payer's files are not part of the request.
+          AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
+          AND (pu.created_at > l.portal_submitted_at
+               OR pu.withdrawn_at > l.portal_submitted_at)
+    )
+)"#;
+
 /// The request page of one lead for the portal.
 pub(crate) async fn request_payload(
     state: &AppState,
@@ -1919,26 +1945,7 @@ pub(crate) async fn request_payload(
     let row = sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.created_at, l.qualification_status,
                   l.compliance_status, l.portal_submitted_at,
-                  -- The patient changed the data or the documents after
-                  -- sending: only then "send again" makes sense.
-                  l.portal_submitted_at IS NOT NULL AND (
-                      EXISTS (
-                          SELECT 1
-                          FROM jsonb_each(
-                              CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
-                                   THEN l.portal_field_updates ELSE '{{}}'::jsonb END
-                          ) AS field(name, entry)
-                          WHERE (field.entry->>'at')::timestamptz > l.portal_submitted_at
-                      )
-                      OR EXISTS (
-                          SELECT 1 FROM lead_portal_uploads pu
-                          WHERE pu.lead_id = l.id
-                            -- The payer's files are not part of the request.
-                            AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
-                            AND (pu.created_at > l.portal_submitted_at
-                                 OR pu.withdrawn_at > l.portal_submitted_at)
-                      )
-                  ) AS changed_since_submit
+                  ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit
            FROM leads l
            WHERE l.id = $1"#
     ))
@@ -3801,6 +3808,7 @@ async fn get_lead_portal_intake(
     }
     let row = match sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.portal_field_updates, l.portal_submitted_at,
+                  ({CHANGED_SINCE_SUBMIT_SQL}) AS changed_since_submit,
                   l.wizard_state->>'step1_fill_mode' AS fill_mode,
                   (SELECT u.role FROM users u WHERE u.id = l.portal_submitted_by) AS submitted_by_role,
                   EXISTS(
@@ -4052,6 +4060,11 @@ async fn get_lead_portal_intake(
             "submitted_at": time(&row, "portal_submitted_at"),
         },
         "submitted_at": time(&row, "portal_submitted_at"),
+        // The lead changed answers after sending and has not sent again: the
+        // answers shown are not the confirmed ones (as in the cabinet).
+        "changed_since_submit": row
+            .try_get::<bool, _>("changed_since_submit")
+            .unwrap_or(false),
         "submitted_by": submitted_by,
         "consents": consent_items,
         "uploads": upload_items,
@@ -4967,6 +4980,36 @@ mod tests {
                 today()
             ),
             vec!["payer_contact_consent"]
+        );
+        // Nor why "another person" pays (QA 2026-10-06, B4): that login is
+        // the one who pays. The lead's own login is still asked.
+        let without_background = Identification {
+            payment_background: None,
+            ..complete
+        };
+        assert!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &without_background,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Guardian,
+                today()
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &without_background,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                today()
+            ),
+            vec!["payer_contact_consent", "payment_background"]
         );
     }
 

@@ -4,6 +4,7 @@ import {
   daysUntilRetentionDeadline,
   leadSourceTone,
   retentionCountdownLabel,
+  withFinalPeriod,
 } from "./status-appearance";
 
 describe("leadSourceTone", () => {
@@ -39,5 +40,11 @@ describe("daysUntilRetentionDeadline", () => {
     expect(retentionCountdownLabel(3, "de")).toBe("Löschung in 3 T.");
     expect(retentionCountdownLabel(0, "ru")).toBe("Удаление сегодня");
     expect(retentionCountdownLabel(0, "de")).toBe("Löschung heute");
+  });
+
+  it("ends the banner's first sentence with one period", () => {
+    expect(withFinalPeriod(retentionCountdownLabel(14, "de"))).toBe("Löschung in 14 T.");
+    expect(withFinalPeriod(retentionCountdownLabel(14, "ru"))).toBe("Удаление через 14 дн.");
+    expect(withFinalPeriod(retentionCountdownLabel(0, "de"))).toBe("Löschung heute.");
   });
 });

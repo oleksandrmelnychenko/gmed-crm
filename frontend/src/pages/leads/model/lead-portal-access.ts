@@ -199,8 +199,8 @@ export function portalCredentialsMessage(input: {
       return [
         `Hello${name ? ` ${name}` : ""},`,
         parent
-          ? "your access to the GMed patient portal is ready. Please enter the details for your child's request there and upload the documents."
-          : "your access to the GMed patient portal is ready. Please enter your personal details and upload your documents there.",
+          ? "your access to the GMED patient portal is ready. Please enter the details for your child's request there and upload the documents."
+          : "your access to the GMED patient portal is ready. Please enter your personal details and upload your documents there.",
         `Sign in: ${loginUrl}`,
         `Login: ${email}`,
         `Password: ${password}`,
@@ -209,8 +209,8 @@ export function portalCredentialsMessage(input: {
       return [
         `Здравствуйте${name ? `, ${name}` : ""}!`,
         parent
-          ? "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там данные заявки для вашего ребёнка и загрузите документы."
-          : "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там свои данные и загрузите документы.",
+          ? "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там данные заявки для вашего ребёнка и загрузите документы."
+          : "Ваш доступ в портал пациента GMED готов. Пожалуйста, заполните там свои данные и загрузите документы.",
         `Вход: ${loginUrl}`,
         `Логин: ${email}`,
         `Пароль: ${password}`,
@@ -219,8 +219,8 @@ export function portalCredentialsMessage(input: {
       return [
         `Вітаємо${name ? `, ${name}` : ""}!`,
         parent
-          ? "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там дані заявки для вашої дитини та завантажте документи."
-          : "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
+          ? "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там дані заявки для вашої дитини та завантажте документи."
+          : "Ваш доступ до порталу пацієнта GMED готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
         `Вхід: ${loginUrl}`,
         `Логін: ${email}`,
         `Пароль: ${password}`,
@@ -229,8 +229,8 @@ export function portalCredentialsMessage(input: {
       return [
         `Guten Tag${name ? ` ${name}` : ""},`,
         parent
-          ? "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein und laden Sie die Unterlagen hoch."
-          : "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
+          ? "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein und laden Sie die Unterlagen hoch."
+          : "Ihr Zugang zum GMED-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
         `Anmeldung: ${loginUrl}`,
         `Benutzername: ${email}`,
         `Passwort: ${password}`,

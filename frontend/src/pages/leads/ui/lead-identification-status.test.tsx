@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   representativeSubject,
+  type DeclaredPaymentRoute,
   type LeadIdentificationStatus,
   type RepresentativeIdentification,
 } from "../model/lead-identification";
@@ -50,7 +51,7 @@ const MINOR: LeadIdentificationStatus = {
 
 function render(
   status: LeadIdentificationStatus,
-  options: { canEdit?: boolean; lang?: "ru" | "de"; errorMessage?: string } = {},
+  options: { canEdit?: boolean; lang?: "ru" | "de"; errorMessage?: string; paymentRoute?: DeclaredPaymentRoute | null } = {},
 ) {
   return renderToStaticMarkup(
     <LeadIdentificationStatusView
@@ -60,6 +61,7 @@ function render(
       busy={null}
       errorMessage={options.errorMessage ?? ""}
       tx={options.lang === "de" ? de : ru}
+      paymentRoute={options.paymentRoute ?? null}
       onSetOwnAccountPayment={() => undefined}
     />,
   );
@@ -173,6 +175,44 @@ describe("LeadIdentificationStatusView", () => {
     expect(line(html, ANNA)).toMatch(/<button\b/);
     expect(render({ ...MINOR, payer: { qes: null, own_account_payment: null, same_person_as: ANNA } }, { lang: "de" }))
       .toContain("Kostenträger — dieselbe Person wie Vertreter/in Anna Muster");
+  });
+
+  it("says on the paying person's line when cash, crypto or a third party is declared; the button stays", () => {
+    const HINT = "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение по § 12 GwG не ожидается";
+    const route = (patch: Partial<DeclaredPaymentRoute>): DeclaredPaymentRoute => ({
+      payment_route_by: "patient",
+      payment_method: "bank_transfer",
+      via_third_party: false,
+      ...patch,
+    });
+    for (const paymentRoute of [route({ payment_method: "cash" }), route({ payment_method: "crypto" }), route({ via_third_party: true })]) {
+      const patient = line(render(AWAITING, { paymentRoute }), "contract_partner");
+      expect(patient).toContain(HINT);
+      expect(patient).toContain("Подтвердить платёж — Пациент");
+    }
+    expect(render(AWAITING, { paymentRoute: route({ payment_method: "cash" }), lang: "de" })).toContain(
+      "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – Bestätigung nach § 12 GwG nicht zu erwarten",
+    );
+    // A bank transfer from the own account, or no answer yet: no hint.
+    expect(render(AWAITING, { paymentRoute: route({}) })).not.toContain("lead-identification-own-account-hint");
+    expect(render(AWAITING)).not.toContain("lead-identification-own-account-hint");
+
+    // The third-party payer states the route: his line gets the hint, the patient's not.
+    const thirdParty = render(
+      { ...AWAITING, payer: { qes: null, own_account_payment: null, same_person_as: null } },
+      { paymentRoute: route({ payment_route_by: "payer", payment_method: "cash" }) },
+    );
+    expect(line(thirdParty, "payer")).toContain(HINT);
+    expect(line(thirdParty, "contract_partner")).not.toContain(HINT);
+
+    // A paying parent: the parent's own line, not the repeating payer line.
+    const parent = render(
+      { ...MINOR, payer: { qes: null, own_account_payment: null, same_person_as: ANNA } },
+      { paymentRoute: route({ via_third_party: true }) },
+    );
+    expect(line(parent, ANNA)).toContain(HINT);
+    expect(line(parent, BEN)).not.toContain(HINT);
+    expect(line(parent, "payer")).not.toContain(HINT);
   });
 
   it("asks for a parent or guardian when a minor has none on file", () => {

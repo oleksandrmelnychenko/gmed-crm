@@ -142,6 +142,8 @@ export function LeadPortalAccessDetail({
   }, [canOffer, lead.id]);
 
   const [sheetBusy, setSheetBusy] = useState(false);
+  // "Сформирован DD.MM.YYYY HH:mm" after the quick button made the sheet.
+  const [sheetNotice, setSheetNotice] = useState("");
   // Whether the lead is a minor, from the portal state the parents' block
   // loads: `undefined` while loading, `null` when it is not known.
   const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
@@ -160,6 +162,7 @@ export function LeadPortalAccessDetail({
   async function downloadGwgSheet() {
     setSheetBusy(true);
     setError("");
+    setSheetNotice("");
     try {
       const existing = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(lead.id)}`);
       const generated = await generateDocument(
@@ -169,6 +172,9 @@ export function LeadPortalAccessDetail({
           replaceDocument: currentGwgSheet(existing, "contract_partner"),
         }),
       );
+      // The sheet is saved with the lead; the row says so even when the download is blocked.
+      const at = formatAppDateTime(new Date().toISOString());
+      setSheetNotice(de ? `Erstellt am ${at}` : `Сформирован ${at}`);
       await downloadDocumentFile(generated.id, generated.original_filename || generated.auto_name);
     } catch (nextError) {
       const tx = (ru: string, deText: string) => (de ? deText : ru);
@@ -286,6 +292,11 @@ export function LeadPortalAccessDetail({
             {sheetBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
             Doku-Bogen GwG
           </Button>
+        ) : null}
+        {sheetNotice ? (
+          <span className="text-emerald-700" role="status" data-testid="lead-gwg-sheet-notice">
+            {sheetNotice}
+          </span>
         ) : null}
         {emailNotice ? (
           <span className="text-emerald-700" role="status" data-testid="lead-portal-email-notice">

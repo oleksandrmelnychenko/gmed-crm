@@ -736,6 +736,22 @@ export function clinicalWarningPayload(
   };
 }
 
+/**
+ * The languages of "Предпочитаемый язык": the ISO 639-1 list of the language
+ * picker (`LANGUAGE_OPTIONS`, named by the browser's `Intl.DisplayNames`),
+ * without the codes the browser has no name for in the UI language — those
+ * would read "Aa (aa)". A stored code without a name is added by the field.
+ */
+export function namedLanguageOptions<Option extends { value: string; labelDe: string; labelRu: string }>(
+  options: readonly Option[],
+  lang: "de" | "ru",
+): Option[] {
+  return options.filter((option) => {
+    const label = (lang === "de" ? option.labelDe : option.labelRu).trim().toLowerCase();
+    return label !== "" && label !== option.value.trim().toLowerCase();
+  });
+}
+
 export function clinicalWarningFingerprint(item: ClinicalWarningLike): string {
   return normalizedFingerprint([
     item.kind,

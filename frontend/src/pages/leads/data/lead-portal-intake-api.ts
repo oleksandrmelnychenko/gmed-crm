@@ -268,6 +268,11 @@ export type LeadPortalIntake = {
   billing_updated_at: string | null;
   /** The payer's own link in short; null on an older server or for a role that may not read it. */
   payer_link: LeadPortalPayerLink | null;
+  /**
+   * The lead changed answers after sending and has not sent again (the same
+   * meaning as in the lead's own request); null on an older server.
+   */
+  changed_since_submit?: boolean | null;
 };
 
 export type LeadGuardianAccessIssued = {
@@ -318,6 +323,7 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     billing: normalizeLeadPortalBilling(raw.billing),
     billing_updated_at: textOrNull(raw.billing_updated_at),
     payer_link: normalizeLeadPortalPayerLink((raw as Record<string, unknown>).payer_link),
+    changed_since_submit: answerOrNull((raw as Record<string, unknown>).changed_since_submit),
   };
 }
 

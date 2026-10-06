@@ -81,6 +81,17 @@ describe("portalCredentialsMessage", () => {
     expect(portalCredentialsMessage({ ...base, language: "de", audience: "patient" })).toContain("Ihre persönlichen Daten");
   });
 
+  it("writes GMED as the e-mails do, never GMed", () => {
+    const base = { firstName: "", email: "anna@example.com", password: "Kq7-mP2x", loginUrl: "https://app.example/login" };
+    for (const language of ["de", "en", "uk", "ru"] as const) {
+      for (const audience of ["patient", "parent"] as const) {
+        const message = portalCredentialsMessage({ ...base, language, audience });
+        expect(message).toContain("GMED");
+        expect(message).not.toContain("GMed");
+      }
+    }
+  });
+
   it("falls back to German", () => {
     expect(patientMessageLanguage(null)).toBe("de");
     expect(patientMessageLanguage("tr")).toBe("de");

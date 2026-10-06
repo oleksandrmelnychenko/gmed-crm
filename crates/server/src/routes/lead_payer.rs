@@ -64,6 +64,7 @@ use crate::auth::middleware::AuthUser;
 use crate::routes::invoices::payer::{
     PAYER_ROLE_COST_BEARER, PayerRecord, is_plausible_email, payer_columns,
 };
+use crate::routes::lead_representatives;
 use crate::services::citizenships::{normalize_citizenships, normalize_country_code};
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
@@ -1557,10 +1558,38 @@ async fn get_payer_declaration(
         Ok(false) => return error(StatusCode::NOT_FOUND, "not_found", "Lead not found"),
         Err(error) => return database_error(error, "load payer declaration lead"),
     }
-    match load_payer_state(&mut conn, lead_id).await {
-        Ok(payer) => Json(payer.payload()).into_response(),
-        Err(error) => database_error(error, "load payer declaration"),
+    let payer = match load_payer_state(&mut conn, lead_id).await {
+        Ok(payer) => payer,
+        Err(error) => return database_error(error, "load payer declaration"),
+    };
+    let representation = match lead_representatives::load(&mut conn, lead_id).await {
+        Ok(loaded) => loaded.unwrap_or_default().representation,
+        Err(error) => return database_error(error, "load payer declaration representatives"),
+    };
+    let mut payload = payer.payload();
+    let required = json!(contact_consent_required(
+        payer.declaration.as_ref(),
+        &representation
+    ));
+    payload["status"]["contact_consent_required"] = required.clone();
+    if payload["declaration"].is_object() {
+        payload["declaration"]["contact_consent_required"] = required;
     }
+    Json(payload).into_response()
+}
+
+/// Whether the lead's consent that GMED passes the contact on to the payer
+/// is needed (`contact_consent_required` of the staff JSON, QA 2026-10-06):
+/// not when the third-party payer is a representative of the minor who holds
+/// a cabinet login — that parent is the one who pays and answers in the own
+/// cabinet ([`lead_representatives::payer_same_person`]); otherwise it is.
+pub(crate) fn contact_consent_required(
+    declaration: Option<&Declaration>,
+    representation: &lead_representatives::Representation,
+) -> bool {
+    !lead_representatives::payer_same_person(representation, declaration)
+        .and_then(|id| representation.find(id))
+        .is_some_and(lead_representatives::Representative::has_login)
 }
 
 async fn save_payer_declaration(

@@ -122,6 +122,8 @@ export type PayerQuestionnaire = {
   identity_documents: PayerDocument[] | null;
   funds_proof_documents: PayerDocument[] | null;
   funds_proof_required: boolean;
+  /** The sources of funds of the payer type, in form order; absent on an older server (the persons' list). */
+  funds_source_options?: string[] | null;
   missing_for_submit: string[] | null;
   declared_correct_at: string | null;
   submitted_at: string | null;

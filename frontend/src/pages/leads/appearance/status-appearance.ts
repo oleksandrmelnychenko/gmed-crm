@@ -37,6 +37,14 @@ export function retentionCountdownLabel(days: number, lang: string): string {
   return lang === "de" ? `Löschung in ${days} T.` : `Удаление через ${days} дн`;
 }
 
+/**
+ * A label as the first sentence of a banner: one period at the end, also
+ * after a label that ends with an abbreviation ("Löschung in 14 T.").
+ */
+export function withFinalPeriod(label: string): string {
+  return label.endsWith(".") ? label : `${label}.`;
+}
+
 /** What the countdown means, for a tooltip or a banner. */
 export function retentionCountdownHint(lang: string): string {
   return lang === "de"

@@ -29,6 +29,8 @@ import {
 export type LeadRequestText = {
   title: string;
   titleGuardian: string;
+  /** The account label of a parent's login in the side bar, instead of "Patient". */
+  accountLabelGuardian: string;
   intro: string;
   introGuardian: string;
   deadline: (date: string) => string;
@@ -173,8 +175,12 @@ export type LeadRequestText = {
   /** Added to the caption: the person who fills in the form, and the other parent. */
   representativeYou: string;
   representativeOtherParent: string;
+  /** The first person of a minor whom a guardian (Vormund / Pfleger) represents. */
+  representativeGuardianOfChild: string;
   /** A person with custody on file at GMED whom the form does not ask for. */
   representativeOnFile: (name: string) => string;
+  /** The same while a guardian represents the child: not "the other parent". */
+  representativeOnFileGuardian: (name: string) => string;
   copyChildAddress: string;
   /**
    * Below an e-mail that is a sign-in address (the own one, or the other
@@ -384,12 +390,24 @@ export function representativeFieldLabel(text: LeadRequestText, field: Represent
 
 /**
  * Heading of a person's form. The parent who fills in the form reads "you";
- * the second representative of a minor is the other parent.
+ * the second representative of a minor is the other parent. While a guardian
+ * (Vormund / Pfleger) represents the child, the first person is named so.
  */
-export function representativeHeading(text: LeadRequestText, slot: RepresentativeSlot, mine = false): string {
-  const caption = text.representativeCaptions[slot];
+export function representativeHeading(
+  text: LeadRequestText,
+  slot: RepresentativeSlot,
+  mine = false,
+  custody: Custody | null | undefined = null,
+): string {
+  const caption =
+    slot === "rep1" && custody === "guardian" ? text.representativeGuardianOfChild : text.representativeCaptions[slot];
   if (mine) return `${caption} – ${text.representativeYou}`;
   return slot === "rep2" ? `${caption} – ${text.representativeOtherParent}` : caption;
+}
+
+/** The note on a person with custody on file whom the form does not ask for, by the custody chosen. */
+export function representativeOnFileNote(text: LeadRequestText, name: string, custody: Custody | null | undefined): string {
+  return custody === "guardian" ? text.representativeOnFileGuardian(name) : text.representativeOnFile(name);
 }
 
 /**
@@ -499,6 +517,7 @@ export function submitFieldLabel(
 const de: LeadRequestText = {
   title: "Ihre Anfrage",
   titleGuardian: "Anfrage für Ihr Kind",
+  accountLabelGuardian: "Elternteil / gesetzliche Vertretung",
   intro: "Bitte tragen Sie Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch. Alles wird automatisch gespeichert.",
   introGuardian:
     "Bitte tragen Sie die persönlichen Daten Ihres Kindes ein und laden Sie die Unterlagen hoch. Alles wird automatisch gespeichert.",
@@ -724,8 +743,11 @@ const de: LeadRequestText = {
   },
   representativeYou: "Sie",
   representativeOtherParent: "anderer Elternteil",
+  representativeGuardianOfChild: "Vormund / Pfleger/in",
   representativeOnFile: (name) =>
     `Bei GMED ist eine weitere sorgeberechtigte Person hinterlegt: ${name}. Bitte sprechen Sie uns an.`,
+  representativeOnFileGuardian: (name) =>
+    `Bei GMED ist eine weitere Person mit Sorgerecht hinterlegt: ${name}. Bitte sprechen Sie uns an.`,
   copyChildAddress: "Adresse des Kindes übernehmen",
   representativeEmailIsLogin: "Ihre Anmeldeadresse",
   representativeEmailIsTheirLogin: "Anmeldeadresse dieser Person",
@@ -847,6 +869,7 @@ const de: LeadRequestText = {
 const ru: LeadRequestText = {
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашего ребёнка",
+  accountLabelGuardian: "Родитель / законный представитель",
   intro: "Пожалуйста, заполните свои личные данные и загрузите документы. Всё сохраняется автоматически.",
   introGuardian:
     "Пожалуйста, заполните личные данные ребёнка и загрузите документы. Всё сохраняется автоматически.",
@@ -1073,8 +1096,11 @@ const ru: LeadRequestText = {
   },
   representativeYou: "вы",
   representativeOtherParent: "второй родитель",
+  representativeGuardianOfChild: "Опекун / попечитель",
   representativeOnFile: (name) =>
     `В GMED указан ещё один человек с правом опеки: ${name}. Пожалуйста, свяжитесь с нами.`,
+  representativeOnFileGuardian: (name) =>
+    `В GMED указан ещё один человек, у которого есть право опеки: ${name}. Пожалуйста, свяжитесь с нами.`,
   copyChildAddress: "Взять адрес ребёнка",
   representativeEmailIsLogin: "Ваш адрес для входа",
   representativeEmailIsTheirLogin: "Адрес для входа этого человека",
@@ -1197,6 +1223,7 @@ const ru: LeadRequestText = {
 const uk: LeadRequestText = {
   title: "Ваша заявка",
   titleGuardian: "Заявка для вашої дитини",
+  accountLabelGuardian: "Один із батьків / законний представник",
   intro: "Будь ласка, заповніть свої особисті дані та завантажте документи. Усе зберігається автоматично.",
   introGuardian:
     "Будь ласка, заповніть особисті дані дитини та завантажте документи. Усе зберігається автоматично.",
@@ -1423,8 +1450,11 @@ const uk: LeadRequestText = {
   },
   representativeYou: "ви",
   representativeOtherParent: "другий із батьків",
+  representativeGuardianOfChild: "Опікун / піклувальник",
   representativeOnFile: (name) =>
     `У GMED зазначено ще одну людину з правом опіки: ${name}. Будь ласка, зв'яжіться з нами.`,
+  representativeOnFileGuardian: (name) =>
+    `У GMED зазначено ще одну людину, яка має право опіки: ${name}. Будь ласка, зв'яжіться з нами.`,
   copyChildAddress: "Взяти адресу дитини",
   representativeEmailIsLogin: "Ваша адреса для входу",
   representativeEmailIsTheirLogin: "Адреса для входу цієї людини",
@@ -1547,6 +1577,7 @@ const uk: LeadRequestText = {
 const en: LeadRequestText = {
   title: "Your request",
   titleGuardian: "Request for your child",
+  accountLabelGuardian: "Parent / legal representative",
   intro: "Please enter your personal details and upload your documents. Everything is saved automatically.",
   introGuardian:
     "Please enter your child's personal details and upload the documents. Everything is saved automatically.",
@@ -1767,7 +1798,10 @@ const en: LeadRequestText = {
   },
   representativeYou: "you",
   representativeOtherParent: "other parent",
+  representativeGuardianOfChild: "Guardian / custodian",
   representativeOnFile: (name) => `GMED has another person with custody on file: ${name}. Please contact us.`,
+  representativeOnFileGuardian: (name) =>
+    `GMED has a further person with parental responsibility on file: ${name}. Please contact us.`,
   copyChildAddress: "Use the child's address",
   representativeEmailIsLogin: "Your sign-in address",
   representativeEmailIsTheirLogin: "This person's sign-in address",

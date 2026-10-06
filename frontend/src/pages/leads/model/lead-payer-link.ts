@@ -322,6 +322,23 @@ export function payerLinkActions(
 }
 
 /**
+ * "Send again" while the payer has the link open (`opened`) or confirmed the
+ * code (`verified`): the payer is filling in the questionnaire, and the new
+ * link ends the old one and its session — staff are asked first.
+ */
+export function payerLinkResendAsksFirst(link: Pick<PayerLinkInfo, "status"> | null | undefined): boolean {
+  return link?.status === "opened" || link?.status === "verified";
+}
+
+/** The question before such a resend. */
+export function payerLinkResendQuestion(tx: Tx): string {
+  return tx(
+    "Плательщик сейчас заполняет анкету — старая ссылка перестанет работать. Отправить новую?",
+    "Der Zahler füllt den Fragebogen gerade aus – der alte Link wird ungültig. Neuen Link senden?",
+  );
+}
+
+/**
  * The expected total as typed: "12000", "12 000,50", "12.000,50" or
  * "12000.5" → "12000.50"; "" → null (cleared). `undefined` for anything that
  * is not an amount ≥ 0 with at most two decimals.
@@ -480,6 +497,25 @@ export function beneficialOwnerLine(owner: PayerBeneficialOwner, tx: Tx, lang: s
 }
 
 /**
+ * A source of funds the payer chose on the link: a person's from the
+ * declaration's list, a company's, organisation's or insurer's from its own
+ * list (QA 2026-10-06); an unknown value as it came.
+ */
+export function payerFundsSourceLabel(source: string, tx: Tx): string {
+  if ((SOURCE_OF_FUNDS as readonly string[]).includes(source)) {
+    return sourceOfFundsLabel(source as (typeof SOURCE_OF_FUNDS)[number], tx);
+  }
+  const organisation: Record<string, string> = {
+    business_revenue: tx("Хозяйственная деятельность / выручка", "Geschäftstätigkeit / Umsatz"),
+    equity: tx("Собственный капитал", "Eigenkapital"),
+    loan: tx("Заём / кредит", "Darlehen / Kredit"),
+    insurance_benefit: tx("Страховая выплата", "Versicherungsleistung"),
+    donation: tx("Пожертвование / грант", "Spende / Zuwendung"),
+  };
+  return organisation[source] ?? source;
+}
+
+/**
  * The payer's answers as the group "Angaben des Zahlers" shows them, by
  * payer type: a person with the personal data, an organisation with name,
  * seat, register and representative and — for a company, organisation or
@@ -560,9 +596,7 @@ export function payerQuestionnaireGroups(
   const relationshipKind = (PAYER_RELATIONSHIP_KINDS as readonly string[]).includes(answers.relationship_kind ?? "")
     ? payerRelationshipKindLabel(answers.relationship_kind as (typeof PAYER_RELATIONSHIP_KINDS)[number], tx)
     : answers.relationship_kind ?? "";
-  const sources = answers.funds_sources
-    .map((source) => ((SOURCE_OF_FUNDS as readonly string[]).includes(source) ? sourceOfFundsLabel(source as (typeof SOURCE_OF_FUNDS)[number], tx) : source))
-    .join(", ");
+  const sources = answers.funds_sources.map((source) => payerFundsSourceLabel(source, tx)).join(", ");
   const relation: PayerStatementRow[] = [
     row("relationship", tx("Кем приходится пациенту", "Beziehung zum Patienten"), relationshipKind, {
       details: answers.relationship_kind === "other" || !answers.relationship_kind ? answers.relationship : null,

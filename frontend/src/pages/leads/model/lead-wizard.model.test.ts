@@ -26,6 +26,7 @@ import {
   intakeAsksDiscoverySource,
   isMinor,
   isRepeatIntakeLead,
+  namedLanguageOptions,
   nextStep,
   orderLineClientReference,
   orderResumeFromLead,
@@ -631,5 +632,17 @@ describe("Phase B clinical intake (#8)", () => {
         note: null,
       }),
     );
+  });
+});
+
+describe("preferred language options", () => {
+  it("leaves out codes the browser has no name for in the UI language", () => {
+    const options = [
+      { value: "aa", labelDe: "Aa", labelRu: "Aa" },
+      { value: "de", labelDe: "Deutsch", labelRu: "Немецкий" },
+      { value: "ab", labelDe: "Abchasisch", labelRu: "AB" },
+    ];
+    expect(namedLanguageOptions(options, "de").map((option) => option.value)).toEqual(["de", "ab"]);
+    expect(namedLanguageOptions(options, "ru").map((option) => option.value)).toEqual(["de"]);
   });
 });

@@ -6077,6 +6077,51 @@ async fn a_minor_lead_gets_no_patient_login() {
     )
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The child's own address is optional then: the parents get their own
+    // logins (QA 2026-10-06, B1-a). One that is given must be valid; an adult
+    // still needs one.
+    for email in [None, Some(""), Some("  ")] {
+        let mut lead = json!({
+            "first_name": "Kid",
+            "last_name": "Without-Mail",
+            "date_of_birth": "2016-04-05"
+        });
+        if let Some(email) = email {
+            lead["email"] = json!(email);
+        }
+        let (status, created) = json_request(&app, "POST", "/api/v1/leads", &pm, Some(lead)).await;
+        assert_eq!(status, StatusCode::CREATED, "{email:?}: {created}");
+        assert!(created["portal_account"].is_null(), "{created}");
+        let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+        let stored: Option<String> = sqlx::query_scalar("SELECT email FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_one(&app.suite.pool)
+            .await
+            .unwrap();
+        assert_eq!(stored, None, "{email:?}");
+    }
+    for (date_of_birth, email) in [("2016-04-05", "not-an-address"), ("1980-04-05", "")] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/leads",
+            &pm,
+            Some(json!({
+                "first_name": "Kid",
+                "last_name": "Invalid-Mail",
+                "date_of_birth": date_of_birth,
+                "email": email
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{date_of_birth}: {body}"
+        );
+        assert_eq!(body["message"], "A valid email is required");
+    }
 }
 
 /// The wizard saves the whole list of trusted contacts. A list it loaded

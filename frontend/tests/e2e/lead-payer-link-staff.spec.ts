@@ -418,27 +418,69 @@ test("after the payer answered, a new link needs 'reopen for correction'", async
   await expect(panel.getByRole("checkbox", { name: "Zur Korrektur öffnen" })).toHaveCount(0);
 });
 
+test("a resend while the payer is filling in asks first; a sent-only link is resent at once", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const { wizard, panel, calls, state } = await mount(
+    page,
+    "de",
+    freshState({ link: sentLink({ status: "verified", opened_at: "2026-10-06T10:05:00Z", verified_at: "2026-10-06T10:06:00Z" }) }),
+  );
+  const resend = panel.getByRole("button", { name: "Erneut senden" });
+  await expect(resend).toBeEnabled();
+  await resend.click();
+  const question = page.getByTestId("lead-payer-link-resend-dialog");
+  await expect(question).toBeVisible();
+  await expect(question).toContainText(
+    "Der Zahler füllt den Fragebogen gerade aus – der alte Link wird ungültig. Neuen Link senden?",
+  );
+  await question.getByRole("button", { name: "Abbrechen", exact: true }).click();
+  await expect(question).toBeHidden();
+  expect(calls.sends).toEqual([]);
+  await expect(wizard).toBeVisible();
+
+  await resend.click();
+  await question.getByRole("button", { name: "Neuen Link senden", exact: true }).click();
+  await expect(question).toBeHidden();
+  await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Link gesendet an viktor.zahler@example.com");
+  expect(calls.sends).toEqual([{ language: "de", reopen: false }]);
+  // The new link is only sent, not opened: "send again" goes out without the question.
+  expect((state.link.link as LinkState).status).toBe("sent");
+  await resend.click();
+  await expect.poll(() => calls.sends.length).toBe(2);
+  await expect(question).toBeHidden();
+});
+
 test("staff revoke a link only after the confirmation", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1100 });
-  const { panel, calls } = await mount(page, "ru", freshState({ link: sentLink({ status: "opened", opened_at: "2026-10-06T10:05:00Z" }) }));
+  const { wizard, panel, calls } = await mount(page, "ru", freshState({ link: sentLink({ status: "opened", opened_at: "2026-10-06T10:05:00Z" }) }));
 
   await expect(panel.getByTestId("lead-payer-link-status")).toHaveText(
     "Открыта 06.10.2026 12:05 · отправлена 06.10.2026 12:00 на viktor.zahler@example.com (Intake QA) · действует до 05.11.2026",
   );
   const revoke = panel.getByRole("button", { name: "Отозвать ссылку" });
-  let question = "";
-  page.once("dialog", (dialog) => {
-    question = dialog.message();
+  // The app's own dialog asks (no browser confirm(), which a browser may suppress).
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => {
+    nativeDialogs += 1;
     void dialog.dismiss();
   });
   await revoke.click();
-  expect(question).toContain("Отозвать ссылку плательщика?");
+  const question = page.getByTestId("lead-payer-link-revoke-dialog");
+  await expect(question).toBeVisible();
+  await expect(question).toContainText("Отозвать ссылку плательщика?");
+  await expect(question).toContainText("Открыть её больше будет нельзя; ответы плательщика сохраняются.");
+  await question.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(question).toBeHidden();
   expect(calls.revokes).toBe(0);
   await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Открыта");
+  // Cancelling the question leaves the wizard open.
+  await expect(wizard).toBeVisible();
 
-  page.once("dialog", (dialog) => void dialog.accept());
   await revoke.click();
+  await question.getByRole("button", { name: "Отозвать ссылку", exact: true }).click();
+  await expect(question).toBeHidden();
   await expect(panel.getByTestId("lead-payer-link-notice")).toHaveText("Ссылка отозвана");
+  expect(nativeDialogs).toBe(0);
   expect(calls.revokes).toBe(1);
   await expect(panel.getByTestId("lead-payer-link-badge")).toHaveText("Отозвана");
   await expect(panel.getByTestId("lead-payer-link-status")).toContainText("Отозвана 06.10.2026 13:30 — отозвана сотрудником");

@@ -236,6 +236,36 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   visa_invitation_letter: "Einladungsschreiben (Visum)",
 };
 
+/**
+ * Uploads of a person other than the patient: the payer on the payer link
+ * (source "payer"), a legal representative in the lead cabinet. Their
+ * category is "identity" or "administrative" like the patient's own files,
+ * so lists name the person and the art instead.
+ */
+export type DocumentPartyUpload = "payer" | "representative";
+
+const PARTY_UPLOAD_ARTS: Record<string, DocumentPartyUpload> = {
+  payer_identity: "payer",
+  payer_funds_proof: "payer",
+  representative_identity: "representative",
+  representative_authority: "representative",
+};
+
+/** Whose upload a document is, when it is a payer's or a representative's; null otherwise. */
+export function documentPartyUpload(
+  document: { art?: string | null; source_person?: string | null },
+): DocumentPartyUpload | null {
+  const art = document.art?.trim().toLowerCase() ?? "";
+  if (Object.hasOwn(PARTY_UPLOAD_ARTS, art)) return PARTY_UPLOAD_ARTS[art] ?? null;
+  return document.source_person?.trim().toLowerCase() === "payer" ? "payer" : null;
+}
+
+/** The type of such an upload from the art labels ("Ausweis (Zahler/in)", …); null for other documents. */
+export function documentPartyUploadTypeLabel(art: string | null | undefined): string | null {
+  const key = art?.trim().toLowerCase() ?? "";
+  return Object.hasOwn(PARTY_UPLOAD_ARTS, key) ? DOCUMENT_ART_LABELS[key] ?? null : null;
+}
+
 const MEDICAL_DOCUMENT_CATEGORY_CODES: Record<string, string> = {
   medical_gastro: "GASTRO",
   medical_onko: "ONKO",

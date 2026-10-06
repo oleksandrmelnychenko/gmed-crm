@@ -301,9 +301,12 @@ test("the GwG identification sheet of the lead downloads from the row", async ({
   const sheet = row.getByTestId("lead-gwg-sheet");
   await expect(sheet).toHaveText("Doku-Bogen GwG");
 
+  await expect(row.getByTestId("lead-gwg-sheet-notice")).toHaveCount(0);
   const download = page.waitForEvent("download");
   await sheet.click();
   expect((await download).suggestedFilename()).toBe("Dokumentationsbogen natuerliche Personen.pdf");
+  // The row says that the sheet was made, and when.
+  await expect(row.getByTestId("lead-gwg-sheet-notice")).toHaveText(/^Сформирован \d{2}\.\d{2}\.\d{4} \d{2}:\d{2}$/);
   // Nothing is typed: the server fills the sheet of the patient from the lead.
   expect(calls).toEqual([
     {

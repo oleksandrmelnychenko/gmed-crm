@@ -274,6 +274,53 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
   return persons;
 }
 
+/**
+ * How the payment is made, as the lead (or the payer on the own link) stated
+ * it in section 8 of the form; the intake's `billing` has these keys.
+ */
+export type DeclaredPaymentRoute = {
+  /** `payer`: the third-party payer states the route; `patient`: the lead or a paying parent. */
+  payment_route_by: "patient" | "payer";
+  payment_method: string | null;
+  via_third_party: boolean | null;
+};
+
+/** Cash, crypto or a payment through a third party: no payment from the own account is to be expected. */
+export function declaresNoOwnAccountPayment(route: DeclaredPaymentRoute | null | undefined): boolean {
+  if (!route) return false;
+  return route.payment_method === "cash" || route.payment_method === "crypto" || route.via_third_party === true;
+}
+
+/**
+ * The lines that get the hint "no payment from the own account declared":
+ * the line of the person whose payment the stated route describes — the
+ * third-party payer when the payer states it, else the patient; for a minor
+ * the paying parent, or every legal representative while it is not known
+ * which of them pays. A payer who is one of the representatives is that
+ * representative's line (the payer line only repeats it). The hint only
+ * informs: the button stays.
+ */
+export function ownAccountHintSubjects(
+  status: LeadIdentificationStatus,
+  route: DeclaredPaymentRoute | null | undefined,
+): Set<IdentificationSubject> {
+  if (!declaresNoOwnAccountPayment(route)) return new Set();
+  const payer = status.payer;
+  const samePerson = payerSamePerson(status);
+  if (samePerson) return new Set([samePerson.subject]);
+  if (route?.payment_route_by === "payer" && payer) return new Set(["payer"]);
+  if (status.minor) return new Set(status.representatives.map((representative) => representative.subject));
+  return new Set(["contract_partner"]);
+}
+
+/** The hint below such a line. */
+export function noOwnAccountPaymentHint(tx: Tx): string {
+  return tx(
+    "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение по § 12 GwG не ожидается",
+    "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – Bestätigung nach § 12 GwG nicht zu erwarten",
+  );
+}
+
 /** A minor without a parent or guardian on file: nobody can be identified yet. */
 export function identificationLacksRepresentative(status: LeadIdentificationStatus): boolean {
   return status.minor && status.representatives.length === 0;

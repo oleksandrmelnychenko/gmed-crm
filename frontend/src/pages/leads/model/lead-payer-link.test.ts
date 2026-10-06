@@ -17,11 +17,14 @@ import {
   parseEstimatedTotal,
   payerCheckLevelLine,
   payerCheckReasonLabel,
+  payerFundsSourceLabel,
   payerLinkActions,
   payerLinkActive,
   payerLinkBlockedReasonText,
   payerLinkChanged,
   payerLinkErrorText,
+  payerLinkResendAsksFirst,
+  payerLinkResendQuestion,
   payerLinkRevokeReasonLabel,
   payerLinkStatusLine,
   payerPrivacyLine,
@@ -220,6 +223,32 @@ describe("payer link: what may be done", () => {
     const ended = payerLinkActions(state({ link: link({ status: "expired" }) }), false, de);
     expect(ended.sendKind).toBe("send");
     expect(ended.revokeEnabled).toBe(false);
+  });
+
+  it("names an organisation's sources of funds as well as a person's", () => {
+    expect(payerFundsSourceLabel("employment", de)).toBe("Gehalt / nichtselbständige Arbeit");
+    expect(payerFundsSourceLabel("business_revenue", de)).toBe("Geschäftstätigkeit / Umsatz");
+    expect(payerFundsSourceLabel("equity", de)).toBe("Eigenkapital");
+    expect(payerFundsSourceLabel("loan", ru)).toBe("Заём / кредит");
+    expect(payerFundsSourceLabel("insurance_benefit", de)).toBe("Versicherungsleistung");
+    expect(payerFundsSourceLabel("donation", de)).toBe("Spende / Zuwendung");
+    expect(payerFundsSourceLabel("other", de)).toBe("Sonstiges (bitte beschreiben)");
+    expect(payerFundsSourceLabel("lottery", de)).toBe("lottery");
+  });
+
+  it("asks before a resend while the payer is filling in the questionnaire", () => {
+    expect(payerLinkResendAsksFirst(link({ status: "opened" }))).toBe(true);
+    expect(payerLinkResendAsksFirst(link({ status: "verified" }))).toBe(true);
+    for (const status of ["sent", "submitted", "locked", "expired", "revoked"] as const) {
+      expect(payerLinkResendAsksFirst(link({ status }))).toBe(false);
+    }
+    expect(payerLinkResendAsksFirst(null)).toBe(false);
+    expect(payerLinkResendQuestion(ru)).toBe(
+      "Плательщик сейчас заполняет анкету — старая ссылка перестанет работать. Отправить новую?",
+    );
+    expect(payerLinkResendQuestion(de)).toBe(
+      "Der Zahler füllt den Fragebogen gerade aus – der alte Link wird ungültig. Neuen Link senden?",
+    );
   });
 
   it("needs 'reopen for correction' to resend after the payer answered", () => {

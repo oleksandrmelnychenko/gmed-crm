@@ -816,6 +816,8 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     const first = page.getByTestId("lead-request-representative-rep1");
     const second = page.getByTestId("lead-request-representative-rep2");
 
+    // A parent's login is no patient: the side bar names it.
+    await expect(page.getByText("Elternteil / gesetzliche Vertretung", { exact: true })).toBeVisible();
     // Nobody is asked whether the patient is a minor: the request says so, and the block asks for the parents.
     await expect(page.getByRole("heading", { name: "Gesetzliche Vertreter", exact: true })).toBeVisible();
     await expect(block).toContainText(
@@ -937,6 +939,8 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByTestId("lead-request-custody-note")).toHaveText(
       "Für Minderjährige handeln die gesetzlichen Vertreter. Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
     );
+    // The person at the form is the guardian, not "the 1st representative".
+    await expect(first.getByRole("heading", { name: "Vormund / Pfleger/in – Sie" })).toBeVisible();
     const appointment = page.getByTestId("lead-request-rep1-authority-upload");
     await expect(appointment).toContainText("Bestallungsurkunde");
     await expect(appointment).toContainText("*");

@@ -896,6 +896,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
 
     // Nothing changed since sending: there is nothing to send again.
     assert_eq!(body["changed_since_submit"], false, "{body}");
+    assert_eq!(intake["changed_since_submit"], false, "{intake}");
 
     // The insurance block of wizard step 1 is the patient's to fill in too.
     let personal_data = format!("/api/v1/me/lead-requests/{lead_id}/personal-data");
@@ -934,6 +935,19 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         intake["patient_fields"]["insurance_provider"]["access_kind"], "self",
         "{intake}"
     );
+    // Staff see that the answers shown were changed after sending (QA
+    // 2026-10-06, A X2) — every role that reads the intake.
+    assert_eq!(intake["changed_since_submit"], true, "{intake}");
+    let (status, sales_intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sales_intake}");
+    assert_eq!(sales_intake["changed_since_submit"], true, "{sales_intake}");
 
     let (status, self_payer) = json_request(
         router,
@@ -1289,6 +1303,7 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "via_third_party",
         "via_third_party_details",
         "identity_adopted_at",
+        "contact_consent_required",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }
@@ -3324,8 +3339,19 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
         ["invoice_to", "payment_method", "via_third_party"],
         "{body}"
     );
+    // Why "another person" pays is not asked of the paying parent's own
+    // login (QA 2026-10-06, B4); the other parent's login still asks it.
+    let asks_background = |body: &Value| {
+        body["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|key| key == "payment_background")
+    };
+    assert!(!asks_background(&body), "{body}");
     let (status, body) = json_request(router, "GET", &request, ben, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(asks_background(&body), "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
     assert!(
         body["billing"]["account_holder_suggestion"].is_null(),
@@ -3383,6 +3409,19 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     assert_eq!(staff["billing"]["payment_method"], "card", "{staff}");
     assert_eq!(staff["billing"]["account_holder"], "Anna Muster", "{staff}");
     assert!(staff["billing_updated_at"].is_string(), "{staff}");
+    // The payer is a parent with a login: nobody else's contact data are
+    // passed on, so no consent for it is needed (QA 2026-10-06).
+    let declaration = format!("/api/v1/leads/{child}/payer-declaration");
+    let (status, declared) = json_request(router, "GET", &declaration, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{declared}");
+    assert_eq!(
+        declared["status"]["contact_consent_required"], false,
+        "{declared}"
+    );
+    assert_eq!(
+        declared["declaration"]["contact_consent_required"], false,
+        "{declared}"
+    );
 
     // The father pays instead: the route belonged to the mother and goes; the
     // father is asked now, the mother no longer.

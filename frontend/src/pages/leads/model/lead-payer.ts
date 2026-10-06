@@ -132,6 +132,12 @@ export type PayerDeclarationStatus = {
   agency_may_sign: boolean;
   agency_blocking: string[];
   aml_countries: string[];
+  /**
+   * Whether the lead's consent to pass the contact on to the payer is needed:
+   * false when the payer is a representative with an own cabinet login (a
+   * parent who pays). Null on an older server (the consent line stays as before).
+   */
+  contact_consent_required?: boolean | null;
 };
 
 export type PayerDeclarationResponse = {
@@ -182,6 +188,13 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
       agency_may_sign: status.agency_may_sign === true,
       agency_blocking: stringList(status.agency_blocking),
       aml_countries: stringList(status.aml_countries),
+      // The server sends it with the status and, when there is one, with the declaration.
+      contact_consent_required:
+        typeof status.contact_consent_required === "boolean"
+          ? status.contact_consent_required
+          : typeof declaration?.contact_consent_required === "boolean"
+            ? declaration.contact_consent_required
+            : null,
     },
   };
 }
@@ -552,6 +565,22 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
     client_order_signature_missing: tx("Сначала клиент подписывает заказ", "Zuerst unterschreibt der Kunde den Auftrag"),
   };
   return labels[code] ?? tx("Проверьте данные плательщика", "Angaben zum Zahler prüfen");
+}
+
+/**
+ * The badge beside "Кто платит": complete, or waiting only for the
+ * Kostenübernahmeerklärung (created later, in the contract step, once the
+ * order exists), or still incomplete.
+ */
+export function payerStatusBadge(
+  status: Pick<PayerDeclarationStatus, "complete" | "missing"> | null | undefined,
+  tx: Tx,
+): { tone: "success" | "info" | "warning"; label: string } {
+  if (status?.complete) return { tone: "success", label: tx("Заполнено", "Vollständig") };
+  if (status && status.missing.length > 0 && status.missing.every((code) => code === "cost_assumption_missing")) {
+    return { tone: "info", label: tx("ждёт Kostenübernahmeerklärung", "wartet auf Kostenübernahmeerklärung") };
+  }
+  return { tone: "warning", label: tx("Не заполнено", "Unvollständig") };
 }
 
 /** English readiness reasons of the server (lead readiness) → reason code. */

@@ -49,10 +49,15 @@ type Questionnaire = {
   identity_documents: Doc[];
   funds_proof_documents: Doc[];
   funds_proof_required: boolean;
+  /** The sources of funds of the payer type, as the server lists them. */
+  funds_source_options: string[];
   missing_for_submit: string[];
   declared_correct_at: string | null;
   submitted_at: string | null;
 };
+
+const PERSON_FUNDS_SOURCES = ["employment", "business_income", "savings", "asset_sale", "inheritance_gift", "other"];
+const ORGANISATION_FUNDS_SOURCES = ["business_revenue", "equity", "loan", "insurance_benefit", "donation", "other"];
 
 const TEXT_KEYS = [
   "salutation",
@@ -203,6 +208,7 @@ function completeAnswers(payerType: PayerType): Partial<Answers> {
         beneficial_owners_none: true,
         ...shared,
         relationship_kind: "employer",
+        funds_sources: ["business_revenue"],
       };
 }
 
@@ -267,6 +273,7 @@ async function setup(page: Page, options: Options = {}) {
     identity_documents: options.identityDocuments ?? [],
     funds_proof_documents: [],
     funds_proof_required: false,
+    funds_source_options: payerType === "person" ? PERSON_FUNDS_SOURCES : ORGANISATION_FUNDS_SOURCES,
     missing_for_submit: [],
     declared_correct_at: null,
     submitted_at: null,
@@ -1007,6 +1014,14 @@ test.describe("payer link", () => {
 
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     await expect(page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: "Branche" })).toHaveValue("Handel");
+    // A company chooses from the sources of an organisation, not from a person's (salary, inheritance).
+    const sources = page.getByTestId("payer-link-funds-sources");
+    await expect(sources.getByRole("checkbox")).toHaveCount(6);
+    await expect(sources.getByRole("checkbox", { name: "Geschäftstätigkeit / Umsatz" })).toBeChecked();
+    await expect(sources.getByRole("checkbox", { name: "Gehalt / nichtselbständige Arbeit" })).toHaveCount(0);
+    await expect(sources.getByRole("checkbox", { name: "Erbschaft / Schenkung" })).toHaveCount(0);
+    await sources.getByRole("checkbox", { name: "Darlehen / Kredit" }).check();
+    await expect.poll(() => q.answers.funds_sources).toEqual(["business_revenue", "loan"]);
     await next(page);
     await expect(stepTitle(page)).toHaveText("Zahlungsweg");
     await expect(page.getByTestId("payer-link-step-payment").getByRole("combobox", { name: "Wie erfolgt die Zahlung?" })).toBeVisible();

@@ -242,6 +242,28 @@ const OWNER_KEYS: [&str; 9] = [
     "share_percent",
 ];
 
+/// Sources of funds of a company, an organisation or an insurer (QA
+/// 2026-10-06, C7-b), in form order; a person chooses from the declaration's
+/// list ([`lead_payer::SOURCE_OF_FUNDS`]). The questionnaire shows the list of
+/// its payer type as `funds_source_options`.
+const ORGANISATION_FUNDS_SOURCES: [&str; 6] = [
+    "business_revenue",
+    "equity",
+    "loan",
+    "insurance_benefit",
+    "donation",
+    "other",
+];
+
+/// The sources of funds the payer type chooses from, in form order.
+fn funds_source_options(organisation: bool) -> &'static [&'static str] {
+    if organisation {
+        &ORGANISATION_FUNDS_SOURCES
+    } else {
+        lead_payer::SOURCE_OF_FUNDS
+    }
+}
+
 // ----------------------------------------------------------------------------
 // Routers
 // ----------------------------------------------------------------------------
@@ -1385,11 +1407,13 @@ fn owners_of(value: &Value, today: NaiveDate) -> Result<Vec<Owner>, FieldError> 
 
 /// Applies the sent answer keys to the stored answers; the result is what
 /// gets stored. Details belong to a "yes", "nobody over 25 %" clears the
-/// list; the rules that look at the declaration too are applied by the
-/// caller ([`save_patch`]).
+/// list; the sources of funds are those of the payer type
+/// (`organisation`); the rules that look at the declaration too are applied
+/// by the caller ([`save_patch`]).
 fn apply_answers_patch(
     current: &Answers,
     patch: &Map<String, Value>,
+    organisation: bool,
     today: NaiveDate,
 ) -> Result<Answers, FieldError> {
     let mut next = current.clone();
@@ -1479,14 +1503,15 @@ fn apply_answers_patch(
             "occupation" => next.occupation = intake::clean_text(text_of(value, key)?, key, 200)?,
             "industry" => next.industry = intake::clean_text(text_of(value, key)?, key, 200)?,
             "funds_sources" => {
+                let options = funds_source_options(organisation);
                 let chosen = list_of(value, key)?;
                 if chosen
                     .iter()
-                    .any(|source| !lead_payer::SOURCE_OF_FUNDS.contains(&source.trim()))
+                    .any(|source| !options.contains(&source.trim()))
                 {
                     return Err(field_error(key, "Not one of the sources of funds"));
                 }
-                next.funds_sources = lead_payer::SOURCE_OF_FUNDS
+                next.funds_sources = options
                     .iter()
                     .filter(|source| chosen.iter().any(|value| value.trim() == **source))
                     .map(|source| source.to_string())
@@ -1940,6 +1965,8 @@ impl Questionnaire {
                 "contact_channels": self.statement.contact_channels,
             },
             "answers": self.answers.to_json(self.organisation),
+            // The sources of funds of the payer type, in form order.
+            "funds_source_options": funds_source_options(self.organisation),
             "payment_route": {
                 "payment_method": route.payment_method,
                 "payment_method_details": route.payment_method_details,
@@ -2525,14 +2552,15 @@ async fn save_patch(
         Writer::Parent { .. } => context.paying_parent(),
         Writer::Link { .. } => None,
     };
+    let organisation = declaration.is_organisation();
     let (answers_patch, route_patch) = split_patch(
         body,
         PatchScope {
-            organisation: declaration.is_organisation(),
+            organisation,
             cabinet: matches!(writer, Writer::Parent { .. }),
         },
     )?;
-    let mut next = apply_answers_patch(&statement.answers, &answers_patch, today)
+    let mut next = apply_answers_patch(&statement.answers, &answers_patch, organisation, today)
         .map_err(FieldError::into_response)?;
     // The rules that look at what the payer sees: the words describe the
     // kind `other`; a habitual residence is asked only when it differs.
@@ -2777,18 +2805,23 @@ fn adopted_declaration(
             None
         };
     }
-    // The source of funds only while nobody stated it: one source is it,
-    // several are "other" with the payer's words.
+    // The source of funds only while nobody stated it: one source the
+    // declaration knows is it; several, or one of an organisation without a
+    // match in the declaration's list, are "other" with the payer's words.
     if next.source_of_funds.is_none() {
-        match answers.funds_sources.as_slice() {
-            [] => {}
-            [single] => {
-                next.source_of_funds = Some(single.clone());
+        let matched = match answers.funds_sources.as_slice() {
+            [single] => declaration_source_of_funds(single),
+            _ => None,
+        };
+        match (answers.funds_sources.as_slice(), matched) {
+            ([], _) => {}
+            ([_], Some(source)) => {
+                next.source_of_funds = Some(source.to_string());
                 if next.source_of_funds_description.is_none() {
                     next.source_of_funds_description = answers.funds_description.clone();
                 }
             }
-            several => {
+            (several, _) => {
                 next.source_of_funds = Some("other".to_string());
                 if next.source_of_funds_description.is_none() {
                     let labels = several
@@ -2813,7 +2846,23 @@ fn adopted_declaration(
     next
 }
 
-/// The German label of a source of funds, as the wizard shows it.
+/// The declaration's source of funds ([`lead_payer::SOURCE_OF_FUNDS`]) for
+/// one source the payer stated: a person's sources are that list; of an
+/// organisation's ([`ORGANISATION_FUNDS_SOURCES`]) the business revenue is
+/// the declaration's business income and "other" is "other", the rest has no
+/// match.
+fn declaration_source_of_funds(source: &str) -> Option<&'static str> {
+    match source {
+        "business_revenue" => Some("business_income"),
+        source => lead_payer::SOURCE_OF_FUNDS
+            .iter()
+            .copied()
+            .find(|known| *known == source),
+    }
+}
+
+/// The German label of a source of funds, as the wizard and the payer page
+/// show it.
 fn funds_source_label(source: &str) -> &str {
     match source {
         "employment" => "Gehalt / nichtselbständige Arbeit",
@@ -2821,6 +2870,11 @@ fn funds_source_label(source: &str) -> &str {
         "savings" => "Ersparnisse",
         "asset_sale" => "Verkauf von Vermögenswerten",
         "inheritance_gift" => "Erbschaft / Schenkung",
+        "business_revenue" => "Geschäftstätigkeit / Umsatz",
+        "equity" => "Eigenkapital",
+        "loan" => "Darlehen / Kredit",
+        "insurance_benefit" => "Versicherungsleistung",
+        "donation" => "Spende / Zuwendung",
         "other" => "Sonstiges",
         other => other,
     }
@@ -4361,6 +4415,7 @@ async fn staff_send(
     let rendered = templates::payer_invitation(&PayerInvitationEmail {
         language: mail_language,
         payer_name: declaration.payer_name().as_deref().unwrap_or_default(),
+        organisation: declaration.is_organisation(),
         patient_name: &context.patient_name,
         link_url: &link_url,
         expires_on: crate::app_time::date_of(link.expires_at),
@@ -5025,6 +5080,7 @@ mod tests {
                 "high_risk_country_code": "ir",
                 "id_valid_until": "2030-01-01"
             })),
+            false,
             today(),
         )
         .unwrap();
@@ -5045,17 +5101,57 @@ mod tests {
                 "relationship_kind",
             ),
         ] {
-            let error = apply_answers_patch(&stored, &patch(body), today()).unwrap_err();
+            let error = apply_answers_patch(&stored, &patch(body), false, today()).unwrap_err();
             assert_eq!(error.field, field);
             assert_eq!(error.code, "invalid_field");
         }
         let expired = apply_answers_patch(
             &stored,
             &patch(json!({ "id_valid_until": "2026-10-05" })),
+            false,
             today(),
         )
         .unwrap_err();
         assert_eq!(expired.code, "id_document_expired");
+    }
+
+    /// An organisation chooses from its own sources of funds; the person's
+    /// list and the organisation's share only "other" (QA 2026-10-06, C7-b).
+    #[test]
+    fn an_organisation_states_its_own_sources_of_funds() {
+        let stored = Answers::default();
+        let next = apply_answers_patch(
+            &stored,
+            &patch(json!({ "funds_sources": ["loan", "other", "business_revenue"] })),
+            true,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(
+            next.funds_sources,
+            ["business_revenue", "loan", "other"],
+            "form order"
+        );
+        for (sources, organisation) in [
+            (json!(["employment"]), true),
+            (json!(["inheritance_gift", "equity"]), true),
+            (json!(["equity"]), false),
+            (json!(["donation"]), false),
+        ] {
+            let error = apply_answers_patch(
+                &stored,
+                &patch(json!({ "funds_sources": sources })),
+                organisation,
+                today(),
+            )
+            .unwrap_err();
+            assert_eq!(
+                (error.code, error.field),
+                ("invalid_field", "funds_sources")
+            );
+        }
+        assert_eq!(funds_source_options(true), ORGANISATION_FUNDS_SOURCES);
+        assert_eq!(funds_source_options(false), lead_payer::SOURCE_OF_FUNDS);
     }
 
     #[test]
@@ -5084,6 +5180,7 @@ mod tests {
                 ..Answers::default()
             },
             &patch(json!({ "beneficial_owners_none": true })),
+            true,
             today(),
         )
         .unwrap();
@@ -5355,5 +5452,65 @@ mod tests {
         };
         let kept = adopted_declaration(&stated, &answers, Some(document));
         assert_eq!(kept.source_of_funds.as_deref(), Some("inheritance_gift"));
+    }
+
+    /// An organisation's sources map to the declaration's list where it has
+    /// a match, else to "other" with the payer's words (QA 2026-10-06).
+    #[test]
+    fn adoption_maps_the_sources_of_an_organisation() {
+        let company = Declaration {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            first_name: None,
+            last_name: None,
+            date_of_birth: None,
+            citizenships: Vec::new(),
+            ..person_payer()
+        };
+        let adopt = |sources: &[&str], text: Option<&str>| {
+            adopted_declaration(
+                &company,
+                &Answers {
+                    funds_sources: sources.iter().map(|source| source.to_string()).collect(),
+                    funds_description: text.map(str::to_string),
+                    ..Answers::default()
+                },
+                None,
+            )
+        };
+        let revenue = adopt(&["business_revenue"], None);
+        assert_eq!(revenue.source_of_funds.as_deref(), Some("business_income"));
+        assert_eq!(revenue.source_of_funds_description, None);
+        let other = adopt(&["other"], Some("Rücklagen der Stiftung"));
+        assert_eq!(other.source_of_funds.as_deref(), Some("other"));
+        assert_eq!(
+            other.source_of_funds_description.as_deref(),
+            Some("Rücklagen der Stiftung")
+        );
+        let loan = adopt(&["loan"], Some("Kredit der Hausbank"));
+        assert_eq!(loan.source_of_funds.as_deref(), Some("other"));
+        assert_eq!(
+            loan.source_of_funds_description.as_deref(),
+            Some("Angaben des Zahlers: Darlehen / Kredit – Kredit der Hausbank")
+        );
+        let several = adopt(&["business_revenue", "equity"], None);
+        assert_eq!(several.source_of_funds.as_deref(), Some("other"));
+        assert_eq!(
+            several.source_of_funds_description.as_deref(),
+            Some("Angaben des Zahlers: Geschäftstätigkeit / Umsatz, Eigenkapital")
+        );
+        // Every value of either list is one the declaration accepts.
+        for source in ORGANISATION_FUNDS_SOURCES
+            .iter()
+            .chain(lead_payer::SOURCE_OF_FUNDS)
+        {
+            let adopted = adopt(&[*source], None);
+            assert!(
+                lead_payer::SOURCE_OF_FUNDS
+                    .contains(&adopted.source_of_funds.as_deref().unwrap_or_default()),
+                "{source}"
+            );
+            assert_ne!(funds_source_label(source), *source, "{source} has a label");
+        }
     }
 }

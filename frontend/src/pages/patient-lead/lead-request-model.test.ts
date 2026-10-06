@@ -17,7 +17,9 @@ import {
   organisationPayerType,
   payerAnswer,
   payerInput,
+  payerSelfOffered,
   payerTypeOf,
+  paymentBackgroundAsked,
   personalDataPatch,
   rejectedValue,
   stillRejectedIdentification,
@@ -580,6 +582,21 @@ describe("lead request send step", () => {
       city: "",
       country: "",
     });
+  });
+
+  it("offers 'the patient pays' for a minor only as the stored answer of an older request", () => {
+    expect(payerSelfOffered({ minor: false, payer: null })).toBe(true);
+    expect(payerSelfOffered({ minor: true, payer: null })).toBe(false);
+    expect(payerSelfOffered({ minor: true, payer: storedPayer })).toBe(false);
+    expect(payerSelfOffered({ minor: true, payer: { ...storedPayer, payer_kind: "self" } })).toBe(true);
+  });
+
+  it("asks why the payer pays about a third party, not about the paying parent", () => {
+    const progress = (missing: string[]) => ({ progress: { filled: 0, total: 0, missing_for_submit: missing } });
+    expect(paymentBackgroundAsked({ guardian_pays: false }, progress([]))).toBe(true);
+    expect(paymentBackgroundAsked({ guardian_pays: true }, progress([]))).toBe(false);
+    // An older server still requires it from the parent: the field stays, or the request could not be sent.
+    expect(paymentBackgroundAsked({ guardian_pays: true }, progress(["payment_background"]))).toBe(true);
   });
 
   it("shows a stored payer as the first answer it was given as", () => {

@@ -45,9 +45,32 @@ export const RELATIONSHIP_KINDS = [
 ] as const;
 export type RelationshipKind = (typeof RELATIONSHIP_KINDS)[number];
 
-/** Where the money comes from (the declaration's SOURCE_OF_FUNDS). */
+/** Where a person's money comes from (the declaration's SOURCE_OF_FUNDS). */
 export const FUNDS_SOURCES = ["employment", "business_income", "savings", "asset_sale", "inheritance_gift", "other"] as const;
-export type FundsSource = (typeof FUNDS_SOURCES)[number];
+/** Where the money of a company, an organisation or an insurer comes from (QA 2026-10-06). */
+export const ORGANISATION_FUNDS_SOURCES = ["business_revenue", "equity", "loan", "insurance_benefit", "donation", "other"] as const;
+export type FundsSource = (typeof FUNDS_SOURCES)[number] | (typeof ORGANISATION_FUNDS_SOURCES)[number];
+
+/** Every source the page can name, persons' first (the order of a read-only list). */
+export const ALL_FUNDS_SOURCES: readonly FundsSource[] = [
+  ...FUNDS_SOURCES,
+  ...ORGANISATION_FUNDS_SOURCES.filter((source) => source !== "other"),
+];
+
+/**
+ * The sources the questionnaire offers, in form order: the server's list for
+ * the payer type (`funds_source_options`), else — on an older server — the
+ * persons' list as before. Values the page cannot name are left out.
+ */
+export function fundsSourceOptions(questionnaire: { funds_source_options?: unknown } | null | undefined): FundsSource[] {
+  const options = questionnaire?.funds_source_options;
+  if (!Array.isArray(options)) return [...FUNDS_SOURCES];
+  const known = options.filter(
+    (option, index): option is FundsSource =>
+      typeof option === "string" && ALL_FUNDS_SOURCES.includes(option as FundsSource) && options.indexOf(option) === index,
+  );
+  return known.length > 0 ? known : [...FUNDS_SOURCES];
+}
 
 export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const;
 export type LegalQuestion = (typeof LEGAL_QUESTIONS)[number];
@@ -514,11 +537,20 @@ export function withRelationshipKind(draft: PayerDraft, kind: string): PayerDraf
   return { ...draft, relationship_kind: kind, relationship: kind === "other" ? draft.relationship : "" };
 }
 
-/** A source of funds checked or unchecked, in the order of the list. */
-export function withFundsSource(draft: PayerDraft, source: FundsSource, chosen: boolean): PayerDraft {
+/**
+ * A source of funds checked or unchecked, in the order of the offered list
+ * (the persons' list unless the questionnaire offers another one); a value
+ * the list does not offer is dropped, the server would refuse it.
+ */
+export function withFundsSource(
+  draft: PayerDraft,
+  source: FundsSource,
+  chosen: boolean,
+  options: readonly FundsSource[] = FUNDS_SOURCES,
+): PayerDraft {
   const rest = draft.funds_sources.filter((item) => item !== source);
   const next = chosen ? [...rest, source] : rest;
-  return { ...draft, funds_sources: FUNDS_SOURCES.filter((item) => next.includes(item)) };
+  return { ...draft, funds_sources: options.filter((item) => next.includes(item)) };
 }
 
 /** "Nobody holds more than 25 %": the list goes; unchecked, the list may be filled again. */

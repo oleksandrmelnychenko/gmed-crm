@@ -10,6 +10,7 @@ import {
   changedOnServer,
   draftFromQuestionnaire,
   fieldValue,
+  fundsSourceOptions,
   missingByStep,
   payerSteps,
   reconcileDraft,
@@ -412,7 +413,7 @@ function DraftForm({
     if (field === "bank_name") return form.draft.payment_method === "bank_transfer";
     return true;
   };
-  const context: StepContext = { form, text, lang, payerType, required };
+  const context: StepContext = { form, text, lang, payerType, required, fundsSources: fundsSourceOptions(questionnaire) };
 
   const goTo = (next: PayerStep) => {
     if (next !== "privacy" && !consented) {

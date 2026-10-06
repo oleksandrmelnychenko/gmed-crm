@@ -199,6 +199,22 @@ describe("LeadGwgStatements", () => {
     expect(render(null)).toBe("");
   });
 
+  it("says in amber when the lead changed answers after sending, and nothing without the key", () => {
+    const changed = render(portalState({ changed_since_submit: true }));
+    expect(changed).toContain('data-testid="lead-gwg-changed-since-submit"');
+    expect(changed).toContain("Пациент изменил данные после отправки — ещё не отправлено повторно");
+    expect(render(portalState({ changed_since_submit: true }), null, "de")).toContain(
+      "Die Patientin / der Patient hat Angaben nach dem Senden geändert – noch nicht erneut gesendet",
+    );
+    // Also while the lead entered no statements yet.
+    expect(render(portalState({ identification: {}, identity_documents: [], changed_since_submit: true }))).toContain(
+      "lead-gwg-changed-since-submit",
+    );
+    expect(render(portalState({ changed_since_submit: false }))).not.toContain("lead-gwg-changed-since-submit");
+    // An older server does not send the key.
+    expect(render(portalState())).not.toContain("lead-gwg-changed-since-submit");
+  });
+
   it("does not claim empty statements for a role the server keeps them from", () => {
     const hidden = portalState({
       identification: {},

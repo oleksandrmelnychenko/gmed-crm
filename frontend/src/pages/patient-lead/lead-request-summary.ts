@@ -215,7 +215,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       return [
         {
           id: slot,
-          title: representativeHeading(text, slot, person.mine),
+          title: representativeHeading(text, slot, person.mine, custody),
           rows: entered([
             ...REPRESENTATIVE_FIELDS.filter((field) => asksRepresentativeField(slot, field)).map(
               (field): [string, string | null | undefined] => [representativeFieldLabel(text, field), stated(person, field)],

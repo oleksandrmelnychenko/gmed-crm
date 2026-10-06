@@ -8,8 +8,11 @@ import { cn } from "@/lib/utils";
 import {
   identificationLacksRepresentative,
   identificationPersons,
+  noOwnAccountPaymentHint,
+  ownAccountHintSubjects,
   ownAccountPaymentLabel,
   qualifiedSignatureLabel,
+  type DeclaredPaymentRoute,
   type IdentificationLabel,
   type IdentificationSubject,
   type LeadIdentificationStatus,
@@ -35,7 +38,9 @@ function Label({ label, testId }: { label: IdentificationLabel; testId: string }
  * payment is confirmed or taken back with one button, for roles that may edit.
  * A minor has no line of his own: the legal representatives sign and pay, each
  * on a line; a payer who is one of them repeats that person's labels without a
- * second confirmation.
+ * second confirmation. When the stated payment route is cash, crypto or a
+ * payment through a third party, the paying person's line says that no
+ * payment from the own account is to be expected; the button stays.
  */
 export function LeadIdentificationStatusView({
   status,
@@ -44,6 +49,7 @@ export function LeadIdentificationStatusView({
   busy,
   errorMessage,
   tx,
+  paymentRoute = null,
   onSetOwnAccountPayment,
 }: {
   status: LeadIdentificationStatus;
@@ -53,8 +59,11 @@ export function LeadIdentificationStatusView({
   busy: IdentificationSubject | null;
   errorMessage: string;
   tx: Tx;
+  /** The payment route of section 8 (the intake's billing); null while unknown. */
+  paymentRoute?: DeclaredPaymentRoute | null;
   onSetOwnAccountPayment: (subject: IdentificationSubject, confirmed: boolean) => void;
 }) {
+  const hinted = ownAccountHintSubjects(status, paymentRoute);
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-identification-status">
       <div className="text-xs font-semibold text-foreground">
@@ -118,6 +127,14 @@ export function LeadIdentificationStatusView({
                   {note}
                 </span>
               ) : null}
+              {hinted.has(subject) ? (
+                <span
+                  className="w-full text-xs leading-5 text-amber-700 dark:text-amber-300"
+                  data-testid={`lead-identification-own-account-hint-${subject}`}
+                >
+                  {noOwnAccountPaymentHint(tx)}
+                </span>
+              ) : null}
             </li>
           );
         })}
@@ -150,6 +167,7 @@ export function LeadIdentificationStatus({
   disabled,
   tx,
   errorText,
+  paymentRoute = null,
 }: {
   /** The loaded status and the action that confirms a payment. */
   identification: Pick<LeadIdentificationStatusState, "status" | "setOwnAccountPayment">;
@@ -157,6 +175,8 @@ export function LeadIdentificationStatus({
   disabled: boolean;
   tx: Tx;
   errorText: (error: unknown) => string;
+  /** The payment route of section 8 (the intake's billing); null while unknown. */
+  paymentRoute?: DeclaredPaymentRoute | null;
 }) {
   const { status, setOwnAccountPayment } = identification;
   const [busy, setBusy] = useState<IdentificationSubject | null>(null);
@@ -184,6 +204,7 @@ export function LeadIdentificationStatus({
       busy={busy}
       errorMessage={errorMessage}
       tx={tx}
+      paymentRoute={paymentRoute}
       onSetOwnAccountPayment={(subject, confirmed) => void change(subject, confirmed)}
     />
   );

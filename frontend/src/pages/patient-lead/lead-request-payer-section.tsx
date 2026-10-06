@@ -28,7 +28,9 @@ import {
   draftFromPayer,
   knowsPayerType,
   payerInput,
+  payerSelfOffered,
   payerTypeOf,
+  paymentBackgroundAsked,
   withPayerAnswer,
   withPayerType,
   withRelationshipKind,
@@ -95,6 +97,10 @@ export function PayerSection({
   // (an older one) gets the box, or the request could not be sent.
   const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
   const consentAsked = typed && (!draft.guardian_pays || serverAsksConsent);
+  // Why somebody pays is asked about a third party, not about the paying parent.
+  const backgroundAsked = paymentBackgroundAsked(draft, request);
+  // A child does not pay (only an older request keeps that answer).
+  const selfOffered = payerSelfOffered(request);
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
@@ -218,7 +224,7 @@ export function PayerSection({
             onChange={(event) => setAnswer(event.target.value)}
           >
             <option value="">{text.choose}</option>
-            <option value="self">{options.self}</option>
+            {selfOffered ? <option value="self">{options.self}</option> : null}
             {template ? <option value="guardian">{text.payerOptionsGuardian.guardian}</option> : null}
             <option value="third_party">{options.third_party}</option>
           </NativeComboboxSelect>
@@ -408,7 +414,7 @@ export function PayerSection({
             {!organisation && !draft.guardian_pays ? (
               <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerInformHint}</p>
             ) : null}
-            {identification ? (
+            {identification && backgroundAsked ? (
               <IdentificationFormField
                 form={identification}
                 field="payment_background"

@@ -18,10 +18,13 @@ import {
   payerLinkActions,
   payerLinkCabinetNote,
   payerLinkErrorText,
+  payerLinkResendAsksFirst,
+  payerLinkResendQuestion,
   payerLinkStatusLine,
   type Tx,
 } from "../model/lead-payer-link";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
+import { LeadConfirmDialog } from "./lead-confirm-dialog";
 
 const LANGUAGE_LABELS: Record<PayerLinkLanguage, string> = { de: "DE", en: "EN", uk: "UA", ru: "RU" };
 
@@ -69,6 +72,8 @@ export function LeadPayerLinkPanel({
   const [busy, setBusy] = useState<"send" | "revoke" | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // The question asked before revoking, or before a new link replaces one the payer is filling in.
+  const [confirm, setConfirm] = useState<"revoke" | "resend" | null>(null);
 
   const link = state.link;
   const actions = payerLinkActions(state, reopen, tx);
@@ -78,6 +83,7 @@ export function LeadPayerLinkPanel({
   const message = (cause: unknown) => payerLinkErrorText(cause, tx) ?? errorText(cause);
 
   async function send() {
+    setConfirm(null);
     setBusy("send");
     setError("");
     setNotice("");
@@ -98,16 +104,7 @@ export function LeadPayerLinkPanel({
   }
 
   async function revoke() {
-    if (
-      !window.confirm(
-        tx(
-          "Отозвать ссылку плательщика? Открыть её больше будет нельзя; ответы плательщика сохраняются.",
-          "Link des Zahlers widerrufen? Er lässt sich danach nicht mehr öffnen; die Angaben des Zahlers bleiben erhalten.",
-        ),
-      )
-    ) {
-      return;
-    }
+    setConfirm(null);
     setBusy("revoke");
     setError("");
     setNotice("");
@@ -195,7 +192,11 @@ export function LeadPayerLinkPanel({
                   className={cn("h-8 rounded-lg", actions.highlight && "ring-2 ring-[var(--brand)]/40 ring-offset-1")}
                   disabled={locked || !actions.sendEnabled}
                   data-highlight={actions.highlight ? "true" : undefined}
-                  onClick={() => void send()}
+                  onClick={() => {
+                    // A new link while the payer is filling in ends the payer's session: ask first.
+                    if (actions.sendKind === "resend" && payerLinkResendAsksFirst(link)) setConfirm("resend");
+                    else void send();
+                  }}
                 >
                   {busy === "send" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Mail className="size-3.5" />}
                   {actions.sendKind === "resend"
@@ -209,7 +210,7 @@ export function LeadPayerLinkPanel({
                     variant="ghost"
                     className="h-8 rounded-lg text-rose-700"
                     disabled={locked}
-                    onClick={() => void revoke()}
+                    onClick={() => setConfirm("revoke")}
                   >
                     {busy === "revoke" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}
                     {tx("Отозвать ссылку", "Link widerrufen")}
@@ -244,6 +245,31 @@ export function LeadPayerLinkPanel({
           {notice}
         </p>
       ) : null}
+
+      <LeadConfirmDialog
+        open={confirm === "revoke"}
+        testId="lead-payer-link-revoke-dialog"
+        title={tx("Отозвать ссылку плательщика?", "Link des Zahlers widerrufen?")}
+        description={tx(
+          "Открыть её больше будет нельзя; ответы плательщика сохраняются.",
+          "Er lässt sich danach nicht mehr öffnen; die Angaben des Zahlers bleiben erhalten.",
+        )}
+        confirmLabel={tx("Отозвать ссылку", "Link widerrufen")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        destructive
+        onConfirm={() => void revoke()}
+        onCancel={() => setConfirm(null)}
+      />
+      <LeadConfirmDialog
+        open={confirm === "resend"}
+        testId="lead-payer-link-resend-dialog"
+        title={tx("Отправить новую ссылку?", "Neuen Link senden?")}
+        description={payerLinkResendQuestion(tx)}
+        confirmLabel={tx("Отправить новую", "Neuen Link senden")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        onConfirm={() => void send()}
+        onCancel={() => setConfirm(null)}
+      />
     </div>
   );
 }
