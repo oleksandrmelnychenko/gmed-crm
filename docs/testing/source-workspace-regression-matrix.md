@@ -861,41 +861,53 @@ Covers:
   Covers:
   patient-portal messaging writes audit events for conversation view, outbound text message, attachment upload, attachment download and explicit mark-read flow so compliance can reconstruct access and disclosure actions.
 
-- `patient_text_messages_use_e2e_envelopes_when_keys_exist`
+- `plain_text_and_attachment_are_server_encrypted_even_with_old_device_keys`
   Source:
-  `docs/requirements/04_non-functional-requirements_ua.md:83`
+  `docs/requirements/04_non-functional-requirements_ua.md:23`
   `docs/backlog/04_implementation-tasks_ua.md:295`
+  `docs/chat-release-runbook.md` (owner decision 2026-10-07: server-side instead of end-to-end encryption)
   Covers:
-  direct text chat publishes per-user message keys, stores only `e2e_ciphertext / nonce / salt / key fingerprints` for secure text messages on the backend, and leaves plaintext rendering to the client after local key-based decryption.
+  plain chat text and attachments are accepted even between participants with an old end-to-end device key, are stored only as AES-256-GCM ciphertext with a versioned key id (database column and attachment file), are readable by both participants without any device key, and stay closed to a third user.
 
-- `patient_attachments_can_use_e2e_envelopes`
+- `old_e2e_text_is_converted_once_by_a_participant` / `old_e2e_attachment_is_converted_after_its_caption`
   Source:
-  `docs/requirements/04_non-functional-requirements_ua.md:83`
-  `docs/backlog/04_implementation-tasks_ua.md:295`
+  `docs/chat-release-runbook.md` (rescue of old end-to-end history)
   Covers:
-  secure chat file attachments store only opaque ciphertext plus attachment-level `e2e nonce / salt / key fingerprints` metadata on the backend, while download returns the encrypted payload for client-side decryption instead of server-side plaintext disclosure.
+  a participant's browser that can still open an old end-to-end message hands the text and then the attachment back once; the server stores them server-encrypted, clears the envelope, keeps the original timestamps, records `converted_by` / `converted_from_e2e_at` and a content-free audit row; non-participants get `404`, repeated or plain conversions `409`, size mismatches `422`.
 
-- `staff can send a secure text message in browser E2E`
+- `patient_text_messages_can_use_e2e_envelopes` / `patient_attachments_can_use_e2e_envelopes`
+  Source:
+  `docs/chat-release-runbook.md` (old end-to-end envelopes)
+  Covers:
+  the backend still accepts and returns old end-to-end envelopes for browsers that have not reloaded since 2026-10-07, so old history can be opened and rescued.
+
+- `staff can send a text message and delete it` / `staff message a peer who never created a device key and the text goes to the server as text`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`
   `docs/backlog/04_implementation-tasks_ua.md:295`
   Covers:
-  browser-level secure chat flow boots a local keyring, fetches the peer public key, submits an encrypted text envelope and renders the just-sent secure message through the actual UI path instead of API-only assertions.
+  browser-level chat sends text without any device key, peer key or end-to-end envelope, shows "Serverseitig verschlüsselt" in the conversation header and deletes the message for both participants.
 
-- `staff can send a secure attachment in browser E2E`
+- `staff can send an attachment with a caption`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`
   `docs/requirements/04_non-functional-requirements_ua.md:83`
   `docs/backlog/04_implementation-tasks_ua.md:295`
   Covers:
-  browser-level secure chat flow can encrypt a file attachment for the active peer, submit the multipart E2E envelope through the real upload form, render the secure attachment chip back in the conversation and hit the encrypted download path.
+  browser-level chat uploads the file and caption through the real upload form, renders the attachment chip and downloads the original bytes.
 
-- `patient can use secure chat with assigned care team in browser E2E`
+- `old end-to-end history is handed back once and then reads on another device`
+  Source:
+  `docs/chat-release-runbook.md` (rescue of old end-to-end history)
+  Covers:
+  a browser holding an old device key opens the old messages, converts texts and then the attachment exactly once, and a fresh browser without any key reads the same history and downloads the attachment.
+
+- `patient can chat with the assigned care team`
   Source:
   `docs/requirements/03_product-backlog_ua.md:213`
   `docs/backlog/04_implementation-tasks_ua.md:295`
   Covers:
-  browser-level patient portal secure chat can open the assigned care-team conversation, send an encrypted text update, upload an encrypted attachment with caption and download that secure attachment back through the same self-service conversation.
+  browser-level patient portal chat can open the assigned care-team conversation, send a text update, upload an attachment with caption and download it back through the same self-service conversation.
 
 - `patient portal chat clears unread state and only exposes allowed peers`
   Source:

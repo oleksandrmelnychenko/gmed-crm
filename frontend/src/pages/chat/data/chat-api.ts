@@ -6,6 +6,7 @@ import {
   openAuthenticatedApiWebSocket,
 } from "@/lib/api";
 
+import { chatAttachmentMime } from "../model/attachments";
 import type { Conversation, Message, UserItem } from "../model/types";
 import { notifyChatRead } from "@/lib/chat-read-events";
 
@@ -107,6 +108,26 @@ export async function uploadPeerAttachment(peerId: string, formData: FormData) {
   }
   clearApiCache();
   return { ...receipt, attachment_key: rawReceipt.attachment_key };
+}
+
+/** Hands the decrypted text of an old end-to-end message back to the server once. */
+export async function convertMessageFromE2E(messageId: string, text: string) {
+  await apiFetch(`/messages/${encodeURIComponent(messageId)}/convert-from-e2e`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+/** Hands the decrypted bytes of an old end-to-end attachment back to the server once. */
+export async function convertAttachmentFromE2E(messageId: string, bytes: Uint8Array, filename: string) {
+  const formData = new FormData();
+  formData.append("file", new Blob([Uint8Array.from(bytes)], { type: chatAttachmentMime(filename) }), filename);
+  await apiFetch(`/messages/${encodeURIComponent(messageId)}/convert-attachment-from-e2e`, {
+    method: "POST",
+    body: formData,
+    timeoutMs: 120_000,
+  });
+  clearApiCache();
 }
 
 export async function deletePeerMessage(peerId: string, messageId: string) {

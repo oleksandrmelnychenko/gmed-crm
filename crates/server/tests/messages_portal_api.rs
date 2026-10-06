@@ -1027,71 +1027,631 @@ async fn message_key_fingerprint_cannot_be_claimed_by_another_account() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-async fn plaintext_downgrade_is_rejected_when_recipient_has_an_active_key() {
-    let Some((app, pool, admin_id)) = test_context().await else {
-        return;
-    };
+struct ChatConversionFixture {
+    suite: support::TestSuiteContext,
+    patient_user_id: Uuid,
+    concierge_id: Uuid,
+    patient_auth: String,
+    concierge_auth: String,
+    outsider_auth: String,
+    patient_key: Value,
+    concierge_key: Value,
+}
 
-    let tag = unique_tag("chat-no-downgrade");
-    let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
+/// A patient and an assigned concierge who both registered an end-to-end
+/// device key in the past, plus a patient manager without an assignment.
+async fn chat_conversion_fixture(prefix: &str) -> Option<ChatConversionFixture> {
+    let suite = support::suite_context(TEST_SECRET).await?;
+    let tag = unique_tag(prefix);
+    let patient_user_id = seed_user(&suite.pool, &tag, "patient").await;
+    let concierge_id = seed_user(&suite.pool, &format!("{tag}-concierge"), "concierge").await;
+    let outsider_id = seed_user(&suite.pool, &format!("{tag}-outsider"), "patient_manager").await;
+    let patient_id = seed_patient(&suite.pool, suite.admin_id, &tag).await;
+    seed_patient_assignment(&suite.pool, patient_id, patient_user_id, suite.admin_id).await;
+    seed_patient_assignment(&suite.pool, patient_id, concierge_id, suite.admin_id).await;
 
     let patient_auth = auth_header_for(patient_user_id, "patient");
     let concierge_auth = auth_header_for(concierge_id, "concierge");
-    upsert_message_key(&app, &concierge_auth, &[7_u8; 91]).await;
+    let outsider_auth = auth_header_for(outsider_id, "patient_manager");
+    let mut patient_public_key = [0_u8; 91];
+    patient_public_key[..16].copy_from_slice(patient_user_id.as_bytes());
+    let mut concierge_public_key = [1_u8; 91];
+    concierge_public_key[..16].copy_from_slice(concierge_id.as_bytes());
+    let patient_key = upsert_message_key(&suite.app, &patient_auth, &patient_public_key).await;
+    let concierge_key =
+        upsert_message_key(&suite.app, &concierge_auth, &concierge_public_key).await;
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/messages/{concierge_id}"),
-        &patient_auth,
-        Some(json!({ "message": "must not downgrade" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    Some(ChatConversionFixture {
+        suite,
+        patient_user_id,
+        concierge_id,
+        patient_auth,
+        concierge_auth,
+        outsider_auth,
+        patient_key,
+        concierge_key,
+    })
+}
+
+fn chat_upload_path(file_key: &str) -> std::path::PathBuf {
+    std::path::Path::new(gmed_server::routes::messages::CHAT_UPLOAD_DIR).join(file_key)
 }
 
 #[tokio::test]
-async fn plaintext_text_and_attachment_are_rejected_when_sender_has_an_active_key() {
-    let Some((app, pool, admin_id)) = test_context().await else {
+async fn plain_text_and_attachment_are_server_encrypted_even_with_old_device_keys() {
+    let Some(fx) = chat_conversion_fixture("chat-server-encrypted").await else {
         return;
     };
+    let app = &fx.suite.app;
+    let pool = &fx.suite.pool;
+    let text = "Synthetic note: blood test moved to Thursday 09:30.";
 
-    let tag = unique_tag("chat-sender-no-downgrade");
-    let patient_user_id = seed_user(&pool, &tag, "patient").await;
-    let concierge_id = seed_user(&pool, &format!("{tag}-concierge"), "concierge").await;
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
-    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
-    seed_patient_assignment(&pool, patient_id, concierge_id, admin_id).await;
-
-    let patient_auth = auth_header_for(patient_user_id, "patient");
-    upsert_message_key(&app, &patient_auth, &[8_u8; 91]).await;
-
+    // Both participants still have an end-to-end device key registered from
+    // the old chat. Plain messages are accepted anyway and sealed at rest.
     let (status, body) = json_request(
-        &app,
+        app,
         "POST",
-        &format!("/api/v1/messages/{concierge_id}"),
-        &patient_auth,
-        Some(json!({ "message": "must stay encrypted" })),
+        &format!("/api/v1/messages/{}", fx.concierge_id),
+        &fx.patient_auth,
+        Some(json!({ "message": text })),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["is_e2e"], false);
+    let message_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
 
-    let (status, body) = multipart_request(
-        &app,
-        &format!("/api/v1/messages/{concierge_id}/upload"),
-        &patient_auth,
-        b"%PDF-1.4\nplaintext downgrade",
-        "plaintext.pdf",
+    let row = sqlx::query(
+        r#"SELECT message, message_ciphertext, message_nonce, encryption_key_id, e2e_ciphertext
+             FROM direct_messages
+            WHERE id = $1"#,
+    )
+    .bind(message_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        row.try_get::<Option<String>, _>("message")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("e2e_ciphertext")
+            .unwrap()
+            .is_none()
+    );
+    let ciphertext = row
+        .try_get::<Option<Vec<u8>>, _>("message_ciphertext")
+        .unwrap()
+        .expect("text is stored as ciphertext");
+    let nonce = row
+        .try_get::<Option<Vec<u8>>, _>("message_nonce")
+        .unwrap()
+        .expect("text nonce");
+    let key_id = row
+        .try_get::<Option<String>, _>("encryption_key_id")
+        .unwrap()
+        .expect("versioned key id");
+    assert_ne!(ciphertext.as_slice(), text.as_bytes());
+    assert!(
+        !ciphertext
+            .windows(text.len())
+            .any(|window| window == text.as_bytes()),
+        "the plaintext must not appear in the stored column"
+    );
+    assert_eq!(key_id, fx.suite.state.message_keys.active_id());
+    assert_eq!(
+        fx.suite
+            .state
+            .message_keys
+            .decrypt_to_string(&key_id, &ciphertext, &nonce)
+            .unwrap(),
+        text
+    );
+
+    let file_bytes = b"%PDF-1.4\nsynthetic discharge letter\n%%EOF\n";
+    let (status, upload) = multipart_request(
+        app,
+        &format!("/api/v1/messages/{}/upload", fx.concierge_id),
+        &fx.patient_auth,
+        file_bytes,
+        "discharge-letter.pdf",
         "application/pdf",
+        Some("Letter attached"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    assert_eq!(upload["attachment_is_e2e"], false);
+    let attachment_key = upload["attachment_key"].as_str().unwrap().to_string();
+    let stored_file = std::fs::read(chat_upload_path(&attachment_key)).unwrap();
+    assert_ne!(stored_file.as_slice(), file_bytes.as_slice());
+    assert!(
+        !stored_file
+            .windows(b"synthetic discharge letter".len())
+            .any(|window| window == b"synthetic discharge letter")
+    );
+
+    // Any session of either participant reads the history without a device
+    // key: the server decrypts for authorised participants.
+    for (auth, peer) in [
+        (&fx.concierge_auth, fx.patient_user_id),
+        (&fx.patient_auth, fx.concierge_id),
+    ] {
+        let (status, conversation) =
+            json_request(app, "GET", &format!("/api/v1/messages/{peer}"), auth, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let messages = conversation.as_array().unwrap();
+        assert!(
+            messages
+                .iter()
+                .any(|item| item["message"] == text && item["is_e2e"] == false)
+        );
+        assert!(messages.iter().any(|item| {
+            item["attachment_key"] == attachment_key.as_str()
+                && item["message"] == "Letter attached"
+                && item["attachment_is_e2e"] == false
+        }));
+        let (status, downloaded) = bytes_request(
+            app,
+            "GET",
+            &format!("/api/v1/messages/file/{attachment_key}"),
+            auth,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(downloaded, file_bytes);
+    }
+
+    // A third user can neither open the patient conversation nor fetch the
+    // file, and its own conversation with the concierge stays empty.
+    let (status, _) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/messages/{}", fx.patient_user_id),
+        &fx.outsider_auth,
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, conversation) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/messages/{}", fx.concierge_id),
+        &fx.outsider_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        conversation
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["message"] != text)
+    );
+    let (status, _) = bytes_request(
+        app,
+        "GET",
+        &format!("/api/v1/messages/file/{attachment_key}"),
+        &fx.outsider_auth,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn old_e2e_text_is_converted_once_by_a_participant() {
+    let Some(fx) = chat_conversion_fixture("chat-convert-text").await else {
+        return;
+    };
+    let app = &fx.suite.app;
+    let pool = &fx.suite.pool;
+    let text = "Synthetic: please bring the vaccination card.";
+
+    let (status, sent) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/messages/{}", fx.concierge_id),
+        &fx.patient_auth,
+        Some(json!({
+            "e2e_algorithm": "p256-hkdf-aes256gcm-v1",
+            "e2e_ciphertext": BASE64.encode(b"opaque-old-e2e-ciphertext"),
+            "e2e_nonce": BASE64.encode([3_u8; 12]),
+            "e2e_salt": BASE64.encode([4_u8; 16]),
+            "sender_key_fingerprint": fx.patient_key["fingerprint"],
+            "recipient_key_fingerprint": fx.concierge_key["fingerprint"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    assert_eq!(sent["is_e2e"], true);
+    let message_id = sent["id"].as_str().unwrap().to_string();
+    let created_at = sent["created_at"].as_str().unwrap().to_string();
+    let convert_path = format!("/api/v1/messages/{message_id}/convert-from-e2e");
+
+    // Not a participant: indistinguishable from a missing message.
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &convert_path,
+        &fx.outsider_auth,
+        Some(json!({ "text": "forged" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/messages/{}/convert-from-e2e", Uuid::new_v4()),
+        &fx.patient_auth,
+        Some(json!({ "text": text })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &convert_path,
+        &fx.concierge_auth,
+        Some(json!({ "text": "   " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The recipient's browser still holds its key and hands the text back.
+    let (status, converted) = json_request(
+        app,
+        "POST",
+        &convert_path,
+        &fx.concierge_auth,
+        Some(json!({ "text": text })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    assert!(converted["converted_from_e2e_at"].is_string());
+
+    // Only once: the sender's later attempt finds no end-to-end envelope.
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &convert_path,
+        &fx.patient_auth,
+        Some(json!({ "text": "a different text" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    for (auth, peer) in [
+        (&fx.patient_auth, fx.concierge_id),
+        (&fx.concierge_auth, fx.patient_user_id),
+    ] {
+        let (status, conversation) =
+            json_request(app, "GET", &format!("/api/v1/messages/{peer}"), auth, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let item = conversation
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == message_id.as_str())
+            .expect("converted message");
+        assert_eq!(item["is_e2e"], false);
+        assert_eq!(item["message"], text);
+        assert!(item["e2e_ciphertext"].is_null());
+        assert!(item["converted_from_e2e_at"].is_string());
+        assert_eq!(
+            chrono::DateTime::parse_from_rfc3339(item["created_at"].as_str().unwrap()).unwrap(),
+            chrono::DateTime::parse_from_rfc3339(&created_at).unwrap(),
+            "conversion keeps the original timestamp"
+        );
+    }
+
+    let row = sqlx::query(
+        r#"SELECT message, message_ciphertext, message_nonce, encryption_key_id,
+                  e2e_algorithm, e2e_ciphertext, e2e_nonce, e2e_salt,
+                  sender_key_fingerprint, recipient_key_fingerprint,
+                  converted_from_e2e_at, converted_by
+             FROM direct_messages
+            WHERE id = $1"#,
+    )
+    .bind(Uuid::parse_str(&message_id).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    for column in [
+        "e2e_algorithm",
+        "sender_key_fingerprint",
+        "recipient_key_fingerprint",
+    ] {
+        assert!(
+            row.try_get::<Option<String>, _>(column).unwrap().is_none(),
+            "{column} is cleared"
+        );
+    }
+    for column in ["e2e_ciphertext", "e2e_nonce", "e2e_salt"] {
+        assert!(
+            row.try_get::<Option<Vec<u8>>, _>(column).unwrap().is_none(),
+            "{column} is cleared"
+        );
+    }
+    assert!(
+        row.try_get::<Option<String>, _>("message")
+            .unwrap()
+            .is_none()
+    );
+    let ciphertext = row
+        .try_get::<Option<Vec<u8>>, _>("message_ciphertext")
+        .unwrap()
+        .unwrap();
+    assert!(
+        !ciphertext
+            .windows(text.len())
+            .any(|window| window == text.as_bytes())
+    );
+    assert_eq!(
+        fx.suite
+            .state
+            .message_keys
+            .decrypt_to_string(
+                &row.try_get::<Option<String>, _>("encryption_key_id")
+                    .unwrap()
+                    .unwrap(),
+                &ciphertext,
+                &row.try_get::<Option<Vec<u8>>, _>("message_nonce")
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap(),
+        text
+    );
+    assert_eq!(
+        row.try_get::<Option<Uuid>, _>("converted_by").unwrap(),
+        Some(fx.concierge_id)
+    );
+    assert!(
+        row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("converted_from_e2e_at")
+            .unwrap()
+            .is_some()
+    );
+
+    let audits = audit_contexts(
+        pool,
+        fx.concierge_id,
+        fx.patient_user_id,
+        "chat_message_converted_from_e2e",
+    )
+    .await;
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0]["message_id"], message_id.as_str());
+    assert_eq!(audits[0]["converted_by_sender"], false);
+    assert!(
+        !audits[0].to_string().contains("vaccination"),
+        "the audit row must not contain the message text"
+    );
+
+    // A message that was never end-to-end encrypted cannot be "converted".
+    let (status, plain) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/messages/{}", fx.concierge_id),
+        &fx.patient_auth,
+        Some(json!({ "message": "Synthetic plain message" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = json_request(
+        app,
+        "POST",
+        &format!(
+            "/api/v1/messages/{}/convert-from-e2e",
+            plain["id"].as_str().unwrap()
+        ),
+        &fx.patient_auth,
+        Some(json!({ "text": "Overwritten" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn old_e2e_attachment_is_converted_after_its_caption() {
+    let Some(fx) = chat_conversion_fixture("chat-convert-file").await else {
+        return;
+    };
+    let app = &fx.suite.app;
+    let pool = &fx.suite.pool;
+    let plaintext = b"Synthetic lab value: haemoglobin 13.5 g/dl".to_vec();
+    let opaque_ciphertext = vec![0x5a_u8; plaintext.len() + 16];
+    let plaintext_size = plaintext.len().to_string();
+    let attachment_nonce = BASE64.encode([5_u8; 12]);
+    let attachment_salt = BASE64.encode([6_u8; 16]);
+    let caption_ciphertext = BASE64.encode(b"opaque-old-caption");
+    let caption_nonce = BASE64.encode([7_u8; 12]);
+    let caption_salt = BASE64.encode([8_u8; 16]);
+    let sender_fingerprint = fx.patient_key["fingerprint"].as_str().unwrap().to_string();
+    let recipient_fingerprint = fx.concierge_key["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let (status, uploaded) = multipart_request_with_extra_fields(
+        app,
+        &format!("/api/v1/messages/{}/upload", fx.concierge_id),
+        &fx.patient_auth,
+        MultipartMessageUpload {
+            file_content: &opaque_ciphertext,
+            filename: "lab-result.txt",
+            mime: "application/octet-stream",
+            message: None,
+            extra_fields: &[
+                ("attachment_plaintext_size", plaintext_size.as_str()),
+                ("attachment_e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+                ("attachment_e2e_nonce", attachment_nonce.as_str()),
+                ("attachment_e2e_salt", attachment_salt.as_str()),
+                ("e2e_algorithm", "p256-hkdf-aes256gcm-v1"),
+                ("e2e_ciphertext", caption_ciphertext.as_str()),
+                ("e2e_nonce", caption_nonce.as_str()),
+                ("e2e_salt", caption_salt.as_str()),
+                ("sender_key_fingerprint", sender_fingerprint.as_str()),
+                ("recipient_key_fingerprint", recipient_fingerprint.as_str()),
+            ],
+        },
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{uploaded}");
+    assert_eq!(uploaded["attachment_is_e2e"], true);
+    let message_id = uploaded["id"].as_str().unwrap().to_string();
+    let old_key = uploaded["attachment_key"].as_str().unwrap().to_string();
+    let attachment_path = format!("/api/v1/messages/{message_id}/convert-attachment-from-e2e");
+    let upload_plaintext = |auth: &str, bytes: &[u8]| {
+        let auth = auth.to_string();
+        let bytes = bytes.to_vec();
+        let path = attachment_path.clone();
+        async move {
+            multipart_request_with_extra_fields(
+                app,
+                &path,
+                &auth,
+                MultipartMessageUpload {
+                    file_content: &bytes,
+                    filename: "lab-result.txt",
+                    mime: "text/plain",
+                    message: None,
+                    extra_fields: &[],
+                },
+            )
+            .await
+        }
+    };
+
+    // The caption is still end-to-end encrypted, so it has to come first.
+    let (status, body) = upload_plaintext(fx.concierge_auth.as_str(), plaintext.as_slice()).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/messages/{message_id}/convert-from-e2e"),
+        &fx.patient_auth,
+        Some(json!({ "caption": "Synthetic caption: lab results" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["attachment_is_e2e"], true);
+    let fingerprints = sqlx::query(
+        "SELECT sender_key_fingerprint, recipient_key_fingerprint FROM direct_messages WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&message_id).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        fingerprints
+            .try_get::<Option<String>, _>("sender_key_fingerprint")
+            .unwrap()
+            .as_deref(),
+        Some(sender_fingerprint.as_str()),
+        "the still encrypted attachment keeps its key fingerprints"
+    );
+
+    let (status, _) = upload_plaintext(fx.outsider_auth.as_str(), plaintext.as_slice()).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, body) = upload_plaintext(fx.concierge_auth.as_str(), &plaintext[1..]).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    let (status, converted) =
+        upload_plaintext(fx.concierge_auth.as_str(), plaintext.as_slice()).await;
+    assert_eq!(status, StatusCode::OK, "{converted}");
+    let new_key = converted["attachment_key"].as_str().unwrap().to_string();
+    assert_ne!(new_key, old_key);
+    assert!(
+        !chat_upload_path(&old_key).exists(),
+        "the old end-to-end ciphertext file is removed"
+    );
+    let stored_file = std::fs::read(chat_upload_path(&new_key)).unwrap();
+    assert!(
+        !stored_file
+            .windows(b"haemoglobin".len())
+            .any(|window| window == b"haemoglobin")
+    );
+
+    let (status, again) = upload_plaintext(fx.patient_auth.as_str(), plaintext.as_slice()).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{again}");
+
+    for (auth, peer) in [
+        (&fx.patient_auth, fx.concierge_id),
+        (&fx.concierge_auth, fx.patient_user_id),
+    ] {
+        let (status, conversation) =
+            json_request(app, "GET", &format!("/api/v1/messages/{peer}"), auth, None).await;
+        assert_eq!(status, StatusCode::OK);
+        let item = conversation
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == message_id.as_str())
+            .expect("converted attachment message");
+        assert_eq!(item["attachment_is_e2e"], false);
+        assert_eq!(item["is_e2e"], false);
+        assert_eq!(item["attachment_key"], new_key.as_str());
+        assert_eq!(item["message"], "Synthetic caption: lab results");
+        assert!(item["attachment_converted_from_e2e_at"].is_string());
+        assert!(item["sender_key_fingerprint"].is_null());
+
+        let (status, downloaded) = bytes_request(
+            app,
+            "GET",
+            &format!("/api/v1/messages/file/{new_key}"),
+            auth,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(downloaded, plaintext);
+    }
+
+    let row = sqlx::query(
+        r#"SELECT attachment_converted_by, attachment_e2e_algorithm, attachment_nonce
+             FROM direct_messages
+            WHERE id = $1"#,
+    )
+    .bind(Uuid::parse_str(&message_id).unwrap())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row.try_get::<Option<Uuid>, _>("attachment_converted_by")
+            .unwrap(),
+        Some(fx.concierge_id)
+    );
+    assert!(
+        row.try_get::<Option<String>, _>("attachment_e2e_algorithm")
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        row.try_get::<Option<Vec<u8>>, _>("attachment_nonce")
+            .unwrap()
+            .is_some()
+    );
+
+    let audits = audit_contexts(
+        pool,
+        fx.concierge_id,
+        fx.patient_user_id,
+        "chat_attachment_converted_from_e2e",
+    )
+    .await;
+    assert_eq!(audits.len(), 1);
+    assert_eq!(audits[0]["message_id"], message_id.as_str());
+    assert!(!audits[0].to_string().contains("haemoglobin"));
+    let caption_audits = audit_contexts(
+        pool,
+        fx.patient_user_id,
+        fx.concierge_id,
+        "chat_message_converted_from_e2e",
+    )
+    .await;
+    assert_eq!(caption_audits.len(), 1);
+    assert_eq!(caption_audits[0]["converted_by_sender"], true);
+    assert_eq!(caption_audits[0]["attachment_still_e2e"], true);
 }
 
 #[tokio::test]

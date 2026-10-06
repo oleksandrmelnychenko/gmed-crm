@@ -62,32 +62,12 @@ async function waitForConversationContent(
     .toBeVisible({ timeout: 35_000 });
 }
 
-async function refreshOwnChatKey(page: import("@playwright/test").Page) {
-  const result = await page.evaluate(async () => {
-    const token = window.localStorage.getItem("gmed_access_token");
-    const response = await fetch("/api/v1/messages/e2e-key", {
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-
-    return {
-      ok: response.ok,
-      status: response.status,
-      body: await response.text(),
-    };
-  });
-
-  expect(result.ok, "failed to refresh active chat key").toBeTruthy();
-}
-
-async function sendEncryptedTextWithRetry(
+async function sendTextWithRetry(
   page: import("@playwright/test").Page,
   peerUserId: string,
   message: string,
 ) {
   async function attemptSend(attempt: number): Promise<void> {
-    await refreshOwnChatKey(page);
     await page
       .getByPlaceholder(/Nachricht eingeben|Введите сообщение/i)
       .fill(message);
@@ -111,7 +91,7 @@ async function sendEncryptedTextWithRetry(
     const lastBody = await response.text();
     if (attempt >= 2) {
       throw new Error(
-        `Encrypted text send failed after retries: ${lastStatus} ${lastBody}`,
+        `Text send failed after retries: ${lastStatus} ${lastBody}`,
       );
     }
     await page.waitForTimeout(1_000);
@@ -157,23 +137,19 @@ test.describe("secure chat live workflows", () => {
         ),
       ]);
 
-      // Sign-in now registers the device on every authenticated screen. The
-      // POST may already have completed before opening Chat; verify the active
-      // key state instead of requiring another registration request.
+      // The chat is encrypted on the server (owner decision 2026-10-07): no
+      // device key is created or registered, so chatting starts right away.
+      const keyRegistrations: string[] = [];
+      for (const page of [patientPage, conciergePage]) {
+        page.on("request", (request) => {
+          if (request.method() === "POST" && request.url().includes("/api/v1/messages/e2e-key")) {
+            keyRegistrations.push(request.url());
+          }
+        });
+      }
       await Promise.all([patientPage, conciergePage].map(async (page) => {
         await page.goto("/chat");
         await expect(page.getByRole("heading", { name: /^Chat$/i })).toBeVisible();
-        await expect.poll(async () => page.evaluate(async () => {
-          const token = window.localStorage.getItem("gmed_access_token");
-          const response = await fetch("/api/v1/messages/e2e-key", {
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
-          });
-          if (!response.ok) return false;
-          const key = await response.json();
-          return key?.is_active === true &&
-            key.algorithm === "p256-hkdf-aes256gcm-v1" &&
-            typeof key.fingerprint === "string" && key.fingerprint.length > 0;
-        }), { timeout: 15_000 }).toBe(true);
       }));
 
       await patientPage
@@ -198,11 +174,11 @@ test.describe("secure chat live workflows", () => {
         .getByRole("option", { name: new RegExp(scenario.credentials.patient.name, "i") })
         .click();
 
-      const encryptedChatLabel = /End-to-end encrypted chat|Ende-zu-Ende verschlüsselt/i;
+      const encryptedChatLabel = /Serverseitig verschlüsselt|Шифрование на сервере/i;
       await expect(patientPage.getByText(encryptedChatLabel)).toBeVisible();
       await expect(conciergePage.getByText(encryptedChatLabel)).toBeVisible();
 
-      await sendEncryptedTextWithRetry(
+      await sendTextWithRetry(
         patientPage,
         scenario.credentials.concierge.user_id,
         "Patient secure update for the care team",
@@ -216,7 +192,6 @@ test.describe("secure chat live workflows", () => {
         name: scenario.credentials.patient.name,
         role: "patient",
       });
-      await refreshOwnChatKey(conciergePage);
       await waitForConversationContent(
         conciergePage,
         {
@@ -234,7 +209,6 @@ test.describe("secure chat live workflows", () => {
           mimeType: "application/pdf",
           buffer: MINIMAL_PDF,
         });
-      await refreshOwnChatKey(patientPage);
       await patientPage
         .getByPlaceholder(/Nachricht eingeben|Введите сообщение/i)
         .fill("Please see the attached secure note.");
@@ -331,6 +305,7 @@ test.describe("secure chat live workflows", () => {
       await expect(
         conciergePage.getByText("Patient secure update for the care team"),
       ).toHaveCount(0);
+      expect(keyRegistrations).toEqual([]);
     } finally {
       await patientContext.close();
       await conciergeContext.close();

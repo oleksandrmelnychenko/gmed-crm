@@ -147,25 +147,17 @@ export interface AdminSystemTranslations {
   compliance_privacy_source_compliance_workspace: string;
 
   chat_access_denied: string;
-  chat_secure_setup_failed_device: string;
-  chat_secure_setup_pending: string;
-  chat_secure_key_failed: string;
   chat_secure_attachment_unavailable: string;
-  chat_secure_attachment_peer_key_failed: string;
   chat_secure_attachment_decrypt_failed: string;
-  chat_secure_attachment_send_failed: string;
   chat_attachment_send_failed: string;
-  chat_secure_message_send_failed: string;
-  chat_secure_passphrase_required: string;
-  chat_secure_backup_downloaded: string;
-  chat_secure_keys_imported: string;
-  chat_secure_operation_failed: string;
-  chat_secure_encrypted_label: string;
-  chat_secure_attachment_label: string;
+  chat_message_send_failed: string;
+  chat_server_encryption_label: string;
+  chat_server_encryption_hint: string;
+  chat_attachment_add: string;
+  chat_attachments_queue: string;
   chat_seen: string;
   chat_no_users_found: string;
   chat_load_failed: string;
-  chat_attachment_pending: string;
   chat_attachment_too_large: string;
   chat_attachment_type_blocked: string;
   chat_attachment_name_invalid: string;
@@ -177,20 +169,10 @@ export interface AdminSystemTranslations {
   chat_attachment_preview_unavailable: string;
   chat_attachment_preview_truncated: string;
   chat_attachment_load_failed: string;
-  chat_security_settings: string;
-  chat_security_settings_description: string;
-  chat_security_device_bound_description: string;
-  chat_security_this_device: string;
-  chat_security_peer_device: string;
-  chat_secure_identity_changed: string;
-  chat_secure_identity_unverified: string;
-  chat_secure_trust_new_identity: string;
   chat_message_sent: string;
   chat_scroll_latest: string;
   chat_empty_conversation: string;
-  chat_secure_waiting: string;
   chat_connection_polling: string;
-  chat_security_retry: string;
   chat_message_history: string;
   chat_search_messages: string;
   chat_search_loaded_history: string;
@@ -203,9 +185,6 @@ export interface AdminSystemTranslations {
   chat_secure_attachment_unscanned: string;
   chat_composer_keyboard_hint: string;
   chat_start_conversation: string;
-  chat_secure_server_channel_label: string;
-  chat_security_e2e_description: string;
-  chat_security_server_description: string;
   chat_message_sending: string;
   chat_message_failed: string;
   chat_message_retry: string;
@@ -220,20 +199,6 @@ export interface AdminSystemTranslations {
   chat_message_timer_day: string;
   chat_message_timer_week: string;
   chat_message_expires: string;
-  chat_export_keys: string;
-  chat_import_keys: string;
-  chat_export_secure_keys_title: string;
-  chat_import_secure_keys_title: string;
-  chat_export_secure_keys_description: string;
-  chat_import_secure_keys_description: string;
-  chat_backup_selected: string;
-  chat_backup_choose_first: string;
-  chat_key_passphrase: string;
-  chat_key_passphrase_placeholder: string;
-  chat_close: string;
-  chat_working: string;
-  chat_export_backup: string;
-  chat_import_backup: string;
 
   sops_access_denied: string;
   sops_loading_workspace: string;
@@ -601,29 +566,20 @@ export const adminSystemRu: AdminSystemTranslations = {
   compliance_privacy_source_compliance_workspace: "Рабочая область compliance",
 
   chat_access_denied: "Текущая роль не имеет доступа к чату.",
-  chat_secure_setup_failed_device: "Не удалось настроить защищенный чат на этом устройстве.",
-  chat_secure_setup_pending:
-    "Защищенный чат еще настраивается для этой беседы. Текстовые сообщения приостановлены, пока собеседник не откроет чат.",
-  chat_secure_key_failed: "Не удалось загрузить ключ защищенного чата.",
   chat_secure_attachment_unavailable:
-    "Защищенное вложение недоступно на этом устройстве.",
-  chat_secure_attachment_peer_key_failed:
-    "Не удалось загрузить ключ собеседника для защищенного вложения.",
-  chat_secure_attachment_decrypt_failed: "Не удалось расшифровать защищенное вложение.",
-  chat_secure_attachment_send_failed: "Не удалось отправить защищенное вложение.",
-  chat_attachment_send_failed: "Не удалось загрузить вложение.",
-  chat_secure_message_send_failed: "Не удалось отправить зашифрованное сообщение.",
-  chat_secure_passphrase_required: "Введите парольную фразу.",
-  chat_secure_backup_downloaded: "Резервная копия ключей защищенного чата скачана.",
-  chat_secure_keys_imported: "Импортировано ключей защищенного чата: {count}.",
-  chat_secure_operation_failed: "Операция с защищенными ключами не выполнена.",
-  chat_secure_encrypted_label: "Сквозное шифрование",
-  chat_secure_attachment_label: "Защищенное вложение",
+    "Старое вложение со сквозным шифрованием: доступно только на устройстве, где оно было открыто.",
+  chat_secure_attachment_decrypt_failed:
+    "Не удалось расшифровать старое вложение со сквозным шифрованием.",
+  chat_attachment_send_failed: "Не удалось отправить вложение.",
+  chat_message_send_failed: "Не удалось отправить сообщение.",
+  chat_server_encryption_label: "Шифрование на сервере",
+  chat_server_encryption_hint:
+    "Сообщения и вложения хранятся на сервере GMED в зашифрованном виде и доступны участникам беседы на любом устройстве.",
+  chat_attachment_add: "Прикрепить файл",
+  chat_attachments_queue: "Файлы к отправке",
   chat_seen: "Прочитано",
   chat_no_users_found: "Пользователи не найдены.",
   chat_load_failed: "Не удалось загрузить чат.",
-  chat_attachment_pending:
-    "Вложения станут доступны, когда собеседник активирует защищенный чат.",
   chat_attachment_too_large: "Файл превышает допустимый размер 20 МБ.",
   chat_attachment_name_invalid: "Сократите имя файла до 255 байт и уберите недопустимые символы.",
   chat_attachments_limit: "Можно прикрепить до 10 файлов за раз, не более 20 МБ каждый.",
@@ -634,25 +590,11 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_attachment_preview_unavailable: "Предпросмотр недоступен. Файл можно скачать.",
   chat_attachment_preview_truncated: "Показано начало файла. Скачайте его для просмотра целиком.",
   chat_attachment_load_failed: "Не удалось загрузить вложение. Попробуйте ещё раз.",
-  chat_attachment_type_blocked:
-    "Этот тип файла нельзя безопасно отправить в зашифрованном чате.",
-  chat_security_settings: "Безопасность чата",
-  chat_security_settings_description:
-    "Статус защиты переписки и резервные копии ключей этого устройства.",
-  chat_security_device_bound_description:
-    "Закрытый ключ неэкспортируемый, привязан к этой учетной записи и хранится в защищенном хранилище браузера.",
-  chat_security_this_device: "Контрольный номер этого устройства",
-  chat_security_peer_device: "Контрольный номер собеседника",
-  chat_secure_identity_changed:
-    "Ключ собеседника изменился. Отправка приостановлена до проверки контрольного номера.",
-  chat_secure_identity_unverified: "Личность собеседника не подтверждена",
-  chat_secure_trust_new_identity: "Доверять новому ключу",
+  chat_attachment_type_blocked: "Этот тип файла нельзя отправить в чате.",
   chat_message_sent: "Отправлено",
   chat_scroll_latest: "К последним сообщениям",
   chat_empty_conversation: "Здесь пока нет сообщений. Напишите первое сообщение.",
-  chat_secure_waiting: "Собеседник ещё не активировал защищённый чат. Он станет доступен после входа собеседника в систему. Проверяем автоматически.",
   chat_connection_polling: "Обновляем сообщения каждые 5 секунд, пока восстанавливается соединение.",
-  chat_security_retry: "Проверить соединение",
   chat_message_history: "История сообщений",
   chat_search_messages: "Поиск в сообщениях",
   chat_search_loaded_history: "Поиск выполняется локально в загруженной истории.",
@@ -663,14 +605,9 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_connection_reconnecting: "Переподключение…",
   chat_connection_offline: "Нет соединения",
   chat_secure_attachment_unscanned:
-    "Содержимое зашифровано на устройстве и не проверялось антивирусом.",
+    "Старое вложение со сквозным шифрованием: не проверялось антивирусом.",
   chat_composer_keyboard_hint: "Enter — отправить · Shift+Enter — новая строка",
   chat_start_conversation: "Начать разговор",
-  chat_secure_server_channel_label: "Защищенный канал",
-  chat_security_e2e_description:
-    "Сообщения и вложения защищены сквозным шифрованием между устройствами.",
-  chat_security_server_description:
-    "Текст защищен серверным шифрованием. Сквозное шифрование и вложения включатся после активации чата собеседником.",
   chat_message_sending: "Отправляется…",
   chat_message_failed: "Не отправлено",
   chat_message_retry: "Повторить",
@@ -686,22 +623,6 @@ export const adminSystemRu: AdminSystemTranslations = {
   chat_message_timer_day: "24 часа",
   chat_message_timer_week: "7 дней",
   chat_message_expires: "Исчезнет {time}",
-  chat_export_keys: "Экспорт ключей",
-  chat_import_keys: "Импорт ключей",
-  chat_export_secure_keys_title: "Экспорт ключей защищенного чата",
-  chat_import_secure_keys_title: "Импорт ключей защищенного чата",
-  chat_export_secure_keys_description:
-    "Создайте зашифрованную резервную копию, чтобы восстановить защищенный чат на другом устройстве.",
-  chat_import_secure_keys_description:
-    "Восстановите зашифрованную резервную копию ключей, чтобы открыть старые защищенные чаты на этом устройстве.",
-  chat_backup_selected: "Выбрана резервная копия: {name}",
-  chat_backup_choose_first: "Сначала выберите файл резервной копии защищенного чата.",
-  chat_key_passphrase: "Парольная фраза",
-  chat_key_passphrase_placeholder: "Введите парольную фразу",
-  chat_close: "Закрыть",
-  chat_working: "Выполняется...",
-  chat_export_backup: "Экспортировать копию",
-  chat_import_backup: "Импортировать копию",
 
   sops_access_denied: "Этот раздел доступен только внутренним ролям.",
   sops_loading_workspace: "Загрузка рабочей области SOP...",
@@ -1082,30 +1003,20 @@ export const adminSystemDe: AdminSystemTranslations = {
   compliance_privacy_source_compliance_workspace: "Compliance-Arbeitsbereich",
 
   chat_access_denied: "Ihre aktuelle Rolle hat keinen Zugriff auf den Chat.",
-  chat_secure_setup_failed_device:
-    "Der sichere Chat konnte auf diesem Gerät nicht eingerichtet werden.",
-  chat_secure_setup_pending:
-    "Die sichere Einrichtung ist für diese Unterhaltung noch ausstehend. Textnachrichten bleiben pausiert, bis die Gegenseite den Chat einmal öffnet.",
-  chat_secure_key_failed: "Der sichere Chat-Schlüssel konnte nicht geladen werden.",
   chat_secure_attachment_unavailable:
-    "Dieser sichere Anhang ist auf diesem Gerät nicht verfügbar.",
-  chat_secure_attachment_peer_key_failed:
-    "Der Schlüssel der Gegenseite für diesen sicheren Anhang konnte nicht geladen werden.",
-  chat_secure_attachment_decrypt_failed: "Der sichere Anhang konnte nicht entschlüsselt werden.",
-  chat_secure_attachment_send_failed: "Der sichere Anhang konnte nicht gesendet werden.",
-  chat_attachment_send_failed: "Der Anhang konnte nicht hochgeladen werden.",
-  chat_secure_message_send_failed: "Die verschlüsselte Nachricht konnte nicht gesendet werden.",
-  chat_secure_passphrase_required: "Passphrase ist erforderlich.",
-  chat_secure_backup_downloaded: "Sicherung der sicheren Chat-Schlüssel heruntergeladen.",
-  chat_secure_keys_imported: "{count} sichere Chat-Schlüssel importiert.",
-  chat_secure_operation_failed: "Der sichere Schlüsselvorgang ist fehlgeschlagen.",
-  chat_secure_encrypted_label: "Ende-zu-Ende verschlüsselt",
-  chat_secure_attachment_label: "Sicherer Anhang",
+    "Älterer Anhang mit Ende-zu-Ende-Verschlüsselung: nur auf dem Gerät lesbar, auf dem er geöffnet wurde.",
+  chat_secure_attachment_decrypt_failed:
+    "Der ältere Ende-zu-Ende-verschlüsselte Anhang konnte nicht entschlüsselt werden.",
+  chat_attachment_send_failed: "Der Anhang konnte nicht gesendet werden.",
+  chat_message_send_failed: "Die Nachricht konnte nicht gesendet werden.",
+  chat_server_encryption_label: "Serverseitig verschlüsselt",
+  chat_server_encryption_hint:
+    "Nachrichten und Anhänge werden verschlüsselt auf dem GMED-Server gespeichert und sind für die Beteiligten auf jedem Gerät lesbar.",
+  chat_attachment_add: "Datei anhängen",
+  chat_attachments_queue: "Zu sendende Dateien",
   chat_seen: "Gesehen",
   chat_no_users_found: "Keine Benutzer gefunden.",
   chat_load_failed: "Der Chat konnte nicht geladen werden.",
-  chat_attachment_pending:
-    "Anhänge werden verfügbar, sobald die Gegenseite den sicheren Chat aktiviert.",
   chat_attachment_too_large: "Die Datei überschreitet die zulässigen 20 MB.",
   chat_attachment_name_invalid: "Kürzen Sie den Dateinamen auf 255 Bytes und entfernen Sie ungültige Zeichen.",
   chat_attachments_limit: "Bis zu 10 Dateien gleichzeitig, jeweils maximal 20 MB.",
@@ -1116,25 +1027,11 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_attachment_preview_unavailable: "Keine Vorschau verfügbar. Sie können die Datei herunterladen.",
   chat_attachment_preview_truncated: "Anfang der Datei. Laden Sie sie herunter, um den gesamten Inhalt zu sehen.",
   chat_attachment_load_failed: "Der Anhang konnte nicht geladen werden. Bitte versuchen Sie es erneut.",
-  chat_attachment_type_blocked:
-    "Dieser Dateityp kann im verschlüsselten Chat nicht sicher gesendet werden.",
-  chat_security_settings: "Chat-Sicherheit",
-  chat_security_settings_description:
-    "Schutzstatus der Unterhaltung und Schlüssel-Sicherungen dieses Geräts.",
-  chat_security_device_bound_description:
-    "Der private Schlüssel ist nicht exportierbar, an dieses Konto gebunden und im geschützten Browser-Speicher abgelegt.",
-  chat_security_this_device: "Prüfnummer dieses Geräts",
-  chat_security_peer_device: "Prüfnummer der Gegenseite",
-  chat_secure_identity_changed:
-    "Der Schlüssel der Gegenseite hat sich geändert. Der Versand bleibt bis zur Prüfung der Prüfnummer gesperrt.",
-  chat_secure_identity_unverified: "Identität der Gegenseite nicht bestätigt",
-  chat_secure_trust_new_identity: "Neuem Schlüssel vertrauen",
+  chat_attachment_type_blocked: "Dieser Dateityp kann im Chat nicht gesendet werden.",
   chat_message_sent: "Gesendet",
   chat_scroll_latest: "Zu den neuesten Nachrichten",
   chat_empty_conversation: "Noch keine Nachrichten. Schreiben Sie die erste Nachricht.",
-  chat_secure_waiting: "Die Gegenseite hat den sicheren Chat noch nicht aktiviert. Sobald sie sich anmeldet, prüfen wir die Einrichtung automatisch.",
   chat_connection_polling: "Nachrichten werden alle 5 Sekunden aktualisiert, während die Verbindung wiederhergestellt wird.",
-  chat_security_retry: "Verbindung prüfen",
   chat_message_history: "Nachrichtenverlauf",
   chat_search_messages: "Nachrichten durchsuchen",
   chat_search_loaded_history: "Die Suche bleibt lokal im geladenen Verlauf.",
@@ -1145,14 +1042,9 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_connection_reconnecting: "Verbindung wird wiederhergestellt…",
   chat_connection_offline: "Offline",
   chat_secure_attachment_unscanned:
-    "Der Inhalt wurde auf dem Gerät verschlüsselt und nicht auf Malware geprüft.",
+    "Älterer Anhang mit Ende-zu-Ende-Verschlüsselung: nicht auf Malware geprüft.",
   chat_composer_keyboard_hint: "Enter sendet · Shift+Enter fügt eine Zeile ein",
   chat_start_conversation: "Unterhaltung starten",
-  chat_secure_server_channel_label: "Geschützter Kanal",
-  chat_security_e2e_description:
-    "Nachrichten und Anhänge sind zwischen den Geräten Ende-zu-Ende verschlüsselt.",
-  chat_security_server_description:
-    "Text ist serverseitig verschlüsselt. Ende-zu-Ende-Verschlüsselung und Anhänge werden nach Aktivierung durch die Gegenseite verfügbar.",
   chat_message_sending: "Wird gesendet…",
   chat_message_failed: "Nicht gesendet",
   chat_message_retry: "Erneut versuchen",
@@ -1168,22 +1060,6 @@ export const adminSystemDe: AdminSystemTranslations = {
   chat_message_timer_day: "24 Stunden",
   chat_message_timer_week: "7 Tage",
   chat_message_expires: "Verschwindet {time}",
-  chat_export_keys: "Schlüssel exportieren",
-  chat_import_keys: "Schlüssel importieren",
-  chat_export_secure_keys_title: "Sichere Chat-Schlüssel exportieren",
-  chat_import_secure_keys_title: "Sichere Chat-Schlüssel importieren",
-  chat_export_secure_keys_description:
-    "Erstellen Sie eine verschlüsselte Sicherung, um sichere Chats auf einem anderen Gerät wiederherzustellen.",
-  chat_import_secure_keys_description:
-    "Stellen Sie eine verschlüsselte Schlüssel-Sicherung wieder her, um ältere sichere Chats auf diesem Gerät zu öffnen.",
-  chat_backup_selected: "Ausgewählte Sicherung: {name}",
-  chat_backup_choose_first: "Wählen Sie zuerst eine Sicherungsdatei für den sicheren Chat aus.",
-  chat_key_passphrase: "Passphrase",
-  chat_key_passphrase_placeholder: "Passphrase eingeben",
-  chat_close: "Schließen",
-  chat_working: "Wird ausgeführt...",
-  chat_export_backup: "Sicherung exportieren",
-  chat_import_backup: "Sicherung importieren",
 
   sops_access_denied: "Dieser Bereich steht nur internen Rollen zur Verfügung.",
   sops_loading_workspace: "SOP-Arbeitsbereich wird geladen...",

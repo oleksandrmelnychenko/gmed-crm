@@ -56,8 +56,16 @@ pub fn public_router() -> Router<AppState> {
 pub fn router() -> Router<AppState> {
     let upload_routes = Router::new()
         .route("/messages/{user_id}/upload", post(upload_file))
+        .route(
+            "/messages/{message_id}/convert-attachment-from-e2e",
+            post(convert_attachment_from_e2e),
+        )
         .layer(DefaultBodyLimit::max(MAX_FILE_SIZE + 1024 * 1024));
 
+    // End-to-end encryption was given up by the owner's decision of
+    // 2026-10-07: new messages are encrypted at rest with the server's message
+    // keys. The key routes stay so browsers can still decrypt old end-to-end
+    // history and hand it back through the conversion routes.
     Router::new()
         .merge(upload_routes)
         .route(
@@ -65,6 +73,10 @@ pub fn router() -> Router<AppState> {
             get(get_my_e2e_key).post(upsert_my_e2e_key),
         )
         .route("/messages/e2e-key/{user_id}", get(get_peer_e2e_key))
+        .route(
+            "/messages/{message_id}/convert-from-e2e",
+            post(convert_message_from_e2e),
+        )
         .route("/messages/allowed-peers", get(list_allowed_peers))
         .route("/messages/conversations", get(list_conversations))
         .route("/messages/read-all", post(mark_all_conversations_read))
@@ -1206,7 +1218,8 @@ async fn get_conversation(
                   sender_key_fingerprint, recipient_key_fingerprint,
                   is_read, read_at, created_at, expires_at, client_message_id,
                   attachment_filename, attachment_mime, attachment_size, attachment_key,
-                  attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt
+                  attachment_e2e_algorithm, attachment_e2e_nonce, attachment_e2e_salt,
+                  converted_from_e2e_at, attachment_converted_from_e2e_at
            FROM direct_messages
            WHERE ((from_user = $1 AND to_user = $2) OR (from_user = $2 AND to_user = $1))
              AND deleted_at IS NULL
@@ -1292,6 +1305,8 @@ async fn get_conversation(
                         "attachment_e2e_algorithm": r.try_get::<Option<String>, _>("attachment_e2e_algorithm").unwrap_or_default(),
                         "attachment_e2e_nonce": attachment_e2e_nonce.map(|value| BASE64.encode(value)),
                         "attachment_e2e_salt": attachment_e2e_salt.map(|value| BASE64.encode(value)),
+                        "converted_from_e2e_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("converted_from_e2e_at").ok().flatten().map(|value| value.to_rfc3339()),
+                        "attachment_converted_from_e2e_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("attachment_converted_from_e2e_at").ok().flatten().map(|value| value.to_rfc3339()),
                     })
                 })
                 .collect();
@@ -1613,19 +1628,9 @@ async fn send_message(
             return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
         }
 
-        for participant_id in [auth.user_id, user_id] {
-            match load_message_key_row(&state, participant_id, None).await {
-                Ok(Some(_)) => {
-                    return err(
-                        StatusCode::CONFLICT,
-                        "End-to-end encryption is required for this conversation",
-                    );
-                }
-                Ok(None) => {}
-                Err(resp) => return resp,
-            }
-        }
-
+        // Plain messages are sealed with the server's message keys and are
+        // accepted in every conversation, including those of participants
+        // who once registered an end-to-end device key.
         let (ciphertext, nonce, key_id) = match state.message_keys.encrypt_str(&trimmed_message) {
             Ok(v) => v,
             Err(e) => {
@@ -1855,6 +1860,586 @@ async fn delete_message(
     );
 
     Json(json!({ "ok": true, "id": message_id })).into_response()
+}
+
+#[derive(Deserialize)]
+struct ConvertFromE2eReq {
+    text: Option<String>,
+    caption: Option<String>,
+}
+
+/// Resolves the peer of a message the caller sent or received and applies the
+/// same peer access rule as reading the conversation. Messages of other
+/// conversations and deleted, redacted or expired rows are reported as not
+/// found, so the conversion routes do not reveal whether a message id exists.
+async fn load_convertible_message_peer(
+    state: &AppState,
+    auth: &AuthUser,
+    message_id: Uuid,
+) -> Result<Uuid, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT from_user, to_user
+             FROM direct_messages
+            WHERE id = $1
+              AND (from_user = $2 OR to_user = $2)
+              AND deleted_at IS NULL
+              AND redacted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())"#,
+    )
+    .bind(message_id)
+    .bind(auth.user_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, message_id = %message_id, "load message for e2e conversion");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert message",
+        )
+    })?;
+    let Some(row) = row else {
+        return Err(err(StatusCode::NOT_FOUND, "Message not found"));
+    };
+    let from_user = row
+        .try_get::<Uuid, _>("from_user")
+        .unwrap_or_else(|_| Uuid::nil());
+    let to_user = row
+        .try_get::<Uuid, _>("to_user")
+        .unwrap_or_else(|_| Uuid::nil());
+    let peer_id = if from_user == auth.user_id {
+        to_user
+    } else {
+        from_user
+    };
+    ensure_message_peer_access(state, auth, peer_id).await?;
+    Ok(peer_id)
+}
+
+/// Rescues an old end-to-end message whose text a participant's browser can
+/// still decrypt: the text is stored server-encrypted like every new message,
+/// the end-to-end envelope is cleared and the original timestamps stay. Only
+/// the sender or the recipient may convert, and only while the message is
+/// still end-to-end encrypted. The audit row carries no text.
+async fn convert_message_from_e2e(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(message_id): Path<Uuid>,
+    Json(body): Json<ConvertFromE2eReq>,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
+    let text = match (body.text.as_deref(), body.caption.as_deref()) {
+        (Some(text), Some(caption)) if text != caption => {
+            return err(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Send the decrypted text either as text or as caption",
+            );
+        }
+        (Some(value), _) | (None, Some(value)) => value,
+        (None, None) => return err(StatusCode::UNPROCESSABLE_ENTITY, "Message is empty"),
+    };
+    if text.trim().is_empty() {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Message is empty");
+    }
+    if text.chars().count() > MAX_MESSAGE_CHARS {
+        return err(StatusCode::PAYLOAD_TOO_LARGE, "Message is too long");
+    }
+    let peer_id = match load_convertible_message_peer(&state, &auth, message_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+
+    let (ciphertext, nonce, key_id) = match state.message_keys.encrypt_str(text) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "encrypt converted e2e message");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to encrypt message",
+            );
+        }
+    };
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "begin e2e message conversion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert message",
+            );
+        }
+    };
+    // An end-to-end attachment of the same row keeps its key fingerprints so
+    // it stays decryptable until it is converted as well. A caption is always
+    // converted before its attachment, so the row never mixes a server-sealed
+    // attachment with the key id of a newer caption.
+    let row = match sqlx::query(
+        r#"UPDATE direct_messages
+              SET message_ciphertext = $2,
+                  message_nonce = $3,
+                  encryption_key_id = $4,
+                  e2e_algorithm = NULL,
+                  e2e_ciphertext = NULL,
+                  e2e_nonce = NULL,
+                  e2e_salt = NULL,
+                  sender_key_fingerprint = CASE
+                      WHEN attachment_e2e_algorithm IS NULL THEN NULL
+                      ELSE sender_key_fingerprint
+                  END,
+                  recipient_key_fingerprint = CASE
+                      WHEN attachment_e2e_algorithm IS NULL THEN NULL
+                      ELSE recipient_key_fingerprint
+                  END,
+                  converted_from_e2e_at = now(),
+                  converted_by = $5
+            WHERE id = $1
+              AND (from_user = $5 OR to_user = $5)
+              AND e2e_ciphertext IS NOT NULL
+              AND attachment_nonce IS NULL
+              AND deleted_at IS NULL
+              AND redacted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())
+          RETURNING from_user,
+                    converted_from_e2e_at,
+                    attachment_key IS NOT NULL AS has_attachment,
+                    attachment_e2e_algorithm IS NOT NULL AS attachment_is_e2e"#,
+    )
+    .bind(message_id)
+    .bind(&ciphertext)
+    .bind(&nonce)
+    .bind(&key_id)
+    .bind(auth.user_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return err(StatusCode::CONFLICT, "Message is not end-to-end encrypted");
+        }
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "convert e2e message");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert message",
+            );
+        }
+    };
+    let from_user = row
+        .try_get::<Uuid, _>("from_user")
+        .unwrap_or_else(|_| Uuid::nil());
+    let converted_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("converted_from_e2e_at")
+        .ok()
+        .flatten();
+    let has_attachment = row.try_get::<bool, _>("has_attachment").unwrap_or(false);
+    let attachment_is_e2e = row.try_get::<bool, _>("attachment_is_e2e").unwrap_or(false);
+
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "chat_message_converted_from_e2e",
+            Some(auth.user_id),
+            "message_peer",
+            Some(peer_id),
+            json!({
+                "message_id": message_id,
+                "converted_by_sender": from_user == auth.user_id,
+                "message_length": text.chars().count(),
+                "has_attachment": has_attachment,
+                "attachment_still_e2e": attachment_is_e2e,
+                "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, message_id = %message_id, "audit e2e message conversion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert message",
+        );
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, message_id = %message_id, "commit e2e message conversion");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert message",
+        );
+    }
+
+    publish_message_event(
+        &state,
+        auth.user_id,
+        peer_id,
+        "message_updated",
+        Some(message_id),
+    );
+    publish_message_event(
+        &state,
+        peer_id,
+        auth.user_id,
+        "message_updated",
+        Some(message_id),
+    );
+
+    Json(json!({
+        "ok": true,
+        "id": message_id,
+        "converted_from_e2e_at": converted_at.map(|value| value.to_rfc3339()),
+        "attachment_is_e2e": attachment_is_e2e,
+    }))
+    .into_response()
+}
+
+/// Rescues an old end-to-end attachment: a participant's browser that can
+/// still decrypt it uploads the decrypted bytes once. They must match the
+/// recorded plaintext size, pass the same content checks as a new upload and
+/// are then sealed with the server's message keys; the end-to-end envelope
+/// and the old ciphertext file are removed. An end-to-end caption must be
+/// converted first.
+async fn convert_attachment_from_e2e(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(message_id): Path<Uuid>,
+    mut multipart: Multipart,
+) -> axum::response::Response {
+    if let Err(resp) = ensure_chat_workspace_role(&auth) {
+        return resp;
+    }
+
+    let mut file_data: Option<Vec<u8>> = None;
+    while let Some(field) = match multipart.next_field().await {
+        Ok(field) => field,
+        Err(error) => return err(error.status(), "Failed to read multipart upload"),
+    } {
+        if field.name() != Some("file") {
+            continue;
+        }
+        match field.bytes().await {
+            Ok(bytes) => {
+                if bytes.len() > MAX_FILE_SIZE {
+                    return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 20MB)");
+                }
+                file_data = Some(bytes.to_vec());
+            }
+            Err(error) => {
+                tracing::error!(error = %error, message_id = %message_id, "read converted attachment");
+                return err(error.status(), "Failed to read file");
+            }
+        }
+    }
+    let data = match file_data {
+        Some(value) if !value.is_empty() => value,
+        _ => return err(StatusCode::BAD_REQUEST, "No file uploaded"),
+    };
+
+    let peer_id = match load_convertible_message_peer(&state, &auth, message_id).await {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
+    let current = match sqlx::query(
+        r#"SELECT attachment_key, attachment_filename, attachment_mime, attachment_size,
+                  attachment_e2e_algorithm, e2e_ciphertext,
+                  message_ciphertext, message_nonce, encryption_key_id
+             FROM direct_messages
+            WHERE id = $1"#,
+    )
+    .bind(message_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Message not found"),
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "load attachment for e2e conversion");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert attachment",
+            );
+        }
+    };
+    let attachment_is_e2e = current
+        .try_get::<Option<String>, _>("attachment_e2e_algorithm")
+        .ok()
+        .flatten()
+        .is_some();
+    let Some(old_key) = current
+        .try_get::<Option<String>, _>("attachment_key")
+        .ok()
+        .flatten()
+        .filter(|value| sanitize_filename(value) == *value)
+    else {
+        return err(
+            StatusCode::CONFLICT,
+            "Attachment is not end-to-end encrypted",
+        );
+    };
+    if !attachment_is_e2e {
+        return err(
+            StatusCode::CONFLICT,
+            "Attachment is not end-to-end encrypted",
+        );
+    }
+    if current
+        .try_get::<Option<Vec<u8>>, _>("e2e_ciphertext")
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        return err(
+            StatusCode::CONFLICT,
+            "Convert the end-to-end encrypted caption first",
+        );
+    }
+    let file_name = current
+        .try_get::<Option<String>, _>("attachment_filename")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "file".to_string());
+    let stored_mime = current
+        .try_get::<Option<String>, _>("attachment_mime")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "application/octet-stream".to_string());
+    let recorded_size = current
+        .try_get::<Option<i64>, _>("attachment_size")
+        .ok()
+        .flatten()
+        .unwrap_or_default();
+    if i64::try_from(data.len()).ok() != Some(recorded_size) {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Attachment size does not match the original",
+        );
+    }
+
+    let mut mime_type = stored_mime;
+    match validate_upload_magic_bytes(Some(&file_name), Some(mime_type.as_str()), &data) {
+        Ok(Some(validated_mime)) => mime_type = validated_mime,
+        Ok(None) => {}
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    }
+    match scan_upload_bytes(Some(&file_name), &data).await {
+        Ok(FileScanOutcome::Clean) => {}
+        Ok(FileScanOutcome::Skipped) => {
+            tracing::warn!(message_id = %message_id, "virus scanner unavailable; converted chat attachment scan skipped");
+        }
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    }
+
+    // The row keeps a single key id for caption and attachment. A caption
+    // sealed with an older key is re-sealed with the active one together with
+    // the attachment.
+    let active_key_id = state.message_keys.active_id().to_string();
+    let mut resealed_caption: Option<(Vec<u8>, Vec<u8>)> = None;
+    if let (Some(caption_ciphertext), Some(caption_nonce)) = (
+        current
+            .try_get::<Option<Vec<u8>>, _>("message_ciphertext")
+            .ok()
+            .flatten(),
+        current
+            .try_get::<Option<Vec<u8>>, _>("message_nonce")
+            .ok()
+            .flatten(),
+    ) {
+        let caption_key_id = current
+            .try_get::<Option<String>, _>("encryption_key_id")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| crate::crypto::LEGACY_KEY_ID.to_string());
+        if caption_key_id != active_key_id {
+            let resealed = state
+                .message_keys
+                .decrypt(&caption_key_id, &caption_ciphertext, &caption_nonce)
+                .and_then(|plaintext| state.message_keys.encrypt(&plaintext));
+            match resealed {
+                Ok((ciphertext, nonce, _)) => resealed_caption = Some((ciphertext, nonce)),
+                Err(error) => {
+                    tracing::error!(error = %error, message_id = %message_id, key_id = %caption_key_id, "reseal caption for attachment conversion");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to convert attachment",
+                    );
+                }
+            }
+        }
+    }
+
+    let (file_ciphertext, file_nonce, encryption_key_id) = match state.message_keys.encrypt(&data) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "encrypt converted attachment");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to encrypt attachment",
+            );
+        }
+    };
+    let dir = std::path::Path::new(UPLOAD_DIR);
+    if let Err(error) = tokio::fs::create_dir_all(dir).await {
+        tracing::error!(error = %error, "create upload dir for converted attachment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+    }
+    let new_key = format!("{}_{}", Uuid::new_v4(), sanitize_filename(&file_name));
+    let new_path = dir.join(&new_key);
+    if let Err(error) = tokio::fs::write(&new_path, &file_ciphertext).await {
+        tracing::error!(error = %error, message_id = %message_id, "write converted attachment");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Err(error) =
+            tokio::fs::set_permissions(&new_path, std::fs::Permissions::from_mode(0o600)).await
+        {
+            tracing::error!(error = %error, message_id = %message_id, "restrict converted attachment permissions");
+            let _ = tokio::fs::remove_file(&new_path).await;
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Storage error");
+        }
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "begin attachment conversion");
+            let _ = tokio::fs::remove_file(&new_path).await;
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert attachment",
+            );
+        }
+    };
+    let (caption_ciphertext, caption_nonce) = match resealed_caption {
+        Some((ciphertext, nonce)) => (Some(ciphertext), Some(nonce)),
+        None => (None, None),
+    };
+    let updated = sqlx::query(
+        r#"UPDATE direct_messages
+              SET attachment_key = $2,
+                  attachment_nonce = $3,
+                  attachment_mime = $4,
+                  encryption_key_id = $5,
+                  message_ciphertext = COALESCE($6, message_ciphertext),
+                  message_nonce = COALESCE($7, message_nonce),
+                  attachment_e2e_algorithm = NULL,
+                  attachment_e2e_nonce = NULL,
+                  attachment_e2e_salt = NULL,
+                  sender_key_fingerprint = NULL,
+                  recipient_key_fingerprint = NULL,
+                  attachment_converted_from_e2e_at = now(),
+                  attachment_converted_by = $8
+            WHERE id = $1
+              AND (from_user = $8 OR to_user = $8)
+              AND attachment_key = $9
+              AND attachment_e2e_algorithm IS NOT NULL
+              AND e2e_ciphertext IS NULL
+              AND deleted_at IS NULL
+              AND redacted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())
+          RETURNING from_user, attachment_converted_from_e2e_at"#,
+    )
+    .bind(message_id)
+    .bind(&new_key)
+    .bind(&file_nonce)
+    .bind(mime_type.as_str())
+    .bind(&encryption_key_id)
+    .bind(caption_ciphertext.as_deref())
+    .bind(caption_nonce.as_deref())
+    .bind(auth.user_id)
+    .bind(&old_key)
+    .fetch_optional(&mut *tx)
+    .await;
+    let row = match updated {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            let _ = tokio::fs::remove_file(&new_path).await;
+            return err(
+                StatusCode::CONFLICT,
+                "Attachment is not end-to-end encrypted",
+            );
+        }
+        Err(error) => {
+            tracing::error!(error = %error, message_id = %message_id, "convert e2e attachment");
+            let _ = tokio::fs::remove_file(&new_path).await;
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to convert attachment",
+            );
+        }
+    };
+    let from_user = row
+        .try_get::<Uuid, _>("from_user")
+        .unwrap_or_else(|_| Uuid::nil());
+    let converted_at = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("attachment_converted_from_e2e_at")
+        .ok()
+        .flatten();
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "chat_attachment_converted_from_e2e",
+            Some(auth.user_id),
+            "message_peer",
+            Some(peer_id),
+            json!({
+                "message_id": message_id,
+                "converted_by_sender": from_user == auth.user_id,
+                "attachment_mime": mime_type.as_str(),
+                "attachment_size": recorded_size,
+                "is_ceo_access": matches!(auth.role, Role::Ceo | Role::CeoAssistant),
+            }),
+        ),
+    )
+    .await
+    {
+        tracing::error!(error = %error, message_id = %message_id, "audit attachment conversion");
+        let _ = tokio::fs::remove_file(&new_path).await;
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert attachment",
+        );
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(error = %error, message_id = %message_id, "commit attachment conversion");
+        let _ = tokio::fs::remove_file(&new_path).await;
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to convert attachment",
+        );
+    }
+
+    if let Err(error) = tokio::fs::remove_file(dir.join(&old_key)).await
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        // The orphan sweep removes the unreferenced ciphertext later.
+        tracing::warn!(error = %error, message_id = %message_id, "remove converted e2e attachment ciphertext");
+    }
+    publish_message_event(
+        &state,
+        auth.user_id,
+        peer_id,
+        "message_updated",
+        Some(message_id),
+    );
+    publish_message_event(
+        &state,
+        peer_id,
+        auth.user_id,
+        "message_updated",
+        Some(message_id),
+    );
+
+    Json(json!({
+        "ok": true,
+        "id": message_id,
+        "attachment_key": new_key,
+        "attachment_mime": mime_type,
+        "attachment_converted_from_e2e_at": converted_at.map(|value| value.to_rfc3339()),
+    }))
+    .into_response()
 }
 
 /// Upload a file attachment (multipart/form-data).
@@ -2301,19 +2886,6 @@ async fn upload_file(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "E2E caption requires an E2E attachment envelope",
             );
-        }
-
-        for participant_id in [auth.user_id, user_id] {
-            match load_message_key_row(&state, participant_id, None).await {
-                Ok(Some(_)) => {
-                    return err(
-                        StatusCode::CONFLICT,
-                        "End-to-end encryption is required for this conversation",
-                    );
-                }
-                Ok(None) => {}
-                Err(resp) => return resp,
-            }
         }
 
         match validate_upload_magic_bytes(Some(&file_name), Some(mime_type.as_str()), &data) {

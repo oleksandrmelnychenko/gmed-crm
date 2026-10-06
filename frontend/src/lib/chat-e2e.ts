@@ -1,18 +1,36 @@
 import { apiFetch } from "@/lib/api";
-import { uiText } from "@/lib/i18n";
+import { uiText, type Lang } from "@/lib/i18n";
+
+/**
+ * Reader for the chat's former end-to-end encryption.
+ *
+ * End-to-end encryption was given up by the owner's decision of 2026-10-07:
+ * messages and attachments are now encrypted at rest with the server's keys
+ * and are readable on every device right after login. This module only opens
+ * old end-to-end messages in a browser that still holds the device key it
+ * created at the time, so the chat can hand them back to the server once
+ * (see `pages/chat/model/e2e-rescue.ts`). It never creates or registers a
+ * device key and cannot encrypt anything.
+ */
 
 export const CHAT_E2E_ALGORITHM = "p256-hkdf-aes256gcm-v1";
-export const CHAT_E2E_PREVIEW = uiText("chat_e2e_preview");
-export const CHAT_E2E_UNAVAILABLE = uiText("chat_e2e_unavailable");
+
+/** List preview of an old end-to-end message while it is being opened. */
+export function chatE2EPreviewText(lang?: Lang) {
+  return uiText("chat_e2e_preview", lang);
+}
+
+/** Placeholder for an old end-to-end message this browser cannot open. */
+export function chatE2EUnavailableText(lang?: Lang) {
+  return uiText("chat_e2e_unavailable", lang);
+}
 
 const LEGACY_STORAGE_KEY = "gmed_chat_e2e_keyring_v1";
-const PEER_PIN_STORAGE_PREFIX = "gmed_chat_e2e_peer_pins_v1:";
 const KEY_DATABASE_NAME = "gmed-chat-e2e-v2";
 const KEY_DATABASE_VERSION = 1;
 const KEY_STORE = "message-keys";
 const META_STORE = "key-meta";
 const HKDF_INFO = new TextEncoder().encode("gmed-chat-e2e-v1");
-const ensureServerMessageKeyPromises = new Map<string, Promise<MessageKeyRecord>>();
 
 export interface MessageKeyRecord {
   ownerUserId: string;
@@ -52,11 +70,6 @@ export interface E2EAttachmentEnvelope {
   recipient_key_fingerprint?: string | null;
 }
 
-type StoredKeyMeta = {
-  ownerUserId: string;
-  activeFingerprint: string | null;
-};
-
 type LegacyMessageKeyRecord = Omit<MessageKeyRecord, "ownerUserId" | "privateKey"> & {
   privateKeyJwk: JsonWebKey;
 };
@@ -67,7 +80,7 @@ type LegacyMessageKeyRing = {
 };
 
 const memoryKeys = new Map<string, MessageKeyRecord>();
-const memoryMeta = new Map<string, StoredKeyMeta>();
+const legacyImports = new Map<string, Promise<void>>();
 
 function keyId(ownerUserId: string, fingerprint: string) {
   return `${ownerUserId}:${fingerprint}`;
@@ -93,6 +106,7 @@ function transactionComplete(transaction: IDBTransaction) {
 async function openKeyDatabase(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return null;
   const request = indexedDB.open(KEY_DATABASE_NAME, KEY_DATABASE_VERSION);
+  // Same schema as the end-to-end chat used, so existing device keys open.
   request.onupgradeneeded = () => {
     const database = request.result;
     if (!database.objectStoreNames.contains(KEY_STORE)) {
@@ -119,35 +133,15 @@ async function getStoredKey(ownerUserId: string, fingerprint: string) {
   }
 }
 
-async function getStoredMeta(ownerUserId: string) {
+async function storeMessageKey(record: MessageKeyRecord) {
   const database = await openKeyDatabase();
-  if (!database) return memoryMeta.get(ownerUserId) ?? null;
-  try {
-    const transaction = database.transaction(META_STORE, "readonly");
-    const result = await requestResult(transaction.objectStore(META_STORE).get(ownerUserId));
-    return (result as StoredKeyMeta | undefined) ?? null;
-  } finally {
-    database.close();
-  }
-}
-
-async function storeMessageKey(record: MessageKeyRecord, makeActive: boolean) {
-  const database = await openKeyDatabase();
-  const meta: StoredKeyMeta = {
-    ownerUserId: record.ownerUserId,
-    activeFingerprint: makeActive
-      ? record.fingerprint
-      : (await getStoredMeta(record.ownerUserId))?.activeFingerprint ?? null,
-  };
   if (!database) {
     memoryKeys.set(keyId(record.ownerUserId, record.fingerprint), record);
-    memoryMeta.set(record.ownerUserId, meta);
     return;
   }
   try {
-    const transaction = database.transaction([KEY_STORE, META_STORE], "readwrite");
+    const transaction = database.transaction(KEY_STORE, "readwrite");
     transaction.objectStore(KEY_STORE).put(record);
-    transaction.objectStore(META_STORE).put(meta);
     await transactionComplete(transaction);
   } finally {
     database.close();
@@ -184,43 +178,11 @@ async function fingerprintPublicKey(publicKeyBytes: Uint8Array) {
   return bytesToHex(new Uint8Array(digest));
 }
 
-async function generateLocalMessageKey(ownerUserId: string): Promise<MessageKeyRecord> {
-  const keyPair = await crypto.subtle.generateKey(
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
-    true,
-    ["deriveBits"],
-  );
-  const publicKeyBytes = new Uint8Array(
-    await crypto.subtle.exportKey("spki", keyPair.publicKey),
-  );
-  const privateKeyJwk = (await crypto.subtle.exportKey(
-    "jwk",
-    keyPair.privateKey,
-  )) as JsonWebKey;
-  const privateKey = await importPrivateKey(privateKeyJwk);
-  const fingerprint = await fingerprintPublicKey(publicKeyBytes);
-
-  return {
-    ownerUserId,
-    algorithm: CHAT_E2E_ALGORITHM,
-    fingerprint,
-    publicKey: bytesToBase64(publicKeyBytes),
-    privateKey,
-    createdAt: new Date().toISOString(),
-  };
-}
-
 async function importPrivateKey(privateKeyJwk: JsonWebKey) {
   return crypto.subtle.importKey(
     "jwk",
     privateKeyJwk,
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
+    { name: "ECDH", namedCurve: "P-256" },
     false,
     ["deriveBits"],
   );
@@ -230,48 +192,32 @@ async function importPublicKey(publicKeyBase64: string) {
   return crypto.subtle.importKey(
     "spki",
     base64ToBytes(publicKeyBase64),
-    {
-      name: "ECDH",
-      namedCurve: "P-256",
-    },
+    { name: "ECDH", namedCurve: "P-256" },
     false,
     [],
   );
 }
 
-async function deriveMessageKey(
+async function deriveDecryptionKey(
   privateKey: CryptoKey,
   peerPublicKeyBase64: string,
   salt: Uint8Array,
-  usage: KeyUsage,
 ) {
   const peerPublicKey = await importPublicKey(peerPublicKeyBase64);
   const sharedBits = await crypto.subtle.deriveBits(
-    {
-      name: "ECDH",
-      public: peerPublicKey,
-    },
+    { name: "ECDH", public: peerPublicKey },
     privateKey,
     256,
   );
   const hkdfKey = await crypto.subtle.importKey("raw", sharedBits, "HKDF", false, [
     "deriveKey",
   ]);
-
   return crypto.subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: toBufferSource(salt),
-      info: HKDF_INFO,
-    },
+    { name: "HKDF", hash: "SHA-256", salt: toBufferSource(salt), info: HKDF_INFO },
     hkdfKey,
-    {
-      name: "AES-GCM",
-      length: 256,
-    },
+    { name: "AES-GCM", length: 256 },
     false,
-    [usage],
+    ["decrypt"],
   );
 }
 
@@ -286,23 +232,15 @@ async function decryptEnvelopeBytes(
   if (algorithm !== CHAT_E2E_ALGORITHM) {
     throw new Error("Unsupported E2E algorithm");
   }
-
-  const salt = base64ToBytes(saltBase64);
-  const nonce = base64ToBytes(nonceBase64);
-  const ciphertext = base64ToBytes(ciphertextBase64);
-  const aesKey = await deriveMessageKey(
+  const aesKey = await deriveDecryptionKey(
     myKey.privateKey,
     peerKey.public_key,
-    salt,
-    "decrypt",
+    base64ToBytes(saltBase64),
   );
   const plaintext = await crypto.subtle.decrypt(
-    {
-      name: "AES-GCM",
-      iv: nonce,
-    },
+    { name: "AES-GCM", iv: base64ToBytes(nonceBase64) },
     aesKey,
-    ciphertext,
+    base64ToBytes(ciphertextBase64),
   );
   return new Uint8Array(plaintext);
 }
@@ -313,38 +251,41 @@ function isNotFoundError(error: unknown) {
   return message.includes("not found") || message.includes("404");
 }
 
-async function validateMessageKeyEnvelope(
-  envelope: MessageKeyEnvelope,
-  expectedUserId: string,
-  requireActive: boolean,
-) {
+async function validateMessageKeyEnvelope(envelope: MessageKeyEnvelope, expectedUserId: string) {
   if (
     !envelope ||
     envelope.user_id !== expectedUserId ||
     envelope.algorithm !== CHAT_E2E_ALGORITHM ||
     typeof envelope.public_key !== "string" ||
-    typeof envelope.fingerprint !== "string" ||
-    (requireActive && envelope.is_active !== true)
+    typeof envelope.fingerprint !== "string"
   ) {
     throw new Error("Invalid server message key identity");
   }
-  const computedFingerprint = await fingerprintPublicKey(
-    base64ToBytes(envelope.public_key),
-  );
+  const computedFingerprint = await fingerprintPublicKey(base64ToBytes(envelope.public_key));
   if (computedFingerprint !== envelope.fingerprint) {
     throw new Error("Server message key fingerprint mismatch");
   }
   return envelope;
 }
 
-async function fetchMyServerMessageKey(ownerUserId: string, fingerprint?: string) {
+/**
+ * Looks up the public half of a device key that was registered for `userId`.
+ * Historical keys are immutable, so a lookup by fingerprint is all an old
+ * message needs. Returns null when the server has no such key.
+ */
+export async function fetchMessageKeyByFingerprint(
+  userId: string,
+  fingerprint: string,
+): Promise<MessageKeyEnvelope | null> {
   try {
-    const path = fingerprint
-      ? `/messages/e2e-key/${encodeURIComponent(ownerUserId)}?fingerprint=${encodeURIComponent(fingerprint)}`
-      : "/messages/e2e-key";
-    const envelope = await apiFetch<MessageKeyEnvelope>(path, { cache: "no-store" });
-    await validateMessageKeyEnvelope(envelope, ownerUserId, !fingerprint);
-    if (fingerprint && envelope.fingerprint !== fingerprint) throw new Error("Server message key fingerprint mismatch");
+    const envelope = await apiFetch<MessageKeyEnvelope>(
+      `/messages/e2e-key/${encodeURIComponent(userId)}?fingerprint=${encodeURIComponent(fingerprint)}`,
+      { cache: "no-store" },
+    );
+    await validateMessageKeyEnvelope(envelope, userId);
+    if (envelope.fingerprint !== fingerprint) {
+      throw new Error("Server message key fingerprint mismatch");
+    }
     return envelope;
   } catch (error) {
     if (isNotFoundError(error)) return null;
@@ -352,52 +293,45 @@ async function fetchMyServerMessageKey(ownerUserId: string, fingerprint?: string
   }
 }
 
-async function migrateLegacyMessageKey(
-  ownerUserId: string,
-  serverKey: MessageKeyEnvelope | null,
-) {
+async function importLegacyMessageKeysOnce(ownerUserId: string) {
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(LEGACY_STORAGE_KEY);
   } catch {
-    return null;
+    return;
   }
-  if (!raw) return null;
+  if (!raw) return;
 
   let ring: LegacyMessageKeyRing;
   try {
     ring = JSON.parse(raw) as LegacyMessageKeyRing;
-    if (!ring?.keys || typeof ring.keys !== "object" || Array.isArray(ring.keys)) return null;
+    if (!ring?.keys || typeof ring.keys !== "object" || Array.isArray(ring.keys)) return;
   } catch {
-    return null;
+    return;
   }
 
   const remaining = { ...ring.keys };
-  let preferred: MessageKeyRecord | null = null;
-  let migrationError: unknown;
+  let importError: unknown;
   for (const [fingerprint, legacy] of Object.entries(ring.keys)) {
     try {
       if (!legacy || legacy.fingerprint !== fingerprint || legacy.algorithm !== CHAT_E2E_ALGORITHM ||
           await fingerprintPublicKey(base64ToBytes(legacy.publicKey)) !== fingerprint) continue;
-      // V1 keys were not account-bound. Validate each historical key's owner
-      // against the server before importing it, even when it is no longer active.
-      const registered = serverKey?.fingerprint === fingerprint
-        ? serverKey : await fetchMyServerMessageKey(ownerUserId, fingerprint);
+      // The first key ring was not bound to an account: import a key only
+      // when the server registered it for this account.
+      const registered = await fetchMessageKeyByFingerprint(ownerUserId, fingerprint);
       if (!registered || registered.public_key !== legacy.publicKey) continue;
-      const migrated: MessageKeyRecord = {
+      await storeMessageKey({
         ownerUserId,
         algorithm: legacy.algorithm,
         fingerprint,
         publicKey: legacy.publicKey,
         privateKey: await importPrivateKey(legacy.privateKeyJwk),
         createdAt: legacy.createdAt,
-      };
-      await storeMessageKey(migrated, false);
+      });
       delete remaining[fingerprint];
-      if (!preferred || fingerprint === ring.activeFingerprint) preferred = migrated;
     } catch (error) {
       // Keep the only copy when verification or durable storage fails.
-      migrationError = error;
+      importError = error;
     }
   }
   try {
@@ -406,224 +340,32 @@ async function migrateLegacyMessageKey(
       else localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify({ ...ring, keys: remaining }));
     }
   } catch {
-    // Secure copies are already durable; cleanup can be retried on the next setup.
+    // Imported copies are already durable; cleanup is retried on the next import.
   }
-  if (!preferred && migrationError) throw migrationError;
-  return preferred;
+  if (importError) throw importError;
 }
 
-async function ensureServerMessageKeyOnce(ownerUserId: string): Promise<MessageKeyRecord> {
-  if (!ownerUserId) throw new Error("Authenticated user is required for secure chat");
-
-  const serverExisting = await fetchMyServerMessageKey(ownerUserId);
-  const registeredLocal = serverExisting ? await getStoredKey(ownerUserId, serverExisting.fingerprint) : null;
-  const migrated = await migrateLegacyMessageKey(ownerUserId, serverExisting).catch((error: unknown) => {
-    // Retrying an unrelated old key must not disable a verified current device.
-    // Without that current key, do not generate a replacement after a failed migration.
-    if (!registeredLocal) throw error;
-    return null;
-  });
-  const meta = await getStoredMeta(ownerUserId);
-  // Prefer the server's current key if this browser already has it, rather than
-  // reactivating stale metadata and changing the identity seen by other users.
-  let active = registeredLocal ?? (serverExisting ? await getStoredKey(ownerUserId, serverExisting.fingerprint) : null);
-  active ??= meta?.activeFingerprint
-    ? await getStoredKey(ownerUserId, meta.activeFingerprint)
-    : null;
-  active ??= migrated;
-  if (!active) {
-    active = await generateLocalMessageKey(ownerUserId);
-    await storeMessageKey(active, true);
-  }
-
-  if (serverExisting?.fingerprint === active.fingerprint &&
-      serverExisting.public_key === active.publicKey) {
-    if (meta?.activeFingerprint !== active.fingerprint) await storeMessageKey(active, true);
-    return active;
-  }
-
-  const serverKey = await apiFetch<MessageKeyEnvelope>("/messages/e2e-key", {
-    method: "POST",
-    body: JSON.stringify({
-      algorithm: active.algorithm,
-      public_key: active.publicKey,
-    }),
-  });
-  await validateMessageKeyEnvelope(serverKey, ownerUserId, true);
-  if (
-    serverKey.fingerprint !== active.fingerprint ||
-    serverKey.public_key !== active.publicKey
-  ) {
-    throw new Error("Server message key does not match this device");
-  }
-  await storeMessageKey(active, true);
-  return active;
-}
-
-export async function ensureServerMessageKey(ownerUserId: string) {
-  const pending = ensureServerMessageKeyPromises.get(ownerUserId);
+/**
+ * Moves device keys of the first chat version from local storage into the
+ * protected key store, so their old messages can still be opened. Runs once
+ * per account and page session; a failed import is retried on the next call.
+ */
+export function importLegacyMessageKeys(ownerUserId: string) {
+  if (!ownerUserId) return Promise.resolve();
+  const pending = legacyImports.get(ownerUserId);
   if (pending) return pending;
-
-  // Coordinate first-time setup across tabs sharing the same IndexedDB store.
-  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
-  const promise = locks
-    ? locks.request(`gmed-chat-key:${ownerUserId}`, () => ensureServerMessageKeyOnce(ownerUserId))
-    : ensureServerMessageKeyOnce(ownerUserId);
-  ensureServerMessageKeyPromises.set(ownerUserId, promise);
-  try {
-    return await promise;
-  } finally {
-    ensureServerMessageKeyPromises.delete(ownerUserId);
-  }
-}
-
-export async function getLocalMessageKey(
-  ownerUserId: string,
-  fingerprint?: string | null,
-) {
-  if (!ownerUserId) return null;
-  if (fingerprint) return getStoredKey(ownerUserId, fingerprint);
-  const meta = await getStoredMeta(ownerUserId);
-  return meta?.activeFingerprint
-    ? getStoredKey(ownerUserId, meta.activeFingerprint)
-    : null;
-}
-
-type PeerPins = Record<string, string>;
-
-function readPeerPins(ownerUserId: string): PeerPins {
-  try {
-    const value = JSON.parse(
-      localStorage.getItem(`${PEER_PIN_STORAGE_PREFIX}${ownerUserId}`) ?? "{}",
-    ) as unknown;
-    return value && typeof value === "object" ? (value as PeerPins) : {};
-  } catch {
-    return {};
-  }
-}
-
-function writePeerPin(ownerUserId: string, peerUserId: string, fingerprint: string) {
-  const pins = readPeerPins(ownerUserId);
-  localStorage.setItem(
-    `${PEER_PIN_STORAGE_PREFIX}${ownerUserId}`,
-    JSON.stringify({ ...pins, [peerUserId]: fingerprint }),
-  );
-}
-
-export class PeerMessageKeyChangedError extends Error {
-  readonly previousFingerprint: string;
-  readonly candidate: MessageKeyEnvelope;
-
-  constructor(
-    previousFingerprint: string,
-    candidate: MessageKeyEnvelope,
-  ) {
-    super("Peer secure-chat identity changed");
-    this.name = "PeerMessageKeyChangedError";
-    this.previousFingerprint = previousFingerprint;
-    this.candidate = candidate;
-  }
-}
-
-export async function fetchPeerMessageKey(
-  ownerUserId: string,
-  peerUserId: string,
-  fingerprint?: string | null,
-  expectedChangedFingerprint?: string | null,
-): Promise<MessageKeyEnvelope | null> {
-  const query = fingerprint ? `?fingerprint=${encodeURIComponent(fingerprint)}` : "";
-  try {
-    const raw = await apiFetch<MessageKeyEnvelope>(
-      `/messages/e2e-key/${peerUserId}${query}`,
-      { cache: "no-store" },
-    );
-    const envelope = await validateMessageKeyEnvelope(raw, peerUserId, !fingerprint);
-    if (!fingerprint) {
-      const previous = readPeerPins(ownerUserId)[peerUserId];
-      const expected = expectedChangedFingerprint?.trim();
-      if (expected && envelope.fingerprint !== expected) {
-        throw new PeerMessageKeyChangedError(previous ?? expected, envelope);
-      }
-      if (previous && previous !== envelope.fingerprint && !expected) {
-        throw new PeerMessageKeyChangedError(previous, envelope);
-      }
-      if (!previous || expected === envelope.fingerprint) {
-        writePeerPin(ownerUserId, peerUserId, envelope.fingerprint);
-      }
-    }
-    return envelope;
-  } catch (error) {
-    if (isNotFoundError(error)) return null;
+  const promise = importLegacyMessageKeysOnce(ownerUserId).catch((error: unknown) => {
+    legacyImports.delete(ownerUserId);
     throw error;
-  }
+  });
+  legacyImports.set(ownerUserId, promise);
+  return promise;
 }
 
-export async function encryptMessageForPeer(
-  plaintext: string,
-  senderKey: MessageKeyRecord,
-  recipientKey: MessageKeyEnvelope,
-) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const aesKey = await deriveMessageKey(
-    senderKey.privateKey,
-    recipientKey.public_key,
-    salt,
-    "encrypt",
-  );
-  const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv: nonce,
-      },
-      aesKey,
-      new TextEncoder().encode(plaintext),
-    ),
-  );
-
-  return {
-    e2e_algorithm: CHAT_E2E_ALGORITHM,
-    e2e_ciphertext: bytesToBase64(ciphertext),
-    e2e_nonce: bytesToBase64(nonce),
-    e2e_salt: bytesToBase64(salt),
-    sender_key_fingerprint: senderKey.fingerprint,
-    recipient_key_fingerprint: recipientKey.fingerprint,
-  };
-}
-
-export async function encryptAttachmentForPeer(
-  bytes: Uint8Array,
-  senderKey: MessageKeyRecord,
-  recipientKey: MessageKeyEnvelope,
-) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const aesKey = await deriveMessageKey(
-    senderKey.privateKey,
-    recipientKey.public_key,
-    salt,
-    "encrypt",
-  );
-  const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt(
-      {
-        name: "AES-GCM",
-        iv: nonce,
-      },
-      aesKey,
-      toBufferSource(bytes),
-    ),
-  );
-
-  return {
-    ciphertext,
-    attachment_e2e_algorithm: CHAT_E2E_ALGORITHM,
-    attachment_e2e_nonce: bytesToBase64(nonce),
-    attachment_e2e_salt: bytesToBase64(salt),
-    sender_key_fingerprint: senderKey.fingerprint,
-    recipient_key_fingerprint: recipientKey.fingerprint,
-  };
+/** The private device key this browser holds for an old message, if any. */
+export async function getLocalMessageKey(ownerUserId: string, fingerprint: string | null | undefined) {
+  if (!ownerUserId || !fingerprint) return null;
+  return getStoredKey(ownerUserId, fingerprint);
 }
 
 export async function decryptMessageFromPeer(
@@ -639,10 +381,6 @@ export async function decryptMessageFromPeer(
   ) {
     throw new Error("Incomplete E2E envelope");
   }
-  if (envelope.e2e_algorithm !== CHAT_E2E_ALGORITHM) {
-    throw new Error("Unsupported E2E algorithm");
-  }
-
   const plaintext = await decryptEnvelopeBytes(
     envelope.e2e_ciphertext,
     envelope.e2e_nonce,
@@ -670,8 +408,7 @@ export async function decryptAttachmentFromPeer(
   ) {
     throw new Error("Incomplete E2E attachment envelope");
   }
-
-  const plaintext = await decryptEnvelopeBytes(
+  return decryptEnvelopeBytes(
     bytesToBase64(ciphertext),
     envelope.attachment_e2e_nonce,
     envelope.attachment_e2e_salt,
@@ -679,5 +416,4 @@ export async function decryptAttachmentFromPeer(
     myKey,
     peerKey,
   );
-  return plaintext;
 }

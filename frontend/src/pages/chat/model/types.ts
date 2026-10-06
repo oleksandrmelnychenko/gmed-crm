@@ -17,6 +17,7 @@ export interface Message {
   from_user: string;
   to_user: string;
   message: string | null;
+  /** Old end-to-end envelope; messages are encrypted on the server since 2026-10-07. */
   is_e2e?: boolean;
   e2e_algorithm?: string | null;
   e2e_ciphertext?: string | null;
@@ -40,6 +41,8 @@ export interface Message {
   attachment_e2e_algorithm?: string | null;
   attachment_e2e_nonce?: string | null;
   attachment_e2e_salt?: string | null;
+  converted_from_e2e_at?: string | null;
+  attachment_converted_from_e2e_at?: string | null;
 }
 
 export interface UserItem {
@@ -54,7 +57,7 @@ export type ChatStreamEvent = {
   type: "messages.connected";
   user_id: string;
 } | {
-  type: "message_created" | "message_deleted" | "conversation_read";
+  type: "message_created" | "message_updated" | "message_deleted" | "conversation_read";
   user_id: string;
   peer_id: string;
   message_id?: string | null;

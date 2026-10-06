@@ -19,36 +19,26 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import {
-  CHAT_E2E_PREVIEW,
-  CHAT_E2E_UNAVAILABLE,
-  PeerMessageKeyChangedError,
+  chatE2EPreviewText,
+  chatE2EUnavailableText,
   decryptAttachmentFromPeer,
   decryptMessageFromPeer,
-  encryptAttachmentForPeer,
-  encryptMessageForPeer,
-  ensureServerMessageKey,
-  fetchPeerMessageKey,
+  fetchMessageKeyByFingerprint,
   getLocalMessageKey,
+  importLegacyMessageKeys,
   type MessageKeyEnvelope,
 } from "@/lib/chat-e2e";
 import { useAuth } from "@/lib/auth";
-import { ApiRequestError } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { deNormalize } from "@/components/data-table/search";
 import {
+  convertAttachmentFromE2E,
+  convertMessageFromE2E,
   downloadMessageAttachmentBytes,
   deletePeerMessage,
   fetchAllowedPeers,
@@ -76,9 +66,10 @@ import {
 } from "./model/chat-model";
 import type { ChatStreamEvent, Conversation, Message, UserItem } from "./model/types";
 import { CHAT_ATTACHMENT_ACCEPT, CHAT_ATTACHMENT_MAX_COUNT, chatAttachmentMime, chatAttachmentProblem, type PendingChatAttachment } from "./model/attachments";
+import { createE2ERescueQueue, type E2ERescueJob } from "./model/e2e-rescue";
+import { buildAttachmentFormData, buildTextMessagePayload } from "./model/outgoing";
 import { ChatAttachment, PendingAttachment } from "./ui/chat-attachment";
 
-type KeyDialogMode = "manage" | null;
 type ChatConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
 
 const CHAT_TIMER_OPTIONS = [0, 60, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60] as const;
@@ -120,17 +111,12 @@ type ChatPageState = {
   allUsers: UserItem[];
   userSearch: string;
   pendingFiles: PendingChatAttachment[];
-  activePeerMessageKey: MessageKeyEnvelope | null;
-  pendingPeerMessageKey: MessageKeyEnvelope | null;
-  deviceKeyFingerprint: string | null;
   secureStatus: string | null;
-  keyDialogMode: KeyDialogMode;
   messageTimerSeconds: number;
   deleteTarget: Message | null;
   deletingMessageId: string | null;
   expiryClock: number;
   usersLoading: boolean;
-  securityLoading: boolean;
   showScrollToLatest: boolean;
 };
 
@@ -163,7 +149,6 @@ function createChatPageFieldPatch<K extends keyof ChatPageState>(
 function useChatPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
-  const secureChannelPendingStatus = t.chat_attachment_pending;
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const myId = user?.id ?? "";
@@ -194,17 +179,12 @@ function useChatPageContent() {
       allUsers: [],
       userSearch: "",
       pendingFiles: [],
-      activePeerMessageKey: null,
-      pendingPeerMessageKey: null,
-      deviceKeyFingerprint: null,
       secureStatus: null,
-      keyDialogMode: null,
       messageTimerSeconds: 0,
       deleteTarget: null,
       deletingMessageId: null,
       expiryClock: Date.now(),
       usersLoading: false,
-      securityLoading: false,
       showScrollToLatest: false,
     }),
   );
@@ -230,17 +210,12 @@ function useChatPageContent() {
     allUsers,
     userSearch,
     pendingFiles,
-    activePeerMessageKey,
-    pendingPeerMessageKey,
-    deviceKeyFingerprint,
     secureStatus,
-    keyDialogMode,
     messageTimerSeconds,
     deleteTarget,
     deletingMessageId,
     expiryClock,
     usersLoading,
-    securityLoading,
     showScrollToLatest,
   } = chatState;
   const setChatField = <K extends keyof ChatPageState>(
@@ -289,16 +264,8 @@ function useChatPageContent() {
     setChatField("userSearch", value);
   const setPendingFiles = (value: SetStateAction<PendingChatAttachment[]>) =>
     setChatField("pendingFiles", value);
-  const setActivePeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
-    setChatField("activePeerMessageKey", value);
-  const setPendingPeerMessageKey = (value: SetStateAction<MessageKeyEnvelope | null>) =>
-    setChatField("pendingPeerMessageKey", value);
-  const setDeviceKeyFingerprint = (value: SetStateAction<string | null>) =>
-    setChatField("deviceKeyFingerprint", value);
   const setSecureStatus = (value: SetStateAction<string | null>) =>
     setChatField("secureStatus", value);
-  const setKeyDialogMode = (value: SetStateAction<KeyDialogMode>) =>
-    setChatField("keyDialogMode", value);
   const setMessageTimerSeconds = (value: SetStateAction<number>) =>
     setChatField("messageTimerSeconds", value);
   const setDeleteTarget = (value: SetStateAction<Message | null>) =>
@@ -323,12 +290,19 @@ function useChatPageContent() {
   const outboxRef = useRef(new Map<string, Message>());
   const draftRef = useRef(new Map<string, { input: string; pendingFiles: PendingChatAttachment[]; messageTimerSeconds: number }>());
   const uploadAttemptRef = useRef(new Map<string, {
-    caption: string; timer: number; id: string; formData?: FormData; envelope?: Partial<Message>;
+    caption: string; timer: number; id: string; formData?: FormData;
   }>());
   const [attachmentUpload, setAttachmentUpload] = useState<{ peerId: string; fileId: string; index: number; total: number; name: string } | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
   const sendLockRef = useRef(false);
-  const deviceReadyRef = useRef(false);
+  const afterRescueRef = useRef<(job: E2ERescueJob) => void>(() => undefined);
+  // Hands old end-to-end history that this browser can still open back to the
+  // server once, so it becomes readable on every device.
+  const [rescueQueue] = useState(() => createE2ERescueQueue({
+    convertText: convertMessageFromE2E,
+    convertAttachment: convertAttachmentFromE2E,
+    onConverted: (job) => afterRescueRef.current(job),
+  }));
 
   useLayoutEffect(() => {
     const container = messagesScrollRef.current;
@@ -364,89 +338,100 @@ function useChatPageContent() {
   }, [messages]);
 
   const loadPeerMessageKey = useCallback(
-    async (peerId: string, fingerprint?: string | null) => {
-      if (fingerprint) {
-        const cached = peerMessageKeyCacheRef.current[`${peerId}:${fingerprint}`];
-        if (cached) return cached;
-      }
-
-      const cacheId = `${peerId}:${fingerprint ?? "active"}`;
+    async (peerId: string, fingerprint: string) => {
+      const cacheId = `${peerId}:${fingerprint}`;
+      const cached = peerMessageKeyCacheRef.current[cacheId];
+      if (cached) return cached;
       const pending = peerMessageKeyRequestsRef.current.get(cacheId);
       if (pending) return pending;
-      const request = fetchPeerMessageKey(myId, peerId, fingerprint);
+      const request = fetchMessageKeyByFingerprint(peerId, fingerprint);
       peerMessageKeyRequestsRef.current.set(cacheId, request);
       try {
         const key = await request;
-        if (key) {
-          // Historical keys are immutable. Always fetch the active key before
-          // sending so an in-memory cache cannot hide a peer's key rotation.
-          peerMessageKeyCacheRef.current[`${peerId}:${key.fingerprint}`] = key;
-        }
+        // Device keys of old messages never change, so they can be cached.
+        if (key) peerMessageKeyCacheRef.current[cacheId] = key;
         return key;
       } finally {
         peerMessageKeyRequestsRef.current.delete(cacheId);
       }
     },
-    [myId],
+    [],
   );
+
+  // An old end-to-end message opens only where this browser still holds the
+  // device key it used at the time; no key is ever created any more.
+  const loadLegacyKeys = useCallback(async (message: Message) => {
+    const mine = message.from_user === myId;
+    const ownFingerprint = mine ? message.sender_key_fingerprint : message.recipient_key_fingerprint;
+    const peerFingerprint = mine ? message.recipient_key_fingerprint : message.sender_key_fingerprint;
+    if (!ownFingerprint || !peerFingerprint) return null;
+    const localKey = await getLocalMessageKey(myId, ownFingerprint);
+    if (!localKey) return null;
+    const peerKey = await loadPeerMessageKey(mine ? message.to_user : message.from_user, peerFingerprint);
+    return peerKey ? { localKey, peerKey } : null;
+  }, [loadPeerMessageKey, myId]);
+
+  const loadLegacyAttachmentBytes = useCallback(async (message: Message) => {
+    if (!message.attachment_key) throw new Error(t.chat_attachment_load_failed);
+    await importLegacyMessageKeys(myId).catch(() => undefined);
+    const keys = await loadLegacyKeys(message).catch(() => null);
+    if (!keys) throw new Error(t.chat_secure_attachment_unavailable);
+    let ciphertext: ArrayBuffer;
+    try { ciphertext = await downloadMessageAttachmentBytes(message.attachment_key); }
+    catch { throw new Error(t.chat_attachment_load_failed); }
+    try { return await decryptAttachmentFromPeer(message, new Uint8Array(ciphertext), keys.localKey, keys.peerKey); }
+    catch { throw new Error(t.chat_secure_attachment_decrypt_failed); }
+  }, [loadLegacyKeys, myId, t.chat_attachment_load_failed, t.chat_secure_attachment_unavailable, t.chat_secure_attachment_decrypt_failed]);
+
+  // Queued once per message and page session: the caption or text first, the
+  // attachment after it (the server requires that order).
+  const queueLegacyRescue = useCallback((peerId: string, message: Message) => {
+    if (message.id.startsWith("local-")) return;
+    const text = message.message;
+    if (message.is_e2e && !message.decryption_failed && text?.trim()) {
+      rescueQueue.enqueue({ kind: "text", peerId, messageId: message.id, text });
+    }
+    if (message.attachment_is_e2e && message.attachment_key) {
+      rescueQueue.enqueue({
+        kind: "attachment", peerId, messageId: message.id,
+        filename: message.attachment_filename || "attachment",
+        load: () => loadLegacyAttachmentBytes(message),
+      });
+    }
+  }, [loadLegacyAttachmentBytes, rescueQueue]);
 
   const hydrateMessages = useCallback(
     async (peerId: string, rawMessages: Message[]) => {
-      // Finish IndexedDB migration/registration before trying to read history.
-      if (!deviceReadyRef.current && rawMessages.some((message) => message.is_e2e)) {
-        await ensureServerMessageKey(myId).then(() => { deviceReadyRef.current = true; }).catch(() => undefined);
-      }
-      return Promise.all(
+      if (!rawMessages.some((message) => message.is_e2e || message.attachment_is_e2e)) return rawMessages;
+      // Device keys of the first chat version may still sit in local storage.
+      await importLegacyMessageKeys(myId).catch(() => undefined);
+      const unavailable = chatE2EUnavailableText(lang);
+      const hydrated = await Promise.all(
         rawMessages.map(async (message) => {
-          if (!message.is_e2e) return message;
-          try {
-            const myFingerprint =
-              message.from_user === myId
-                ? message.sender_key_fingerprint
-                : message.recipient_key_fingerprint;
-            const peerFingerprint =
-              message.from_user === myId
-                ? message.recipient_key_fingerprint
-                : message.sender_key_fingerprint;
-            const localKey = await getLocalMessageKey(myId, myFingerprint);
-            if (!localKey || !peerFingerprint) {
-              return {
-                ...message,
-                message: CHAT_E2E_UNAVAILABLE,
-                decryption_failed: true,
-              };
+          if (!message.is_e2e && !message.attachment_is_e2e) return { message, readable: false };
+          const keys = await loadLegacyKeys(message).catch(() => null);
+          if (!message.is_e2e) return { message, readable: Boolean(keys) };
+          if (keys) {
+            try {
+              const text = await decryptMessageFromPeer(message, keys.localKey, keys.peerKey);
+              return { message: { ...message, message: text, decryption_failed: false }, readable: true };
+            } catch {
+              // Falls through to the placeholder below.
             }
-
-            const peerKey = await loadPeerMessageKey(peerId, peerFingerprint);
-            if (!peerKey) {
-              return {
-                ...message,
-                message: CHAT_E2E_PREVIEW,
-                decryption_failed: true,
-              };
-            }
-
-            const decrypted = await decryptMessageFromPeer(message, localKey, peerKey);
-            return {
-              ...message,
-              message: decrypted,
-              decryption_failed: false,
-            };
-          } catch {
-            return {
-              ...message,
-              message: CHAT_E2E_UNAVAILABLE,
-              decryption_failed: true,
-            };
           }
+          return { message: { ...message, message: unavailable, decryption_failed: true }, readable: false };
         }),
       );
+      for (const { message, readable } of hydrated) {
+        if (readable) queueLegacyRescue(peerId, message);
+      }
+      return hydrated.map(({ message }) => message);
     },
-    [loadPeerMessageKey, myId],
+    [lang, loadLegacyKeys, myId, queueLegacyRescue],
   );
 
-  // Previews stay in memory and reuse the latest envelope until the conversation
-  // changes. The list endpoint deliberately contains no decrypted E2E text.
+  // Previews of old end-to-end messages stay in memory and reuse the latest
+  // envelope until the conversation changes; the server cannot read them.
   const conversationPreviewsRef = useRef(new Map<string, { source: string; text: string; decrypted: boolean }>());
   const previewRequestsRef = useRef(new Map<string, Promise<string>>());
   const loadConversations = useCallback(async () => {
@@ -461,10 +446,11 @@ function useChatPageContent() {
       if (requestId !== conversationRequestIdRef.current) return;
       const previewSource = (conversation: Conversation) =>
         JSON.stringify([myId, conversation.user_id, conversation.last_at, conversation.is_mine, conversation.last_message]);
+      const encryptedPreview = chatE2EPreviewText(lang);
       setConversations(data.map((conversation) => {
         if (!conversation.is_e2e) return conversation;
         const cached = conversationPreviewsRef.current.get(conversation.user_id);
-        return { ...conversation, last_message: cached?.source === previewSource(conversation) ? cached.text : CHAT_E2E_PREVIEW };
+        return { ...conversation, last_message: cached?.source === previewSource(conversation) ? cached.text : encryptedPreview };
       }));
       setConversationError(false);
       setLoading(false);
@@ -484,7 +470,7 @@ function useChatPageContent() {
             const latest = await fetchLatestPeerMessage(conversation.user_id);
             if (!latest || Date.parse(latest.created_at) !== Date.parse(conversation.last_at) ||
                 (latest.from_user === myId) !== conversation.is_mine) {
-              return CHAT_E2E_PREVIEW;
+              return encryptedPreview;
             }
             const [hydrated] = await hydrateMessages(conversation.user_id, [latest]);
             const preview = hydrated.message || (hydrated.attachment_filename ? `[${hydrated.attachment_filename}]` : "");
@@ -512,7 +498,7 @@ function useChatPageContent() {
     } finally {
       if (requestId === conversationRequestIdRef.current) setLoading(false);
     }
-  }, [canViewChat, hydrateMessages, myId]);
+  }, [canViewChat, hydrateMessages, lang, myId]);
 
   const loadMessagesForPeer = useCallback(
     async (peerId: string, markRead = false, preserveHistory = true) => {
@@ -605,91 +591,18 @@ function useChatPageContent() {
   }, [canViewChat, loadConversations]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!canViewChat) {
-      setSecureStatus(null);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void (async () => {
-      try {
-        const key = await ensureServerMessageKey(myId);
-        if (!cancelled) {
-          deviceReadyRef.current = true;
-          setDeviceKeyFingerprint(key.fingerprint);
-        }
-      } catch {
-        if (!cancelled) {
-          setSecureStatus(t.chat_secure_setup_failed_device);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canViewChat, myId, t.chat_secure_setup_failed_device]);
-
-  useEffect(() => {
     activePeerRef.current = activePeer;
   }, [activePeer]);
 
-  const clearActivePeerMessageKey = useCallback(() => {
-    setActivePeerMessageKey(null);
-  }, []);
-
-  const resetActivePeerSecurity = useCallback(() => {
-    setActivePeerMessageKey(null);
-    setPendingPeerMessageKey(null);
-    setSecureStatus(null);
-  }, []);
-
-  const refreshSecurity = useCallback(async () => {
-    const peerId = activePeerRef.current;
-    if (!peerId) return;
-    dispatchChatState({ securityLoading: true });
-    try {
-      const ownKey = deviceReadyRef.current
-        ? await getLocalMessageKey(myId)
-        : await ensureServerMessageKey(myId);
-      if (activePeerRef.current !== peerId) return;
-      if (!ownKey) throw new Error("Device key unavailable");
-      deviceReadyRef.current = true;
-      setDeviceKeyFingerprint(ownKey.fingerprint);
-      const peerKey = await loadPeerMessageKey(peerId);
-      if (activePeerRef.current !== peerId) return;
-      setActivePeerMessageKey(peerKey);
-      setPendingPeerMessageKey(null);
-      if (peerKey) setSecureStatus((current) =>
-        current === t.chat_secure_key_failed || current === t.chat_secure_setup_failed_device ||
-        current === t.chat_secure_setup_pending ? null : current,
-      );
-    } catch (error) {
-      if (activePeerRef.current !== peerId) return;
-      if (error instanceof PeerMessageKeyChangedError) {
-        setActivePeerMessageKey(null);
-        setPendingPeerMessageKey(error.candidate);
-        setSecureStatus(t.chat_secure_identity_changed);
-      } else if (error instanceof ApiRequestError && (!error.status || error.status >= 500 || error.status === 429)) {
-        // A temporary lookup failure does not revoke the already verified key.
-        // Sending still fetches the active identity and fails if it cannot verify it.
-        dispatchChatState((current) => current.activePeerMessageKey ? {} : { secureStatus: t.chat_secure_key_failed });
-      } else {
-        setActivePeerMessageKey(null);
-        setSecureStatus(t.chat_secure_key_failed);
+  useEffect(() => {
+    afterRescueRef.current = (job) => {
+      // A converted attachment is stored under a new key: reload the history
+      // so the next download uses it.
+      if (job.kind === "attachment" && activePeerRef.current === job.peerId) {
+        void loadMessagesForPeer(job.peerId).catch(() => undefined);
       }
-    } finally {
-      if (activePeerRef.current === peerId) dispatchChatState({ securityLoading: false });
-    }
-  }, [myId, loadPeerMessageKey, t.chat_secure_identity_changed, t.chat_secure_key_failed]);
-
-  const applyActivePeerMessageKey = useCallback((key: MessageKeyEnvelope | null) => {
-    setActivePeerMessageKey(key);
-    setPendingPeerMessageKey(null);
-    setSecureStatus(null);
-  }, []);
+    };
+  }, [loadMessagesForPeer]);
 
   const openPeerFromRoute = useCallback((peer: string, name: string, role: string) => {
     scrollToBottomRef.current = true;
@@ -710,33 +623,10 @@ function useChatPageContent() {
       olderMessagesLoading: false,
       deleteTarget: null,
       showScrollToLatest: false,
+      secureStatus: null,
     });
     setMessageSearch("");
   }, []);
-
-  useEffect(() => {
-    if (!canViewChat) {
-      clearActivePeerMessageKey();
-      return;
-    }
-    if (!activePeer) {
-      resetActivePeerSecurity();
-      return;
-    }
-
-    resetActivePeerSecurity();
-    void refreshSecurity();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && navigator.onLine) void refreshSecurity();
-    }, 10_000);
-    return () => window.clearInterval(timer);
-  }, [
-    activePeer,
-    canViewChat,
-    clearActivePeerMessageKey,
-    refreshSecurity,
-    resetActivePeerSecurity,
-  ]);
 
   useEffect(() => {
     const peer = searchParams.get("peer");
@@ -883,7 +773,7 @@ function useChatPageContent() {
             return;
           }
           if (!connected ||
-              !["message_created", "message_deleted", "conversation_read"].includes(payload.type)) return;
+              !["message_created", "message_updated", "message_deleted", "conversation_read"].includes(payload.type)) return;
           if (payload.type === "message_deleted" && payload.peer_id === activePeerRef.current) {
             setMessages((current) => current.filter((message) => message.id !== payload.message_id));
           }
@@ -905,7 +795,6 @@ function useChatPageContent() {
     const resume = () => {
       if (document.visibilityState !== "visible") return;
       void refresh();
-      void refreshSecurity();
       if (!connected) {
         window.clearTimeout(reconnectTimer);
         reconnectTimer = undefined;
@@ -936,7 +825,7 @@ function useChatPageContent() {
       document.removeEventListener("visibilitychange", resume);
       socket?.close();
     };
-  }, [canViewChat, loadConversations, loadMessagesForPeer, myId, refreshSecurity]);
+  }, [canViewChat, loadConversations, loadMessagesForPeer, myId]);
 
   // Load messages when peer changes
   useEffect(() => {
@@ -992,7 +881,7 @@ function useChatPageContent() {
     setMessageError(false);
     setPendingFiles([]);
     setMessageSearch("");
-    resetActivePeerSecurity();
+    setSecureStatus(null);
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -1032,67 +921,21 @@ function useChatPageContent() {
     return () => window.clearTimeout(timer);
   }, [loadUsers, showNewChat]);
 
-  const resetKeyDialog = useCallback(() => {
-    setKeyDialogMode(null);
-  }, []);
-
-  const trustPendingPeerIdentity = useCallback(async () => {
-    if (!activePeer || !pendingPeerMessageKey) return;
-    try {
-      const trusted = await fetchPeerMessageKey(
-        myId,
-        activePeer,
-        null,
-        pendingPeerMessageKey.fingerprint,
-      );
-      if (activePeerRef.current !== activePeer) return;
-      if (!trusted) throw new Error("Peer key is unavailable");
-      peerMessageKeyCacheRef.current[`${activePeer}:${trusted.fingerprint}`] = trusted;
-      setActivePeerMessageKey(trusted);
-      setPendingPeerMessageKey(null);
-      setSecureStatus(null);
-    } catch (error) {
-      if (activePeerRef.current !== activePeer) return;
-      if (error instanceof PeerMessageKeyChangedError) {
-        setPendingPeerMessageKey(error.candidate);
-        setSecureStatus(t.chat_secure_identity_changed);
-        return;
-      }
-      setSecureStatus(t.chat_secure_key_failed);
-    }
-  }, [
-    activePeer,
-    myId,
-    pendingPeerMessageKey,
-    t.chat_secure_identity_changed,
-    t.chat_secure_key_failed,
-  ]);
-
   const loadAttachmentBlob = useCallback(async (message: Message) => {
     if (!message.attachment_key) throw new Error(t.chat_attachment_load_failed);
     let bytes: ArrayBuffer | Uint8Array<ArrayBuffer>;
     if (message.attachment_is_e2e) {
-      const mine = message.from_user === myId;
-      const localKey = await getLocalMessageKey(myId, mine ? message.sender_key_fingerprint : message.recipient_key_fingerprint);
-      const peerFingerprint = mine ? message.recipient_key_fingerprint : message.sender_key_fingerprint;
-      if (!localKey || !peerFingerprint) throw new Error(t.chat_secure_attachment_unavailable);
-      const peerKey = await loadPeerMessageKey(mine ? message.to_user : message.from_user, peerFingerprint);
-      if (!peerKey) throw new Error(t.chat_secure_attachment_peer_key_failed);
-      let ciphertext: ArrayBuffer;
-      try { ciphertext = await downloadMessageAttachmentBytes(message.attachment_key); }
-      catch { throw new Error(t.chat_attachment_load_failed); }
-      try { bytes = await decryptAttachmentFromPeer(message, new Uint8Array(ciphertext), localKey, peerKey); }
-      catch { throw new Error(t.chat_secure_attachment_decrypt_failed); }
+      // Old end-to-end attachment: opens only where the device key still is.
+      bytes = await loadLegacyAttachmentBytes(message);
     } else {
       try { bytes = await downloadMessageAttachmentBytes(message.attachment_key); }
       catch { throw new Error(t.chat_attachment_load_failed); }
     }
     return new Blob([bytes], { type: chatAttachmentMime(message.attachment_filename ?? "") });
-  }, [loadPeerMessageKey, myId, t.chat_attachment_load_failed, t.chat_secure_attachment_unavailable, t.chat_secure_attachment_peer_key_failed, t.chat_secure_attachment_decrypt_failed]);
+  }, [loadLegacyAttachmentBytes, t.chat_attachment_load_failed]);
 
   function addPendingFiles(files: File[]) {
     if (!activePeer || sendLockRef.current || !files.length) return;
-    if (!activePeerMessageKey) { setSecureStatus(secureChannelPendingStatus); return; }
     const additions: PendingChatAttachment[] = [];
     const errors: string[] = [];
     for (const file of files) {
@@ -1157,18 +1000,11 @@ function useChatPageContent() {
     if (!clientMessageId || !text) return;
 
     try {
-      const lifecycle = {
-        client_message_id: clientMessageId,
-        ...(message.retry_expires_in_seconds
-          ? { expires_in_seconds: message.retry_expires_in_seconds }
-          : {}),
-      };
-      const currentPeerKey = await loadPeerMessageKey(peerId);
-      if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
-      if (activePeerRef.current === peerId) applyActivePeerMessageKey(currentPeerKey);
-      const senderKey = await ensureServerMessageKey(myId);
-      const payload = await encryptMessageForPeer(text, senderKey, currentPeerKey);
-      const receipt = await sendPeerMessage(peerId, { ...payload, ...lifecycle });
+      // Sent as text over TLS; the server seals it with its message keys.
+      const receipt = await sendPeerMessage(
+        peerId,
+        buildTextMessagePayload(text, clientMessageId, message.retry_expires_in_seconds),
+      );
 
       applyDeliveryReceipt(peerId, clientMessageId, receipt);
       if (activePeerRef.current === peerId) {
@@ -1176,23 +1012,7 @@ function useChatPageContent() {
         void loadMessagesForPeer(peerId).catch(() => undefined);
       }
       void loadConversations();
-    } catch (error) {
-      if (error instanceof PeerMessageKeyChangedError) {
-        outboxRef.current.set(clientMessageId, { ...message, delivery_state: "failed" });
-        if (activePeerRef.current === peerId) {
-          setActivePeerMessageKey(null);
-          setPendingPeerMessageKey(error.candidate);
-          setMessages((current) =>
-            current.map((item) =>
-              item.client_message_id === clientMessageId
-                ? { ...item, delivery_state: "failed" }
-                : item,
-            ),
-          );
-          setSecureStatus(t.chat_secure_identity_changed);
-        }
-        return;
-      }
+    } catch {
       try {
         const serverMessages = await fetchPeerMessages(peerId);
         if (serverMessages.some((item) => item.client_message_id === clientMessageId)) {
@@ -1217,7 +1037,7 @@ function useChatPageContent() {
               : item,
           ),
         );
-        setSecureStatus(t.chat_secure_message_send_failed);
+        setSecureStatus(t.chat_message_send_failed);
       }
     } finally {
       sendLockRef.current = false;
@@ -1267,11 +1087,6 @@ function useChatPageContent() {
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     if (!activePeer || sendLockRef.current || (!input.trim() && !pendingFiles.length)) return;
-    if (!activePeerMessageKey || !deviceKeyFingerprint) {
-      setSecureStatus(t.chat_secure_setup_pending);
-      void refreshSecurity();
-      return;
-    }
 
     // Upload sequentially: each accepted file leaves the draft immediately.
     if (pendingFiles.length) {
@@ -1290,41 +1105,23 @@ function useChatPageContent() {
             attempt = { id: crypto.randomUUID(), caption: entryCaption, timer: messageTimerSeconds };
             uploadAttemptRef.current.set(entry.id, attempt);
           }
-          const currentPeerKey = await loadPeerMessageKey(peerId);
-          if (!currentPeerKey) throw new Error("Secure peer identity is unavailable");
-          if (activePeerRef.current === peerId) applyActivePeerMessageKey(currentPeerKey);
-          if (!attempt.formData) {
-            const senderKey = await ensureServerMessageKey(myId);
-            const { ciphertext, ...metadata } = await encryptAttachmentForPeer(new Uint8Array(await entry.file.arrayBuffer()), senderKey, currentPeerKey);
-            const captionEnvelope = entryCaption ? await encryptMessageForPeer(entryCaption, senderKey, currentPeerKey) : {};
-            const formData = new FormData();
-            formData.append("client_message_id", attempt.id);
-            if (messageTimerSeconds) formData.append("expires_in_seconds", String(messageTimerSeconds));
-            formData.append("file", new Blob([ciphertext], { type: "application/octet-stream" }), entry.file.name);
-            formData.append("attachment_plaintext_size", String(entry.file.size));
-            for (const [key, value] of Object.entries({ ...metadata, ...captionEnvelope })) formData.append(key, String(value));
-            attempt.formData = formData;
-            attempt.envelope = { ...metadata, ...captionEnvelope };
-          }
-          let receipt;
-          try { receipt = await uploadPeerAttachment(peerId, attempt.formData); }
-          catch (error) {
-            // The server checks idempotency before validating active keys. Only
-            // a definite key rejection permits re-encryption on the next retry.
-            if (error instanceof ApiRequestError && error.status === 422 && error.message.includes("message key is not active")) {
-              attempt.formData = undefined;
-              attempt.envelope = undefined;
-            }
-            throw error;
-          }
+          // The file and caption travel over TLS; the server checks the
+          // content, scans it and seals it with its message keys. A retry
+          // reuses the same form and idempotency key.
+          attempt.formData ??= buildAttachmentFormData({
+            file: entry.file,
+            caption: entryCaption,
+            clientMessageId: attempt.id,
+            expiresInSeconds: messageTimerSeconds,
+          });
+          const receipt = await uploadPeerAttachment(peerId, attempt.formData);
           const delivered: Message = {
-            ...attempt.envelope,
             id: receipt.id, client_message_id: attempt.id, created_at: receipt.created_at,
             expires_at: receipt.expires_at ?? null, from_user: myId, to_user: peerId,
-            message: entryCaption || null, is_e2e: Boolean(entryCaption), is_read: false, read_at: null,
+            message: entryCaption || null, is_e2e: false, is_read: false, read_at: null,
             attachment_key: receipt.attachment_key, attachment_filename: entry.file.name,
             attachment_mime: chatAttachmentMime(entry.file.name), attachment_size: entry.file.size,
-            attachment_is_e2e: true,
+            attachment_is_e2e: false,
           };
           outboxRef.current.set(attempt.id, delivered);
           if (activePeerRef.current === peerId) {
@@ -1336,14 +1133,8 @@ function useChatPageContent() {
           uploadAttemptRef.current.delete(entry.id);
           finishAttachmentDraft(peerId, entry.id, entryCaption);
         }
-      } catch (error) {
-        if (activePeerRef.current === peerId) {
-          if (error instanceof PeerMessageKeyChangedError) {
-            setActivePeerMessageKey(null);
-            setPendingPeerMessageKey(error.candidate);
-            setSecureStatus(t.chat_secure_identity_changed);
-          } else setSecureStatus(t.chat_secure_attachment_send_failed);
-        }
+      } catch {
+        if (activePeerRef.current === peerId) setSecureStatus(t.chat_attachment_send_failed);
       } finally {
         sendLockRef.current = false;
         setSending(false);
@@ -1367,7 +1158,7 @@ function useChatPageContent() {
       from_user: myId,
       to_user: peerId,
       message: msg,
-      is_e2e: !!activePeerMessageKey,
+      is_e2e: false,
       is_read: false,
       read_at: null,
       created_at: createdAt,
@@ -1423,16 +1214,7 @@ function useChatPageContent() {
             : t.chat_message_timer_off;
 
   const normalizedMessageSearch = deNormalize(messageSearch);
-  const securityWarning = !activePeerMessageKey || !deviceKeyFingerprint
-    ? pendingPeerMessageKey ? t.chat_secure_identity_changed
-      : securityLoading && !deviceKeyFingerprint ? t.common_loading
-      : !deviceKeyFingerprint ? t.chat_secure_setup_failed_device
-      : secureStatus === t.chat_secure_key_failed ? t.chat_secure_key_failed : t.chat_secure_waiting
-    : null;
-  const visibleSecureStatus = securityWarning && (
-    secureStatus === securityWarning || secureStatus === t.chat_secure_setup_pending ||
-    secureStatus === t.chat_attachment_pending || secureStatus === t.chat_secure_key_failed
-  ) ? null : secureStatus;
+  const visibleSecureStatus = secureStatus;
   const messageLoadError = messageError ? (
     <div role="alert" className="mx-auto flex max-w-sm items-center gap-3 rounded-xl border border-destructive/30 bg-card px-4 py-3 shadow-sm">
       <p className="flex-1 text-sm text-destructive">{t.common_error}</p>
@@ -1672,13 +1454,13 @@ function useChatPageContent() {
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate">{activeName}</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {roleDisplay(activeRole, t)}
-                    {` - ${
-                      activePeerMessageKey && deviceKeyFingerprint
-                        ? t.chat_secure_encrypted_label
-                        : t.chat_secure_identity_unverified
-                    }`}
+                  <p className="flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
+                    <span className="truncate">{roleDisplay(activeRole, t)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className="inline-flex shrink-0 items-center gap-1" title={t.chat_server_encryption_hint}>
+                      <ShieldCheck className="size-3" aria-hidden="true" />
+                      {t.chat_server_encryption_label}
+                    </span>
                   </p>
                   <p className="truncate text-[10px] text-muted-foreground" aria-live="polite"
                     title={connectionStatus !== "connected" ? t.chat_connection_polling : undefined}>
@@ -1692,35 +1474,7 @@ function useChatPageContent() {
                   </p>
                 </div>
               </div>
-              <button
-                type="button"
-                className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  activePeerMessageKey
-                    ? "border-emerald-200 text-emerald-700"
-                    : "border-border text-muted-foreground",
-                )}
-                onClick={() => setKeyDialogMode("manage")}
-                title={t.chat_security_settings}
-                aria-label={t.chat_security_settings}
-              >
-                <ShieldCheck className="size-4" />
-              </button>
             </div>
-
-            {securityWarning ? (
-              <div className="flex items-start gap-3 border-b bg-amber-50/60 px-3 py-3 text-xs sm:px-5 dark:bg-amber-950/20" role="status">
-                <Shield className="mt-0.5 size-4 shrink-0 text-amber-700" />
-                <p className="min-w-0 flex-1 leading-relaxed">
-                  {securityWarning}
-                </p>
-                <Button type="button" variant="outline" size="sm" disabled={securityLoading}
-                  onClick={() => pendingPeerMessageKey ? setKeyDialogMode("manage") : void refreshSecurity()}>
-                  {securityLoading ? <LoaderCircle className="size-3.5 animate-spin" /> : <RotateCcw className="size-3.5" />}
-                  {pendingPeerMessageKey ? t.chat_security_settings : t.chat_security_retry}
-                </Button>
-              </div>
-            ) : null}
 
             <div className="border-b px-3 py-2 sm:px-5">
               <div className="relative">
@@ -1938,7 +1692,7 @@ function useChatPageContent() {
             {pendingFiles.length > 0 ? (
               <div data-testid="chat-attachment-queue" className="border-t bg-muted/30 px-3 py-2 sm:px-5">
                 {attachmentUpload?.peerId === activePeer ? <p role="status" className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 shrink-0 animate-spin" />{t.chat_attachments_uploading.replace("{index}", String(attachmentUpload.index)).replace("{total}", String(attachmentUpload.total)).replace("{name}", attachmentUpload.name)}</p> : null}
-                <div role="list" aria-label={t.chat_secure_attachment_label} className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
+                <div role="list" aria-label={t.chat_attachments_queue} className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
                   {pendingFiles.map((entry) => <div role="listitem" key={entry.id}><PendingAttachment file={entry.file} busy={sending} onRemove={() => {
                     uploadAttemptRef.current.delete(entry.id);
                     setPendingFiles((current) => current.filter((item) => item.id !== entry.id));
@@ -1966,20 +1720,10 @@ function useChatPageContent() {
               />
               <button
                 type="button"
-                onClick={() => {
-                  if (!activePeerMessageKey) {
-                    setSecureStatus(secureChannelPendingStatus);
-                    return;
-                  }
-                  fileInputRef.current?.click();
-                }}
+                onClick={() => fileInputRef.current?.click()}
                 disabled={sending}
-                title={
-                  activePeerMessageKey
-                    ? t.chat_secure_attachment_label
-                    : secureChannelPendingStatus
-                }
-                aria-label={t.chat_secure_attachment_label}
+                title={t.chat_attachment_add}
+                aria-label={t.chat_attachment_add}
                 className="flex size-11 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Paperclip className="size-[18px]" />
@@ -2042,12 +1786,7 @@ function useChatPageContent() {
               />
               <button
                 type="submit"
-                disabled={
-                  sending ||
-                  !activePeerMessageKey ||
-                  !deviceKeyFingerprint ||
-                  (!input.trim() && !pendingFiles.length)
-                }
+                disabled={sending || (!input.trim() && !pendingFiles.length)}
                 aria-label={t.chat_send}
                 title={t.chat_send}
                 className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-background transition-opacity hover:opacity-80 disabled:opacity-40"
@@ -2062,69 +1801,6 @@ function useChatPageContent() {
               </p>
             </form>
 
-            <Dialog open={keyDialogMode !== null} onOpenChange={(open) => !open && resetKeyDialog()}>
-              <DialogContent className="sm:max-w-md">
-                <DialogHeader>
-                  <DialogTitle>{t.chat_security_settings}</DialogTitle>
-                  <DialogDescription>
-                    {t.chat_security_device_bound_description}
-                  </DialogDescription>
-                </DialogHeader>
-
-                <div className="space-y-3">
-                  <div className="flex items-start gap-3 rounded-xl border bg-muted/30 px-3 py-3">
-                    <ShieldCheck
-                      className={cn(
-                        "mt-0.5 size-4 shrink-0",
-                        activePeerMessageKey
-                          ? "text-emerald-600"
-                          : "text-muted-foreground",
-                      )}
-                    />
-                    <div className="min-w-0 space-y-2">
-                      <p className="text-sm font-medium">
-                        {activePeerMessageKey
-                          ? t.chat_secure_encrypted_label
-                          : t.chat_secure_identity_unverified}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {t.chat_security_e2e_description}
-                      </p>
-                      <dl className="space-y-1 font-mono text-[10px] text-muted-foreground">
-                        <div>
-                          <dt className="font-sans font-medium">{t.chat_security_this_device}</dt>
-                          <dd className="break-all">{deviceKeyFingerprint ?? "-"}</dd>
-                        </div>
-                        <div>
-                          <dt className="font-sans font-medium">{t.chat_security_peer_device}</dt>
-                          <dd className="break-all">
-                            {activePeerMessageKey?.fingerprint ?? pendingPeerMessageKey?.fingerprint ?? "-"}
-                          </dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </div>
-                  {pendingPeerMessageKey ? (
-                    <div className="space-y-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-xs text-amber-950">
-                      <p>{t.chat_secure_identity_changed}</p>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void trustPendingPeerIdentity()}
-                      >
-                        {t.chat_secure_trust_new_identity}
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-                <DialogFooter>
-                  <Button type="button" variant="outline" onClick={resetKeyDialog}>
-                    {t.chat_close}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
             <DirtyDismissConfirmDialog
               open={deleteTarget !== null}
               title={t.chat_message_delete_title}

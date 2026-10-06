@@ -12,7 +12,6 @@ import {
 
 import { AppShellFrame } from "./app-shell-frame";
 import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
-import { ChatDeviceSetup } from "@/components/chat-device-setup";
 import { TwoFactorReminder } from "@/components/two-factor-reminder";
 
 export function AuthenticatedAppShell() {
@@ -54,7 +53,6 @@ export function AuthenticatedAppShell() {
 
   return (
     <NavStateProvider>
-      {leadCabinet ? null : <ChatDeviceSetup />}
       <AuthenticatedAppShellContent />
     </NavStateProvider>
   );
