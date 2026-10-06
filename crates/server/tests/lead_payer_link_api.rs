@@ -1284,10 +1284,12 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         adopted["payment_method"], "bank_transfer",
         "section 8 stays"
     );
-    let keys: (Value, Value, Value) = sqlx::query_as(
+    assert!(adopted["identity_adopted_at"].is_string(), "{declaration}");
+    let keys: (Value, Value, Value, Option<Value>) = sqlx::query_as(
         r#"SELECT k.payer_key, s.payer_key,
                   jsonb_build_array(d.payer_type, d.organisation_name, d.first_name,
-                                    d.last_name, d.date_of_birth)
+                                    d.last_name, d.date_of_birth),
+                  d.identity_adopted_key
            FROM lead_payer_links k
            JOIN lead_payer_statements s ON s.lead_id = k.lead_id
            JOIN lead_payer_declarations d ON d.lead_id = k.lead_id
@@ -1299,6 +1301,7 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     .unwrap();
     assert_eq!(keys.0, keys.2);
     assert_eq!(keys.1, keys.2);
+    assert_eq!(keys.3.as_ref(), Some(&keys.2), "the adopted payer key");
     let submitted = audit_contexts(pool, "payer_questionnaire_submitted", lead_id).await;
     assert_eq!(submitted[0].1["check_level"], 2);
     assert_eq!(
@@ -1713,11 +1716,72 @@ const OLD_ANSWERS: [&str; 7] = [
     "pass.pdf",
 ];
 
+/// The staff form of the declaration as the wizard sends it back: every key it
+/// edits, as stored.
+fn staff_form(current: &Value) -> serde_json::Map<String, Value> {
+    let mut form = serde_json::Map::new();
+    for key in [
+        "payer_kind",
+        "acts_on_own_account",
+        "beneficial_owner_name",
+        "beneficial_owner_note",
+        "source_of_funds",
+        "source_of_funds_description",
+        "source_of_funds_document_id",
+        "payer_type",
+        "organisation_name",
+        "first_name",
+        "last_name",
+        "date_of_birth",
+        "place_of_birth",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "citizenships",
+        "relationship_kind",
+        "relationship",
+        "email",
+        "phone",
+    ] {
+        form.insert(key.to_string(), current[key].clone());
+    }
+    form.insert("payer_informed".into(), json!(true));
+    form
+}
+
+/// Staff save the declaration with `change` applied to the stored form;
+/// returns the saved declaration.
+async fn staff_save(
+    app: &PayerApp,
+    lead_id: Uuid,
+    change: impl FnOnce(&mut serde_json::Map<String, Value>),
+) -> Value {
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (_, stored) = with_login(app, "GET", &path, &app.manager(), None).await;
+    let mut form = staff_form(&stored["declaration"]);
+    change(&mut form);
+    let (status, saved) = with_login(
+        app,
+        "POST",
+        &path,
+        &app.manager(),
+        Some(Value::Object(form)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    saved["declaration"].clone()
+}
+
 /// QA 2026-10-06 (S1): the payer's address changes after the payer sent the
 /// answers. Whoever holds the new address opens a new link: it shows none of
 /// the old answers, no payment route, no files and no acknowledgement — and
 /// a fresh link prefills only the name and the relationship the lead
 /// entered, never the lead's other data about the payer.
+///
+/// QA retest 2026-10-06 (R2-a): the declaration still holds the identity the
+/// old address's payer stated, so the lead's cabinet keeps hiding it and does
+/// not change the payer until staff name another payer.
 #[tokio::test]
 async fn a_new_address_gets_a_link_without_the_previous_answers() {
     let Some(app) = payer_app().await else { return };
@@ -1806,45 +1870,18 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     let (_, stored) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
     let current = &stored["declaration"];
     assert_eq!(current["payment_method"], "bank_transfer", "{stored}");
-    let mut form = serde_json::Map::new();
-    for key in [
-        "payer_kind",
-        "acts_on_own_account",
-        "beneficial_owner_name",
-        "beneficial_owner_note",
-        "source_of_funds",
-        "source_of_funds_description",
-        "source_of_funds_document_id",
-        "payer_type",
-        "organisation_name",
-        "first_name",
-        "last_name",
-        "date_of_birth",
-        "place_of_birth",
-        "street",
-        "zip",
-        "city",
-        "country",
-        "citizenships",
-        "relationship_kind",
-        "relationship",
-        "phone",
-    ] {
-        form.insert(key.to_string(), current[key].clone());
-    }
-    form.insert("email".into(), json!("viktor.neu@example.com"));
-    form.insert("payer_informed".into(), json!(true));
-    let (status, saved) = with_login(
-        &app,
-        "POST",
-        &declaration_path,
-        &app.manager(),
-        Some(Value::Object(form)),
-    )
+    let adopted_at = current["identity_adopted_at"].clone();
+    assert!(adopted_at.is_string(), "the adoption is recorded: {stored}");
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("email".into(), json!("viktor.neu@example.com"));
+    })
     .await;
-    assert_eq!(status, StatusCode::OK, "{saved}");
-    let saved = &saved["declaration"];
+    let saved = &saved;
     assert_eq!(saved["email"], "viktor.neu@example.com", "{saved}");
+    assert_eq!(
+        saved["identity_adopted_at"], adopted_at,
+        "a staff save for the same payer keeps the record: {saved}"
+    );
     for key in [
         "payment_method",
         "account_country",
@@ -1903,16 +1940,62 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     for value in OLD_ANSWERS {
         assert!(!context.to_string().contains(value), "{value}: {context}");
     }
-    // The lead's cabinet may name the payer again (staff reset the answers).
-    let (_, request) = with_login(
+    // The statement is reset, but the declaration still holds the identity
+    // the payer stated (QA retest R2-a): the lead's cabinet shows the name,
+    // the type, the relationship and the own consent only, and does not
+    // change the payer.
+    let request_path = format!("/api/v1/me/lead-requests/{lead_id}");
+    let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
+    let shown = &request["payer"];
+    assert_eq!(shown["answered_by_payer"], true, "{request}");
+    assert_eq!(shown["payer_type"], "person");
+    assert_eq!(shown["first_name"], "Viktor");
+    assert_eq!(shown["last_name"], "Zahler");
+    assert_eq!(shown["relationship_kind"], "other");
+    assert!(shown["contact_consent_at"].is_string(), "{request}");
+    for hidden in [
+        "date_of_birth",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "citizenships",
+        "email",
+        "phone",
+    ] {
+        assert!(shown[hidden].is_null(), "{hidden}: {request}");
+    }
+    for value in [
+        "1970-05-01",
+        "Ringstraße",
+        "Wien",
+        "Graz",
+        "viktor.neu@example.com",
+    ] {
+        assert!(!request.to_string().contains(value), "{value}: {request}");
+    }
+    let mut renamed_by_lead = viktor();
+    renamed_by_lead["street"] = json!("Leadweg 5");
+    let (status, refused) = with_login(
         &app,
-        "GET",
-        &format!("/api/v1/me/lead-requests/{lead_id}"),
+        "POST",
+        &format!("{request_path}/payer"),
         &patient,
-        None,
+        Some(renamed_by_lead),
     )
     .await;
-    assert_eq!(request["payer"]["answered_by_payer"], false, "{request}");
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "payer_answered_by_payer");
+    // Another staff save for the same payer keeps the record.
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("phone".into(), json!("+43 1 5550199"));
+    })
+    .await;
+    assert_eq!(saved["phone"], "+43 1 5550199", "{saved}");
+    assert_eq!(saved["identity_adopted_at"], adopted_at, "{saved}");
+    let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
+    assert_eq!(request["payer"]["answered_by_payer"], true, "{request}");
+    assert!(request["payer"]["phone"].is_null(), "{request}");
 
     // The new address opens a new link: nothing of the old answers.
     let (token, _) = send_link(&app, lead_id, json!({})).await;
@@ -1981,4 +2064,33 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     let (status, refused) = patch(&app, &token, &session, json!({ "occupation": "Händler" })).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
     assert_eq!(refused["code"], "payer_consent_required");
+
+    // Staff name another payer (another last name): the record goes, the
+    // lead's cabinet may name the payer again.
+    let saved = staff_save(&app, lead_id, |form| {
+        form.insert("last_name".into(), json!("Zahler-Neu"));
+    })
+    .await;
+    assert_eq!(saved["last_name"], "Zahler-Neu", "{saved}");
+    assert!(saved["identity_adopted_at"].is_null(), "{saved}");
+    let adopted: (Option<String>, Option<Value>) = sqlx::query_as(
+        "SELECT identity_adopted_at::text, identity_adopted_key FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(adopted, (None, None));
+    let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
+    assert_eq!(request["payer"]["answered_by_payer"], false, "{request}");
+    assert_eq!(request["payer"]["last_name"], "Zahler-Neu", "{request}");
+    let (status, body) = with_login(
+        &app,
+        "POST",
+        &format!("{request_path}/payer"),
+        &patient,
+        Some(viktor()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }

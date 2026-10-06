@@ -1288,6 +1288,7 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "bank_name",
         "via_third_party",
         "via_third_party_details",
+        "identity_adopted_at",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }

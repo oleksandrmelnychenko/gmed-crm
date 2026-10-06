@@ -4625,6 +4625,12 @@ pub(crate) async fn link_sent_for(
 /// identity is then the payer's own statement: the lead's cabinet shows only
 /// the name, type and relationship and no longer changes the payer (staff
 /// do).
+///
+/// The declaration's own record of the adoption counts independently of the
+/// statement (QA retest 2026-10-06, R2-a): staff changing only the payer's
+/// e-mail reset the statement, but the declaration still holds the identity
+/// the payer stated, which the lead never entered. Only another payer (staff
+/// change the name, the date of birth or the type) lifts the lock.
 pub(crate) async fn answered_by_payer(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -4633,6 +4639,9 @@ pub(crate) async fn answered_by_payer(
     let Some(declaration) = declaration.filter(|declaration| declaration.is_third_party()) else {
         return Ok(false);
     };
+    if declaration.identity_adopted_for_current_payer() {
+        return Ok(true);
+    }
     let payer_key = sqlx::query_scalar::<_, Option<Value>>(
         r#"SELECT payer_key FROM lead_payer_statements
            WHERE lead_id = $1 AND source = 'link'

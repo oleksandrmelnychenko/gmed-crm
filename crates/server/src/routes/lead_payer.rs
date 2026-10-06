@@ -221,6 +221,16 @@ pub(crate) struct Declaration {
     /// details say who or which.
     pub via_third_party: Option<bool>,
     pub via_third_party_details: Option<String>,
+    /// When the payer's identity was adopted from the payer's own answers
+    /// through its link ([`adopt_payer_identity`], QA retest 2026-10-06), and
+    /// the [`Declaration::payer_key`] it was adopted for. While the
+    /// declaration names that payer, the lead's cabinet sees only the name,
+    /// the type, the relationship and the own consent, and does not change
+    /// the payer — also after a change of the payer's e-mail reset the
+    /// statement. Every save for the same payer keeps both
+    /// ([`Declaration::carry_identity_adoption`]); another payer clears them.
+    pub identity_adopted_at: Option<DateTime<Utc>>,
+    pub identity_adopted_key: Option<Value>,
 }
 
 const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
@@ -231,7 +241,8 @@ const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_
      contact_consent_at, invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city, \
      invoice_country, invoice_email, invoice_vat_id, invoice_tax_number, payment_method, \
      payment_method_details, account_country, account_holder, bank_name, via_third_party, \
-     via_third_party_details, identity_changed_at, patient_id, created_at, updated_at";
+     via_third_party_details, identity_adopted_at, identity_adopted_key, identity_changed_at, \
+     patient_id, created_at, updated_at";
 
 /// The 14 keys of sections 7 and 8 the cabinet edits (API keys = column
 /// names), in form order; the two tax fields of section 7 are staff's.
@@ -322,6 +333,8 @@ impl Declaration {
             bank_name: row.try_get("bank_name").unwrap_or_default(),
             via_third_party: row.try_get("via_third_party").unwrap_or_default(),
             via_third_party_details: row.try_get("via_third_party_details").unwrap_or_default(),
+            identity_adopted_at: row.try_get("identity_adopted_at").unwrap_or_default(),
+            identity_adopted_key: row.try_get("identity_adopted_key").unwrap_or_default(),
         }
     }
 
@@ -488,6 +501,8 @@ impl Declaration {
             "bank_name": self.bank_name,
             "via_third_party": self.via_third_party,
             "via_third_party_details": self.via_third_party_details,
+            // Read-only: set by the payer's own link, kept for the same payer.
+            "identity_adopted_at": self.identity_adopted_at.map(|at| at.to_rfc3339()),
         })
     }
 
@@ -610,8 +625,9 @@ fn text(value: &Option<String>, max: usize) -> Result<Option<String>, &'static s
 /// organisation name and the relationship kind where the body leaves the key
 /// out, and the lead's answers of sections 7 and 8
 /// ([`Declaration::carry_billing`]), of which the body may set only the two
-/// tax fields. The consent to contact the payer is no input: the callers
-/// carry it over.
+/// tax fields, and the record of an identity the payer stated through its own
+/// link ([`Declaration::carry_identity_adoption`]). The consent to contact
+/// the payer is no input: the callers carry it over.
 fn declaration_from_input(
     input: &DeclarationInput,
     previous: Option<&Declaration>,
@@ -724,6 +740,8 @@ fn declaration_from_input(
     // The lead's answers of sections 7 and 8 survive the save; staff may set
     // the two tax fields of the invoice recipient.
     declaration.carry_billing(previous);
+    // So does the record that the payer stated this identity itself.
+    declaration.carry_identity_adoption(previous);
     if let Some(value) = &input.invoice_vat_id {
         declaration.invoice_vat_id =
             text(value, INVOICE_VAT_ID_MAX).map_err(|_| "invoice_vat_id_too_long")?;
@@ -1766,11 +1784,12 @@ async fn store_declaration(
                invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city,
                invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
                payment_method, payment_method_details, account_country, account_holder,
-               bank_name, via_third_party, via_third_party_details)
+               bank_name, via_third_party, via_third_party_details, identity_adopted_at,
+               identity_adopted_key)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
                    $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                   $40, $41, $42, $43, $44, $45)
+                   $40, $41, $42, $43, $44, $45, $46, $47)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                payer_type = EXCLUDED.payer_type,
@@ -1814,6 +1833,8 @@ async fn store_declaration(
                bank_name = EXCLUDED.bank_name,
                via_third_party = EXCLUDED.via_third_party,
                via_third_party_details = EXCLUDED.via_third_party_details,
+               identity_adopted_at = EXCLUDED.identity_adopted_at,
+               identity_adopted_key = EXCLUDED.identity_adopted_key,
                identity_changed_at = CASE WHEN $22 THEN clock_timestamp()
                                           ELSE lead_payer_declarations.identity_changed_at END,
                updated_by = EXCLUDED.updated_by,
@@ -1864,6 +1885,8 @@ async fn store_declaration(
     .bind(&declaration.bank_name)
     .bind(declaration.via_third_party)
     .bind(&declaration.via_third_party_details)
+    .bind(declaration.identity_adopted_at)
+    .bind(&declaration.identity_adopted_key)
     .execute(conn)
     .await
     .map(|_| ())
@@ -2329,6 +2352,12 @@ pub(crate) async fn save_from_portal(
 /// [`Declaration::carry_billing`], no reset of the payer's link —, dated as a
 /// new payer identity when the identity key changed, audited as a diff and
 /// synced onto the lead's orders. `actor` is `None` for the payer's link.
+///
+/// Through the payer's link (`link_id`) the adoption is recorded with the
+/// payer key it was made for (`identity_adopted_at`, `identity_adopted_key`):
+/// the lead's cabinet keeps the payer's identity hidden while the declaration
+/// names that payer. A paying parent's answers in the cabinet record nothing
+/// (the parent is a login of that cabinet); a record of the same payer stays.
 pub(crate) async fn adopt_payer_identity(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -2337,6 +2366,15 @@ pub(crate) async fn adopt_payer_identity(
     link_id: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
     let previous = load_declaration(conn, lead_id).await?;
+    let mut declaration = declaration.clone();
+    if link_id.is_some() && declaration.is_third_party() {
+        // The precision the database keeps.
+        declaration.identity_adopted_at = Some(Utc::now().trunc_subsecs(6));
+        declaration.identity_adopted_key = Some(declaration.payer_key());
+    } else {
+        declaration.carry_identity_adoption(previous.as_ref());
+    }
+    let declaration = &declaration;
     if previous.as_ref() == Some(declaration) {
         return Ok(());
     }
@@ -2818,6 +2856,35 @@ impl Declaration {
             self.clear_payment_route();
         }
         self.clear_dependent_billing();
+    }
+
+    /// The record that the payer stated its identity through its own link
+    /// (`identity_adopted_at`, `identity_adopted_key`) survives every save
+    /// that names the same payer — the whole row is written each time, a
+    /// change of the e-mail address included — and goes when who pays
+    /// changes or another person or organisation is named (another
+    /// [`Declaration::payer_key`]).
+    pub(crate) fn carry_identity_adoption(&mut self, previous: Option<&Declaration>) {
+        let same_payer = previous.filter(|previous| {
+            previous.payer_kind == self.payer_kind && previous.payer_key() == self.payer_key()
+        });
+        self.identity_adopted_at = same_payer.and_then(|previous| previous.identity_adopted_at);
+        self.identity_adopted_key =
+            same_payer.and_then(|previous| previous.identity_adopted_key.clone());
+    }
+
+    /// Whether the declaration names the payer whose identity was adopted
+    /// from the payer's own answers through its link: the lead's cabinet then
+    /// shows only the payer's name, type, relationship and the own consent and
+    /// does not change the payer
+    /// ([`crate::routes::lead_payer_link::answered_by_payer`]).
+    pub(crate) fn identity_adopted_for_current_payer(&self) -> bool {
+        self.is_third_party()
+            && self.identity_adopted_at.is_some()
+            && self
+                .identity_adopted_key
+                .as_ref()
+                .is_some_and(|key| *key == self.payer_key())
     }
 
     /// Clears section 8 and returns the keys that held an answer: the payer's
@@ -4045,6 +4112,58 @@ mod tests {
         let again = from_portal(Some(&own), &portal_person()).unwrap();
         assert_eq!(again.payment_method, None);
         assert_eq!(again.invoice_to.as_deref(), Some("other"));
+    }
+
+    #[test]
+    fn the_adopted_identity_stays_with_the_same_payer_only() {
+        // The payer stated its identity through its own link.
+        let mut adopted = from_input(&input("third_party")).unwrap();
+        adopted.identity_adopted_at = Some(now());
+        adopted.identity_adopted_key = Some(adopted.payer_key());
+        assert!(adopted.identity_adopted_for_current_payer());
+
+        // Staff save the same payer, another e-mail and phone included.
+        let kept = declaration_from_input(&input("third_party"), Some(&adopted), today()).unwrap();
+        assert_eq!(kept, adopted);
+        let mut readdressed = input("third_party");
+        readdressed.email = Some("erika.neu@example.org".into());
+        readdressed.phone = Some("+43 1 5550100".into());
+        readdressed.street = Some("Neuweg 2".into());
+        let readdressed = declaration_from_input(&readdressed, Some(&adopted), today()).unwrap();
+        assert_eq!(readdressed.identity_adopted_at, Some(now()));
+        assert!(readdressed.identity_adopted_for_current_payer());
+        // The billing patch of the cabinet keeps it as well.
+        let billed =
+            apply_billing_patch(&adopted, &patch(json!({ "invoice_to": "payer" }))).unwrap();
+        assert!(billed.identity_adopted_for_current_payer());
+
+        // Another person, another date of birth or another type: gone.
+        let mut renamed = input("third_party");
+        renamed.last_name = Some("Anders".into());
+        let renamed = declaration_from_input(&renamed, Some(&adopted), today()).unwrap();
+        assert_eq!(renamed.identity_adopted_at, None);
+        assert_eq!(renamed.identity_adopted_key, None);
+        assert!(!renamed.identity_adopted_for_current_payer());
+        let mut younger = input("third_party");
+        younger.date_of_birth = Some("1980-05-01".into());
+        let younger = declaration_from_input(&younger, Some(&adopted), today()).unwrap();
+        assert!(!younger.identity_adopted_for_current_payer());
+        let mut company = input("third_party");
+        company.payer_type = Some(Some("company".into()));
+        company.organisation_name = Some(Some("Zahl GmbH".into()));
+        let company = declaration_from_input(&company, Some(&adopted), today()).unwrap();
+        assert_eq!(company.identity_adopted_at, None);
+        let own = declaration_from_input(&input("self"), Some(&adopted), today()).unwrap();
+        assert_eq!(own.identity_adopted_at, None);
+        assert!(!own.identity_adopted_for_current_payer());
+        // Back to the adopted payer: the record does not return.
+        let back = declaration_from_input(&input("third_party"), Some(&renamed), today()).unwrap();
+        assert!(!back.identity_adopted_for_current_payer());
+
+        // A record of another key (an older row) never counts.
+        let mut stale = adopted.clone();
+        stale.last_name = Some("Anders".into());
+        assert!(!stale.identity_adopted_for_current_payer());
     }
 
     #[test]
