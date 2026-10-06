@@ -58,7 +58,7 @@ gmed-domain = { path = "../domain" }
 gmed-shared = { path = "../shared" }
 gmed-db = { path = "../db" }
 hmac = "0.12"
-sha1 = "0.10"
+sha1 = "0.11"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", features = [
