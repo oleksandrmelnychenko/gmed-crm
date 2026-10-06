@@ -142,7 +142,7 @@ jobs:
           tests/e2e-live/realtime.live.spec.ts
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -176,7 +176,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -217,7 +217,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
