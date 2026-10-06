@@ -10,6 +10,7 @@ import { lazyPageLoad } from "./lazy-pages";
 const TOKEN = "0123456789abcdef".repeat(4);
 const OTHER_TOKEN = "fedcba9876543210".repeat(4);
 const SESSION = "5e55".repeat(16);
+const OTHER_SESSION = "0e55".repeat(16);
 const CODE = "482915";
 const TODAY = "2026-10-06";
 
@@ -234,6 +235,8 @@ type Options = {
   route?: Partial<Route8>;
   acknowledged?: boolean;
   identityDocuments?: Doc[];
+  /** `OTHER_TOKEN` is a second valid link for the same payer, with its own code and session. */
+  secondLink?: boolean;
 };
 
 type Call = {
@@ -276,6 +279,8 @@ async function setup(page: Page, options: Options = {}) {
     session: null as string | null,
     documents: 0,
   };
+  /** The second link (`OTHER_TOKEN`), when the test has one: its own status, code and session. */
+  const second: typeof state = { status: "active", codeSentAt: null, attemptsLeft: 5, wrongTotal: 0, session: null, documents: 0 };
   const calls = {
     payer: [] as Call[],
     /** Any other API call: none may happen on this page. */
@@ -390,12 +395,13 @@ async function setup(page: Page, options: Options = {}) {
     calls.payer.push({ method, path, url: req.url(), link: headers["x-payer-link"], session: headers["x-payer-session"], body });
 
     // The token on every call (contract 3).
-    if (headers["x-payer-link"] !== TOKEN) return refuse(route, 401, "link_invalid");
-    if (state.status === "revoked") return refuse(route, 410, "link_revoked");
-    if (state.status === "expired") return refuse(route, 410, "link_expired");
-    if (state.status === "locked") return refuse(route, 423, "link_locked");
+    const link = headers["x-payer-link"] === TOKEN ? state : options.secondLink && headers["x-payer-link"] === OTHER_TOKEN ? second : null;
+    if (!link) return refuse(route, 401, "link_invalid");
+    if (link.status === "revoked") return refuse(route, 410, "link_revoked");
+    if (link.status === "expired") return refuse(route, 410, "link_expired");
+    if (link.status === "locked") return refuse(route, 423, "link_locked");
 
-    const sessionValid = Boolean(state.session) && headers["x-payer-session"] === state.session;
+    const sessionValid = Boolean(link.session) && headers["x-payer-session"] === link.session;
 
     if (path === "/public/payer-link" && method === "GET") {
       return route.fulfill({
@@ -406,36 +412,38 @@ async function setup(page: Page, options: Options = {}) {
           email_masked: "v***r@example.com",
           language: options.language ?? "de",
           expires_at: "2026-11-05T10:00:00Z",
-          code_sent_at: state.codeSentAt ? new Date(state.codeSentAt).toISOString() : null,
+          code_sent_at: link.codeSentAt ? new Date(link.codeSentAt).toISOString() : null,
           session_valid: sessionValid,
         },
       });
     }
     if (path === "/public/payer-link/code" && method === "POST") {
-      if (state.codeSentAt && Date.now() - state.codeSentAt < 60_000) {
-        return refuse(route, 429, "code_rate_limited", { retry_after_seconds: Math.ceil((60_000 - (Date.now() - state.codeSentAt)) / 1000) });
+      if (link.codeSentAt && Date.now() - link.codeSentAt < 60_000) {
+        return refuse(route, 429, "code_rate_limited", { retry_after_seconds: Math.ceil((60_000 - (Date.now() - link.codeSentAt)) / 1000) });
       }
       if (options.hourlyCodeLimitReached) return refuse(route, 429, "code_rate_limited", { retry_after_seconds: 42 });
-      state.codeSentAt = Date.now();
-      state.attemptsLeft = 5;
-      return route.fulfill({ status: 202, json: { sent_at: new Date(state.codeSentAt).toISOString(), resend_after_seconds: 60 } });
+      link.codeSentAt = Date.now();
+      link.attemptsLeft = 5;
+      return route.fulfill({ status: 202, json: { sent_at: new Date(link.codeSentAt).toISOString(), resend_after_seconds: 60 } });
     }
     if (path === "/public/payer-link/verify" && method === "POST") {
       const code = (body as { code?: string } | null)?.code;
-      if (!state.codeSentAt || state.attemptsLeft <= 0) return refuse(route, 422, "code_expired");
+      // The server says why a code no longer works: used up by wrong entries, or expired.
+      if (!link.codeSentAt) return refuse(route, 422, "code_expired", { reason: "expired" });
+      if (link.attemptsLeft <= 0) return refuse(route, 422, "code_expired", { reason: "too_many_attempts" });
       if (code !== CODE) {
-        state.wrongTotal += 1;
-        state.attemptsLeft -= 1;
-        if (state.wrongTotal >= (options.lockAfterWrong ?? 10)) {
-          state.status = "locked";
+        link.wrongTotal += 1;
+        link.attemptsLeft -= 1;
+        if (link.wrongTotal >= (options.lockAfterWrong ?? 10)) {
+          link.status = "locked";
           return refuse(route, 423, "link_locked");
         }
-        if (state.attemptsLeft <= 0) return refuse(route, 422, "code_expired");
-        return refuse(route, 422, "code_invalid", { attempts_left: state.attemptsLeft });
+        if (link.attemptsLeft <= 0) return refuse(route, 422, "code_expired", { reason: "too_many_attempts" });
+        return refuse(route, 422, "code_invalid", { attempts_left: link.attemptsLeft });
       }
-      state.session = SESSION;
+      link.session = link === state ? SESSION : OTHER_SESSION;
       q.email_confirmed_at = "2026-10-06T10:02:00Z";
-      return route.fulfill({ json: { session: SESSION, session_expires_at: "2026-10-06T11:02:00Z", questionnaire: view() } });
+      return route.fulfill({ json: { session: link.session, session_expires_at: "2026-10-06T11:02:00Z", questionnaire: view() } });
     }
 
     // From here on the session is needed (3.4).
@@ -504,7 +512,7 @@ async function setup(page: Page, options: Options = {}) {
     return refuse(route, 404, "not_found");
   });
 
-  return { q, state, calls };
+  return { q, state, second, calls };
 }
 
 /** Sets a date field (a date picker that takes "DD.MM.YYYY") like typing does. */
@@ -678,6 +686,95 @@ test.describe("payer link", () => {
     const fatal = page.getByTestId("payer-link-fatal");
     await expect(fatal).toContainText("Dieser Link wurde nach zu vielen falschen Codes gesperrt. Bitte wenden Sie sich an GMED.");
     await expect(page.getByTestId("payer-link-code-step")).toHaveCount(0);
+    expect(calls.others).toEqual([]);
+  });
+
+  test("five wrong codes use the code up, and the message follows the language", async ({ page }) => {
+    const { calls } = await setup(page);
+    await page.goto(`/payer#${TOKEN}`);
+    await page.getByTestId("payer-link-send-code").click(lazyPageLoad);
+    // The field by its id: its label changes with the language below.
+    const code = page.locator("#payer-link-code");
+    const error = page.getByTestId("payer-link-code-error");
+    const switcher = page.getByTestId("payer-link-language");
+
+    await code.fill("100001");
+    await page.getByRole("button", { name: "Bestätigen" }).click();
+    await expect(error).toHaveText("Der Code ist nicht richtig. Sie haben noch 4 Versuche.");
+    // The message is in the language shown, also after a switch.
+    await switcher.getByRole("radio", { name: "EN" }).click();
+    await expect(error).toHaveText("The code is not correct. You have 4 more attempts.");
+    await switcher.getByRole("radio", { name: "DE" }).click();
+    await expect(error).toHaveText("Der Code ist nicht richtig. Sie haben noch 4 Versuche.");
+
+    for (const [wrong, message] of [
+      ["100002", "Der Code ist nicht richtig. Sie haben noch 3 Versuche."],
+      ["100003", "Der Code ist nicht richtig. Sie haben noch 2 Versuche."],
+      ["100004", "Der Code ist nicht richtig. Sie haben noch einen Versuch."],
+    ]) {
+      await code.fill(wrong);
+      await page.getByRole("button", { name: "Bestätigen" }).click();
+      await expect(error).toHaveText(message);
+    }
+    // The fifth wrong code uses the code up: that is what the page says, not "expired".
+    await code.fill("100005");
+    await page.getByRole("button", { name: "Bestätigen" }).click();
+    await expect(error).toHaveText("Zu viele Fehlversuche. Bitte fordern Sie einen neuen Code an.");
+    await expect(code).toHaveValue("");
+    await switcher.getByRole("radio", { name: "EN" }).click();
+    await expect(error).toHaveText("Too many failed attempts. Please request a new code.");
+    await switcher.getByRole("radio", { name: "RU" }).click();
+    await expect(error).toHaveText("Слишком много неудачных попыток. Пожалуйста, запросите новый код.");
+    // Even the right code does not work any more.
+    await code.fill(CODE);
+    await page.getByRole("button", { name: "Подтвердить" }).click();
+    await expect(error).toHaveText("Слишком много неудачных попыток. Пожалуйста, запросите новый код.");
+    await expect(page.getByTestId("payer-link-form")).toHaveCount(0);
+    expect(calls.others).toEqual([]);
+  });
+
+  test("another link opened in the same tab is read at once: new token, no old session", async ({ page }) => {
+    const { second, calls } = await setup(page, { secondLink: true });
+    await signIn(page);
+    expect(await stored(page, "gmed-payer-session")).toBe(SESSION);
+    // Marks this document: a reload would lose it.
+    await page.evaluate(() => {
+      (window as unknown as { payerTabMark?: string }).payerTabMark = "same-document";
+    });
+
+    // The new link of the invitation e-mail, opened in this tab: only the fragment changes.
+    const callsBefore = calls.payer.length;
+    await page.goto(`/payer#${OTHER_TOKEN}`);
+    await expect(page.getByTestId("payer-link-code-step")).toBeVisible();
+    await expect(page.getByTestId("payer-link-form")).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { payerTabMark?: string }).payerTabMark)).toBe("same-document");
+    // The token leaves the address again and replaces the old one; the old session is gone.
+    await expect.poll(() => page.evaluate(() => window.location.hash)).toBe("");
+    expect(new URL(page.url()).pathname).toBe("/payer");
+    expect(page.url()).not.toContain(OTHER_TOKEN);
+    expect(await stored(page, "gmed-payer-link")).toBe(OTHER_TOKEN);
+    expect(await stored(page, "gmed-payer-session")).toBeNull();
+    const fresh = calls.payer.slice(callsBefore);
+    expect(fresh.map((call) => `${call.method} ${call.path}`)).toEqual(["GET /public/payer-link"]);
+    expect(fresh[0].link).toBe(OTHER_TOKEN);
+    expect(fresh[0].session).toBeUndefined();
+
+    // The new link asks for its own code and then opens the questionnaire.
+    await page.getByTestId("payer-link-send-code").click();
+    await page.getByLabel("Bestätigungscode (6 Ziffern)").fill(CODE);
+    await page.getByTestId("payer-link-verify").click();
+    await expect(page.getByTestId("payer-link-form")).toBeVisible();
+    expect(second.session).toBe(OTHER_SESSION);
+    expect(await stored(page, "gmed-payer-session")).toBe(OTHER_SESSION);
+    expect(calls.payer.slice(callsBefore).every((call) => call.link === OTHER_TOKEN)).toBe(true);
+
+    // A cut-off link in the same tab says so, and nothing of the link before is used.
+    const callsCut = calls.payer.length;
+    await page.goto("/payer#0123456789");
+    await expect(page.getByTestId("payer-link-fatal")).toContainText("Dieser Link ist unvollständig.");
+    expect(await stored(page, "gmed-payer-link")).toBeNull();
+    expect(await stored(page, "gmed-payer-session")).toBeNull();
+    expect(calls.payer.length).toBe(callsCut);
     expect(calls.others).toEqual([]);
   });
 
@@ -912,8 +1009,23 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: "Branche" })).toHaveValue("Handel");
     await next(page);
     await expect(stepTitle(page)).toHaveText("Zahlungsweg");
+    await expect(page.getByTestId("payer-link-step-payment").getByRole("combobox", { name: "Wie erfolgt die Zahlung?" })).toBeVisible();
     await next(page);
+    // The declarations of an organisation are about its representatives and beneficial owners.
     await expect(stepTitle(page)).toHaveText("Erklärungen");
+    const declarations = page.getByTestId("payer-link-step-declarations");
+    await expect(declarations).toContainText(
+      "Sie betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
+    );
+    await expect(
+      declarations.getByRole("combobox", {
+        name: "Üben die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten ein hochrangiges öffentliches Amt aus",
+      }),
+    ).toBeVisible();
+    await expect(declarations.getByRole("combobox", { name: /politisch exponiert/ })).toBeVisible();
+    await expect(declarations.getByRole("combobox", { name: /Sitz oder Wohnsitz in einem Land/ })).toBeVisible();
+    await expect(declarations.getByRole("combobox", { name: /Verbindungen zu Personen oder Unternehmen/ })).toBeVisible();
+    await expect(declarations.getByText(/Üben Sie|Haben Sie oder|Ihnen nahestehende/)).toHaveCount(0);
     await next(page);
 
     await expect(page.getByTestId("payer-link-complete")).toBeVisible();
@@ -1080,7 +1192,8 @@ test.describe("payer link", () => {
       await page.getByTestId("payer-link-summary-payment").getByRole("button", { name: "Ändern" }).click();
       await expect(stepTitle(page)).toHaveText("Zahlungsweg");
       await expect(page.getByTestId("payer-link-payment-method-note")).toBeVisible();
-      await page.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }).click();
+      // A company is asked how the payment is made.
+      await page.getByRole("combobox", { name: "Wie erfolgt die Zahlung?" }).click();
       const edge = await page.getByRole("option", { name: "Kryptowährung" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(edge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");

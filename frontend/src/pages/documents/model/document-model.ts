@@ -224,6 +224,9 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   privacy_information: "Informationsblatt zum Datenschutz",
   privacy_consents: "Einverständniserklärung zur Datenübermittlung",
   order_cost_estimate: "Kostenvoranschlag zum Einzelauftrag",
+  // Uploads of the payer on the payer link: never the patient's documents.
+  payer_funds_proof: "Nachweis der Mittelherkunft",
+  payer_identity: "Ausweis (Zahler/in)",
   // Uploads of the lead cabinet for a person who acts for the lead.
   representative_authority: "Vertretungsnachweis",
   representative_identity: "Ausweis (Vertreter/in)",

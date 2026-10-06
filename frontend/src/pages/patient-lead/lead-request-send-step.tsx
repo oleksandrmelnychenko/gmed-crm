@@ -204,6 +204,11 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
           ) : (
             <SummaryRows rows={group.rows} />
           )}
+          {group.note ? (
+            <p className="mt-2 text-xs leading-5 text-muted-foreground" data-testid={`lead-request-summary-${group.id}-note`}>
+              {group.note}
+            </p>
+          ) : null}
           {/* The persons of the group: each representative with the own statements and files. */}
           {group.parts?.map((part) => (
             <div
@@ -225,7 +230,8 @@ function RequestSummary({ groups }: { groups: SummaryGroup[] }) {
   );
 }
 
-function SummaryRows({ rows }: { rows: SummaryRow[] }) {
+/** Rows of the summary: label beside value, or a plain list when no row has a label. */
+export function SummaryRows({ rows }: { rows: SummaryRow[] }) {
   if (rows.length === 0) return null;
   if (rows.every((row) => !row.label)) {
     // A plain list: the uploaded files.

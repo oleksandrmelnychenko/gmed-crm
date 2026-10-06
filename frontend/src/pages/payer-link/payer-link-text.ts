@@ -26,6 +26,15 @@ import {
 
 export type PayerLabelField = PayerField | "email";
 
+/** Fields that ask about persons: an organisation reads them about its representatives and beneficial owners. */
+export type OrganisationQuestionField =
+  | "pep_self"
+  | "pep_self_details"
+  | "pep_related"
+  | "high_risk_country"
+  | "sanctions_links"
+  | "payment_method";
+
 /** Keys of `missing_for_submit` that are no form field, or that read differently in the list. */
 type MissingLabelKey =
   | "privacy_ack"
@@ -76,6 +85,8 @@ export type PayerLinkText = {
   codeFormat: string;
   codeInvalid: (attemptsLeft: number | null) => string;
   codeExpired: string;
+  /** The code was used up by wrong entries (422 `code_expired` with `reason: "too_many_attempts"`). */
+  codeTooManyAttempts: string;
   codeRateLimited: (seconds: number | null) => string;
   stepOf: (index: number, total: number) => string;
   steps: Record<PayerStep, string>;
@@ -104,6 +115,11 @@ export type PayerLinkText = {
   salutations: Record<Salutation, string>;
   organisationName: Record<OrganisationType, string>;
   fields: Record<PayerLabelField, string>;
+  /**
+   * The same questions for a company, organisation or insurer: they are about
+   * the persons who represent it or own it, not about the one who types.
+   */
+  organisationFields: Record<OrganisationQuestionField, string>;
   missing: Record<MissingLabelKey, string>;
   legalTopics: Record<LegalQuestion, string>;
   identityIntro: string;
@@ -145,6 +161,7 @@ export type PayerLinkText = {
   paymentMethods: Record<PaymentMethod, string>;
   cashCryptoNote: string;
   declarationsIntro: string;
+  declarationsIntroOrganisation: string;
   yesNo: { yes: string; no: string };
   summaryIntro: string;
   missingTitle: string;
@@ -206,6 +223,7 @@ const de: PayerLinkText = {
           ? "Der Code ist nicht richtig. Sie haben noch einen Versuch."
           : `Der Code ist nicht richtig. Sie haben noch ${left} Versuche.`,
   codeExpired: "Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.",
+  codeTooManyAttempts: "Zu viele Fehlversuche. Bitte fordern Sie einen neuen Code an.",
   codeRateLimited: (seconds) =>
     seconds
       ? `Bitte warten Sie ${seconds} s, bevor Sie einen neuen Code anfordern.`
@@ -306,6 +324,18 @@ const de: PayerLinkText = {
     via_third_party: "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
     via_third_party_details: "Bitte beschreiben (wer, welcher Dienst)",
   },
+  organisationFields: {
+    pep_self:
+      "Üben die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten ein hochrangiges öffentliches Amt aus oder haben sie es in den letzten 12 Monaten ausgeübt?",
+    pep_self_details: "Person, Amt, Land und Zeitraum",
+    pep_related:
+      "Ist ein unmittelbares Familienmitglied oder eine nahestehende Person der vertretungsberechtigten Personen oder wirtschaftlich Berechtigten politisch exponiert?",
+    high_risk_country:
+      "Haben die Organisation, die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Sitz oder Wohnsitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
+    sanctions_links:
+      "Bestehen bei der Organisation, den vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
+    payment_method: "Wie erfolgt die Zahlung?",
+  },
   missing: {
     privacy_ack: "Bestätigung der Datenschutzhinweise",
     id_document_upload: "Foto oder Scan des Ausweises",
@@ -402,6 +432,8 @@ const de: PayerLinkText = {
   },
   cashCryptoNote: "Barzahlungen und Zahlungen in Kryptowährung prüft GMED gesondert (Geldwäschegesetz).",
   declarationsIntro: "Diese Fragen schreibt das Geldwäschegesetz vor. Bitte beantworten Sie jede mit Ja oder Nein.",
+  declarationsIntroOrganisation:
+    "Diese Fragen schreibt das Geldwäschegesetz vor. Sie betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten. Bitte beantworten Sie jede mit Ja oder Nein.",
   yesNo: { yes: "Ja", no: "Nein" },
   summaryIntro: "Bitte prüfen Sie Ihre Angaben, bevor Sie sie senden.",
   missingTitle: "Bitte noch ergänzen:",
@@ -463,6 +495,7 @@ const en: PayerLinkText = {
           ? "The code is not correct. You have one more attempt."
           : `The code is not correct. You have ${left} more attempts.`,
   codeExpired: "The code has expired. Please request a new code.",
+  codeTooManyAttempts: "Too many failed attempts. Please request a new code.",
   codeRateLimited: (seconds) =>
     seconds
       ? `Please wait ${seconds} s before you request a new code.`
@@ -563,6 +596,18 @@ const en: PayerLinkText = {
     via_third_party: "Is the payment made through a third person or a payment service provider?",
     via_third_party_details: "Please describe (who, which service)",
   },
+  organisationFields: {
+    pep_self:
+      "Do the persons authorised to represent the organisation or its beneficial owners hold a prominent public office, or have they held one in the last 12 months?",
+    pep_self_details: "Person, office, country and period",
+    pep_related:
+      "Is an immediate family member or a close associate of the persons authorised to represent the organisation or of its beneficial owners politically exposed?",
+    high_risk_country:
+      "Do the organisation, the persons authorised to represent it or its beneficial owners have their registered office or residence in a country that the EU Commission lists as a high-risk third country?",
+    sanctions_links:
+      "Do the organisation, the persons authorised to represent it or its beneficial owners have links to persons or companies that are subject to sanctions?",
+    payment_method: "How will the payment be made?",
+  },
   missing: {
     privacy_ack: "Confirmation of the privacy information",
     id_document_upload: "Photo or scan of the identity document",
@@ -659,6 +704,8 @@ const en: PayerLinkText = {
   },
   cashCryptoNote: "GMED checks cash payments and payments in cryptocurrency separately (Money Laundering Act).",
   declarationsIntro: "German anti-money laundering law requires these questions. Please answer each with yes or no.",
+  declarationsIntroOrganisation:
+    "German anti-money laundering law requires these questions. They concern the organisation, the persons authorised to represent it and its beneficial owners. Please answer each with yes or no.",
   yesNo: { yes: "Yes", no: "No" },
   summaryIntro: "Please check your details before you send them.",
   missingTitle: "Please add:",
@@ -718,6 +765,7 @@ const uk: PayerLinkText = {
         ? "Код неправильний. Будь ласка, запросіть новий код."
         : `Код неправильний. Залишилося спроб: ${left}.`,
   codeExpired: "Термін дії коду минув. Будь ласка, запросіть новий код.",
+  codeTooManyAttempts: "Забагато невдалих спроб. Будь ласка, запросіть новий код.",
   codeRateLimited: (seconds) =>
     seconds
       ? `Будь ласка, зачекайте ${seconds} с, перш ніж запросити новий код.`
@@ -818,6 +866,18 @@ const uk: PayerLinkText = {
     bank_name: "Назва банку",
     via_third_party: "Чи здійснюється оплата через третю особу або платіжного провайдера?",
     via_third_party_details: "Опишіть, будь ласка (хто, який сервіс)",
+  },
+  organisationFields: {
+    pep_self:
+      "Чи обіймають особи, уповноважені представляти організацію, або кінцеві бенефіціари високу державну посаду або обіймали її протягом останніх 12 місяців?",
+    pep_self_details: "Особа, посада, країна і період",
+    pep_related:
+      "Чи є хтось із найближчих членів родини або близьких осіб уповноважених представників організації чи кінцевих бенефіціарів політично значущою особою?",
+    high_risk_country:
+      "Чи зареєстровані організація, її уповноважені представники або кінцеві бенефіціари чи проживають вони в країні, яку Європейська комісія відносить до третіх країн високого ризику?",
+    sanctions_links:
+      "Чи мають організація, її уповноважені представники або кінцеві бенефіціари зв'язки з особами або компаніями, на які накладено санкції?",
+    payment_method: "Як буде здійснено оплату?",
   },
   missing: {
     privacy_ack: "Підтвердження інформації про захист даних",
@@ -920,6 +980,8 @@ const uk: PayerLinkText = {
   cashCryptoNote: "Оплату готівкою та криптовалютою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
   declarationsIntro:
     "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
+  declarationsIntroOrganisation:
+    "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Вони стосуються організації, її уповноважених представників і кінцевих бенефіціарів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
   yesNo: { yes: "Так", no: "Ні" },
   summaryIntro: "Будь ласка, перевірте дані перед надсиланням.",
   missingTitle: "Будь ласка, доповніть:",
@@ -979,6 +1041,7 @@ const ru: PayerLinkText = {
         ? "Код неверный. Пожалуйста, запросите новый код."
         : `Код неверный. Осталось попыток: ${left}.`,
   codeExpired: "Срок действия кода истёк. Пожалуйста, запросите новый код.",
+  codeTooManyAttempts: "Слишком много неудачных попыток. Пожалуйста, запросите новый код.",
   codeRateLimited: (seconds) =>
     seconds
       ? `Пожалуйста, подождите ${seconds} с, прежде чем запросить новый код.`
@@ -1079,6 +1142,18 @@ const ru: PayerLinkText = {
     bank_name: "Название банка",
     via_third_party: "Производится ли оплата через третье лицо или платёжного провайдера?",
     via_third_party_details: "Опишите, пожалуйста (кто, какой сервис)",
+  },
+  organisationFields: {
+    pep_self:
+      "Занимают ли лица, уполномоченные представлять организацию, или конечные бенефициары высокую государственную должность или занимали её в последние 12 месяцев?",
+    pep_self_details: "Лицо, должность, страна и период",
+    pep_related:
+      "Является ли кто-то из ближайших членов семьи или близких лиц уполномоченных представителей организации или конечных бенефициаров политически значимым лицом?",
+    high_risk_country:
+      "Зарегистрированы ли организация, её уполномоченные представители или конечные бенефициары или проживают ли они в стране, которую Европейская комиссия относит к третьим странам высокого риска?",
+    sanctions_links:
+      "Есть ли у организации, её уполномоченных представителей или конечных бенефициаров связи с лицами или компаниями, на которые наложены санкции?",
+    payment_method: "Как будет произведена оплата?",
   },
   missing: {
     privacy_ack: "Подтверждение информации о защите данных",
@@ -1181,6 +1256,8 @@ const ru: PayerLinkText = {
   cashCryptoNote: "Оплату наличными и криптовалютой GMED проверяет отдельно (закон о противодействии отмыванию денег).",
   declarationsIntro:
     "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Пожалуйста, ответьте на каждый «да» или «нет».",
+  declarationsIntroOrganisation:
+    "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Они касаются организации, её уполномоченных представителей и конечных бенефициаров. Пожалуйста, ответьте на каждый «да» или «нет».",
   yesNo: { yes: "Да", no: "Нет" },
   summaryIntro: "Пожалуйста, проверьте данные перед отправкой.",
   missingTitle: "Пожалуйста, дополните:",
@@ -1217,9 +1294,15 @@ export function stepTitle(text: PayerLinkText, step: PayerStep, payerType: Payer
   return text.steps[step];
 }
 
-/** The label of a form field for this payer type. */
+/**
+ * The label of a form field for this payer type. An organisation answers the
+ * questions about persons for its representatives and beneficial owners.
+ */
 export function fieldLabel(text: PayerLinkText, field: PayerLabelField, payerType: PayerType): string {
-  if (field === "organisation_name" && isOrganisation(payerType)) return text.organisationName[payerType];
+  if (isOrganisation(payerType)) {
+    if (field === "organisation_name") return text.organisationName[payerType];
+    if (field in text.organisationFields) return text.organisationFields[field as OrganisationQuestionField];
+  }
   return text.fields[field];
 }
 

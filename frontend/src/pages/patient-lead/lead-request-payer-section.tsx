@@ -14,7 +14,7 @@ import {
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import { saveLeadPayer, type LeadRequest } from "./lead-request-api";
+import { PAYER_ANSWERED_BY_PAYER, fetchMyLeadRequests, saveLeadPayer, type LeadRequest } from "./lead-request-api";
 import {
   IdentificationFormField,
   IdentificationTextArea,
@@ -44,6 +44,8 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
+import { SummaryRows } from "./lead-request-send-step";
+import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
 import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 /**
@@ -79,18 +81,30 @@ export function PayerSection({
   const typed = knowsPayerType(request);
   // A parent's own data on file: the parent may answer "I pay".
   const template = guardian && typed ? (request.payer_self_template ?? null) : null;
+  // The payer answered on the own link: the block is read-only, nothing is sent from it.
+  const answered = payerAnsweredByPayer(request);
+  const answeredRef = useRef(answered);
+  answeredRef.current = answered;
   const [draft, setDraft] = useState<PayerDraft>(() => draftFromPayer(request.payer, template));
   const savedRef = useRef<PayerDraft>(draftFromPayer(request.payer));
   const rejectedRef = useRef<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const options = guardian ? text.payerOptionsGuardian : text.payerOptions;
+  // A parent who pays is not asked to agree that GMED contacts them (the
+  // parent is the payer); a server that still lists the consent as missing
+  // (an older one) gets the box, or the request could not be sent.
+  const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
+  const consentAsked = typed && (!draft.guardian_pays || serverAsksConsent);
 
   const save = useCallback(
     (snapshot: PayerDraft) => {
       void enqueue(async () => {
-        const input = payerInput(snapshot, typed);
+        if (answeredRef.current) return;
+        // Without the box the consent is left out: the server keeps what it has.
+        const withConsent = !snapshot.guardian_pays || serverAsksConsent;
+        const input = payerInput(snapshot, typed, withConsent);
         const key = JSON.stringify(input);
-        if (key === JSON.stringify(payerInput(savedRef.current, typed))) {
+        if (key === JSON.stringify(payerInput(savedRef.current, typed, withConsent))) {
           // Back at the saved answer: an answer the server refused in between is no error any more.
           if (rejectedRef.current !== null) {
             rejectedRef.current = null;
@@ -111,16 +125,59 @@ export function PayerSection({
         } catch (cause) {
           // The refused answer is not repeated until the patient changes it.
           rejectedRef.current = key;
-          const field = errorBody(cause)?.field;
+          const body = errorBody(cause);
+          if (body?.code === PAYER_ANSWERED_BY_PAYER) {
+            // The payer has answered in the meantime: the request is loaded
+            // afresh and the block turns read-only; nothing was saved.
+            answeredRef.current = true;
+            try {
+              const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === request.lead_id);
+              if (fresh) {
+                onChange(fresh);
+                onSaveState("saved");
+                return;
+              }
+            } catch {
+              // The next load of the page shows the state.
+            }
+            onSaveState("error");
+            return;
+          }
+          const field = body?.field;
           setFieldError(PAYER_FIELDS.includes(field as PayerField) ? (field as PayerField) : "payer");
           onSaveState("error");
         }
       });
     },
-    [enqueue, onChange, onSaveState, request.lead_id, typed],
+    [enqueue, onChange, onSaveState, request.lead_id, serverAsksConsent, typed],
   );
 
   useAutosave(draft, save);
+
+  if (answered) {
+    return (
+      <Section title={text.sectionPayer}>
+        <div className="space-y-3" data-testid="lead-request-payer">
+          <p
+            role="note"
+            className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground"
+            data-testid="lead-request-payer-answered"
+          >
+            {text.payerAnsweredByPayer}
+          </p>
+          <div data-testid="lead-request-payer-readonly">
+            <SummaryRows rows={answeredPayerRows(request, text)} />
+          </div>
+          {/* Why the payer pays is the lead's own statement (saved with the identification), not the payer's. */}
+          {identification && request.payer?.payer_kind === "third_party" ? (
+            <IdentificationFormField form={identification} field="payment_background" text={text} required>
+              <IdentificationTextArea form={identification} field="payment_background" />
+            </IdentificationFormField>
+          ) : null}
+        </div>
+      </Section>
+    );
+  }
 
   const set = <K extends keyof PayerDraft>(field: K, value: PayerDraft[K]) => {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -362,7 +419,7 @@ export function PayerSection({
                 <IdentificationTextArea form={identification} field="payment_background" />
               </IdentificationFormField>
             ) : null}
-            {typed ? (
+            {consentAsked ? (
               // The consent is part of the answer: it is saved with it, and it is needed to send.
               <div
                 className="space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3 sm:col-span-2"

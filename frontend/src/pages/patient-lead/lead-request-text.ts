@@ -130,6 +130,8 @@ export type LeadRequestText = {
   payerConsentHint: string;
   /** The consent in the summary and in the list of what is still missing. */
   payerConsentShort: string;
+  /** The payer answered on the own link: "who pays" is read-only, only GMED changes it. */
+  payerAnsweredByPayer: string;
   /** Own economic interest (GwG), part of "who pays". */
   ownAccountQuestion: string;
   beneficialOwner: string;
@@ -162,6 +164,8 @@ export type LeadRequestText = {
   /** The same block for a minor: the legal representatives. */
   sectionLegalRepresentatives: string;
   legalRepresentativesIntro: string;
+  /** Who gives the consent and the signatures, by the custody chosen. */
+  custodySignatureNote: Record<Custody, string>;
   custodyQuestion: string;
   custodyOptions: Record<Custody, string>;
   /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
@@ -639,6 +643,7 @@ const de: LeadRequestText = {
     "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr den Namen der Patientin / des Patienten mitteilt.",
   payerConsentHint: "Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.",
   payerConsentShort: "Einverständnis zur Kontaktaufnahme",
+  payerAnsweredByPayer: "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
   ownAccountQuestion: "Handeln Sie im eigenen wirtschaftlichen Interesse?",
   beneficialOwner: "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)",
   ownAccountQuestionGuardian: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?",
@@ -699,8 +704,12 @@ const de: LeadRequestText = {
   hasRepresentativeQuestion: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
   underGuardianshipQuestion: "Stehen Sie unter rechtlicher Betreuung?",
   sectionLegalRepresentatives: "Gesetzliche Vertreter",
-  legalRepresentativesIntro:
-    "Für Minderjährige handeln die gesetzlichen Vertreter. Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
+  legalRepresentativesIntro: "Für Minderjährige handeln die gesetzlichen Vertreter.",
+  custodySignatureNote: {
+    joint: "Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
+    sole_parent: "Einwilligung und Unterschrift gibt der allein sorgeberechtigte Elternteil.",
+    guardian: "Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
+  },
   custodyQuestion: "Wer vertritt das Kind?",
   custodyOptions: {
     joint: "Beide Eltern gemeinsam",
@@ -980,6 +989,7 @@ const ru: LeadRequestText = {
     "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им имя пациента.",
   payerConsentHint: "Без этого согласия мы не вправе обращаться к плательщику.",
   payerConsentShort: "Согласие на контакт",
+  payerAnsweredByPayer: "Плательщик сам указал свои данные. Изменения только через GMED.",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
   beneficialOwner: "В чьих интересах вы действуете? (имя, дата рождения, место рождения, адрес)",
   ownAccountQuestionGuardian: "Пациент действует в собственных экономических интересах?",
@@ -1043,8 +1053,12 @@ const ru: LeadRequestText = {
   hasRepresentativeQuestion: "Действует ли кто-то от вашего имени (представитель, посредник, уполномоченное лицо)?",
   underGuardianshipQuestion: "Назначен ли вам опекун по решению суда (rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законные представители",
-  legalRepresentativesIntro:
-    "За несовершеннолетних действуют законные представители. Согласие и подписи нужны от обоих родителей.",
+  legalRepresentativesIntro: "За несовершеннолетних действуют законные представители.",
+  custodySignatureNote: {
+    joint: "Согласие и подписи нужны от обоих родителей.",
+    sole_parent: "Согласие и подпись даёт родитель, у которого единоличное право опеки.",
+    guardian: "Согласие и подпись даёт опекун или попечитель.",
+  },
   custodyQuestion: "Кто представляет ребёнка?",
   custodyOptions: {
     joint: "Оба родителя вместе",
@@ -1325,6 +1339,7 @@ const uk: LeadRequestText = {
     "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй ім'я пацієнта.",
   payerConsentHint: "Без цієї згоди ми не маємо права звертатися до платника.",
   payerConsentShort: "Згода на контакт",
+  payerAnsweredByPayer: "Платник сам указав свої дані. Зміни лише через GMED.",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
   beneficialOwner: "В чиїх інтересах ви дієте? (ім'я, дата народження, місце народження, адреса)",
   ownAccountQuestionGuardian: "Пацієнт діє у власних економічних інтересах?",
@@ -1388,8 +1403,12 @@ const uk: LeadRequestText = {
   hasRepresentativeQuestion: "Чи діє хтось від вашого імені (представник, посередник, уповноважена особа)?",
   underGuardianshipQuestion: "Чи призначено вам опікуна за рішенням суду (rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законні представники",
-  legalRepresentativesIntro:
-    "За неповнолітніх діють законні представники. Згода та підписи потрібні від обох батьків.",
+  legalRepresentativesIntro: "За неповнолітніх діють законні представники.",
+  custodySignatureNote: {
+    joint: "Згода та підписи потрібні від обох батьків.",
+    sole_parent: "Згоду та підпис дає той із батьків, хто має одноосібне право опіки.",
+    guardian: "Згоду та підпис дає опікун або піклувальник.",
+  },
   custodyQuestion: "Хто представляє дитину?",
   custodyOptions: {
     joint: "Обоє батьків разом",
@@ -1670,6 +1689,7 @@ const en: LeadRequestText = {
     "I agree that GMED contacts this person or organisation about covering the costs and tells them the patient's name.",
   payerConsentHint: "Without this consent we may not approach the payer.",
   payerConsentShort: "Consent to contact",
+  payerAnsweredByPayer: "The paying person has given their details themselves. Changes only through GMED.",
   ownAccountQuestion: "Are you acting in your own economic interest?",
   beneficialOwner: "In whose interest are you acting? (name, date of birth, place of birth, address)",
   ownAccountQuestionGuardian: "Is the patient acting in their own economic interest?",
@@ -1727,8 +1747,12 @@ const en: LeadRequestText = {
   hasRepresentativeQuestion: "Is somebody acting for you (representative, messenger, authorised person)?",
   underGuardianshipQuestion: "Are you under legal guardianship?",
   sectionLegalRepresentatives: "Legal representatives",
-  legalRepresentativesIntro:
-    "For minors the legal representatives act. Consent and signatures are needed from both parents.",
+  legalRepresentativesIntro: "For minors the legal representatives act.",
+  custodySignatureNote: {
+    joint: "Consent and signatures are needed from both parents.",
+    sole_parent: "Consent and signature are given by the parent with sole custody.",
+    guardian: "Consent and signature are given by the guardian or custodian.",
+  },
   custodyQuestion: "Who represents the child?",
   custodyOptions: {
     joint: "Both parents together",

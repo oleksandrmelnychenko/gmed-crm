@@ -1614,8 +1614,9 @@ async fn save_payer_declaration(
             .and_then(|previous| previous.contact_consent_at);
     }
     // The payer's own link informs the payer (Art. 14 notice in the
-    // invitation, phase 3a): a staff form that does not tick the checkbox —
-    // an older client above all — keeps that record for the same payer.
+    // invitation, phase 3a), a paying parent by acknowledging the notice in
+    // the cabinet: a staff form that does not tick the checkbox — an older
+    // client above all — keeps that record for the same payer.
     if declaration.is_third_party()
         && declaration.payer_informed_at.is_none()
         && let Some(previous) = previous.as_ref().filter(|previous| {
@@ -1692,12 +1693,13 @@ async fn save_payer_declaration(
         return database_error(error, "save payer declaration");
     }
     // Another payer or another e-mail address: the payer's link stops
-    // working, and another payer's answers go.
+    // working, and another payer's answers go — with a link payer's
+    // payment route when only the address changed.
     if let Err(error) = crate::routes::lead_payer_link::payer_changed_in_tx(
         &mut tx,
         lead_id,
         previous.as_ref(),
-        &declaration,
+        &mut declaration,
         Some(auth.user_id),
     )
     .await
@@ -2065,9 +2067,37 @@ pub(crate) async fn patient_declaration(
     }))
 }
 
-/// The cabinet's view of the declaration; `null` until the question is answered.
-pub(crate) fn portal_payload(declaration: Option<&Declaration>) -> Value {
-    declaration.map_or(Value::Null, Declaration::portal_json)
+/// The payer's identity, address and contact keys of [`portal_payload`] the
+/// lead no longer sees once the payer answered through its own link.
+const PAYER_ANSWERED_HIDDEN_KEYS: [&str; 8] = [
+    "date_of_birth",
+    "street",
+    "zip",
+    "city",
+    "country",
+    "citizenships",
+    "email",
+    "phone",
+];
+
+/// The cabinet's view of the declaration; `null` until the question is
+/// answered. `answered_by_payer` (QA 2026-10-06): the payer stated its own
+/// identity through its link
+/// ([`crate::routes::lead_payer_link::answered_by_payer`]) — the lead sees
+/// the payer's type, name, relationship and the own consent only, every
+/// other identity, address and contact key is `null`.
+pub(crate) fn portal_payload(declaration: Option<&Declaration>, answered_by_payer: bool) -> Value {
+    let Some(declaration) = declaration else {
+        return Value::Null;
+    };
+    let mut value = declaration.portal_json();
+    if answered_by_payer {
+        for key in PAYER_ANSWERED_HIDDEN_KEYS {
+            value[key] = Value::Null;
+        }
+    }
+    value["answered_by_payer"] = json!(answered_by_payer);
+    value
 }
 
 /// What the cabinet still needs before the request can be sent: the answer
@@ -2244,7 +2274,7 @@ pub(crate) async fn save_from_portal(
     // The precision the database keeps, so the stored consent time is the
     // one the "entered by the patient" marker was made from.
     let now = Utc::now().trunc_subsecs(6);
-    let declaration =
+    let mut declaration =
         declaration_from_portal(previous.as_ref(), input, today, now).map_err(|code| {
             PortalPayerError::Invalid {
                 code,
@@ -2259,12 +2289,13 @@ pub(crate) async fn save_from_portal(
         .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
     store_declaration(conn, lead_id, &declaration, Some(actor), identity_changed).await?;
     // Another payer or another e-mail address: the payer's link stops
-    // working, and another payer's answers go.
+    // working, and another payer's answers go — with a link payer's
+    // payment route when only the address changed.
     crate::routes::lead_payer_link::payer_changed_in_tx(
         conn,
         lead_id,
         previous.as_ref(),
-        &declaration,
+        &mut declaration,
         Some(actor),
     )
     .await?;
@@ -2787,6 +2818,15 @@ impl Declaration {
             self.clear_payment_route();
         }
         self.clear_dependent_billing();
+    }
+
+    /// Clears section 8 and returns the keys that held an answer: the payer's
+    /// link went to another address, and what the payer at the old one
+    /// answered goes ([`crate::routes::lead_payer_link::payer_changed_in_tx`]).
+    pub(crate) fn take_payment_route(&mut self) -> Vec<&'static str> {
+        let before = self.clone();
+        self.clear_payment_route();
+        changed_billing_fields(&before, self)
     }
 
     /// Section 8 as nobody answered it.

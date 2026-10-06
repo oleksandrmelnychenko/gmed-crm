@@ -186,8 +186,10 @@ export function payerErrorMessage(kind: PayerErrorKind, text: ErrorTexts): strin
 }
 
 type CodeTexts = ErrorTexts & {
+  codeFormat: string;
   codeInvalid: (attemptsLeft: number | null) => string;
   codeExpired: string;
+  codeTooManyAttempts: string;
   codeRateLimited: (seconds: number | null) => string;
 };
 
@@ -195,12 +197,29 @@ function numberOf(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.round(value)) : null;
 }
 
-/** The message of a refused "send code" or "confirm" (3.2, 3.3). */
+/**
+ * The message of a refused "send code" or "confirm" (3.2, 3.3). A code used
+ * up by wrong entries says so (`reason: "too_many_attempts"`); a plain expiry,
+ * or an older server without the reason, reads "expired".
+ */
 export function codeErrorMessage(status: number, code: string, body: Record<string, unknown>, text: CodeTexts): string {
   if (code === "code_invalid") return text.codeInvalid(numberOf(body.attempts_left));
-  if (code === "code_expired") return text.codeExpired;
+  if (code === "code_expired") return body.reason === "too_many_attempts" ? text.codeTooManyAttempts : text.codeExpired;
   if (code === "code_rate_limited") return text.codeRateLimited(numberOf(body.retry_after_seconds));
   return payerErrorMessage(payerErrorKind(status, code), text);
+}
+
+/**
+ * What went wrong in the code step, kept as such: the message is written in
+ * the language shown when it is read, so a switch of the language takes it
+ * along.
+ */
+export type CodeProblem =
+  | { kind: "format" }
+  | { kind: "refused"; status: number; code: string; body: Record<string, unknown> };
+
+export function codeProblemMessage(problem: CodeProblem, text: CodeTexts): string {
+  return problem.kind === "format" ? text.codeFormat : codeErrorMessage(problem.status, problem.code, problem.body, text);
 }
 
 // ---------------------------------------------------------------------------

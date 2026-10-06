@@ -78,15 +78,17 @@ import {
   gwgSheetErrorText,
   gwgSheetPlan,
   gwgSheetRequest,
-  isRepresentativeUploadArt,
+  isOtherPersonUploadArt,
   type GwgSheetButton,
 } from "../model/gwg-identification";
 import { identificationErrorText, payerSamePerson } from "../model/lead-identification";
 import { representativeName } from "../model/lead-gwg-statements";
 import {
+  TRUSTED_CONTACT_RELATIONS,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   storedTrustedContactDrafts,
+  trustedContactRelationLabel,
   trustedContactsPayload,
   type TrustedContactPayload,
 } from "../model/lead-trusted-contacts";
@@ -2033,10 +2035,12 @@ export function preferPersistedCommercialLines(
 function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   // A proof of the origin of assets belongs to the due-diligence form, whatever its file is called.
   if (item.art === AML_ASSET_ORIGIN_EVIDENCE_ART) return null;
-  // What the lead cabinet uploaded for a person who acts for the lead (a
-  // parent's passport, a proof of authority) is never the lead's own identity
-  // document, although its type and name contain "identity".
-  if (isRepresentativeUploadArt(item.art)) return null;
+  // What was uploaded for another person — in the lead cabinet for a person
+  // who acts for the lead (a parent's passport, a proof of authority), on the
+  // payer link by the payer (the payer's passport, the proof of funds) — is
+  // never the lead's own identity document, although its category and name
+  // say "identity".
+  if (isOtherPersonUploadArt(item.art)) return null;
   const templateId = item.generated_template_id?.trim().toLowerCase();
   if (templateId === "privacy_information") return "privacy_information";
   if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
@@ -5199,7 +5203,7 @@ export function LeadWizard({
           personName,
           orderId: order?.id,
           orderNumber: order?.order_number,
-          replaceDocumentId: currentGwgSheet(wizardDocuments.gwg_identification, subject)?.id,
+          replaceDocument: currentGwgSheet(wizardDocuments.gwg_identification, subject),
         }),
       );
       const nextDocuments = await fetchDocuments(`/documents?lead_id=${encodeURIComponent(targetLeadId)}&include_archived_versions=true`);
@@ -7649,7 +7653,9 @@ ${serviceCommentLines.join("\n")}`
                             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                               <span className="break-words text-sm font-medium text-foreground">{contact.name}</span>
                               {contact.relation ? (
-                                <span className="text-xs text-muted-foreground">{contact.relation}</span>
+                                <span className="text-xs text-muted-foreground" data-testid="trusted-contact-relation">
+                                  {trustedContactRelationLabel(contact.relation, tx)}
+                                </span>
                               ) : null}
                               {gwgDataContactIds.has(contact.id) ? (
                                 <Badge variant="outline" className="border-border bg-muted/40 text-[10px] text-muted-foreground" data-testid="trusted-contact-gwg-badge">
@@ -9306,15 +9312,15 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => patchTrustedContactEditor("relation", event.target.value)}
                     >
                       <option value="">{tx("Выберите", "Auswählen")}</option>
-                      {trustedContactEditor.relation && !["parent", "guardian", "representative", "spouse", "relative", "other"].includes(trustedContactEditor.relation) ? (
+                      {trustedContactEditor.relation && !(TRUSTED_CONTACT_RELATIONS as readonly string[]).includes(trustedContactEditor.relation) ? (
                         <option value={trustedContactEditor.relation}>{trustedContactEditor.relation}</option>
                       ) : null}
-                      <option value="parent">{tx("Мать / отец", "Mutter / Vater")}</option>
-                      <option value="guardian">{tx("Законный представитель", "Gesetzlicher Vertreter")}</option>
-                      <option value="representative">{tx("Уполномоченный представитель", "Bevollmächtigte Person")}</option>
-                      <option value="spouse">{tx("Супруг / супруга", "Ehepartner/in")}</option>
-                      <option value="relative">{tx("Родственник", "Verwandte Person")}</option>
-                      <option value="other">{tx("Другое", "Sonstiges")}</option>
+                      {/* The same labels as the list of contacts. */}
+                      {TRUSTED_CONTACT_RELATIONS.map((relation) => (
+                        <option key={relation} value={relation}>
+                          {trustedContactRelationLabel(relation, tx)}
+                        </option>
+                      ))}
                     </NativeComboboxSelect>
                   </Field>
                   <Field label={tx("Дата рождения", "Geburtsdatum")}>

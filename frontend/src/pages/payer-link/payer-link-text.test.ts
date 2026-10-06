@@ -123,4 +123,30 @@ describe("payer page texts", () => {
     expect(missingLabel(de, "street", "organisation")).toBe("Sitz: Straße und Hausnummer");
     expect(missingLabel(de, "pep_related_details", "person")).toBe("Politisch exponierte nahestehende Person: Angaben");
   });
+
+  it("asks an organisation about its representatives and beneficial owners, not about the one who types", () => {
+    const de = payerLinkText("de");
+    for (const type of ["company", "organisation", "insurance"] as const) {
+      expect(fieldLabel(de, "pep_self", type)).toBe(
+        "Üben die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten ein hochrangiges öffentliches Amt aus oder haben sie es in den letzten 12 Monaten ausgeübt?",
+      );
+      for (const question of ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const) {
+        expect(fieldLabel(de, question, type)).toContain("vertretungsberechtigten Personen oder wirtschaftlich Berechtigten");
+        expect(fieldLabel(de, question, type)).not.toMatch(/\b(Sie|Ihnen|Ihre?)\b/);
+      }
+      expect(fieldLabel(de, "payment_method", type)).toBe("Wie erfolgt die Zahlung?");
+    }
+    // A private person is asked as before.
+    expect(fieldLabel(de, "pep_self", "person")).toBe(de.fields.pep_self);
+    expect(fieldLabel(de, "high_risk_country", "person")).toMatch(/^Haben Sie/);
+    expect(fieldLabel(de, "payment_method", "person")).toBe("Wie werden Sie bezahlen?");
+    // Every language words the organisation's questions on their own.
+    for (const lang of LANGS) {
+      const text = payerLinkText(lang);
+      for (const [field, label] of Object.entries(text.organisationFields)) {
+        expect(label, `${lang} ${field}`).not.toBe(text.fields[field as keyof typeof text.fields]);
+      }
+      expect(text.declarationsIntroOrganisation).not.toBe(text.declarationsIntro);
+    }
+  });
 });

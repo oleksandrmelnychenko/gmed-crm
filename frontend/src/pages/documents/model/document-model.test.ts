@@ -86,6 +86,18 @@ describe("commercial document context", () => {
 });
 
 describe("buildStandardDocumentName", () => {
+  it("names the payer's and a representative's uploads as another person's documents", () => {
+    expect(buildStandardDocumentName({ category: "identity", art: "payer_identity", documentDate: "2026-10-06" })).toBe(
+      "PERS-Ausweis (Zahler/in) vom 06.10.2026",
+    );
+    expect(buildStandardDocumentName({ category: "identity", art: "payer_funds_proof", documentDate: "2026-10-06" })).toBe(
+      "PERS-Nachweis der Mittelherkunft vom 06.10.2026",
+    );
+    expect(buildStandardDocumentName({ category: "identity", art: "representative_identity", documentDate: "2026-10-06" })).toBe(
+      "PERS-Ausweis (Vertreter/in) vom 06.10.2026",
+    );
+  });
+
   it("builds the requested medical specialty document naming pattern", () => {
     expect(
       buildStandardDocumentName({

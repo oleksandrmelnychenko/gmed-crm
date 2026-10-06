@@ -1,14 +1,38 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  TRUSTED_CONTACT_RELATIONS,
   leadUpdateWithChangedContacts,
   mergeTrustedContacts,
   storedTrustedContactDrafts,
+  trustedContactRelationLabel,
   trustedContactsChanged,
   trustedContactsPayload,
   withoutTrustedContacts,
   type TrustedContactDraft,
 } from "./lead-trusted-contacts";
+
+describe("the relation of a trusted contact", () => {
+  const ru = (text: string) => text;
+  const de = (_ru: string, text: string) => text;
+
+  it("reads as words, never as the stored value", () => {
+    expect(trustedContactRelationLabel("guardian", ru)).toBe("Опекун");
+    expect(trustedContactRelationLabel("guardian", de)).toBe("Vormund/Betreuer");
+    expect(trustedContactRelationLabel("representative", ru)).toBe("Уполномоченный представитель");
+    expect(trustedContactRelationLabel("representative", de)).toBe("Bevollmächtigte Person");
+    expect(trustedContactRelationLabel("parent", ru)).toBe("Мать / отец");
+    expect(trustedContactRelationLabel("parent", de)).toBe("Mutter / Vater");
+    for (const relation of TRUSTED_CONTACT_RELATIONS) {
+      expect(trustedContactRelationLabel(relation, ru)).not.toBe(relation);
+      expect(trustedContactRelationLabel(relation, de)).not.toBe(relation);
+    }
+  });
+
+  it("shows a relation typed as text in older data as it is", () => {
+    expect(trustedContactRelationLabel("Tante", de)).toBe("Tante");
+  });
+});
 import { patientEventChangesLeadData } from "./use-lead-step1-portal";
 
 const ANNA_ID = "11111111-1111-4111-8111-111111111111";

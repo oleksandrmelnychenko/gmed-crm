@@ -912,6 +912,10 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     onNextConfirm(page, true, asked);
     await choose(page, custody, "Ein Elternteil allein (alleiniges Sorgerecht)");
     await expect(second).toHaveCount(0);
+    // Who consents and signs follows the custody: not both parents any more.
+    await expect(page.getByTestId("lead-request-custody-note")).toHaveText(
+      "Für Minderjährige handeln die gesetzlichen Vertreter. Einwilligung und Unterschrift gibt der allein sorgeberechtigte Elternteil.",
+    );
     await expect.poll(() => calls.answers).toEqual([{ custody: "sole_parent" }]);
     await expect.poll(() => request.representation.representatives.map((item) => item.id)).toEqual([ANNA]);
     await expect(first.getByRole("textbox", { name: "Vorname" })).toHaveValue("Anna");
@@ -930,6 +934,9 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await choose(page, custody, "Vormund oder Pfleger");
     await expect.poll(() => calls.answers.at(-1)).toEqual({ custody: "guardian" });
     expect(asked).toHaveLength(2);
+    await expect(page.getByTestId("lead-request-custody-note")).toHaveText(
+      "Für Minderjährige handeln die gesetzlichen Vertreter. Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
+    );
     const appointment = page.getByTestId("lead-request-rep1-authority-upload");
     await expect(appointment).toContainText("Bestallungsurkunde");
     await expect(appointment).toContainText("*");

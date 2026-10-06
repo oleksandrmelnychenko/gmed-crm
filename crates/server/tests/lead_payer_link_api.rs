@@ -428,10 +428,14 @@ async fn patch(app: &PayerApp, token: &str, session: &str, body: Value) -> (Stat
     .await
 }
 
-/// Everything a person states for the submit except the files.
+/// Everything a person states for the submit except the files. The link
+/// prefills only the name and the relationship the lead entered; birth
+/// data, address and citizenships are the payer's own answers.
 fn person_answers() -> Value {
     json!({
         "salutation": "mr",
+        "date_of_birth": "1970-05-01",
+        "citizenships": ["AT"],
         "birth_place": "Graz",
         "birth_country": "AT",
         "street": "Ringstraße 9",
@@ -783,6 +787,7 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "code_expired");
+    assert_eq!(body["reason"], "expired", "{body}");
 
     let (status, sent) = as_payer(&app, "POST", CODE, &link, None).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{sent}");
@@ -815,8 +820,10 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
         as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": wrong }))).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "code_expired");
+    assert_eq!(body["reason"], "too_many_attempts", "{body}");
     let (_, body) = as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": code }))).await;
     assert_eq!(body["code"], "code_expired", "the right code is void too");
+    assert_eq!(body["reason"], "too_many_attempts", "{body}");
 
     // A new code; five more wrong tries make ten and lock the link.
     sqlx::query(
@@ -889,6 +896,7 @@ async fn the_code_yields_a_session_and_wrong_codes_lock_the_link() {
     // The code is used up.
     let (_, body) = as_payer(&app, "POST", VERIFY, &link, Some(json!({ "code": code }))).await;
     assert_eq!(body["code"], "code_expired");
+    assert_eq!(body["reason"], "expired", "{body}");
 
     let with_session = [
         ("X-Payer-Link", token.as_str()),
@@ -1333,43 +1341,83 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
 
-    // The lead's cabinet saves the same payer again: nothing resets.
-    let (_, request) = with_login(
+    // The lead's cabinet (QA 2026-10-06): the payer's own answers are not
+    // shown — name, type, relationship and the consent only — and the lead
+    // no longer changes the payer; the missing list stays as it was.
+    let request_path = format!("/api/v1/me/lead-requests/{lead_id}");
+    let (_, before) = with_login(&app, "GET", &request_path, &patient, None).await;
+    let shown = &before["payer"];
+    assert_eq!(shown["answered_by_payer"], true, "{before}");
+    assert_eq!(shown["payer_kind"], "third_party");
+    assert_eq!(shown["payer_type"], "person");
+    assert_eq!(shown["first_name"], "Viktor");
+    assert_eq!(shown["last_name"], "Zahler");
+    assert_eq!(shown["relationship_kind"], "other");
+    assert_eq!(shown["relationship"], "Onkel");
+    assert!(shown["contact_consent_at"].is_string(), "{before}");
+    for hidden in [
+        "date_of_birth",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "citizenships",
+        "email",
+        "phone",
+    ] {
+        assert!(shown[hidden].is_null(), "{hidden}: {before}");
+    }
+    for value in [
+        "1970-05-01",
+        "Ringstraße",
+        "Graz",
+        "viktor.zahler@example.com",
+    ] {
+        assert!(!before.to_string().contains(value), "{value}: {before}");
+    }
+    let (status, refused) = with_login(
+        &app,
+        "POST",
+        &format!("{request_path}/payer"),
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "street": "Zahlerstraße 7",
+            "citizenships": ["AT"],
+            "relationship_kind": "other",
+            "relationship": "Onkel",
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "payer_answered_by_payer");
+    let (_, after) = with_login(&app, "GET", &request_path, &patient, None).await;
+    assert_eq!(
+        after["progress"]["missing_for_submit"], before["progress"]["missing_for_submit"],
+        "{after}"
+    );
+    let (_, declaration) = with_login(
         &app,
         "GET",
-        &format!("/api/v1/me/lead-requests/{lead_id}"),
-        &patient,
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &app.manager(),
         None,
     )
     .await;
-    let shown = &request["payer"];
-    name_payer(
-        &app,
-        lead_id,
-        &patient,
-        json!({
-            "payer_kind": "third_party",
-            "payer_type": shown["payer_type"],
-            "first_name": shown["first_name"],
-            "last_name": shown["last_name"],
-            "date_of_birth": shown["date_of_birth"],
-            "street": shown["street"],
-            "zip": shown["zip"],
-            "city": shown["city"],
-            "country": shown["country"],
-            "citizenships": shown["citizenships"],
-            "relationship_kind": shown["relationship_kind"],
-            "relationship": shown["relationship"],
-            "email": shown["email"],
-            "phone": shown["phone"],
-        }),
-    )
-    .await;
+    assert_eq!(
+        declaration["declaration"]["street"], "Ringstraße 9",
+        "nothing saved: {declaration}"
+    );
     assert_eq!(active_links(pool, lead_id).await, 1);
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "submitted", "{info}");
 
-    // A resend needs "reopen", which keeps the answers.
+    // A resend needs "reopen", which keeps the answers; the payer corrects
+    // them, so the lead still sees nothing of them.
     let (status, refused) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["code"], "payer_already_submitted");
@@ -1382,6 +1430,9 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
         reopened["questionnaire"]["answers"]["occupation"],
         "Kaufmann"
     );
+    let (_, request) = with_login(&app, "GET", &request_path, &patient, None).await;
+    assert_eq!(request["payer"]["answered_by_payer"], true, "{request}");
+    assert!(request["payer"]["street"].is_null(), "{request}");
 }
 
 #[tokio::test]
@@ -1504,7 +1555,9 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
         .parse()
         .unwrap();
 
-    // The same payer at another address: the link ends, the answers stay.
+    // The same payer at another address: the link ends and — the holder of
+    // the new address may be somebody else (QA 2026-10-06) — the answers go
+    // and the files are withdrawn as for another payer.
     let mut moved = viktor();
     moved["email"] = json!("viktor.neu@example.com");
     name_payer(&app, lead_id, &patient, moved).await;
@@ -1517,13 +1570,21 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     assert_eq!(reason.as_deref(), Some("email_changed"));
     let (status, _) = as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
     assert_eq!(status, StatusCode::GONE);
-    let occupation: Option<String> =
-        sqlx::query_scalar("SELECT occupation FROM lead_payer_statements WHERE lead_id = $1")
-            .bind(lead_id)
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    assert_eq!(occupation.as_deref(), Some("Kaufmann"));
+    let (occupation, withdrawn): (Option<String>, bool) = sqlx::query_as(
+        r#"SELECT s.occupation,
+                  (SELECT u.withdrawn_at IS NOT NULL FROM lead_portal_uploads u
+                   WHERE u.document_id = $2)
+           FROM lead_payer_statements s WHERE s.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(document)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!((occupation, withdrawn), (None, true));
+    let resets = audit_contexts(pool, "payer_questionnaire_reset", lead_id).await;
+    assert_eq!(resets.len(), 1);
+    assert_eq!(resets[0].1["reason"], "email_changed", "{:?}", resets[0]);
 
     // Another payer: the link ends, the answers go, the files are withdrawn
     // (the documents stay with the lead for staff).
@@ -1561,12 +1622,9 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     .await
     .unwrap();
     assert_eq!(cleared, (None, None, true, true));
-    assert_eq!(
-        audit_contexts(pool, "payer_questionnaire_reset", lead_id)
-            .await
-            .len(),
-        1
-    );
+    let resets = audit_contexts(pool, "payer_questionnaire_reset", lead_id).await;
+    assert_eq!(resets.len(), 2);
+    assert_eq!(resets[1].1["reason"], "payer_changed", "{:?}", resets[1]);
 
     // A converted lead's link stops working.
     let (token, _) = send_link(&app, lead_id, json!({})).await;
@@ -1641,4 +1699,286 @@ async fn another_payer_or_address_ends_the_link_and_the_purge_removes_it() {
     assert_eq!(left, (0, 0, 0, 0));
     let (status, _) = as_payer(&app, "GET", OPEN, &[("X-Payer-Link", token.as_str())], None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// The answers of a payer that sent them through the link: everything of
+/// them the page could show, as text.
+const OLD_ANSWERS: [&str; 7] = [
+    "P1234567",
+    "Graz",
+    "Ringstraße",
+    "Kaufmann",
+    "Beispielbank",
+    "BH Wien",
+    "pass.pdf",
+];
+
+/// QA 2026-10-06 (S1): the payer's address changes after the payer sent the
+/// answers. Whoever holds the new address opens a new link: it shows none of
+/// the old answers, no payment route, no files and no acknowledgement — and
+/// a fresh link prefills only the name and the relationship the lead
+/// entered, never the lead's other data about the payer.
+#[tokio::test]
+async fn a_new_address_gets_a_link_without_the_previous_answers() {
+    let Some(app) = payer_app().await else { return };
+    let pool = app.pool();
+    let (lead_id, patient) = lead(&app, "address").await;
+    let mut named = viktor();
+    named["street"] = json!("Leadweg 3");
+    named["zip"] = json!("10115");
+    named["city"] = json!("Berlin");
+    named["country"] = json!("DE");
+    named["phone"] = json!("+49 30 5550100");
+    name_payer(&app, lead_id, &patient, named).await;
+    submit_request(&app, lead_id).await;
+    let path = format!("/api/v1/leads/{lead_id}/payer-link");
+    let (status, estimated) = with_login(
+        &app,
+        "POST",
+        &format!("{path}/estimated-total"),
+        &app.manager(),
+        Some(json!({ "estimated_total_eur": "500" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{estimated}");
+
+    // A fresh link: the name and the relationship only.
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    let session = open_session(&app, &token).await;
+    let headers = [
+        ("X-Payer-Link", token.as_str()),
+        ("X-Payer-Session", session.as_str()),
+    ];
+    let (status, fresh) = as_payer(&app, "GET", QUESTIONNAIRE, &headers, None).await;
+    assert_eq!(status, StatusCode::OK, "{fresh}");
+    let answers = &fresh["answers"];
+    assert_eq!(answers["first_name"], "Viktor", "{fresh}");
+    assert_eq!(answers["last_name"], "Zahler");
+    assert_eq!(answers["relationship_kind"], "friend");
+    for key in [
+        "date_of_birth",
+        "birth_place",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "phone",
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_country",
+        "id_valid_until",
+    ] {
+        assert!(answers[key].is_null(), "{key}: {fresh}");
+    }
+    assert_eq!(answers["citizenships"], json!([]), "{fresh}");
+    for value in ["Leadweg", "1970-05-01", "+49 30 5550100"] {
+        assert!(!fresh.to_string().contains(value), "{value}: {fresh}");
+    }
+    let missing = fresh["missing_for_submit"].as_array().unwrap();
+    for key in ["date_of_birth", "citizenships", "street", "country"] {
+        assert!(missing.contains(&json!(key)), "{key}: {fresh}");
+    }
+
+    // The payer answers, uploads the identity document and sends.
+    consent(&app, &token, &session).await;
+    let (status, body) = patch(&app, &token, &session, person_answers()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = payer_upload(&app, IDENTITY, &token, &session, "pass.pdf").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document: Uuid = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (status, body) = as_payer(
+        &app,
+        "POST",
+        SUBMIT,
+        &headers,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["state"], "submitted");
+
+    // Staff change the payer's address: the same payer, another e-mail.
+    let declaration_path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let (_, stored) = with_login(&app, "GET", &declaration_path, &app.manager(), None).await;
+    let current = &stored["declaration"];
+    assert_eq!(current["payment_method"], "bank_transfer", "{stored}");
+    let mut form = serde_json::Map::new();
+    for key in [
+        "payer_kind",
+        "acts_on_own_account",
+        "beneficial_owner_name",
+        "beneficial_owner_note",
+        "source_of_funds",
+        "source_of_funds_description",
+        "source_of_funds_document_id",
+        "payer_type",
+        "organisation_name",
+        "first_name",
+        "last_name",
+        "date_of_birth",
+        "place_of_birth",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "citizenships",
+        "relationship_kind",
+        "relationship",
+        "phone",
+    ] {
+        form.insert(key.to_string(), current[key].clone());
+    }
+    form.insert("email".into(), json!("viktor.neu@example.com"));
+    form.insert("payer_informed".into(), json!(true));
+    let (status, saved) = with_login(
+        &app,
+        "POST",
+        &declaration_path,
+        &app.manager(),
+        Some(Value::Object(form)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let saved = &saved["declaration"];
+    assert_eq!(saved["email"], "viktor.neu@example.com", "{saved}");
+    for key in [
+        "payment_method",
+        "account_country",
+        "account_holder",
+        "bank_name",
+        "via_third_party",
+    ] {
+        assert!(saved[key].is_null(), "section 8 goes: {key}: {saved}");
+    }
+    let reason: Option<String> = sqlx::query_scalar(
+        "SELECT revoked_reason FROM lead_payer_links WHERE lead_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(reason.as_deref(), Some("email_changed"));
+    let row: (
+        Option<String>,
+        Option<String>,
+        bool,
+        Option<String>,
+        Option<String>,
+        bool,
+    ) = sqlx::query_as(
+        r#"SELECT s.id_document_number, s.occupation,
+                      s.privacy_ack_at IS NULL AND s.submitted_at IS NULL
+                          AND s.declared_correct_at IS NULL AND s.adopted_at IS NULL,
+                      s.confirmed_email, s.estimated_total_eur::text,
+                      (SELECT u.withdrawn_at IS NOT NULL FROM lead_portal_uploads u
+                       WHERE u.document_id = $2)
+               FROM lead_payer_statements s WHERE s.lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(document)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (None, None, true, None, Some("500.00".to_string()), true),
+        "only staff's expected total stays"
+    );
+    let resets = audit_contexts(pool, "payer_questionnaire_reset", lead_id).await;
+    assert_eq!(resets.len(), 1, "{resets:?}");
+    let context = &resets[0].1;
+    assert_eq!(context["reason"], "email_changed", "{context}");
+    assert_eq!(context["withdrawn_uploads"], 1, "{context}");
+    assert!(
+        context["payment_route_cleared"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("bank_name")),
+        "{context}"
+    );
+    for value in OLD_ANSWERS {
+        assert!(!context.to_string().contains(value), "{value}: {context}");
+    }
+    // The lead's cabinet may name the payer again (staff reset the answers).
+    let (_, request) = with_login(
+        &app,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{lead_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(request["payer"]["answered_by_payer"], false, "{request}");
+
+    // The new address opens a new link: nothing of the old answers.
+    let (token, _) = send_link(&app, lead_id, json!({})).await;
+    {
+        let received = app.fake.received.lock().unwrap();
+        assert_eq!(received.last().unwrap()["to"], "viktor.neu@example.com");
+    }
+    let session = open_session(&app, &token).await;
+    let headers = [
+        ("X-Payer-Link", token.as_str()),
+        ("X-Payer-Session", session.as_str()),
+    ];
+    let (status, opened) = as_payer(&app, "GET", OPEN, &headers, None).await;
+    assert_eq!(status, StatusCode::OK, "{opened}");
+    assert_eq!(opened["state"], "active", "{opened}");
+    let (status, shown) = as_payer(&app, "GET", QUESTIONNAIRE, &headers, None).await;
+    assert_eq!(status, StatusCode::OK, "{shown}");
+    assert_eq!(shown["state"], "draft", "{shown}");
+    assert_eq!(shown["email"], "viktor.neu@example.com");
+    assert!(shown["privacy"]["acknowledged_at"].is_null(), "{shown}");
+    assert!(shown["submitted_at"].is_null());
+    assert!(shown["declared_correct_at"].is_null());
+    assert_eq!(shown["identity_documents"], json!([]), "{shown}");
+    assert_eq!(shown["funds_proof_documents"], json!([]), "{shown}");
+    for key in [
+        "payment_method",
+        "account_country",
+        "account_holder",
+        "bank_name",
+        "via_third_party",
+    ] {
+        assert!(shown["payment_route"][key].is_null(), "{key}: {shown}");
+    }
+    let answers = &shown["answers"];
+    assert_eq!(answers["first_name"], "Viktor", "{shown}");
+    assert_eq!(answers["last_name"], "Zahler");
+    for key in [
+        "salutation",
+        "date_of_birth",
+        "birth_place",
+        "birth_country",
+        "street",
+        "zip",
+        "city",
+        "country",
+        "phone",
+        "id_document_type",
+        "id_document_number",
+        "id_issuing_authority",
+        "id_issuing_country",
+        "id_valid_until",
+        "occupation",
+        "pep_self",
+        "pep_related",
+        "high_risk_country",
+        "sanctions_links",
+    ] {
+        assert!(answers[key].is_null(), "{key}: {shown}");
+    }
+    assert_eq!(answers["citizenships"], json!([]), "{shown}");
+    assert_eq!(answers["funds_sources"], json!([]), "{shown}");
+    for value in OLD_ANSWERS.iter().chain(["1970-05-01", "Leadweg"].iter()) {
+        assert!(!shown.to_string().contains(value), "{value}: {shown}");
+    }
+    assert_eq!(shown["missing_for_submit"][0], "privacy_ack", "{shown}");
+    let (status, refused) = patch(&app, &token, &session, json!({ "occupation": "Händler" })).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["code"], "payer_consent_required");
 }

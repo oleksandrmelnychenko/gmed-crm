@@ -7417,12 +7417,7 @@ async fn evaluate_patient_document_alerts(
                 .to_lowercase()
                 .replace([' ', '-'], "_");
 
-            let matches_art = !rule.art.is_empty() && rule.art.iter().any(|value| value == &art);
-            let matches_category = !rule.category.is_empty()
-                && !category.is_empty()
-                && rule.category.iter().any(|value| value == &category);
-
-            if matches_art || matches_category {
+            if required_document_rule_matches(rule, &art, &category) {
                 matching_documents.push(json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                     "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
@@ -7466,6 +7461,26 @@ async fn evaluate_patient_document_alerts(
         missing_documents,
         missing_count,
     })
+}
+
+/// Whether a patient document (type and category, normalised) fulfils a
+/// required-document rule. A file of another person — a representative's or
+/// a payer's identity document, a proof of authority or of funds — never
+/// fulfils the patient's rule, although its category (`identity`,
+/// `administrative`) is one the default rules name (QA 2026-10-06).
+fn required_document_rule_matches(
+    rule: &RequiredPatientDocumentRule,
+    art: &str,
+    category: &str,
+) -> bool {
+    if crate::routes::documents::is_other_person_document(art) {
+        return false;
+    }
+    let matches_art = !rule.art.is_empty() && rule.art.iter().any(|value| value == art);
+    let matches_category = !rule.category.is_empty()
+        && !category.is_empty()
+        && rule.category.iter().any(|value| value == category);
+    matches_art || matches_category
 }
 
 pub(crate) fn patient_document_alerts_payload(summary: &PatientDocumentAlertsSummary) -> Value {
@@ -16352,5 +16367,56 @@ mod unicode_pdf_tests {
             .is_ok(),
             "mixed English grouping/decimal separators must be supported",
         );
+    }
+}
+
+#[cfg(test)]
+mod required_document_rule_tests {
+    use super::{RequiredPatientDocumentRule, required_document_rule_matches};
+
+    #[test]
+    fn another_persons_file_never_fulfils_the_patients_rule() {
+        // The default rules of the migration `required_patient_documents`.
+        let passport = RequiredPatientDocumentRule {
+            key: "passport".into(),
+            label: "Reisepass".into(),
+            art: vec![
+                "passport".into(),
+                "passport_scan".into(),
+                "reisepass".into(),
+            ],
+            category: vec!["identity".into(), "passport".into()],
+        };
+        let consent = RequiredPatientDocumentRule {
+            key: "consent_form".into(),
+            label: "Einverständniserklärung".into(),
+            art: vec!["consent".into(), "consent_form".into()],
+            category: vec!["consent".into(), "administrative".into()],
+        };
+        assert!(required_document_rule_matches(
+            &passport,
+            "passport_scan",
+            ""
+        ));
+        assert!(required_document_rule_matches(
+            &passport, "identity", "identity"
+        ));
+        assert!(required_document_rule_matches(
+            &consent,
+            "other",
+            "administrative"
+        ));
+        for art in ["payer_identity", "representative_identity"] {
+            assert!(
+                !required_document_rule_matches(&passport, art, "identity"),
+                "{art}"
+            );
+        }
+        for art in ["payer_funds_proof", "representative_authority"] {
+            assert!(
+                !required_document_rule_matches(&consent, art, "administrative"),
+                "{art}"
+            );
+        }
     }
 }

@@ -36,9 +36,11 @@ import {
   patientMessageLanguage,
   portalCredentialsMessage,
   type PatientMessageLanguage,
+  type PortalCredentialsAudience,
 } from "../model/lead-portal-access";
 import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gwg-identification";
 import { leadErrorMessage } from "../model/leads-model";
+import { trustedContactRelationLabel } from "../model/lead-trusted-contacts";
 import {
   fetchLeadPortalIntake,
   issueLeadGuardianAccess,
@@ -164,7 +166,7 @@ export function LeadPortalAccessDetail({
         gwgSheetRequest({
           leadId: lead.id,
           subject: "contract_partner",
-          replaceDocumentId: currentGwgSheet(existing, "contract_partner")?.id,
+          replaceDocument: currentGwgSheet(existing, "contract_partner"),
         }),
       );
       await downloadDocumentFile(generated.id, generated.original_filename || generated.auto_name);
@@ -465,6 +467,11 @@ export type PortalCredentials = {
   leadId?: string;
   patientId?: string;
   userId?: string;
+  /**
+   * Whose login it is: the patient's own (the default), or a parent's — a
+   * legal representative who fills in the request of a minor child.
+   */
+  audience?: PortalCredentialsAudience;
 };
 
 /**
@@ -486,6 +493,9 @@ export function PortalCredentialsDialog({
   onClose: () => void;
 }) {
   const de = lang === "de";
+  const tx = (ru: string, deText: string) => (de ? deText : ru);
+  // A parent's login fills in the request of the child: the dialog speaks of the parent.
+  const parent = credentials?.audience === "parent";
   return (
     <Dialog
       open={credentials !== null}
@@ -497,17 +507,21 @@ export function PortalCredentialsDialog({
         <DialogHeader>
           <DialogTitle>
             {created
-              ? de
-                ? "Zugang für den Patienten angelegt"
-                : "Доступ для пациента создан"
-              : de
-                ? "Neues Passwort"
-                : "Новый пароль"}
+              ? parent
+                ? tx("Доступ для родителя / законного представителя создан", "Zugang für den Elternteil / die gesetzliche Vertretung angelegt")
+                : tx("Доступ для пациента создан", "Zugang für den Patienten angelegt")
+              : tx("Новый пароль", "Neues Passwort")}
           </DialogTitle>
           <DialogDescription>
-            {de
-              ? "Das Passwort wird nur jetzt angezeigt. Der Patient meldet sich damit an; geht es verloren, geben Sie hier ein neues aus."
-              : "Пароль показывается только сейчас. Пациент входит с ним; если пароль потерян, выдайте здесь новый."}
+            {parent
+              ? tx(
+                  "Пароль показывается только сейчас. Родитель или законный представитель входит с ним и заполняет заявку ребёнка; если пароль потерян, выдайте здесь новый.",
+                  "Das Passwort wird nur jetzt angezeigt. Der Elternteil bzw. die gesetzliche Vertretung meldet sich damit an und füllt die Anfrage des Kindes aus; geht es verloren, geben Sie hier ein neues aus.",
+                )
+              : tx(
+                  "Пароль показывается только сейчас. Пациент входит с ним; если пароль потерян, выдайте здесь новый.",
+                  "Das Passwort wird nur jetzt angezeigt. Der Patient meldet sich damit an; geht es verloren, geben Sie hier ein neues aus.",
+                )}
           </DialogDescription>
         </DialogHeader>
         {credentials ? (
@@ -607,6 +621,7 @@ function PortalCredentialsContent({
   }
 
   const loginUrl = typeof window === "undefined" ? "/login" : `${window.location.origin}/login`;
+  const parent = credentials.audience === "parent";
   const message = portalCredentialsMessage({ ...credentials, loginUrl, language });
   const canEmail = Boolean(targetId && userId && emailInfo?.can_send);
 
@@ -623,7 +638,13 @@ function PortalCredentialsContent({
       <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
         <div className="flex items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            {de ? "Nachricht an den Patienten" : "Сообщение для пациента"}
+            {parent
+              ? de
+                ? "Nachricht an den Elternteil / die gesetzliche Vertretung"
+                : "Сообщение для родителя / законного представителя"
+              : de
+                ? "Nachricht an den Patienten"
+                : "Сообщение для пациента"}
           </span>
           <div className="flex gap-1" role="group" aria-label={de ? "Sprache" : "Язык"}>
             {MESSAGE_LANGUAGES.map((option) => (
@@ -857,7 +878,12 @@ export function LeadGuardianAccess({
             <span>
               {candidate.name ?? "—"}{" "}
               <span className="text-muted-foreground">
-                {[candidate.relation, candidate.email ?? tx("нет e-mail", "keine E-Mail")].filter(Boolean).join(" · ")}
+                {[
+                  candidate.relation ? trustedContactRelationLabel(candidate.relation, tx) : null,
+                  candidate.email ?? tx("нет e-mail", "keine E-Mail"),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </span>
             </span>
             {canIssue && contactId && candidate.email ? (
@@ -889,7 +915,14 @@ export function LeadGuardianAccess({
       <PortalCredentialsDialog
         credentials={
           issued
-            ? { email: issued.email, password: issued.password, firstName: "", leadId: lead.id, userId: issued.userId }
+            ? {
+                email: issued.email,
+                password: issued.password,
+                firstName: "",
+                leadId: lead.id,
+                userId: issued.userId,
+                audience: "parent",
+              }
             : null
         }
         created={issued?.created ?? false}

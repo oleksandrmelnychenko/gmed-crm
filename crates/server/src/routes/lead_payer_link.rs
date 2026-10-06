@@ -885,9 +885,16 @@ fn fill(target: &mut Option<String>, fallback: Option<&String>, max: usize) {
 }
 
 /// The answers as the payer sees and submits them (D2): the statement's
-/// value, otherwise what the declaration holds (the lead named the payer);
-/// for a paying parent the person and the identity document are the
-/// representative's (phase 1b-2), whatever the statement holds for them.
+/// value, otherwise — through the link — only the name, the payer type and
+/// the relationship the lead entered in the declaration; for a paying parent
+/// the person and the identity document are the representative's (phase
+/// 1b-2), whatever the statement holds for them.
+///
+/// Data minimisation (QA 2026-10-06): the link never shows the payer what
+/// the lead entered about it beyond the name — no date or place of birth, no
+/// address, citizenship, phone or identity document. The payer states those
+/// itself; whoever opens the link learns nothing the lead said about the
+/// payer.
 fn effective_answers(
     stored: &Answers,
     declaration: &Declaration,
@@ -963,16 +970,6 @@ fn effective_answers(
         ),
         (&mut answers.last_name, declaration.last_name.as_ref(), 100),
         (
-            &mut answers.birth_place,
-            declaration.place_of_birth.as_ref(),
-            200,
-        ),
-        (&mut answers.street, declaration.street.as_ref(), 200),
-        (&mut answers.zip, declaration.zip.as_ref(), 20),
-        (&mut answers.city, declaration.city.as_ref(), 200),
-        (&mut answers.country, declaration.country.as_ref(), 2),
-        (&mut answers.phone, declaration.phone.as_ref(), 200),
-        (
             &mut answers.organisation_name,
             declaration.organisation_name.as_ref(),
             200,
@@ -984,12 +981,6 @@ fn effective_answers(
         ),
     ] {
         fill(target, fallback, max);
-    }
-    if answers.date_of_birth.is_none() {
-        answers.date_of_birth = declaration.date_of_birth;
-    }
-    if answers.citizenships.is_empty() {
-        answers.citizenships = declaration.citizenships.clone();
     }
     if answers.relationship_kind.is_none() {
         answers.relationship_kind = declaration.relationship_kind.clone();
@@ -2417,7 +2408,10 @@ fn billing_error(error: PortalBillingError) -> Response {
 
 /// The acknowledgement of the privacy notice (D7): the first one keeps its
 /// time, text version, language and IP; the contact channels follow the
-/// latest answer. Nothing else is writable before it.
+/// latest answer. Nothing else is writable before it. `payer_informed` is
+/// what the paying parent's acknowledgement recorded on the declaration
+/// (`None` for the link, whose invitation records it).
+#[allow(clippy::too_many_arguments)]
 async fn record_consent(
     conn: &mut PgConnection,
     context: &LeadContext,
@@ -2426,6 +2420,7 @@ async fn record_consent(
     body: &[u8],
     ip: Option<&str>,
     default_language: Option<&str>,
+    payer_informed: Option<bool>,
 ) -> Result<(), Response> {
     if context.submitted_at().is_some() {
         return Err(already_submitted());
@@ -2487,13 +2482,17 @@ async fn record_consent(
     .execute(&mut *conn)
     .await
     .map_err(database)?;
+    let mut audit_context = json!({ "first": first, "text_version": PRIVACY_TEXT_VERSION });
+    if let Some(recorded) = payer_informed {
+        audit_context["payer_informed_recorded"] = json!(recorded);
+    }
     audit::write_in_transaction(
         conn,
         &writer.event(
             "payer_questionnaire_consent",
             "lead",
             lead_id,
-            json!({ "first": first, "text_version": PRIVACY_TEXT_VERSION }),
+            audit_context,
         ),
     )
     .await
@@ -3178,6 +3177,26 @@ async fn log_email(
     .map(|_| ())
 }
 
+/// 422 `code_expired`: no valid code. `reason` says why — `too_many_attempts`
+/// when wrong tries used the code up, `expired` otherwise (none was sent, its
+/// time passed, or it was used).
+fn code_expired(too_many_attempts: bool) -> Response {
+    let (reason, message) = if too_many_attempts {
+        (
+            "too_many_attempts",
+            "Too many wrong tries; please ask for a new code",
+        )
+    } else {
+        ("expired", "Please ask for a new code")
+    };
+    coded(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "code_expired",
+        message,
+        json!({ "reason": reason }),
+    )
+}
+
 /// `POST /public/payer-link/verify` (3.3): checks the code; a right one
 /// yields the session (a new one replaces the old), a wrong one counts.
 async fn verify_code(State(state): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
@@ -3207,12 +3226,10 @@ async fn verify_code(State(state): State<AppState>, headers: HeaderMap, body: By
         .as_deref()
         .filter(|_| link.code_expires_at.is_some_and(|until| until > now))
     else {
-        return coded(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "code_expired",
-            "Please ask for a new code",
-            json!({}),
-        );
+        // A code used up by wrong tries keeps its count until the next code
+        // (QA 2026-10-06: the page says why, not "expired").
+        let used_up = link.code_hash.is_none() && link.code_attempts >= CODE_ATTEMPTS;
+        return code_expired(used_up);
     };
     let writer = Writer::Link {
         link_id: link.id,
@@ -3268,12 +3285,7 @@ async fn verify_code(State(state): State<AppState>, headers: HeaderMap, body: By
             return Refusal::LinkLocked.into_response();
         }
         if void {
-            return coded(
-                StatusCode::UNPROCESSABLE_ENTITY,
-                "code_expired",
-                "Too many wrong tries; please ask for a new code",
-                json!({}),
-            );
+            return code_expired(true);
         }
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -3408,6 +3420,7 @@ async fn give_consent(State(state): State<AppState>, headers: HeaderMap, body: B
         &body,
         ip.as_deref(),
         Some(&link.language),
+        None,
     )
     .await
     {
@@ -3894,6 +3907,22 @@ async fn cabinet_consent(
     {
         return intake::internal(error, "create payer statement");
     }
+    // The paying parent read the payer's notice: the payer is informed
+    // (Art. 13/14 DSGVO), recorded once like the link's invitation does —
+    // by the parent's login. Rolled back with the consent if that fails.
+    let informed = match sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_informed_at = now(), payer_informed_by = $2, updated_at = now()
+           WHERE lead_id = $1 AND payer_informed_at IS NULL"#,
+    )
+    .bind(lead_id)
+    .bind(auth.user_id)
+    .execute(&mut *tx)
+    .await
+    {
+        Ok(done) => done.rows_affected() > 0,
+        Err(error) => return intake::internal(error, "record payer informed"),
+    };
     let writer = Writer::Parent {
         user_id: auth.user_id,
     };
@@ -3906,6 +3935,7 @@ async fn cabinet_consent(
         &body,
         ip.as_deref(),
         None,
+        Some(informed),
     )
     .await
     {
@@ -4562,8 +4592,10 @@ async fn staff_estimated_total(
 // Hooks of the other modules
 // ----------------------------------------------------------------------------
 
-/// Whether a link with this payer was ever mailed successfully for the lead:
-/// the invitation informed that payer (the staff save keeps the record).
+/// Whether this payer was informed through its own channel: a link with it
+/// was ever mailed successfully for the lead (the invitation carries the
+/// notice), or the paying parent acknowledged the payer's notice in the
+/// cabinet. The staff save keeps the record either way.
 pub(crate) async fn link_sent_for(
     conn: &mut PgConnection,
     lead_id: Uuid,
@@ -4575,12 +4607,42 @@ pub(crate) async fn link_sent_for(
                JOIN lead_payer_link_emails e
                  ON e.link_id = k.id AND e.kind = 'invitation' AND e.status = 'sent'
                WHERE k.lead_id = $1 AND k.payer_key = $2
+           ) OR EXISTS(
+               SELECT 1 FROM lead_payer_statements s
+               WHERE s.lead_id = $1 AND s.source = 'cabinet'
+                 AND s.privacy_ack_at IS NOT NULL AND s.payer_key = $2
            )"#,
     )
     .bind(lead_id)
     .bind(payer_key)
     .fetch_one(&mut *conn)
     .await
+}
+
+/// Whether the payer named in `declaration` answered through its own link
+/// (QA 2026-10-06): the statement came from the link, was sent — or was
+/// adopted and is reopened for corrections — and belongs to this payer. Its
+/// identity is then the payer's own statement: the lead's cabinet shows only
+/// the name, type and relationship and no longer changes the payer (staff
+/// do).
+pub(crate) async fn answered_by_payer(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: Option<&Declaration>,
+) -> Result<bool, sqlx::Error> {
+    let Some(declaration) = declaration.filter(|declaration| declaration.is_third_party()) else {
+        return Ok(false);
+    };
+    let payer_key = sqlx::query_scalar::<_, Option<Value>>(
+        r#"SELECT payer_key FROM lead_payer_statements
+           WHERE lead_id = $1 AND source = 'link'
+             AND (submitted_at IS NOT NULL OR adopted_at IS NOT NULL)"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    Ok(payer_key.is_some_and(|key| key == declaration.payer_key()))
 }
 
 /// When the payer's answers were sent, if they are.
@@ -4606,16 +4668,25 @@ pub(crate) async fn link_can_be_sent(state: &AppState, lead_id: Uuid) -> Result<
         .is_some_and(|context| context.blocked_reason().is_none()))
 }
 
-/// D10: the declaration changed. Another payer (kind or key): the active link
-/// is revoked (`payer_changed`), the statement's answers are cleared — all
-/// but staff's expected total — and the payer's files are withdrawn (the
-/// documents stay with the lead). The same payer at another address: the
-/// link is revoked (`email_changed`), the answers stay.
+/// D10: the declaration changed (called after it is stored, in the same
+/// transaction). Another payer (kind or key): the active link is revoked
+/// (`payer_changed`), the statement's answers are cleared — all but staff's
+/// expected total — and the payer's files are withdrawn (the documents stay
+/// with the lead).
+///
+/// The same payer at another address: the link is revoked
+/// (`email_changed`). When that payer answers through its own link (not a
+/// paying parent with a cabinet login), the change counts as another payer
+/// as well (QA 2026-10-06): whoever holds the new address must not see what
+/// the holder of the old one stated — the answers are cleared and the files
+/// withdrawn like above, and section 8 of the declaration, which the payer
+/// answered through the link, is cleared too (in `next` and in the stored
+/// row, so the caller's audit diff shows it).
 pub(crate) async fn payer_changed_in_tx(
     conn: &mut PgConnection,
     lead_id: Uuid,
     previous: Option<&Declaration>,
-    next: &Declaration,
+    next: &mut Declaration,
     actor: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
     let Some(previous) = previous else {
@@ -4625,8 +4696,53 @@ pub(crate) async fn payer_changed_in_tx(
         || (next.is_third_party() && previous.payer_key() != next.payer_key());
     if payer_changed {
         revoke_active(conn, lead_id, "payer_changed", actor).await?;
-        let cleared: Option<bool> = sqlx::query_scalar(
-            r#"UPDATE lead_payer_statements
+        return reset_statement(conn, lead_id, "payer_changed", actor, &[]).await;
+    }
+    if !next.is_third_party()
+        || normalized_email(previous.email.as_deref()) == normalized_email(next.email.as_deref())
+    {
+        return Ok(());
+    }
+    revoke_active(conn, lead_id, "email_changed", actor).await?;
+    let representation = lead_representatives::load(conn, lead_id)
+        .await?
+        .unwrap_or_default();
+    let route_by = intake::payment_route_by(Some(&*next), &representation.representation, None);
+    if route_by != PaymentRouteBy::Payer {
+        // A paying parent with a cabinet login answers in the cabinet; no
+        // link reaches anybody else.
+        return Ok(());
+    }
+    let route_cleared = next.take_payment_route();
+    if !route_cleared.is_empty() {
+        sqlx::query(
+            r#"UPDATE lead_payer_declarations
+               SET payment_method = NULL, payment_method_details = NULL,
+                   account_country = NULL, account_holder = NULL, bank_name = NULL,
+                   via_third_party = NULL, via_third_party_details = NULL,
+                   updated_at = now()
+               WHERE lead_id = $1"#,
+        )
+        .bind(lead_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    reset_statement(conn, lead_id, "email_changed", actor, &route_cleared).await
+}
+
+/// Clears the payer's answers (all but staff's expected total, with the
+/// privacy acknowledgement, the confirmed address and the submit), withdraws
+/// the payer's files and audits the reset with the field names of section 8
+/// that went with it.
+async fn reset_statement(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    reason: &str,
+    actor: Option<Uuid>,
+    payment_route_cleared: &[&'static str],
+) -> Result<(), sqlx::Error> {
+    let cleared: Option<bool> = sqlx::query_scalar(
+        r#"UPDATE lead_payer_statements
                SET answered_by_user = NULL, link_id = NULL, payer_key = NULL,
                    privacy_ack_at = NULL, privacy_text_version = NULL, privacy_language = NULL,
                    privacy_ip = NULL, contact_channels = '{}', confirmed_email = NULL,
@@ -4651,39 +4767,36 @@ pub(crate) async fn payer_changed_in_tx(
                    updated_at = now()
                WHERE lead_id = $1
                RETURNING true"#,
-        )
-        .bind(lead_id)
-        .fetch_optional(&mut *conn)
-        .await?;
-        let withdrawn = sqlx::query(
-            r#"UPDATE lead_portal_uploads SET withdrawn_at = now()
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let withdrawn = sqlx::query(
+        r#"UPDATE lead_portal_uploads SET withdrawn_at = now()
                WHERE lead_id = $1
                  AND kind IN ('payer_identity', 'payer_funds_proof')
                  AND withdrawn_at IS NULL"#,
+    )
+    .bind(lead_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    if cleared.is_some() || withdrawn > 0 || !payment_route_cleared.is_empty() {
+        audit::write_in_transaction(
+            conn,
+            &audit::domain_event(
+                "payer_questionnaire_reset",
+                actor,
+                "lead",
+                Some(lead_id),
+                json!({
+                    "reason": reason,
+                    "withdrawn_uploads": withdrawn,
+                    "payment_route_cleared": payment_route_cleared,
+                }),
+            ),
         )
-        .bind(lead_id)
-        .execute(&mut *conn)
-        .await?
-        .rows_affected();
-        if cleared.is_some() || withdrawn > 0 {
-            audit::write_in_transaction(
-                conn,
-                &audit::domain_event(
-                    "payer_questionnaire_reset",
-                    actor,
-                    "lead",
-                    Some(lead_id),
-                    json!({ "reason": "payer_changed", "withdrawn_uploads": withdrawn }),
-                ),
-            )
-            .await?;
-        }
-        return Ok(());
-    }
-    if next.is_third_party()
-        && normalized_email(previous.email.as_deref()) != normalized_email(next.email.as_deref())
-    {
-        revoke_active(conn, lead_id, "email_changed", actor).await?;
+        .await?;
     }
     Ok(())
 }
@@ -5010,8 +5123,18 @@ mod tests {
     }
 
     #[test]
-    fn the_effective_answers_fall_back_to_the_declaration() {
-        let declaration = person_payer();
+    fn the_link_takes_only_the_name_and_the_relationship_from_the_declaration() {
+        // Everything the lead may have entered about the payer.
+        let declaration = Declaration {
+            place_of_birth: Some("Graz".into()),
+            street: Some("Ringstraße 9".into()),
+            zip: Some("1010".into()),
+            city: Some("Wien".into()),
+            phone: Some("+43 1 000000".into()),
+            relationship_kind: Some("other".into()),
+            relationship: Some("Onkel".into()),
+            ..person_payer()
+        };
         let stored = Answers {
             first_name: Some("Viktor Paul".into()),
             ..Answers::default()
@@ -5019,16 +5142,44 @@ mod tests {
         let answers = effective_answers(&stored, &declaration, None);
         assert_eq!(answers.first_name.as_deref(), Some("Viktor Paul"));
         assert_eq!(answers.last_name.as_deref(), Some("Zahler"));
-        assert_eq!(answers.citizenships, ["AT"]);
-        assert_eq!(answers.relationship_kind.as_deref(), Some("friend"));
-        // A declaration value over the statement's limit is asked again.
+        assert_eq!(answers.relationship_kind.as_deref(), Some("other"));
+        assert_eq!(answers.relationship.as_deref(), Some("Onkel"));
+        // Data minimisation (QA 2026-10-06): the payer states birth data,
+        // address, citizenships and phone itself.
+        assert_eq!(answers.date_of_birth, None);
+        assert_eq!(answers.birth_place, None);
+        assert!(answers.citizenships.is_empty());
+        assert_eq!(
+            (
+                &answers.street,
+                &answers.zip,
+                &answers.city,
+                &answers.country,
+                &answers.phone
+            ),
+            (&None, &None, &None, &None, &None)
+        );
+        assert_eq!(answers.id_document_number, None);
+        // What the payer states is the effective value.
+        let stated = Answers {
+            date_of_birth: NaiveDate::from_ymd_opt(1962, 4, 12),
+            citizenships: vec!["DE".into()],
+            street: Some("Zahlerstraße 5".into()),
+            ..Answers::default()
+        };
+        let answers = effective_answers(&stated, &declaration, None);
+        assert_eq!(answers.date_of_birth, NaiveDate::from_ymd_opt(1962, 4, 12));
+        assert_eq!(answers.citizenships, ["DE"]);
+        assert_eq!(answers.street.as_deref(), Some("Zahlerstraße 5"));
+        assert_eq!(answers.first_name.as_deref(), Some("Viktor"));
+        // A declaration name over the statement's limit is asked again.
         let long = Declaration {
-            zip: Some("1".repeat(21)),
+            last_name: Some("Z".repeat(101)),
             ..person_payer()
         };
         assert!(
             effective_answers(&Answers::default(), &long, None)
-                .zip
+                .last_name
                 .is_none()
         );
     }
@@ -5036,7 +5187,11 @@ mod tests {
     #[test]
     fn the_check_level_names_its_reasons() {
         let declaration = person_payer();
-        let answers = effective_answers(&Answers::default(), &declaration, None);
+        let answers = Answers {
+            country: Some("AT".into()),
+            citizenships: vec!["AT".into()],
+            ..effective_answers(&Answers::default(), &declaration, None)
+        };
         assert_eq!(
             check_level(&answers, &declaration, false, None, &[]),
             (1, vec![])
@@ -5091,11 +5246,14 @@ mod tests {
             missing_for_submit(&answers, &required),
             [
                 "privacy_ack",
+                "date_of_birth",
                 "birth_place",
                 "birth_country",
+                "citizenships",
                 "street",
                 "zip",
                 "city",
+                "country",
                 "id_document_type",
                 "id_document_number",
                 "id_issuing_authority",
@@ -5139,11 +5297,12 @@ mod tests {
                 "street",
                 "zip",
                 "city",
+                "country",
                 "register_court",
-                "register_number",
-                "representative_first_name"
+                "register_number"
             ]
         );
+        assert!(missing.contains(&"representative_first_name"));
         assert!(missing.contains(&"beneficial_owners"));
         assert!(missing.contains(&"industry"));
         assert!(!missing.contains(&"first_name"));

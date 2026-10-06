@@ -528,6 +528,60 @@ describe("lead request send step", () => {
     expect(back).toMatchObject({ first_name: "Viktor", street: "Musterstraße 1", contact_consent: false });
   });
 
+  it("takes a paying parent's citizenships and address from the representative data, and asks no consent", () => {
+    const template = {
+      first_name: "Anna",
+      last_name: "Muster",
+      date_of_birth: "1985-03-12",
+      email: "anna.muster@example.com",
+      phone: "+49 30 1234567",
+      citizenships: ["DE", "AT"],
+      street: "Musterweg 1",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+    };
+    const parent = withPayerAnswer(draftFromPayer(null, template), "guardian", template);
+    expect(parent).toMatchObject({
+      guardian_pays: true,
+      citizenships: ["DE", "AT"],
+      street: "Musterweg 1",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+    });
+    // The parent is the payer: the consent to contact the payer is left out, the server keeps what it has.
+    const input = payerInput(parent, true, false);
+    expect(input).toEqual({
+      payer_kind: "third_party",
+      payer_type: "person",
+      first_name: "Anna",
+      last_name: "Muster",
+      date_of_birth: "1985-03-12",
+      relationship_kind: "parent",
+      street: "Musterweg 1",
+      zip: "10115",
+      city: "Berlin",
+      country: "DE",
+      phone: "+49 30 1234567",
+      email: "anna.muster@example.com",
+      citizenships: ["DE", "AT"],
+    });
+    expect(input).not.toHaveProperty("contact_consent");
+    // The template is a copy: editing the draft does not change it.
+    parent.citizenships.push("UA");
+    expect(template.citizenships).toEqual(["DE", "AT"]);
+    // An older server sends no citizenships or address: they stay empty, to be typed.
+    const older = { first_name: "Anna", last_name: "Muster", date_of_birth: null, email: null, phone: null };
+    expect(withPayerAnswer(draftFromPayer(null, older), "guardian", older)).toMatchObject({
+      citizenships: [],
+      street: "",
+      zip: "",
+      city: "",
+      country: "",
+    });
+  });
+
   it("shows a stored payer as the first answer it was given as", () => {
     const template = { first_name: "Maria", last_name: "Muster", date_of_birth: null, email: null, phone: null };
     const parent = {

@@ -33,6 +33,7 @@ import {
   leadTypeLabel,
   leadVisitTimingLabel,
 } from "@/pages/leads/model/leads-model";
+import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import { LinkedTasksSection, OPEN_PATIENT_TASK_CREATOR_EVENT } from "@/pages/concierge/linked-tasks-section";
 import { nationalityNameForDisplay } from "../../model/nationalities";
@@ -89,7 +90,14 @@ function profileRecordString(record: Record<string, unknown>, key: string) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+/**
+ * The patient's own identity document. An upload about another person — a
+ * representative's or the payer's passport, a proof of authority or of the
+ * source of funds — is filed with category `identity` too, and is never the
+ * patient's.
+ */
 export function isPatientIdentityDocument(document: DocumentItem) {
+  if (isOtherPersonUploadArt(document.art)) return false;
   const markers = [document.art, document.category, document.compliance_kind]
     .map((value) => value?.trim().toLowerCase())
     .filter(Boolean);

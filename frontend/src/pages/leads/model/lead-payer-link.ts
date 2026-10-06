@@ -224,7 +224,7 @@ export function payerLinkBlockedReasonText(reason: string | null | undefined, tx
 export function payerLinkCabinetNote(tx: Tx): string {
   return tx(
     "Плательщик — родитель с доступом в кабинет: анкета в его кабинете",
-    "Zahler ist Elternteil mit Kabinett-Zugang: Fragebogen im Kabinett",
+    "Zahler ist Elternteil mit Portalzugang: Fragebogen im Portal",
   );
 }
 

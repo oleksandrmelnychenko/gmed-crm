@@ -171,10 +171,17 @@ export function patientMessageLanguage(language: string | null | undefined): Pat
 }
 
 /**
+ * Whose login a password is for: the patient's own, or a parent's — a legal
+ * representative who fills in the request of a minor child.
+ */
+export type PortalCredentialsAudience = "patient" | "parent";
+
+/**
  * Text the staff member sends to the patient (messenger, SMS) together with
  * the password. The password is never put into a URL. The lead keeps this
  * password: the cabinet neither forces nor offers a change (owner decision
- * 2026-10-05); a lost one is replaced by staff.
+ * 2026-10-05); a lost one is replaced by staff. A parent's login is told
+ * about the child's request, like the e-mail of that login.
  */
 export function portalCredentialsMessage(input: {
   firstName: string;
@@ -182,14 +189,18 @@ export function portalCredentialsMessage(input: {
   password: string;
   loginUrl: string;
   language: PatientMessageLanguage;
+  audience?: PortalCredentialsAudience;
 }): string {
   const { firstName, email, password, loginUrl, language } = input;
+  const parent = input.audience === "parent";
   const name = firstName.trim();
   switch (language) {
     case "en":
       return [
         `Hello${name ? ` ${name}` : ""},`,
-        "your access to the GMed patient portal is ready. Please enter your personal details and upload your documents there.",
+        parent
+          ? "your access to the GMed patient portal is ready. Please enter the details for your child's request there and upload the documents."
+          : "your access to the GMed patient portal is ready. Please enter your personal details and upload your documents there.",
         `Sign in: ${loginUrl}`,
         `Login: ${email}`,
         `Password: ${password}`,
@@ -197,7 +208,9 @@ export function portalCredentialsMessage(input: {
     case "ru":
       return [
         `Здравствуйте${name ? `, ${name}` : ""}!`,
-        "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там свои данные и загрузите документы.",
+        parent
+          ? "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там данные заявки для вашего ребёнка и загрузите документы."
+          : "Ваш доступ в портал пациента GMed готов. Пожалуйста, заполните там свои данные и загрузите документы.",
         `Вход: ${loginUrl}`,
         `Логин: ${email}`,
         `Пароль: ${password}`,
@@ -205,7 +218,9 @@ export function portalCredentialsMessage(input: {
     case "uk":
       return [
         `Вітаємо${name ? `, ${name}` : ""}!`,
-        "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
+        parent
+          ? "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там дані заявки для вашої дитини та завантажте документи."
+          : "Ваш доступ до порталу пацієнта GMed готовий. Будь ласка, заповніть там свої дані та завантажте документи.",
         `Вхід: ${loginUrl}`,
         `Логін: ${email}`,
         `Пароль: ${password}`,
@@ -213,7 +228,9 @@ export function portalCredentialsMessage(input: {
     default:
       return [
         `Guten Tag${name ? ` ${name}` : ""},`,
-        "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
+        parent
+          ? "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein und laden Sie die Unterlagen hoch."
+          : "Ihr Zugang zum GMed-Patientenportal ist eingerichtet. Bitte tragen Sie dort Ihre persönlichen Daten ein und laden Sie Ihre Unterlagen hoch.",
         `Anmeldung: ${loginUrl}`,
         `Benutzername: ${email}`,
         `Passwort: ${password}`,

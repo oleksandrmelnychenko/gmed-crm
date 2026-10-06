@@ -1714,7 +1714,16 @@ fn missing_for_submit(
     today: NaiveDate,
 ) -> Vec<String> {
     let mut missing = data.missing_for_submit();
-    missing.extend(lead_payer::portal_missing(payer));
+    missing.extend(
+        lead_payer::portal_missing(payer)
+            .into_iter()
+            // A parent who pays and answers in the own login is the payer:
+            // there is nobody else GMED needs the consent to contact (QA
+            // 2026-10-06). Staff completeness keeps asking for it.
+            .filter(|key| {
+                payment_route_by != PaymentRouteBy::Guardian || *key != "payer_contact_consent"
+            }),
+    );
     missing.extend(identification.missing_identity(today));
     if !identity_document_uploaded {
         missing.push("id_document_upload");
@@ -1822,12 +1831,17 @@ where
 
 /// "I pay (as a parent)": what the form puts into the payer fields when the
 /// parent names himself — first and last name, date of birth, e-mail and
-/// phone of a trusted contact. Only these: never the address or the relation.
-/// The name parts are the ones the parent entered as a representative
-/// (`names`: first and last name of the contact's row) while they still are
-/// the contact's name; otherwise the name is split at the last space, and a
-/// single word is the last name.
-fn payer_template_from_contact(contact: &Value, names: Option<(&str, &str)>) -> Value {
+/// phone of a trusted contact, and the citizenships and the address the
+/// parent entered as a representative (`row`, phase 1b-2; QA 2026-10-06).
+/// Never the contact's free-text address or the relation. The name parts are
+/// the ones the parent entered as a representative while they still are the
+/// contact's name; otherwise the name is split at the last space, and a
+/// single word is the last name. Without a row the citizenships are `[]` and
+/// the address keys `null`.
+fn payer_template_from_contact(
+    contact: &Value,
+    row: Option<&lead_representatives::Extras>,
+) -> Value {
     let text = |key: &str| {
         contact
             .get(key)
@@ -1837,8 +1851,8 @@ fn payer_template_from_contact(contact: &Value, names: Option<(&str, &str)>) -> 
     };
     let (first_name, last_name) = lead_representatives::name_parts(
         text("name").unwrap_or_default(),
-        names.map(|(first, _)| first),
-        names.map(|(_, last)| last),
+        row.map(|row| row.first_name.as_deref().unwrap_or_default()),
+        row.map(|row| row.last_name.as_deref().unwrap_or_default()),
     );
     json!({
         "first_name": first_name,
@@ -1848,6 +1862,11 @@ fn payer_template_from_contact(contact: &Value, names: Option<(&str, &str)>) -> 
             .map(|date| date.format("%Y-%m-%d").to_string()),
         "email": text("email"),
         "phone": text("phone"),
+        "citizenships": row.map(|row| row.citizenships.clone()).unwrap_or_default(),
+        "street": row.and_then(|row| row.street.clone()),
+        "zip": row.and_then(|row| row.zip.clone()),
+        "city": row.and_then(|row| row.city.clone()),
+        "country": row.and_then(|row| row.country.clone()),
     })
 }
 
@@ -1886,15 +1905,7 @@ where
     Ok(contact.as_ref().map(|contact| {
         let row = lead_representatives::entry_id(contact)
             .and_then(|contact_id| representation.row_of(contact_id));
-        payer_template_from_contact(
-            contact,
-            row.map(|row| {
-                (
-                    row.first_name.as_deref().unwrap_or_default(),
-                    row.last_name.as_deref().unwrap_or_default(),
-                )
-            }),
-        )
+        payer_template_from_contact(contact, row)
     }))
 }
 
@@ -1935,14 +1946,20 @@ pub(crate) async fn request_payload(
     .fetch_one(&state.db)
     .await?;
     let data = PersonalData::from_row(&row);
-    // Who pays, and who acts for the lead.
-    let (payer, representation) = {
+    // Who pays, who acts for the lead, and whether the payer answered
+    // through its own link.
+    let (payer, representation, answered_by_payer) = {
         let mut conn = state.db.acquire().await?;
+        let payer = lead_payer::load_declaration(&mut conn, lead_id).await?;
+        let answered_by_payer =
+            crate::routes::lead_payer_link::answered_by_payer(&mut conn, lead_id, payer.as_ref())
+                .await?;
         (
-            lead_payer::load_declaration(&mut conn, lead_id).await?,
+            payer,
             lead_representatives::load(&mut conn, lead_id)
                 .await?
                 .unwrap_or_default(),
+            answered_by_payer,
         )
     };
     let (identification, _) = load_identification(&state.db, lead_id).await?;
@@ -2078,7 +2095,7 @@ pub(crate) async fn request_payload(
             "total": PROGRESS_FIELDS.len(),
             "missing_for_submit": missing,
         },
-        "payer": lead_payer::portal_payload(payer.as_ref()),
+        "payer": lead_payer::portal_payload(payer.as_ref(), answered_by_payer),
         "payer_self_template": payer_self_template,
         "billing": lead_payer::portal_billing_payload(
             payer.as_ref(),
@@ -2370,6 +2387,26 @@ async fn update_my_payer(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // The payer answered through its own link: its identity is its own
+    // statement now. The lead asks GMED to change the payer; staff can.
+    let declared = match lead_payer::load_declaration(&mut tx, lead_id).await {
+        Ok(declared) => declared,
+        Err(error) => return internal(error, "load payer"),
+    };
+    match crate::routes::lead_payer_link::answered_by_payer(&mut tx, lead_id, declared.as_ref())
+        .await
+    {
+        Ok(false) => {}
+        Ok(true) => {
+            return coded(
+                StatusCode::CONFLICT,
+                "payer_answered_by_payer",
+                "The payer has answered through its own link; GMED changes the payer",
+                json!({}),
+            );
+        }
+        Err(error) => return internal(error, "load payer"),
+    }
     let saved = match lead_payer::save_from_portal(
         &mut tx,
         lead_id,
@@ -4897,6 +4934,40 @@ mod tests {
             ),
             vec!["payment_method", "via_third_party"]
         );
+        // The paying parent is the payer: no consent to contact somebody
+        // else is asked of that login; the lead's own login still asks it.
+        let without_consent = lead_payer::Declaration {
+            contact_consent_at: None,
+            payment_method: Some("card".into()),
+            account_country: Some("DE".into()),
+            account_holder: Some("Anna Muster".into()),
+            via_third_party: Some(false),
+            ..payer
+        };
+        assert!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Guardian,
+                today()
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                today()
+            ),
+            vec!["payer_contact_consent"]
+        );
     }
 
     #[test]
@@ -4994,7 +5065,7 @@ mod tests {
     }
 
     #[test]
-    fn a_parent_as_payer_is_prefilled_from_the_trusted_contact_without_the_address() {
+    fn a_parent_as_payer_is_prefilled_from_the_trusted_contact_and_the_own_row() {
         let contact = json!({
             "id": "5d0c1f0e-0000-4000-8000-000000000001",
             "name": "  Olga Maria  Kind ",
@@ -5004,6 +5075,8 @@ mod tests {
             "birth_date": "1985-03-04",
             "address": "Musterweg 1, 10115 Berlin"
         });
+        // Without a representative row: never the contact's free-text
+        // address.
         let template = payer_template_from_contact(&contact, None);
         assert_eq!(
             template,
@@ -5012,30 +5085,66 @@ mod tests {
                 "last_name": "Kind",
                 "date_of_birth": "1985-03-04",
                 "email": "olga.kind@example.com",
-                "phone": "+49 30 000000"
+                "phone": "+49 30 000000",
+                "citizenships": [],
+                "street": null,
+                "zip": null,
+                "city": null,
+                "country": null
             })
         );
         // The name parts the parent entered as a representative count while
-        // they still are the name of the contact.
-        let entered = payer_template_from_contact(&contact, Some(("Olga", "Maria Kind")));
+        // they still are the name of the contact; the row's citizenships and
+        // address are taken over.
+        let row = |first: &str, last: &str| lead_representatives::Extras {
+            first_name: Some(first.into()),
+            last_name: Some(last.into()),
+            citizenships: vec!["DE".into(), "UA".into()],
+            street: Some("Musterweg 1".into()),
+            zip: Some("10115".into()),
+            city: Some("Berlin".into()),
+            country: Some("DE".into()),
+            ..Default::default()
+        };
+        let entered = payer_template_from_contact(&contact, Some(&row("Olga", "Maria Kind")));
         assert_eq!(
             (&entered["first_name"], &entered["last_name"]),
             (&json!("Olga"), &json!("Maria Kind"))
         );
-        let renamed = payer_template_from_contact(&contact, Some(("Olga", "Beispiel")));
+        assert_eq!(entered["citizenships"], json!(["DE", "UA"]));
+        assert_eq!(
+            (
+                &entered["street"],
+                &entered["zip"],
+                &entered["city"],
+                &entered["country"]
+            ),
+            (
+                &json!("Musterweg 1"),
+                &json!("10115"),
+                &json!("Berlin"),
+                &json!("DE")
+            )
+        );
+        let renamed = payer_template_from_contact(&contact, Some(&row("Olga", "Beispiel")));
         assert_eq!(renamed["last_name"], "Kind");
         // A single word is the last name; what is not known is null.
         assert_eq!(
             payer_template_from_contact(
                 &json!({ "name": "Kind", "birth_date": "", "phone": null }),
-                None
+                Some(&lead_representatives::Extras::default())
             ),
             json!({
                 "first_name": "",
                 "last_name": "Kind",
                 "date_of_birth": null,
                 "email": null,
-                "phone": null
+                "phone": null,
+                "citizenships": [],
+                "street": null,
+                "zip": null,
+                "city": null,
+                "country": null
             })
         );
     }

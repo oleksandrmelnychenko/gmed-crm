@@ -446,7 +446,7 @@ function PayerAnswersGroup({
         )}
         {questionnaire.source === "cabinet" ? (
           <span className="text-[11px] text-muted-foreground">
-            {tx("в кабинете родителя", "im Kabinett des Elternteils")}
+            {tx("в кабинете родителя", "im Portal des Elternteils")}
           </span>
         ) : null}
       </div>

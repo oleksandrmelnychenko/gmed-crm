@@ -57,7 +57,63 @@ export type SummaryGroup = {
   empty: string;
   /** The persons of the group, below its own rows. */
   parts?: SummaryPart[];
+  /** A remark below the rows, e.g. that the payer answered and only GMED changes it. */
+  note?: string;
 };
+
+type Entry = [string, string | null | undefined];
+
+/** Only what was entered, trimmed. */
+function enteredRows(rows: Entry[]): SummaryRow[] {
+  return rows.flatMap(([label, value]) => (value?.trim() ? [{ label, value: value.trim() }] : []));
+}
+
+/**
+ * The payer answered on the own link (`answered_by_payer`): the lead cabinet
+ * no longer changes "who pays" — only GMED does — and the server sends only
+ * what the lead named. `false` for an older server, which does not say so.
+ */
+export function payerAnsweredByPayer(request: Pick<LeadRequest, "payer">): boolean {
+  return request.payer?.answered_by_payer === true;
+}
+
+/**
+ * "Who pays" read-only, after the payer answered: what the lead named (the
+ * answer, what the payer is, the name, the relationship, the consent to
+ * contact the payer) and the own economic interest. The lead cabinet shows
+ * these rows in the block and in the summary of step "send".
+ */
+export function answeredPayerRows(request: LeadRequest, text: LeadRequestText): SummaryRow[] {
+  const guardian = request.access_kind === "guardian";
+  const payer = request.payer;
+  if (!payer) return [];
+  const option = (options: Record<string, string>, value: string | null | undefined) =>
+    value ? options[value] ?? "" : "";
+  const yesNo = (value: boolean | null | undefined) => option(text.yesNo, answerFromBoolean(value));
+  const thirdParty = payer.payer_kind === "third_party";
+  const label = (field: PayerField) => payerFieldLabel(text, field, guardian, payer.payer_type);
+  const kind = option(text.payerRelationshipOptions, payer.relationship_kind);
+  const relationship =
+    payer.relationship_kind && payer.relationship_kind !== "other" ? kind : payer.relationship?.trim() || kind;
+  return enteredRows([
+    [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, payerAnswer(payer))],
+    ...(thirdParty
+      ? ([
+          [label("payer_type"), payer.payer_type === undefined ? "" : text.payerTypeOptions[payerTypeOf(payer)]],
+          ...(organisationPayerType(payer.payer_type)
+            ? ([[label("payer_organisation_name"), payer.organisation_name]] satisfies Entry[])
+            : ([
+                [label("payer_first_name"), payer.first_name],
+                [label("payer_last_name"), payer.last_name],
+              ] satisfies Entry[])),
+          [label("payer_relationship"), relationship],
+          [text.payerConsentShort, payer.contact_consent_at ? text.consentGivenAt(formatAppDateTime(payer.contact_consent_at)) : ""],
+        ] satisfies Entry[])
+      : []),
+    [payerFieldLabel(text, "payer_own_account", guardian), yesNo(payer.acts_on_own_account)],
+    [payerFieldLabel(text, "payer_beneficial_owner", guardian), payer.acts_on_own_account === false ? payer.beneficial_owner : ""],
+  ]);
+}
 
 /**
  * What "send to the manager" sends, grouped like the form (step "send"). Only
@@ -202,7 +258,19 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       : []),
   ]);
 
-  if (payer !== undefined) {
+  if (payer && payerAnsweredByPayer(request)) {
+    // The payer answered: the same read-only rows as the block, and why they are read-only.
+    groups.push({
+      id: "payer",
+      title: text.sectionPayer,
+      rows: [
+        ...answeredPayerRows(request, text),
+        ...enteredRows([[identificationLabel("payment_background"), identification?.payment_background]]),
+      ],
+      empty: text.summaryEmpty,
+      note: text.payerAnsweredByPayer,
+    });
+  } else if (payer !== undefined) {
     const thirdParty = payer?.payer_kind === "third_party" ? payer : null;
     // A parent's own answer "I pay" is stored as a third party; it is shown as it was given.
     const answer = payerAnswer(payer, guardian ? request.payer_self_template : null);

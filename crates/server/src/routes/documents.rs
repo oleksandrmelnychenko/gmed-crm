@@ -1717,6 +1717,25 @@ struct MarkDocumentSignedRequest {
     signed_at: Option<String>,
 }
 
+/// Document types of another person's file filed with the lead or patient:
+/// the identity document and the proof of authority of a representative
+/// (phase 1b-2), the identity document and the proof of funds of a
+/// third-party payer (phase 3a). Their categories (`identity`,
+/// `administrative`) are the patient's ones, so nothing that looks for the
+/// patient's own documents by category may count them (QA 2026-10-06).
+pub(crate) const OTHER_PERSON_DOCUMENT_ARTS: [&str; 4] = [
+    "representative_identity",
+    "representative_authority",
+    "payer_identity",
+    "payer_funds_proof",
+];
+
+/// A file of another person than the patient ([`OTHER_PERSON_DOCUMENT_ARTS`]).
+pub(crate) fn is_other_person_document(art: &str) -> bool {
+    let art = art.trim().to_lowercase();
+    OTHER_PERSON_DOCUMENT_ARTS.contains(&art.as_str())
+}
+
 fn document_satisfies_compliance_kind(
     compliance_kind: &str,
     generated_template_id: Option<&str>,
@@ -3334,12 +3353,32 @@ async fn load_gwg_identification_sheet(
         || risk_countries
             .iter()
             .any(|country| super::leads::is_enhanced_due_diligence_country(country));
-    sheet.increased_risk = aml.internal_risk_analysis
-        || aml.individual_review
-        || matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
-        || sheet.high_risk_third_country
-        || sheet.politically_exposed;
+    sheet.increased_risk = gwg_increased_risk(
+        &aml,
+        sheet.high_risk_third_country,
+        sheet.politically_exposed,
+    );
     Ok(sheet)
+}
+
+/// Question a) of the sheet: an increased risk from the internal risk
+/// analysis or an individual review. The wizard's due-diligence form has
+/// "internal risk analysis" ticked by default, so the two boxes count only
+/// with a stated risk reason (QA 2026-10-06); the risk tier, a high-risk
+/// third country and a politically exposed person count on their own.
+fn gwg_increased_risk(
+    aml: &AmlEnhancedDueDiligenceBindings,
+    high_risk_third_country: bool,
+    politically_exposed: bool,
+) -> bool {
+    let risk_reason_stated = aml
+        .risk_reason
+        .as_deref()
+        .is_some_and(|reason| !reason.trim().is_empty());
+    (risk_reason_stated && (aml.internal_risk_analysis || aml.individual_review))
+        || matches!(aml.risk_tier.as_deref(), Some("blacklist" | "high_risk"))
+        || high_risk_third_country
+        || politically_exposed
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -30224,6 +30263,56 @@ mod tests {
         assert!(text.contains("Nachweise zur Herkunft der Vermögenswerte"));
         assert!(text.contains("1. Kaufvertrag.pdf (hochgeladen am 30.07.2026)"));
         assert!(text.contains("2. Dokument"));
+    }
+
+    #[test]
+    fn gwg_increased_risk_needs_a_reason_for_the_internal_analysis() {
+        // The wizard ticks "internal risk analysis" by default: without a
+        // stated reason it is no increased risk (QA 2026-10-06).
+        let ticked = AmlEnhancedDueDiligenceBindings {
+            internal_risk_analysis: true,
+            ..Default::default()
+        };
+        assert!(!super::gwg_increased_risk(&ticked, false, false));
+        let blank_reason = AmlEnhancedDueDiligenceBindings {
+            individual_review: true,
+            risk_reason: Some("  ".to_string()),
+            ..ticked.clone()
+        };
+        assert!(!super::gwg_increased_risk(&blank_reason, false, false));
+        let with_reason = AmlEnhancedDueDiligenceBindings {
+            risk_reason: Some("Ungewöhnlich hohe Vorauszahlung".to_string()),
+            ..ticked.clone()
+        };
+        assert!(super::gwg_increased_risk(&with_reason, false, false));
+        let reviewed = AmlEnhancedDueDiligenceBindings {
+            internal_risk_analysis: false,
+            individual_review: true,
+            ..with_reason.clone()
+        };
+        assert!(super::gwg_increased_risk(&reviewed, false, false));
+        // A reason without either box is no answer of question a).
+        let reason_only = AmlEnhancedDueDiligenceBindings {
+            internal_risk_analysis: false,
+            ..with_reason
+        };
+        assert!(!super::gwg_increased_risk(&reason_only, false, false));
+        // The risk tier, a high-risk third country and a PEP count on their
+        // own.
+        for tier in ["blacklist", "high_risk"] {
+            let tiered = AmlEnhancedDueDiligenceBindings {
+                risk_tier: Some(tier.to_string()),
+                ..Default::default()
+            };
+            assert!(super::gwg_increased_risk(&tiered, false, false), "{tier}");
+        }
+        let standard = AmlEnhancedDueDiligenceBindings {
+            risk_tier: Some("standard".to_string()),
+            ..ticked
+        };
+        assert!(!super::gwg_increased_risk(&standard, false, false));
+        assert!(super::gwg_increased_risk(&standard, true, false));
+        assert!(super::gwg_increased_risk(&standard, false, true));
     }
 
     #[test]

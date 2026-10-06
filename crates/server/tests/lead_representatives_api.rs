@@ -1253,6 +1253,14 @@ async fn both_parents_of_a_minor_are_asked_for_by_default() {
     // parts as she entered them.
     assert_eq!(body["payer_self_template"]["first_name"], "Anna", "{body}");
     assert_eq!(body["payer_self_template"]["last_name"], "Muster", "{body}");
+    // ... and with the citizenships and the address of her own row (QA
+    // 2026-10-06).
+    let template = &body["payer_self_template"];
+    assert_eq!(template["citizenships"], json!(["DE"]), "{body}");
+    assert_eq!(template["street"], "Musterweg 1", "{body}");
+    assert_eq!(template["zip"], "10115", "{body}");
+    assert_eq!(template["city"], "Berlin", "{body}");
+    assert_eq!(template["country"], "DE", "{body}");
     let (status, intake) = json_request(
         router,
         "GET",

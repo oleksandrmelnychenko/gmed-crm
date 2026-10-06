@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { LeadRequest, LeadRequestBilling, LeadRequestDocument, LeadRequestRepresentative } from "./lead-request-api";
-import { requestSummary } from "./lead-request-summary";
+import { answeredPayerRows, payerAnsweredByPayer, requestSummary } from "./lead-request-summary";
 import { leadRequestText } from "./lead-request-text";
 
 const de = leadRequestText("de");
@@ -303,6 +303,47 @@ describe("lead request summary", () => {
         "Wer übernimmt die Kosten der Behandlung?"
       ],
     ).toBe("Eine andere Person oder Organisation");
+  });
+
+  it("shows only what the lead named once the payer answered on the own link, with the note why", () => {
+    // What the server sends then (BE2): the name, the type, the relationship and the consent; the rest is null.
+    const answered = request({
+      payer: {
+        ...request().payer!,
+        date_of_birth: null,
+        city: null,
+        country: null,
+        citizenships: [],
+        answered_by_payer: true,
+      },
+    });
+    expect(payerAnsweredByPayer(answered)).toBe(true);
+    const expected = {
+      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      "Wer ist der Zahler?": "Privatperson",
+      Vorname: "Viktor",
+      Nachname: "Zahler",
+      "Beziehung zur Patientin / zum Patienten": "Elternteil",
+      "Einverständnis zur Kontaktaufnahme": "Zugestimmt am 05.10.2026 11:25",
+      "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
+      "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
+    };
+    expect(Object.fromEntries(answeredPayerRows(answered, de).map((row) => [row.label, row.value]))).toEqual(expected);
+    const groups = requestSummary(answered, de, "de");
+    expect(rows(groups, "payer")).toEqual({ ...expected, "Warum zahlt diese Person?": "Mein Vater unterstützt mich." });
+    expect(groups.find((group) => group.id === "payer")?.note).toBe(
+      "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
+    );
+    // Even a value the server still sent is not shown: the block names what the lead named.
+    const leftover = request({ payer: { ...request().payer!, answered_by_payer: true } });
+    expect(rows(requestSummary(leftover, de, "de"), "payer")).not.toHaveProperty("Geburtsdatum");
+    // Not answered yet, or an older server without the key: the summary as before, without a note.
+    for (const payer of [{ ...request().payer!, answered_by_payer: false }, request().payer!]) {
+      const open = requestSummary(request({ payer }), de, "de").find((group) => group.id === "payer");
+      expect(payerAnsweredByPayer(request({ payer }))).toBe(false);
+      expect(open?.note).toBeUndefined();
+      expect(Object.fromEntries(open!.rows.map((row) => [row.label, row.value]))).toMatchObject({ Geburtsdatum: "03.02.1960" });
+    }
   });
 
   it("shows a payer of a server without the payer type as before", () => {

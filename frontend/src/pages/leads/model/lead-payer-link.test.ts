@@ -258,7 +258,7 @@ describe("payer link: what may be done", () => {
     const cabinet = payerLinkActions(state({ mode: "cabinet", can_send: false, blocked_reason: "payer_has_cabinet_login" }), false, de);
     expect(cabinet).toMatchObject({ cabinet: true, sendEnabled: false, sendBlockedText: null, revokeEnabled: false, highlight: false });
     expect(payerLinkBlockedReasonText("payer_has_cabinet_login", de)).toBe(
-      "Zahler ist Elternteil mit Kabinett-Zugang: Fragebogen im Kabinett",
+      "Zahler ist Elternteil mit Portalzugang: Fragebogen im Portal",
     );
   });
 

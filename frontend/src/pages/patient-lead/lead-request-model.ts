@@ -352,9 +352,10 @@ function withoutPayerParty(draft: PayerDraft): PayerDraft {
 /**
  * The draft after the first answer. Another answer names another payer, so
  * the consent to contact the payer is asked again. "I pay (as a parent)"
- * fills the parent's own data in, which stay editable; "another person or
- * organisation" does not keep them. What was typed about another person
- * stays while "I pay myself" hides it, as before.
+ * fills the parent's own data in — name, birth date, contact and, where the
+ * parent entered them as representative, citizenships and address — which
+ * stay editable; "another person or organisation" does not keep them. What
+ * was typed about another person stays while "I pay myself" hides it, as before.
  */
 export function withPayerAnswer(
   draft: PayerDraft,
@@ -374,7 +375,12 @@ export function withPayerAnswer(
       first_name: template.first_name ?? "",
       last_name: template.last_name ?? "",
       date_of_birth: template.date_of_birth ?? "",
+      citizenships: [...(template.citizenships ?? [])],
       relationship_kind: "parent",
+      street: template.street ?? "",
+      zip: template.zip ?? "",
+      city: template.city ?? "",
+      country: template.country ?? "",
       phone: template.phone ?? "",
       email: template.email ?? "",
     };
@@ -418,9 +424,10 @@ export function withRelationshipKind(draft: PayerDraft, kind: string): PayerDraf
  *
  * `typed` is false for a server that does not know the payer type yet (see
  * `knowsPayerType`): it gets the answer of before, a person with the
- * relationship in words.
+ * relationship in words. `withConsent` false leaves the consent out (a parent
+ * who pays is not asked for it): the server then keeps what it has.
  */
-export function payerInput(draft: PayerDraft, typed = true): LeadRequestPayerInput | null {
+export function payerInput(draft: PayerDraft, typed = true, withConsent = true): LeadRequestPayerInput | null {
   if (draft.payer_kind !== "self" && draft.payer_kind !== "third_party") return null;
   const input: LeadRequestPayerInput = { payer_kind: draft.payer_kind };
   if (draft.payer_kind === "third_party") {
@@ -449,7 +456,7 @@ export function payerInput(draft: PayerDraft, typed = true): LeadRequestPayerInp
     put("phone");
     put("email");
     if (type === "person" && draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
-    if (typed) input.contact_consent = draft.contact_consent;
+    if (typed && withConsent) input.contact_consent = draft.contact_consent;
   }
   if (draft.acts_on_own_account === "yes") {
     input.acts_on_own_account = true;

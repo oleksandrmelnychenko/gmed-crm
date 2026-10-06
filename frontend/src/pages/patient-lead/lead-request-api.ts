@@ -64,6 +64,14 @@ export type LeadRequestPayer = {
   /** `spouse`, `parent`, `child`, `relative`, `employer`, `friend`, `business_partner` or `other`. */
   relationship_kind?: string | null;
   contact_consent_at?: string | null;
+  /**
+   * The payer answered on the own link (phase 3a): the cabinet shows only the
+   * name, what the payer is, the relationship and the consent — every other
+   * identity, address and contact key is `null` — and "who pays" is read-only
+   * (`POST …/payer` answers 409 `payer_answered_by_payer`). Absent on an older
+   * server.
+   */
+  answered_by_payer?: boolean;
 };
 
 /** What the cabinet sends: the whole answer, empty values left out. */
@@ -95,7 +103,9 @@ export type LeadRequestPayerInput = {
 /**
  * A parent's own data for the answer "I pay (as a parent)", taken from the
  * lead's trusted contact the login is linked to. A single-word name is the
- * last name: the first name is then empty.
+ * last name: the first name is then empty. Citizenships and address come
+ * from the parent's own representative data when the parent entered them;
+ * an older server does not send these keys.
  */
 export type PayerSelfTemplate = {
   first_name: string | null;
@@ -103,6 +113,11 @@ export type PayerSelfTemplate = {
   date_of_birth: string | null;
   email: string | null;
   phone: string | null;
+  citizenships?: string[] | null;
+  street?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  country?: string | null;
 };
 
 /**
@@ -425,6 +440,10 @@ export function saveLeadPersonalData(leadId: string, patch: PersonalDataPatch): 
   });
 }
 
+/** The refusal of "who pays" once the payer answered on the own link: only GMED changes the payer then. */
+export const PAYER_ANSWERED_BY_PAYER = "payer_answered_by_payer";
+
+/** Saves the answer "who pays"; 409 `payer_answered_by_payer` after the payer answered on the own link. */
 export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
     method: "POST",

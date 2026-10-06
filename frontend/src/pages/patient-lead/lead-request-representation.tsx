@@ -810,7 +810,10 @@ export function RepresentationSection({
     return (
       <Section title={text.sectionLegalRepresentatives}>
         <div className="space-y-4" data-testid="lead-request-representation">
-          <p className="text-xs leading-5 text-muted-foreground">{text.legalRepresentativesIntro}</p>
+          {/* Who consents and signs follows the custody chosen below. */}
+          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-custody-note">
+            {`${text.legalRepresentativesIntro} ${text.custodySignatureNote[draft.custody]}`}
+          </p>
           <LabeledField id="lead-request-custody" label={text.custodyQuestion}>
             <NativeComboboxSelect
               id="lead-request-custody"

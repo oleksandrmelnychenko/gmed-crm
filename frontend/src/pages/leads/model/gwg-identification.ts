@@ -64,13 +64,21 @@ export function gwgSheetRequest(input: {
   personName?: string | null;
   orderId?: string | null;
   orderNumber?: string | null;
-  replaceDocumentId?: string | null;
+  /**
+   * The current sheet the new one replaces. A replacement keeps the order
+   * context of that sheet (the server refuses another one), whichever of the
+   * wizard or the lead row made it.
+   */
+  replaceDocument?: Pick<DocumentItem, "id" | "order_id"> | null;
 }): Record<string, unknown> {
+  const replaced = input.replaceDocument ?? null;
+  const orderId = replaced ? replaced.order_id : (input.orderId ?? null);
+  const orderNumber = orderId && orderId === input.orderId ? input.orderNumber : undefined;
   return {
     template_id: GWG_IDENTIFICATION_TEMPLATE,
     lead_id: input.leadId,
-    order_id: input.orderId ?? undefined,
-    replace_document_id: input.replaceDocumentId ?? undefined,
+    order_id: orderId ?? undefined,
+    replace_document_id: replaced?.id ?? undefined,
     language: "de",
     document_language: "de",
     document_direction: "outgoing",
@@ -79,7 +87,7 @@ export function gwgSheetRequest(input: {
     status: "active",
     auto_name: gwgSheetAutoName(input.subject, input.personName),
     bindings: {
-      order_number: input.orderNumber ?? undefined,
+      order_number: orderNumber ?? undefined,
       gwg_identification: { subject: input.subject },
     },
   };
@@ -95,6 +103,23 @@ const REPRESENTATIVE_UPLOAD_ARTS = new Set(["representative_identity", "represen
 
 export function isRepresentativeUploadArt(art: string | null | undefined): boolean {
   return REPRESENTATIVE_UPLOAD_ARTS.has((art ?? "").trim().toLowerCase());
+}
+
+/**
+ * Document types of the payer's own uploads on the payer link: the payer's
+ * identity document and the proof of the source of funds. Filed with the
+ * lead (category `identity`), they are never the patient's documents.
+ */
+const PAYER_UPLOAD_ARTS = new Set(["payer_identity", "payer_funds_proof"]);
+
+/**
+ * An upload about another person than the patient — a representative's or
+ * the payer's — although its category or type says "identity": it is never
+ * shown or confirmed as the patient's identity document.
+ */
+export function isOtherPersonUploadArt(art: string | null | undefined): boolean {
+  const key = (art ?? "").trim().toLowerCase();
+  return REPRESENTATIVE_UPLOAD_ARTS.has(key) || PAYER_UPLOAD_ARTS.has(key);
 }
 
 export type GwgSheetButton = {

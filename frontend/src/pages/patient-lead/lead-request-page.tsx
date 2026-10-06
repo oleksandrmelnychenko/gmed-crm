@@ -814,6 +814,8 @@ function PersonalDataStep({
       {/* An older server does not know the question yet. */}
       {request.payer !== undefined ? (
         <PayerSection
+          // Read-only once the payer answered on the own link; open again (staff changed the payer): a fresh form.
+          key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
           request={request}
           text={text}
           lang={lang}

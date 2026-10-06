@@ -7,11 +7,12 @@ import { formatAppDate } from "@/lib/app-time-zone";
 import { PayerLinkError, type PayerLinkClient, type PayerLinkInfo, type PayerVerified } from "./payer-link-api";
 import {
   codeDigits,
-  codeErrorMessage,
+  codeProblemMessage,
   isFatalKind,
   payerErrorKind,
   resendAllowedAt,
   secondsLeft,
+  type CodeProblem,
   type FatalKind,
 } from "./payer-link-session";
 import { Notice } from "./payer-link-parts";
@@ -45,7 +46,9 @@ export function PayerCodeStep({
   const [now, setNow] = useState(() => Date.now());
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"send" | "verify" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Kept as what went wrong, not as a text: the message follows a switch of the language.
+  const [problem, setProblem] = useState<CodeProblem | null>(null);
+  const error = problem ? codeProblemMessage(problem, text) : null;
   const codeInput = useRef<HTMLInputElement | null>(null);
   // Counts the codes sent from here: after each, the field takes the focus once it is shown.
   const [sentCount, setSentCount] = useState(0);
@@ -78,12 +81,12 @@ export function PayerCodeStep({
       setCodeSent(true);
     }
     if (failure.code === "code_expired") setCode("");
-    setError(codeErrorMessage(failure.status, failure.code, failure.body, text));
+    setProblem({ kind: "refused", status: failure.status, code: failure.code, body: failure.body });
   }
 
   async function send() {
     setBusy("send");
-    setError(null);
+    setProblem(null);
     try {
       const sent = await client.requestCode();
       const at = Date.now();
@@ -104,12 +107,12 @@ export function PayerCodeStep({
     event.preventDefault();
     const digits = codeDigits(code);
     if (digits.length !== 6) {
-      setError(text.codeFormat);
+      setProblem({ kind: "format" });
       codeInput.current?.focus();
       return;
     }
     setBusy("verify");
-    setError(null);
+    setProblem(null);
     try {
       onVerified(await client.verifyCode(digits));
     } catch (cause) {

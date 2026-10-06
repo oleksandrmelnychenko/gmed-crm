@@ -10,6 +10,33 @@
  * contacts staff did not edit.
  */
 
+/** The relations the wizard offers for a trusted contact, in the order of its list. */
+export const TRUSTED_CONTACT_RELATIONS = ["parent", "guardian", "representative", "spouse", "relative", "other"] as const;
+
+/**
+ * How a trusted contact is related to the client, as staff read it. A stored
+ * value the list does not know (free text of older data) is shown as it is.
+ */
+export function trustedContactRelationLabel(relation: string, tx: (ru: string, de: string) => string): string {
+  switch (relation.trim()) {
+    case "parent":
+      return tx("Мать / отец", "Mutter / Vater");
+    case "guardian":
+      // A minor's Vormund or an adult's Betreuer (rechtliche Betreuung).
+      return tx("Опекун", "Vormund/Betreuer");
+    case "representative":
+      return tx("Уполномоченный представитель", "Bevollmächtigte Person");
+    case "spouse":
+      return tx("Супруг / супруга", "Ehepartner/in");
+    case "relative":
+      return tx("Родственник", "Verwandte Person");
+    case "other":
+      return tx("Другое", "Sonstiges");
+    default:
+      return relation;
+  }
+}
+
 /** A trusted contact as the wizard edits it. */
 export type TrustedContactDraft = {
   id: string;

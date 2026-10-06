@@ -2782,8 +2782,10 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     let request = format!("/api/v1/me/lead-requests/{child}");
 
     // The template is the contact the login was issued for: name split at
-    // the last space, date of birth, e-mail and phone. Never the address,
-    // and nothing of the other parent.
+    // the last space, date of birth, e-mail and phone; citizenships and
+    // address only from the parent's own representative row (none yet).
+    // Never the contact's free-text address, and nothing of the other
+    // parent.
     let (status, body) = json_request(router, "GET", &request, &parent, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["access_kind"], "guardian", "{body}");
@@ -2795,7 +2797,12 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
             "last_name": "Kind",
             "date_of_birth": "1985-03-04",
             "email": "olga.template@example.com",
-            "phone": "+49 30 000000"
+            "phone": "+49 30 000000",
+            "citizenships": [],
+            "street": null,
+            "zip": null,
+            "city": null,
+            "country": null
         }),
         "{body}"
     );
@@ -2806,7 +2813,8 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     );
 
     // "I pay (as a parent)" is an ordinary third-party answer made of the
-    // template; nothing else is stored for it.
+    // template; nothing else is stored for it. The parent is the payer: no
+    // consent to contact somebody else is asked (QA 2026-10-06).
     let (status, body) = json_request(
         router,
         "POST",
@@ -2821,8 +2829,7 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
             "date_of_birth": template["date_of_birth"],
             "email": template["email"],
             "phone": template["phone"],
-            "citizenships": ["DE"],
-            "contact_consent": true
+            "citizenships": ["DE"]
         })),
     )
     .await;
@@ -2832,6 +2839,9 @@ async fn a_parent_who_pays_is_prefilled_from_the_own_trusted_contact() {
     assert_eq!(body["payer"]["last_name"], "Kind", "{body}");
     assert_eq!(body["payer"]["date_of_birth"], "1985-03-04", "{body}");
     assert!(body["payer"]["street"].is_null(), "{body}");
+    assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    assert_eq!(body["payer"]["answered_by_payer"], false, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "guardian", "{body}");
     assert_eq!(body["payer_self_template"], template, "{body}");
     assert!(
         !missing_for_the_payer(&body)
@@ -3772,6 +3782,16 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
     assert_eq!(body["code"], "payer_consent_required");
+    let informed = move || async move {
+        sqlx::query_as::<_, (Option<chrono::DateTime<chrono::Utc>>, Option<Uuid>)>(
+            "SELECT payer_informed_at, payer_informed_by FROM lead_payer_declarations WHERE lead_id = $1",
+        )
+        .bind(child)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
+    assert_eq!(informed().await, (None, None));
     let (status, body) = json_request(
         router,
         "POST",
@@ -3782,6 +3802,71 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["privacy"]["acknowledged_at"].is_string(), "{body}");
+    // Her acknowledgement informs the payer (QA 2026-10-06), recorded once
+    // with her login, audited with the consent.
+    let (informed_at, informed_by) = informed().await;
+    assert!(informed_at.is_some());
+    assert_eq!(informed_by, Some(*anna_id));
+    let consent_context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'payer_questionnaire_consent' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        consent_context["payer_informed_recorded"], true,
+        "{consent_context}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{section}/consent"),
+        anna,
+        Some(json!({ "acknowledged": true, "contact_channels": ["email", "phone"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(informed().await, (informed_at, informed_by), "kept");
+    // A staff save that leaves the checkbox out keeps the record.
+    let (status, stored) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{child}/payer-declaration"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{stored}");
+    let current = &stored["declaration"];
+    let mut form = serde_json::Map::new();
+    for key in [
+        "payer_kind",
+        "acts_on_own_account",
+        "payer_type",
+        "first_name",
+        "last_name",
+        "date_of_birth",
+        "citizenships",
+        "relationship_kind",
+        "email",
+    ] {
+        form.insert(key.to_string(), current[key].clone());
+    }
+    form.insert("phone".into(), json!("+49 30 1234567"));
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/payer-declaration"),
+        &pm,
+        Some(Value::Object(form)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["declaration"]["phone"], "+49 30 1234567", "{saved}");
+    assert_eq!(informed().await, (informed_at, informed_by), "{saved}");
     for (key, value) in [
         ("first_name", json!("Annette")),
         ("payment_method", json!("card")),

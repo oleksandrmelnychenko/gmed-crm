@@ -33,12 +33,14 @@ import {
   captureLinkToken,
   codeDigits,
   codeErrorMessage,
+  codeProblemMessage,
   isFatalKind,
   linkTokenFromHash,
   payerErrorKind,
   payerErrorMessage,
   resendAllowedAt,
   secondsLeft,
+  type CodeProblem,
   type StorageLike,
 } from "./payer-link-session";
 import { missingLabels, payerLinkText } from "./payer-link-text";
@@ -271,6 +273,30 @@ describe("error codes", () => {
     );
     expect(codeErrorMessage(503, "mail_not_configured", {}, de)).toBe(de.mailFailed);
     expect(codeErrorMessage(423, "link_locked", {}, de)).toBe(de.linkLocked);
+  });
+
+  it("tells a code used up by wrong entries from one that expired", () => {
+    expect(codeErrorMessage(422, "code_expired", { reason: "too_many_attempts" }, de)).toBe(
+      "Zu viele Fehlversuche. Bitte fordern Sie einen neuen Code an.",
+    );
+    expect(codeErrorMessage(422, "code_expired", { reason: "expired" }, de)).toBe(
+      "Der Code ist abgelaufen. Bitte fordern Sie einen neuen Code an.",
+    );
+    // An older server says no reason: the code reads as expired.
+    expect(codeErrorMessage(422, "code_expired", {}, de)).toBe(de.codeExpired);
+    for (const lang of ["en", "uk", "ru"]) {
+      const text = payerLinkText(lang);
+      expect(codeErrorMessage(422, "code_expired", { reason: "too_many_attempts" }, text)).toBe(text.codeTooManyAttempts);
+      expect(text.codeTooManyAttempts).not.toBe(text.codeExpired);
+    }
+  });
+
+  it("writes a problem of the code step in the language shown when it is read", () => {
+    const wrong: CodeProblem = { kind: "refused", status: 422, code: "code_invalid", body: { attempts_left: 4 } };
+    expect(codeProblemMessage(wrong, de)).toBe("Der Code ist nicht richtig. Sie haben noch 4 Versuche.");
+    expect(codeProblemMessage(wrong, payerLinkText("en"))).toBe(payerLinkText("en").codeInvalid(4));
+    expect(codeProblemMessage(wrong, payerLinkText("ru"))).toBe("Код неверный. Осталось попыток: 4.");
+    expect(codeProblemMessage({ kind: "format" }, payerLinkText("uk"))).toBe(payerLinkText("uk").codeFormat);
   });
 
   it("never puts the token or the code into a message", () => {

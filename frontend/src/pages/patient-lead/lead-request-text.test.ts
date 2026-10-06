@@ -226,6 +226,32 @@ describe("lead cabinet languages", () => {
     }
   });
 
+  it("says who consents and signs for a minor by the custody chosen", () => {
+    const de = leadRequestText("de");
+    expect(de.legalRepresentativesIntro).toBe("Für Minderjährige handeln die gesetzlichen Vertreter.");
+    expect(de.custodySignatureNote).toEqual({
+      joint: "Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
+      sole_parent: "Einwilligung und Unterschrift gibt der allein sorgeberechtigte Elternteil.",
+      guardian: "Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
+    });
+    // Only joint custody speaks of both parents, in every language.
+    const bothParents = { de: /beiden Elternteilen/, en: /both parents/, uk: /обох батьків/, ru: /обоих родителей/ };
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      expect(text.custodySignatureNote.joint, option.value).toMatch(bothParents[option.value]);
+      expect(text.custodySignatureNote.sole_parent, option.value).not.toMatch(bothParents[option.value]);
+      expect(text.custodySignatureNote.guardian, option.value).not.toMatch(bothParents[option.value]);
+      expect(new Set(Object.values(text.custodySignatureNote)).size, option.value).toBe(3);
+    }
+  });
+
+  it("says that only GMED changes a payer who answered on the own link", () => {
+    expect(leadRequestText("de").payerAnsweredByPayer).toBe(
+      "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
+    );
+    for (const option of LEAD_CABINET_LANGS) expect(leadRequestText(option.value).payerAnsweredByPayer).toMatch(/GMED/);
+  });
+
   it("has every text in every language", () => {
     // Every key, also inside the groups (field labels, options), with a text behind it.
     const shape = (value: unknown, path = ""): string[] => {

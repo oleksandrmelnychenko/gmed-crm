@@ -67,6 +67,20 @@ describe("portalCredentialsMessage", () => {
     expect(message).toContain("https://app.example/login");
   });
 
+  it("tells a parent's login about the child's request, not about own personal data", () => {
+    const base = { firstName: "", email: "anna@example.com", password: "Kq7-mP2x", loginUrl: "https://app.example/login" };
+    const german = portalCredentialsMessage({ ...base, language: "de", audience: "parent" });
+    expect(german).toContain("Bitte tragen Sie dort die Angaben zur Anfrage für Ihr Kind ein");
+    expect(german).not.toContain("Ihre persönlichen Daten");
+    expect(german).toContain("Benutzername: anna@example.com");
+    expect(portalCredentialsMessage({ ...base, language: "ru", audience: "parent" })).toContain("для вашего ребёнка");
+    expect(portalCredentialsMessage({ ...base, language: "uk", audience: "parent" })).toContain("для вашої дитини");
+    expect(portalCredentialsMessage({ ...base, language: "en", audience: "parent" })).toContain("your child's request");
+    // The patient's own login reads as before.
+    expect(portalCredentialsMessage({ ...base, language: "de" })).toContain("Ihre persönlichen Daten");
+    expect(portalCredentialsMessage({ ...base, language: "de", audience: "patient" })).toContain("Ihre persönlichen Daten");
+  });
+
   it("falls back to German", () => {
     expect(patientMessageLanguage(null)).toBe("de");
     expect(patientMessageLanguage("tr")).toBe("de");

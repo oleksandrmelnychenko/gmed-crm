@@ -10,6 +10,7 @@ import {
   gwgSheetPlan,
   gwgSheetRequest,
   gwgSheetSubject,
+  isOtherPersonUploadArt,
   isRepresentativeUploadArt,
 } from "./gwg-identification";
 
@@ -96,7 +97,7 @@ describe("GwG identification sheet", () => {
       subject: "payer",
       orderId: "order-1",
       orderNumber: "A-1",
-      replaceDocumentId: "doc-9",
+      replaceDocument: { id: "doc-9", order_id: "order-1" },
     });
     expect(payer).toMatchObject({
       order_id: "order-1",
@@ -106,12 +107,36 @@ describe("GwG identification sheet", () => {
     });
   });
 
+  it("keeps the order context of the sheet it replaces, whoever made it", () => {
+    // Made in the wizard with an order, replaced from the lead row without one.
+    const fromRow = gwgSheetRequest({
+      leadId: "lead-1",
+      subject: "contract_partner",
+      replaceDocument: { id: "doc-wizard", order_id: "order-1" },
+    });
+    expect(fromRow).toMatchObject({ order_id: "order-1", replace_document_id: "doc-wizard" });
+    expect((fromRow.bindings as Record<string, unknown>).order_number).toBeUndefined();
+    // Made from the lead row without an order, replaced in the wizard of an order.
+    const fromWizard = gwgSheetRequest({
+      leadId: "lead-1",
+      subject: "contract_partner",
+      orderId: "order-1",
+      orderNumber: "A-1",
+      replaceDocument: { id: "doc-row", order_id: null },
+    });
+    expect(fromWizard.order_id).toBeUndefined();
+    expect(fromWizard.replace_document_id).toBe("doc-row");
+    expect((fromWizard.bindings as Record<string, unknown>).order_number).toBeUndefined();
+    // A first sheet takes the wizard's order.
+    expect(gwgSheetRequest({ leadId: "lead-1", subject: "contract_partner", orderId: "order-1" }).order_id).toBe("order-1");
+  });
+
   it("asks for the sheet of a legal representative, named after that person", () => {
     const request = gwgSheetRequest({
       leadId: "lead-1",
       subject: ANNA,
       personName: " Anna Muster ",
-      replaceDocumentId: "anna-new",
+      replaceDocument: { id: "anna-new", order_id: null },
     });
     expect(request).toMatchObject({
       template_id: "gwg_identification",
@@ -137,6 +162,17 @@ describe("uploads for a person who acts for the lead", () => {
     for (const art of ["identity", "passport", "", null, undefined]) {
       expect(isRepresentativeUploadArt(art)).toBe(false);
     }
+  });
+
+  it("are, with the payer's uploads on the payer link, another person's files, never the patient's", () => {
+    for (const art of ["payer_identity", " Payer_Funds_Proof ", "representative_identity", "representative_authority"]) {
+      expect(isOtherPersonUploadArt(art), art).toBe(true);
+    }
+    for (const art of ["identity", "passport", "aml_asset_origin_evidence", "", null, undefined]) {
+      expect(isOtherPersonUploadArt(art)).toBe(false);
+    }
+    // The payer's files are not a representative's.
+    expect(isRepresentativeUploadArt("payer_identity")).toBe(false);
   });
 });
 
