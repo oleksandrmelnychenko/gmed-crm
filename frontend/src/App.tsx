@@ -290,6 +290,11 @@ const LeadRequestPage = lazy(() =>
     default: module.LeadRequestPage,
   })),
 );
+const PayerLinkPage = lazy(() =>
+  import("@/pages/payer-link/payer-link-page").then((module) => ({
+    default: module.PayerLinkPage,
+  })),
+);
 const AccountPage = lazy(() =>
   import("@/pages/account").then((module) => ({ default: module.AccountPage })),
 );
@@ -423,6 +428,7 @@ function AppRoutes() {
             <Route index element={<LegalNoticePage />} />
           </Route>
           <Route path="/account/password-required" element={<AccountPasswordRequiredPage />} />
+          <Route path="/payer" element={<PayerLinkPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />
             <Route path="notifications" element={<PatientNotificationsPage />} />

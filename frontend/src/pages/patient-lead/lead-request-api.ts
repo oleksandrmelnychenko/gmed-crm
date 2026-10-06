@@ -304,6 +304,71 @@ export type LeadRequestBilling = {
   account_holder_suggestion: string | null;
 };
 
+/**
+ * The paying parent's own questionnaire in short (contract phase 3a, 4.5):
+ * sent only to the login of the parent who pays for the child; `null` (or
+ * absent on an older server) for everybody else.
+ */
+export type LeadRequestPayerQuestionnaireSummary = {
+  available: boolean;
+  submitted_at: string | null;
+  missing_count: number;
+};
+
+/** An upload of the paying person (proof of the source of funds, identity document). */
+export type LeadPayerDocument = {
+  id: string;
+  file_name: string | null;
+  size_bytes: number | null;
+  mime_type: string | null;
+  uploaded_at: string | null;
+  reviewed: boolean;
+  can_delete: boolean;
+};
+
+/**
+ * The answers of the paying person the cabinet reads (contract 3.5): the keys
+ * the paying parent writes here, as the server holds them. Name, address and
+ * identity document are the parent's representative data and stay there.
+ */
+export type LeadPayerAnswers = {
+  salutation: string | null;
+  former_names: string | null;
+  habitual_residence_country: string | null;
+  /** `de`, `en`, `uk` or `ru`. */
+  language: string | null;
+  occupation: string | null;
+  /** Subset of the sources of funds. */
+  funds_sources: string[];
+  funds_description: string | null;
+  pep_self: boolean | null;
+  pep_self_details: string | null;
+  pep_related: boolean | null;
+  pep_related_details: string | null;
+  high_risk_country: boolean | null;
+  high_risk_country_code: string | null;
+  sanctions_links: boolean | null;
+  sanctions_links_details: string | null;
+};
+
+/** `GET /me/lead-requests/{lead_id}/payer-questionnaire`: the paying parent's questionnaire (contract 3.5). */
+export type LeadPayerQuestionnaire = {
+  /** `draft` or `submitted`. */
+  state: string | null;
+  email: string | null;
+  privacy: { acknowledged_at: string | null; text_version: string | null; contact_channels: string[] };
+  answers: LeadPayerAnswers;
+  funds_proof_documents: LeadPayerDocument[];
+  funds_proof_required: boolean;
+  /** What is still missing for "send", in the order of the form (contract 3.5). */
+  missing_for_submit: string[];
+  declared_correct_at: string | null;
+  submitted_at: string | null;
+};
+
+/** Only the changed keys the paying parent may write; `null` clears a text, a choice or an answer. */
+export type PayerQuestionnairePatch = Partial<Record<keyof LeadPayerAnswers, string | string[] | boolean | null>>;
+
 /** The keys of the billing the cabinet writes: everything but what the server computes. */
 export type BillingKey = Exclude<keyof LeadRequestBilling, "payer_declared" | "payment_route_by" | "account_holder_suggestion">;
 
@@ -332,6 +397,8 @@ export type LeadRequest = {
   representation?: LeadRequestRepresentation;
   /** Invoice recipient and payment route; absent on an older server. */
   billing?: LeadRequestBilling;
+  /** The paying parent's own questionnaire; set only for the parent who pays (phase 3a). */
+  payer_questionnaire?: LeadRequestPayerQuestionnaireSummary | null;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -463,6 +530,44 @@ export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<Le
 export function withdrawLeadDocument(leadId: string, documentId: string): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/documents/${encodeURIComponent(documentId)}`, {
     method: "DELETE",
+  });
+}
+
+const payerQuestionnaire = (leadId: string) => `${base(leadId)}/payer-questionnaire`;
+
+// The paying parent's own questionnaire (contract phase 3a, 5.2). Every call
+// answers with the questionnaire (contract 3.5); the caller normalizes it,
+// because the cabinet must not break on an answer of another shape.
+
+export function fetchLeadPayerQuestionnaire(leadId: string): Promise<unknown> {
+  return apiFetch<unknown>(payerQuestionnaire(leadId), { forceFresh: true });
+}
+
+/** Saves the changed keys; the server refuses a key the parent may not write (422 `invalid_field`). */
+export function saveLeadPayerQuestionnaire(leadId: string, patch: PayerQuestionnairePatch): Promise<unknown> {
+  return apiFetch<unknown>(payerQuestionnaire(leadId), { method: "POST", body: JSON.stringify(patch) });
+}
+
+/** The acknowledgement of the payer notice, with how the parent may be contacted; nothing is writable before it. */
+export function acknowledgeLeadPayerNotice(leadId: string, contactChannels: string[]): Promise<unknown> {
+  return apiFetch<unknown>(`${payerQuestionnaire(leadId)}/consent`, {
+    method: "POST",
+    body: JSON.stringify({ acknowledged: true, contact_channels: contactChannels }),
+  });
+}
+
+/** A proof of the source of funds; withdrawn through `withdrawLeadDocument`. */
+export function uploadLeadPayerFundsProof(leadId: string, file: File): Promise<unknown> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<unknown>(`${payerQuestionnaire(leadId)}/funds-proof`, { method: "POST", body: form });
+}
+
+/** Sends the questionnaire with the confirmation that it is complete and correct. */
+export function submitLeadPayerQuestionnaire(leadId: string): Promise<unknown> {
+  return apiFetch<unknown>(`${payerQuestionnaire(leadId)}/submit`, {
+    method: "POST",
+    body: JSON.stringify({ declared_correct: true }),
   });
 }
 

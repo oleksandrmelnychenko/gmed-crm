@@ -30,6 +30,8 @@ import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientFieldMarker } from "../data/lead-portal-intake-api";
+import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
+import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
@@ -120,7 +122,8 @@ function PayerCheckbox({
  * The lead's consent that GMED contacts the payer is shown, never edited:
  * only the lead gives it in the cabinet. The same holds for where the invoice
  * goes (section 7 of the form): staff add only USt-IdNr. / Steuernummer of
- * the invoice recipient.
+ * the invoice recipient. A stored third-party payer gets the payer's own
+ * link (phase 3a) below the payer's data.
  */
 export function LeadPayerDeclarationSection({
   leadId,
@@ -134,6 +137,10 @@ export function LeadPayerDeclarationSection({
   onSave,
   errorText,
   patientMarker,
+  payerLink,
+  payerLinkCanEdit,
+  leadLanguage,
+  onPayerLinkSent,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -147,6 +154,14 @@ export function LeadPayerDeclarationSection({
   errorText: (error: unknown) => string;
   /** Set while the payer is the one the patient stated in the lead cabinet. */
   patientMarker?: PatientFieldMarker | null;
+  /** The payer's own link; absent where it is not loaded (the panel then stays away). */
+  payerLink?: LeadPayerLinkController | null;
+  /** Whether the link may be sent, revoked and the amount entered (leads.edit); `canEdit` when absent. */
+  payerLinkCanEdit?: boolean;
+  /** The lead's language: the first choice for the payer's invitation. */
+  leadLanguage?: string | null;
+  /** A payer link went out: the server marked the payer as informed, the declaration is to be reloaded. */
+  onPayerLinkSent?: () => void;
 }) {
   // The stored declaration is the first form state as well, so a render
   // without effects (static markup) already shows it.
@@ -157,9 +172,10 @@ export function LeadPayerDeclarationSection({
   const [evidenceName, setEvidenceName] = useState("");
   const loadedFor = useRef<string | null>(null);
 
-  // Take the stored declaration unless the user is editing it.
+  // Take the stored declaration unless the user is editing it. Sending the
+  // payer link marks the payer as informed without another change.
   useEffect(() => {
-    const key = `${leadId}:${data?.declaration?.updated_at ?? "none"}`;
+    const key = `${leadId}:${data?.declaration?.updated_at ?? "none"}:${data?.declaration?.payer_informed_at ?? ""}`;
     if (dirty && loadedFor.current?.startsWith(`${leadId}:`)) return;
     if (loadedFor.current === key) return;
     loadedFor.current = key;
@@ -203,6 +219,8 @@ export function LeadPayerDeclarationSection({
         tone: "success",
         text: tx("Данные о плательщике сохранены", "Angaben zum Zahler gespeichert"),
       });
+      // Another payer or e-mail revokes the link; a third party may make it sendable.
+      void payerLink?.reload();
     } catch (error) {
       setMessage({ tone: "error", text: errorText(error) });
     } finally {
@@ -544,6 +562,24 @@ export function LeadPayerDeclarationSection({
                     {tx("ещё не дано", "noch nicht erteilt")}
                   </span>
                 )}
+              </p>
+            ) : null}
+            {payerLink?.data ? (
+              <LeadPayerLinkPanel
+                leadId={leadId}
+                state={payerLink.data}
+                controller={payerLink}
+                canEdit={payerLinkCanEdit ?? canEdit}
+                disabled={disabled}
+                leadLanguage={leadLanguage}
+                tx={tx}
+                errorText={errorText}
+                onSent={onPayerLinkSent}
+              />
+            ) : payerLink?.error ? (
+              <p className="text-xs text-rose-700" data-testid="lead-payer-link-error">
+                {tx("Не удалось загрузить ссылку плательщика: ", "Zahler-Link konnte nicht geladen werden: ")}
+                {errorText(payerLink.error)}
               </p>
             ) : null}
             <p className="text-xs text-muted-foreground">

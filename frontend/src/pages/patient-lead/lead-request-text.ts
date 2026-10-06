@@ -3,6 +3,7 @@ import type { Lang } from "@/lib/i18n";
 import type { Custody, InvoiceTo, PaymentMethod, PaymentRouteBy, PayerType, RepresentativeSlot } from "./lead-request-api";
 import { BILLING_SUBMIT_FIELDS, INVOICE_FIELDS, type BillingField } from "./lead-request-billing-model";
 import {
+  SUBMIT_FIELDS,
   organisationPayerType,
   type ContactChannel,
   type IdentificationField,
@@ -13,6 +14,7 @@ import {
   type RelationshipKind,
   type SubmitField,
 } from "./lead-request-model";
+import type { FundsSource } from "./lead-request-payer-questionnaire-model";
 import {
   authorityProofOf,
   representativeSubmitPart,
@@ -223,7 +225,74 @@ export type LeadRequestText = {
   declarationLabel: string;
   declarationRequired: string;
   declarationGivenAt: (dateTime: string) => string;
+  /**
+   * The paying parent's own questionnaire (contract phase 3a, 5.2): the
+   * questions only a payer is asked, after the payment route. `section` is the
+   * title of the block with the parent's name, address and identity document.
+   */
+  payerQuestionnaireTitle: string;
+  payerQuestionnaireIntro: (section: string) => string;
+  /** The payer notice (Art. 13/14 DSGVO), the same content as the payer's invitation e-mail. */
+  payerNoticeTitle: string;
+  payerNotice: string;
+  payerNoticeAck: string;
+  payerNoticeAckAt: (dateTime: string) => string;
+  payerNoticeFirst: string;
+  payerContactChannels: string;
+  payerQuestionnaireFields: Record<"language" | "occupation" | "funds_sources" | "funds_description", string>;
+  fundsSourceOptions: Record<FundsSource, string>;
+  payerFundsProofTitle: string;
+  payerFundsProofRequired: string;
+  payerFundsProofOptional: string;
+  payerFundsProofRequiredNote: string;
+  payerFundsProofHint: string;
+  payerFundsProofUpload: string;
+  noPayerFundsProof: string;
+  /** Where a missing key is answered instead: "Please add in the section „…“:". */
+  payerElsewhere: (section: string) => string;
+  payerOwnMissingTitle: string;
+  payerNoticeMissing: string;
+  payerDeclarationLabel: string;
+  payerDeclarationRequired: string;
+  payerSubmitButton: string;
+  payerSubmittedAt: (dateTime: string) => string;
+  payerSubmittedNote: string;
+  payerQuestionnaireLoadFailed: string;
+  payerQuestionnaireLocked: string;
 };
+
+/**
+ * A key of the paying parent's questionnaire in the lists of what is still
+ * missing (contract 3.5): the parent's own questions, the notice and the
+ * proof of funds, and the keys answered elsewhere with the labels of there.
+ */
+export function payerQuestionnaireFieldLabel(text: LeadRequestText, field: string): string {
+  switch (field) {
+    case "privacy_ack":
+      return text.payerNoticeMissing;
+    case "funds_proof_upload":
+      return text.payerFundsProofTitle;
+    case "language":
+    case "occupation":
+    case "funds_sources":
+    case "funds_description":
+      return text.payerQuestionnaireFields[field];
+    case "salutation":
+    case "former_names":
+    case "habitual_residence_country":
+      return text.identificationFields[field];
+    case "street":
+      return text.fields.street_address;
+    case "zip":
+      return text.fields.zip_code;
+    case "relationship_kind":
+      return text.payerRelationship;
+    case "relationship":
+      return `${text.payerRelationship} – ${text.payerRelationshipOther}`;
+    default:
+      return (SUBMIT_FIELDS as readonly string[]).includes(field) ? submitFieldLabel(text, field as SubmitField) : field;
+  }
+}
 
 /**
  * Label of a payer field; identity and address reuse the patient's labels.
@@ -723,6 +792,47 @@ const de: LeadRequestText = {
     "Ich bestätige, dass meine Angaben vollständig und wahrheitsgemäß sind und dass ich Änderungen mitteile.",
   declarationRequired: "Bitte bestätigen Sie Ihre Angaben, bevor Sie die Anfrage senden.",
   declarationGivenAt: (dateTime) => `Bestätigt am ${dateTime}`,
+  payerQuestionnaireTitle: "Angaben als zahlende Person",
+  payerQuestionnaireIntro: (section) =>
+    `Sie zahlen die Behandlung. Das Geldwäschegesetz verlangt dazu einige Angaben von Ihnen als zahlender Person. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
+  payerNoticeTitle: "Datenschutzhinweis für die zahlende Person",
+  payerNotice:
+    "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), um die Kostenübernahme zu klären und um Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
+  payerNoticeAck: "Ich habe die Datenschutzhinweise gelesen.",
+  payerNoticeAckAt: (dateTime) => `Bestätigt am ${dateTime}`,
+  payerNoticeFirst: "Bitte bestätigen Sie zuerst den Datenschutzhinweis. Danach können Sie Ihre Angaben als zahlende Person machen.",
+  payerContactChannels: "Wie dürfen wir Sie als zahlende Person kontaktieren?",
+  payerQuestionnaireFields: {
+    language: "Sprache",
+    occupation: "Beruf / Tätigkeit",
+    funds_sources: "Herkunft der Mittel",
+    funds_description: "Beschreibung der Herkunft der Mittel",
+  },
+  fundsSourceOptions: {
+    employment: "Gehalt / nichtselbständige Arbeit",
+    business_income: "Einkünfte aus Unternehmen / selbständiger Tätigkeit",
+    savings: "Ersparnisse",
+    asset_sale: "Verkauf von Vermögenswerten",
+    inheritance_gift: "Erbschaft / Schenkung",
+    other: "Sonstiges",
+  },
+  payerFundsProofTitle: "Nachweis der Herkunft der Mittel",
+  payerFundsProofRequired: "erforderlich",
+  payerFundsProofOptional: "optional",
+  payerFundsProofRequiredNote: "Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.",
+  payerFundsProofHint: "Zum Beispiel Kontoauszug, Gehaltsnachweis, Kaufvertrag oder Erbschein. PDF, JPG oder PNG, bis 25 MB pro Datei.",
+  payerFundsProofUpload: "Nachweis hochladen",
+  noPayerFundsProof: "Noch kein Nachweis hochgeladen.",
+  payerElsewhere: (section) => `Bitte im Abschnitt „${section}“ ergänzen:`,
+  payerOwnMissingTitle: "Für das Senden fehlt noch:",
+  payerNoticeMissing: "Datenschutzhinweis bestätigen",
+  payerDeclarationLabel: "Ich bestätige, dass meine Angaben als zahlende Person vollständig und richtig sind.",
+  payerDeclarationRequired: "Bitte bestätigen Sie Ihre Angaben, bevor Sie sie senden.",
+  payerSubmitButton: "Angaben als Zahler senden",
+  payerSubmittedAt: (dateTime) => `Ihre Angaben als zahlende Person wurden am ${dateTime} gesendet.`,
+  payerSubmittedNote: "Möchten Sie etwas ändern, wenden Sie sich bitte an GMED.",
+  payerQuestionnaireLoadFailed: "Ihre Angaben als zahlende Person konnten nicht geladen werden.",
+  payerQuestionnaireLocked: "Ihre Angaben als zahlende Person sind bereits gesendet und können hier nicht mehr geändert werden.",
 };
 
 const ru: LeadRequestText = {
@@ -1027,6 +1137,47 @@ const ru: LeadRequestText = {
   declarationLabel: "Я подтверждаю, что мои данные полные и достоверные и что я сообщу об изменениях.",
   declarationRequired: "Пожалуйста, подтвердите свои данные перед отправкой заявки.",
   declarationGivenAt: (dateTime) => `Подтверждено ${dateTime}`,
+  payerQuestionnaireTitle: "Ваши данные как плательщика",
+  payerQuestionnaireIntro: (section) =>
+    `Вы оплачиваете лечение. Закон о противодействии отмыванию денег требует для этого некоторых данных о вас как о плательщике. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
+  payerNoticeTitle: "Уведомление о защите данных для плательщика",
+  payerNotice:
+    "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы идентифицировать вас по Закону Германии о противодействии отмыванию денег (§§ 10–12 GwG), согласовать оплату расходов и выставлять счета. Правовое основание — ст. 6 ч. 1 п. b и c DSGVO (GDPR). Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
+  payerNoticeAck: "Я ознакомился(-ась) с информацией о защите данных.",
+  payerNoticeAckAt: (dateTime) => `Подтверждено ${dateTime}`,
+  payerNoticeFirst: "Сначала подтвердите, пожалуйста, уведомление о защите данных. После этого вы сможете указать данные плательщика.",
+  payerContactChannels: "Как мы можем связаться с вами как с плательщиком?",
+  payerQuestionnaireFields: {
+    language: "Язык",
+    occupation: "Профессия / род занятий",
+    funds_sources: "Источник средств",
+    funds_description: "Описание источника средств",
+  },
+  fundsSourceOptions: {
+    employment: "Заработная плата / работа по найму",
+    business_income: "Доход от предпринимательской деятельности",
+    savings: "Сбережения",
+    asset_sale: "Продажа имущества",
+    inheritance_gift: "Наследство / дарение",
+    other: "Другое",
+  },
+  payerFundsProofTitle: "Подтверждение источника средств",
+  payerFundsProofRequired: "обязательно",
+  payerFundsProofOptional: "по желанию",
+  payerFundsProofRequiredNote: "Для этого платежа закон о противодействии отмыванию денег требует подтверждения источника средств.",
+  payerFundsProofHint: "Например, выписка со счёта, справка о доходах, договор купли-продажи или свидетельство о наследстве. PDF, JPG или PNG, до 25 МБ на файл.",
+  payerFundsProofUpload: "Загрузить подтверждение",
+  noPayerFundsProof: "Подтверждение ещё не загружено.",
+  payerElsewhere: (section) => `Пожалуйста, дополните в разделе «${section}»:`,
+  payerOwnMissingTitle: "Для отправки ещё не хватает:",
+  payerNoticeMissing: "Подтвердить уведомление о защите данных",
+  payerDeclarationLabel: "Я подтверждаю, что мои данные как плательщика полны и верны.",
+  payerDeclarationRequired: "Пожалуйста, подтвердите свои данные перед отправкой.",
+  payerSubmitButton: "Отправить данные плательщика",
+  payerSubmittedAt: (dateTime) => `Ваши данные как плательщика отправлены ${dateTime}.`,
+  payerSubmittedNote: "Если вы хотите что-то изменить, обратитесь, пожалуйста, в GMED.",
+  payerQuestionnaireLoadFailed: "Не удалось загрузить ваши данные как плательщика.",
+  payerQuestionnaireLocked: "Ваши данные как плательщика уже отправлены, изменить их здесь больше нельзя.",
 };
 
 const uk: LeadRequestText = {
@@ -1331,6 +1482,47 @@ const uk: LeadRequestText = {
   declarationLabel: "Я підтверджую, що мої дані повні й правдиві та що я повідомлю про зміни.",
   declarationRequired: "Будь ласка, підтвердьте свої дані перед надсиланням заявки.",
   declarationGivenAt: (dateTime) => `Підтверджено ${dateTime}`,
+  payerQuestionnaireTitle: "Ваші дані як платника",
+  payerQuestionnaireIntro: (section) =>
+    `Ви оплачуєте лікування. Закон про протидію відмиванню грошей вимагає для цього деяких даних про вас як про платника. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
+  payerNoticeTitle: "Повідомлення про захист даних для платника",
+  payerNotice:
+    "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб ідентифікувати вас відповідно до Закону Німеччини про протидію відмиванню грошей (§§ 10–12 GwG), узгодити оплату витрат і виставляти рахунки. Правова підстава — ст. 6 ч. 1 п. b і c DSGVO (GDPR). Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
+  payerNoticeAck: "Я ознайомився(-лася) з інформацією про захист даних.",
+  payerNoticeAckAt: (dateTime) => `Підтверджено ${dateTime}`,
+  payerNoticeFirst: "Спочатку підтвердьте, будь ласка, повідомлення про захист даних. Після цього ви зможете вказати дані платника.",
+  payerContactChannels: "Як ми можемо зв'язатися з вами як з платником?",
+  payerQuestionnaireFields: {
+    language: "Мова",
+    occupation: "Професія / рід занять",
+    funds_sources: "Походження коштів",
+    funds_description: "Опис походження коштів",
+  },
+  fundsSourceOptions: {
+    employment: "Заробітна плата / робота за наймом",
+    business_income: "Доходи від підприємницької діяльності",
+    savings: "Заощадження",
+    asset_sale: "Продаж майна",
+    inheritance_gift: "Спадщина / дарування",
+    other: "Інше",
+  },
+  payerFundsProofTitle: "Підтвердження походження коштів",
+  payerFundsProofRequired: "обов'язково",
+  payerFundsProofOptional: "за бажанням",
+  payerFundsProofRequiredNote: "Для цього платежу закон про протидію відмиванню грошей вимагає підтвердження походження коштів.",
+  payerFundsProofHint: "Наприклад, виписка з рахунку, довідка про доходи, договір купівлі-продажу або свідоцтво про спадщину. PDF, JPG або PNG, до 25 МБ на файл.",
+  payerFundsProofUpload: "Завантажити підтвердження",
+  noPayerFundsProof: "Підтвердження ще не завантажено.",
+  payerElsewhere: (section) => `Будь ласка, доповніть у розділі «${section}»:`,
+  payerOwnMissingTitle: "Для надсилання ще бракує:",
+  payerNoticeMissing: "Підтвердити повідомлення про захист даних",
+  payerDeclarationLabel: "Я підтверджую, що мої дані як платника повні та правильні.",
+  payerDeclarationRequired: "Будь ласка, підтвердьте свої дані перед надсиланням.",
+  payerSubmitButton: "Надіслати дані платника",
+  payerSubmittedAt: (dateTime) => `Ваші дані як платника надіслано ${dateTime}.`,
+  payerSubmittedNote: "Якщо ви хочете щось змінити, зверніться, будь ласка, до GMED.",
+  payerQuestionnaireLoadFailed: "Не вдалося завантажити ваші дані як платника.",
+  payerQuestionnaireLocked: "Ваші дані як платника вже надіслано, змінити їх тут більше не можна.",
 };
 
 const en: LeadRequestText = {
@@ -1626,6 +1818,47 @@ const en: LeadRequestText = {
   declarationLabel: "I confirm that my details are complete and true and that I will report any changes.",
   declarationRequired: "Please confirm your details before you send the request.",
   declarationGivenAt: (dateTime) => `Confirmed on ${dateTime}`,
+  payerQuestionnaireTitle: "Your details as the paying person",
+  payerQuestionnaireIntro: (section) =>
+    `You pay for the treatment. German anti-money laundering law requires some details from you as the paying person. You enter your name, address and identity document in the section "${section}".`,
+  payerNoticeTitle: "Privacy notice for the paying person",
+  payerNotice:
+    "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to identify you under the German Anti-Money Laundering Act (sections 10–12 GwG), to arrange the cost coverage and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the details for five years after the end of the business relationship (section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
+  payerNoticeAck: "I have read the privacy information.",
+  payerNoticeAckAt: (dateTime) => `Confirmed on ${dateTime}`,
+  payerNoticeFirst: "Please confirm the privacy notice first. Then you can enter your details as the paying person.",
+  payerContactChannels: "How may we contact you as the paying person?",
+  payerQuestionnaireFields: {
+    language: "Language",
+    occupation: "Occupation",
+    funds_sources: "Source of funds",
+    funds_description: "Description of the source of funds",
+  },
+  fundsSourceOptions: {
+    employment: "Salary / employment",
+    business_income: "Business or self-employed income",
+    savings: "Savings",
+    asset_sale: "Sale of assets",
+    inheritance_gift: "Inheritance / gift",
+    other: "Other",
+  },
+  payerFundsProofTitle: "Proof of the source of funds",
+  payerFundsProofRequired: "required",
+  payerFundsProofOptional: "optional",
+  payerFundsProofRequiredNote: "For this payment German anti-money laundering law requires a proof of the source of funds.",
+  payerFundsProofHint: "For example a bank statement, a payslip, a sales contract or a certificate of inheritance. PDF, JPG or PNG, up to 25 MB per file.",
+  payerFundsProofUpload: "Upload proof",
+  noPayerFundsProof: "No proof uploaded yet.",
+  payerElsewhere: (section) => `Please add in the section "${section}":`,
+  payerOwnMissingTitle: "Still missing before sending:",
+  payerNoticeMissing: "Confirm the privacy notice",
+  payerDeclarationLabel: "I confirm that my details as the paying person are complete and correct.",
+  payerDeclarationRequired: "Please confirm your details before you send them.",
+  payerSubmitButton: "Send my details as payer",
+  payerSubmittedAt: (dateTime) => `Your details as the paying person were sent on ${dateTime}.`,
+  payerSubmittedNote: "If you want to change something, please contact GMED.",
+  payerQuestionnaireLoadFailed: "Your details as the paying person could not be loaded.",
+  payerQuestionnaireLocked: "Your details as the paying person have been sent and can no longer be changed here.",
 };
 
 /** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */

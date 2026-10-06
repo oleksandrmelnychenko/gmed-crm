@@ -566,6 +566,304 @@ fn test_copy(language: MailLanguage) -> TestCopy {
     }
 }
 
+/// The invitation of a third-party payer to the payer's own link (owner spec
+/// "Patientenformular", section 10, phase 3a): who named the payer, the link,
+/// until when it works, the short Art. 14 DSGVO notice (the data come from the
+/// patient side) and that a confirmation code follows when the link is
+/// opened. No medical word: the payer learns only the patient's name.
+#[derive(Debug, Clone)]
+pub struct PayerInvitationEmail<'a> {
+    pub language: MailLanguage,
+    /// The payer's name as the lead entered it (a person or an organisation).
+    pub payer_name: &'a str,
+    /// "First Last" of the patient (the lead).
+    pub patient_name: &'a str,
+    /// `{console_url}/payer#<token>`; the token is in the fragment only.
+    pub link_url: &'a str,
+    pub expires_on: NaiveDate,
+    /// The full privacy notice, `{console_url}/legal#privacy`.
+    pub privacy_url: &'a str,
+    pub agency: &'a AgencyIdentity,
+    pub logo_url: Option<&'a str>,
+}
+
+/// The confirmation code of the payer's link, mailed to the link's address.
+#[derive(Debug, Clone)]
+pub struct PayerCodeEmail<'a> {
+    pub language: MailLanguage,
+    /// Six digits.
+    pub code: &'a str,
+    pub agency: &'a AgencyIdentity,
+    pub logo_url: Option<&'a str>,
+}
+
+struct PayerInvitationCopy {
+    subject: &'static str,
+    preheader: &'static str,
+    label: &'static str,
+    greeting_named: &'static str,
+    greeting: &'static str,
+    intro: &'static str,
+    button: &'static str,
+    link_hint: &'static str,
+    code_hint: &'static str,
+    privacy_heading: &'static str,
+    privacy: &'static str,
+    not_you: &'static str,
+    automatic: &'static str,
+}
+
+fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
+    match language {
+        MailLanguage::De => PayerInvitationCopy {
+            subject: "Angaben zur Kostenübernahme – GMED",
+            preheader: "Bitte machen Sie Ihre Angaben als zahlende Person",
+            label: "Kostenübernahme",
+            greeting_named: "Guten Tag {name},",
+            greeting: "Guten Tag,",
+            intro: "{patient} hat Sie als zahlende Person für eine Anfrage bei GMED benannt. Bitte machen Sie Ihre Angaben über den folgenden Link (gültig bis {date}).",
+            button: "Angaben machen",
+            link_hint: "Falls die Schaltfläche nicht funktioniert, öffnen Sie diese Adresse:",
+            code_hint: "Beim Öffnen senden wir einen Bestätigungscode an diese Adresse.",
+            privacy_heading: "Datenschutzhinweis (Art. 14 DSGVO)",
+            privacy: "Verantwortlich für die Verarbeitung Ihrer Daten ist {controller}. Ihren Namen und Ihre Kontaktdaten haben wir von {patient} erhalten. Wir verarbeiten sie, um Sie nach §§ 10–12 GwG zu identifizieren, die Kostenübernahme zu klären und Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie auf Beschwerde bei einer Aufsichtsbehörde. Vollständige Datenschutzhinweise: {url}",
+            not_you: "Sind Sie nicht gemeint, können Sie diese E-Mail ignorieren; der Link verfällt dann von selbst.",
+            automatic: "Diese E-Mail wurde automatisch versendet.",
+        },
+        MailLanguage::En => PayerInvitationCopy {
+            subject: "Details for the cost coverage – GMED",
+            preheader: "Please enter your details as the paying person",
+            label: "Cost coverage",
+            greeting_named: "Hello {name},",
+            greeting: "Hello,",
+            intro: "{patient} has named you as the paying person for a request to GMED. Please enter your details using the following link (valid until {date}).",
+            button: "Enter my details",
+            link_hint: "If the button does not work, open this address:",
+            code_hint: "When you open the link, we send a confirmation code to this address.",
+            privacy_heading: "Privacy notice (Art. 14 GDPR)",
+            privacy: "The controller of your data is {controller}. We received your name and contact details from {patient}. We process them to identify you under Sections 10–12 of the German Money Laundering Act (GwG), to settle the cost coverage and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the data for five years after the end of the business relationship (Section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a supervisory authority. Full privacy notice: {url}",
+            not_you: "If you are not the person meant, you can ignore this e-mail; the link then expires by itself.",
+            automatic: "This e-mail was sent automatically.",
+        },
+        MailLanguage::Ru => PayerInvitationCopy {
+            subject: "Данные для оплаты расходов – GMED",
+            preheader: "Пожалуйста, укажите свои данные как плательщик",
+            label: "Оплата расходов",
+            greeting_named: "Здравствуйте, {name}!",
+            greeting: "Здравствуйте!",
+            intro: "{patient} указал(а) вас как плательщика по обращению в GMED. Пожалуйста, укажите свои данные по ссылке ниже (действует до {date}).",
+            button: "Указать данные",
+            link_hint: "Если кнопка не работает, откройте этот адрес:",
+            code_hint: "При открытии ссылки мы отправим код подтверждения на этот адрес.",
+            privacy_heading: "Информация о защите данных (ст. 14 DSGVO)",
+            privacy: "Ответственный за обработку ваших данных — {controller}. Ваше имя и контактные данные мы получили от {patient}. Мы обрабатываем их, чтобы идентифицировать вас согласно §§ 10–12 GwG (закон Германии о противодействии отмыванию денег), урегулировать оплату расходов и выставлять счета. Правовое основание — ст. 6 п. 1 лит. b и c DSGVO. Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы имеете право на информацию, исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган. Полная информация о защите данных: {url}",
+            not_you: "Если письмо адресовано не вам, просто не обращайте на него внимания — ссылка перестанет действовать сама.",
+            automatic: "Это письмо отправлено автоматически.",
+        },
+        MailLanguage::Uk => PayerInvitationCopy {
+            subject: "Дані для оплати витрат – GMED",
+            preheader: "Будь ласка, вкажіть свої дані як платник",
+            label: "Оплата витрат",
+            greeting_named: "Вітаємо, {name}!",
+            greeting: "Вітаємо!",
+            intro: "{patient} вказав(ла) вас як платника за зверненням до GMED. Будь ласка, вкажіть свої дані за посиланням нижче (діє до {date}).",
+            button: "Вказати дані",
+            link_hint: "Якщо кнопка не працює, відкрийте цю адресу:",
+            code_hint: "Під час відкриття посилання ми надішлемо код підтвердження на цю адресу.",
+            privacy_heading: "Інформація про захист даних (ст. 14 DSGVO)",
+            privacy: "Відповідальний за обробку ваших даних — {controller}. Ваше ім'я та контактні дані ми отримали від {patient}. Ми обробляємо їх, щоб ідентифікувати вас відповідно до §§ 10–12 GwG (закон Німеччини про запобігання відмиванню грошей), урегулювати оплату витрат і виставляти рахунки. Правова підстава — ст. 6 п. 1 літ. b і c DSGVO. Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ, виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу. Повна інформація про захист даних: {url}",
+            not_you: "Якщо лист адресовано не вам, просто не зважайте на нього — посилання перестане діяти саме.",
+            automatic: "Цей лист надіслано автоматично.",
+        },
+    }
+}
+
+pub fn payer_invitation(email: &PayerInvitationEmail<'_>) -> RenderedEmail {
+    let copy = payer_invitation_copy(email.language);
+    let name = email.payer_name.trim();
+    let greeting = if name.is_empty() {
+        copy.greeting.to_string()
+    } else {
+        copy.greeting_named.replace("{name}", name)
+    };
+    let patient = email.patient_name.trim();
+    let intro = copy
+        .intro
+        .replace("{patient}", patient)
+        .replace("{date}", &email.expires_on.format("%d.%m.%Y").to_string());
+    let controller = non_empty(email.agency.name.as_deref()).unwrap_or("GMED");
+    let privacy = copy
+        .privacy
+        .replace("{controller}", controller)
+        .replace("{patient}", patient)
+        .replace("{url}", email.privacy_url);
+    let footer = email.agency.lines();
+
+    let mut text = vec![
+        greeting.clone(),
+        String::new(),
+        intro.clone(),
+        String::new(),
+        format!("{}: {}", copy.button, email.link_url),
+        String::new(),
+        copy.code_hint.to_string(),
+        String::new(),
+        copy.privacy_heading.to_string(),
+        privacy.clone(),
+        String::new(),
+        copy.not_you.to_string(),
+        String::new(),
+        "-- ".to_string(),
+    ];
+    text.extend(footer.iter().cloned());
+    text.push(copy.automatic.to_string());
+
+    let url = escape_html(email.link_url);
+    let body = format!(
+        r#"<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{greeting}</p>
+{intro}
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 20px;"><tr>
+<td style="border-radius:8px;background:{BRAND};">
+<a href="{url}" target="_blank" rel="noopener" style="display:inline-block;padding:13px 24px;font:600 15px/1.2 {FONT};color:#ffffff;text-decoration:none;border-radius:8px;">{button}</a>
+</td>
+</tr></table>
+<p style="margin:0 0 20px;font:13px/1.5 {FONT};color:{MUTED};">{link_hint}<br><a href="{url}" target="_blank" rel="noopener" style="color:{BRAND};word-break:break-all;">{url}</a></p>
+{code_hint}
+<p style="margin:0 0 6px;font:600 13px/1.4 {FONT};color:{INK};">{privacy_heading}</p>
+{privacy}
+{not_you}"#,
+        greeting = escape_html(&greeting),
+        intro = paragraph(&intro),
+        button = escape_html(copy.button),
+        link_hint = escape_html(copy.link_hint),
+        code_hint = note(copy.code_hint),
+        privacy_heading = escape_html(copy.privacy_heading),
+        privacy = small(&privacy, 16),
+        not_you = small(copy.not_you, 24),
+    );
+    let html = shell(
+        &Shell {
+            language: email.language,
+            subject: copy.subject,
+            preheader: copy.preheader,
+            label: copy.label,
+            logo_url: email.logo_url,
+            footer: &footer,
+            automatic: copy.automatic,
+        },
+        &body,
+    );
+    RenderedEmail {
+        subject: copy.subject.to_string(),
+        text: text.join("\n"),
+        html,
+    }
+}
+
+struct PayerCodeCopy {
+    subject: &'static str,
+    label: &'static str,
+    heading: &'static str,
+    intro: &'static str,
+    code_label: &'static str,
+    valid: &'static str,
+    not_you: &'static str,
+    automatic: &'static str,
+}
+
+fn payer_code_copy(language: MailLanguage) -> PayerCodeCopy {
+    match language {
+        MailLanguage::De => PayerCodeCopy {
+            subject: "Ihr Bestätigungscode – GMED",
+            label: "Kostenübernahme",
+            heading: "Ihr Bestätigungscode",
+            intro: "Mit diesem Code bestätigen Sie Ihre E-Mail-Adresse für die Angaben zur Kostenübernahme.",
+            code_label: "Ihr Bestätigungscode",
+            valid: "Der Code ist 15 Minuten gültig. Geben Sie ihn nicht weiter; GMED fragt Sie niemals telefonisch danach.",
+            not_you: "Sie haben keinen Code angefordert? Dann können Sie diese E-Mail ignorieren.",
+            automatic: "Diese E-Mail wurde automatisch versendet.",
+        },
+        MailLanguage::En => PayerCodeCopy {
+            subject: "Your confirmation code – GMED",
+            label: "Cost coverage",
+            heading: "Your confirmation code",
+            intro: "With this code you confirm your e-mail address for the cost coverage details.",
+            code_label: "Your confirmation code",
+            valid: "The code is valid for 15 minutes. Do not share it; GMED never asks for it by phone.",
+            not_you: "You did not request a code? Then you can ignore this e-mail.",
+            automatic: "This e-mail was sent automatically.",
+        },
+        MailLanguage::Ru => PayerCodeCopy {
+            subject: "Ваш код подтверждения – GMED",
+            label: "Оплата расходов",
+            heading: "Ваш код подтверждения",
+            intro: "Этим кодом вы подтверждаете свой адрес электронной почты для данных об оплате расходов.",
+            code_label: "Ваш код подтверждения",
+            valid: "Код действует 15 минут. Никому его не сообщайте; GMED никогда не спрашивает его по телефону.",
+            not_you: "Вы не запрашивали код? Тогда просто не обращайте внимания на это письмо.",
+            automatic: "Это письмо отправлено автоматически.",
+        },
+        MailLanguage::Uk => PayerCodeCopy {
+            subject: "Ваш код підтвердження – GMED",
+            label: "Оплата витрат",
+            heading: "Ваш код підтвердження",
+            intro: "Цим кодом ви підтверджуєте свою адресу електронної пошти для даних про оплату витрат.",
+            code_label: "Ваш код підтвердження",
+            valid: "Код дійсний 15 хвилин. Нікому його не повідомляйте; GMED ніколи не запитує його телефоном.",
+            not_you: "Ви не запитували код? Тоді просто не зважайте на цей лист.",
+            automatic: "Цей лист надіслано автоматично.",
+        },
+    }
+}
+
+pub fn payer_code(email: &PayerCodeEmail<'_>) -> RenderedEmail {
+    let copy = payer_code_copy(email.language);
+    let footer = email.agency.lines();
+    let mut text = vec![
+        copy.intro.to_string(),
+        String::new(),
+        format!("{}: {}", copy.code_label, email.code),
+        String::new(),
+        copy.valid.to_string(),
+        copy.not_you.to_string(),
+        String::new(),
+        "-- ".to_string(),
+    ];
+    text.extend(footer.iter().cloned());
+    text.push(copy.automatic.to_string());
+    let body = format!(
+        r#"<p style="margin:0 0 16px;font:600 17px/1.5 {FONT};color:{INK};">{heading}</p>
+{intro}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;background:{BRAND_SOFT};border:1px solid {BRAND_BORDER};border-radius:10px;">
+<tr><td style="padding:16px 20px;font:700 28px/1.3 {MONO};letter-spacing:6px;white-space:nowrap;color:{INK};">{code}</td></tr>
+</table>
+{valid}
+{not_you}"#,
+        heading = escape_html(copy.heading),
+        intro = paragraph(copy.intro),
+        code = escape_html(email.code),
+        valid = small(copy.valid, 12),
+        not_you = small(copy.not_you, 24),
+    );
+    let html = shell(
+        &Shell {
+            language: email.language,
+            subject: copy.subject,
+            preheader: copy.heading,
+            label: copy.label,
+            logo_url: email.logo_url,
+            footer: &footer,
+            automatic: copy.automatic,
+        },
+        &body,
+    );
+    RenderedEmail {
+        subject: copy.subject.to_string(),
+        text: text.join("\n"),
+        html,
+    }
+}
+
 pub fn connection_test(email: &ConnectionTestEmail<'_>) -> RenderedEmail {
     let copy = test_copy(email.language);
     let requested = copy
@@ -789,6 +1087,95 @@ mod tests {
             assert!(email.text.contains("Max <Admin>"));
             assert!(email.html.contains("Max &lt;Admin&gt;"));
             assert!(email.html.contains("gmed-logo.png"));
+        }
+    }
+
+    #[test]
+    fn the_payer_invitation_names_the_patient_the_deadline_and_the_privacy_notice() {
+        let agency = agency();
+        for language in [
+            MailLanguage::De,
+            MailLanguage::En,
+            MailLanguage::Ru,
+            MailLanguage::Uk,
+        ] {
+            let email = payer_invitation(&PayerInvitationEmail {
+                language,
+                payer_name: "Viktor Zahler",
+                patient_name: "Mia Muster",
+                link_url: "https://console.gmed-health.com/payer#abc123",
+                expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+                privacy_url: "https://console.gmed-health.com/legal#privacy",
+                agency: &agency,
+                logo_url: Some("https://console.gmed-health.com/gmed-logo.png"),
+            });
+            assert!(email.subject.contains("GMED"), "{language:?}");
+            for part in [&email.text, &email.html] {
+                assert!(part.contains("Mia Muster"), "{language:?}");
+                assert!(part.contains("Viktor Zahler"), "{language:?}");
+                assert!(part.contains("05.11.2026"), "{language:?}");
+                assert!(part.contains("https://console.gmed-health.com/payer#abc123"));
+                assert!(part.contains("https://console.gmed-health.com/legal#privacy"));
+                assert!(part.contains("GwG"), "{language:?}");
+                assert!(part.contains("80331 München"));
+            }
+            // The agency named in the settings is the controller.
+            assert!(email.text.contains("GMED - Agentur für Patientenbetreuung"));
+        }
+        let german = payer_invitation(&PayerInvitationEmail {
+            language: MailLanguage::De,
+            payer_name: "",
+            patient_name: "Mia Muster",
+            link_url: "https://console.gmed-health.com/payer#abc123",
+            expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+            privacy_url: "https://console.gmed-health.com/legal#privacy",
+            agency: &AgencyIdentity::default(),
+            logo_url: None,
+        });
+        assert_eq!(german.subject, "Angaben zur Kostenübernahme – GMED");
+        assert!(german.text.starts_with("Guten Tag,\n"));
+        assert!(
+            german.text.contains(
+                "Mia Muster hat Sie als zahlende Person für eine Anfrage bei GMED benannt."
+            )
+        );
+        assert!(
+            german
+                .text
+                .contains("Beim Öffnen senden wir einen Bestätigungscode an diese Adresse.")
+        );
+        assert!(
+            german
+                .text
+                .contains("Verantwortlich für die Verarbeitung Ihrer Daten ist GMED.")
+        );
+        for word in ["Diagnose", "Behandlung", "medizin", "Klinik"] {
+            assert!(!german.text.contains(word), "{word}");
+        }
+    }
+
+    #[test]
+    fn the_payer_code_e_mail_carries_the_code_on_a_line_of_its_own() {
+        let agency = AgencyIdentity::default();
+        for language in [
+            MailLanguage::De,
+            MailLanguage::En,
+            MailLanguage::Ru,
+            MailLanguage::Uk,
+        ] {
+            let email = payer_code(&PayerCodeEmail {
+                language,
+                code: "042917",
+                agency: &agency,
+                logo_url: None,
+            });
+            assert!(email.subject.contains("GMED"));
+            assert!(!email.subject.contains("042917"), "never in the subject");
+            assert!(email.html.contains("042917"));
+            assert!(
+                email.text.lines().any(|line| line.ends_with(": 042917")),
+                "{language:?}"
+            );
         }
     }
 

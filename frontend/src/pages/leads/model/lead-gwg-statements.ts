@@ -5,7 +5,7 @@
  * staff keep their own AML assessment elsewhere in the wizard.
  */
 import { countryNameForDisplay } from "@/components/ui/country-select";
-import { appDateKeyOf } from "@/lib/app-time-zone";
+import { appDateKeyOf, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type {
   LeadComplianceFlag,
@@ -13,6 +13,7 @@ import type {
   LeadGwgIdentification,
   LeadPortalBilling,
   LeadPortalIntake,
+  LeadPortalPayerLink,
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
@@ -166,8 +167,21 @@ export type GwgLegalAnswer = {
   details: string;
 };
 
-/** The four legal questions of the cabinet with the lead's answers. */
-export function gwgLegalAnswers(identification: LeadGwgIdentification, tx: Tx, lang: string): GwgLegalAnswer[] {
+/** The keys of the four legal questions and their details: the lead's, or a payer's. */
+export type GwgLegalAnswerSource = Pick<
+  LeadGwgIdentification,
+  | "pep_self"
+  | "pep_self_details"
+  | "pep_related"
+  | "pep_related_details"
+  | "high_risk_country"
+  | "high_risk_country_code"
+  | "sanctions_links"
+  | "sanctions_links_details"
+>;
+
+/** The four legal questions of the cabinet with the answers of the lead (or of the payer). */
+export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, lang: string): GwgLegalAnswer[] {
   const details = (answer: boolean | null, text: string | null | undefined) => (answer === true ? (text ?? "").trim() : "");
   return [
     {
@@ -466,7 +480,16 @@ export type BillingStatements = {
   complianceLine: string;
 };
 
-export function billingStatements(billing: LeadPortalBilling, tx: Tx, lang: string): BillingStatements {
+export function billingStatements(
+  billing: LeadPortalBilling,
+  tx: Tx,
+  lang: string,
+  /**
+   * The payer sent the answers through the own link: section 8 is the
+   * payer's answer then and is shown as such (phase 3a).
+   */
+  payerAnswered = false,
+): BillingStatements {
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const statement = (
     key: BillingStatementKey,
@@ -504,7 +527,7 @@ export function billingStatements(billing: LeadPortalBilling, tx: Tx, lang: stri
   const byPayer = billing.payment_route_by === "payer";
   const method = billing.payment_method;
   const payment: BillingStatement[] = [];
-  if (!byPayer) {
+  if (!byPayer || payerAnswered) {
     payment.push(
       statement("payment_method", tx("Способ оплаты", "Zahlungsweg"), paymentMethodLabel(method, tx), {
         details: method === "other" ? billing.payment_method_details : null,
@@ -542,4 +565,21 @@ export function paymentRouteByPayerNote(tx: Tx): string {
     "Способ оплаты укажет плательщик (собственная ссылка — следующий этап)",
     "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
   );
+}
+
+/**
+ * The line of section 8 for a third-party payer (phase 3a): the payer states
+ * the payment route through the own link, or stated it on a day. A server
+ * without the payer link keeps the note of before.
+ */
+export function paymentRouteByPayerLine(
+  payerLink: Pick<LeadPortalPayerLink, "submitted_at"> | null | undefined,
+  tx: Tx,
+): string {
+  if (!payerLink) return paymentRouteByPayerNote(tx);
+  if (payerLink.submitted_at) {
+    const at = formatAppDateTime(payerLink.submitted_at);
+    return tx(`Способ оплаты: указал плательщик ${at}`, `Zahlungsweg: angegeben vom Zahler am ${at}`);
+  }
+  return tx("Способ оплаты: укажет плательщик по ссылке", "Zahlungsweg: gibt der Zahler über den Link an");
 }

@@ -11,8 +11,10 @@
 //!   relation is the role;
 //! * the third-party payer of a lead (`lead_payer`) from
 //!   `lead_payer_declarations`: a person, or a company, an organisation or an
-//!   insurer screened as an organisation by its name — see
-//!   [`payer_subjects`];
+//!   insurer screened as an organisation by its name, with what the payer
+//!   stated through its own link (`lead_payer_statements`: the habitual
+//!   residence and, once sent, an organisation's representative and
+//!   beneficial owners) — see [`payer_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
 //!
@@ -448,23 +450,33 @@ fn lead_subjects_from_row(
 /// declaration work that lands separately. Until its migration exists this
 /// returns nothing (`to_regclass` guard). Rows are read as JSON so that
 /// additional columns (for example an organisation name) do not break
-/// screening.
+/// screening. What the payer stated itself through its own link (phase 3a,
+/// `lead_payer_statements`) rides along as `payer_statement` (`null` without
+/// a statement).
 pub async fn load_payer_rows(db: &gmed_db::DbPool, lead_ids: &[Uuid]) -> HashMap<Uuid, Vec<Value>> {
     let mut by_lead: HashMap<Uuid, Vec<Value>> = HashMap::new();
-    let exists: Result<bool, sqlx::Error> =
-        sqlx::query_scalar("SELECT to_regclass('public.lead_payer_declarations') IS NOT NULL")
-            .fetch_one(db)
-            .await;
-    if !matches!(exists, Ok(true)) || lead_ids.is_empty() {
+    let tables: Result<(bool, bool), sqlx::Error> = sqlx::query_as(
+        r#"SELECT to_regclass('public.lead_payer_declarations') IS NOT NULL,
+                  to_regclass('public.lead_payer_statements') IS NOT NULL"#,
+    )
+    .fetch_one(db)
+    .await;
+    let Ok((true, statements)) = tables else {
+        return by_lead;
+    };
+    if lead_ids.is_empty() {
         return by_lead;
     }
-    let rows: Vec<(Uuid, Value)> = match sqlx::query_as(
-        "SELECT d.lead_id, to_jsonb(d) FROM lead_payer_declarations d WHERE d.lead_id = ANY($1)",
-    )
-    .bind(lead_ids)
-    .fetch_all(db)
-    .await
-    {
+    let query = if statements {
+        r#"SELECT d.lead_id,
+                  to_jsonb(d) || jsonb_build_object('payer_statement', to_jsonb(s))
+           FROM lead_payer_declarations d
+           LEFT JOIN lead_payer_statements s ON s.lead_id = d.lead_id
+           WHERE d.lead_id = ANY($1)"#
+    } else {
+        "SELECT d.lead_id, to_jsonb(d) FROM lead_payer_declarations d WHERE d.lead_id = ANY($1)"
+    };
+    let rows: Vec<(Uuid, Value)> = match sqlx::query_as(query).bind(lead_ids).fetch_all(db).await {
         Ok(rows) => rows,
         Err(error) => {
             tracing::warn!(error = %error, "Payer declarations unreadable for sanctions screening");
@@ -485,12 +497,22 @@ pub async fn load_payer_rows(db: &gmed_db::DbPool, lead_ids: &[Uuid]) -> HashMap
 /// name, and its seat country is the residence. A person is screened by first
 /// and last name, date of birth and citizenships; a person without a first
 /// name is screened as an organisation, as before the payer type existed.
+///
+/// What the payer stated through its own link (`payer_statement`, phase 3a)
+/// adds the habitual residence to the residence countries and — once the
+/// payer submitted it — an organisation's legal representative
+/// (`payer-representative`, relation `payer_representative`) and each
+/// beneficial owner (`payer-owner-<n>` from 1, relation
+/// `payer_beneficial_owner`) as subjects of their own.
 pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
     let mut subjects = Vec::new();
     for (position, row) in rows.iter().enumerate() {
         if json_text(row, "payer_kind") != "third_party" {
             continue;
         }
+        let statement = row
+            .get("payer_statement")
+            .filter(|statement| statement.is_object());
         let payer_type = json_text(row, "payer_type");
         let organisation_name = ["organisation_name", "organization_name", "company_name"]
             .iter()
@@ -526,15 +548,82 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
             Some(Value::Number(id)) => id.to_string(),
             _ => format!("payer-{position}"),
         };
+        let mut residence = json_codes(row, "country");
+        for code in statement
+            .map(|statement| json_codes(statement, "habitual_residence_country"))
+            .unwrap_or_default()
+        {
+            if !residence.contains(&code) {
+                residence.push(code);
+            }
+        }
+        let organisation = !payer_type.is_empty() && payer_type != "person";
         subjects.push(SubjectRecord {
             kind: SubjectKind::LeadPayer,
             lead_id: Some(lead_id),
             patient_id: None,
             subject_ref,
             subject,
-            residence: json_codes(row, "country"),
+            residence,
             relation: Some("payer".to_string()),
         });
+        // The people behind an organisation, once the payer sent its answers.
+        let Some(statement) = statement
+            .filter(|statement| organisation && !json_text(statement, "submitted_at").is_empty())
+        else {
+            continue;
+        };
+        let person = |first_name: String,
+                      last_name: String,
+                      date_of_birth: Option<NaiveDate>,
+                      residence: Vec<String>,
+                      subject_ref: String,
+                      relation: &str| SubjectRecord {
+            kind: SubjectKind::LeadPayer,
+            lead_id: Some(lead_id),
+            patient_id: None,
+            subject_ref,
+            subject: Subject {
+                first_name,
+                middle_name: None,
+                last_name,
+                date_of_birth,
+                citizenships: Vec::new(),
+                organisation: false,
+            },
+            residence,
+            relation: Some(relation.to_string()),
+        };
+        let representative_last = json_text(statement, "representative_last_name");
+        if !representative_last.is_empty() {
+            subjects.push(person(
+                json_text(statement, "representative_first_name"),
+                representative_last,
+                None,
+                Vec::new(),
+                "payer-representative".to_string(),
+                "payer_representative",
+            ));
+        }
+        let owners = statement
+            .get("beneficial_owners")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        for (index, owner) in owners.iter().enumerate() {
+            let last_name = json_text(owner, "last_name");
+            if last_name.is_empty() {
+                continue;
+            }
+            subjects.push(person(
+                json_text(owner, "first_name"),
+                last_name,
+                json_date(owner, "date_of_birth"),
+                json_codes(owner, "country"),
+                format!("payer-owner-{}", index + 1),
+                "payer_beneficial_owner",
+            ));
+        }
     }
     subjects
 }
@@ -1383,6 +1472,93 @@ mod tests {
             subject_fingerprint(&company.subject),
             subject_fingerprint(&person.subject)
         );
+    }
+
+    #[test]
+    fn the_payers_own_statement_adds_residence_representative_and_owners_once_sent() {
+        let lead_id = Uuid::new_v4();
+        let statement = |submitted: bool| {
+            json!({
+                "habitual_residence_country": "AE",
+                "representative_first_name": "Viktor",
+                "representative_last_name": "Zahler",
+                "beneficial_owners": [
+                    { "first_name": "Anna", "last_name": "Muster", "date_of_birth": "1980-02-03",
+                      "country": "de", "share_percent": 60 },
+                    { "first_name": "Ben", "last_name": "Muster", "share_percent": 40 }
+                ],
+                "submitted_at": if submitted { json!("2026-10-06T10:00:00+00:00") } else { Value::Null },
+            })
+        };
+        let company = |statement: Value| {
+            json!({
+                "payer_kind": "third_party",
+                "payer_type": "company",
+                "organisation_name": "Beispiel GmbH",
+                "country": "CY",
+                "payer_statement": statement,
+            })
+        };
+        // While the payer drafts, only the residence counts.
+        let drafting = payer_subjects(lead_id, &[company(statement(false))]);
+        assert_eq!(drafting.len(), 1);
+        assert_eq!(drafting[0].residence, ["CY", "AE"]);
+
+        let sent = payer_subjects(lead_id, &[company(statement(true))]);
+        assert_eq!(
+            sent.len(),
+            4,
+            "the company, its representative and two owners"
+        );
+        assert!(
+            sent.iter()
+                .all(|record| record.kind == SubjectKind::LeadPayer)
+        );
+        let representative = &sent[1];
+        assert_eq!(representative.subject_ref, "payer-representative");
+        assert_eq!(
+            representative.relation.as_deref(),
+            Some("payer_representative")
+        );
+        assert!(!representative.subject.organisation);
+        assert_eq!(representative.subject.last_name, "Zahler");
+        let owner = &sent[2];
+        assert_eq!(owner.subject_ref, "payer-owner-1");
+        assert_eq!(owner.relation.as_deref(), Some("payer_beneficial_owner"));
+        assert_eq!(owner.subject.first_name, "Anna");
+        assert_eq!(
+            owner.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1980, 2, 3)
+        );
+        assert_eq!(owner.residence, ["DE"]);
+        assert_eq!(sent[3].subject_ref, "payer-owner-2");
+
+        // A person payer gains the residence only; a row without a
+        // statement stays as before.
+        let person = payer_subjects(
+            lead_id,
+            &[json!({
+                "payer_kind": "third_party",
+                "payer_type": "person",
+                "first_name": "Viktor",
+                "last_name": "Zahler",
+                "country": "AT",
+                "payer_statement": statement(true),
+            })],
+        );
+        assert_eq!(person.len(), 1);
+        assert_eq!(person[0].residence, ["AT", "AE"]);
+        let plain = payer_subjects(
+            lead_id,
+            &[json!({
+                "payer_kind": "third_party",
+                "first_name": "Viktor",
+                "last_name": "Zahler",
+                "country": "AT",
+                "payer_statement": null,
+            })],
+        );
+        assert_eq!(plain[0].residence, ["AT"]);
     }
 
     #[test]

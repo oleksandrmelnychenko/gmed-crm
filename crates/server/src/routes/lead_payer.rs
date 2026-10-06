@@ -1613,6 +1613,32 @@ async fn save_payer_declaration(
             .as_ref()
             .and_then(|previous| previous.contact_consent_at);
     }
+    // The payer's own link informs the payer (Art. 14 notice in the
+    // invitation, phase 3a): a staff form that does not tick the checkbox —
+    // an older client above all — keeps that record for the same payer.
+    if declaration.is_third_party()
+        && declaration.payer_informed_at.is_none()
+        && let Some(previous) = previous.as_ref().filter(|previous| {
+            previous.is_third_party()
+                && previous.payer_informed_at.is_some()
+                && previous.payer_key() == declaration.payer_key()
+        })
+    {
+        match crate::routes::lead_payer_link::link_sent_for(
+            &mut tx,
+            lead_id,
+            &declaration.payer_key(),
+        )
+        .await
+        {
+            Ok(true) => {
+                declaration.payer_informed_at = previous.payer_informed_at;
+                declaration.payer_informed_by = previous.payer_informed_by;
+            }
+            Ok(false) => {}
+            Err(error) => return database_error(error, "load payer link e-mails"),
+        }
+    }
     if let Some(document_id) = declaration.source_of_funds_document_id {
         let prospect: Option<Uuid> = lead.try_get("prospect_patient_id").unwrap_or_default();
         match sqlx::query_scalar::<_, bool>(
@@ -1658,12 +1684,25 @@ async fn save_payer_declaration(
         &mut tx,
         lead_id,
         &declaration,
-        auth.user_id,
+        Some(auth.user_id),
         identity_changed,
     )
     .await
     {
         return database_error(error, "save payer declaration");
+    }
+    // Another payer or another e-mail address: the payer's link stops
+    // working, and another payer's answers go.
+    if let Err(error) = crate::routes::lead_payer_link::payer_changed_in_tx(
+        &mut tx,
+        lead_id,
+        previous.as_ref(),
+        &declaration,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        return database_error(error, "reset payer link");
     }
     let mut event = audit::domain_diff_event(
         "update_lead_payer_declaration",
@@ -1685,7 +1724,8 @@ async fn save_payer_declaration(
     if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
         return database_error(error, "audit payer declaration");
     }
-    if let Err(error) = sync_order_payers(&mut tx, lead_id, &declaration, auth.user_id).await {
+    if let Err(error) = sync_order_payers(&mut tx, lead_id, &declaration, Some(auth.user_id)).await
+    {
         return database_error(error, "sync order payer");
     }
     if let Err(error) = tx.commit().await {
@@ -1703,12 +1743,13 @@ async fn save_payer_declaration(
 }
 
 /// Writes the declaration of a lead. `identity_changed` dates the payer
-/// named in a cost assumption document (see `identity_changed_at`).
+/// named in a cost assumption document (see `identity_changed_at`). `actor`
+/// is `None` for the payer's own link (no login).
 async fn store_declaration(
     conn: &mut PgConnection,
     lead_id: Uuid,
     declaration: &Declaration,
-    actor: Uuid,
+    actor: Option<Uuid>,
     identity_changed: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -1911,8 +1952,9 @@ fn portal_field_of(code: &str) -> &'static str {
 impl Declaration {
     /// The person or organisation named as payer: a different one has not
     /// been informed yet, has another place of birth, and the lead has not
-    /// agreed that GMED contacts it.
-    fn payer_key(&self) -> Value {
+    /// agreed that GMED contacts it. The payer's link keeps a snapshot of it
+    /// (`lead_payer_links.payer_key`): another payer makes the link invalid.
+    pub(crate) fn payer_key(&self) -> Value {
         json!([
             self.payer_type,
             self.organisation_name,
@@ -2215,7 +2257,17 @@ pub(crate) async fn save_from_portal(
     let identity_changed = previous
         .as_ref()
         .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
-    store_declaration(conn, lead_id, &declaration, actor, identity_changed).await?;
+    store_declaration(conn, lead_id, &declaration, Some(actor), identity_changed).await?;
+    // Another payer or another e-mail address: the payer's link stops
+    // working, and another payer's answers go.
+    crate::routes::lead_payer_link::payer_changed_in_tx(
+        conn,
+        lead_id,
+        previous.as_ref(),
+        &declaration,
+        Some(actor),
+    )
+    .await?;
     let mut event = audit::domain_diff_event(
         "lead_portal_update_payer_declaration",
         Some(actor),
@@ -2235,8 +2287,74 @@ pub(crate) async fn save_from_portal(
         "missing": declaration.missing().iter().map(|reason| reason.code()).collect::<Vec<_>>(),
     });
     audit::write_in_transaction(conn, &event).await?;
-    sync_order_payers(conn, lead_id, &declaration, actor).await?;
+    sync_order_payers(conn, lead_id, &declaration, Some(actor)).await?;
     Ok(Some(declaration))
+}
+
+/// The payer's own answers become the payer of the declaration when the payer
+/// submits them (phase 3a, D8): `declaration` is the stored one with the
+/// payer's identity written over it (the caller clones and changes it). It is
+/// stored without the reset rules of the other save paths — no
+/// [`Declaration::carry_billing`], no reset of the payer's link —, dated as a
+/// new payer identity when the identity key changed, audited as a diff and
+/// synced onto the lead's orders. `actor` is `None` for the payer's link.
+pub(crate) async fn adopt_payer_identity(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+    actor: Option<Uuid>,
+    link_id: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    let previous = load_declaration(conn, lead_id).await?;
+    if previous.as_ref() == Some(declaration) {
+        return Ok(());
+    }
+    let identity_changed = previous
+        .as_ref()
+        .is_none_or(|previous| previous.identity_key() != declaration.identity_key());
+    store_declaration(conn, lead_id, declaration, actor, identity_changed).await?;
+    let mut event = audit::domain_diff_event(
+        "payer_link_adopt_payer_declaration",
+        actor,
+        "lead",
+        Some(lead_id),
+        previous
+            .as_ref()
+            .map(Declaration::to_json)
+            .unwrap_or(Value::Null),
+        declaration.to_json(),
+    );
+    event.context = json!({
+        "lead_id": lead_id,
+        "link_id": link_id,
+        "payer_kind": declaration.payer_kind,
+        "identity_changed": identity_changed,
+    });
+    audit::write_in_transaction(conn, &event).await?;
+    sync_order_payers(conn, lead_id, declaration, actor).await
+}
+
+/// Section 8 as the payer states it through its own link (phase 3a): the
+/// cabinet's validation and dependent clearing ([`apply_billing_patch`]),
+/// returning the declaration to store and the changed keys. Only the keys of
+/// section 8 reach this point.
+pub(crate) fn apply_payment_route_patch(
+    current: &Declaration,
+    patch: &PortalBillingPatch,
+) -> Result<(Declaration, Vec<&'static str>), PortalBillingError> {
+    let next = apply_billing_patch(current, patch)?;
+    let changed = changed_billing_fields(current, &next);
+    Ok((next, changed))
+}
+
+/// Stores section 8 the payer changed: the identity stays as it is, no reset
+/// rule applies, nobody's login wrote it.
+pub(crate) async fn store_payment_route(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    declaration: &Declaration,
+) -> Result<(), sqlx::Error> {
+    store_declaration(conn, lead_id, declaration, None, false).await
 }
 
 /// The declaration is the source of the payer of the lead's orders while the
@@ -2248,7 +2366,7 @@ async fn sync_order_payers(
     tx: &mut PgConnection,
     lead_id: Uuid,
     declaration: &Declaration,
-    actor: Uuid,
+    actor: Option<Uuid>,
 ) -> Result<(), sqlx::Error> {
     let orders = sqlx::query(&format!(
         "SELECT o.id, {} FROM orders o WHERE o.source_lead_id = $1 FOR UPDATE",
@@ -2289,13 +2407,14 @@ async fn sync_order_payers(
 /// Writes the payer of an order (the row is already locked by the caller)
 /// and audits the change like the order payer dialog (`set_order_payer`,
 /// old and new payer, `context` says where the payer came from) in the same
-/// transaction.
+/// transaction. `actor` is `None` when the payer's own link changed the
+/// payer (phase 3a).
 async fn write_order_payer(
     tx: &mut PgConnection,
     order_id: Uuid,
     previous: &PayerRecord,
     next: &PayerRecord,
-    actor: Uuid,
+    actor: Option<Uuid>,
     context: Value,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -2335,7 +2454,7 @@ async fn write_order_payer(
     .await?;
     let mut event = audit::domain_diff_event(
         "set_order_payer",
-        Some(actor),
+        actor,
         "order",
         Some(order_id),
         previous.to_audit_json(),
@@ -2354,7 +2473,7 @@ pub(crate) async fn sync_lead_order_payers(
     let mut tx = db.begin().await?;
     let state = load_payer_state(&mut tx, lead_id).await?;
     if let Some(declaration) = state.declaration {
-        sync_order_payers(&mut tx, lead_id, &declaration, actor).await?;
+        sync_order_payers(&mut tx, lead_id, &declaration, Some(actor)).await?;
     }
     tx.commit().await
 }
@@ -2409,7 +2528,7 @@ pub(crate) async fn preset_order_payer_from_patient(
         order_id,
         &previous,
         &next,
-        actor,
+        Some(actor),
         json!({
             "source": "patient_payer_declaration",
             "lead_id": declared.lead_id,
@@ -2734,12 +2853,16 @@ impl Declaration {
     /// Sections 7 and 8 as the cabinet shows them (`billing` of the request
     /// object): the answers, whether a third party is declared (only then
     /// "to the payer" is offered), who answers section 8 for the caller and
-    /// the name to pre-fill the account holder with.
+    /// the name to pre-fill the account holder with. Section 8 is the payer's
+    /// own answer: a caller who is not asked for it (`payer`) sees none of it
+    /// (phase 3a — the third party answers through its own link).
     pub(crate) fn billing_portal_json(
         &self,
         payment_route_by: PaymentRouteBy,
         account_holder_suggestion: Option<&str>,
     ) -> Value {
+        let shown = payment_route_by.asks();
+        let route = |value: Value| if shown { value } else { Value::Null };
         json!({
             "invoice_to": self.invoice_to,
             "invoice_name": self.invoice_name,
@@ -2750,13 +2873,13 @@ impl Declaration {
             "invoice_email": self.invoice_email,
             "payer_declared": self.is_third_party(),
             "payment_route_by": payment_route_by.as_str(),
-            "payment_method": self.payment_method,
-            "payment_method_details": self.payment_method_details,
-            "account_country": self.account_country,
-            "account_holder": self.account_holder,
-            "bank_name": self.bank_name,
-            "via_third_party": self.via_third_party,
-            "via_third_party_details": self.via_third_party_details,
+            "payment_method": route(json!(self.payment_method)),
+            "payment_method_details": route(json!(self.payment_method_details)),
+            "account_country": route(json!(self.account_country)),
+            "account_holder": route(json!(self.account_holder)),
+            "bank_name": route(json!(self.bank_name)),
+            "via_third_party": route(json!(self.via_third_party)),
+            "via_third_party_details": route(json!(self.via_third_party_details)),
             "account_holder_suggestion": account_holder_suggestion,
         })
     }
@@ -2935,7 +3058,7 @@ pub(crate) async fn save_billing_from_portal(
     if changed.is_empty() {
         return Ok(None);
     }
-    store_declaration(conn, lead_id, &next, actor, false).await?;
+    store_declaration(conn, lead_id, &next, Some(actor), false).await?;
     audit::write_in_transaction(
         conn,
         &audit::domain_event(
@@ -3961,5 +4084,20 @@ mod tests {
         assert!(empty["invoice_to"].is_null());
         assert_eq!(empty["payment_route_by"], "payer");
         assert!(empty["account_holder_suggestion"].is_null());
+        // The payer's own answer stays with the payer: a cabinet that is not
+        // asked for it sees none of section 8 (phase 3a).
+        let hidden = complete.billing_portal_json(PaymentRouteBy::Payer, None);
+        for key in [
+            "payment_method",
+            "payment_method_details",
+            "account_country",
+            "account_holder",
+            "bank_name",
+            "via_third_party",
+            "via_third_party_details",
+        ] {
+            assert!(hidden[key].is_null(), "{key}");
+        }
+        assert_eq!(hidden["payment_route_by"], "payer");
     }
 }

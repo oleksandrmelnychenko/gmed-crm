@@ -138,6 +138,9 @@ async fn main() {
             http::header::AUTHORIZATION,
             http::header::CONTENT_TYPE,
             http::header::ACCEPT,
+            // The payer's own link: token and session travel only in headers.
+            http::HeaderName::from_static("x-payer-link"),
+            http::HeaderName::from_static("x-payer-session"),
         ])
         .allow_credentials(true);
 

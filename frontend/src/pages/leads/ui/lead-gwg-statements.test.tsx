@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { normalizeLeadPayerLinkState, type LeadPayerLinkState } from "../data/lead-payer-link-api";
 import { normalizeLeadPortalIntake, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import type { GwgPayerStatement } from "../model/lead-gwg-statements";
 import { LeadGwgStatements } from "./lead-gwg-statements";
@@ -603,5 +604,113 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
     expect(render(billingState({ payment_route_by: "payer", compliance_flags: [] }), null, "de")).toContain(
       "Den Zahlungsweg gibt der Zahler selbst an (eigener Link folgt)",
     );
+  });
+});
+
+/** The payer's answers through the own link (phase 3a): a PEP, level 2, no proof of funds yet. */
+const PAYER_LINK = normalizeLeadPayerLinkState({
+  mode: "link",
+  can_send: true,
+  blocked_reason: null,
+  mail_available: true,
+  link: { status: "submitted", email: "viktor.zahler@example.com", sent_at: "2026-10-06T08:00:00Z" },
+  estimated_total_eur: "12000.00",
+  funds_proof_threshold_eur: 10000,
+  questionnaire: {
+    source: "link",
+    payer_type: "person",
+    state: "submitted",
+    email: "viktor.zahler@example.com",
+    email_confirmed_at: "2026-10-06T08:05:00Z",
+    privacy: { acknowledged_at: "2026-10-06T08:06:00Z", text_version: "payer-privacy-2026-10-06", contact_channels: ["email"], ip: "203.0.113.7" },
+    answers: {
+      first_name: "Viktor",
+      last_name: "Zahler",
+      date_of_birth: "1970-03-02",
+      id_valid_until: "2030-01-14",
+      funds_sources: ["savings"],
+      pep_self: true,
+      pep_self_details: "Bürgermeister 2019–2024",
+      pep_related: false,
+      high_risk_country: false,
+      sanctions_links: false,
+    },
+    identity_documents: [{ id: "doc-payer-id", file_name: "viktor-pass.pdf", uploaded_at: "2026-10-06T08:10:00Z", reviewed: false }],
+    funds_proof_documents: [],
+    funds_proof_required: true,
+    missing_for_submit: [],
+    submitted_at: "2026-10-06T08:30:00Z",
+    check_level: 2,
+    check_reasons: ["pep", "amount_over_threshold"],
+  },
+});
+
+function renderWithPayer(intake: LeadPortalIntake, payerLink: LeadPayerLinkState | null, lang: "ru" | "de" = "ru") {
+  return renderToStaticMarkup(
+    <LeadGwgStatements intake={intake} payer={{ acts_on_own_account: true }} payerLink={payerLink} tx={lang === "de" ? de : ru} lang={lang} today={TODAY} />,
+  );
+}
+
+describe("LeadGwgStatements: the payer's answers", () => {
+  const byPayer = { ...TRANSFER, invoice_to: "payer", payment_route_by: "payer", payment_method: "bank_transfer", account_holder: "Viktor Zahler" };
+
+  it("follows the invoice and payment group, amber for a PEP and for the missing proof of level 2", () => {
+    const html = renderWithPayer(billingState(byPayer, { payer_link: { mode: "link", status: "submitted", submitted_at: "2026-10-06T08:30:00Z", check_level: 2 } }), PAYER_LINK, "de");
+    const group = part(html, "lead-gwg-payer", 'data-testid="lead-gwg-payer-privacy"');
+    expect(group).toContain("Angaben des Zahlers");
+    // 08:30 UTC is 10:30 in Berlin.
+    expect(group).toContain("vom Zahler am 06.10.2026 10:30");
+    expect(html.indexOf('data-testid="lead-gwg-billing"')).toBeLessThan(html.indexOf('data-testid="lead-gwg-payer"'));
+    // Before the lead's own legal questions.
+    expect(html.indexOf('data-testid="lead-gwg-payer"')).toBeLessThan(html.indexOf('data-testid="lead-gwg-answer-pep_self"'));
+    expect(statement(html, "lead-gwg-payer-name")).toContain("Viktor Zahler");
+    expect(statement(html, "lead-gwg-payer-identity_documents")).toContain("viktor-pass.pdf");
+    const pep = statement(html, "lead-gwg-payer-answer-pep_self");
+    expect(pep).toContain('data-warning="true"');
+    expect(pep).toContain("Bürgermeister 2019–2024");
+    expect(statement(html, "lead-gwg-payer-answer-pep_related")).not.toContain('data-warning="true"');
+    expect(part(html, "lead-gwg-payer-check-level", "</p>")).toContain("Prüfstufe: 2 — PEP, Betrag ab 10.000 EUR");
+    expect(part(html, "lead-payer-funds-proof-missing", "</p>")).toContain("Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch");
+    expect(part(html, "lead-gwg-payer-privacy", "</p>")).toContain("Datenschutzhinweis bestätigt am 06.10.2026 10:06 · Version payer-privacy-2026-10-06 · IP 203.0.113.7");
+    // The payer stated section 8: the line says when, and the rows are shown.
+    expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Zahlungsweg: angegeben vom Zahler am 06.10.2026 10:30");
+    expect(statement(html, "lead-gwg-billing-payment_method")).toContain("Überweisung");
+    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+  });
+
+  it("says the payer states the route through the link until the answers are in", () => {
+    const html = renderWithPayer(
+      billingState({ ...byPayer, payment_method: null, account_holder: null }, { payer_link: { mode: "link", status: "sent", submitted_at: null, check_level: 1 } }),
+      null,
+    );
+    expect(part(html, "lead-gwg-billing-by-payer", "</p>")).toContain("Способ оплаты: укажет плательщик по ссылке");
+    expect(html).not.toContain("lead-gwg-billing-payment_method");
+    expect(html).not.toContain('data-testid="lead-gwg-payer"');
+  });
+
+  it("shows no proof line once a proof is uploaded, nor a level-2 line at level 1", () => {
+    const withProof = normalizeLeadPayerLinkState({
+      ...JSON.parse(JSON.stringify(PAYER_LINK)),
+      questionnaire: {
+        ...JSON.parse(JSON.stringify(PAYER_LINK!.questionnaire)),
+        funds_proof_documents: [{ id: "doc-proof", file_name: "kontoauszug.pdf", uploaded_at: "2026-10-06T08:20:00Z", reviewed: false }],
+      },
+    });
+    const html = renderWithPayer(billingState(byPayer), withProof, "de");
+    expect(html).not.toContain("lead-payer-funds-proof-missing");
+    expect(statement(html, "lead-gwg-payer-funds_proof_documents")).toContain("kontoauszug.pdf");
+    const level1 = normalizeLeadPayerLinkState({
+      ...JSON.parse(JSON.stringify(PAYER_LINK)),
+      questionnaire: { ...JSON.parse(JSON.stringify(PAYER_LINK!.questionnaire)), check_level: 1, check_reasons: [], funds_proof_required: false },
+    });
+    const plain = renderWithPayer(billingState(byPayer), level1, "de");
+    expect(part(plain, "lead-gwg-payer-check-level", "</p>")).toContain("Prüfstufe: 1");
+    expect(plain).not.toContain("lead-payer-funds-proof-missing");
+  });
+
+  it("shows the payer's answers even while the lead entered nothing else", () => {
+    const html = renderWithPayer(portalState({ identification: {}, identification_updated_at: null, identity_documents: [] }), PAYER_LINK);
+    expect(html).toContain("Пациент ещё не заполнил эти данные в кабинете");
+    expect(html).toContain("Анкета плательщика");
   });
 });

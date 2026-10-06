@@ -6217,6 +6217,14 @@ async fn convert_lead(
         tracing::error!(error = %error, lead_id = %lead_id, patient_id = %patient_id, "carry over citizenships and payer declaration");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
     }
+    // The payer's own link ends with the lead; the payer's statement stays
+    // with it as GwG evidence (§ 8 Abs. 4 GwG).
+    if let Err(error) =
+        super::lead_payer_link::revoke_for_conversion(&mut tx, lead_id, auth.user_id).await
+    {
+        tracing::error!(error = %error, lead_id = %lead_id, "revoke payer link on conversion");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
 
     for contact in &contacts {
         if let Err(error) = sqlx::query(
@@ -7706,12 +7714,25 @@ pub(crate) async fn anonymize_lead_pii(
     // The payer declaration of an unconverted lead goes with it (a converted
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
     // lead's own GwG statements from the cabinet, what the cabinet holds about
-    // the lead's representatives and staff's confirmations of the own-account
-    // payments (§ 12 Abs. 1 GwG) follow the same rule.
+    // the lead's representatives, staff's confirmations of the own-account
+    // payments (§ 12 Abs. 1 GwG) and the payer's own statement and links
+    // (phase 3a; the link e-mails go with the links) follow the same rule.
     sqlx::query(
         r#"WITH removed_payer AS (
                DELETE FROM lead_payer_declarations
                WHERE lead_id = $1 AND patient_id IS NULL
+           ), removed_payer_statement AS (
+               DELETE FROM lead_payer_statements payer_statement
+               USING leads lead
+               WHERE payer_statement.lead_id = $1
+                 AND lead.id = payer_statement.lead_id
+                 AND lead.converted_patient_id IS NULL
+           ), removed_payer_links AS (
+               DELETE FROM lead_payer_links payer_link
+               USING leads lead
+               WHERE payer_link.lead_id = $1
+                 AND lead.id = payer_link.lead_id
+                 AND lead.converted_patient_id IS NULL
            ), removed_representatives AS (
                DELETE FROM lead_representatives representatives
                USING leads lead

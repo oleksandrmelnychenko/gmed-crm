@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeLeadPortalBilling,
   normalizeLeadPortalIntake,
+  normalizeLeadPortalPayerLink,
   normalizeLeadRepresentation,
   type LeadGwgIdentification,
   type LeadPortalBilling,
@@ -25,6 +26,7 @@ import {
   idDocumentValidity,
   ownAccountStatement,
   paymentMethodLabel,
+  paymentRouteByPayerLine,
   paymentRouteByPayerNote,
   representationStatements,
   representationWarnings,
@@ -848,5 +850,48 @@ describe("the representation as the block shows it", () => {
       underGuardianship: null,
       persons: [],
     });
+  });
+});
+
+describe("section 8 of a third-party payer with the own link (phase 3a)", () => {
+  it("reads the payer link in short, and none on an older server", () => {
+    expect(normalizeLeadPortalIntake({ lead_id: "lead-1" })?.payer_link).toBeNull();
+    expect(
+      normalizeLeadPortalIntake({
+        lead_id: "lead-1",
+        payer_link: { mode: "link", status: "submitted", sent_at: "2026-10-06T08:00:00Z", submitted_at: "2026-10-06T08:30:00Z", check_level: 2 },
+      })?.payer_link,
+    ).toEqual({ mode: "link", status: "submitted", sent_at: "2026-10-06T08:00:00Z", submitted_at: "2026-10-06T08:30:00Z", check_level: 2 });
+    expect(normalizeLeadPortalPayerLink({ mode: "other", check_level: "2" })).toEqual({
+      mode: null,
+      status: null,
+      sent_at: null,
+      submitted_at: null,
+      check_level: null,
+    });
+  });
+
+  it("says the payer states the route through the link, or when the payer stated it", () => {
+    expect(paymentRouteByPayerLine({ submitted_at: null }, de)).toBe("Zahlungsweg: gibt der Zahler über den Link an");
+    expect(paymentRouteByPayerLine({ submitted_at: "2026-10-06T08:30:00Z" }, de)).toBe(
+      "Zahlungsweg: angegeben vom Zahler am 06.10.2026 10:30",
+    );
+    expect(paymentRouteByPayerLine({ submitted_at: null }, ru)).toBe("Способ оплаты: укажет плательщик по ссылке");
+    // An older server knows no payer link: the note of before.
+    expect(paymentRouteByPayerLine(null, de)).toBe(paymentRouteByPayerNote(de));
+  });
+
+  it("shows the payer's answer of section 8 once the payer sent it", () => {
+    const answered = billing({ payment_route_by: "payer", payment_method: "card", account_country: "AT", account_holder: "Viktor Zahler", via_third_party: false });
+    expect(billingStatements(answered, de, "de").payment).toEqual([]);
+    const shown = billingStatements(answered, de, "de", true);
+    expect(shown.byPayer).toBe(true);
+    expect(shown.payment.map((row) => [row.key, row.value])).toEqual([
+      ["payment_method", "Karte"],
+      ["account_country", "Österreich"],
+      ["account_holder", "Viktor Zahler"],
+      ["bank_name", ""],
+      ["via_third_party", "Nein"],
+    ]);
   });
 });

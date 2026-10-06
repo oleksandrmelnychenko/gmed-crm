@@ -70,6 +70,8 @@ import {
   payerReadinessReasonSteps,
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
+import { useLeadPayerLink } from "../model/use-lead-payer-link";
+import { useCan } from "@/lib/permissions";
 import {
   GWG_IDENTIFICATION_TEMPLATE,
   currentGwgSheet,
@@ -2801,6 +2803,9 @@ export function LeadWizard({
   // documents step and the signing order of the commercial step. It follows
   // every lead refresh (order signatures, documents, readiness).
   const payer = useLeadPayerDeclaration(open ? leadId : null);
+  // The third-party payer's own link and answers (phase 3a); sent, revoked and estimated with leads.edit.
+  const payerLink = useLeadPayerLink(open ? leadId : null);
+  const canEditPayerLink = useCan("leads.edit");
   const payerCountries = useMemo(() => payerAmlCountries(payer.data), [payer.data]);
   const reloadPayer = payer.reload;
   useEffect(() => {
@@ -7441,6 +7446,10 @@ ${serviceCommentLines.join("\n")}`
                   lang={lang}
                   tx={tx}
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
+                  payerLink={payerLink}
+                  payerLinkCanEdit={canEditPayerLink}
+                  leadLanguage={draft.language}
+                  onPayerLinkSent={() => void payer.reload()}
                   errorText={(nextError) => errorText(nextError, tx)}
                   onSave={async (form) => {
                     const saved = await payer.save(form);
@@ -7492,6 +7501,7 @@ ${serviceCommentLines.join("\n")}`
                   <LeadGwgStatements
                     intake={step1Portal.intake}
                     payer={payer.data?.declaration ?? null}
+                    payerLink={payerLink.data}
                     tx={tx}
                     lang={lang}
                   />

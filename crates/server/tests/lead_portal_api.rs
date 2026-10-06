@@ -3360,7 +3360,10 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     assert!(missing_for_the_billing(&body).is_empty(), "{body}");
     let (_, body) = json_request(router, "GET", &request, ben, None).await;
     assert!(missing_for_the_billing(&body).is_empty(), "{body}");
-    assert_eq!(body["billing"]["payment_method"], "card", "{body}");
+    // Section 8 is the paying parent's own answer: the other parent sees none
+    // of it (phase 3a).
+    assert!(body["billing"]["payment_method"].is_null(), "{body}");
+    assert!(body["billing"]["account_holder"].is_null(), "{body}");
 
     // Staff: the cabinet asked the paying parent, so the answers are shown.
     let (status, staff) = json_request(router, "GET", &intake, &pm, None).await;
@@ -3400,4 +3403,494 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     );
     let (_, body) = json_request(router, "GET", &request, anna, None).await;
     assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
+}
+
+/// A request of the payer's own link: token and session in their headers.
+async fn payer_request(
+    app: &axum::Router,
+    method: &str,
+    path: &str,
+    token: &str,
+    session: &str,
+    body: Option<Value>,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method(method)
+        .uri(path)
+        .header("X-Payer-Link", token)
+        .header("X-Payer-Session", session)
+        .header("Content-Type", "application/json")
+        .body(match body {
+            Some(value) => Body::from(serde_json::to_vec(&value).unwrap()),
+            None => Body::empty(),
+        })
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+async fn payer_upload(
+    app: &axum::Router,
+    path: &str,
+    token: &str,
+    session: &str,
+) -> (StatusCode, Value) {
+    let boundary = format!("----gmed-boundary-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+    body.extend_from_slice(
+        b"Content-Disposition: form-data; name=\"file\"; filename=\"pass.pdf\"\r\nContent-Type: application/pdf\r\n\r\n",
+    );
+    body.extend_from_slice(PDF);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("X-Payer-Link", token)
+        .header("X-Payer-Session", session)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 4 * 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+/// A verified link of the lead's third party with the privacy notice
+/// acknowledged, as the code would leave it (no e-mail needed): returns the
+/// token and the session.
+async fn seed_payer_session(pool: &PgPool, lead_id: Uuid, sent_by: Uuid) -> (String, String) {
+    let token = "a1".repeat(32);
+    let session = "b2".repeat(32);
+    let link_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO lead_payer_links
+               (lead_id, token_hash, email, language, payer_key, sent_by, expires_at,
+                verified_at, session_hash, session_expires_at)
+           SELECT d.lead_id, $2, d.email, 'de',
+                  jsonb_build_array(d.payer_type, d.organisation_name, d.first_name,
+                                    d.last_name, d.date_of_birth),
+                  $3, now() + interval '30 days', now(), $4, now() + interval '1 hour'
+           FROM lead_payer_declarations d WHERE d.lead_id = $1
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(gmed_server::auth::tokens::hash_token(&token))
+    .bind(sent_by)
+    .bind(gmed_server::auth::tokens::hash_token(&session))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_statements
+               (lead_id, source, link_id, confirmed_email, email_confirmed_at,
+                privacy_ack_at, privacy_text_version)
+           SELECT lead_id, 'link', $2, email, now(), now(), 'payer-privacy-2026-10-06'
+           FROM lead_payer_declarations WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(link_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    (token, session)
+}
+
+/// Phase 3a, risks 3 and 4: what the payer states through its own link —
+/// the payment route and the files without an uploader — never reaches the
+/// lead's cabinet, and the rows without an uploader break none of the
+/// readers (cabinet, staff intake, withdrawal, purge).
+#[tokio::test]
+async fn the_payers_files_and_payment_route_stay_out_of_the_leads_cabinet() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, patient) = lead_with_login(&app, "Mia", "mia.payer-files@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "1970-05-01",
+            "citizenships": ["AT"],
+            "relationship_kind": "friend",
+            "email": "viktor.zahler@example.com",
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (token, session) = seed_payer_session(pool, lead_id, app.patient_manager_id).await;
+
+    // The payer states the payment route and uploads its identity document.
+    let (status, body) = payer_request(
+        router,
+        "POST",
+        "/api/v1/public/payer-link/questionnaire",
+        &token,
+        &session,
+        Some(json!({
+            "payment_method": "card",
+            "account_country": "AT",
+            "account_holder": "Viktor Zahler",
+            "via_third_party": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payment_route"]["payment_method"], "card", "{body}");
+    let (status, body) = payer_upload(
+        router,
+        "/api/v1/public/payer-link/identity-document",
+        &token,
+        &session,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document_id: Uuid = body["identity_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let uploader: Option<Uuid> =
+        sqlx::query_scalar("SELECT uploaded_by FROM lead_portal_uploads WHERE document_id = $1")
+            .bind(document_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(uploader.is_none());
+
+    // The lead's cabinet: nothing of the payer's route or file.
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
+    for key in [
+        "payment_method",
+        "account_country",
+        "account_holder",
+        "via_third_party",
+    ] {
+        assert!(body["billing"][key].is_null(), "{key}: {body}");
+    }
+    assert!(
+        !body.to_string().contains(&document_id.to_string()),
+        "{body}"
+    );
+    assert!(body["payer_questionnaire"].is_null(), "{body}");
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+
+    // Staff read the intake; the file is no identity document of the lead.
+    let manager = app.staff("patient_manager");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["identity_documents"], json!([]), "{intake}");
+    assert_eq!(intake["payer_link"]["mode"], "link", "{intake}");
+    assert_eq!(intake["payer_link"]["status"], "verified", "{intake}");
+
+    // The lead cannot remove the payer's file.
+    let (status, _) = json_request(
+        router,
+        "DELETE",
+        &format!("{request}/documents/{document_id}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The purge takes the rows without an uploader too.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &manager,
+        Some(json!({ "resolution": "delete", "reason": "not_our_lead" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let left: (i64, i64, i64) = sqlx::query_as(
+        r#"SELECT (SELECT count(*) FROM lead_portal_uploads WHERE lead_id = $1),
+                  (SELECT count(*) FROM lead_payer_statements WHERE lead_id = $1),
+                  (SELECT count(*) FROM lead_payer_links WHERE lead_id = $1)"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(left, (0, 0, 0));
+}
+
+/// Phase 3a, D5: a parent with a cabinet login who pays gets no link; the
+/// payer's questions are a section of that parent's cabinet, with the
+/// person and identity data of the representative's row.
+#[tokio::test]
+async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (mother, father) = (Uuid::new_v4(), Uuid::new_v4());
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "Muster",
+            "date_of_birth": "2016-04-05",
+            "email": "mia.questionnaire@example.com",
+            "trusted_contacts": [
+                { "id": mother, "name": "Anna Muster", "relation": "mother",
+                  "email": "anna.questionnaire@example.com", "birth_date": "1985-03-02" },
+                { "id": father, "name": "Ben Muster", "relation": "father",
+                  "email": "ben.questionnaire@example.com", "birth_date": "1983-01-02" }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let child: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let mut logins = Vec::new();
+    for contact in [mother, father] {
+        let (status, issued) = json_request(
+            router,
+            "POST",
+            &format!("/api/v1/leads/{child}/portal-guardians"),
+            &pm,
+            Some(json!({ "trusted_contact_id": contact })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{issued}");
+        let user: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+        logins.push((user, bearer(user, "patient")));
+    }
+    let ((anna_id, anna), (_, ben)) = (&logins[0], &logins[1]);
+    let request = format!("/api/v1/me/lead-requests/{child}");
+    let section = format!("{request}/payer-questionnaire");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        anna,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "relationship_kind": "parent",
+            "first_name": "Anna",
+            "last_name": "Muster",
+            "date_of_birth": "1985-03-02",
+            "email": "anna.questionnaire@example.com",
+            "citizenships": ["DE"],
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+        .bind(child)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // No link for her: the section of her cabinet.
+    let link = format!("/api/v1/leads/{child}/payer-link");
+    let (status, info) = json_request(router, "GET", &link, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{info}");
+    assert_eq!(info["mode"], "cabinet", "{info}");
+    assert_eq!(info["blocked_reason"], "payer_has_cabinet_login", "{info}");
+    assert_eq!(info["can_send"], false);
+    let (status, refused) = json_request(router, "POST", &link, &pm, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "payer_has_cabinet_login");
+    let (_, body) = json_request(router, "GET", &request, anna, None).await;
+    assert_eq!(body["payer_questionnaire"]["available"], true, "{body}");
+    assert!(body["payer_questionnaire"]["submitted_at"].is_null());
+    assert!(
+        body["payer_questionnaire"]["missing_count"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let (_, body) = json_request(router, "GET", &request, ben, None).await;
+    assert!(body["payer_questionnaire"].is_null(), "{body}");
+    let (status, _) = json_request(router, "GET", &section, ben, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = json_request(router, "GET", &section, &pm, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, body) = json_request(router, "GET", &section, anna, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["source"], "cabinet", "{body}");
+    assert_eq!(body["payment_route"]["asked"], false);
+    assert_eq!(body["answers"]["first_name"], "Anna");
+    assert_eq!(body["answers"]["date_of_birth"], "1985-03-02");
+    assert_eq!(body["email"], "anna.questionnaire@example.com");
+    let missing = body["missing_for_submit"].as_array().unwrap();
+    assert_eq!(missing[0], "privacy_ack", "{body}");
+    assert!(missing.contains(&json!("birth_place")), "{body}");
+    assert!(missing.contains(&json!("id_document_upload")), "{body}");
+    assert!(!missing.contains(&json!("payment_method")), "{body}");
+
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &section,
+        anna,
+        Some(json!({ "occupation": "Lehrerin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "payer_consent_required");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{section}/consent"),
+        anna,
+        Some(json!({ "acknowledged": true, "contact_channels": ["email"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["privacy"]["acknowledged_at"].is_string(), "{body}");
+    for (key, value) in [
+        ("first_name", json!("Annette")),
+        ("payment_method", json!("card")),
+        ("citizenships", json!(["AT"])),
+    ] {
+        let (status, refused) =
+            json_request(router, "POST", &section, anna, Some(json!({ key: value }))).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+        assert_eq!(refused["field"], key, "{refused}");
+    }
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &section,
+        anna,
+        Some(json!({
+            "salutation": "ms",
+            "occupation": "Lehrerin",
+            "funds_sources": ["employment"],
+            "pep_self": false,
+            "pep_related": false,
+            "high_risk_country": false,
+            "sanctions_links": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["answers"]["occupation"], "Lehrerin");
+    let (audited_by, context): (Option<Uuid>, Value) = sqlx::query_as(
+        r#"SELECT user_id, context FROM audit_log
+           WHERE action = 'payer_questionnaire_update' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited_by, Some(*anna_id));
+    assert_eq!(context["access_kind"], "guardian", "{context}");
+
+    // Her proof of funds: hers to remove, not the other parent's, and never
+    // a document of the request.
+    let (status, body) = upload_file(
+        router,
+        &format!("{section}/funds-proof"),
+        anna,
+        "konto.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(
+        body["funds_proof_documents"][0]["can_delete"], true,
+        "{body}"
+    );
+    let proof = body["funds_proof_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (_, request_body) = json_request(router, "GET", &request, anna, None).await;
+    assert!(!request_body.to_string().contains(&proof), "{request_body}");
+    let (status, _) = json_request(
+        router,
+        "DELETE",
+        &format!("{request}/documents/{proof}"),
+        ben,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{child}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["payer_link"]["mode"], "cabinet", "{intake}");
+    let (status, _) = json_request(
+        router,
+        "DELETE",
+        &format!("{request}/documents/{proof}"),
+        anna,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = json_request(router, "GET", &section, anna, None).await;
+    assert_eq!(body["funds_proof_documents"], json!([]), "{body}");
+
+    // The representative's data are still missing: no submit yet.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{section}/submit"),
+        anna,
+        Some(json!({ "declared_correct": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "questionnaire_incomplete");
+    assert!(
+        body["missing"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("id_document_upload")),
+        "{body}"
+    );
 }

@@ -74,6 +74,7 @@ import {
 } from "./lead-request-parts";
 import { BillingSections } from "./lead-request-billing";
 import { PayerSection } from "./lead-request-payer-section";
+import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
 import { RepresentationSection } from "./lead-request-representation";
 import { SendStep } from "./lead-request-send-step";
 import {
@@ -390,7 +391,7 @@ function LeadRequestView({
 }
 
 /** The parts of step "data" that save on their own; the footer shows one state for all. */
-type SavePart = "personal" | "payer" | "identification" | "representation" | "billing";
+type SavePart = "personal" | "payer" | "identification" | "representation" | "billing" | "payerQuestionnaire";
 
 /**
  * Step "data" in the order of the GwG form (owner spec 2026-10-05): consent
@@ -423,6 +424,7 @@ function PersonalDataStep({
     identification: "idle",
     representation: "idle",
     billing: "idle",
+    payerQuestionnaire: "idle",
   });
   const [fieldError, setFieldError] = useState<{ field: string; message: string } | null>(null);
   const guardian = request.access_kind === "guardian";
@@ -440,6 +442,10 @@ function PersonalDataStep({
     [setSaveState],
   );
   const setBillingSaveState = useCallback((state: SaveState) => setSaveState("billing", state), [setSaveState]);
+  const setPayerQuestionnaireSaveState = useCallback(
+    (state: SaveState) => setSaveState("payerQuestionnaire", state),
+    [setSaveState],
+  );
 
   const save = useCallback(
     (snapshot: PersonalDraft) => {
@@ -828,6 +834,18 @@ function PersonalDataStep({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={setBillingSaveState}
+        />
+      ) : null}
+
+      {/* The parent who pays answers the payer-only questions (phase 3a); set for that login only. */}
+      {request.payer_questionnaire ? (
+        <PayerQuestionnaireSection
+          request={request}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={setPayerQuestionnaireSaveState}
         />
       ) : null}
 

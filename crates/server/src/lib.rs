@@ -56,7 +56,10 @@ async fn api_not_found() -> impl IntoResponse {
 ///    `/auth/pending/{id}`) sit behind the tight per-IP limiter from
 ///    [`rate_limit::apply_auth_tight`].
 /// 3. Other public endpoints (public `leads` and `messages` surfaces) sit
-///    behind the general per-IP limiter.
+///    behind the general per-IP limiter. The payer's own link (token and
+///    e-mail code, `routes::lead_payer_link`) opens, sends codes and checks
+///    them behind a tight limiter of its own; its questionnaire calls use
+///    the general one.
 /// 4. Authenticated routes sit behind the require-auth middleware *and*
 ///    the general per-IP limiter.
 /// 5. The whole tree is wrapped in [`security_headers::apply`] so every
@@ -76,11 +79,15 @@ pub fn build_app_for_role_contract_tests(app_state: state::AppState) -> Router {
 
 fn build_app_inner(app_state: state::AppState) -> Router {
     let auth_public = rate_limit::apply_auth_tight(routes::auth::public_router());
+    // A bucket of its own: guessing codes must not share the login's budget.
+    let payer_link_public =
+        rate_limit::apply_auth_tight(routes::lead_payer_link::public_tight_router());
 
     let misc_public = rate_limit::apply_general(
         Router::new()
             .merge(datev::public_router())
             .merge(routes::leads::public_router())
+            .merge(routes::lead_payer_link::public_router())
             .merge(routes::legal::public_router())
             .merge(routes::totp::public_router())
             .merge(routes::messages::public_router())
@@ -119,6 +126,7 @@ fn build_app_inner(app_state: state::AppState) -> Router {
     let protected = rate_limit::apply_general(protected_routes);
 
     let api_router = auth_public
+        .merge(payer_link_public)
         .merge(misc_public)
         .merge(protected)
         .fallback(api_not_found);

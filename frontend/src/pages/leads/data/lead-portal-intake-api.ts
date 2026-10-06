@@ -209,6 +209,22 @@ export type LeadPortalBilling = {
   compliance_flags: LeadComplianceFlag[];
 };
 
+/**
+ * The payer's own link in short (contract phase 3a, 4.5): whether the payer
+ * answers through a link or in a paying parent's cabinet, the state of the
+ * newest link, when it went out, when the payer sent the answers, the check
+ * level. Null on an older server and for a role that may not read the
+ * statements.
+ */
+export type LeadPortalPayerLink = {
+  mode: "link" | "cabinet" | null;
+  /** `sent`, `opened`, `verified`, `submitted`, `expired`, `revoked`, `locked`; null without a link. */
+  status: string | null;
+  sent_at: string | null;
+  submitted_at: string | null;
+  check_level: number | null;
+};
+
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
 export type LeadPortalIntake = {
   lead_id: string;
@@ -250,6 +266,8 @@ export type LeadPortalIntake = {
   billing: LeadPortalBilling | null;
   /** Last change of sections 7–8 by the lead while nobody changed the stored answers since. */
   billing_updated_at: string | null;
+  /** The payer's own link in short; null on an older server or for a role that may not read it. */
+  payer_link: LeadPortalPayerLink | null;
 };
 
 export type LeadGuardianAccessIssued = {
@@ -299,6 +317,20 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     representation_updated_at: textOrNull(raw.representation_updated_at),
     billing: normalizeLeadPortalBilling(raw.billing),
     billing_updated_at: textOrNull(raw.billing_updated_at),
+    payer_link: normalizeLeadPortalPayerLink((raw as Record<string, unknown>).payer_link),
+  };
+}
+
+/** The payer link in short with every key present; null when the server sent none. */
+export function normalizeLeadPortalPayerLink(value: unknown): LeadPortalPayerLink | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  return {
+    mode: raw.mode === "link" || raw.mode === "cabinet" ? raw.mode : null,
+    status: textOrNull(raw.status),
+    sent_at: textOrNull(raw.sent_at),
+    submitted_at: textOrNull(raw.submitted_at),
+    check_level: typeof raw.check_level === "number" ? raw.check_level : null,
   };
 }
 

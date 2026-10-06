@@ -34,6 +34,12 @@
 //! the payment route depends on who looks at the cabinet
 //! ([`payment_route_by`]).
 //!
+//! A third-party payer answers its own questions through a link of its own
+//! (phase 3a, [`crate::routes::lead_payer_link`], which also registers the
+//! questionnaire of a paying parent in this cabinet). The payer's files are
+//! portal uploads of their own kinds ([`PAYER_UPLOAD_KINDS`], no uploader for
+//! the link): the lead's cabinet never lists or counts them.
+//!
 //! A login that reaches only requests is in the lead cabinet
 //! (`/me.portal_mode = "lead"`); [`lead_portal_guard`] closes the rest of the
 //! patient portal to it. See docs/architecture/lead-patient-portal_ua.md.
@@ -365,8 +371,9 @@ impl AccessKind {
 }
 
 /// A lead the portal still serves: not deleted (manually or by the retention
-/// rule) and not converted (a converted lead is a normal patient record).
-const PORTAL_LEAD_SQL: &str = r#"
+/// rule) and not converted (a converted lead is a normal patient record). The
+/// payer's own link serves the same leads ([`crate::routes::lead_payer_link`]).
+pub(crate) const PORTAL_LEAD_SQL: &str = r#"
     l.qualification_status <> 'deleted'
     AND l.converted_patient_id IS NULL
     AND COALESCE(l.failed_outcome_status, 'none') <> 'delete_anonymized'"#;
@@ -1615,25 +1622,42 @@ pub(crate) enum UploadKind {
     /// The proof that a representative may act: a power of attorney, the
     /// appointment deed of a guardian, a proof of sole custody.
     RepresentativeAuthority,
+    /// A copy of the third-party payer's identity document (of an
+    /// organisation: of its representative), through the payer's own link
+    /// (phase 3a). Never the lead's: not shown in the lead's cabinet, never
+    /// the lead's identity document.
+    PayerIdentity,
+    /// The payer's proof of the source of funds, through the payer's link or
+    /// from a paying parent's cabinet section.
+    PayerFundsProof,
 }
 
+/// `lead_portal_uploads.kind` of the payer's files.
+pub(crate) const PAYER_UPLOAD_KINDS: [&str; 2] = ["payer_identity", "payer_funds_proof"];
+
 impl UploadKind {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             UploadKind::Medical => "medical",
             UploadKind::Identity => "identity",
             UploadKind::RepresentativeIdentity => lead_representatives::UPLOAD_IDENTITY,
             UploadKind::RepresentativeAuthority => lead_representatives::UPLOAD_AUTHORITY,
+            UploadKind::PayerIdentity => PAYER_UPLOAD_KINDS[0],
+            UploadKind::PayerFundsProof => PAYER_UPLOAD_KINDS[1],
         }
     }
 
-    /// The consent the upload needs first.
-    fn consent(self) -> ConsentPurpose {
+    /// The consent of `consent_records` the upload needs first. A file of
+    /// the payer needs none of them: the payer's acknowledgement of the
+    /// privacy notice on the payer's statement stands for it
+    /// ([`crate::routes::lead_payer_link`]).
+    fn consent(self) -> Option<ConsentPurpose> {
         match self {
-            UploadKind::Medical => ConsentPurpose::HealthData,
+            UploadKind::Medical => Some(ConsentPurpose::HealthData),
             UploadKind::Identity
             | UploadKind::RepresentativeIdentity
-            | UploadKind::RepresentativeAuthority => ConsentPurpose::InquiryProcessing,
+            | UploadKind::RepresentativeAuthority => Some(ConsentPurpose::InquiryProcessing),
+            UploadKind::PayerIdentity | UploadKind::PayerFundsProof => None,
         }
     }
 
@@ -1898,6 +1922,8 @@ pub(crate) async fn request_payload(
                       OR EXISTS (
                           SELECT 1 FROM lead_portal_uploads pu
                           WHERE pu.lead_id = l.id
+                            -- The payer's files are not part of the request.
+                            AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
                             AND (pu.created_at > l.portal_submitted_at
                                  OR pu.withdrawn_at > l.portal_submitted_at)
                       )
@@ -1951,7 +1977,12 @@ pub(crate) async fn request_payload(
                 // Staff took the file over: marked as reviewed, or confirmed
                 // as the identity document.
                 let reviewed = upload_taken_over(upload);
-                let mine = upload.try_get::<Uuid, _>("uploaded_by").ok() == Some(user_id);
+                // A file of the payer's link has no uploader.
+                let mine = upload
+                    .try_get::<Option<Uuid>, _>("uploaded_by")
+                    .ok()
+                    .flatten()
+                    == Some(user_id);
                 let moved = upload
                     .try_get::<Option<Uuid>, _>("patient_id")
                     .ok()
@@ -2008,6 +2039,13 @@ pub(crate) async fn request_payload(
         route_by,
         today,
     );
+    // A paying parent answers the payer's questions in the own cabinet
+    // (phase 3a); nobody else sees anything of the payer's answers or link.
+    let payer_questionnaire = if route_by == PaymentRouteBy::Guardian {
+        crate::routes::lead_payer_link::cabinet_summary(state, lead_id, user_id).await?
+    } else {
+        Value::Null
+    };
     let mut consents = Map::new();
     for purpose in ConsentPurpose::ALL {
         let given = active_consent(&state.db, lead_id, user_id, purpose).await?;
@@ -2047,6 +2085,7 @@ pub(crate) async fn request_payload(
             route_by,
             account_holder_suggestion.as_deref(),
         ),
+        "payer_questionnaire": payer_questionnaire,
         "identification": identification.to_json(),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, today),
         "representation": lead_representatives::portal_payload(&representation, user_id),
@@ -2884,8 +2923,48 @@ async fn upload_my_identity_document(
     store_my_upload(state, auth, lead_id, multipart, UploadKind::Identity, None).await
 }
 
-/// File types of a copy of an identity document or of a proof of authority.
-const IDENTITY_DOCUMENT_MIME_TYPES: [&str; 3] = ["application/pdf", "image/jpeg", "image/png"];
+/// File types of a copy of an identity document or of a proof of authority
+/// (and of the payer's files, phase 3a).
+pub(crate) const IDENTITY_DOCUMENT_MIME_TYPES: [&str; 3] =
+    ["application/pdf", "image/jpeg", "image/png"];
+
+/// Reads the multipart field `file` of an upload: the name as sent (at most
+/// 200 characters), the declared type and the bytes. Over 25 MB, unreadable
+/// or empty is refused. Shared with the payer's own link.
+pub(crate) async fn read_upload_file(
+    multipart: &mut Multipart,
+) -> Result<(String, Option<String>, Vec<u8>), axum::response::Response> {
+    let mut file: Option<(String, Option<String>, Vec<u8>)> = None;
+    while let Ok(Some(field)) = multipart.next_field().await {
+        if field.name() != Some("file") {
+            continue;
+        }
+        let file_name = field
+            .file_name()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or("document")
+            .chars()
+            .take(200)
+            .collect::<String>();
+        let content_type = field.content_type().map(ToOwned::to_owned);
+        match field.bytes().await {
+            Ok(bytes) if bytes.len() > MAX_FILE_SIZE => {
+                return Err(err(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    "File too large (max 25MB)",
+                ));
+            }
+            Ok(bytes) => file = Some((file_name, content_type, bytes.to_vec())),
+            Err(error) => {
+                tracing::warn!(%error, "read lead portal upload");
+                return Err(err(StatusCode::BAD_REQUEST, "Failed to read uploaded file"));
+            }
+        }
+    }
+    file.filter(|(_, _, data)| !data.is_empty())
+        .ok_or_else(|| err(StatusCode::BAD_REQUEST, "No file uploaded"))
+}
 
 /// Stores an upload of the caller's request as a document of the lead and
 /// registers it in `lead_portal_uploads` with the consent it was made under.
@@ -2920,19 +2999,22 @@ pub(crate) async fn store_my_upload(
         }
         (true, None) => return err(StatusCode::NOT_FOUND, "Representative not found"),
     };
-    match active_consent(&state.db, lead_id, auth.user_id, upload_kind.consent()).await {
+    // The payer's files come through the payer's link or the paying parent's
+    // section (`lead_payer_link`), never through here.
+    let Some(consent_purpose) = upload_kind.consent() else {
+        return not_found();
+    };
+    match active_consent(&state.db, lead_id, auth.user_id, consent_purpose).await {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return match upload_kind {
-                UploadKind::Medical => coded(
+            return match consent_purpose {
+                ConsentPurpose::HealthData => coded(
                     StatusCode::FORBIDDEN,
                     "health_consent_required",
                     "Consent to the processing of health data is required before uploading",
                     json!({ "version": HEALTH_CONSENT_VERSION }),
                 ),
-                UploadKind::Identity
-                | UploadKind::RepresentativeIdentity
-                | UploadKind::RepresentativeAuthority => coded(
+                ConsentPurpose::InquiryProcessing => coded(
                     StatusCode::FORBIDDEN,
                     "inquiry_consent_required",
                     "Please agree to the processing of your data for the request first",
@@ -2946,39 +3028,17 @@ pub(crate) async fn store_my_upload(
         Err(error) => return internal(error, "load consent"),
     }
 
-    let mut file: Option<(String, Option<String>, Vec<u8>)> = None;
-    while let Ok(Some(field)) = multipart.next_field().await {
-        if field.name() != Some("file") {
-            continue;
-        }
-        let file_name = field
-            .file_name()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .unwrap_or("document")
-            .chars()
-            .take(200)
-            .collect::<String>();
-        let content_type = field.content_type().map(ToOwned::to_owned);
-        match field.bytes().await {
-            Ok(bytes) if bytes.len() > MAX_FILE_SIZE => {
-                return err(StatusCode::PAYLOAD_TOO_LARGE, "File too large (max 25MB)");
-            }
-            Ok(bytes) => file = Some((file_name, content_type, bytes.to_vec())),
-            Err(error) => {
-                tracing::warn!(%error, "read lead portal upload");
-                return err(StatusCode::BAD_REQUEST, "Failed to read uploaded file");
-            }
-        }
-    }
-    let Some((file_name, content_type, data)) = file.filter(|(_, _, data)| !data.is_empty()) else {
-        return err(StatusCode::BAD_REQUEST, "No file uploaded");
+    let (file_name, content_type, data) = match read_upload_file(&mut multipart).await {
+        Ok(file) => file,
+        Err(response) => return response,
     };
 
+    // The payer's files have a limit of their own and are not the lead's.
     let active_uploads: i64 = match sqlx::query_scalar(
         r#"SELECT count(*) FROM lead_portal_uploads u
            JOIN documents d ON d.id = u.document_id
-           WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL"#,
+           WHERE u.lead_id = $1 AND u.withdrawn_at IS NULL AND d.file_deleted_at IS NULL
+             AND u.kind NOT IN ('payer_identity', 'payer_funds_proof')"#,
     )
     .bind(lead_id)
     .fetch_one(&state.db)
@@ -3050,6 +3110,7 @@ pub(crate) async fn store_my_upload(
             "administrative",
             "internal",
         ),
+        UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return not_found(),
     };
     let auto_name = auto_name.as_str();
     let input = NewStoredDocument {
@@ -3105,7 +3166,7 @@ pub(crate) async fn store_my_upload(
             return Ok::<_, sqlx::Error>(None);
         };
         let Some((consent_id, _)) =
-            active_consent(&mut *tx, lead_id, auth.user_id, upload_kind.consent()).await?
+            active_consent(&mut *tx, lead_id, auth.user_id, consent_purpose).await?
         else {
             return Ok(None);
         };
@@ -3196,7 +3257,11 @@ pub(crate) async fn store_my_upload(
 }
 
 /// Removes a stored document that could not be registered as a portal upload.
-async fn discard_stored_document(state: &AppState, document_id: Uuid, storage_key: &str) {
+pub(crate) async fn discard_stored_document(
+    state: &AppState,
+    document_id: Uuid,
+    storage_key: &str,
+) {
     if let Err(error) = sqlx::query("DELETE FROM documents WHERE id = $1")
         .bind(document_id)
         .execute(&state.db)
@@ -3255,11 +3320,35 @@ async fn withdraw_my_lead_document(
         Ok(None) => return err(StatusCode::NOT_FOUND, "Document not found"),
         Err(error) => return internal(error, "lock upload"),
     };
-    if upload.try_get::<Uuid, _>("uploaded_by").ok() != Some(auth.user_id) {
+    // A file of the payer's link has no uploader: nobody of the cabinet
+    // removes it. A paying parent's own proof of funds goes only while the
+    // parent has not sent the payer's answers.
+    if upload
+        .try_get::<Option<Uuid>, _>("uploaded_by")
+        .ok()
+        .flatten()
+        != Some(auth.user_id)
+    {
         return err(
             StatusCode::FORBIDDEN,
             "Only the person who uploaded the document can remove it",
         );
+    }
+    let upload_kind: String = upload.try_get("kind").unwrap_or_default();
+    let of_payer = PAYER_UPLOAD_KINDS.contains(&upload_kind.as_str());
+    if of_payer {
+        match crate::routes::lead_payer_link::payer_submitted_at(&mut tx, lead_id).await {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    "payer_submitted",
+                    "The payer's answers are sent; ask GMED to change them",
+                    json!({}),
+                );
+            }
+            Err(error) => return internal(error, "load payer statement"),
+        }
     }
     let reviewed = upload
         .try_get::<Option<DateTime<Utc>>, _>("reviewed_at")
@@ -3288,7 +3377,6 @@ async fn withdraw_my_lead_document(
         );
     }
     let storage_key: Option<String> = upload.try_get("storage_key").ok().flatten();
-    let upload_kind: String = upload.try_get("kind").unwrap_or_default();
     let of_representative = [
         lead_representatives::UPLOAD_IDENTITY,
         lead_representatives::UPLOAD_AUTHORITY,
@@ -3356,6 +3444,16 @@ async fn withdraw_my_lead_document(
     .await;
     if of_representative {
         lead_representatives::publish_cabinet_change(&state, lead_id, auth.user_id, kind).await;
+    }
+    if of_payer {
+        crate::realtime::publish_lead_event(
+            &state,
+            Some(auth.user_id),
+            "lead.portal_updated",
+            lead_id,
+            json!({ "change": "payer_link", "access_kind": kind.as_str() }),
+        )
+        .await;
     }
     match request_payload(&state, lead_id, auth.user_id, kind).await {
         Ok(payload) => Json(payload).into_response(),
@@ -3536,16 +3634,31 @@ async fn submit_my_lead_request(
     if let Err(error) = tx.commit().await {
         return internal(error, "commit submit");
     }
+    // A third party pays and may be contacted: staff can send the payer's
+    // own link now (phase 3a, sent by staff, never automatically).
+    let payer_link_ready =
+        match crate::routes::lead_payer_link::link_can_be_sent(&state, lead_id).await {
+            Ok(ready) => ready,
+            Err(error) => {
+                tracing::warn!(%error, %lead_id, "check payer link gate for the notification");
+                false
+            }
+        };
     notify_lead_staff(
         &state,
         lead_id,
         "lead_portal_submitted",
         "Patient sent the request data",
         &format!(
-            "Personal data: {} of {} fields, {} documents.",
+            "Personal data: {} of {} fields, {} documents.{}",
             data.filled_count(),
             PROGRESS_FIELDS.len(),
-            documents
+            documents,
+            if payer_link_ready {
+                " The payer link can be sent now."
+            } else {
+                ""
+            }
         ),
     )
     .await;
@@ -3566,7 +3679,13 @@ async fn submit_my_lead_request(
 /// Stores a notification about the lead for its owner and the patient
 /// managers (the CEO when there is neither). Like the retention notices it
 /// names no person; best effort.
-async fn notify_lead_staff(state: &AppState, lead_id: Uuid, kind: &str, title: &str, body: &str) {
+pub(crate) async fn notify_lead_staff(
+    state: &AppState,
+    lead_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) {
     let recipients: Vec<Uuid> = match sqlx::query_scalar(
         r#"WITH owner AS (
                SELECT u.id FROM leads l
@@ -3789,6 +3908,16 @@ async fn get_lead_portal_intake(
         } else {
             (Value::Null, None, Value::Null, None)
         };
+    // The payer's own link (phase 3a), for the same roles: how far it is and
+    // the check level of the payer's answers.
+    let payer_link = if statements_visible {
+        match crate::routes::lead_payer_link::intake_summary(&state, lead_id).await {
+            Ok(summary) => summary,
+            Err(error) => return internal(error, "load payer link"),
+        }
+    } else {
+        Value::Null
+    };
     let consents = match sqlx::query(
         r#"SELECT c.id, c.consent_type, c.granted_at, c.revoked_at,
                   c.context->>'text_version' AS version,
@@ -3898,6 +4027,7 @@ async fn get_lead_portal_intake(
         "representation_updated_at": representation_updated_at,
         "billing": billing,
         "billing_updated_at": billing_updated_at,
+        "payer_link": payer_link,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
@@ -4111,9 +4241,10 @@ pub(crate) async fn attach_list_progress(db: &gmed_db::DbPool, leads: &mut [Valu
 }
 
 /// Clears what the portal intake keeps on the lead itself, in the purge
-/// transaction: the markers, the time of sending, the upload rows of both
-/// kinds, the lead's own GwG statements and staff's confirmations of the
-/// own-account payments (uploads go with the lead's documents, consents stay
+/// transaction: the markers, the time of sending, the upload rows of every
+/// kind, the lead's own GwG statements, staff's confirmations of the
+/// own-account payments and — for an unconverted lead — the payer's
+/// statement and links (uploads go with the lead's documents, consents stay
 /// as evidence without personal data of their own).
 pub(crate) async fn purge_portal_intake_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -4124,6 +4255,7 @@ pub(crate) async fn purge_portal_intake_in_tx(
         .execute(&mut **tx)
         .await?;
     super::lead_identification::purge_in_tx(tx, lead_id).await?;
+    crate::routes::lead_payer_link::purge_in_tx(tx, lead_id).await?;
     sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = '{}'::jsonb,

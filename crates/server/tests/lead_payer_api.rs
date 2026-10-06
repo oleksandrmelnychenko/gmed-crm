@@ -1198,6 +1198,112 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     assert_eq!(stored, (None, None, None));
 }
 
+async fn payer_informed(
+    pool: &PgPool,
+    lead_id: Uuid,
+) -> (Option<chrono::DateTime<chrono::Utc>>, Option<Uuid>) {
+    sqlx::query_as(
+        "SELECT payer_informed_at, payer_informed_by FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// Phase 3a, risk 5: the invitation of the payer's own link records that the
+/// payer was informed; a staff save without the checkbox (an older client
+/// above all) keeps that record for the same payer, and only for it.
+#[tokio::test]
+async fn a_staff_save_keeps_the_payer_informed_by_the_payers_link() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let manager = app.bearer("patient_manager");
+    let (_, manager_id) = *app
+        .users
+        .iter()
+        .find(|(role, _)| *role == "patient_manager")
+        .unwrap();
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let mut unticked = third_party_payer();
+    unticked.as_object_mut().unwrap().remove("payer_informed");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(unticked.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["declaration"]["payer_informed_at"].is_null(), "{body}");
+
+    // The link was mailed to this payer, and its invitation recorded that
+    // the payer was informed (as `POST /leads/{id}/payer-link` does).
+    let link_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO lead_payer_links (lead_id, token_hash, email, language, payer_key, sent_by,
+                                         expires_at)
+           SELECT lead_id, $2, email, 'de',
+                  jsonb_build_array(payer_type, organisation_name, first_name, last_name,
+                                    date_of_birth),
+                  $3, now() + interval '30 days'
+           FROM lead_payer_declarations WHERE lead_id = $1
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind("c3".repeat(32))
+    .bind(manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_link_emails
+               (lead_id, link_id, kind, recipient, language, status, provider_message_id, sent_by)
+           VALUES ($1, $2, 'invitation', 'erika.zahler@example.org', 'de', 'sent', 'email_1', $3)"#,
+    )
+    .bind(lead_id)
+    .bind(link_id)
+    .bind(manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_informed_at = now() - interval '1 day', payer_informed_by = $2
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let informed = payer_informed(pool, lead_id).await;
+    assert_eq!(informed.1, Some(manager_id));
+
+    // A correction without the checkbox keeps it.
+    let mut corrected = unticked.clone();
+    corrected["street"] = json!("Ringstr. 11");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(corrected)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["street"], "Ringstr. 11", "{body}");
+    assert_eq!(payer_informed(pool, lead_id).await, informed);
+    let revoked: Option<String> =
+        sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE id = $1")
+            .bind(link_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert!(revoked.is_none(), "the same payer keeps the link");
+
+    // Another payer was not informed by that link, and the link ends.
+    let mut other = unticked;
+    other["first_name"] = json!("Anna");
+    let (status, body) = json_request(&app, "POST", &path, &manager, Some(other)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(payer_informed(pool, lead_id).await, (None, None));
+    let revoked: Option<String> =
+        sqlx::query_scalar("SELECT revoked_reason FROM lead_payer_links WHERE id = $1")
+            .bind(link_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(revoked.as_deref(), Some("payer_changed"));
+}
+
 /// A converted patient (adult, full address) whose lead declared `payer`,
 /// as the conversion leaves them: the lead converted, the declaration
 /// linked to the patient.

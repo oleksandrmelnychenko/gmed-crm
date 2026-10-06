@@ -1,11 +1,19 @@
 import type { ReactNode } from "react";
 
 import { StatusBadge } from "@/components/ui-shell";
+import { Badge } from "@/components/ui/badge";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import type { LeadIdentityDocument, LeadPortalBilling, LeadPortalIntake, LeadRepresentative } from "../data/lead-portal-intake-api";
+import type { LeadPayerLinkState } from "../data/lead-payer-link-api";
+import type {
+  LeadIdentityDocument,
+  LeadPortalBilling,
+  LeadPortalIntake,
+  LeadPortalPayerLink,
+  LeadRepresentative,
+} from "../data/lead-portal-intake-api";
 import {
   answerLabel,
   billingStatements,
@@ -16,7 +24,7 @@ import {
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
-  paymentRouteByPayerNote,
+  paymentRouteByPayerLine,
   representationStatements,
   representationWarningText,
   representativeAddress,
@@ -28,6 +36,13 @@ import {
   type RepresentationStatements,
   type Tx,
 } from "../model/lead-gwg-statements";
+import {
+  fundsProofMissing,
+  payerCheckLevelLine,
+  payerPrivacyLine,
+  payerQuestionnaireGroups,
+  type PayerStatementRow,
+} from "../model/lead-payer-link";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
@@ -65,9 +80,10 @@ function Statement({
   const empty = children === null || children === undefined || children === "";
   return (
     <div className={cn("min-w-0", className)} data-testid={testId} data-warning={warning ? "true" : undefined}>
+      {/* Long German labels ("Staatsangehörigkeit") wrap inside a narrow column. */}
       <dt
         className={cn(
-          "text-[11px] font-medium text-muted-foreground",
+          "break-words text-[11px] font-medium text-muted-foreground",
           sentence ? "leading-snug" : "uppercase tracking-[0.06em]",
         )}
       >
@@ -299,15 +315,19 @@ function BillingStatementRow({ statement, className }: { statement: BillingState
 function BillingGroup({
   billing,
   updatedAt,
+  payerLink,
   tx,
   lang,
 }: {
   billing: LeadPortalBilling;
   updatedAt: string | null;
+  /** The payer link in short: whether and when the payer stated section 8; null on an older server. */
+  payerLink: LeadPortalPayerLink | null;
   tx: Tx;
   lang: string;
 }) {
-  const statements = billingStatements(billing, tx, lang);
+  const payerAnswered = Boolean(payerLink?.submitted_at);
+  const statements = billingStatements(billing, tx, lang, payerAnswered);
   return (
     <div className="space-y-2" data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
@@ -327,9 +347,10 @@ function BillingGroup({
       </dl>
       {statements.byPayer ? (
         <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-gwg-billing-by-payer">
-          {paymentRouteByPayerNote(tx)}
+          {paymentRouteByPayerLine(payerLink, tx)}
         </p>
-      ) : (
+      ) : null}
+      {statements.payment.length > 0 ? (
         <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
           {statements.payment.map((statement) => (
             <BillingStatementRow
@@ -339,12 +360,134 @@ function BillingGroup({
             />
           ))}
         </dl>
-      )}
+      ) : null}
       {statements.complianceLine ? (
         <p data-testid="lead-gwg-billing-flag" className={cn("text-xs font-medium leading-5", WARNING_TEXT)}>
           {statements.complianceLine}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** One answer of the payer: the value (or the files) and what the payer added to it. */
+function PayerStatement({ statement, tx }: { statement: PayerStatementRow; tx: Tx }) {
+  const documents = statement.documents;
+  return (
+    <Statement
+      label={statement.label}
+      className={statement.wide ? "col-span-full" : undefined}
+      warning={statement.warning}
+      sentence={statement.key.startsWith("answer-")}
+      testId={`lead-gwg-payer-${statement.key}`}
+    >
+      {documents ? (
+        documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} /> : null
+      ) : statement.value ? (
+        <>
+          <span className={statement.warning && statement.key.startsWith("answer-") ? "font-semibold" : undefined}>
+            {statement.value}
+          </span>
+          {statement.details ? <span className="mt-0.5 block whitespace-pre-line">{statement.details}</span> : null}
+        </>
+      ) : null}
+    </Statement>
+  );
+}
+
+/**
+ * "Angaben des Zahlers" (phase 3a, 6.2): what the third-party payer stated
+ * through the own link, or the paying parent in the cabinet — person or
+ * organisation, beneficial owners, identity document, relationship, source
+ * of funds with the proof, the legal questions (amber on a "yes") — with the
+ * check level and its reasons, an amber line while level 2 lacks the proof of
+ * funds, and when the payer acknowledged the privacy notice. Read-only.
+ */
+function PayerAnswersGroup({
+  state,
+  tx,
+  lang,
+  today,
+}: {
+  state: LeadPayerLinkState;
+  tx: Tx;
+  lang: string;
+  today: string;
+}) {
+  const questionnaire = state.questionnaire;
+  if (!questionnaire) return null;
+  const groups = payerQuestionnaireGroups(questionnaire, tx, lang, today);
+  const level = payerCheckLevelLine(
+    questionnaire.check_level,
+    questionnaire.check_reasons,
+    tx,
+    state.funds_proof_threshold_eur,
+  );
+  const privacy = payerPrivacyLine(questionnaire, tx);
+  return (
+    <div className="space-y-2.5 rounded-md border border-border/60 bg-background/50 p-2.5" data-testid="lead-gwg-payer">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h4 className="text-xs font-semibold text-foreground">{tx("Анкета плательщика", "Angaben des Zahlers")}</h4>
+        {questionnaire.submitted_at ? (
+          <Badge
+            variant="outline"
+            data-testid="lead-gwg-payer-badge"
+            className="h-5 rounded-full border-violet-200 bg-violet-50 px-1.5 text-[10.5px] font-medium text-violet-800"
+          >
+            {tx(
+              `от плательщика · ${formatAppDateTime(questionnaire.submitted_at)}`,
+              `vom Zahler am ${formatAppDateTime(questionnaire.submitted_at)}`,
+            )}
+          </Badge>
+        ) : (
+          <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-payer-draft">
+            {tx("плательщик ещё не отправил анкету", "vom Zahler noch nicht gesendet")}
+          </span>
+        )}
+        {questionnaire.source === "cabinet" ? (
+          <span className="text-[11px] text-muted-foreground">
+            {tx("в кабинете родителя", "im Kabinett des Elternteils")}
+          </span>
+        ) : null}
+      </div>
+      {groups.map((group) => (
+        <StatementGroup
+          key={group.key}
+          title={group.title}
+          columns={group.key === "legal" ? "grid-cols-1 sm:grid-cols-2" : STATEMENT_COLUMNS}
+        >
+          {group.rows.map((row) => (
+            <PayerStatement key={row.key} statement={row} tx={tx} />
+          ))}
+        </StatementGroup>
+      ))}
+      {level ? (
+        <p
+          className={cn(
+            "text-xs font-medium leading-5",
+            questionnaire.check_level === 2 ? WARNING_TEXT : "text-muted-foreground",
+          )}
+          data-testid="lead-gwg-payer-check-level"
+          data-level={questionnaire.check_level ?? undefined}
+        >
+          {level}
+        </p>
+      ) : null}
+      {fundsProofMissing(questionnaire) ? (
+        <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-payer-funds-proof-missing">
+          {tx(
+            "Уровень проверки 2: подтверждение источника средств ещё не загружено",
+            "Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch",
+          )}
+        </p>
+      ) : null}
+      <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-gwg-payer-privacy">
+        {privacy ||
+          tx(
+            "Плательщик ещё не подтвердил уведомление о защите данных",
+            "Der Zahler hat den Datenschutzhinweis noch nicht bestätigt",
+          )}
+      </p>
     </div>
   );
 }
@@ -358,11 +501,13 @@ function BillingGroup({
  * legal representatives of a minor are listed even while the lead entered
  * nothing, because they are known from the request. Invoice recipient and
  * payment route (sections 7–8) follow the economic interest, while the
- * server sends them.
+ * server sends them; the third-party payer's own answers (phase 3a) come
+ * after them, from the payer link the wizard loads.
  */
 export function LeadGwgStatements({
   intake,
   payer,
+  payerLink,
   tx,
   lang,
   today = appDateKey(),
@@ -370,6 +515,8 @@ export function LeadGwgStatements({
   intake: LeadPortalIntake | null;
   /** The payer declaration ("who pays"): own economic interest and the beneficial owner. */
   payer: GwgPayerStatement | null | undefined;
+  /** The payer link with the payer's answers; absent on an older server (nothing of it is shown). */
+  payerLink?: LeadPayerLinkState | null;
   tx: Tx;
   lang: string;
   /** The Berlin date ("YYYY-MM-DD") the identity document must still be valid on. */
@@ -388,6 +535,9 @@ export function LeadGwgStatements({
       today={today}
     />
   ) : null;
+  const payerGroup = payerLink?.questionnaire ? (
+    <PayerAnswersGroup state={payerLink} tx={tx} lang={lang} today={today} />
+  ) : null;
 
   if (!identification || !hasGwgStatements(intake)) {
     return (
@@ -401,6 +551,7 @@ export function LeadGwgStatements({
         </p>
         {/* Who represents a minor is known from the request before anybody opens the cabinet. */}
         {representation?.kind === "minor" ? <div className="pt-1.5">{representationGroup}</div> : null}
+        {payerGroup ? <div className="pt-1.5">{payerGroup}</div> : null}
       </div>
     );
   }
@@ -474,8 +625,16 @@ export function LeadGwgStatements({
       </StatementGroup>
 
       {intake.billing ? (
-        <BillingGroup billing={intake.billing} updatedAt={intake.billing_updated_at} tx={tx} lang={lang} />
+        <BillingGroup
+          billing={intake.billing}
+          updatedAt={intake.billing_updated_at}
+          payerLink={intake.payer_link}
+          tx={tx}
+          lang={lang}
+        />
       ) : null}
+
+      {payerGroup}
 
       <StatementGroup title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
         {legalAnswers.map((item) => (
