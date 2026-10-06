@@ -140,6 +140,12 @@ enum SignerPolicy {
     PayerAndAgency,
     /// A package with a contract or consent and a cost coverage declaration.
     ClientPayerAndAgency,
+    /// The payer's own documents (phase 3b, D4): the payer's self-disclosure,
+    /// the patient's statement about the payer and the payer's copy of the
+    /// cost estimate. The payer and GMED sign; the patient side never does —
+    /// the self-disclosure holds the payer's identity data, which must not
+    /// reach the patient.
+    PayerPackage,
 }
 
 impl SignerPolicy {
@@ -151,19 +157,29 @@ impl SignerPolicy {
             Self::BothParties => "both_parties",
             Self::PayerAndAgency => "payer_and_agency",
             Self::ClientPayerAndAgency => "client_payer_and_agency",
+            Self::PayerPackage => "payer_package",
         }
     }
 
     /// The patient side is the client (or every legal representative) plus,
     /// optionally, a minor patient who co-signs; a minor never signs alone.
-    /// The payer signs only a cost coverage declaration.
+    /// The payer signs only a cost coverage declaration or the payer's own
+    /// documents, which nobody of the patient side signs.
     fn validate(self, signers: &[Signer]) -> Result<(), &'static str> {
         let has = |role: &str| signers.iter().any(|signer| signer.role == role);
         let (has_client, has_agency, has_payer) = (has("client"), has("agency"), has("payer"));
+        if self == Self::PayerPackage {
+            return if has_payer && has_agency && !has_client && !has("minor") {
+                Ok(())
+            } else {
+                Err("payer_package_signers_required")
+            };
+        }
         if has("minor") && !has_client {
             return Err("minor_needs_representative");
         }
         match self {
+            Self::PayerPackage => Err("payer_package_signers_required"),
             Self::Flexible => Ok(()),
             Self::ClientOnly
                 if has_client
@@ -187,12 +203,25 @@ impl SignerPolicy {
 
     /// One merged PDF has one set of signers, so a package needs what its
     /// strictest member needs. An internal agency-only document is never sent
-    /// together with documents for the patient side.
+    /// together with documents for the patient side, and the payer's own
+    /// documents never together with a document the patient side signs.
     fn combine(policies: impl IntoIterator<Item = Self>) -> Result<Self, &'static str> {
         let policies: Vec<Self> = policies.into_iter().collect();
         if policies.contains(&Self::AgencyOnly) {
             return if policies.iter().all(|policy| *policy == Self::AgencyOnly) {
                 Ok(Self::AgencyOnly)
+            } else {
+                Err("signature_policy_conflict")
+            };
+        }
+        if policies.contains(&Self::PayerPackage) {
+            return if policies.iter().all(|policy| {
+                matches!(
+                    policy,
+                    Self::PayerPackage | Self::PayerAndAgency | Self::Flexible
+                )
+            }) {
+                Ok(Self::PayerPackage)
             } else {
                 Err("signature_policy_conflict")
             };
@@ -231,6 +260,12 @@ fn signer_policy_for_parts(
         || (generated_template_id.is_none() && art == "cost_coverage_declaration")
     {
         return SignerPolicy::PayerAndAgency;
+    }
+    // The payer's own documents of its signature package (phase 3b).
+    if generated_template_id.is_some_and(is_payer_package_template)
+        || is_payer_package_template(art)
+    {
+        return SignerPolicy::PayerPackage;
     }
     // Internal GwG records: only the GMED staff member who filled them signs.
     if matches!(
@@ -271,6 +306,80 @@ fn signer_policy(row: &PgRow) -> SignerPolicy {
         row.get::<Option<String>, _>("compliance_kind").as_deref(),
         &row.get::<String, _>("art"),
     )
+}
+
+/// The templates (and document types) only the payer and GMED sign: the
+/// payer's self-disclosure, the patient's statement about the payer and the
+/// payer's copy of the cost estimate.
+pub(crate) fn is_payer_package_template(template: &str) -> bool {
+    matches!(
+        template,
+        "payer_self_disclosure" | "patient_payer_statement" | "payer_cost_estimate"
+    )
+}
+
+/// The invitation languages the provider supports.
+pub(crate) fn invitation_languages() -> &'static [&'static str] {
+    &provider::LANGUAGES
+}
+
+/// A package the server assembles itself (the payer's four documents, phase
+/// 3b): the documents in bundle order and the signers of the other side; the
+/// server adds GMED's default signers, the required read-only companions, the
+/// level QES and a deadline of 30 days unless one is given.
+pub(crate) struct FixedPackage {
+    pub(crate) document_ids: Vec<Uuid>,
+    pub(crate) signers: Vec<Signer>,
+    pub(crate) language: Option<String>,
+    pub(crate) note: Option<String>,
+    pub(crate) expires_at: Option<DateTime<Utc>>,
+}
+
+/// How long the invitation of a server-assembled package stays open.
+const FIXED_PACKAGE_EXPIRY_DAYS: i64 = 30;
+
+/// Creates the signature request of a server-assembled package. Every check
+/// of `POST /signature-packages` applies; its errors pass through unchanged
+/// (`{ "error": code }`). Without a default GMED signer the package cannot
+/// be sent (422 `agency_signer_missing`).
+pub(crate) async fn create_fixed_package(
+    state: &AppState,
+    auth: &AuthUser,
+    package: FixedPackage,
+) -> Result<Uuid, Response> {
+    let agency = defaults::load(state).await?;
+    if agency.is_empty() {
+        return Err(error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "agency_signer_missing",
+        ));
+    }
+    let mut signers = package.signers;
+    signers.extend(agency);
+    let mut rows = Vec::with_capacity(package.document_ids.len());
+    for id in &package.document_ids {
+        rows.push(signature_document_access(state, auth, *id, true).await?);
+    }
+    let members: Vec<&PgRow> = rows.iter().collect();
+    let attachment_ids = package::required_attachment_ids(state, auth, &members).await?;
+    create::create_request(
+        state,
+        auth,
+        create::Plan {
+            document_ids: package.document_ids,
+            signers,
+            attachment_ids,
+            level: Some(Level::Qes),
+            expires_at: Some(
+                package.expires_at.unwrap_or_else(|| {
+                    Utc::now() + chrono::Duration::days(FIXED_PACKAGE_EXPIRY_DAYS)
+                }),
+            ),
+            note: package.note,
+            language: package.language,
+        },
+    )
+    .await
 }
 
 fn request_level(row: &PgRow) -> Level {

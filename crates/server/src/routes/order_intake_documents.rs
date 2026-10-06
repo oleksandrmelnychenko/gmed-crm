@@ -38,10 +38,14 @@ fn decimal(value: &Value) -> f64 {
         .unwrap_or_default()
 }
 
-/// Agency services feed the order and its Kostenvoranschlag only. The VKS
-/// (`cost_estimate`) lists the selected medical work types, see `estimate_selection`.
+/// Agency services feed the order and its Kostenvoranschlag only (with the
+/// payer's copy of it, phase 3b). The VKS (`cost_estimate`) lists the
+/// selected medical work types, see `estimate_selection`.
 pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, template: &str) {
-    if !matches!(template, "single_order" | "order_cost_estimate") {
+    if !matches!(
+        template,
+        "single_order" | "order_cost_estimate" | "payer_cost_estimate"
+    ) {
         return;
     }
     bindings.specialties = data["catalog_snapshot"]["specializations"]
@@ -215,7 +219,7 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
         .into_iter()
         .flatten()
         .filter(|line| {
-            template == "order_cost_estimate"
+            matches!(template, "order_cost_estimate" | "payer_cost_estimate")
                 || text(line, "description") != "Voraussichtliche Auslagen"
         })
         .collect::<Vec<_>>();

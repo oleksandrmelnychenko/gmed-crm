@@ -1484,6 +1484,53 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         languages: &["de"],
         text_block_keys: &[],
     },
+    // The payer's signature package (phase 3b, owner decisions 2026-10-06):
+    // three documents only the payer and GMED sign, generated for a lead.
+    DocumentTemplateDefinition {
+        id: "payer_self_disclosure",
+        label: "Selbstauskunft der zahlenden Person",
+        description: "Angaben der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz, aus ihrem gesendeten Fragebogen; unterschreibt die zahlende Person.",
+        art: "payer_self_disclosure",
+        category: "compliance_aml",
+        default_auto_name: "Selbstauskunft der zahlenden Person",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "patient_payer_statement",
+        label: "Erklärung zur Kostenübernahme durch Dritte",
+        description: "Angaben der Patientenseite zur zahlenden Person und Bestätigung der zahlenden Person.",
+        art: "patient_payer_statement",
+        category: "compliance_aml",
+        default_auto_name: "Erklärung zur Kostenübernahme durch Dritte",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
+    DocumentTemplateDefinition {
+        id: "payer_cost_estimate",
+        label: "Kostenvoranschlag für die zahlende Person",
+        description: "Ausfertigung des Kostenvoranschlags für die zahlende Person: Leistungsarten und Beträge, ohne Angaben zu Diagnosen oder Behandlungen.",
+        art: "payer_cost_estimate",
+        category: "finance_payer_cost_estimate",
+        default_auto_name: "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
     DocumentTemplateDefinition {
         id: "consent_data_release_child",
         label: "Einverständniserklärung · Kind (zwei Sorgeberechtigte)",
@@ -2566,6 +2613,10 @@ struct GenerateDocumentRequest {
     text_block_keys: Option<Vec<String>>,
     #[serde(default)]
     bindings: Option<DocumentBindingOverrides>,
+    /// The client's Kostenvoranschlag the payer's copy is made from (phase
+    /// 3b): set only by [`generate_lead_document`], never read from a body.
+    #[serde(skip)]
+    source_cost_estimate_id: Option<Uuid>,
 }
 
 /// Optional manual binding fields ("yellow sockets") for the generated
@@ -4867,6 +4918,9 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
             | "privacy_information"
             | "enhanced_due_diligence"
             | "gwg_identification"
+            | "payer_self_disclosure"
+            | "patient_payer_statement"
+            | "payer_cost_estimate"
     )
 }
 
@@ -4890,6 +4944,9 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
             | "consent_data_release_child"
             | "consent_data_release_single"
             | "cost_coverage_declaration"
+            | "payer_self_disclosure"
+            | "patient_payer_statement"
+            | "payer_cost_estimate"
     )
 }
 
@@ -7163,6 +7220,9 @@ fn default_generated_document_name(
         ("privacy_information", _) => "Informationsblatt zum Datenschutz",
         ("enhanced_due_diligence", _) => "Durchführung verstärkter Sorgfaltspflichten",
         ("gwg_identification", _) => "Dokumentationsbogen natürliche Personen",
+        ("payer_self_disclosure", _) => "Selbstauskunft der zahlenden Person",
+        ("patient_payer_statement", _) => "Erklärung zur Kostenübernahme durch Dritte",
+        ("payer_cost_estimate", _) => "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)",
         ("appointment_confirmation", "en") => "Appointment confirmation",
         ("appointment_confirmation", _) => "Terminbestätigung",
         ("consent_data_release_child" | "consent_data_release_single", "en") => {
@@ -14543,7 +14603,10 @@ async fn generate_document(
         Ok(value) => value,
         Err(response) => return response,
     };
-    let repeat_context = if matches!(template.id, "single_order" | "order_cost_estimate") {
+    let repeat_context = if matches!(
+        template.id,
+        "single_order" | "order_cost_estimate" | "payer_cost_estimate"
+    ) {
         match sqlx::query_scalar::<_, Option<Value>>("SELECT repeat_order_document_context($1)")
             .bind(order_id)
             .fetch_one(&state.db)
@@ -14690,7 +14753,11 @@ async fn generate_document(
         )
     };
 
-    if matches!(template.id, "single_order" | "order_cost_estimate") && order_id.is_none() {
+    if matches!(
+        template.id,
+        "single_order" | "order_cost_estimate" | "payer_cost_estimate"
+    ) && order_id.is_none()
+    {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Order context is required for this document",
@@ -14721,9 +14788,12 @@ async fn generate_document(
         None
     };
 
-    if let (Some(context), Some(guard)) = (
+    // The payer's copy of the cost estimate names the payer of the moment and
+    // the client's estimate it was made from: it is made anew every time.
+    if let (Some(context), Some(guard), false) = (
         intake_context.as_ref().or(repeat_context.as_ref()),
         intake_generation_guard.as_mut(),
+        template.id == "payer_cost_estimate",
     ) {
         let existing = sqlx::query_scalar::<_, serde_json::Value>(
             "SELECT jsonb_build_object('ok',true,'id',id,'document_number',document_number,
@@ -15734,8 +15804,18 @@ async fn generate_document(
             };
             (preview_html, pdf_bytes)
         }
-        "single_order" | "order_cost_estimate" => {
+        "single_order" | "order_cost_estimate" | "payer_cost_estimate" => {
             let is_order_cost_estimate = template.id == "order_cost_estimate";
+            // The payer's copy of the cost estimate (phase 3b): the client's
+            // lines and totals, signed by the Kostenübernehmer/in and GMED,
+            // printed by service type only.
+            let is_payer_copy = template.id == "payer_cost_estimate";
+            if is_payer_copy && lead_id.is_none() {
+                return gwg_sheet_refusal(
+                    "lead_document_only",
+                    "The payer's copy of the cost estimate is generated for a lead",
+                );
+            }
             let contracting = match load_contracting_doc(
                 &state,
                 patient_uuid,
@@ -15776,7 +15856,48 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
+            let mut payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
+            // The payer's copy names the third-party payer of the lead's
+            // declaration (422 without one, like the Kostenübernahmeerklärung)
+            // and records which version of the payer and of the client's
+            // estimate it was made from.
+            let mut payer_estimate_catalog: Vec<(String, String)> = Vec::new();
+            if is_payer_copy {
+                match crate::routes::lead_payer::cost_assumption_payer(&state.db, lead_id, order_id)
+                    .await
+                {
+                    Ok(Some(declared)) => {
+                        payer = DocPartyBlock {
+                            name: declared.name,
+                            birth_date: declared.date_of_birth,
+                            street: declared.street,
+                            zip: declared.zip,
+                            city: declared.city,
+                            country: declared.country,
+                            email: declared.email,
+                            phone: declared.phone,
+                            ..DocPartyBlock::default()
+                        };
+                        let snapshot = generated_bindings_snapshot.get_or_insert_with(|| json!({}));
+                        snapshot[crate::routes::lead_payer::PAYER_IDENTITY_BINDING_KEY] =
+                            json!(declared.identity_version);
+                        if let Some(source) = body.source_cost_estimate_id {
+                            snapshot[PAYER_COST_ESTIMATE_SOURCE_BINDING_KEY] = json!(source);
+                        }
+                    }
+                    Ok(None) => {
+                        return gwg_sheet_refusal(
+                            "payer_declaration_not_third_party",
+                            "The payer declaration names no third-party payer",
+                        );
+                    }
+                    Err(response) => return response,
+                }
+                payer_estimate_catalog = match load_payer_estimate_catalog(&state).await {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                };
+            }
             let quote = if let Some(order_uuid) = order_id {
                 match load_order_quote_summary(&state, order_uuid).await {
                     Ok(value) => value,
@@ -15904,7 +16025,9 @@ async fn generate_document(
                 &context.title_override.clone().unwrap_or_else(|| {
                     admin_doc_label(
                         &context.language,
-                        if is_order_cost_estimate {
+                        if is_payer_copy {
+                            "payer_cost_estimate_title"
+                        } else if is_order_cost_estimate {
                             "order_cost_estimate_title"
                         } else {
                             "single_order_title"
@@ -15914,7 +16037,9 @@ async fn generate_document(
                 }),
                 &party_block_lines(&context.party),
             );
-            let pdf_result = if is_order_cost_estimate {
+            let pdf_result = if is_payer_copy {
+                build_payer_cost_estimate_pdf(&context, &payer_estimate_catalog, &generated_doc_id)
+            } else if is_order_cost_estimate {
                 build_order_cost_estimate_pdf(&context, &generated_doc_id)
             } else {
                 build_single_order_pdf(&context, &generated_doc_id)
@@ -16430,6 +16555,102 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "payer_self_disclosure" => {
+            let Some(lead_uuid) = lead_id else {
+                return gwg_sheet_refusal(
+                    "lead_document_only",
+                    "The self-disclosure of the payer is generated for a lead",
+                );
+            };
+            let disclosure = match load_payer_self_disclosure(&state, lead_uuid).await {
+                Ok(Some(disclosure)) => disclosure,
+                Ok(None) => {
+                    return gwg_sheet_refusal(
+                        "payer_not_submitted",
+                        "The payer has not sent its answers yet",
+                    );
+                }
+                Err(response) => return response,
+            };
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let order_reference =
+                match lead_order_reference(&state, lead_uuid, order_number.as_deref()).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
+            let preview = admin_preview_html(
+                "Selbstauskunft der zahlenden Person",
+                std::slice::from_ref(&generated_doc_id),
+            );
+            let pdf_bytes = match build_payer_self_disclosure_pdf(
+                &disclosure,
+                &patient_name,
+                &agency,
+                order_reference.as_deref(),
+                &generated_doc_id,
+            ) {
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?lead_id,
+                        "build payer self-disclosure PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
+        "patient_payer_statement" => {
+            let Some(lead_uuid) = lead_id else {
+                return gwg_sheet_refusal(
+                    "lead_document_only",
+                    "The statement about the payer is generated for a lead",
+                );
+            };
+            let statement = match load_patient_payer_statement(&state, lead_uuid).await {
+                Ok(statement) => statement,
+                Err(response) => return response,
+            };
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let order_reference =
+                match lead_order_reference(&state, lead_uuid, order_number.as_deref()).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
+            let preview = admin_preview_html(
+                "Erklärung zur Kostenübernahme durch Dritte",
+                std::slice::from_ref(&generated_doc_id),
+            );
+            let pdf_bytes = match build_patient_payer_statement_pdf(
+                &statement,
+                &patient_name,
+                &agency,
+                order_reference.as_deref(),
+                &generated_doc_id,
+            ) {
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?lead_id,
+                        "build patient payer statement PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
             let guardian_relations = sqlx::query(
@@ -16789,6 +17010,7 @@ fn admin_doc_label(language: &str, key: &str) -> &'static str {
         ("en", "consent_title") => "Data transfer and confidentiality release",
         (_, "single_order_title") => "Einzelauftrag",
         (_, "order_cost_estimate_title") => "Kostenvoranschlag zum Einzelauftrag",
+        (_, "payer_cost_estimate_title") => "Kostenvoranschlag für die zahlende Person",
         (_, "cost_coverage_title") => "Kostenübernahmeerklärung",
         (_, "cost_estimate_title") => cost_estimate_default_title(language),
         (_, "appointment_confirmation_title") => "Terminbestätigung",
@@ -21014,6 +21236,1267 @@ fn build_gwg_identification_pdf(
     );
 
     Ok(finalize_generated_pdf(document, layout))
+}
+
+// ---------------------------------------------------------------------------
+// The payer's signature package (phase 3b, owner decisions 2026-10-06): the
+// self-disclosure, the statement about the payer and the payer's copy of the
+// cost estimate. Only the payer and GMED sign them (signature frame `payer`);
+// nothing medical, no check level, no staff assessment, no staff names.
+// ---------------------------------------------------------------------------
+
+/// Binding of the payer's copy of the cost estimate: the client's
+/// Kostenvoranschlag (version) it was made from.
+const PAYER_COST_ESTIMATE_SOURCE_BINDING_KEY: &str = "_source_cost_estimate_id";
+
+/// The sentence of the payer's copy of the cost estimate (owner decision
+/// 2026-10-06): service types and amounts only.
+const PAYER_COST_ESTIMATE_PRIVACY_SENTENCE: &str =
+    "Diese Aufstellung enthält bewusst keine Angaben zu Diagnosen oder Behandlungen.";
+
+/// The agency service catalogue as (lower-case service name, service key):
+/// a line of the estimate whose text is a catalogue service is counted under
+/// the type of that service.
+async fn load_payer_estimate_catalog(
+    state: &AppState,
+) -> Result<Vec<(String, String)>, axum::response::Response> {
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT lower(btrim(service_name)), service_key FROM agency_service_catalog",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, "load agency service catalogue for the payer's estimate");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the service catalogue",
+        )
+    })
+}
+
+/// The German service type of a catalogue service, from its key. The texts of
+/// the lines themselves never reach the payer.
+fn payer_estimate_catalog_label(service_key: &str) -> &'static str {
+    let key = service_key.to_ascii_lowercase();
+    let has = |needles: &[&str]| needles.iter().any(|needle| key.contains(needle));
+    if has(&[
+        "interpret",
+        "dolmetsch",
+        "translat",
+        "uebersetz",
+        "übersetz",
+    ]) {
+        "Dolmetscher- und Übersetzungsleistungen"
+    } else if has(&["transfer", "transport", "fahrt"]) {
+        "Transfer und Beförderung"
+    } else if has(&["companion", "concierge", "begleit", "betreu"]) {
+        "Begleitung und Betreuung vor Ort"
+    } else if has(&["organi", "coordinat", "koordin"]) {
+        "Organisation und Koordination"
+    } else {
+        "Leistungen der Agentur"
+    }
+}
+
+/// The service type a line of the estimate is counted under: a pass-through
+/// cost, else the type of the catalogue service the line is, else
+/// "Leistungen". Never the text of the line.
+fn payer_estimate_category(
+    item: &GeneratedContractLineItem,
+    catalog: &[(String, String)],
+) -> &'static str {
+    if item.is_cost_passthrough {
+        return "Auslagen (durchlaufende Posten)";
+    }
+    let description = item.description.trim().to_lowercase();
+    catalog
+        .iter()
+        .find(|(name, _)| !name.is_empty() && *name == description)
+        .map(|(_, key)| payer_estimate_catalog_label(key))
+        .unwrap_or("Leistungen")
+}
+
+/// The amount a line of the estimate shows in its "Summe" column, as a number.
+fn payer_estimate_line_amount(item: &GeneratedContractLineItem) -> Decimal {
+    if let Some(amount) = parse_eur_decimal(&item.line_gross) {
+        return money::round_cents(amount);
+    }
+    let Some(unit_price) = parse_eur_decimal(&item.unit_price) else {
+        return Decimal::ZERO;
+    };
+    let quantity = parse_eur_decimal(&item.quantity)
+        .filter(|value| *value > Decimal::ZERO)
+        .unwrap_or(Decimal::ONE);
+    money::round_cents(unit_price * quantity)
+}
+
+/// One row per service type, in the order the types first appear, with the
+/// summed amounts of their lines. The estimated outlays have their own line
+/// under the totals, as in the client's estimate.
+fn payer_estimate_rows(
+    items: &[GeneratedContractLineItem],
+    catalog: &[(String, String)],
+) -> Vec<(&'static str, Decimal)> {
+    let mut rows: Vec<(&'static str, Decimal)> = Vec::new();
+    for item in items.iter().filter(|item| !is_estimated_outlays_item(item)) {
+        let category = payer_estimate_category(item, catalog);
+        let amount = payer_estimate_line_amount(item);
+        match rows.iter_mut().find(|(label, _)| *label == category) {
+            Some((_, sum)) => *sum += amount,
+            None => rows.push((category, amount)),
+        }
+    }
+    rows
+}
+
+/// The payer's copy of the client's Kostenvoranschlag ("Anlage zur
+/// Kostenübernahmeerklärung", phase 3b): the same totals, one row per service
+/// type instead of the client's lines, the Kostenübernehmer/in and GMED sign.
+fn build_payer_cost_estimate_pdf(
+    context: &GeneratedSingleOrderContext,
+    catalog: &[(String, String)],
+    fallback_document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let document_reference =
+        legal_document_reference(context.quote_number.as_deref(), fallback_document_reference);
+    let mut layout = legal_document_pdf_layout(&document_reference, &context.agency, regular, bold);
+
+    layout.text_block_centered(
+        "Anlage zur Kostenübernahmeerklärung",
+        11.0,
+        true,
+        TreatmentPlanPdfColor::Primary,
+        0.0,
+        1.0,
+    );
+    layout.text_block_centered(
+        "KOSTENVORANSCHLAG",
+        18.0,
+        true,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.5,
+    );
+    layout.text_block_centered(
+        &format!("ZUM {}. EINZELAUFTRAG", context.order_sequence),
+        13.0,
+        true,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block_centered(
+        "Ausfertigung für die zahlende Person (Kostenübernehmer/in)",
+        9.5,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        3.0,
+    );
+    let placeholder = "____________________";
+    let filled = |value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(placeholder)
+            .to_string()
+    };
+    // The patient's name only: no date of birth for the payer.
+    legal_meta_grid(
+        &mut layout,
+        &[
+            (
+                "Kostenvoranschlag Nr. :",
+                filled(context.quote_number.as_deref()),
+            ),
+            ("Datum:", fmt_de_date(context.order_date)),
+            (
+                "Auftraggeber:",
+                context.contracting.debtor_name(&context.party),
+            ),
+            (
+                "Rahmendienstleistungsvertrag Nr.:",
+                filled(context.contract_number.as_deref()),
+            ),
+            (
+                "Einzelauftrag Nr.:",
+                filled(Some(context.order_number.as_str())),
+            ),
+        ],
+    );
+    let payer_name = context
+        .payer
+        .as_ref()
+        .map(|payer| payer.name.trim().to_string())
+        .filter(|name| !name.is_empty());
+    if let Some(payer) = &context.payer {
+        let address = gwg_address_line(
+            payer.street.as_deref(),
+            payer.zip.as_deref(),
+            payer.city.as_deref(),
+            payer.country.as_deref(),
+        );
+        let line = match (payer_name.as_deref(), address.is_empty()) {
+            (Some(name), false) => format!("Kostenübernehmer/in: {name}, {address}"),
+            (Some(name), true) => format!("Kostenübernehmer/in: {name}"),
+            (None, _) => format!("Kostenübernehmer/in: {placeholder}"),
+        };
+        layout.text_block(
+            &line,
+            10.5,
+            true,
+            0.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            3.0,
+        );
+    }
+    admin_block(&mut layout, "Sehr geehrte Damen und Herren,", 0.0, 3.0);
+    admin_block(
+        &mut layout,
+        "hiermit erhalten Sie eine Übersicht über die zu erwartenden Kosten, die im Zusammenhang mit der Erbringung unserer Leistungen anfallen können, nach Leistungsarten zusammengefasst.",
+        0.0,
+        3.0,
+    );
+    admin_block(
+        &mut layout,
+        "Bitte beachten Sie, dass es sich lediglich um eine vorläufige Berechnung handelt, die auf den vorliegenden Daten beruht. Eine endgültige Berechnung der anfallenden Kosten für von uns erbrachte Leistungen ist erst mit Abschluss des Einzelauftrags möglich. Höhere Kosten können sich z. B. bei zusätzlichem organisatorischen Aufwand ergeben.",
+        0.0,
+        0.0,
+    );
+    const TYPE_WIDTH_MM: f32 = 134.0;
+    const TOTAL_WIDTH_MM: f32 = 40.0;
+    const LABEL_WIDTH_MM: f32 = 70.0;
+    layout.spacer(6.0);
+    layout.table_header_row(&[
+        ("Leistungsart", TYPE_WIDTH_MM, PdfCellAlign::Left),
+        ("Summe", TOTAL_WIDTH_MM, PdfCellAlign::Right),
+    ]);
+    for (label, amount) in payer_estimate_rows(&context.line_items, catalog) {
+        let amount = format_eur_decimal(amount);
+        layout.table_row_aligned_middle(
+            &[
+                (label, TYPE_WIDTH_MM, PdfCellAlign::Left),
+                (amount.as_str(), TOTAL_WIDTH_MM, PdfCellAlign::Right),
+            ],
+            false,
+            false,
+        );
+    }
+    layout.spacer(4.0);
+    let estimated_outlays = estimated_outlays_total(&context.line_items);
+    let displayed_net =
+        net_without_estimated_outlays(context.total_net.as_deref(), estimated_outlays);
+    let displayed_outlays = estimated_outlays.map(format_eur);
+    let vat_label = format!(
+        "{}:",
+        contract_vat_total_label(&context.line_items.iter().collect::<Vec<_>>())
+    );
+    let totals = [
+        ("Nettowert:", displayed_net.as_deref(), false, false),
+        (
+            vat_label.as_str(),
+            context.total_vat.as_deref(),
+            false,
+            false,
+        ),
+        (
+            "Voraussichtliche Auslagen:",
+            displayed_outlays.as_deref(),
+            false,
+            false,
+        ),
+        ("Gesamtsumme:", context.total_gross.as_deref(), true, true),
+    ]
+    .into_iter()
+    .filter_map(|(label, value, bold, shaded)| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| (label, value, bold, shaded))
+    })
+    .collect::<Vec<_>>();
+    for (index, (label, value, bold, shaded)) in totals.iter().copied().enumerate() {
+        if shaded {
+            layout.spacer(1.5);
+        }
+        let summary = format!("{label} {value}");
+        let cells = [
+            (
+                "",
+                TYPE_WIDTH_MM + TOTAL_WIDTH_MM - LABEL_WIDTH_MM,
+                PdfCellAlign::Left,
+            ),
+            (summary.as_str(), LABEL_WIDTH_MM, PdfCellAlign::Right),
+        ];
+        if totals
+            .get(index + 1)
+            .is_some_and(|(_, _, _, next_shaded)| *next_shaded)
+        {
+            layout.table_row_aligned_middle_compact_without_rule(&cells, bold, shaded);
+        } else {
+            layout.table_row_aligned_middle_compact(&cells, bold, shaded);
+        }
+    }
+    admin_block(&mut layout, PAYER_COST_ESTIMATE_PRIVACY_SENTENCE, 3.0, 0.0);
+    let listed = context
+        .line_items
+        .iter()
+        .filter(|item| !is_estimated_outlays_item(item))
+        .collect::<Vec<_>>();
+    if contract_vat_groups(&listed).len() > 1 {
+        admin_block(
+            &mut layout,
+            "Die Umsatzsteuer richtet sich nach dem für die jeweilige Leistungsart geltenden Steuersatz; durchlaufende Posten sind nicht umsatzsteuerbar.",
+            2.0,
+            0.0,
+        );
+    }
+    let bank_lines = [
+        ("Kontoinhaber", context.agency.bank_holder.as_deref()),
+        ("Bank", context.agency.bank_name.as_deref()),
+        ("SWIFT-Code", context.agency.bank_swift.as_deref()),
+        ("IBAN", context.agency.bank_iban.as_deref()),
+    ];
+    let bank_rows = bank_lines
+        .iter()
+        .filter_map(|(label, value)| {
+            value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| (*label, value))
+        })
+        .collect::<Vec<_>>();
+    if !bank_rows.is_empty() {
+        layout.ensure_space(42.0);
+        layout.spacer(6.0);
+        admin_block(
+            &mut layout,
+            "Der angegebene Gesamtbetrag ist vor Auftragsbeginn zu überweisen an:",
+            0.0,
+            0.8,
+        );
+        layout.spacer(2.5);
+        layout.key_value_rows_centered(&bank_rows, 10.0, 0.0, 0.4);
+        layout.spacer(2.5);
+        admin_block(
+            &mut layout,
+            "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf. Überschreiten die Vorauszahlungen die endgültigen Gesamtauftragskosten, erstatten wir den Restbetrag selbstverständlich zurück.",
+            1.0,
+            1.0,
+        );
+    }
+    let agency_signature_name = agency_legal_name(&context.agency);
+    admin_signature_grid(
+        &mut layout,
+        AdminSignatureParty {
+            place: context
+                .payer
+                .as_ref()
+                .and_then(|payer| payer.city.as_deref()),
+            date: None,
+            name: payer_name.as_deref().unwrap_or(placeholder),
+            role: "Kostenübernehmer/in",
+            anchor: Some("payer"),
+        },
+        AdminSignatureParty {
+            place: context.agency_sign_place.as_deref(),
+            date: context.agency_sign_date,
+            name: &agency_signature_name,
+            role: "Auftragnehmer",
+            anchor: Some("agency"),
+        },
+    );
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// The newest order of a lead as "Auftrags-Nr." of the payer's documents,
+/// when the document is not generated for an order.
+async fn lead_order_reference(
+    state: &AppState,
+    lead_id: Uuid,
+    order_number: Option<&str>,
+) -> Result<Option<String>, axum::response::Response> {
+    if let Some(number) = order_number
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(Some(number.to_string()));
+    }
+    sqlx::query_scalar::<_, String>(
+        r#"SELECT order_number FROM orders
+           WHERE source_lead_id = $1
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(%error, %lead_id, "load the lead's order for a payer document");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the order of the lead",
+        )
+    })
+}
+
+async fn load_payer_self_disclosure(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<Option<super::lead_payer_link::PayerSelfDisclosure>, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %lead_id, "load the payer's self-disclosure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the payer's answers",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    super::lead_payer_link::self_disclosure(&mut conn, lead_id)
+        .await
+        .map_err(failed)
+}
+
+/// What the patient side stated about the payer, for the "Erklärung zur
+/// Kostenübernahme durch Dritte".
+struct PatientPayerStatement {
+    organisation: bool,
+    payer_type: String,
+    payer_name: Option<String>,
+    relationship: Option<String>,
+    contact_consent_at: Option<chrono::DateTime<chrono::Utc>>,
+    payment_background: Option<String>,
+    request_sent_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Who signs: the payer, or "Für <Firma>: <Vertreter/in>, <Funktion>".
+    signer: Option<String>,
+}
+
+async fn load_patient_payer_statement(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<PatientPayerStatement, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %lead_id, "load the statement about the payer");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the statement about the payer",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
+        .await
+        .map_err(failed)?
+        .filter(super::lead_payer::Declaration::is_third_party)
+        .ok_or_else(|| {
+            gwg_sheet_refusal(
+                "payer_declaration_not_third_party",
+                "The payer declaration names no third-party payer",
+            )
+        })?;
+    let subject = super::lead_payer_link::package_subject(&mut conn, lead_id)
+        .await
+        .map_err(failed)?;
+    let request_sent_at: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT portal_submitted_at FROM leads WHERE id = $1")
+            .bind(lead_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(failed)?
+            .flatten();
+    drop(conn);
+    let (statements, _) = super::lead_portal_intake::load_identification(&state.db, lead_id)
+        .await
+        .map_err(failed)?;
+    let organisation = declaration.is_organisation();
+    let payer_name = declaration.payer_name();
+    let signer = subject.as_ref().and_then(|subject| {
+        payer_signer_line(
+            subject.signer_first_name.as_deref(),
+            subject.signer_last_name.as_deref(),
+            subject.acting_for.as_deref(),
+            subject.signer_role.as_deref(),
+        )
+    });
+    Ok(PatientPayerStatement {
+        organisation,
+        payer_type: declaration
+            .payer_type
+            .clone()
+            .unwrap_or_else(|| super::lead_payer::PAYER_TYPE_PERSON.to_string()),
+        relationship: payer_relationship_label(
+            declaration.relationship_kind.as_deref(),
+            declaration.relationship.as_deref(),
+        ),
+        contact_consent_at: declaration.contact_consent_at,
+        payment_background: statements.payment_background,
+        request_sent_at,
+        signer: signer.or_else(|| payer_name.clone()),
+        payer_name,
+    })
+}
+
+/// "Für Beispiel GmbH: Max Muster, Geschäftsführer" for an organisation,
+/// the name of a person otherwise; `None` without a name.
+fn payer_signer_line(
+    first_name: Option<&str>,
+    last_name: Option<&str>,
+    acting_for: Option<&str>,
+    role: Option<&str>,
+) -> Option<String> {
+    let name = [first_name, last_name]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let acting_for = acting_for.map(str::trim).filter(|value| !value.is_empty());
+    let role = role.map(str::trim).filter(|value| !value.is_empty());
+    match (acting_for, name.is_empty()) {
+        (Some(organisation), false) => Some(match role {
+            Some(role) => format!("Für {organisation}: {name}, {role}"),
+            None => format!("Für {organisation}: {name}"),
+        }),
+        (Some(organisation), true) => Some(format!("Für {organisation}")),
+        (None, false) => Some(name),
+        (None, true) => None,
+    }
+}
+
+/// The relationship to the patient in German, the words for "other".
+fn payer_relationship_label(kind: Option<&str>, words: Option<&str>) -> Option<String> {
+    let words = words.map(str::trim).filter(|value| !value.is_empty());
+    let label = match kind {
+        Some("spouse") => "Ehepartner/in",
+        Some("parent") => "Elternteil",
+        Some("child") => "Kind",
+        Some("relative") => "Verwandte/r",
+        Some("employer") => "Arbeitgeber",
+        Some("friend") => "Freund/in",
+        Some("business_partner") => "Geschäftspartner/in",
+        _ => return words.map(str::to_string),
+    };
+    Some(label.to_string())
+}
+
+/// "Person", "Unternehmen", "Organisation" or "Versicherung".
+fn payer_type_label(payer_type: &str) -> &'static str {
+    match payer_type {
+        "company" => "Unternehmen",
+        "organisation" => "Organisation",
+        "insurance" => "Versicherung",
+        _ => "Person",
+    }
+}
+
+/// "ja – <Angaben>", "ja", "nein" or "keine Angabe".
+fn payer_yes_no(answer: Option<bool>, details: Option<&str>) -> String {
+    match answer {
+        Some(true) => match details.map(str::trim).filter(|value| !value.is_empty()) {
+            Some(details) => format!("ja – {details}"),
+            None => "ja".to_string(),
+        },
+        Some(false) => "nein".to_string(),
+        None => "keine Angabe".to_string(),
+    }
+}
+
+fn payer_date_time(at: chrono::DateTime<chrono::Utc>) -> (String, String) {
+    let local = crate::app_time::local(at);
+    (
+        local.format("%d.%m.%Y").to_string(),
+        local.format("%H:%M").to_string(),
+    )
+}
+
+/// Section headings numbered in the order they are printed.
+struct PayerSectionCounter(usize);
+
+impl PayerSectionCounter {
+    fn heading(&mut self, layout: &mut TreatmentPlanPdfLayout, title: &str) {
+        self.0 += 1;
+        admin_heading(layout, &format!("{}. {title}", self.0));
+    }
+}
+
+/// The payer's own signature block (frame `payer`; the caption names the
+/// Kostenübernehmer/in, so the frame is found in the PDF text as well).
+fn payer_signature_block(
+    layout: &mut TreatmentPlanPdfLayout,
+    signer: &str,
+    organisation: Option<&str>,
+) {
+    // An organisation signs through its representative. "Für <Firma>:
+    // <Name>, <Funktion>" rarely fits the width of a signature column, so
+    // the whole line is printed above the block and the block names the
+    // representative.
+    let representative = organisation
+        .map(str::trim)
+        .filter(|organisation| !organisation.is_empty())
+        .and_then(|organisation| signer.strip_prefix(&format!("Für {organisation}: ")));
+    if representative.is_some() {
+        admin_block(layout, signer, 0.0, 2.0);
+    }
+    admin_signature_rows(
+        layout,
+        vec![AdminSignatureParty {
+            place: None,
+            date: None,
+            name: representative.unwrap_or(signer),
+            role: "Zahlende Person (Kostenübernehmer/in)",
+            anchor: Some("payer"),
+        }],
+    );
+}
+
+/// "Selbstauskunft der zahlenden Person" (phase 3b, contract 3.1): what the
+/// payer sent through its questionnaire, signed by the payer.
+fn build_payer_self_disclosure_pdf(
+    data: &super::lead_payer_link::PayerSelfDisclosure,
+    patient_name: &str,
+    agency: &AgencyContractSettings,
+    order_number: Option<&str>,
+    document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let date = |value: Option<NaiveDate>| value.map(|date| date.format("%d.%m.%Y").to_string());
+    let country = |value: Option<&str>| value.map(german_document_country);
+    let text = |value: Option<&String>| {
+        value
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let organisation = data.organisation;
+    let person_name = [data.first_name.as_deref(), data.last_name.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let representative = [
+        data.representative_first_name.as_deref(),
+        data.representative_last_name.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .map(str::trim)
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(" ");
+    let payer_name = if organisation {
+        text(data.organisation_name.as_ref()).unwrap_or_default()
+    } else {
+        person_name.clone()
+    };
+    let agency_name = Some(agency.name.trim())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("GMED");
+    let patient = Some(patient_name.trim())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("die Patientin / den Patienten");
+    let (received_on, received_at) = payer_date_time(data.submitted_at);
+    let email = text(data.confirmed_email.as_ref());
+
+    layout.text_block_centered(
+        "Selbstauskunft",
+        16.0,
+        true,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block_centered(
+        "der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz (GwG)",
+        10.0,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        3.0,
+    );
+    let channel = if data.mode == "cabinet" {
+        "über das Patientenportal".to_string()
+    } else {
+        match &email {
+            Some(email) => {
+                format!("über den gesicherten Fragebogen (bestätigte E-Mail: {email})")
+            }
+            None => "über den gesicherten Fragebogen".to_string(),
+        }
+    };
+    admin_block(
+        &mut layout,
+        &format!(
+            "Angaben der zahlenden Person zur Kostenübernahme für {patient} gegenüber {agency_name}, übermittelt am {received_on} um {received_at} {channel}."
+        ),
+        0.0,
+        3.0,
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            (
+                if organisation {
+                    "Organisation"
+                } else {
+                    "Zahlende Person"
+                },
+                aml_binding_value(Some(payer_name.as_str())).to_string(),
+            ),
+            (
+                "Patient/in",
+                aml_binding_value(Some(patient_name)).to_string(),
+            ),
+            ("Auftrags-Nr.", aml_binding_value(order_number).to_string()),
+            (
+                "Eingang der Angaben",
+                format!("{received_on} {received_at}"),
+            ),
+            (
+                "E-Mail (bestätigt)",
+                aml_binding_value(email.as_deref()).to_string(),
+            ),
+        ],
+    );
+
+    let mut section = PayerSectionCounter(0);
+    let address = gwg_address_line(
+        data.street.as_deref(),
+        data.zip.as_deref(),
+        data.city.as_deref(),
+        data.country.as_deref(),
+    );
+    let address = Some(address).filter(|line| !line.is_empty());
+    if organisation {
+        section.heading(&mut layout, "Angaben zur Organisation");
+        aml_labeled_value(&mut layout, "Firma", Some(payer_name.as_str()));
+        aml_labeled_value(&mut layout, "Art", Some(payer_type_label(&data.payer_type)));
+        aml_labeled_value(&mut layout, "Sitz", address.as_deref());
+        aml_labeled_value(
+            &mut layout,
+            "Registergericht",
+            data.register_court.as_deref(),
+        );
+        aml_labeled_value(
+            &mut layout,
+            "Registernummer",
+            data.register_number.as_deref(),
+        );
+        aml_labeled_value(&mut layout, "Branche", data.industry.as_deref());
+        aml_labeled_value(&mut layout, "Telefon", data.phone.as_deref());
+        let representative_line = match (
+            representative.is_empty(),
+            text(data.representative_role.as_ref()),
+        ) {
+            (true, _) => None,
+            (false, Some(role)) => Some(format!("{representative}, {role}")),
+            (false, None) => Some(representative.clone()),
+        };
+        aml_labeled_value(
+            &mut layout,
+            "Gesetzliche/r Vertreter/in (Funktion)",
+            representative_line.as_deref(),
+        );
+    } else {
+        section.heading(&mut layout, "Angaben zur Person");
+        aml_labeled_value(
+            &mut layout,
+            "Anrede",
+            data.salutation
+                .as_deref()
+                .map(|salutation| match salutation {
+                    "mr" => "Herr",
+                    "ms" => "Frau",
+                    _ => "keine Angabe",
+                }),
+        );
+        aml_labeled_value(&mut layout, "Vor- und Nachname", Some(person_name.as_str()));
+        aml_labeled_value(&mut layout, "Frühere Namen", data.former_names.as_deref());
+        aml_labeled_value(
+            &mut layout,
+            "Geburtsdatum",
+            date(data.date_of_birth).as_deref(),
+        );
+        let birth_place = match (
+            text(data.birth_place.as_ref()),
+            country(data.birth_country.as_deref()),
+        ) {
+            (Some(place), Some(country)) => Some(format!("{place} ({country})")),
+            (Some(place), None) => Some(place),
+            (None, country) => country,
+        };
+        aml_labeled_value(&mut layout, "Geburtsort (Land)", birth_place.as_deref());
+        let citizenships = data
+            .citizenships
+            .iter()
+            .map(|code| german_document_country(code))
+            .collect::<Vec<_>>()
+            .join(", ");
+        aml_labeled_value(
+            &mut layout,
+            "Staatsangehörigkeit(en)",
+            Some(citizenships.as_str()),
+        );
+        aml_labeled_value(&mut layout, "Anschrift", address.as_deref());
+        aml_labeled_value(
+            &mut layout,
+            "Gewöhnlicher Aufenthalt (falls abweichend)",
+            country(data.habitual_residence_country.as_deref()).as_deref(),
+        );
+        aml_labeled_value(&mut layout, "Telefon", data.phone.as_deref());
+        aml_labeled_value(&mut layout, "Beruf", data.occupation.as_deref());
+    }
+
+    section.heading(
+        &mut layout,
+        if organisation {
+            "Ausweisdokument der vertretungsberechtigten Person"
+        } else {
+            "Ausweisdokument"
+        },
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Art",
+        data.id_document_type.as_deref().map(|kind| match kind {
+            "passport" => "Reisepass",
+            "id_card" => "Personalausweis",
+            "residence_permit" => "Aufenthaltstitel",
+            other => other,
+        }),
+    );
+    aml_labeled_value(&mut layout, "Nummer", data.id_document_number.as_deref());
+    aml_labeled_value(
+        &mut layout,
+        "Ausstellende Behörde",
+        data.id_issuing_authority.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Ausstellungsstaat",
+        country(data.id_issuing_country.as_deref()).as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Ausgestellt am",
+        date(data.id_issued_on).as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Gültig bis",
+        date(data.id_valid_until).as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Kopie übermittelt",
+        Some(if data.id_copy_on_file { "ja" } else { "nein" }),
+    );
+
+    if organisation {
+        section.heading(&mut layout, "Wirtschaftlich Berechtigte");
+        if data.beneficial_owners.is_empty() {
+            aml_labeled_value(
+                &mut layout,
+                "Wirtschaftlich Berechtigte",
+                (data.beneficial_owners_none == Some(true)).then_some(
+                    "Keine natürliche Person hält mehr als 25 % der Anteile oder Stimmrechte.",
+                ),
+            );
+        }
+        for (index, owner) in data.beneficial_owners.iter().enumerate() {
+            let address = gwg_address_line(
+                owner.street.as_deref(),
+                owner.zip.as_deref(),
+                owner.city.as_deref(),
+                owner.country.as_deref(),
+            );
+            let line = [
+                Some(owner.name.clone()).filter(|name| !name.is_empty()),
+                date(owner.date_of_birth).map(|day| format!("geb. am {day}")),
+                text(owner.birth_place.as_ref()).map(|place| format!("in {place}")),
+                Some(address).filter(|line| !line.is_empty()),
+                Some(format!(
+                    "Anteil {} %",
+                    owner.share_percent.replace('.', ",")
+                )),
+            ]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(", ");
+            aml_labeled_value(
+                &mut layout,
+                &format!("Wirtschaftlich Berechtigte/r {}", index + 1),
+                Some(line.as_str()),
+            );
+        }
+    }
+
+    section.heading(&mut layout, "Beziehung zur Patientin / zum Patienten");
+    aml_labeled_value(
+        &mut layout,
+        "Beziehung",
+        payer_relationship_label(
+            data.relationship_kind.as_deref(),
+            data.relationship.as_deref(),
+        )
+        .as_deref(),
+    );
+
+    section.heading(&mut layout, "Herkunft der Mittel");
+    let sources = data.funds_sources.join(", ");
+    aml_labeled_value(&mut layout, "Herkunft der Mittel", Some(sources.as_str()));
+    aml_labeled_value(
+        &mut layout,
+        "Beschreibung",
+        data.funds_description.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Nachweis übermittelt",
+        Some(if data.funds_proof_on_file {
+            "ja"
+        } else {
+            "nein"
+        }),
+    );
+
+    section.heading(&mut layout, "Zahlungsweg");
+    let route = GwgPaymentRoute::from_declaration(&data.payment_route);
+    aml_labeled_value(&mut layout, "Zahlungsweg", Some(route.line().as_str()));
+    aml_labeled_value(
+        &mut layout,
+        "Zahlung über Dritte / Zahlungsdienstleister",
+        Some(route.third_party_line().as_str()),
+    );
+
+    section.heading(&mut layout, "Erklärungen");
+    let high_risk_details = data
+        .high_risk_country_code
+        .as_deref()
+        .map(|code| format!("Staat: {}", german_document_country(code)));
+    let declarations: [(&str, Option<bool>, Option<&str>); 4] = if organisation {
+        [
+            (
+                "Vertretungsberechtigte Personen oder wirtschaftlich Berechtigte sind politisch exponierte Personen",
+                data.pep_self,
+                data.pep_self_details.as_deref(),
+            ),
+            (
+                "Vertretungsberechtigte Personen oder wirtschaftlich Berechtigte sind Familienmitglieder politisch exponierter Personen oder ihnen bekanntermaßen nahestehend",
+                data.pep_related,
+                data.pep_related_details.as_deref(),
+            ),
+            (
+                "Bezug der vertretungsberechtigten Personen oder wirtschaftlich Berechtigten zu einem Drittstaat mit hohem Risiko",
+                data.high_risk_country,
+                high_risk_details.as_deref(),
+            ),
+            (
+                "Bezug der vertretungsberechtigten Personen oder wirtschaftlich Berechtigten zu Sanktionen",
+                data.sanctions_links,
+                data.sanctions_links_details.as_deref(),
+            ),
+        ]
+    } else {
+        [
+            (
+                "Ich bin eine politisch exponierte Person",
+                data.pep_self,
+                data.pep_self_details.as_deref(),
+            ),
+            (
+                "Ich bin Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend",
+                data.pep_related,
+                data.pep_related_details.as_deref(),
+            ),
+            (
+                "Bezug zu einem Drittstaat mit hohem Risiko",
+                data.high_risk_country,
+                high_risk_details.as_deref(),
+            ),
+            (
+                "Bezug zu Sanktionen",
+                data.sanctions_links,
+                data.sanctions_links_details.as_deref(),
+            ),
+        ]
+    };
+    for (label, answer, details) in declarations {
+        aml_labeled_value(
+            &mut layout,
+            label,
+            Some(payer_yes_no(answer, details).as_str()),
+        );
+    }
+
+    section.heading(&mut layout, "Datenschutz");
+    let acknowledged = data.privacy_ack_at.map(|at| {
+        format!(
+            "Datenschutzhinweise zur Kenntnis genommen am {} (Fassung {})",
+            payer_date_time(at).0,
+            data.privacy_text_version
+                .as_deref()
+                .unwrap_or(super::lead_payer_link::PRIVACY_TEXT_VERSION)
+        )
+    });
+    aml_labeled_value(&mut layout, "Datenschutzhinweise", acknowledged.as_deref());
+    let channels = data
+        .contact_channels
+        .iter()
+        .map(|channel| match channel.as_str() {
+            "email" => "E-Mail",
+            "phone" => "Telefon",
+            "messenger" => "Messenger",
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    aml_labeled_value(&mut layout, "Kontaktwege", Some(channels.as_str()));
+
+    section.heading(&mut layout, "Versicherung");
+    admin_block(
+        &mut layout,
+        if organisation {
+            "Wir versichern, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teilen wir dies GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        } else {
+            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind. Ändern sie sich während der Geschäftsbeziehung, teile ich dies GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        },
+        0.0,
+        2.0,
+    );
+    let signer = if organisation {
+        payer_signer_line(
+            data.representative_first_name.as_deref(),
+            data.representative_last_name.as_deref(),
+            Some(payer_name.as_str()),
+            data.representative_role.as_deref(),
+        )
+    } else {
+        Some(person_name).filter(|name| !name.is_empty())
+    };
+    payer_signature_block(
+        &mut layout,
+        signer.as_deref().unwrap_or("____________________"),
+        organisation.then_some(payer_name.as_str()),
+    );
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// "Erklärung zur Kostenübernahme durch Dritte" (phase 3b, contract 3.2):
+/// what the patient side stated about the payer, confirmed by the payer.
+fn build_patient_payer_statement_pdf(
+    statement: &PatientPayerStatement,
+    patient_name: &str,
+    agency: &AgencyContractSettings,
+    order_number: Option<&str>,
+    document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    layout.text_block_centered(
+        "Erklärung zur Kostenübernahme durch Dritte",
+        16.0,
+        true,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block_centered(
+        "Angaben der Patientenseite zur zahlenden Person und Bestätigung der zahlenden Person",
+        10.0,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        3.0,
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            (
+                "Patient/in",
+                aml_binding_value(Some(patient_name)).to_string(),
+            ),
+            (
+                "Anfrage gesendet am",
+                statement
+                    .request_sent_at
+                    .map(|at| payer_date_time(at).0)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            ("Auftrags-Nr.", aml_binding_value(order_number).to_string()),
+        ],
+    );
+    admin_heading(&mut layout, "1. Angaben in der Anfrage");
+    aml_labeled_value(
+        &mut layout,
+        "Wer zahlt?",
+        Some("Eine andere Person oder Organisation"),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Art des Zahlers",
+        Some(payer_type_label(&statement.payer_type)),
+    );
+    aml_labeled_value(
+        &mut layout,
+        if statement.organisation {
+            "Firma"
+        } else {
+            "Name"
+        },
+        statement.payer_name.as_deref(),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Beziehung zur Patientin / zum Patienten",
+        statement.relationship.as_deref(),
+    );
+    let consent = match statement.contact_consent_at {
+        Some(at) => format!("erteilt am {}", payer_date_time(at).0),
+        None => "nicht erteilt".to_string(),
+    };
+    aml_labeled_value(
+        &mut layout,
+        "Einverständnis zur Kontaktaufnahme mit der zahlenden Person",
+        Some(consent.as_str()),
+    );
+    aml_labeled_value(
+        &mut layout,
+        "Warum zahlt diese Person?",
+        Some(
+            statement
+                .payment_background
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or("keine Angabe"),
+        ),
+    );
+    admin_heading(&mut layout, "2. Bestätigung der zahlenden Person");
+    admin_block(
+        &mut layout,
+        if statement.organisation {
+            "Wir haben die vorstehenden Angaben gelesen; sie treffen zu. Wir übernehmen die Kosten aus eigenem Entschluss. Einzelheiten regelt die Kostenübernahmeerklärung."
+        } else {
+            "Ich habe die vorstehenden Angaben gelesen; sie treffen zu. Ich übernehme die Kosten aus eigenem Entschluss. Einzelheiten regelt die Kostenübernahmeerklärung."
+        },
+        0.0,
+        2.0,
+    );
+    payer_signature_block(
+        &mut layout,
+        statement
+            .signer
+            .as_deref()
+            .unwrap_or("____________________"),
+        statement
+            .payer_name
+            .as_deref()
+            .filter(|_| statement.organisation),
+    );
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// One document of a lead generated by the server itself (the payer's
+/// signature package, phase 3b): what [`generate_lead_document`] needs.
+pub(crate) struct LeadDocumentGeneration {
+    pub(crate) template_id: &'static str,
+    pub(crate) lead_id: Uuid,
+    pub(crate) order_id: Option<Uuid>,
+    /// The version this document replaces; `None` starts a new document.
+    pub(crate) replace_document_id: Option<Uuid>,
+    /// The payer's copy of the cost estimate: the client's estimate whose
+    /// lines and totals it carries.
+    pub(crate) bindings_from_document_id: Option<Uuid>,
+}
+
+/// Generates a lead's document like `POST /documents/generate` does (German,
+/// outgoing original, active; financial access for the cost coverage and the
+/// payer's estimate) and returns its id. Every check of the endpoint applies;
+/// a refusal is passed through unchanged.
+pub(crate) async fn generate_lead_document(
+    state: &AppState,
+    auth: &AuthUser,
+    generation: LeadDocumentGeneration,
+) -> Result<Uuid, axum::response::Response> {
+    let mut bindings = None;
+    if let Some(source) = generation.bindings_from_document_id {
+        let stored: Option<Value> = sqlx::query_scalar(
+            "SELECT generated_bindings FROM documents WHERE id = $1 AND lead_id = $2",
+        )
+        .bind(source)
+        .bind(generation.lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| {
+            tracing::error!(%error, %source, "load the bindings of the client's estimate");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the client's cost estimate",
+            )
+        })?
+        .flatten();
+        let mut stored = stored.unwrap_or_else(|| json!({}));
+        // Generator records (signature frames, payer versions, intake
+        // context) are the client's document's own.
+        if let Some(object) = stored.as_object_mut() {
+            object.retain(|key, _| !key.starts_with('_'));
+        }
+        bindings = Some(
+            serde_json::from_value::<DocumentBindingOverrides>(stored).map_err(|error| {
+                tracing::error!(%error, %source, "read the bindings of the client's estimate");
+                err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    "The client's cost estimate cannot be copied",
+                )
+            })?,
+        );
+    }
+    let financial = matches!(
+        generation.template_id,
+        "cost_coverage_declaration" | "payer_cost_estimate"
+    );
+    let request = GenerateDocumentRequest {
+        template_id: generation.template_id.to_string(),
+        lead_id: Some(generation.lead_id),
+        order_id: generation.order_id,
+        replace_document_id: generation.replace_document_id,
+        status: Some("active".to_string()),
+        document_direction: Some("outgoing".to_string()),
+        document_variant: Some("original".to_string()),
+        document_language: Some("de".to_string()),
+        language: Some("de".to_string()),
+        access_category: financial.then(|| "financial".to_string()),
+        bindings,
+        source_cost_estimate_id: generation.bindings_from_document_id,
+        ..GenerateDocumentRequest::default()
+    };
+    let response =
+        generate_document(State(state.clone()), Extension(auth.clone()), Json(request)).await;
+    if !response.status().is_success() {
+        return Err(response);
+    }
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .map_err(|_| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read the generated document",
+            )
+        })?;
+    serde_json::from_slice::<Value>(&bytes)
+        .ok()
+        .and_then(|value| value["id"].as_str().and_then(|id| Uuid::parse_str(id).ok()))
+        .ok_or_else(|| {
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The generated document has no id",
+            )
+        })
 }
 
 fn build_adult_privacy_consents_pdf(
@@ -30326,6 +31809,467 @@ mod tests {
             };
             assert!(!super::gwg_increased_risk(&tiered, false), "{tier}");
             assert!(super::gwg_increased_risk(&tiered, true), "{tier}");
+        }
+    }
+
+    fn recorded_roles(generated: &super::GeneratedPdf) -> Vec<&str> {
+        generated
+            .signature_anchors
+            .iter()
+            .map(|anchor| anchor.role.as_str())
+            .collect()
+    }
+
+    /// Words that never belong on the payer's own documents (phase 3b):
+    /// nothing medical, no check level, no staff assessment.
+    fn assert_nothing_medical_or_assessed(text: &str) {
+        for word in [
+            "Prüfstufe",
+            "Diagnose",
+            "Befund",
+            "Klinik",
+            "Arzt",
+            "Behandlung",
+            "Bearbeiter",
+            "Risikostufe",
+        ] {
+            assert!(!text.contains(word), "{word} in {text}");
+        }
+    }
+
+    fn viktor_disclosure() -> crate::routes::lead_payer_link::PayerSelfDisclosure {
+        crate::routes::lead_payer_link::PayerSelfDisclosure {
+            mode: "link",
+            payer_type: "person".to_string(),
+            submitted_at: Utc.with_ymd_and_hms(2026, 10, 6, 10, 2, 0).unwrap(),
+            confirmed_email: Some("viktor.zahler@example.com".to_string()),
+            salutation: Some("mr".to_string()),
+            first_name: Some("Viktor".to_string()),
+            last_name: Some("Zahler".to_string()),
+            date_of_birth: NaiveDate::from_ymd_opt(1970, 5, 1),
+            birth_place: Some("Graz".to_string()),
+            birth_country: Some("AT".to_string()),
+            citizenships: vec!["AT".to_string()],
+            street: Some("Ringstraße 9".to_string()),
+            zip: Some("1010".to_string()),
+            city: Some("Wien".to_string()),
+            country: Some("AT".to_string()),
+            occupation: Some("Kaufmann".to_string()),
+            id_document_type: Some("passport".to_string()),
+            id_document_number: Some("P1234567".to_string()),
+            id_issuing_authority: Some("BH Wien".to_string()),
+            id_issuing_country: Some("AT".to_string()),
+            id_valid_until: NaiveDate::from_ymd_opt(2031, 12, 31),
+            id_copy_on_file: true,
+            relationship_kind: Some("other".to_string()),
+            relationship: Some("Onkel".to_string()),
+            funds_sources: vec!["Ersparnisse".to_string()],
+            payment_route: crate::routes::lead_payer::Declaration {
+                payment_method: Some("bank_transfer".to_string()),
+                account_country: Some("AT".to_string()),
+                account_holder: Some("Viktor Zahler".to_string()),
+                bank_name: Some("Beispielbank".to_string()),
+                via_third_party: Some(false),
+                ..Default::default()
+            },
+            pep_self: Some(false),
+            pep_related: Some(true),
+            pep_related_details: Some("Bruder, Bürgermeister".to_string()),
+            high_risk_country: Some(false),
+            sanctions_links: Some(false),
+            privacy_ack_at: Some(Utc.with_ymd_and_hms(2026, 10, 6, 9, 0, 0).unwrap()),
+            privacy_text_version: Some("payer-privacy-2026-10-06".to_string()),
+            contact_channels: vec!["email".to_string(), "phone".to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_payers_self_disclosure_prints_its_own_answers_and_one_payer_signature() {
+        let generated = super::build_payer_self_disclosure_pdf(
+            &viktor_disclosure(),
+            "Mia Muster",
+            &legal_test_agency(),
+            Some("A-20261006-0001"),
+            "DOC-PAYER-SD-0001",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["payer"]);
+        assert_signature_frames_detected(&generated);
+        let text = assert_legal_pdf_chrome(&generated, "DOC-PAYER-SD-0001");
+        assert_nothing_medical_or_assessed(&text);
+        for expected in [
+            "Selbstauskunft",
+            "der zahlenden Person (Kostenübernehmer/in) nach dem Geldwäschegesetz (GwG)",
+            "Kostenübernahme für Mia Muster",
+            "übermittelt am 06.10.2026 um 12:02 über den gesicherten Fragebogen (bestätigte E-Mail: viktor.zahler@example.com)",
+            "A-20261006-0001",
+            "1. Angaben zur Person",
+            "Herr",
+            "Viktor Zahler",
+            "01.05.1970",
+            "Graz (Österreich)",
+            "Ringstraße 9, 1010 Wien, Österreich",
+            "Kaufmann",
+            "2. Ausweisdokument",
+            "Reisepass",
+            "P1234567",
+            "Kopie übermittelt ja",
+            "3. Beziehung zur Patientin / zum Patienten",
+            "Onkel",
+            "4. Herkunft der Mittel",
+            "Ersparnisse",
+            "Nachweis übermittelt nein",
+            "5. Zahlungsweg",
+            "Überweisung · Konto in Österreich · Kontoinhaber/in: Viktor Zahler · Bank: Beispielbank",
+            "6. Erklärungen",
+            "ja – Bruder, Bürgermeister",
+            "7. Datenschutz",
+            "Datenschutzhinweise zur Kenntnis genommen am 06.10.2026 (Fassung payer-privacy-2026-10-06)",
+            "E-Mail, Telefon",
+            "8. Versicherung",
+            "Ich versichere, dass die vorstehenden Angaben vollständig und richtig sind",
+            "(§ 11 Abs. 6 GwG)",
+            "Unterschrift Zahlende Person (Kostenübernehmer/in)",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        assert!(!text.contains("Wirtschaftlich Berechtigte"));
+
+        // A company: its representative signs for it; the questions speak of
+        // the representatives and beneficial owners.
+        let company = crate::routes::lead_payer_link::PayerSelfDisclosure {
+            organisation: true,
+            payer_type: "company".to_string(),
+            first_name: None,
+            last_name: None,
+            organisation_name: Some("Beispiel GmbH".to_string()),
+            register_court: Some("Amtsgericht Köln".to_string()),
+            register_number: Some("HRB 12345".to_string()),
+            industry: Some("Handel".to_string()),
+            representative_first_name: Some("Max".to_string()),
+            representative_last_name: Some("Muster".to_string()),
+            representative_role: Some("Geschäftsführer".to_string()),
+            beneficial_owners: vec![crate::routes::lead_payer_link::PayerOwnerLine {
+                name: "Erika Muster".to_string(),
+                date_of_birth: NaiveDate::from_ymd_opt(1965, 3, 1),
+                share_percent: "60.00".to_string(),
+                ..Default::default()
+            }],
+            ..viktor_disclosure()
+        };
+        let generated = super::build_payer_self_disclosure_pdf(
+            &company,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-0002",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["payer"]);
+        let text = assert_legal_pdf_chrome(&generated, "DOC-PAYER-SD-0002");
+        assert_nothing_medical_or_assessed(&text);
+        for expected in [
+            "1. Angaben zur Organisation",
+            "Beispiel GmbH",
+            "Unternehmen",
+            "HRB 12345",
+            "Max Muster, Geschäftsführer",
+            "2. Ausweisdokument der vertretungsberechtigten Person",
+            "3. Wirtschaftlich Berechtigte",
+            "Erika Muster, geb. am 01.03.1965, Anteil 60,00 %",
+            "Vertretungsberechtigte Personen oder wirtschaftlich Berechtigte",
+            "Wir versichern",
+            "teilen wir dies GMED unverzüglich mit",
+            "Für Beispiel GmbH: Max Muster, Geschäftsführer",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+
+        // A paying parent answered in the patient portal.
+        let parent = crate::routes::lead_payer_link::PayerSelfDisclosure {
+            mode: "cabinet",
+            ..viktor_disclosure()
+        };
+        let generated = super::build_payer_self_disclosure_pdf(
+            &parent,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-SD-0003",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains("um 12:02 über das Patientenportal."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_statement_about_the_payer_is_confirmed_by_the_payer() {
+        let statement = super::PatientPayerStatement {
+            organisation: false,
+            payer_type: "person".to_string(),
+            payer_name: Some("Viktor Zahler".to_string()),
+            relationship: super::payer_relationship_label(Some("friend"), Some("ignored")),
+            contact_consent_at: Some(Utc.with_ymd_and_hms(2026, 10, 3, 8, 0, 0).unwrap()),
+            payment_background: Some("Er unterstützt die Familie.".to_string()),
+            request_sent_at: Some(Utc.with_ymd_and_hms(2026, 10, 4, 8, 0, 0).unwrap()),
+            signer: Some("Viktor Zahler".to_string()),
+        };
+        let generated = super::build_patient_payer_statement_pdf(
+            &statement,
+            "Mia Muster",
+            &legal_test_agency(),
+            Some("A-20261006-0001"),
+            "DOC-PAYER-ST-0001",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["payer"]);
+        assert_signature_frames_detected(&generated);
+        let text = assert_legal_pdf_chrome(&generated, "DOC-PAYER-ST-0001");
+        assert_nothing_medical_or_assessed(&text);
+        for expected in [
+            "Erklärung zur Kostenübernahme durch Dritte",
+            "Angaben der Patientenseite zur zahlenden Person und Bestätigung der zahlenden Person",
+            "Anfrage gesendet am",
+            "04.10.2026",
+            "1. Angaben in der Anfrage",
+            "Wer zahlt? Eine andere Person oder Organisation",
+            "Art des Zahlers Person",
+            "Viktor Zahler",
+            "Freund/in",
+            "erteilt am 03.10.2026",
+            "Warum zahlt diese Person? Er unterstützt die Familie.",
+            "2. Bestätigung der zahlenden Person",
+            "Ich übernehme die Kosten aus eigenem Entschluss.",
+            "Einzelheiten regelt die Kostenübernahmeerklärung.",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        assert!(!text.contains("ignored"));
+
+        let organisation = super::PatientPayerStatement {
+            organisation: true,
+            payer_type: "insurance".to_string(),
+            payer_name: Some("Beispiel Versicherung AG".to_string()),
+            payment_background: None,
+            signer: super::payer_signer_line(
+                Some("Max"),
+                Some("Muster"),
+                Some("Beispiel Versicherung AG"),
+                Some("Vorstand"),
+            ),
+            ..statement
+        };
+        let generated = super::build_patient_payer_statement_pdf(
+            &organisation,
+            "Mia Muster",
+            &legal_test_agency(),
+            None,
+            "DOC-PAYER-ST-0002",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        assert!(text.contains("Art des Zahlers Versicherung"), "{text}");
+        assert!(
+            text.contains("Warum zahlt diese Person? keine Angabe"),
+            "{text}"
+        );
+        assert!(text.contains("Wir übernehmen die Kosten"), "{text}");
+        assert!(
+            text.contains("Für Beispiel Versicherung AG: Max Muster, Vorstand"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_payers_copy_of_the_cost_estimate_lists_service_types_only() {
+        let line = |description: &str, notes: Option<&str>, gross: &str, vat: &str| {
+            GeneratedContractLineItem {
+                description_items: None,
+                localized_sections: Vec::new(),
+                description: description.to_string(),
+                quantity: "1".to_string(),
+                unit_price: gross.to_string(),
+                line_gross: gross.to_string(),
+                vat_rate: Some(vat.to_string()),
+                is_cost_passthrough: false,
+                notes: notes.map(str::to_string),
+            }
+        };
+        let mut items = vec![
+            GeneratedContractLineItem {
+                description_items: Some(vec![crate::service_description::ServiceDescriptionItem {
+                    id: "scope".to_string(),
+                    text: "Begleitung zur Herzkatheteruntersuchung in der Beispielklinik"
+                        .to_string(),
+                }]),
+                ..line(
+                    "Organisation der Kardiologie-Termine bei Dr. Beispiel",
+                    Some("Begleitung zur Herzkatheteruntersuchung in der Beispielklinik"),
+                    "1.000,00 EUR",
+                    "19",
+                )
+            },
+            line(
+                "Zweitmeinung Onkologie Beispielklinikum",
+                None,
+                "500,00 EUR",
+                "19",
+            ),
+            line(
+                "Interpreter support",
+                Some("Dolmetscher im Herzzentrum"),
+                "300,00 EUR",
+                "19",
+            ),
+            line(super::ESTIMATED_OUTLAYS_DESCRIPTION, None, "50,00 EUR", "0"),
+        ];
+        items[3].is_cost_passthrough = true;
+        let catalog = vec![(
+            "interpreter support".to_string(),
+            "interpreter_hours".to_string(),
+        )];
+        let rows = super::payer_estimate_rows(&items, &catalog);
+        assert_eq!(
+            rows.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            ["Leistungen", "Dolmetscher- und Übersetzungsleistungen"]
+        );
+        assert_eq!(super::format_eur_decimal(rows[0].1), "1.500,00 EUR");
+        assert_eq!(super::format_eur_decimal(rows[1].1), "300,00 EUR");
+
+        let context = GeneratedSingleOrderContext {
+            language: "de".to_string(),
+            auto_name: "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)".to_string(),
+            title_override: None,
+            patient_pid: "LEAD-PAYER".to_string(),
+            party: legal_test_party("DE"),
+            agency: AgencyContractSettings {
+                bank_holder: Some("GMED Testkonto".to_string()),
+                bank_name: Some("Testbank".to_string()),
+                bank_iban: Some("DE00 0000 0000 0000 0000 00".to_string()),
+                ..legal_test_agency()
+            },
+            order_number: "EA-2026-0042".to_string(),
+            contract_number: Some("RV-2026-0042".to_string()),
+            order_sequence: 1,
+            order_date: NaiveDate::from_ymd_opt(2026, 10, 6),
+            contract_date: None,
+            specialties: Some("Kardiologie".to_string()),
+            examination_purpose: Some("kardiologischen Untersuchung".to_string()),
+            treatment_purpose: None,
+            order_components: None,
+            period_from: None,
+            period_to: None,
+            payer: Some(DocPartyBlock {
+                name: "Viktor Zahler".to_string(),
+                street: Some("Ringstraße 9".to_string()),
+                zip: Some("1010".to_string()),
+                city: Some("Wien".to_string()),
+                country: Some("AT".to_string()),
+                ..Default::default()
+            }),
+            quote_number: Some("KV-2026-0042".to_string()),
+            line_items: items.clone(),
+            total_net: Some("1.850,00 EUR".to_string()),
+            total_vat: Some("342,00 EUR".to_string()),
+            total_gross: Some("2.192,00 EUR".to_string()),
+            party_sign_place: None,
+            party_sign_date: None,
+            agency_sign_place: Some("Köln".to_string()),
+            agency_sign_date: None,
+            generated_at: Utc.with_ymd_and_hms(2026, 10, 6, 10, 0, 0).unwrap(),
+            contracting: super::ContractingDoc::default(),
+        };
+        let generated =
+            super::build_payer_cost_estimate_pdf(&context, &catalog, "DOC-PAYER-KV").unwrap();
+        assert_eq!(recorded_roles(&generated), ["payer", "agency"]);
+        assert_signature_frames_detected(&generated);
+        let text = assert_legal_pdf_chrome(&generated, "KV-2026-0042");
+        for expected in [
+            "Anlage zur Kostenübernahmeerklärung",
+            "KOSTENVORANSCHLAG",
+            "ZUM 1. EINZELAUFTRAG",
+            "Ausfertigung für die zahlende Person (Kostenübernehmer/in)",
+            "Kostenübernehmer/in: Viktor Zahler, Ringstraße 9, 1010 Wien, Österreich",
+            "LEISTUNGSART",
+            "Leistungen",
+            "1.500,00 EUR",
+            "Dolmetscher- und Übersetzungsleistungen",
+            "300,00 EUR",
+            "Nettowert: 1.800,00 EUR",
+            "MWSt. 19%: 342,00 EUR",
+            "Voraussichtliche Auslagen: 50,00 EUR",
+            "Gesamtsumme: 2.192,00 EUR",
+            super::PAYER_COST_ESTIMATE_PRIVACY_SENTENCE,
+            "IBAN",
+            "Unterschrift Kostenübernehmer/in",
+            "Unterschrift, Stempel",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        // No line text, note or description of the client's estimate, no
+        // birth date of the patient, nothing about a clinic or a doctor.
+        for item in &items[..3] {
+            assert!(!text.contains(&item.description), "{}", item.description);
+            if let Some(notes) = &item.notes {
+                assert!(!text.contains(notes.as_str()), "{notes}");
+            }
+        }
+        for word in [
+            "Herzkatheter",
+            "Kardiologie",
+            "Onkologie",
+            "Beispielklinik",
+            "Dr. Beispiel",
+            "Herzzentrum",
+            "12.04.1988",
+            "Behandlungs-",
+            "Komplikationen",
+        ] {
+            assert!(!text.contains(word), "{word} in {text}");
+        }
+    }
+
+    #[test]
+    fn the_payers_signer_line_and_relationship_are_german() {
+        assert_eq!(
+            super::payer_signer_line(Some("Viktor"), Some("Zahler"), None, None).as_deref(),
+            Some("Viktor Zahler")
+        );
+        assert_eq!(
+            super::payer_signer_line(
+                Some("Max"),
+                Some("Muster"),
+                Some("Beispiel GmbH"),
+                Some("Geschäftsführer")
+            )
+            .as_deref(),
+            Some("Für Beispiel GmbH: Max Muster, Geschäftsführer")
+        );
+        assert_eq!(super::payer_signer_line(None, None, None, None), None);
+        assert_eq!(
+            super::payer_relationship_label(Some("parent"), None).as_deref(),
+            Some("Elternteil")
+        );
+        assert_eq!(
+            super::payer_relationship_label(Some("other"), Some(" Onkel ")).as_deref(),
+            Some("Onkel")
+        );
+        for template in [
+            "payer_self_disclosure",
+            "patient_payer_statement",
+            "payer_cost_estimate",
+        ] {
+            let definition = document_template_by_id(template).unwrap();
+            assert_eq!(definition.languages, ["de"]);
+            assert_eq!(definition.default_status, "active");
+            assert_eq!(definition.default_visibility, "internal");
+            assert!(!definition.is_medical);
+            assert!(is_fixed_legal_document_template(template));
+            assert!(is_lead_allowed_document_template(template));
         }
     }
 

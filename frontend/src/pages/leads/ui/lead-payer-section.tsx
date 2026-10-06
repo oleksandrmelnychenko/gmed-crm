@@ -29,9 +29,13 @@ import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
+import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import type { PatientFieldMarker } from "../data/lead-portal-intake-api";
+import { standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
+import { useLeadPayerPackage } from "../model/use-lead-payer-package";
 import { LeadPayerLinkPanel } from "./lead-payer-link-panel";
+import { LeadPayerPackagePanel } from "./lead-payer-package-panel";
 import { sortWizardDocumentsNewestFirst } from "./lead-wizard-document-metadata";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
@@ -40,6 +44,7 @@ import {
   PAYER_SECTION_ID,
   PAYER_TYPES,
   SOURCE_OF_FUNDS,
+  costEstimateConsentLine,
   invoiceTaxFieldsShown,
   invoiceToLabel,
   isOrganisationPayerForm,
@@ -200,6 +205,8 @@ export function LeadPayerDeclarationSection({
   const statusBadge = payerStatusBadge(data?.status, tx);
   const informedAt = data?.declaration?.payer_informed_at ?? null;
   const contactConsentAt = data?.declaration?.contact_consent_at ?? null;
+  // Phase 3b: the lead's consent to pass the cost estimate on; an older server has none.
+  const costEstimateConsent = costEstimateConsentLine(data, tx);
   // Section 7: the lead chose where the invoice goes; an older server does
   // not send the key, and a lead who has not answered yet has it null.
   const invoiceTo = data?.declaration?.invoice_to;
@@ -574,6 +581,23 @@ export function LeadPayerDeclarationSection({
                 )}
               </p>
             ) : null}
+            {typed && costEstimateConsent ? (
+              <p
+                className="text-xs text-muted-foreground"
+                data-testid="lead-payer-cost-estimate-consent"
+                data-state={costEstimateConsent.state}
+              >
+                {costEstimateConsent.prefix}
+                <span
+                  className={cn(
+                    costEstimateConsent.state === "given" && "font-mono text-foreground",
+                    costEstimateConsent.state === "missing" && "font-medium text-amber-700 dark:text-amber-300",
+                  )}
+                >
+                  {costEstimateConsent.value}
+                </span>
+              </p>
+            ) : null}
             {payerLink?.data ? (
               <LeadPayerLinkPanel
                 leadId={leadId}
@@ -585,6 +609,7 @@ export function LeadPayerDeclarationSection({
                 tx={tx}
                 errorText={errorText}
                 onSent={onPayerLinkSent}
+                packageSummary={data?.status.payer_package}
               />
             ) : payerLink?.error ? (
               <p className="text-xs text-rose-700" data-testid="lead-payer-link-error">
@@ -685,11 +710,28 @@ function SequenceStep({ state, label, tx }: { state: SignatureStepState; label: 
   );
 }
 
+/** The payer's signature package in the signing order (contract phase 3b). */
+export type LeadPayerSignatureFlowPackage = {
+  /** The package panel is shown here (the commercial step); elsewhere the package only hides the standalone button. */
+  panel: boolean;
+  /** leads.edit: prepare and send are offered (the server checks the role as well). */
+  canEdit: boolean;
+  /** Opens a document of the package (the wizard's preview). */
+  onOpenDocument?: (documentId: string, title: string) => void;
+  /** The package changed (prepared, sent, signed): the declaration and the documents are read afresh. */
+  onChanged?: () => void;
+};
+
 /**
  * The signing order in the commercial step: "Клиент подписал ✓ → Плательщик
  * подписал согласие ✓ → GMED подписывает", the payer's
  * Kostenübernahmeerklärung and why GMED may not sign yet. The server enforces
  * the same order (409 `payer_gate_blocked`).
+ *
+ * With `payerPackage` the payer's signature package of four documents is
+ * loaded (phase 3b): once the payer has sent a statement the package replaces
+ * the standalone "Kostenübernahmeerklärung erstellen", which stays for a
+ * payer that staff filled in.
  */
 export function LeadPayerSignatureFlow({
   leadId,
@@ -701,6 +743,7 @@ export function LeadPayerSignatureFlow({
   renderDocuments,
   onChanged,
   errorText,
+  payerPackage,
 }: {
   leadId: string;
   status: PayerDeclarationStatus | null;
@@ -711,12 +754,17 @@ export function LeadPayerSignatureFlow({
   renderDocuments: (documents: DocumentItem[]) => ReactNode;
   onChanged: () => void;
   errorText: (error: unknown) => string;
+  payerPackage?: LeadPayerSignatureFlowPackage | null;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const packageController = useLeadPayerPackage(leadId, Boolean(payerPackage), payerPackage?.onChanged);
+  const packageState = packageController.data;
+  const packagePanelShown = Boolean(payerPackage?.panel && packageState?.mode);
   const sequence = payerSignatureSequence(status);
   const required = Boolean(status?.cost_assumption.required);
   const orderId = status?.order_id ?? null;
+  const standaloneKept = standaloneCostAssumptionKept(packageState);
 
   async function generate() {
     if (!orderId) return;
@@ -748,7 +796,7 @@ export function LeadPayerSignatureFlow({
     <Section
       className="rounded-xl border border-border/70 bg-card p-4"
       title={tx("Порядок подписания", "Reihenfolge der Unterschriften")}
-      accessory={required && canGenerate ? (
+      accessory={required && canGenerate && standaloneKept ? (
         <Button
           type="button"
           size="sm"
@@ -779,6 +827,34 @@ export function LeadPayerSignatureFlow({
         documents.length > 0
           ? renderDocuments(documents)
           : <p className="text-xs text-muted-foreground">{tx("Согласие плательщика ещё не создано", "Kostenübernahmeerklärung wurde noch nicht erstellt")}</p>
+      ) : null}
+      {packagePanelShown && packageState ? (
+        <LeadPayerPackagePanel
+          leadId={leadId}
+          state={packageState}
+          controller={packageController}
+          canEdit={Boolean(payerPackage?.canEdit)}
+          disabled={disabled}
+          tx={tx}
+          errorText={errorText}
+          onOpenDocument={payerPackage?.onOpenDocument}
+          renderDetails={(documentId, title) => (
+            <DocumentSignatureAction
+              documentId={documentId}
+              title={title}
+              disabled={disabled}
+              signed={Boolean(packageState.package?.documents.find((item) => item.document_id === documentId)?.signed_at)}
+              onDone={() => {
+                void packageController.reload();
+              }}
+            />
+          )}
+        />
+      ) : payerPackage?.panel && packageController.error ? (
+        <p className="text-xs text-rose-700" data-testid="lead-payer-package-error">
+          {tx("Не удалось загрузить пакет на подпись: ", "Unterschriftenpaket konnte nicht geladen werden: ")}
+          {errorText(packageController.error)}
+        </p>
       ) : null}
       {status && !status.agency_signed_order && status.agency_blocking.length > 0 ? (
         <Banner tone="warning">

@@ -421,6 +421,32 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
   згодою потрібні клієнт, платник і GMED (`ClientPayerAndAgency`). Платника
   пропонує замовлення (`invoice_recipient_resolve`, гілка платника); доказом
   згоди пацієнта платник не вважається.
+- Власні документи платника (фаза 3b, 2026-10-06; шаблони
+  `payer_self_disclosure`, `patient_payer_statement`, `payer_cost_estimate` —
+  за шаблоном або типом): `SignerPolicy::PayerPackage` (`payer_package`):
+  потрібні `payer` і `agency`, `client` і `minor` заборонені
+  (422 `payer_package_signers_required`) — самооцінка містить дані документа
+  особи платника й не повинна потрапити до пацієнта. `combine`: з
+  `PayerAndAgency` (Kostenübernahmeerklärung) і `Flexible` → `PayerPackage`;
+  з політикою, якій потрібен клієнт, або з `AgencyOnly` — 422
+  `signature_policy_conflict`. Жоден із трьох шаблонів не в `AES_ALLOWED`
+  (мінімум QES). Запрошення: «Selbstauskunft der zahlenden Person»,
+  «Erklärung zur Kostenübernahme durch Dritte», «Kostenvoranschlag».
+  Копія кошторису для платника не має обов'язкового компаньйона
+  (`legal::companion(payer_cost_estimate) = None`): медична калькуляція
+  платникові не передається, спроба додати її — 422
+  `unexpected_review_attachment`. Пресети композитора клієнта її не беруть
+  (вибирають `order_cost_estimate`), тож кошторис клієнта і копія платника
+  можуть бути в двох запитах одночасно. Пропозиція підписантів —
+  `[payer або порожній payer] + GMED`.
+- Пакет, який збирає сервер (`document_signatures::create_fixed_package`,
+  пакет підписів платника — [декларація платника](lead-payer-declaration_ua.md#2d-пакет-підписів-платника-фаза-3b-2026-10-06)):
+  рівно задані документи в заданому порядку, підписанти іншої сторони плюс
+  типові підписанти GMED (`defaults::load`; без них — 422
+  `agency_signer_missing`), обов'язкові компаньйони за правилами
+  `prepare_attachments`, рівень QES, строк 30 днів, якщо не задано; далі
+  `create::create_request` з усіма його перевірками, помилки якого
+  передаються без змін (`{ "error": code }`).
 - Сторона договору (`contracting_party`, гілка платника): договір, який
   укладають батьки від свого імені, має поля `guardian_1`/`guardian_2` без поля
   `client`; кожен записаний законний представник підписує своє поле.

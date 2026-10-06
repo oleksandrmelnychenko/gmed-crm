@@ -118,6 +118,33 @@ describe("LeadPayerLinkPanel", () => {
     expect(html).toContain("Открыта · отправлена 06.10.2026 12:00");
   });
 
+  it("names the signature package once the payer answered (phase 3b)", () => {
+    const answered = state({
+      link: { status: "submitted", email: "viktor.zahler@example.com", sent_at: "2026-10-06T10:00:00Z" },
+      questionnaire: { answers: {}, submitted_at: "2026-10-06T10:30:00Z", missing_for_submit: [] },
+    });
+    const line = (summary: Parameters<typeof LeadPayerLinkPanel>[0]["packageSummary"], tx = ru) =>
+      renderToStaticMarkup(
+        <LeadPayerLinkPanel
+          leadId="lead-1"
+          state={answered}
+          controller={controller}
+          canEdit
+          tx={tx}
+          errorText={() => "error"}
+          packageSummary={summary}
+        />,
+      );
+    expect(line(null)).toContain("Пакет на подпись: <span class=\"font-medium text-foreground\">ещё не подготовлен</span> (шаг «Договор и смета»)");
+    expect(line({ status: "pending", outdated: false, sent_at: "2026-10-06T11:00:00Z", signed_at: null }, de)).toContain(
+      "Unterschriftenpaket: <span class=\"font-medium text-foreground\">gesendet am 06.10.2026, wartet auf Unterschrift</span> (Schritt „Vertrag &amp; Angebot“)",
+    );
+    // An older server sends no package: nothing.
+    expect(line(undefined)).not.toContain("lead-payer-link-package");
+    // Before the payer answered: nothing either.
+    expect(render(state())).not.toContain("lead-payer-link-package");
+  });
+
   it("reads the lead's language as one of the four", () => {
     expect(payerLinkLanguageOf("uk-UA")).toBe("uk");
     expect(payerLinkLanguageOf("UA")).toBe("uk");

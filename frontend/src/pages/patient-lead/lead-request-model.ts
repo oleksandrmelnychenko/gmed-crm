@@ -214,6 +214,7 @@ export type PayerField =
   | "payer_phone"
   | "payer_email"
   | "payer_contact_consent"
+  | "payer_cost_estimate_consent"
   | "payer_own_account"
   | "payer_beneficial_owner";
 
@@ -234,6 +235,7 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_phone",
   "payer_email",
   "payer_contact_consent",
+  "payer_cost_estimate_consent",
   "payer_own_account",
   "payer_beneficial_owner",
 ];
@@ -312,6 +314,22 @@ export function paymentBackgroundAsked(
   request: Pick<LeadRequest, "progress">,
 ): boolean {
   return !draft.guardian_pays || request.progress.missing_for_submit.includes("payment_background");
+}
+
+/**
+ * Whether the consent that GMED sends the payer the cost estimate is asked
+ * (contract phase 3b, 11.7). It is the lead's own word about the third party
+ * the server has stored, given on its own (not with the answer): asked by a
+ * server that knows it (the key is there, also as `null`), not about the
+ * parent who pays (`parentPays`, the answer "I pay (as a parent)"). A server
+ * that lists it as missing gets the box in any case, or the request could not
+ * be sent.
+ */
+export function costEstimateConsentAsked(request: Pick<LeadRequest, "payer" | "progress">, parentPays: boolean): boolean {
+  const payer = request.payer;
+  if (payer?.payer_kind !== "third_party") return false;
+  if (request.progress.missing_for_submit.includes("payer_cost_estimate_consent")) return true;
+  return payer.cost_estimate_consent_at !== undefined && !parentPays;
 }
 
 /** The first answer as chosen in the form. */
@@ -731,6 +749,7 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "payer_email",
   "payment_background",
   "payer_contact_consent",
+  "payer_cost_estimate_consent",
   "payer_own_account",
   "payer_beneficial_owner",
   // Invoice recipient and payment route

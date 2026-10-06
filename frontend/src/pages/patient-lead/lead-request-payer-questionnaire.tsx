@@ -13,7 +13,7 @@ import {
   textareaClass,
   tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
-import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -24,6 +24,7 @@ import {
   uploadLeadPayerFundsProof,
   withdrawLeadDocument,
   type LeadPayerQuestionnaire,
+  type LeadPayerSignaturePackage,
   type LeadRequest,
   type LeadRequestDocument,
 } from "./lead-request-api";
@@ -43,6 +44,7 @@ import {
   payerQuestionnaireSubmitted,
   payerQuestionnaireSummary,
   payerQuestionnaireValue,
+  payerSignaturePackageOf,
   stillRejectedPayerFields,
   withFundsSource,
   withPayerLegalAnswer,
@@ -98,7 +100,7 @@ export function PayerQuestionnaireSection({
   const apply = useCallback(
     (next: LeadPayerQuestionnaire) => {
       setQuestionnaire(next);
-      onChange({ ...latest.current, payer_questionnaire: payerQuestionnaireSummary(next) });
+      onChange({ ...latest.current, payer_questionnaire: payerQuestionnaireSummary(next, latest.current.payer_questionnaire) });
     },
     [onChange],
   );
@@ -698,7 +700,36 @@ function PayerQuestionnaireForm({
           </Button>
         </div>
       )}
+
+      <PayerSignatureStatus signature={payerSignaturePackageOf(questionnaire, request.payer_questionnaire)} text={text} />
     </div>
+  );
+}
+
+/**
+ * Where the documents for the payer's signature stand (contract phase 3b,
+ * 6.3): sent through Skribble, or signed and back at GMED. Nothing without a
+ * package, nor on a server that does not say.
+ */
+function PayerSignatureStatus({ signature, text }: { signature: LeadPayerSignaturePackage | null; text: LeadRequestText }) {
+  if (!signature) return null;
+  const signed = signature.status === "signed";
+  return (
+    <p
+      role="status"
+      className={cn(
+        "rounded-lg border px-3 py-2 text-sm leading-snug",
+        signed
+          ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
+          : "border-border bg-muted/10 text-foreground",
+      )}
+      data-testid="lead-request-payer-signature"
+      data-status={signature.status}
+    >
+      {signed
+        ? text.payerSignatureSigned(formatAppDate(signature.signed_at))
+        : text.payerSignatureSent(formatAppDate(signature.sent_at))}
+    </p>
   );
 }
 

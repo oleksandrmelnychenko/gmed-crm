@@ -72,6 +72,14 @@ export type LeadRequestPayer = {
    * server.
    */
   answered_by_payer?: boolean;
+  /**
+   * When the lead agreed that GMED sends the third-party payer the cost
+   * estimate (types of services and amounts only; contract phase 3b, 11).
+   * Saved on its own (`saveLeadPayerCostEstimateConsent`), also while
+   * `answered_by_payer` is true; cleared by the server with a change of the
+   * payer. Absent on an older server, which does not ask for it.
+   */
+  cost_estimate_consent_at?: string | null;
 };
 
 /** What the cabinet sends: the whole answer, empty values left out. */
@@ -328,6 +336,20 @@ export type LeadRequestPayerQuestionnaireSummary = {
   available: boolean;
   submitted_at: string | null;
   missing_count: number;
+  /** The payer's signature package (phase 3b); absent on an older server. */
+  signature_package?: LeadPayerSignaturePackage | null;
+};
+
+/**
+ * Where the payer's signature package stands, as the payer and the paying
+ * parent see it (contract phase 3b, 4.4 and 6.3): `sent` while the payer is
+ * to sign, `signed` once it came back; `null` without such a package. No
+ * titles, ids or request data.
+ */
+export type LeadPayerSignaturePackage = {
+  status: "sent" | "signed";
+  sent_at: string | null;
+  signed_at: string | null;
 };
 
 /** An upload of the paying person (proof of the source of funds, identity document). */
@@ -379,6 +401,8 @@ export type LeadPayerQuestionnaire = {
   missing_for_submit: string[];
   declared_correct_at: string | null;
   submitted_at: string | null;
+  /** The signature package, when the server sends it with the questionnaire; absent otherwise. */
+  signature_package?: LeadPayerSignaturePackage | null;
 };
 
 /** Only the changed keys the paying parent may write; `null` clears a text, a choice or an answer. */
@@ -448,6 +472,22 @@ export function saveLeadPayer(leadId: string, payer: LeadRequestPayerInput): Pro
   return apiFetch<LeadRequest>(`${base(leadId)}/payer`, {
     method: "POST",
     body: JSON.stringify(payer),
+  });
+}
+
+/** The refusal of the cost estimate consent when no third party pays (any more). */
+export const NO_THIRD_PARTY_PAYER = "no_third_party_payer";
+
+/**
+ * The lead's consent that GMED sends the third-party payer the cost estimate
+ * (contract phase 3b, 11.2): `true` records it (the first time stays), `false`
+ * removes it. Saved at once and on its own, also while "who pays" is
+ * read-only; 409 `no_third_party_payer` without a third party.
+ */
+export function saveLeadPayerCostEstimateConsent(leadId: string, consent: boolean): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/payer/cost-estimate-consent`, {
+    method: "POST",
+    body: JSON.stringify({ consent }),
   });
 }
 

@@ -245,6 +245,50 @@ describe("lead cabinet languages", () => {
     }
   });
 
+  it("asks for the consent to pass the cost estimate on in the owner's words and names it when missing", () => {
+    const de = leadRequestText("de");
+    expect(payerFieldLabel(de, "payer_cost_estimate_consent")).toBe(
+      "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
+    );
+    // A parent reads the same sentence: it names no patient.
+    expect(payerFieldLabel(de, "payer_cost_estimate_consent", true)).toBe(payerFieldLabel(de, "payer_cost_estimate_consent"));
+    expect(
+      LEAD_CABINET_LANGS.map((option) => submitFieldLabel(leadRequestText(option.value), "payer_cost_estimate_consent")),
+    ).toEqual([
+      "Zahler: Einwilligung zur Weitergabe des Kostenvoranschlags",
+      "Payer: Consent to pass on the cost estimate",
+      "Платник: Згода на передачу кошторису",
+      "Плательщик: Согласие на передачу сметы",
+    ]);
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      // Its own sentence, not the one about contacting the payer.
+      expect(text.payerCostEstimateConsentLabel).not.toBe(text.payerConsentLabel);
+      expect(text.payerCostEstimateConsentShort).not.toBe(text.payerConsentShort);
+      expect(text.payerCostEstimateConsentHint).not.toBe(text.payerConsentHint);
+    }
+  });
+
+  it("tells the paying parent where the documents for signing stand, in the owner's words", () => {
+    const de = leadRequestText("de");
+    expect(de.payerSignatureSent("06.10.2026")).toBe(
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+    );
+    expect(de.payerSignatureSigned("08.10.2026")).toBe(
+      "Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.",
+    );
+    // Without a date the sentence still reads.
+    expect(de.payerSignatureSent("")).toContain("Wir haben Ihnen vier Dokumente");
+    expect(de.payerSignatureSigned("")).toBe("Vielen Dank – die unterschriebenen Unterlagen sind bei GMED eingegangen.");
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      expect(text.payerSignatureSent("06.10.2026"), option.value).toMatch(/06\.10\.2026.*Skribble/);
+      expect(text.payerSignatureSigned("08.10.2026"), option.value).toMatch(/08\.10\.2026/);
+      expect(text.payerSignatureSent(""), option.value).not.toMatch(/ {2}/);
+      expect(text.payerSignatureSigned(""), option.value).not.toMatch(/ {2}| \./);
+    }
+  });
+
   it("says that only GMED changes a payer who answered on the own link", () => {
     expect(leadRequestText("de").payerAnsweredByPayer).toBe(
       "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",

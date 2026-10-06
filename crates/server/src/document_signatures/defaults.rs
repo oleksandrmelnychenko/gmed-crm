@@ -44,7 +44,8 @@ fn normalize_defaults(signers: Vec<Signer>) -> Result<Vec<Signer>, &'static str>
     normalize_signers(signers)
 }
 
-async fn load(state: &AppState) -> Result<Vec<Signer>, Response> {
+/// GMED's default signers (the agency side of every request).
+pub(super) async fn load(state: &AppState) -> Result<Vec<Signer>, Response> {
     let value: Option<Value> =
         sqlx::query_scalar("SELECT signers FROM signature_signer_defaults WHERE singleton=true")
             .fetch_optional(&state.db)
@@ -313,7 +314,10 @@ pub(super) async fn suggested(
     }
     let mut signers = match policy {
         SignerPolicy::AgencyOnly => Vec::new(),
-        SignerPolicy::PayerAndAgency => vec![payer.unwrap_or_else(|| empty("payer"))],
+        // The payer's own documents: never the patient side.
+        SignerPolicy::PayerAndAgency | SignerPolicy::PayerPackage => {
+            vec![payer.unwrap_or_else(|| empty("payer"))]
+        }
         SignerPolicy::ClientPayerAndAgency => {
             clients.extend(payer);
             clients

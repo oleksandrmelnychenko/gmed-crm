@@ -100,6 +100,16 @@ describe("buildStandardDocumentName", () => {
     );
   });
 
+  it("names the documents of the payer's signature package", () => {
+    const name = (art: string, category: string) => buildStandardDocumentName({ category, art, documentDate: "2026-10-06" });
+    expect(name("payer_self_disclosure", "compliance_aml")).toContain("Selbstauskunft der zahlenden Person vom 06.10.2026");
+    expect(name("patient_payer_statement", "compliance_aml")).toContain("Erklärung zur Kostenübernahme durch Dritte vom 06.10.2026");
+    expect(name("payer_cost_estimate", "finance_payer_cost_estimate")).toContain("Kostenvoranschlag für die zahlende Person vom 06.10.2026");
+    // The payer's copy of the cost estimate belongs to an order.
+    expect(documentTemplateRequiresOrder("payer_cost_estimate")).toBe(true);
+    expect(documentTemplateSupportsOrderContext("payer_cost_estimate")).toBe(true);
+  });
+
   it("builds the requested medical specialty document naming pattern", () => {
     expect(
       buildStandardDocumentName({

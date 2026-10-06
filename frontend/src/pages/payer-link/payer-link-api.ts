@@ -1,4 +1,5 @@
 import { buildApiUrl } from "@/lib/api";
+import type { LeadPayerSignaturePackage } from "@/pages/patient-lead/lead-request-api";
 
 // The payer's own link (contract phase 3a, section 3): a public page without
 // an account. Every call carries the link token in `X-Payer-Link`, from the
@@ -8,6 +9,13 @@ import { buildApiUrl } from "@/lib/api";
 // Neither secret ever goes into a path, a query, a log or an error message.
 
 export type PayerType = "person" | "company" | "organisation" | "insurance";
+
+/**
+ * Phase 3b, 4.4: the documents for the payer's signature — `sent` while the
+ * payer is to sign them through Skribble, `signed` once they came back — or
+ * `null` without such a package. No titles, ids or request data.
+ */
+export type PayerSignaturePackage = LeadPayerSignaturePackage;
 
 /** 3.1: what the link shows before the code. */
 export type PayerLinkInfo = {
@@ -19,6 +27,8 @@ export type PayerLinkInfo = {
   expires_at: string | null;
   code_sent_at: string | null;
   session_valid: boolean;
+  /** Phase 3b; absent on an older server (nothing is shown then). */
+  signature_package?: PayerSignaturePackage | null;
 };
 
 /** 3.2: a code was mailed. */
@@ -127,6 +137,8 @@ export type PayerQuestionnaire = {
   missing_for_submit: string[] | null;
   declared_correct_at: string | null;
   submitted_at: string | null;
+  /** Phase 3b, when the server sends it with the questionnaire too; it then wins over the link's. */
+  signature_package?: PayerSignaturePackage | null;
 };
 
 export type PayerVerified = { session: string; session_expires_at: string | null; questionnaire: PayerQuestionnaire };

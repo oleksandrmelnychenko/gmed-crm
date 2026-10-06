@@ -1718,10 +1718,15 @@ fn missing_for_submit(
         lead_payer::portal_missing(payer)
             .into_iter()
             // A parent who pays and answers in the own login is the payer:
-            // there is nobody else GMED needs the consent to contact (QA
-            // 2026-10-06). Staff completeness keeps asking for it.
+            // there is nobody else GMED needs the consent to contact or to
+            // pass the cost estimate on to (QA 2026-10-06, phase 3b). Staff
+            // completeness keeps asking for the contact consent.
             .filter(|key| {
-                payment_route_by != PaymentRouteBy::Guardian || *key != "payer_contact_consent"
+                payment_route_by != PaymentRouteBy::Guardian
+                    || !matches!(
+                        *key,
+                        "payer_contact_consent" | "payer_cost_estimate_consent"
+                    )
             }),
     );
     missing.extend(identification.missing_identity(today));
@@ -4897,6 +4902,7 @@ mod tests {
             vec![
                 "payer_relationship_kind",
                 "payer_contact_consent",
+                "payer_cost_estimate_consent",
                 "id_valid_until",
                 "payer_beneficial_owner",
                 "invoice_to",
@@ -4919,6 +4925,7 @@ mod tests {
             beneficial_owner_name: Some("Viktor Zahler".into()),
             relationship_kind: Some("relative".into()),
             contact_consent_at: Some(Utc::now()),
+            cost_estimate_consent_at: Some(Utc::now()),
             invoice_to: Some("payer".into()),
             ..payer
         };
@@ -4948,9 +4955,11 @@ mod tests {
             vec!["payment_method", "via_third_party"]
         );
         // The paying parent is the payer: no consent to contact somebody
-        // else is asked of that login; the lead's own login still asks it.
+        // else or to pass the cost estimate on is asked of that login; the
+        // lead's own login still asks both.
         let without_consent = lead_payer::Declaration {
             contact_consent_at: None,
+            cost_estimate_consent_at: None,
             payment_method: Some("card".into()),
             account_country: Some("DE".into()),
             account_holder: Some("Anna Muster".into()),
@@ -4979,7 +4988,7 @@ mod tests {
                 PaymentRouteBy::Payer,
                 today()
             ),
-            vec!["payer_contact_consent"]
+            vec!["payer_contact_consent", "payer_cost_estimate_consent"]
         );
         // Nor why "another person" pays (QA 2026-10-06, B4): that login is
         // the one who pays. The lead's own login is still asked.
@@ -5009,7 +5018,11 @@ mod tests {
                 PaymentRouteBy::Payer,
                 today()
             ),
-            vec!["payer_contact_consent", "payment_background"]
+            vec![
+                "payer_contact_consent",
+                "payer_cost_estimate_consent",
+                "payment_background"
+            ]
         );
     }
 

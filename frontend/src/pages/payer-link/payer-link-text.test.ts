@@ -100,6 +100,22 @@ describe("payer page texts", () => {
     expect(de.privacyNotice("Mia Muster").join(" ")).toMatch(/§§ 10–12 GwG.*Art\. 6 Abs\. 1 lit\. b und c DSGVO.*§ 8 Abs\. 4 GwG/);
   });
 
+  it("says where the documents for signing stand in the contract's German and in every language", () => {
+    const de = payerLinkText("de");
+    expect(de.signatureSent("06.10.2026")).toBe(
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+    );
+    expect(de.signatureSigned("08.10.2026")).toBe("Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.");
+    for (const lang of LANGS) {
+      const text = payerLinkText(lang);
+      expect(text.signatureSent("06.10.2026"), lang).toMatch(/06\.10\.2026.*Skribble/);
+      expect(text.signatureSigned("08.10.2026"), lang).toContain("08.10.2026");
+      // Without a date the sentence still reads.
+      expect(text.signatureSent(""), lang).not.toMatch(/ {2}/);
+      expect(text.signatureSigned(""), lang).not.toMatch(/ {2}| \./);
+    }
+  });
+
   it("addresses the payer formally", () => {
     for (const value of strings(PAYER_LINK_TEXTS.de)) expect(value).not.toMatch(/\b(du|dein|deine|dich|dir)\b/i);
     for (const value of strings(PAYER_LINK_TEXTS.uk)) expect(value).not.toMatch(/(^|\s)(ти|твій|твоя|тебе)(\s|$)/i);

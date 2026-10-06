@@ -1186,6 +1186,27 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     assert_eq!(body["payer"]["country"], "DE", "{body}");
     assert_eq!(body["payer"]["relationship_kind"], "relative", "{body}");
     assert!(body["payer"]["contact_consent_at"].is_string(), "{body}");
+    // The consent to pass the cost estimate on has an endpoint of its own
+    // (phase 3b); until it is given it is the only payer key missing (the
+    // background of the payment is a question of the GwG step).
+    assert_eq!(
+        missing_for_the_payer(&body),
+        ["payer_cost_estimate_consent", "payment_background"],
+        "{body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{payer}/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["payer"]["cost_estimate_consent_at"].is_string(),
+        "{body}"
+    );
     assert!(
         !body["progress"]["missing_for_submit"]
             .as_array()
@@ -1304,6 +1325,8 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "via_third_party_details",
         "identity_adopted_at",
         "contact_consent_required",
+        "cost_estimate_consent_at",
+        "cost_estimate_consent_required",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }
@@ -2476,6 +2499,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
             "payer_relationship_kind",
             "payer_country",
             "payer_contact_consent",
+            "payer_cost_estimate_consent",
             "payment_background"
         ],
         "{body}"
@@ -2504,6 +2528,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
         [
             "payer_relationship",
             "payer_contact_consent",
+            "payer_cost_estimate_consent",
             "payment_background"
         ],
         "{body}"
@@ -2555,15 +2580,19 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!(["payer_contact_consent"]),
+        json!(["payer_contact_consent", "payer_cost_estimate_consent"]),
         "{body}"
     );
 
-    // Without the consent that GMED contacts the payer nothing is sent.
+    // Without the consents of the lead nothing is sent.
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "personal_data_incomplete", "{body}");
-    assert_eq!(body["missing"], json!(["payer_contact_consent"]), "{body}");
+    assert_eq!(
+        body["missing"],
+        json!(["payer_contact_consent", "payer_cost_estimate_consent"]),
+        "{body}"
+    );
 
     // The consent is recorded once: the same answer again, or a save that
     // leaves the checkbox out, keeps its time.
@@ -2580,6 +2609,21 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(status, StatusCode::OK, "{body}");
     let consent_at = body["payer"]["contact_consent_at"].clone();
     assert!(consent_at.is_string(), "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!(["payer_cost_estimate_consent"]),
+        "{body}"
+    );
+    // The consent to pass the cost estimate on to the company (phase 3b).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{payer}/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
     let audited = audit_count(pool, "lead_portal_update_payer_declaration", lead_id).await;
     let (status, body) = json_request(
@@ -2693,9 +2737,14 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(body["payer"]["payer_type"], "person", "{body}");
     assert!(body["payer"]["organisation_name"].is_null(), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    // Both consents of the lead were given for the company.
+    assert!(
+        body["payer"]["cost_estimate_consent_at"].is_null(),
+        "{body}"
+    );
     assert_eq!(
         missing_for_the_payer(&body),
-        ["payer_contact_consent"],
+        ["payer_contact_consent", "payer_cost_estimate_consent"],
         "{body}"
     );
 
@@ -2714,6 +2763,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
         "organisation_name",
         "relationship_kind",
         "contact_consent_at",
+        "cost_estimate_consent_at",
     ] {
         assert!(body["payer"][key].is_null(), "{key}: {body}");
     }

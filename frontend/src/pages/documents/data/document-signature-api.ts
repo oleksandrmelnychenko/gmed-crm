@@ -9,7 +9,10 @@ export type SignerRole = "client" | "minor" | "payer" | "agency" | "other";
 export type Signer = { first_name: string; last_name: string; email: string; role: SignerRole; positions?: unknown[] };
 export type SignatureStatus = "submitting" | "submission_unknown" | "pending" | "completed" | "needs_review" | "declined" | "withdrawn" | "expired" | "error";
 export type SignatureLevel = "AES" | "QES";
-export type SignerPolicy = "flexible" | "client_only" | "agency_only" | "both_parties" | "payer_and_agency" | "client_payer_and_agency";
+// `payer_package`: the payer's own package (self-disclosure, cost coverage,
+// patient statement, payer copy of the cost estimate): payer and GMED sign,
+// never the patient side (the self-disclosure holds the payer's ID data).
+export type SignerPolicy = "flexible" | "client_only" | "agency_only" | "both_parties" | "payer_and_agency" | "client_payer_and_agency" | "payer_package";
 export type DeliveryChannel = "skribble" | "email" | "portal" | "in_person" | "post";
 /** One document of a request, in bundle order; the source has position 0. */
 export type SignatureRequestMember = {
@@ -157,6 +160,10 @@ const isPatientSide = (role: SignerRole) => role === "client" || role === "minor
 /** The package needs what its strictest document needs (mirrors the server). */
 export function combinedSignerPolicy(policies: SignerPolicy[]): SignerPolicy | "conflict" {
   if (policies.includes("agency_only")) return policies.every(policy => policy === "agency_only") ? "agency_only" : "conflict";
+  // The payer's package goes with a cost coverage declaration or a free document, never with one the patient signs.
+  if (policies.includes("payer_package")) {
+    return policies.every(policy => policy === "payer_package" || policy === "payer_and_agency" || policy === "flexible") ? "payer_package" : "conflict";
+  }
   const needsPayer = policies.some(policy => policy === "payer_and_agency" || policy === "client_payer_and_agency");
   const needsClient = policies.some(policy => policy === "client_only" || policy === "both_parties" || policy === "client_payer_and_agency");
   if (needsPayer) return needsClient ? "client_payer_and_agency" : "payer_and_agency";
@@ -176,6 +183,7 @@ export function signerPolicyError(policy: SignerPolicy | "conflict", signers: Si
   if (policy === "both_parties" && !(hasClient && hasAgency)) return "both_contract_parties_required";
   if (policy === "payer_and_agency" && !(hasPayer && hasAgency)) return "payer_and_agency_required";
   if (policy === "client_payer_and_agency" && !(hasClient && hasPayer && hasAgency)) return "client_payer_and_agency_required";
+  if (policy === "payer_package" && !(hasPayer && hasAgency && signers.every(signer => !isPatientSide(signer.role)))) return "payer_package_signers_required";
   return null;
 }
 
@@ -233,6 +241,8 @@ export function signatureErrorText(code: string | null | undefined, tx: (ru: str
       return tx("Заявление о принятии расходов подписывают плательщик и представитель GMED.", "Die Kostenübernahmeerklärung unterschreiben der Kostenübernehmer und die GMED-Vertretung.");
     case "client_payer_and_agency_required":
       return tx("Этот пакет подписывают клиент, плательщик и представитель GMED.", "Dieses Paket unterschreiben Kunde, Kostenübernehmer und GMED-Vertretung.");
+    case "payer_package_signers_required":
+      return tx("Документы плательщика подписывают только плательщик и представитель GMED — без пациента и законных представителей.", "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.");
     case "minor_needs_representative":
       return tx("Несовершеннолетний подписывает только вместе с законным представителем.", "Minderjährige unterschreiben nur zusammen mit der gesetzlichen Vertretung.");
     case "signature_already_pending":

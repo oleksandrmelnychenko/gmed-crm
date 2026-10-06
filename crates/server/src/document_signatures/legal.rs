@@ -35,11 +35,14 @@ const AES_ALLOWED: [&str; 11] = [
 
 /// Templates whose informational companion is mandatory (Art. 13/14 DSGVO
 /// information, the medical cost calculation). They are attached read-only.
+/// The payer's copy of the cost estimate has none: the payer never receives
+/// the medical cost calculation (owner decision 2026-10-06, phase 3b).
 pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
     match template {
         Some("framework_contract") => Some("privacy_information"),
         Some("confidentiality_release") => Some("privacy_information"),
         Some("order_cost_estimate") => Some("cost_estimate"),
+        Some("payer_cost_estimate") => None,
         _ => None,
     }
 }
@@ -124,8 +127,10 @@ pub(super) fn invitation_label(
     match document_kind(template, art) {
         "framework_contract" => "Rahmenvertrag",
         "single_order" => "Einzelauftrag",
-        "order_cost_estimate" => "Kostenvoranschlag",
+        "order_cost_estimate" | "payer_cost_estimate" => "Kostenvoranschlag",
         "cost_coverage_declaration" => "Kostenübernahmeerklärung",
+        "payer_self_disclosure" => "Selbstauskunft der zahlenden Person",
+        "patient_payer_statement" => "Erklärung zur Kostenübernahme durch Dritte",
         "confidentiality_release" => "Schweigepflichtsentbindung",
         "privacy_consents" | "privacy_consent" | "consent" => "Einwilligungserklärung",
         "consent_data_release_child" | "consent_data_release_single" | "consent_data_release" => {
@@ -281,6 +286,35 @@ mod tests {
             Level::Qes
         );
         assert!(Level::Aes < Level::Qes);
+    }
+
+    #[test]
+    fn the_payers_documents_need_a_qes_and_carry_no_medical_calculation() {
+        for template in [
+            "payer_self_disclosure",
+            "patient_payer_statement",
+            "payer_cost_estimate",
+            "cost_coverage_declaration",
+        ] {
+            assert_eq!(minimum_level(Some(template), template), Level::Qes);
+        }
+        assert_eq!(companion(Some("payer_cost_estimate")), None);
+        assert_eq!(
+            companion(Some("order_cost_estimate")),
+            Some("cost_estimate")
+        );
+        assert_eq!(
+            invitation_label(Some("payer_self_disclosure"), "x", false),
+            "Selbstauskunft der zahlenden Person"
+        );
+        assert_eq!(
+            invitation_label(Some("patient_payer_statement"), "x", false),
+            "Erklärung zur Kostenübernahme durch Dritte"
+        );
+        assert_eq!(
+            invitation_label(Some("payer_cost_estimate"), "x", false),
+            "Kostenvoranschlag"
+        );
     }
 
     #[test]

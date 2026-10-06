@@ -6,6 +6,7 @@ import {
   EMPTY_PAYER_DECLARATION_FORM,
   PAYER_RELATIONSHIP_KINDS,
   PAYER_TYPES,
+  costEstimateConsentLine,
   declaredPayerType,
   invoiceTaxFieldsShown,
   invoiceTaxLine,
@@ -546,6 +547,62 @@ describe("payer AML and signing order", () => {
     expect(normalized?.status.cost_assumption.required).toBe(false);
     expect(normalized?.status.agency_blocking).toEqual([]);
     expect(normalized?.status.missing).toEqual(["x"]);
+  });
+
+  it("waits for the payer's signature while the package is out", () => {
+    const out = (packageStatus: string, missing: string[]) =>
+      payerStatusBadge(
+        status({ complete: false, missing, payer_package: { status: packageStatus as "pending", outdated: false, sent_at: null, signed_at: null } }),
+        tx,
+      );
+    expect(out("pending", ["cost_assumption_unsigned"])).toEqual({ tone: "info", label: "ждёт подписи плательщика" });
+    expect(out("sending", ["cost_assumption_missing"]).label).toBe("ждёт подписи плательщика");
+    expect(
+      payerStatusBadge(
+        status({ complete: false, missing: ["cost_assumption_outdated"], payer_package: { status: "pending", outdated: true, sent_at: null, signed_at: null } }),
+        de,
+      ).label,
+    ).toBe("wartet auf Unterschrift des Zahlers");
+    // Something else missing, or the package not out: as before.
+    expect(out("pending", ["payer_not_informed", "cost_assumption_unsigned"]).label).toBe("Не заполнено");
+    expect(out("prepared", ["cost_assumption_missing"]).label).toBe("ждёт Kostenübernahmeerklärung");
+    expect(out("declined", ["cost_assumption_unsigned"]).label).toBe("Не заполнено");
+  });
+
+  it("reads the package and the cost estimate consent of a newer server only where sent", () => {
+    const newer = normalizePayerDeclarationResponse({
+      declaration: { ...typedPerson, cost_estimate_consent_at: "2026-10-06T08:00:00Z" },
+      status: { cost_estimate_consent_required: true, payer_package: { status: "pending", outdated: false, sent_at: "2026-10-06T11:00:00Z" } },
+    });
+    expect(newer?.status.payer_package).toEqual({ status: "pending", outdated: false, sent_at: "2026-10-06T11:00:00Z", signed_at: null });
+    expect(newer?.status.cost_estimate_consent_required).toBe(true);
+    const none = normalizePayerDeclarationResponse({ declaration: typedPerson, status: { payer_package: null } });
+    expect(none?.status.payer_package).toBeNull();
+    const older = normalizePayerDeclarationResponse({ declaration: typedPerson, status: {} });
+    expect(older?.status).not.toHaveProperty("payer_package");
+    expect(older?.status).not.toHaveProperty("cost_estimate_consent_required");
+  });
+
+  it("states the lead's consent to pass the cost estimate on", () => {
+    const line = (declaration: PayerDeclaration, required?: boolean, lang = tx) =>
+      costEstimateConsentLine({ declaration, status: status(required === undefined ? {} : { cost_estimate_consent_required: required }) }, lang);
+    expect(line({ ...typedPerson, cost_estimate_consent_at: "2026-10-06T08:00:00Z" }, true)).toEqual({
+      state: "given",
+      prefix: "Согласие на передачу сметы плательщику: ",
+      value: "дано 06.10.2026",
+    });
+    expect(line({ ...typedPerson, cost_estimate_consent_at: null }, true, de)).toEqual({
+      state: "missing",
+      prefix: "Einwilligung zur Weitergabe des Kostenvoranschlags: ",
+      value: "noch nicht erteilt",
+    });
+    expect(line({ ...typedPerson, cost_estimate_consent_at: null }, false)?.value).toBe("не требуется (платит родитель)");
+    // The consent key alone tells a newer server.
+    expect(line({ ...typedPerson, cost_estimate_consent_at: null })?.state).toBe("missing");
+    // An older server, or the patient pays: nothing.
+    expect(line(typedPerson)).toBeNull();
+    expect(line({ ...typedPerson, payer_kind: "self", cost_estimate_consent_at: null }, true)).toBeNull();
+    expect(costEstimateConsentLine(null, tx)).toBeNull();
   });
 
   it("translates every payer readiness reason of the server", () => {

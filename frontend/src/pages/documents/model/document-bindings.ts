@@ -91,6 +91,10 @@ const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "privacy_consents",
   "enhanced_due_diligence",
   "gwg_identification",
+  // The payer's signature package (phase 3b): no free-form overrides.
+  "payer_self_disclosure",
+  "patient_payer_statement",
+  "payer_cost_estimate",
 ]);
 
 const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([

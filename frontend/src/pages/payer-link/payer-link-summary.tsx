@@ -8,7 +8,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { LEAD_CABINET_LANGS } from "@/pages/patient-lead/lead-request-text";
 
-import type { PayerDocument, PayerQuestionnaire, PayerType } from "./payer-link-api";
+import type { PayerDocument, PayerQuestionnaire, PayerSignaturePackage, PayerType } from "./payer-link-api";
 import {
   ALL_FUNDS_SOURCES,
   CONTACT_CHANNELS,
@@ -348,17 +348,36 @@ export function SummaryStep({
   );
 }
 
-/** After "send": the thanks and the read-only summary. */
+/**
+ * Where the documents for the payer's signature stand (phase 3b, 6.3): sent
+ * through Skribble, or signed and back at GMED; nothing without a package.
+ */
+function SignatureStatus({ signature, text }: { signature: PayerSignaturePackage; text: PayerLinkText }) {
+  const signed = signature.status === "signed";
+  return (
+    <div data-testid="payer-link-signature" data-status={signature.status}>
+      <Notice tone={signed ? "success" : "neutral"} role="status">
+        <span className={signed ? undefined : "text-foreground"}>
+          {signed ? text.signatureSigned(formatAppDate(signature.signed_at)) : text.signatureSent(formatAppDate(signature.sent_at))}
+        </span>
+      </Notice>
+    </div>
+  );
+}
+
+/** After "send": the thanks, where the documents for signing stand, and the read-only summary. */
 export function ThankYou({
   questionnaire,
   steps,
   text,
   lang,
+  signature = null,
 }: {
   questionnaire: PayerQuestionnaire;
   steps: readonly PayerStep[];
   text: PayerLinkText;
   lang: string;
+  signature?: PayerSignaturePackage | null;
 }) {
   return (
     <div className="space-y-5" data-testid="payer-link-thanks">
@@ -374,6 +393,7 @@ export function ThankYou({
           <p className="text-sm text-emerald-900/80 dark:text-emerald-200/80">{text.thanksNext}</p>
         </div>
       </div>
+      {signature ? <SignatureStatus signature={signature} text={text} /> : null}
       <h2 className="text-sm font-semibold">{text.summaryTitle}</h2>
       <AnswersSummary questionnaire={questionnaire} steps={steps.filter((step) => step !== "summary")} text={text} lang={lang} />
     </div>

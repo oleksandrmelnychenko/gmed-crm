@@ -4,7 +4,7 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MAX_UPLOAD_BYTES } from "@/pages/patient-lead/lead-request-model";
 
-import { PayerLinkError, type PayerLinkClient, type PayerQuestionnaire } from "./payer-link-api";
+import { PayerLinkError, type PayerLinkClient, type PayerQuestionnaire, type PayerSignaturePackage } from "./payer-link-api";
 import {
   answersPatch,
   changedOnServer,
@@ -267,6 +267,7 @@ export function PayerLinkForm({
   client,
   text,
   lang,
+  signature = null,
   onQuestionnaire,
   onLinkProblem,
 }: {
@@ -274,6 +275,8 @@ export function PayerLinkForm({
   client: PayerLinkClient;
   text: PayerLinkText;
   lang: string;
+  /** Where the documents for the payer's signature stand (phase 3b); shown once the details were sent. */
+  signature?: PayerSignaturePackage | null;
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onLinkProblem: (problem: LinkProblem) => void;
 }) {
@@ -281,7 +284,7 @@ export function PayerLinkForm({
   const routeAsked = Boolean(questionnaire.payment_route?.asked);
   const steps = useMemo(() => payerSteps(payerType, routeAsked), [payerType, routeAsked]);
   if (questionnaire.state === "submitted") {
-    return <ThankYou questionnaire={questionnaire} steps={steps} text={text} lang={lang} />;
+    return <ThankYou questionnaire={questionnaire} steps={steps} text={text} lang={lang} signature={signature} />;
   }
   return (
     <DraftForm

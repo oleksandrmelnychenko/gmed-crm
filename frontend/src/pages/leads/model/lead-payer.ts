@@ -11,7 +11,10 @@
  * insurer: those have a name and a seat instead of a personal identity.
  */
 import { ApiRequestError } from "@/lib/api";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
+
+import { normalizePayerPackageSummary, type PayerPackageSummary } from "../data/lead-payer-package-api";
 
 export type Tx = (ru: string, de: string) => string;
 
@@ -79,6 +82,12 @@ export type PayerDeclaration = {
   /** When the lead agreed that GMED contacts the payer; only the lead gives it. */
   contact_consent_at?: string | null;
   /**
+   * When the lead agreed that GMED passes the cost estimate (service kinds
+   * and amounts) on to the payer; only the lead gives it. Absent on an older
+   * server.
+   */
+  cost_estimate_consent_at?: string | null;
+  /**
    * Section 7 of the form (invoice recipient), answered by the lead in the
    * cabinet; absent on an older server. Staff do not edit it: the recipient
    * of an order or an invoice is changed there.
@@ -138,6 +147,17 @@ export type PayerDeclarationStatus = {
    * parent who pays). Null on an older server (the consent line stays as before).
    */
   contact_consent_required?: boolean | null;
+  /**
+   * Whether the lead's consent to pass the cost estimate on to the payer is
+   * needed (false for a paying parent with an own login). Absent on an older
+   * server.
+   */
+  cost_estimate_consent_required?: boolean | null;
+  /**
+   * The payer's signature package (phase 3b); null while none is prepared,
+   * absent on an older server.
+   */
+  payer_package?: PayerPackageSummary | null;
 };
 
 export type PayerDeclarationResponse = {
@@ -195,6 +215,15 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
           : typeof declaration?.contact_consent_required === "boolean"
             ? declaration.contact_consent_required
             : null,
+      // Keys of newer servers only where the server sent them (an absent key shows nothing).
+      ...(typeof status.cost_estimate_consent_required === "boolean"
+        ? { cost_estimate_consent_required: status.cost_estimate_consent_required }
+        : typeof declaration?.cost_estimate_consent_required === "boolean"
+          ? { cost_estimate_consent_required: declaration.cost_estimate_consent_required }
+          : {}),
+      ...(Object.hasOwn(status, "payer_package")
+        ? { payer_package: normalizePayerPackageSummary(status.payer_package) }
+        : {}),
     },
   };
 }
@@ -568,19 +597,54 @@ export function payerReasonLabel(code: string, tx: Tx, payerType?: PayerType | n
 }
 
 /**
- * The badge beside "Кто платит": complete, or waiting only for the
- * Kostenübernahmeerklärung (created later, in the contract step, once the
- * order exists), or still incomplete.
+ * The badge beside "Кто платит": complete; waiting for the payer's signature
+ * while the payer's package is out and only the Kostenübernahmeerklärung is
+ * missing; waiting only for the Kostenübernahmeerklärung (created later, in
+ * the contract step, once the order exists); or still incomplete.
  */
 export function payerStatusBadge(
-  status: Pick<PayerDeclarationStatus, "complete" | "missing"> | null | undefined,
+  status: Pick<PayerDeclarationStatus, "complete" | "missing" | "payer_package"> | null | undefined,
   tx: Tx,
 ): { tone: "success" | "info" | "warning"; label: string } {
   if (status?.complete) return { tone: "success", label: tx("Заполнено", "Vollständig") };
+  const packageOut = status?.payer_package?.status === "sending" || status?.payer_package?.status === "pending";
+  if (
+    packageOut
+    && status
+    && status.missing.length > 0
+    && status.missing.every((code) => code.startsWith("cost_assumption_"))
+  ) {
+    return { tone: "info", label: tx("ждёт подписи плательщика", "wartet auf Unterschrift des Zahlers") };
+  }
   if (status && status.missing.length > 0 && status.missing.every((code) => code === "cost_assumption_missing")) {
     return { tone: "info", label: tx("ждёт Kostenübernahmeerklärung", "wartet auf Kostenübernahmeerklärung") };
   }
   return { tone: "warning", label: tx("Не заполнено", "Unvollständig") };
+}
+
+/**
+ * "Согласие на передачу сметы плательщику: дано DD.MM.YYYY" in "Кто платит"
+ * (contract phase 3b, 11.8): given, not yet given, or not needed (a paying
+ * parent with an own login). `null` where the server knows no such consent
+ * (an older server) or nobody else pays.
+ */
+export function costEstimateConsentLine(
+  response: PayerDeclarationResponse | null | undefined,
+  tx: Tx,
+): { state: "given" | "missing" | "not_required"; prefix: string; value: string } | null {
+  const declaration = response?.declaration;
+  if (declaration?.payer_kind !== "third_party") return null;
+  const required = response?.status.cost_estimate_consent_required;
+  const known = typeof required === "boolean" || Object.hasOwn(declaration, "cost_estimate_consent_at");
+  if (!known) return null;
+  const prefix = tx("Согласие на передачу сметы плательщику: ", "Einwilligung zur Weitergabe des Kostenvoranschlags: ");
+  if (required === false) {
+    return { state: "not_required", prefix, value: tx("не требуется (платит родитель)", "nicht nötig (Elternteil zahlt)") };
+  }
+  const givenAt = declaration.cost_estimate_consent_at;
+  return givenAt
+    ? { state: "given", prefix, value: tx(`дано ${formatAppDate(givenAt)}`, `erteilt am ${formatAppDate(givenAt)}`) }
+    : { state: "missing", prefix, value: tx("ещё не дано", "noch nicht erteilt") };
 }
 
 /** English readiness reasons of the server (lead readiness) → reason code. */

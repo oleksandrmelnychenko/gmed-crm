@@ -14,7 +14,14 @@ import {
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
-import { PAYER_ANSWERED_BY_PAYER, fetchMyLeadRequests, saveLeadPayer, type LeadRequest } from "./lead-request-api";
+import {
+  NO_THIRD_PARTY_PAYER,
+  PAYER_ANSWERED_BY_PAYER,
+  fetchMyLeadRequests,
+  saveLeadPayer,
+  saveLeadPayerCostEstimateConsent,
+  type LeadRequest,
+} from "./lead-request-api";
 import {
   IdentificationFormField,
   IdentificationTextArea,
@@ -24,9 +31,11 @@ import {
   PAYER_FIELDS,
   PAYER_TYPES,
   RELATIONSHIP_KINDS,
+  costEstimateConsentAsked,
   draftAnswer,
   draftFromPayer,
   knowsPayerType,
+  payerAnswer,
   payerInput,
   payerSelfOffered,
   payerTypeOf,
@@ -160,7 +169,11 @@ export function PayerSection({
 
   useAutosave(draft, save);
 
+  const costConsent = { request, text, enqueue, onChange, onSaveState };
+
   if (answered) {
+    // The paying parent answers as the payer: no consent to send oneself the cost estimate.
+    const parentPays = payerAnswer(request.payer, template) === "guardian";
     return (
       <Section title={text.sectionPayer}>
         <div className="space-y-3" data-testid="lead-request-payer">
@@ -180,6 +193,8 @@ export function PayerSection({
               <IdentificationTextArea form={identification} field="payment_background" />
             </IdentificationFormField>
           ) : null}
+          {/* So is the consent to pass the cost estimate on: it stays the lead's to give or take back. */}
+          {costEstimateConsentAsked(request, parentPays) ? <CostEstimateConsent {...costConsent} /> : null}
         </div>
       </Section>
     );
@@ -464,6 +479,10 @@ export function PayerSection({
                 ) : null}
               </div>
             ) : null}
+            {/* Below the contact consent, saved on its own: about the third party the server has stored. */}
+            {costEstimateConsentAsked(request, draft.guardian_pays) ? (
+              <CostEstimateConsent {...costConsent} className="sm:col-span-2" />
+            ) : null}
           </>
         ) : null}
         {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
@@ -503,5 +522,96 @@ export function PayerSection({
         ) : null}
       </div>
     </Section>
+  );
+}
+
+/**
+ * The consent that GMED sends the third-party payer the cost estimate — the
+ * types of services and the amounts, nothing medical (contract phase 3b,
+ * 11.7). The lead's own word about the payer the server has stored: saved at
+ * once on its own route, not with the answer "who pays", so it can still be
+ * given or taken back once the payer answered and the block is read-only.
+ */
+function CostEstimateConsent({
+  request,
+  text,
+  enqueue,
+  onChange,
+  onSaveState,
+  className,
+}: {
+  request: LeadRequest;
+  text: LeadRequestText;
+  enqueue: RequestQueue;
+  onChange: (request: LeadRequest) => void;
+  onSaveState: (state: SaveState) => void;
+  className?: string;
+}) {
+  // The answer on its way: the box shows it until the server's comes back.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const [failed, setFailed] = useState(false);
+  const leadId = request.lead_id;
+  const givenAt = request.payer?.cost_estimate_consent_at ?? null;
+  const checked = pending ?? Boolean(givenAt);
+  const id = "lead-request-payer_cost_estimate_consent";
+
+  async function change(consent: boolean) {
+    setPending(consent);
+    setFailed(false);
+    onSaveState("saving");
+    try {
+      onChange(await enqueue(() => saveLeadPayerCostEstimateConsent(leadId, consent)));
+      onSaveState("saved");
+    } catch (cause) {
+      setFailed(true);
+      onSaveState("error");
+      // Nobody else pays any more (GMED changed the payer): the request is loaded afresh.
+      if (errorBody(cause)?.code === NO_THIRD_PARTY_PAYER) {
+        try {
+          const fresh = (await fetchMyLeadRequests()).find((item) => item.lead_id === leadId);
+          if (fresh) onChange(fresh);
+        } catch {
+          // The next load of the page shows the state.
+        }
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
+  return (
+    <div
+      className={cn("space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3", className)}
+      data-testid="lead-request-payer-cost-estimate-consent"
+    >
+      <label className="flex items-start gap-3 text-sm">
+        <input
+          type="checkbox"
+          id={id}
+          className={cn(checkboxClass, "mt-0.5")}
+          checked={checked}
+          disabled={pending !== null}
+          aria-invalid={failed || undefined}
+          aria-describedby={failed ? `${id}-hint ${id}-error` : `${id}-hint`}
+          onChange={(event) => void change(event.target.checked)}
+        />
+        <span className="min-w-0 leading-snug">
+          {text.payerCostEstimateConsentLabel}
+          <RequiredMark />
+        </span>
+      </label>
+      {/* Indented to the text of the label: the checkbox and its gap. */}
+      <div className="space-y-1 pl-7 text-xs text-muted-foreground">
+        {checked && givenAt ? <p>{text.consentGivenAt(formatAppDateTime(givenAt))}</p> : null}
+        <p id={`${id}-hint`} className="leading-5">
+          {text.payerCostEstimateConsentHint}
+        </p>
+      </div>
+      {failed ? (
+        <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
+          {text.notSaved}
+        </p>
+      ) : null}
+    </div>
   );
 }

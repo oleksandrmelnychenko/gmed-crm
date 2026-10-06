@@ -6,6 +6,7 @@ import {
   changedSinceSubmit,
   combinedSaveState,
   consentText,
+  costEstimateConsentAsked,
   draftAnswer,
   draftFromIdentification,
   draftFromPayer,
@@ -599,6 +600,28 @@ describe("lead request send step", () => {
     expect(paymentBackgroundAsked({ guardian_pays: true }, progress(["payment_background"]))).toBe(true);
   });
 
+  it("asks for the consent to pass the cost estimate on about a stored third party, not about the paying parent", () => {
+    const request = (payer: LeadRequestPayer | null, missing: string[] = []) => ({
+      payer,
+      progress: { filled: 0, total: 0, missing_for_submit: missing },
+    });
+    const thirdParty = { ...storedPayer, cost_estimate_consent_at: null };
+    expect(costEstimateConsentAsked(request(thirdParty), false)).toBe(true);
+    // Given, it is still shown: it can be taken back.
+    expect(costEstimateConsentAsked(request({ ...thirdParty, cost_estimate_consent_at: "2026-10-06T10:00:00Z" }), false)).toBe(true);
+    // Also after the payer answered on the own link: the consent is the lead's own.
+    expect(costEstimateConsentAsked(request({ ...thirdParty, answered_by_payer: true }), false)).toBe(true);
+    // The parent who pays is not asked to send the estimate to oneself.
+    expect(costEstimateConsentAsked(request(thirdParty), true)).toBe(false);
+    // Nobody else pays, nothing is stored yet, or an older server that does not know it: no box.
+    expect(costEstimateConsentAsked(request({ ...thirdParty, payer_kind: "self" }), false)).toBe(false);
+    expect(costEstimateConsentAsked(request(null), false)).toBe(false);
+    expect(costEstimateConsentAsked(request(storedPayer), false)).toBe(false);
+    // A server that lists it as missing gets the box in any case, or the request could not be sent.
+    expect(costEstimateConsentAsked(request(thirdParty, ["payer_cost_estimate_consent"]), true)).toBe(true);
+    expect(costEstimateConsentAsked(request(storedPayer, ["payer_cost_estimate_consent"]), false)).toBe(true);
+  });
+
   it("shows a stored payer as the first answer it was given as", () => {
     const template = { first_name: "Maria", last_name: "Muster", date_of_birth: null, email: null, phone: null };
     const parent = {
@@ -673,6 +696,7 @@ describe("lead request send step", () => {
         total: 12,
         missing_for_submit: [
           "payer_own_account",
+          "payer_cost_estimate_consent",
           "payer_contact_consent",
           "payment_background",
           "payer_country",
@@ -689,6 +713,8 @@ describe("lead request send step", () => {
       "payer_country",
       "payment_background",
       "payer_contact_consent",
+      // The consent to pass the cost estimate on comes right after the one to contact the payer.
+      "payer_cost_estimate_consent",
       "payer_own_account",
     ]);
   });

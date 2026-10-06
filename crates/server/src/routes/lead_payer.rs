@@ -194,6 +194,12 @@ pub(crate) struct Declaration {
     /// the costs and tells the payer the lead's name. Only the lead gives or
     /// removes this consent.
     pub contact_consent_at: Option<DateTime<Utc>>,
+    /// When the lead agreed that GMED passes the cost estimate — service
+    /// types and amounts only, no diagnoses or treatment names — to the payer
+    /// named (owner decision 2026-10-06, phase 3b). Like the consent to
+    /// contact the payer: only the lead gives or removes it, and it goes with
+    /// another payer.
+    pub cost_estimate_consent_at: Option<DateTime<Utc>>,
     /// Section 7 (invoice recipient): where the invoice goes
     /// ([`INVOICE_TO_VALUES`]); `None` until the lead answered.
     pub invoice_to: Option<String>,
@@ -243,7 +249,7 @@ const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_
      invoice_country, invoice_email, invoice_vat_id, invoice_tax_number, payment_method, \
      payment_method_details, account_country, account_holder, bank_name, via_third_party, \
      via_third_party_details, identity_adopted_at, identity_adopted_key, identity_changed_at, \
-     patient_id, created_at, updated_at";
+     cost_estimate_consent_at, patient_id, created_at, updated_at";
 
 /// The 14 keys of sections 7 and 8 the cabinet edits (API keys = column
 /// names), in form order; the two tax fields of section 7 are staff's.
@@ -318,6 +324,7 @@ impl Declaration {
             payer_informed_at: row.try_get("payer_informed_at").unwrap_or_default(),
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
             contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
+            cost_estimate_consent_at: row.try_get("cost_estimate_consent_at").unwrap_or_default(),
             invoice_to: row.try_get("invoice_to").unwrap_or_default(),
             invoice_name: row.try_get("invoice_name").unwrap_or_default(),
             invoice_street: row.try_get("invoice_street").unwrap_or_default(),
@@ -486,6 +493,8 @@ impl Declaration {
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
             "payer_informed_by": self.payer_informed_by,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
+            // Read-only: only the lead gives it (phase 3b).
+            "cost_estimate_consent_at": self.cost_estimate_consent_at.map(|at| at.to_rfc3339()),
             "invoice_to": self.invoice_to,
             "invoice_name": self.invoice_name,
             "invoice_street": self.invoice_street,
@@ -1567,14 +1576,24 @@ async fn get_payer_declaration(
         Ok(loaded) => loaded.unwrap_or_default().representation,
         Err(error) => return database_error(error, "load payer declaration representatives"),
     };
+    let package = match crate::routes::lead_payer_package::status_summary(&mut conn, lead_id).await
+    {
+        Ok(package) => package,
+        Err(error) => return database_error(error, "load payer signature package"),
+    };
     let mut payload = payer.payload();
     let required = json!(contact_consent_required(
         payer.declaration.as_ref(),
         &representation
     ));
+    // The consent to pass the cost estimate on is asked of the same people
+    // as the consent to contact the payer (phase 3b).
     payload["status"]["contact_consent_required"] = required.clone();
+    payload["status"]["cost_estimate_consent_required"] = required.clone();
+    payload["status"]["payer_package"] = package;
     if payload["declaration"].is_object() {
-        payload["declaration"]["contact_consent_required"] = required;
+        payload["declaration"]["contact_consent_required"] = required.clone();
+        payload["declaration"]["cost_estimate_consent_required"] = required;
     }
     Json(payload).into_response()
 }
@@ -1654,12 +1673,16 @@ async fn save_payer_declaration(
         };
     // The staff form always states the own-account answer.
     declaration.own_account_answered = true;
-    // Only the lead gives or removes the consent to contact the payer: staff
-    // keep it as long as a third party pays.
+    // Only the lead gives or removes the consent to contact the payer and the
+    // consent to pass the cost estimate on to the payer: staff keep both as
+    // long as a third party pays.
     if declaration.is_third_party() {
         declaration.contact_consent_at = previous
             .as_ref()
             .and_then(|previous| previous.contact_consent_at);
+        declaration.cost_estimate_consent_at = previous
+            .as_ref()
+            .and_then(|previous| previous.cost_estimate_consent_at);
     }
     // The payer's own link informs the payer (Art. 14 notice in the
     // invitation, phase 3a), a paying parent by acknowledging the notice in
@@ -1815,17 +1838,18 @@ async fn store_declaration(
                invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
                payment_method, payment_method_details, account_country, account_holder,
                bank_name, via_third_party, via_third_party_details, identity_adopted_at,
-               identity_adopted_key)
+               identity_adopted_key, cost_estimate_consent_at)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
                    $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                   $40, $41, $42, $43, $44, $45, $46, $47)
+                   $40, $41, $42, $43, $44, $45, $46, $47, $48)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                payer_type = EXCLUDED.payer_type,
                organisation_name = EXCLUDED.organisation_name,
                relationship_kind = EXCLUDED.relationship_kind,
                contact_consent_at = EXCLUDED.contact_consent_at,
+               cost_estimate_consent_at = EXCLUDED.cost_estimate_consent_at,
                acts_on_own_account = EXCLUDED.acts_on_own_account,
                own_account_answered = EXCLUDED.own_account_answered,
                beneficial_owner_name = EXCLUDED.beneficial_owner_name,
@@ -1917,6 +1941,7 @@ async fn store_declaration(
     .bind(&declaration.via_third_party_details)
     .bind(declaration.identity_adopted_at)
     .bind(&declaration.identity_adopted_key)
+    .bind(declaration.cost_estimate_consent_at)
     .execute(conn)
     .await
     .map(|_| ())
@@ -2150,6 +2175,11 @@ pub(crate) fn portal_payload(declaration: Option<&Declaration>, answered_by_paye
         }
     }
     value["answered_by_payer"] = json!(answered_by_payer);
+    // The lead's own consent to pass the cost estimate on to the payer (phase
+    // 3b): shown also while the payer's identity is the payer's own answer.
+    // Kept out of `portal_json`, the "entered by the patient" marker of the
+    // "who pays" answer, because it is saved through its own endpoint.
+    value["cost_estimate_consent_at"] = json!(declaration.cost_estimate_consent_at);
     value
 }
 
@@ -2192,6 +2222,11 @@ pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static 
         }
         if declaration.contact_consent_at.is_none() {
             missing.push("payer_contact_consent");
+        }
+        // The payer receives the cost estimate only with the lead's consent
+        // (phase 3b, owner decision 2026-10-06).
+        if declaration.cost_estimate_consent_at.is_none() {
+            missing.push("payer_cost_estimate_consent");
         }
     }
     missing
@@ -2308,6 +2343,11 @@ fn declaration_from_portal(
             Some(false) => None,
             None => recorded,
         };
+        // The consent to pass the cost estimate on has an endpoint of its
+        // own; the "who pays" answer keeps it for the same payer and drops it
+        // with another one, like the consent to contact the payer.
+        declaration.cost_estimate_consent_at =
+            same_payer.and_then(|previous| previous.cost_estimate_consent_at);
     }
     Ok(declaration)
 }
@@ -3729,7 +3769,11 @@ mod tests {
         assert_eq!(person.payer_type.as_deref(), Some(PAYER_TYPE_PERSON));
         assert_eq!(
             portal_missing(Some(&person)),
-            ["payer_relationship_kind", "payer_contact_consent"]
+            [
+                "payer_relationship_kind",
+                "payer_contact_consent",
+                "payer_cost_estimate_consent"
+            ]
         );
 
         // "Other" asks for the words.
@@ -3737,11 +3781,35 @@ mod tests {
         answer.relationship_kind = Some("other".into());
         answer.contact_consent = Some(true);
         let other = from_portal(Some(&person), &answer).unwrap();
-        assert_eq!(portal_missing(Some(&other)), ["payer_relationship"]);
+        assert_eq!(
+            portal_missing(Some(&other)),
+            ["payer_relationship", "payer_cost_estimate_consent"]
+        );
         answer.relationship = Some(" Nachbar ".into());
-        let complete = from_portal(Some(&other), &answer).unwrap();
+        let mut complete = from_portal(Some(&other), &answer).unwrap();
         assert_eq!(complete.relationship.as_deref(), Some("Nachbar"));
+        assert_eq!(
+            portal_missing(Some(&complete)),
+            ["payer_cost_estimate_consent"]
+        );
+        // The consent to pass the cost estimate on (its own endpoint, phase
+        // 3b) stays with the same payer through the "who pays" answer.
+        complete.cost_estimate_consent_at = Some(
+            DateTime::parse_from_rfc3339("2026-10-06T09:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        );
         assert!(portal_missing(Some(&complete)).is_empty());
+        let same = from_portal(Some(&complete), &answer).unwrap();
+        assert_eq!(
+            same.cost_estimate_consent_at,
+            complete.cost_estimate_consent_at
+        );
+        assert!(portal_payload(Some(&same), true)["cost_estimate_consent_at"].is_string());
+        assert!(
+            same.portal_json().get("cost_estimate_consent_at").is_none(),
+            "not part of the marker of the answer"
+        );
 
         // A company pays: its name and seat country instead of the person,
         // whose data are dropped even when the body still carries them.
@@ -3755,12 +3823,15 @@ mod tests {
         assert_eq!(organisation.first_name, None);
         assert_eq!(organisation.last_name, None);
         assert!(organisation.citizenships.is_empty());
+        // Another payer: both consents of the lead go.
+        assert_eq!(organisation.cost_estimate_consent_at, None);
         assert_eq!(
             portal_missing(Some(&organisation)),
             [
                 "payer_relationship_kind",
                 "payer_country",
-                "payer_contact_consent"
+                "payer_contact_consent",
+                "payer_cost_estimate_consent"
             ]
         );
         let shown = organisation.portal_json();
@@ -3777,7 +3848,10 @@ mod tests {
             ..portal("third_party")
         };
         let insurer = from_portal(None, &unnamed).unwrap();
-        assert_eq!(portal_missing(Some(&insurer)), ["payer_organisation_name"]);
+        assert_eq!(
+            portal_missing(Some(&insurer)),
+            ["payer_organisation_name", "payer_cost_estimate_consent"]
+        );
         let shown = insurer.portal_json();
         assert_eq!(shown["relationship_kind"], "business_partner");
         assert_eq!(shown["contact_consent_at"], "2026-10-03T09:20:00Z");

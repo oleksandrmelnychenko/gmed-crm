@@ -4,6 +4,7 @@ import { LoaderCircle } from "lucide-react";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { payerSignaturePackageOf } from "@/pages/patient-lead/lead-request-payer-questionnaire-model";
 import { LEAD_CABINET_LANGS, asLeadCabinetLang, type LeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
 
 import {
@@ -208,8 +209,20 @@ export function PayerLinkPage() {
       setView((current) =>
         current.kind === "code" ? { kind: "form", info: current.info, questionnaire: result.questionnaire } : current,
       );
+      // Details sent before: where the documents for signing stand is asked for
+      // once more, now with the session (the answer before the code may leave it out).
+      if (result.questionnaire.state === "submitted" && result.questionnaire.signature_package === undefined) {
+        client
+          .info(true)
+          .then((info) => {
+            if (!stale()) setView((current) => (current.kind === "form" ? { ...current, info } : current));
+          })
+          .catch(() => {
+            // The thanks are shown without it; the next visit asks again.
+          });
+      }
     },
-    [secrets, stale],
+    [client, secrets, stale],
   );
 
   const codeFatal = useCallback(
@@ -319,6 +332,7 @@ export function PayerLinkPage() {
             client={client}
             text={text}
             lang={lang}
+            signature={payerSignaturePackageOf(view.questionnaire, view.info)}
             onQuestionnaire={questionnaireChanged}
             onLinkProblem={linkProblem}
           />

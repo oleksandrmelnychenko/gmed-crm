@@ -134,6 +134,79 @@ fn cost_coverage_is_signed_by_the_payer_and_gmed() {
 }
 
 #[test]
+fn the_payers_package_is_signed_by_the_payer_and_gmed_only() {
+    for template in [
+        "payer_self_disclosure",
+        "patient_payer_statement",
+        "payer_cost_estimate",
+    ] {
+        assert_eq!(
+            signer_policy_for_parts(Some(template), None, template),
+            SignerPolicy::PayerPackage,
+            "{template}"
+        );
+        // An uploaded copy is recognised by its type as well.
+        assert_eq!(
+            signer_policy_for_parts(None, None, template),
+            SignerPolicy::PayerPackage
+        );
+    }
+    assert_eq!(SignerPolicy::PayerPackage.as_str(), "payer_package");
+    let both = signers();
+    let payer = Signer {
+        email: "viktor.zahler@example.com".into(),
+        role: "payer".into(),
+        ..both[0].clone()
+    };
+    let minor = Signer {
+        email: "mia@example.com".into(),
+        role: "minor".into(),
+        ..both[0].clone()
+    };
+    let (client, agency) = (both[0].clone(), both[1].clone());
+    assert_eq!(
+        SignerPolicy::PayerPackage.validate(&[payer.clone(), agency.clone()]),
+        Ok(())
+    );
+    // Never the patient side: the self-disclosure holds the payer's ID data.
+    for signers in [
+        vec![payer.clone(), agency.clone(), client.clone()],
+        vec![payer.clone(), agency.clone(), minor],
+        vec![client.clone(), agency.clone()],
+        vec![payer.clone()],
+        vec![agency.clone()],
+    ] {
+        assert_eq!(
+            SignerPolicy::PayerPackage.validate(&signers),
+            Err("payer_package_signers_required")
+        );
+    }
+    // With the Kostenübernahmeerklärung (and documents anybody signs) the
+    // package stays the payer's; with a document of the patient side it
+    // cannot be one PDF.
+    assert_eq!(
+        SignerPolicy::combine([
+            SignerPolicy::PayerPackage,
+            SignerPolicy::PayerAndAgency,
+            SignerPolicy::Flexible
+        ]),
+        Ok(SignerPolicy::PayerPackage)
+    );
+    for other in [
+        SignerPolicy::ClientOnly,
+        SignerPolicy::BothParties,
+        SignerPolicy::ClientPayerAndAgency,
+        SignerPolicy::AgencyOnly,
+    ] {
+        assert_eq!(
+            SignerPolicy::combine([SignerPolicy::PayerPackage, other]),
+            Err("signature_policy_conflict"),
+            "{other:?}"
+        );
+    }
+}
+
+#[test]
 fn enhanced_due_diligence_requires_only_gmed_signature() {
     assert_eq!(
         signer_policy_for_parts(Some("enhanced_due_diligence"), None, "document"),

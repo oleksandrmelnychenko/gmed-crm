@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isSignaturePending, signatureFrameCoverage, validSigners, type Signer } from "./document-signature-api";
+import {
+  combinedSignerPolicy, isSignaturePending, signatureErrorText, signatureFrameCoverage, signerPolicyError, validSigners, type Signer,
+} from "./document-signature-api";
 
 const signer: Signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
 describe("document signing", () => {
@@ -31,5 +33,21 @@ describe("document signing", () => {
     }
     expect(validSigners([{ ...signer, first_name: " Олександр ", email: " ERIKA@EXAMPLE.ORG " }])).toBe(true);
     expect(validSigners(Array.from({ length: 7 }, (_, n) => ({ ...signer, email: `person${n}@example.org` })))).toBe(false);
+  });
+  it("keeps the payer's package away from the patient side (mirrors the server)", () => {
+    expect(combinedSignerPolicy(["payer_package"])).toBe("payer_package");
+    expect(combinedSignerPolicy(["payer_package", "payer_and_agency", "flexible"])).toBe("payer_package");
+    for (const other of ["client_only", "both_parties", "client_payer_and_agency", "agency_only"] as const) {
+      expect(combinedSignerPolicy(["payer_package", other])).toBe("conflict");
+    }
+    const payer: Signer = { first_name: "Viktor", last_name: "Zahler", email: "viktor.zahler@example.com", role: "payer" };
+    const agency: Signer = { first_name: "Ben", last_name: "Muster", email: "ben.muster@example.com", role: "agency" };
+    expect(signerPolicyError("payer_package", [payer, agency])).toBeNull();
+    expect(signerPolicyError("payer_package", [payer])).toBe("payer_package_signers_required");
+    expect(signerPolicyError("payer_package", [payer, agency, signer])).toBe("payer_package_signers_required");
+    expect(signerPolicyError("payer_package", [payer, agency, { ...signer, role: "minor" }])).toBe("minor_needs_representative");
+    expect(signatureErrorText("payer_package_signers_required", (_ru, de) => de)).toBe(
+      "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.",
+    );
   });
 });

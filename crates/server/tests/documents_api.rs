@@ -9977,3 +9977,200 @@ async fn passport_on_file_is_confirmed_as_the_identity_document() {
     .unwrap();
     assert_eq!(identity_verified, Some(true));
 }
+
+/// Phase 3b: the payer's own documents are fixed legal templates of a lead.
+/// For a patient, for a lead without a third-party payer or before the payer
+/// sent its answers they are refused; the statement about the payer is
+/// signed by the payer alone.
+#[tokio::test]
+async fn the_payers_documents_are_lead_documents_of_a_third_party() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("payer-docs");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, qualification_status,
+                              compliance_status, intake_source, portal_submitted_at)
+           VALUES ('Mia', 'Muster', $1, DATE '1990-02-03', 'qualified', 'signed',
+                   'staff_wizard', now())
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.com"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let generate = |template: &str, context: Value| {
+        let mut body = json!({ "template_id": template, "language": "de", "status": "active" });
+        for (key, value) in context.as_object().unwrap() {
+            body[key.as_str()] = value.clone();
+        }
+        body
+    };
+
+    let (status, catalog) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for template in [
+        "payer_self_disclosure",
+        "patient_payer_statement",
+        "payer_cost_estimate",
+    ] {
+        let listed = catalog["templates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == template)
+            .unwrap_or_else(|| panic!("{template} missing"));
+        assert_eq!(listed["default_visibility"], "internal");
+        assert_eq!(listed["is_medical"], false);
+        assert_eq!(listed["supported_languages"], json!(["de"]));
+        // Never for a patient.
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(generate(template, json!({ "patient_id": patient_id }))),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{template}: {body}"
+        );
+        // No free-form text on a fixed legal document.
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(generate(
+                template,
+                json!({ "lead_id": lead_id, "title_override": "Etwas anderes" }),
+            )),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{template}: {body}"
+        );
+    }
+
+    // Nobody else pays.
+    for (template, code) in [
+        ("payer_self_disclosure", "payer_not_submitted"),
+        (
+            "patient_payer_statement",
+            "payer_declaration_not_third_party",
+        ),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(generate(template, json!({ "lead_id": lead_id }))),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{template}: {body}"
+        );
+        assert_eq!(body["error"], code, "{body}");
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(
+            "payer_cost_estimate",
+            json!({ "lead_id": lead_id }),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // A third party named by the patient: the statement about it, signed by
+    // the payer alone; the self-disclosure waits for the payer's answers.
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, payer_kind, payer_type, first_name, last_name, relationship_kind,
+               email, contact_consent_at, source_of_funds)
+           VALUES ($1, 'third_party', 'person', 'Viktor', 'Zahler', 'friend',
+                   'viktor.zahler@example.com', now(), 'savings')"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(
+            "payer_self_disclosure",
+            json!({ "lead_id": lead_id }),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "payer_not_submitted", "{body}");
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(
+            "patient_payer_statement",
+            json!({ "lead_id": lead_id }),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let row = sqlx::query(
+        "SELECT art, category, visibility, is_medical, generated_bindings FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("art"), "patient_payer_statement");
+    assert_eq!(row.get::<String, _>("category"), "compliance_aml");
+    assert_eq!(row.get::<String, _>("visibility"), "internal");
+    assert!(!row.get::<bool, _>("is_medical"));
+    let roles = row.get::<Value, _>("generated_bindings")["_signature_anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|anchor| anchor["role"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(roles, ["payer"]);
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = extract_pdf_text(&bytes);
+    assert!(
+        text.contains("Erklärung zur Kostenübernahme durch Dritte"),
+        "{text}"
+    );
+    assert!(text.contains("Viktor Zahler"), "{text}");
+    assert!(text.contains("Freund/in"), "{text}");
+    assert!(!text.contains("Prüfstufe"), "{text}");
+}

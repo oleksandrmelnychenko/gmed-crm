@@ -1367,10 +1367,17 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     assert_eq!(info["link"]["status"], "submitted", "{info}");
     assert!(info["questionnaire"]["adopted_at"].is_string());
 
-    // The old token still opens, read-only.
+    // The old token still opens, read-only. No signature package yet (phase
+    // 3b): the key is there and empty.
     let (status, opened) = as_payer(&app, "GET", OPEN, &headers, None).await;
     assert_eq!(status, StatusCode::OK, "{opened}");
     assert_eq!(opened["state"], "submitted");
+    assert!(
+        opened
+            .get("signature_package")
+            .is_some_and(serde_json::Value::is_null),
+        "{opened}"
+    );
     let (status, body) = patch(&app, &token, &session, json!({ "occupation": "Händler" })).await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "payer_submitted");
@@ -1442,6 +1449,38 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     assert_eq!(
         after["progress"]["missing_for_submit"], before["progress"]["missing_for_submit"],
         "{after}"
+    );
+    // The consent to pass the cost estimate on to the payer stays the
+    // patient's own (phase 3b): given also while the payer's identity is the
+    // payer's answer, and it reveals nothing of that identity.
+    assert!(
+        after["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_cost_estimate_consent")),
+        "{after}"
+    );
+    let (status, consented) = with_login(
+        &app,
+        "POST",
+        &format!("{request_path}/payer/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consented}");
+    assert_eq!(consented["payer"]["answered_by_payer"], true, "{consented}");
+    assert!(
+        consented["payer"]["cost_estimate_consent_at"].is_string(),
+        "{consented}"
+    );
+    assert!(consented["payer"]["street"].is_null(), "{consented}");
+    assert!(
+        !consented["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_cost_estimate_consent")),
+        "{consented}"
     );
     let (_, declaration) = with_login(
         &app,

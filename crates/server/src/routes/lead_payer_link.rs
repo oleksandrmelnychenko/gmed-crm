@@ -1977,7 +1977,18 @@ async fn questionnaire_json(
     let built = questionnaire(&context, viewer, &check, crate::app_time::today());
     Ok(match viewer {
         Viewer::Staff => built.to_staff_json(),
-        Viewer::Payer | Viewer::Parent(_) => built.to_payer_json(),
+        Viewer::Payer | Viewer::Parent(_) => {
+            // The payer's own view of its signature package (phase 3b): a
+            // status and two dates, nothing else.
+            let mut value = built.to_payer_json();
+            value["signature_package"] = crate::routes::lead_payer_package::payer_view(
+                &mut conn,
+                lead_id,
+                built.statement.confirmed_email.as_deref(),
+            )
+            .await?;
+            value
+        }
     })
 }
 
@@ -2970,6 +2981,21 @@ async fn open_link(State(state): State<AppState>, headers: HeaderMap) -> Respons
         Ok(None) => return Refusal::LinkRevoked.into_response(),
         Err(error) => return intake::internal(error, "load payer link lead"),
     };
+    // The payer's signature package (phase 3b): sent or signed, for the
+    // address this link confirmed; no titles, ids or request data.
+    let signature_package = match crate::routes::lead_payer_package::payer_view(
+        &mut tx,
+        link.lead_id,
+        context
+            .statement
+            .as_ref()
+            .and_then(|statement| statement.confirmed_email.as_deref()),
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(error) => return intake::internal(error, "load payer signature package"),
+    };
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer link");
     }
@@ -2997,6 +3023,7 @@ async fn open_link(State(state): State<AppState>, headers: HeaderMap) -> Respons
         "expires_at": link.expires_at,
         "code_sent_at": link.code_sent_at,
         "session_valid": session_valid,
+        "signature_package": signature_package,
     }))
     .into_response()
 }
@@ -4820,9 +4847,21 @@ pub(crate) async fn revoke_for_conversion(
         .map(|_| ())
 }
 
-/// The purge of an unconverted lead: the statement and the links with their
-/// e-mails. A converted lead keeps them (§ 8 Abs. 4 GwG).
+/// The purge of an unconverted lead: the statement, the links with their
+/// e-mails and the payer's signature packages (phase 3b; their documents
+/// follow the lead's documents). A converted lead keeps them (§ 8 Abs. 4
+/// GwG).
 pub(crate) async fn purge_in_tx(conn: &mut PgConnection, lead_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"DELETE FROM lead_payer_signature_packages payer_package
+           USING leads lead
+           WHERE payer_package.lead_id = $1
+             AND lead.id = payer_package.lead_id
+             AND lead.converted_patient_id IS NULL"#,
+    )
+    .bind(lead_id)
+    .execute(&mut *conn)
+    .await?;
     sqlx::query(
         r#"DELETE FROM lead_payer_statements payer_statement
            USING leads lead
@@ -4883,6 +4922,239 @@ pub(crate) async fn submitted_payer(
     }))
 }
 
+/// The third-party payer as its signature package sees it (phase 3b): how it
+/// answers, whether and when its answers were sent, and who signs — the
+/// payer, the paying parent, or the legal representative of an organisation
+/// with the organisation it acts for. The e-mail is always the confirmed
+/// address of the statement.
+pub(crate) struct PackageSubject {
+    /// `link` or `cabinet`.
+    pub mode: &'static str,
+    pub submitted_at: Option<DateTime<Utc>>,
+    pub confirmed_email: Option<String>,
+    pub signer_first_name: Option<String>,
+    pub signer_last_name: Option<String>,
+    pub acting_for: Option<String>,
+    /// The function of an organisation's legal representative.
+    pub signer_role: Option<String>,
+    /// The language the payer chose (`de`, `en`, `uk`, `ru`), if any.
+    pub language: Option<String>,
+}
+
+/// `None` while the declaration names no third party.
+pub(crate) async fn package_subject(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<PackageSubject>, sqlx::Error> {
+    let Some(context) = load_context(conn, lead_id).await? else {
+        return Ok(None);
+    };
+    let Some(mode) = context.mode() else {
+        return Ok(None);
+    };
+    let built = questionnaire(&context, Viewer::Staff, &[], crate::app_time::today());
+    let answers = &built.answers;
+    let (first_name, last_name, acting_for, role) = if built.organisation {
+        (
+            answers.representative_first_name.clone(),
+            answers.representative_last_name.clone(),
+            answers.display_name(true).or_else(|| {
+                context
+                    .declaration
+                    .as_ref()
+                    .and_then(|declaration| declaration.organisation_name.clone())
+            }),
+            answers.representative_role.clone(),
+        )
+    } else {
+        (
+            answers.first_name.clone(),
+            answers.last_name.clone(),
+            None,
+            None,
+        )
+    };
+    let statement = context.statement.as_ref();
+    Ok(Some(PackageSubject {
+        mode: mode.as_str(),
+        submitted_at: statement.and_then(|statement| statement.submitted_at),
+        confirmed_email: statement
+            .and_then(|statement| normalized_email(statement.confirmed_email.as_deref())),
+        signer_first_name: first_name,
+        signer_last_name: last_name,
+        acting_for,
+        signer_role: role,
+        language: answers.language.clone(),
+    }))
+}
+
+/// One beneficial owner of an organisation as the self-disclosure prints it.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PayerOwnerLine {
+    pub name: String,
+    pub date_of_birth: Option<NaiveDate>,
+    pub birth_place: Option<String>,
+    pub street: Option<String>,
+    pub zip: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    /// "25.00".
+    pub share_percent: String,
+}
+
+/// What the payer sent, for its self-disclosure ("Selbstauskunft der
+/// zahlenden Person", phase 3b): the effective answers of the submitted
+/// statement (a paying parent's person and identity document are the
+/// representative's), the payment route of the declaration, whether the
+/// copies were sent and the privacy acknowledgement. Never the check level or
+/// anything staff assessed.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PayerSelfDisclosure {
+    /// `link` or `cabinet`.
+    pub mode: &'static str,
+    pub organisation: bool,
+    pub payer_type: String,
+    pub submitted_at: DateTime<Utc>,
+    pub confirmed_email: Option<String>,
+    pub salutation: Option<String>,
+    pub first_name: Option<String>,
+    pub last_name: Option<String>,
+    pub former_names: Option<String>,
+    pub date_of_birth: Option<NaiveDate>,
+    pub birth_place: Option<String>,
+    pub birth_country: Option<String>,
+    pub citizenships: Vec<String>,
+    pub street: Option<String>,
+    pub zip: Option<String>,
+    pub city: Option<String>,
+    pub country: Option<String>,
+    pub habitual_residence_country: Option<String>,
+    pub phone: Option<String>,
+    pub occupation: Option<String>,
+    pub organisation_name: Option<String>,
+    pub register_court: Option<String>,
+    pub register_number: Option<String>,
+    pub industry: Option<String>,
+    pub representative_first_name: Option<String>,
+    pub representative_last_name: Option<String>,
+    pub representative_role: Option<String>,
+    pub id_document_type: Option<String>,
+    pub id_document_number: Option<String>,
+    pub id_issuing_authority: Option<String>,
+    pub id_issuing_country: Option<String>,
+    pub id_issued_on: Option<NaiveDate>,
+    pub id_valid_until: Option<NaiveDate>,
+    pub id_copy_on_file: bool,
+    pub beneficial_owners: Vec<PayerOwnerLine>,
+    pub beneficial_owners_none: Option<bool>,
+    pub relationship_kind: Option<String>,
+    pub relationship: Option<String>,
+    /// German labels of the sources of funds.
+    pub funds_sources: Vec<String>,
+    pub funds_description: Option<String>,
+    pub funds_proof_on_file: bool,
+    /// Section 8 of the declaration.
+    pub payment_route: Declaration,
+    pub pep_self: Option<bool>,
+    pub pep_self_details: Option<String>,
+    pub pep_related: Option<bool>,
+    pub pep_related_details: Option<String>,
+    pub high_risk_country: Option<bool>,
+    pub high_risk_country_code: Option<String>,
+    pub sanctions_links: Option<bool>,
+    pub sanctions_links_details: Option<String>,
+    pub privacy_ack_at: Option<DateTime<Utc>>,
+    pub privacy_text_version: Option<String>,
+    pub contact_channels: Vec<String>,
+}
+
+/// `None` while no third party is named or its answers are not sent.
+pub(crate) async fn self_disclosure(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<Option<PayerSelfDisclosure>, sqlx::Error> {
+    let Some(context) = load_context(conn, lead_id).await? else {
+        return Ok(None);
+    };
+    let (Some(mode), Some(submitted_at)) = (context.mode(), context.submitted_at()) else {
+        return Ok(None);
+    };
+    let built = questionnaire(&context, Viewer::Staff, &[], crate::app_time::today());
+    let answers = built.answers.clone();
+    let statement = &built.statement;
+    let owner = |owner: &Owner| PayerOwnerLine {
+        name: format!("{} {}", owner.first_name.trim(), owner.last_name.trim())
+            .trim()
+            .to_string(),
+        date_of_birth: owner.date_of_birth,
+        birth_place: owner.birth_place.clone(),
+        street: owner.street.clone(),
+        zip: owner.zip.clone(),
+        city: owner.city.clone(),
+        country: owner.country.clone(),
+        share_percent: cents_text(owner.share_cents),
+    };
+    Ok(Some(PayerSelfDisclosure {
+        mode: mode.as_str(),
+        organisation: built.organisation,
+        payer_type: built.payer_type.clone(),
+        submitted_at,
+        confirmed_email: statement.confirmed_email.clone(),
+        beneficial_owners: answers.beneficial_owners.iter().map(owner).collect(),
+        funds_sources: answers
+            .funds_sources
+            .iter()
+            .map(|source| funds_source_label(source).to_string())
+            .collect(),
+        id_copy_on_file: !built.identity_documents.is_empty(),
+        funds_proof_on_file: !built.funds_proof_documents.is_empty(),
+        payment_route: built.route.clone(),
+        privacy_ack_at: statement.privacy_ack_at,
+        privacy_text_version: statement.privacy_text_version.clone(),
+        contact_channels: statement.contact_channels.clone(),
+        salutation: answers.salutation,
+        first_name: answers.first_name,
+        last_name: answers.last_name,
+        former_names: answers.former_names,
+        date_of_birth: answers.date_of_birth,
+        birth_place: answers.birth_place,
+        birth_country: answers.birth_country,
+        citizenships: answers.citizenships,
+        street: answers.street,
+        zip: answers.zip,
+        city: answers.city,
+        country: answers.country,
+        habitual_residence_country: answers.habitual_residence_country,
+        phone: answers.phone,
+        occupation: answers.occupation,
+        organisation_name: answers.organisation_name,
+        register_court: answers.register_court,
+        register_number: answers.register_number,
+        industry: answers.industry,
+        representative_first_name: answers.representative_first_name,
+        representative_last_name: answers.representative_last_name,
+        representative_role: answers.representative_role,
+        id_document_type: answers.id_document_type,
+        id_document_number: answers.id_document_number,
+        id_issuing_authority: answers.id_issuing_authority,
+        id_issuing_country: answers.id_issuing_country,
+        id_issued_on: answers.id_issued_on,
+        id_valid_until: answers.id_valid_until,
+        beneficial_owners_none: answers.beneficial_owners_none,
+        relationship_kind: answers.relationship_kind,
+        relationship: answers.relationship,
+        funds_description: answers.funds_description,
+        pep_self: answers.pep_self,
+        pep_self_details: answers.pep_self_details,
+        pep_related: answers.pep_related,
+        pep_related_details: answers.pep_related_details,
+        high_risk_country: answers.high_risk_country,
+        high_risk_country_code: answers.high_risk_country_code,
+        sanctions_links: answers.sanctions_links,
+        sanctions_links_details: answers.sanctions_links_details,
+    }))
+}
+
 /// `payer_link` of `GET /leads/{id}/portal-intake`: how far the link is and
 /// the check level; `null` while no third party is named and nothing exists.
 pub(crate) async fn intake_summary(state: &AppState, lead_id: Uuid) -> Result<Value, sqlx::Error> {
@@ -4936,10 +5208,18 @@ pub(crate) async fn cabinet_summary(
         &check,
         crate::app_time::today(),
     );
+    let signature_package = crate::routes::lead_payer_package::payer_view(
+        &mut conn,
+        lead_id,
+        built.statement.confirmed_email.as_deref(),
+    )
+    .await?;
     Ok(json!({
         "available": true,
         "submitted_at": built.statement.submitted_at,
         "missing_count": built.missing.len(),
+        // The parent's own signature package as the payer (phase 3b).
+        "signature_package": signature_package,
     }))
 }
 

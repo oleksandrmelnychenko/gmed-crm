@@ -132,6 +132,14 @@ export type LeadRequestText = {
   payerConsentHint: string;
   /** The consent in the summary and in the list of what is still missing. */
   payerConsentShort: string;
+  /**
+   * The consent that GMED sends the payer the cost estimate (contract phase
+   * 3b, 11.7): saved at once and on its own, also once the payer answered.
+   */
+  payerCostEstimateConsentLabel: string;
+  payerCostEstimateConsentHint: string;
+  /** The same consent in the summary and in the list of what is still missing. */
+  payerCostEstimateConsentShort: string;
   /** The payer answered on the own link: "who pays" is read-only, only GMED changes it. */
   payerAnsweredByPayer: string;
   /** Own economic interest (GwG), part of "who pays". */
@@ -269,6 +277,13 @@ export type LeadRequestText = {
   payerSubmittedNote: string;
   payerQuestionnaireLoadFailed: string;
   payerQuestionnaireLocked: string;
+  /**
+   * The paying parent's signature package (contract phase 3b, 6.3): sent to
+   * Skribble, or signed and back at GMED. `date` is "DD.MM.YYYY", or "" when
+   * the server does not say when.
+   */
+  payerSignatureSent: (date: string) => string;
+  payerSignatureSigned: (date: string) => string;
 };
 
 /**
@@ -349,6 +364,8 @@ export function payerFieldLabel(
     // The name passed on is the patient's: a parent reads it so.
     case "payer_contact_consent":
       return guardian ? text.payerConsentLabelGuardian : text.payerConsentLabel;
+    case "payer_cost_estimate_consent":
+      return text.payerCostEstimateConsentLabel;
     // The own economic interest is asked about the patient: a parent reads it so.
     case "payer_own_account":
       return guardian ? text.ownAccountQuestionGuardian : text.ownAccountQuestion;
@@ -484,6 +501,7 @@ export function submitFieldLabel(
   }
   // The consent is a sentence: the list names it. "Other" still needs the relationship in words.
   if (field === "payer_contact_consent") return `${text.payerPerson}: ${text.payerConsentShort}`;
+  if (field === "payer_cost_estimate_consent") return `${text.payerPerson}: ${text.payerCostEstimateConsentShort}`;
   if (field === "payer_relationship") return `${text.payerPerson}: ${text.payerRelationship} – ${text.payerRelationshipOther}`;
   if (field.startsWith("payer_")) {
     return `${text.payerPerson}: ${payerFieldLabel(text, field as PayerField, guardian, payerType)}`;
@@ -662,6 +680,11 @@ const de: LeadRequestText = {
     "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr den Namen der Patientin / des Patienten mitteilt.",
   payerConsentHint: "Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.",
   payerConsentShort: "Einverständnis zur Kontaktaufnahme",
+  payerCostEstimateConsentLabel:
+    "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
+  payerCostEstimateConsentHint:
+    "Ohne diese Einwilligung können wir der zahlenden Person die Unterlagen zur Kostenübernahme nicht zur Unterschrift senden.",
+  payerCostEstimateConsentShort: "Einwilligung zur Weitergabe des Kostenvoranschlags",
   payerAnsweredByPayer: "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
   ownAccountQuestion: "Handeln Sie im eigenen wirtschaftlichen Interesse?",
   beneficialOwner: "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)",
@@ -864,6 +887,10 @@ const de: LeadRequestText = {
   payerSubmittedNote: "Möchten Sie etwas ändern, wenden Sie sich bitte an GMED.",
   payerQuestionnaireLoadFailed: "Ihre Angaben als zahlende Person konnten nicht geladen werden.",
   payerQuestionnaireLocked: "Ihre Angaben als zahlende Person sind bereits gesendet und können hier nicht mehr geändert werden.",
+  payerSignatureSent: (date) =>
+    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
+  payerSignatureSigned: (date) =>
+    `Vielen Dank – die unterschriebenen Unterlagen sind ${date ? `am ${date} ` : ""}bei GMED eingegangen.`,
 };
 
 const ru: LeadRequestText = {
@@ -1012,6 +1039,11 @@ const ru: LeadRequestText = {
     "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им имя пациента.",
   payerConsentHint: "Без этого согласия мы не вправе обращаться к плательщику.",
   payerConsentShort: "Согласие на контакт",
+  payerCostEstimateConsentLabel:
+    "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами – только виды услуг и суммы, без диагнозов и названий лечения.",
+  payerCostEstimateConsentHint:
+    "Без этого согласия мы не можем отправить плательщику документы об оплате расходов на подпись.",
+  payerCostEstimateConsentShort: "Согласие на передачу сметы",
   payerAnsweredByPayer: "Плательщик сам указал свои данные. Изменения только через GMED.",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
   beneficialOwner: "В чьих интересах вы действуете? (имя, дата рождения, место рождения, адрес)",
@@ -1218,6 +1250,9 @@ const ru: LeadRequestText = {
   payerSubmittedNote: "Если вы хотите что-то изменить, обратитесь, пожалуйста, в GMED.",
   payerQuestionnaireLoadFailed: "Не удалось загрузить ваши данные как плательщика.",
   payerQuestionnaireLocked: "Ваши данные как плательщика уже отправлены, изменить их здесь больше нельзя.",
+  payerSignatureSent: (date) =>
+    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам четыре документа для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
+  payerSignatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
 };
 
 const uk: LeadRequestText = {
@@ -1366,6 +1401,11 @@ const uk: LeadRequestText = {
     "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй ім'я пацієнта.",
   payerConsentHint: "Без цієї згоди ми не маємо права звертатися до платника.",
   payerConsentShort: "Згода на контакт",
+  payerCostEstimateConsentLabel:
+    "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами – лише види послуг і суми, без діагнозів і назв лікування.",
+  payerCostEstimateConsentHint:
+    "Без цієї згоди ми не можемо надіслати платнику документи щодо оплати витрат на підпис.",
+  payerCostEstimateConsentShort: "Згода на передачу кошторису",
   payerAnsweredByPayer: "Платник сам указав свої дані. Зміни лише через GMED.",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
   beneficialOwner: "В чиїх інтересах ви дієте? (ім'я, дата народження, місце народження, адреса)",
@@ -1572,6 +1612,9 @@ const uk: LeadRequestText = {
   payerSubmittedNote: "Якщо ви хочете щось змінити, зверніться, будь ласка, до GMED.",
   payerQuestionnaireLoadFailed: "Не вдалося завантажити ваші дані як платника.",
   payerQuestionnaireLocked: "Ваші дані як платника вже надіслано, змінити їх тут більше не можна.",
+  payerSignatureSent: (date) =>
+    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам чотири документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
+  payerSignatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
 };
 
 const en: LeadRequestText = {
@@ -1720,6 +1763,11 @@ const en: LeadRequestText = {
     "I agree that GMED contacts this person or organisation about covering the costs and tells them the patient's name.",
   payerConsentHint: "Without this consent we may not approach the payer.",
   payerConsentShort: "Consent to contact",
+  payerCostEstimateConsentLabel:
+    "I agree that GMED sends the paying person the cost estimate with the expected costs – only the types of services and the amounts, without diagnoses or names of treatments.",
+  payerCostEstimateConsentHint:
+    "Without this consent we cannot send the paying person the documents on covering the costs for signature.",
+  payerCostEstimateConsentShort: "Consent to pass on the cost estimate",
   payerAnsweredByPayer: "The paying person has given their details themselves. Changes only through GMED.",
   ownAccountQuestion: "Are you acting in your own economic interest?",
   beneficialOwner: "In whose interest are you acting? (name, date of birth, place of birth, address)",
@@ -1917,6 +1965,9 @@ const en: LeadRequestText = {
   payerSubmittedNote: "If you want to change something, please contact GMED.",
   payerQuestionnaireLoadFailed: "Your details as the paying person could not be loaded.",
   payerQuestionnaireLocked: "Your details as the paying person have been sent and can no longer be changed here.",
+  payerSignatureSent: (date) =>
+    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
+  payerSignatureSigned: (date) => `Thank you – GMED received the signed documents${date ? ` on ${date}` : ""}.`,
 };
 
 /** Languages of the lead cabinet: the portal's DE/RU plus UA and EN. */

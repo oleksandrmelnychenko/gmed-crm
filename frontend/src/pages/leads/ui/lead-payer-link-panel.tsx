@@ -11,6 +11,8 @@ import {
   type LeadPayerLinkState,
   type PayerLinkLanguage,
 } from "../data/lead-payer-link-api";
+import type { PayerPackageSummary } from "../data/lead-payer-package-api";
+import { payerPackageSummaryText } from "../model/lead-payer-package";
 import {
   estimatedTotalInput,
   parseEstimatedTotal,
@@ -53,6 +55,7 @@ export function LeadPayerLinkPanel({
   tx,
   errorText,
   onSent,
+  packageSummary,
 }: {
   leadId: string;
   state: LeadPayerLinkState;
@@ -65,6 +68,12 @@ export function LeadPayerLinkPanel({
   errorText: (error: unknown) => string;
   /** After a link went out: the server marked the payer as informed. */
   onSent?: () => void;
+  /**
+   * The payer's signature package from the declaration's status (phase 3b):
+   * named once the payer has answered; null while none is prepared, absent
+   * (undefined) on an older server — then nothing is shown.
+   */
+  packageSummary?: PayerPackageSummary | null;
 }) {
   const [language, setLanguage] = useState<PayerLinkLanguage | null>(null);
   const [reopen, setReopen] = useState(false);
@@ -225,6 +234,15 @@ export function LeadPayerLinkPanel({
           ) : null}
         </>
       )}
+
+      {state.questionnaire?.submitted_at && packageSummary !== undefined ? (
+        <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-package" data-status={packageSummary?.status ?? "none"}>
+          {tx("Пакет на подпись: ", "Unterschriftenpaket: ")}
+          <span className="font-medium text-foreground">{payerPackageSummaryText(packageSummary, tx)}</span>
+          {" "}
+          {tx("(шаг «Договор и смета»)", "(Schritt „Vertrag & Angebot“)")}
+        </p>
+      ) : null}
 
       <EstimatedTotalField
         key={state.estimated_total_eur ?? "none"}

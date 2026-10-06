@@ -37,6 +37,7 @@ pub mod lead_enhanced_check;
 pub mod lead_identification;
 pub mod lead_payer;
 pub mod lead_payer_link;
+pub mod lead_payer_package;
 pub mod lead_portal_account;
 pub mod lead_portal_guardians;
 pub mod lead_portal_intake;
@@ -119,6 +120,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(patient_portal_access::router())
         .merge(lead_payer::router())
         .merge(lead_payer_link::router())
+        .merge(lead_payer_package::router())
         .merge(lead_identification::router())
         .merge(lead_enhanced_check::router())
         .merge(orders::router())

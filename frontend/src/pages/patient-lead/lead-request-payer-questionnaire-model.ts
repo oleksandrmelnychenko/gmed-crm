@@ -2,6 +2,7 @@ import type {
   LeadPayerAnswers,
   LeadPayerDocument,
   LeadPayerQuestionnaire,
+  LeadPayerSignaturePackage,
   LeadRequestPayerQuestionnaireSummary,
   PayerQuestionnairePatch,
 } from "./lead-request-api";
@@ -158,15 +159,54 @@ export function normalizeLeadPayerQuestionnaire(value: unknown): LeadPayerQuesti
     missing_for_submit: stringList(raw.missing_for_submit),
     declared_correct_at: textOrNull(raw.declared_correct_at),
     submitted_at: textOrNull(raw.submitted_at),
+    // Only when the server sends it here: otherwise the request's short form says it.
+    ...("signature_package" in raw ? { signature_package: normalizePayerSignaturePackage(raw.signature_package) } : {}),
   };
 }
 
-/** The short form the request object carries, after a write of the questionnaire. */
-export function payerQuestionnaireSummary(questionnaire: LeadPayerQuestionnaire): LeadRequestPayerQuestionnaireSummary {
+/**
+ * The payer's signature package as the payer and the paying parent see it
+ * (contract phase 3b, 4.4): `sent` while it waits for the signature (also a
+ * server that names the step, `sending` or `pending`), `signed` once it came
+ * back; `null` for no package and for anything else.
+ */
+export function normalizePayerSignaturePackage(value: unknown): LeadPayerSignaturePackage | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  const status =
+    raw.status === "signed" ? "signed" : raw.status === "sent" || raw.status === "sending" || raw.status === "pending" ? "sent" : null;
+  if (!status) return null;
+  return { status, sent_at: textOrNull(raw.sent_at), signed_at: textOrNull(raw.signed_at) };
+}
+
+/**
+ * The package of the first source that says anything about it (the key is
+ * there, also as `null`); `null` when none does — an older server, as today.
+ */
+export function payerSignaturePackageOf(...sources: unknown[]): LeadPayerSignaturePackage | null {
+  for (const source of sources) {
+    const raw = asRecord(source);
+    if (raw && "signature_package" in raw) return normalizePayerSignaturePackage(raw.signature_package);
+  }
+  return null;
+}
+
+/**
+ * The short form the request object carries, after a write of the
+ * questionnaire. The signature package the request knew stays unless the
+ * questionnaire says otherwise.
+ */
+export function payerQuestionnaireSummary(
+  questionnaire: LeadPayerQuestionnaire,
+  previous?: LeadRequestPayerQuestionnaireSummary | null,
+): LeadRequestPayerQuestionnaireSummary {
+  const signature =
+    questionnaire.signature_package !== undefined ? questionnaire.signature_package : previous?.signature_package;
   return {
     available: true,
     submitted_at: questionnaire.submitted_at,
     missing_count: questionnaire.missing_for_submit.length,
+    ...(signature !== undefined ? { signature_package: signature } : {}),
   };
 }
 

@@ -269,6 +269,10 @@ function recompute(request: ReturnType<typeof leadRequest>) {
                 ...(payer.relationship_kind === "other" && !payer.relationship ? ["payer_relationship"] : []),
                 // Nobody agrees to be contacted oneself: a paying parent is not asked (BE5).
                 ...(payer.contact_consent_at || parentPays ? [] : ["payer_contact_consent"]),
+                // The consent to pass the cost estimate on (phase 3b, 11.2), from a server that knows it.
+                ...("cost_estimate_consent_at" in payer && !payer.cost_estimate_consent_at && !parentPays
+                  ? ["payer_cost_estimate_consent"]
+                  : []),
               ]
             : []),
         ]
@@ -449,6 +453,8 @@ async function setup(
   const calls = {
     personalData: [] as Record<string, unknown>[],
     payer: [] as Record<string, unknown>[],
+    /** Bodies of POST …/payer/cost-estimate-consent (phase 3b, 11.2). */
+    costEstimateConsent: [] as Record<string, unknown>[],
     identification: [] as Record<string, unknown>[],
     representation: [] as Record<string, unknown>[],
     billing: [] as Record<string, unknown>[],
@@ -558,8 +564,27 @@ async function setup(
         }
       }
       const before = request.payer;
+      // A server that knows the consent to pass the cost estimate on keeps it for the same
+      // third party and clears it with another payer (phase 3b, 11.1); the answer never sets it.
+      if (before && "cost_estimate_consent_at" in before) {
+        const samePayer = stored.payer_kind === "third_party" && payerKey(before) === payerKey(stored);
+        stored.cost_estimate_consent_at = samePayer ? (before.cost_estimate_consent_at ?? null) : null;
+      }
       request.payer = stored;
       if (request.billing) billingAfterPayerChange(request.billing, before, stored);
+      if (request.submitted_at) request.changed_since_submit = true;
+      recompute(request);
+      return route.fulfill({ json: request });
+    }
+    if (path === "/me/lead-requests/lead-1/payer/cost-estimate-consent" && method === "POST") {
+      const body = req.postDataJSON() as Record<string, unknown>;
+      calls.costEstimateConsent.push(body);
+      if (request.payer?.payer_kind !== "third_party") {
+        return route.fulfill({ status: 409, json: { code: "no_third_party_payer", message: "No third party pays" } });
+      }
+      // Like the server: `true` records it (the first time stays), `false` removes it; also once the payer answered.
+      request.payer.cost_estimate_consent_at =
+        body.consent === true ? (request.payer.cost_estimate_consent_at ?? "2026-10-03T09:17:00Z") : null;
       if (request.submitted_at) request.changed_since_submit = true;
       recompute(request);
       return route.fulfill({ json: request });
@@ -1233,6 +1258,91 @@ test.describe("lead cabinet", () => {
     await page.locator('[data-step="send"]').click();
     await page.waitForTimeout(1000);
     expect(calls.payer).toHaveLength(1);
+  });
+
+  test("the payer gets the cost estimate only with the patient's own consent, given apart from the answer", async ({ page }) => {
+    const { request, calls } = await setup(page, "lead", {
+      prepare: (prepared) => completeRequestWithPayer(prepared, { cost_estimate_consent_at: null }),
+    });
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    const consent = page.getByTestId("lead-request-payer-cost-estimate-consent");
+    const missing = page.getByTestId("lead-request-missing");
+
+    // Below the consent to contact the payer, in the owner's words.
+    await expect(consent).toContainText(
+      "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
+    );
+    await expect(consent).toContainText(
+      "Ohne diese Einwilligung können wir der zahlenden Person die Unterlagen zur Kostenübernahme nicht zur Unterschrift senden.",
+    );
+    const order = await payer
+      .locator('[data-testid="lead-request-payer-consent"], [data-testid="lead-request-payer-cost-estimate-consent"]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+    expect(order).toEqual(["lead-request-payer-consent", "lead-request-payer-cost-estimate-consent"]);
+    await expect(consent.getByRole("checkbox")).not.toBeChecked();
+
+    // The request cannot be sent without it.
+    await page.locator('[data-step="send"]').click();
+    await expect(missing.getByRole("listitem")).toHaveText(["Zahler: Einwilligung zur Weitergabe des Kostenvoranschlags"]);
+    await expect(page.getByTestId("lead-request-summary-payer")).not.toContainText("Einwilligung zur Weitergabe");
+
+    // Saved at once on its own route, not with the answer "who pays".
+    await page.locator('[data-step="data"]').click();
+    await consent.getByRole("checkbox").check();
+    await expect.poll(() => calls.costEstimateConsent).toEqual([{ consent: true }]);
+    await expect(consent).toContainText("Zugestimmt am 03.10.2026 11:17");
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toHaveCount(0);
+    const summary = page.getByTestId("lead-request-summary-payer");
+    await expect(summary).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
+    await expect(summary).toContainText("Zugestimmt am 03.10.2026 11:17");
+    expect(calls.payer).toEqual([]);
+
+    // Taken back: removed on the server and missing again.
+    await page.locator('[data-step="data"]').click();
+    await consent.getByRole("checkbox").uncheck();
+    await expect.poll(() => calls.costEstimateConsent.at(-1)).toEqual({ consent: false });
+    await expect(consent).not.toContainText("Zugestimmt am");
+    expect(request.payer?.cost_estimate_consent_at).toBeNull();
+
+    // Given again, then another person is named: the consent was for the payer before.
+    await consent.getByRole("checkbox").check();
+    await expect(consent).toContainText("Zugestimmt am");
+    await payer.getByRole("textbox", { name: "Nachname" }).fill("Zahlerin");
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ last_name: "Zahlerin" });
+    expect(calls.payer.every((body) => !("cost_estimate_consent" in body) && !("consent" in body))).toBe(true);
+    await expect(consent.getByRole("checkbox")).not.toBeChecked();
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toContainText("Zahler: Einwilligung zur Weitergabe des Kostenvoranschlags");
+  });
+
+  test("after the payer answered, the consent to pass the cost estimate on stays the patient's to give", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (prepared) => completeRequestWithPayer(prepared, { answered_by_payer: true, cost_estimate_consent_at: null }),
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/");
+    const payer = page.getByTestId("lead-request-payer");
+    await expect(page.getByTestId("lead-request-payer-answered")).toBeVisible();
+    // Read-only but for the lead's own statements: why the payer pays, and this consent.
+    await expect(payer.getByRole("combobox")).toHaveCount(0);
+    const consent = payer.getByTestId("lead-request-payer-cost-estimate-consent");
+    await expect(consent.getByRole("checkbox")).toBeEnabled();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    expect(await widestOverhang(page, "lead-request-data")).toBeLessThanOrEqual(1);
+
+    await consent.getByRole("checkbox").check();
+    await expect.poll(() => calls.costEstimateConsent).toEqual([{ consent: true }]);
+    await expect(page.getByTestId("lead-request-payer-readonly")).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
+    await expect(consent).toContainText("Zugestimmt am 03.10.2026 11:17");
+    await page.locator('[data-step="send"]').click();
+    await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Einwilligung zur Weitergabe des Kostenvoranschlags");
+    expect(await widestOverhang(page, "lead-request-send")).toBeLessThanOrEqual(1);
+    // Nothing of the payer itself was sent.
+    expect(calls.payer).toEqual([]);
   });
 
   test("a parent may answer 'I pay' and finds the own data filled in", async ({ page }) => {

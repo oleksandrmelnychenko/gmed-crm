@@ -247,6 +247,16 @@ type Options = {
   identityDocuments?: Doc[];
   /** `OTHER_TOKEN` is a second valid link for the same payer, with its own code and session. */
   secondLink?: boolean;
+  /** The payer sent the details before (with `answers`, `route`, `identityDocuments` complete). */
+  submitted?: boolean;
+  /**
+   * Phase 3b, 4.4: the documents for the payer's signature as the link's GET
+   * names them; left out, the key is absent (an older server). Changeable
+   * later through `signature.value`.
+   */
+  signaturePackage?: Record<string, unknown> | null;
+  /** The link's GET names the package only with a valid session. */
+  signaturePackageWithSession?: boolean;
 };
 
 type Call = {
@@ -279,9 +289,12 @@ async function setup(page: Page, options: Options = {}) {
     funds_proof_required: false,
     funds_source_options: payerType === "person" ? PERSON_FUNDS_SOURCES : ORGANISATION_FUNDS_SOURCES,
     missing_for_submit: [],
-    declared_correct_at: null,
-    submitted_at: null,
+    declared_correct_at: options.submitted ? "2026-10-06T10:30:00Z" : null,
+    submitted_at: options.submitted ? "2026-10-06T10:30:00Z" : null,
   };
+  if (options.submitted) q.state = "submitted";
+  /** The signature package the server names; `undefined` leaves the key out. */
+  const signature: { value: Record<string, unknown> | null | undefined } = { value: options.signaturePackage };
   const state = {
     status: options.linkStatus ?? "active",
     codeSentAt: options.codeSentSecondsAgo !== undefined ? Date.now() - options.codeSentSecondsAgo * 1000 : (null as number | null),
@@ -427,6 +440,9 @@ async function setup(page: Page, options: Options = {}) {
           expires_at: "2026-11-05T10:00:00Z",
           code_sent_at: link.codeSentAt ? new Date(link.codeSentAt).toISOString() : null,
           session_valid: sessionValid,
+          ...(signature.value !== undefined && (sessionValid || !options.signaturePackageWithSession)
+            ? { signature_package: signature.value }
+            : {}),
         },
       });
     }
@@ -525,7 +541,7 @@ async function setup(page: Page, options: Options = {}) {
     return refuse(route, 404, "not_found");
   });
 
-  return { q, state, second, calls };
+  return { q, state, second, calls, signature };
 }
 
 /** Sets a date field (a date picker that takes "DD.MM.YYYY") like typing does. */
@@ -1138,6 +1154,69 @@ test.describe("payer link", () => {
     await page.getByTestId("payer-link-submit").click();
     await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
     await expect(page.getByTestId("payer-link-summary-funds")).toContainText("kontoauszug.pdf");
+    expect(calls.others).toEqual([]);
+  });
+
+  test("after the details were sent, the page says where the documents for signing stand", async ({ page }) => {
+    const { calls, signature } = await setup(page, {
+      acknowledged: true,
+      answers: completeAnswers("person"),
+      route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")],
+      submitted: true,
+      signaturePackage: { status: "sent", sent_at: "2026-10-06T12:00:00Z", signed_at: null },
+      // The link names the package only to the payer with the code.
+      signaturePackageWithSession: true,
+    });
+    await page.goto(`/payer#${TOKEN}`);
+    await expect(page.getByTestId("payer-link-submitted-note")).toBeVisible(lazyPageLoad);
+    await expect(page.getByTestId("payer-link-signature")).toHaveCount(0);
+    await page.getByTestId("payer-link-send-code").click();
+    await page.getByLabel("Bestätigungscode (6 Ziffern)").fill(CODE);
+    await page.getByTestId("payer-link-verify").click();
+
+    // Sent: four documents through Skribble, with the day they went out.
+    const thanks = page.getByTestId("payer-link-thanks");
+    await expect(thanks).toContainText("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.");
+    const status = page.getByTestId("payer-link-signature");
+    await expect(status).toHaveAttribute("data-status", "sent");
+    await expect(status).toHaveText(
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+    );
+    // Asked for once more with the session after the code; the secrets stay in the headers.
+    const infos = calls.payer.filter((call) => call.method === "GET" && call.path === "/public/payer-link");
+    expect(infos.at(-1)?.session).toBe(SESSION);
+    for (const call of calls.payer) expect(call.url).not.toContain(SESSION);
+    // In the language chosen.
+    const switcher = page.getByTestId("payer-link-language");
+    await switcher.getByRole("radio", { name: "EN" }).click();
+    await expect(status).toHaveText(
+      "Documents for signature: On 06.10.2026 we sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.",
+    );
+    await switcher.getByRole("radio", { name: "RU" }).click();
+    await expect(status).toContainText("Документы на подпись: 06.10.2026 мы отправили вам четыре документа");
+    await switcher.getByRole("radio", { name: "DE" }).click();
+
+    // Signed and back at GMED: the next visit says so (the session of this tab is kept).
+    signature.value = { status: "signed", sent_at: "2026-10-06T12:00:00Z", signed_at: "2026-10-08T09:00:00Z" };
+    await page.reload();
+    await expect(status).toHaveAttribute("data-status", "signed", lazyPageLoad);
+    await expect(status).toHaveText("Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.");
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(status).toBeVisible();
+      expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);
+      expect(await widestOverhang(page), `${width}px`).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: test.info().outputPath(`payer-signature-${width}.png`), fullPage: true });
+    }
+
+    // No package (withdrawn, or another payer's) and an older server without the key: nothing is said.
+    for (const value of [null, undefined]) {
+      signature.value = value;
+      await page.reload();
+      await expect(page.getByTestId("payer-link-thanks")).toBeVisible(lazyPageLoad);
+      await expect(page.getByTestId("payer-link-signature")).toHaveCount(0);
+    }
     expect(calls.others).toEqual([]);
   });
 

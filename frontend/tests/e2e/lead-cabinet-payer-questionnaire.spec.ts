@@ -215,9 +215,26 @@ function recompute(value: Questionnaire, representativeMissing: string[]) {
   value.missing_for_submit = missing;
 }
 
-async function setup(page: Page, options: { paying?: boolean; adult?: boolean; representativeMissing?: string[] } = {}) {
+type SetupOptions = {
+  paying?: boolean;
+  adult?: boolean;
+  representativeMissing?: string[];
+  /** The questionnaire was sent before (with complete answers). */
+  submitted?: boolean;
+  /** Phase 3b, 4.4: the signature package in the request's short form; left out, the key is absent. */
+  summarySignature?: Record<string, unknown> | null;
+  /** The same in the questionnaire object; changeable later through `state.questionnaireSignature`. */
+  questionnaireSignature?: Record<string, unknown> | null;
+};
+
+async function setup(page: Page, options: SetupOptions = {}) {
   const paying = options.paying ?? true;
   const request = childRequest({ paying }) as Record<string, unknown>;
+  // A server that knows the consent to pass the cost estimate on (phase 3b, 11.2): never asked of the paying parent.
+  Object.assign(request.payer as Record<string, unknown>, { cost_estimate_consent_at: null });
+  if (paying && options.summarySignature !== undefined) {
+    request.payer_questionnaire = { ...(request.payer_questionnaire as Record<string, unknown>), signature_package: options.summarySignature };
+  }
   if (options.adult) {
     Object.assign(request, {
       access_kind: "self",
@@ -229,7 +246,23 @@ async function setup(page: Page, options: { paying?: boolean; adult?: boolean; r
     });
   }
   const representativeMissing = options.representativeMissing ?? [];
-  const state = { questionnaire: questionnaire() };
+  const state = {
+    questionnaire: questionnaire(),
+    questionnaireSignature: options.questionnaireSignature as Record<string, unknown> | null | undefined,
+  };
+  if (options.submitted) {
+    Object.assign(state.questionnaire.privacy, { acknowledged_at: "2026-10-06T10:00:00Z", contact_channels: ["email"] });
+    Object.assign(state.questionnaire.answers, {
+      occupation: "Ingenieurin",
+      funds_sources: ["employment"],
+      pep_self: false,
+      pep_related: false,
+      high_risk_country: false,
+      sanctions_links: false,
+    });
+    Object.assign(state.questionnaire, { state: "submitted", declared_correct_at: "2026-10-06T10:30:00Z", submitted_at: "2026-10-06T10:30:00Z" });
+    request.payer_questionnaire = { ...(request.payer_questionnaire as Record<string, unknown>), submitted_at: "2026-10-06T10:30:00Z", missing_count: 0 };
+  }
   recompute(state.questionnaire, representativeMissing);
   const calls = {
     patches: [] as Record<string, unknown>[],
@@ -242,7 +275,9 @@ async function setup(page: Page, options: { paying?: boolean; adult?: boolean; r
   };
   const answer = () => {
     recompute(state.questionnaire, representativeMissing);
-    return state.questionnaire;
+    return state.questionnaireSignature === undefined
+      ? state.questionnaire
+      : { ...state.questionnaire, signature_package: state.questionnaireSignature };
   };
   const refuse = (status: number, code: string, field?: string) => ({ status, json: { code, message: code, ...(field ? { field } : {}) } });
 
@@ -507,6 +542,52 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await page.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
     await expect(page.getByTestId("lead-request-payer-submit")).toBeDisabled();
     expect(calls.submits).toEqual([]);
+  });
+
+  test("after sending, the paying parent reads where the documents for signing stand", async ({ page }, testInfo) => {
+    const { state } = await setup(page, {
+      submitted: true,
+      summarySignature: { status: "sent", sent_at: "2026-10-06T12:00:00Z", signed_at: null },
+    });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/");
+    const section = page.getByTestId("lead-request-payer-questionnaire");
+    await expect(section.getByTestId("lead-request-payer-sent")).toContainText("Ihre Angaben als zahlende Person wurden am 06.10.2026 12:30 gesendet.");
+
+    // From the request's short form: the questionnaire's answer does not name the package and keeps it.
+    const status = section.getByTestId("lead-request-payer-signature");
+    await expect(status).toHaveAttribute("data-status", "sent");
+    await expect(status).toHaveText(
+      "Unterlagen zur Unterschrift: Wir haben Ihnen am 06.10.2026 vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.",
+    );
+    // The parent pays: no consent to send oneself the cost estimate is asked in "who pays".
+    await expect(page.getByTestId("lead-request-payer-cost-estimate-consent")).toHaveCount(0);
+
+    // Signed and back at GMED: the questionnaire says so and wins over the short form.
+    state.questionnaireSignature = { status: "signed", sent_at: "2026-10-06T12:00:00Z", signed_at: "2026-10-08T09:00:00Z" };
+    await page.reload();
+    await expect(status).toHaveAttribute("data-status", "signed");
+    await expect(status).toHaveText("Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.");
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await status.scrollIntoViewIfNeeded();
+      expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);
+      await page.screenshot({ path: testInfo.outputPath(`lead-cabinet-payer-signature-de-${width}.png`), animations: "disabled", fullPage: true });
+    }
+
+    // No package any more (withdrawn): nothing is said.
+    state.questionnaireSignature = null;
+    await page.reload();
+    await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+    await expect(status).toHaveCount(0);
+  });
+
+  test("an older server says nothing about signing: the section is as before", async ({ page }) => {
+    await setup(page, { submitted: true });
+    await page.goto("/");
+    const section = page.getByTestId("lead-request-payer-questionnaire");
+    await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+    await expect(section.getByTestId("lead-request-payer-signature")).toHaveCount(0);
   });
 
   test("the other parent, who does not pay, and an adult self-payer see no such section", async ({ page }) => {

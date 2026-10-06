@@ -591,6 +591,43 @@ async fn cost_calculation_available(
     Ok(false)
 }
 
+/// The read-only companions a server-assembled package needs, chosen like a
+/// composer would: per companion template the members require, the newest
+/// eligible document of the same scope (for the medical cost calculation: of
+/// the order of the cost estimate). A cost calculation that does not exist is
+/// left out, as [`prepare_attachments`] allows; a missing privacy information
+/// is left to [`prepare_attachments`] to refuse.
+pub(super) async fn required_attachment_ids(
+    state: &AppState,
+    auth: &AuthUser,
+    members: &[&PgRow],
+) -> Result<Vec<Uuid>, Response> {
+    let Some(first) = members.first() else {
+        return Ok(Vec::new());
+    };
+    let mut required: Vec<&'static str> = Vec::new();
+    for member in members {
+        if let Some(template) = companion(template_of(member).as_deref())
+            && !required.contains(&template)
+        {
+            required.push(template);
+        }
+    }
+    let mut ids = Vec::new();
+    for template in required {
+        for id in scope_documents(state, first, &[template]).await? {
+            if let Ok(row) = signature_document_access(state, auth, id, false).await
+                && attachment_scope_matches(template, members, &row)
+                && eligibility(&row).is_none()
+            {
+                ids.push(id);
+                break;
+            }
+        }
+    }
+    Ok(ids)
+}
+
 /// Validates the informational attachments of a request. Every companion the
 /// signed documents require must be attached (Art. 13/14 DSGVO information,
 /// the medical cost calculation); nothing else may be. The cost calculation is

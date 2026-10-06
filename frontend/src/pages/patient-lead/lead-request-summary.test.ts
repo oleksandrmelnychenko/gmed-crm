@@ -346,6 +346,27 @@ describe("lead request summary", () => {
     }
   });
 
+  it("lists the consent to pass the cost estimate on once given, also after the payer answered", () => {
+    const label = "Einwilligung zur Weitergabe des Kostenvoranschlags";
+    const given = request({ payer: { ...request().payer!, cost_estimate_consent_at: "2026-10-06T08:30:00Z" } });
+    const payerRows = rows(requestSummary(given, de, "de"), "payer");
+    expect(payerRows[label]).toBe("Zugestimmt am 06.10.2026 10:30");
+    const order = Object.keys(payerRows);
+    expect(order.indexOf(label)).toBe(order.indexOf("Einverständnis zur Kontaktaufnahme") + 1);
+    // Not given yet, or an older server: no row (the list of what is missing names it).
+    for (const payer of [{ ...request().payer!, cost_estimate_consent_at: null }, request().payer!]) {
+      expect(rows(requestSummary(request({ payer }), de, "de"), "payer")).not.toHaveProperty(label);
+    }
+    // After the payer answered: among what the lead named, in the block and in the summary.
+    const answered = request({ payer: { ...given.payer!, answered_by_payer: true } });
+    expect(Object.fromEntries(answeredPayerRows(answered, de).map((row) => [row.label, row.value]))).toMatchObject({
+      [label]: "Zugestimmt am 06.10.2026 10:30",
+    });
+    expect(rows(requestSummary(answered, leadRequestText("en"), "en"), "payer")["Consent to pass on the cost estimate"]).toBe(
+      "Agreed on 06.10.2026 10:30",
+    );
+  });
+
   it("shows a payer of a server without the payer type as before", () => {
     // Only the keys such a server sends: the relationship is a text, there is no type and no consent.
     const older = request({

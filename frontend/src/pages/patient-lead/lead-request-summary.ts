@@ -69,6 +69,15 @@ function enteredRows(rows: Entry[]): SummaryRow[] {
 }
 
 /**
+ * The consent that GMED sends the payer the cost estimate (phase 3b, 11.7),
+ * as a row of "who pays": listed once given, like the consent to contact the
+ * payer; while it is missing the list of what is still needed names it.
+ */
+function costEstimateConsentRow(givenAt: string | null | undefined, text: LeadRequestText): Entry {
+  return [text.payerCostEstimateConsentShort, givenAt ? text.consentGivenAt(formatAppDateTime(givenAt)) : ""];
+}
+
+/**
  * The payer answered on the own link (`answered_by_payer`): the lead cabinet
  * no longer changes "who pays" — only GMED does — and the server sends only
  * what the lead named. `false` for an older server, which does not say so.
@@ -79,8 +88,9 @@ export function payerAnsweredByPayer(request: Pick<LeadRequest, "payer">): boole
 
 /**
  * "Who pays" read-only, after the payer answered: what the lead named (the
- * answer, what the payer is, the name, the relationship, the consent to
- * contact the payer) and the own economic interest. The lead cabinet shows
+ * answer, what the payer is, the name, the relationship, the consents to
+ * contact the payer and to send it the cost estimate) and the own economic
+ * interest. The lead cabinet shows
  * these rows in the block and in the summary of step "send".
  */
 export function answeredPayerRows(request: LeadRequest, text: LeadRequestText): SummaryRow[] {
@@ -108,6 +118,7 @@ export function answeredPayerRows(request: LeadRequest, text: LeadRequestText): 
               ] satisfies Entry[])),
           [label("payer_relationship"), relationship],
           [text.payerConsentShort, payer.contact_consent_at ? text.consentGivenAt(formatAppDateTime(payer.contact_consent_at)) : ""],
+          costEstimateConsentRow(payer.cost_estimate_consent_at, text),
         ] satisfies Entry[])
       : []),
     [payerFieldLabel(text, "payer_own_account", guardian), yesNo(payer.acts_on_own_account)],
@@ -305,6 +316,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
           text.payerConsentShort,
           party.contact_consent_at ? text.consentGivenAt(formatAppDateTime(party.contact_consent_at)) : "",
         ],
+        costEstimateConsentRow(party.cost_estimate_consent_at, text),
       ];
     };
     group("payer", text.sectionPayer, [

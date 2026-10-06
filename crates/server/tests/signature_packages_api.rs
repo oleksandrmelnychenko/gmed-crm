@@ -1994,3 +1994,188 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .unwrap();
     assert_eq!(compliance, "signed");
 }
+
+/// Phase 3b (owner decisions 2026-10-06): the payer's own documents — the
+/// self-disclosure with the payer's identity data, the statement about the
+/// payer, the payer's copy of the cost estimate — are signed by the payer and
+/// GMED only, with a QES, never in one PDF with a document the patient side
+/// signs. The client's preset never takes the payer's copy, the client's
+/// estimate and the payer's copy are out for signature at the same time, and
+/// the payer's copy carries no medical cost calculation.
+#[tokio::test]
+async fn the_payers_documents_never_reach_the_patient_side() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
+    let payer = || signer("Viktor", "viktor.zahler@example.com", "payer");
+    let agency = || signer("Max", "max@example.org", "agency");
+    let disclosure = upload(
+        &env,
+        patient,
+        Doc::new("payer_self_disclosure", 1)
+            .visibility("internal")
+            .anchors(json!([anchor("payer", 0)])),
+    )
+    .await;
+    let contract = upload(&env, patient, Doc::new("framework_contract", 1)).await;
+    let consents = upload(&env, patient, Doc::new("privacy_consents", 1)).await;
+    for (body, code) in [
+        (
+            json!({"document_ids":[disclosure, contract],"signers":[payer(), agency()]}),
+            "signature_policy_conflict",
+        ),
+        (
+            json!({"document_ids":[disclosure, consents],"signers":[payer(), agency()]}),
+            "signature_policy_conflict",
+        ),
+        (
+            json!({"document_ids":[disclosure],"signers":both_parties()}),
+            "payer_package_signers_required",
+        ),
+        (
+            json!({"document_ids":[disclosure],"signers":[payer(), signer("Erika", "erika@example.org", "client"), agency()]}),
+            "payer_package_signers_required",
+        ),
+        (
+            json!({"document_ids":[disclosure],"signers":[payer()]}),
+            "payer_package_signers_required",
+        ),
+        (
+            json!({"document_ids":[disclosure],"signers":[payer(), agency()],"level":"AES"}),
+            "signature_level_too_low",
+        ),
+    ] {
+        let (status, value) = call(
+            &env.app,
+            "POST",
+            "/api/v1/signature-packages",
+            &env.ceo,
+            Some(body),
+        )
+        .await;
+        assert!(status.is_client_error(), "{code}: {status} {value}");
+        assert_eq!(value["error"], code, "{value}");
+    }
+    let (status, candidates) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?patient_id={patient}"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    let listed = candidates["documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|document| document["id"] == disclosure.to_string())
+        .unwrap();
+    assert_eq!(listed["signer_policy"], "payer_package");
+    assert_eq!(listed["minimum_level"], "QES");
+
+    // The order with the client's estimate and the payer's copy of it.
+    let order: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3) RETURNING id"#,
+    )
+    .bind(format!("AUF-PAYER-{}", Uuid::new_v4().simple()))
+    .bind(patient)
+    .bind(env.admin_id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    let order_document = upload(&env, patient, Doc::new("single_order", 1)).await;
+    let estimate = upload(&env, patient, Doc::new("order_cost_estimate", 1)).await;
+    let payer_estimate = upload(
+        &env,
+        patient,
+        Doc::new("payer_cost_estimate", 1)
+            .visibility("internal")
+            .anchors(json!([anchor("payer", 0), anchor("agency", 0)])),
+    )
+    .await;
+    sqlx::query("UPDATE documents SET order_id=$2 WHERE id = ANY($1)")
+        .bind(vec![order_document, estimate, payer_estimate])
+        .bind(order)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let (status, candidates) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?document_id={order_document}"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    assert_eq!(candidates["preset_document_ids"], json!([estimate]));
+
+    // Both out for signature at once: two documents, two requests.
+    let client = send_package(
+        &env,
+        json!({"document_ids":[estimate],"signers":both_parties()}),
+    )
+    .await;
+    let paying = send_package(
+        &env,
+        json!({"document_ids":[payer_estimate],"signers":[payer(), agency()]}),
+    )
+    .await;
+    until_pending(&env, client).await;
+    until_pending(&env, paying).await;
+    let emails = env.mock.payload(paying)["signatures"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            entry["signer_identity_data"]["email_address"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(emails, ["viktor.zahler@example.com", "max@example.org"]);
+
+    // A medical cost calculation of the order is never the payer's.
+    let calculation = upload(&env, patient, Doc::new("cost_estimate", 1)).await;
+    let second_copy = upload(
+        &env,
+        patient,
+        Doc::new("payer_cost_estimate", 1)
+            .visibility("internal")
+            .anchors(json!([anchor("payer", 0), anchor("agency", 0)])),
+    )
+    .await;
+    sqlx::query("UPDATE documents SET order_id=$2 WHERE id = ANY($1)")
+        .bind(vec![calculation, second_copy])
+        .bind(order)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let (status, value) = call(
+        &env.app,
+        "POST",
+        "/api/v1/signature-packages",
+        &env.ceo,
+        Some(json!({"document_ids":[second_copy],"attachment_ids":[calculation],"signers":[payer(), agency()]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{value}");
+    assert_eq!(value["error"], "unexpected_review_attachment");
+    let without = send_package(
+        &env,
+        json!({"document_ids":[second_copy],"signers":[payer(), agency()]}),
+    )
+    .await;
+    until_pending(&env, without).await;
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM document_signature_attachments WHERE request_id=$1",
+            without
+        )
+        .await,
+        0
+    );
+}

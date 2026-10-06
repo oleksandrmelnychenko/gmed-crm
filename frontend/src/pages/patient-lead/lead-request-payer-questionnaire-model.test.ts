@@ -6,11 +6,13 @@ import {
   draftFromPayerQuestionnaire,
   fundsDescriptionRequired,
   normalizeLeadPayerQuestionnaire,
+  normalizePayerSignaturePackage,
   payerMissingParts,
   payerNoticeAcknowledged,
   payerQuestionnairePatch,
   payerQuestionnaireSubmitted,
   payerQuestionnaireSummary,
+  payerSignaturePackageOf,
   stillRejectedPayerFields,
   withFundsSource,
   withPayerLegalAnswer,
@@ -79,6 +81,46 @@ describe("paying parent's questionnaire: the server's answer", () => {
       missing_count: 4,
     });
     expect(payerQuestionnaireSubmitted(questionnaire)).toBe(true);
+  });
+
+  it("reads where the documents for the payer's signature stand, and nothing else", () => {
+    const sent = { status: "sent", sent_at: "2026-10-06T12:00:00Z", signed_at: null };
+    expect(normalizePayerSignaturePackage(sent)).toEqual(sent);
+    expect(normalizePayerSignaturePackage({ status: "signed", sent_at: "2026-10-06T12:00:00Z", signed_at: "2026-10-08T09:00:00Z" })).toEqual({
+      status: "signed",
+      sent_at: "2026-10-06T12:00:00Z",
+      signed_at: "2026-10-08T09:00:00Z",
+    });
+    // A server that names the step still means "sent"; anything else is no package to show.
+    expect(normalizePayerSignaturePackage({ status: "pending", sent_at: null })).toEqual({ status: "sent", sent_at: null, signed_at: null });
+    for (const value of [null, undefined, "sent", [], { status: "declined" }, { status: "withdrawn", sent_at: "2026-10-06T12:00:00Z" }]) {
+      expect(normalizePayerSignaturePackage(value)).toBeNull();
+    }
+    // The questionnaire carries it only when the server sends it there.
+    expect(normalizeLeadPayerQuestionnaire(raw())).not.toHaveProperty("signature_package");
+    expect(normalizeLeadPayerQuestionnaire(raw({ signature_package: null }))?.signature_package).toBeNull();
+    expect(normalizeLeadPayerQuestionnaire(raw({ signature_package: sent }))?.signature_package).toEqual(sent);
+  });
+
+  it("takes the package from the first source that says anything, and keeps it in the request's short form", () => {
+    const sent = { status: "sent", sent_at: "2026-10-06T12:00:00Z", signed_at: null } as const;
+    const signed = { status: "signed", sent_at: "2026-10-06T12:00:00Z", signed_at: "2026-10-08T09:00:00Z" } as const;
+    // The questionnaire wins, also with "no package"; without the key the request's short form says it.
+    expect(payerSignaturePackageOf({ signature_package: signed }, { signature_package: sent })).toEqual(signed);
+    expect(payerSignaturePackageOf({ signature_package: null }, { signature_package: sent })).toBeNull();
+    expect(payerSignaturePackageOf({ submitted_at: null }, { signature_package: sent })).toEqual(sent);
+    // An older server says nothing: nothing is shown.
+    expect(payerSignaturePackageOf({ submitted_at: null }, null, undefined)).toBeNull();
+
+    const questionnaire = normalizeLeadPayerQuestionnaire(raw())!;
+    const previous = { available: true, submitted_at: null, missing_count: 1, signature_package: sent };
+    // A write that does not name the package leaves the request's package as it was.
+    expect(payerQuestionnaireSummary(questionnaire, previous)).toEqual({ ...previous, missing_count: 4 });
+    expect(payerQuestionnaireSummary(questionnaire, { available: true, submitted_at: null, missing_count: 1 })).not.toHaveProperty(
+      "signature_package",
+    );
+    const withPackage = normalizeLeadPayerQuestionnaire(raw({ signature_package: signed }))!;
+    expect(payerQuestionnaireSummary(withPackage, previous).signature_package).toEqual(signed);
   });
 });
 

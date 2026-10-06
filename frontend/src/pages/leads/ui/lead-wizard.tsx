@@ -83,6 +83,7 @@ import {
   SANCTIONS_REVIEW_PENDING,
   type LeadEnhancedCheck,
 } from "../model/enhanced-check";
+import { PAYER_PACKAGE_TEMPLATE_IDS } from "../data/lead-payer-package-api";
 import { useCan } from "@/lib/permissions";
 import {
   GWG_IDENTIFICATION_TEMPLATE,
@@ -4056,6 +4057,8 @@ export function LeadWizard({
       && !wizardDocumentKind(item)
       && !(item.is_medical && !item.generated_template_id)
       && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate", "cost_coverage_declaration"].includes(item.generated_template_id ?? "")
+      // The payer's signature package lists its own documents (phase 3b).
+      && !(PAYER_PACKAGE_TEMPLATE_IDS as readonly string[]).includes(item.generated_template_id ?? "")
     )),
     [documents],
   );
@@ -6317,8 +6320,9 @@ ${serviceCommentLines.join("\n")}`
       onSelect={id => { if (reviewContracts.some(item => item.id === id)) setDraft(current => current ? { ...current, frameworkContractId: id } : current); }} />
     {inheritedContract ? <Button type="button" size="sm" variant="outline" disabled={isBusy} onClick={() => setDraft(current => current ? { ...current, frameworkContractId: "" } : current)}>{tx("Оформить договор для этого обращения", "Vertrag für diese Anfrage erstellen")}</Button> : null}
   </Section> : null;
-  // Client → payer → GMED, with the payer's Kostenübernahmeerklärung.
-  const payerSignatureFlow = leadId ? (
+  // Client → payer → GMED, with the payer's Kostenübernahmeerklärung; the
+  // payer's signature package (phase 3b) has its panel in the commercial step.
+  const renderPayerSignatureFlow = (packagePanel: boolean) => leadId ? (
     <LeadPayerSignatureFlow
       leadId={leadId}
       status={payer.data?.status ?? null}
@@ -6328,6 +6332,19 @@ ${serviceCommentLines.join("\n")}`
       tx={tx}
       errorText={(nextError) => errorText(nextError, tx)}
       onChanged={() => { void refreshDocumentsState().catch(showWizardError); }}
+      payerPackage={{
+        panel: packagePanel,
+        canEdit: canEditPayerLink,
+        onOpenDocument: (documentId, title) => {
+          const document = documents.find((item) => item.id === documentId);
+          if (document) void openOrDownloadDocument(document);
+          else void downloadDocumentFile(documentId, `${title}.pdf`).catch(showWizardError);
+        },
+        onChanged: () => {
+          void reloadPayer();
+          void refreshDocumentsState().catch(showWizardError);
+        },
+      }}
       renderDocuments={(items) => (
         <WizardDocumentRows
           documents={items}
@@ -7588,7 +7605,7 @@ ${serviceCommentLines.join("\n")}`
                   }}
                 />
               ) : null}
-              {leadId && payer.data?.status.cost_assumption.required ? payerSignatureFlow : null}
+              {leadId && payer.data?.status.cost_assumption.required ? renderPayerSignatureFlow(false) : null}
               <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
               {patientUploadDocuments.length > 0 ? (
                 <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Загружено пациентом", "Vom Patienten hochgeladen")}>
@@ -8516,7 +8533,7 @@ ${serviceCommentLines.join("\n")}`
                 {renderCommercialDocumentError("single_order")}
                 </Section>
               </div>
-              {payerSignatureFlow}
+              {renderPayerSignatureFlow(true)}
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div>
                 <ToggleRow

@@ -177,6 +177,13 @@ export type PayerLinkText = {
   thanksBody: string;
   submittedAt: (dateTime: string) => string;
   thanksNext: string;
+  /**
+   * The documents for the payer's signature (phase 3b, 6.3): sent through
+   * Skribble, or signed and back at GMED. `date` is "DD.MM.YYYY", or "" when
+   * the server does not say when.
+   */
+  signatureSent: (date: string) => string;
+  signatureSigned: (date: string) => string;
   summaryTitle: string;
   notStated: string;
   noDocuments: string;
@@ -454,6 +461,9 @@ const de: PayerLinkText = {
   thanksBody: "Ihre Angaben sind bei GMED eingegangen.",
   submittedAt: (dateTime) => `Gesendet am ${dateTime}`,
   thanksNext: "Wenn sich etwas ändert, wenden Sie sich bitte an GMED.",
+  signatureSent: (date) =>
+    `Unterlagen zur Unterschrift: Wir haben Ihnen ${date ? `am ${date} ` : ""}vier Dokumente zur qualifizierten elektronischen Signatur gesendet. Die Einladung kommt per E-Mail von unserem Partner Skribble; dort bestätigen Sie auch Ihre Identität.`,
+  signatureSigned: (date) => `Vielen Dank – die unterschriebenen Unterlagen sind ${date ? `am ${date} ` : ""}bei GMED eingegangen.`,
   summaryTitle: "Ihre Angaben",
   notStated: "Keine Angabe",
   noDocuments: "Keine Datei",
@@ -731,6 +741,9 @@ const en: PayerLinkText = {
   thanksBody: "GMED has received your details.",
   submittedAt: (dateTime) => `Sent on ${dateTime}`,
   thanksNext: "If anything changes, please contact GMED.",
+  signatureSent: (date) =>
+    `Documents for signature: ${date ? `On ${date} we` : "We"} sent you four documents to sign with a qualified electronic signature. The invitation comes by e-mail from our partner Skribble; there you also confirm your identity.`,
+  signatureSigned: (date) => `Thank you – GMED received the signed documents${date ? ` on ${date}` : ""}.`,
   summaryTitle: "Your details",
   notStated: "Not specified",
   noDocuments: "No file",
@@ -1012,6 +1025,9 @@ const uk: PayerLinkText = {
   thanksBody: "Ваші дані надійшли до GMED.",
   submittedAt: (dateTime) => `Надіслано ${dateTime}`,
   thanksNext: "Якщо щось зміниться, зверніться, будь ласка, до GMED.",
+  signatureSent: (date) =>
+    `Документи на підпис: ${date ? `${date} ` : ""}ми надіслали вам чотири документи для кваліфікованого електронного підпису. Запрошення надійде електронною поштою від нашого партнера Skribble; там ви також підтвердите свою особу.`,
+  signatureSigned: (date) => `Дякуємо – підписані документи надійшли до GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваші дані",
   notStated: "Не вказано",
   noDocuments: "Немає файлу",
@@ -1293,6 +1309,9 @@ const ru: PayerLinkText = {
   thanksBody: "Ваши данные поступили в GMED.",
   submittedAt: (dateTime) => `Отправлено ${dateTime}`,
   thanksNext: "Если что-то изменится, обратитесь, пожалуйста, в GMED.",
+  signatureSent: (date) =>
+    `Документы на подпись: ${date ? `${date} ` : ""}мы отправили вам четыре документа для квалифицированной электронной подписи. Приглашение придёт по электронной почте от нашего партнёра Skribble; там вы также подтвердите свою личность.`,
+  signatureSigned: (date) => `Спасибо – подписанные документы поступили в GMED${date ? ` ${date}` : ""}.`,
   summaryTitle: "Ваши данные",
   notStated: "Не указано",
   noDocuments: "Нет файла",

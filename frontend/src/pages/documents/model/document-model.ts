@@ -35,6 +35,8 @@ export const VISIBILITY_OPTIONS: DocumentVisibility[] = [
 const ORDER_CONTEXT_REQUIRED_TEMPLATE_IDS = new Set([
   "single_order",
   "order_cost_estimate",
+  // The payer's copy of the order's cost estimate (phase 3b).
+  "payer_cost_estimate",
 ]);
 
 const ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([
@@ -44,6 +46,7 @@ const ORDER_CONTEXT_SUPPORTED_TEMPLATE_IDS = new Set([
   "visa_invitation_letter",
   "single_order",
   "order_cost_estimate",
+  "payer_cost_estimate",
   "cost_coverage_declaration",
   "cost_estimate",
   "appointment_confirmation",
@@ -224,6 +227,10 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   privacy_information: "Informationsblatt zum Datenschutz",
   privacy_consents: "Einverständniserklärung zur Datenübermittlung",
   order_cost_estimate: "Kostenvoranschlag zum Einzelauftrag",
+  // The payer's signature package (phase 3b): generated for the payer, never the patient's.
+  patient_payer_statement: "Erklärung zur Kostenübernahme durch Dritte",
+  payer_cost_estimate: "Kostenvoranschlag für die zahlende Person",
+  payer_self_disclosure: "Selbstauskunft der zahlenden Person",
   // Uploads of the payer on the payer link: never the patient's documents.
   payer_funds_proof: "Nachweis der Mittelherkunft",
   payer_identity: "Ausweis (Zahler/in)",
