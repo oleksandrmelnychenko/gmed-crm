@@ -4952,7 +4952,13 @@ pub(crate) async fn package_subject(
     let Some(mode) = context.mode() else {
         return Ok(None);
     };
-    let built = questionnaire(&context, Viewer::Staff, &[], crate::app_time::today());
+    // Only the answers are needed here, not the check level.
+    let built = questionnaire(
+        &context,
+        Viewer::Staff,
+        &EnhancedCheck::default(),
+        crate::app_time::today(),
+    );
     let answers = &built.answers;
     let (first_name, last_name, acting_for, role) = if built.organisation {
         (
@@ -5079,7 +5085,13 @@ pub(crate) async fn self_disclosure(
     let (Some(mode), Some(submitted_at)) = (context.mode(), context.submitted_at()) else {
         return Ok(None);
     };
-    let built = questionnaire(&context, Viewer::Staff, &[], crate::app_time::today());
+    // The self-disclosure prints no check level: only the answers count.
+    let built = questionnaire(
+        &context,
+        Viewer::Staff,
+        &EnhancedCheck::default(),
+        crate::app_time::today(),
+    );
     let answers = built.answers.clone();
     let statement = &built.statement;
     let owner = |owner: &Owner| PayerOwnerLine {

@@ -21,6 +21,7 @@ const DOCUMENT_CATEGORY_LABEL_KEYS = [
   "finance_cost_coverage",
   "finance_cost_estimate",
   "finance_order_cost_estimate",
+  "finance_payer_cost_estimate",
   "finance_payment_proof",
   "compliance_aml",
   "provider_template",
@@ -128,6 +129,9 @@ const DOCUMENT_ART_LABEL_CODES = [
   "privacy_information",
   "enhanced_due_diligence",
   "gwg_identification",
+  "payer_self_disclosure",
+  "patient_payer_statement",
+  "payer_cost_estimate",
   "consent_data_release",
 ] as const;
 
