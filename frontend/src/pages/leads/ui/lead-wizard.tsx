@@ -247,6 +247,7 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
+import { selfFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -7590,6 +7591,7 @@ ${serviceCommentLines.join("\n")}`
                   lang={lang}
                   tx={tx}
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
+                  selfFunds={step1Portal.intake?.self_funds ?? null}
                   payerLink={payerLink}
                   payerLinkCanEdit={canEditPayerLink}
                   leadLanguage={draft.language}
@@ -7713,6 +7715,15 @@ ${serviceCommentLines.join("\n")}`
                         {hint}
                       </p>
                     ))}
+                    {/* The check is required: a self-paying patient owes the proof of funds (owner rule 2026-10-07). */}
+                    {amlRequired && selfFundsProofOutstanding(step1Portal.intake?.self_funds) ? (
+                      <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-self-funds-proof-missing">
+                        {tx(
+                          "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
+                          "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
+                        )}
+                      </p>
+                    ) : null}
                   </div>
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}

@@ -3,6 +3,7 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import type { LeadPortalSelfFunds } from "../data/lead-portal-intake-api";
 import { payerDeclarationChanged } from "../model/use-lead-payer-declaration";
 import type { PayerDeclaration, PayerDeclarationStatus } from "../model/lead-payer";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
@@ -236,10 +237,99 @@ describe("LeadPayerDeclarationSection: badge and contact consent", () => {
   });
 });
 
+describe("LeadPayerDeclarationSection: the self-payer's source of funds from the cabinet", () => {
+  /** The lead ticked savings and "other" in the cabinet; staff chose nothing. */
+  const stated: PayerDeclaration = {
+    ...selfPayer,
+    source_of_funds: null,
+    self_funds_sources: ["savings", "other"],
+    self_funds_description: "Stipendium der Stiftung",
+  };
+  const proof = { id: "doc-9", file_name: "kontoauszug.pdf", uploaded_at: "2026-10-07T08:00:00Z", reviewed: true };
+  const funds = (patch: Partial<LeadPortalSelfFunds> = {}): LeadPortalSelfFunds => ({
+    asked: true,
+    sources: ["savings", "other"],
+    description: "Stipendium der Stiftung",
+    proof_required: false,
+    proof_documents: [proof],
+    updated_at: "2026-10-07T08:05:00Z",
+    ...patch,
+  });
+
+  function renderWithFunds(
+    declaration: PayerDeclaration,
+    selfFunds: LeadPortalSelfFunds | null,
+    translate: (ru: string, de: string) => string = tx,
+  ) {
+    return renderToStaticMarkup(
+      <LocalizationProvider dateAdapter={AdapterDayjs}>
+        <LeadPayerDeclarationSection
+          leadId="lead-1"
+          data={{ declaration, status: status({ complete: true, agency_blocking: [] }) }}
+          loading={false}
+          loadError={null}
+          disabled={false}
+          canEdit
+          lang={translate === tx ? "ru" : "de"}
+          tx={translate}
+          onSave={async () => undefined}
+          errorText={() => "error"}
+          selfFunds={selfFunds}
+        />
+      </LocalizationProvider>,
+    );
+  }
+
+  /** The markup of the read-only block. */
+  function block(html: string): string {
+    const start = html.indexOf('data-testid="lead-payer-self-funds"');
+    if (start < 0) return "";
+    return html.slice(start, html.indexOf('data-testid="lead-payer-invoice-recipient"', start));
+  }
+
+  it("shows the lead's sources, the words and the proof read-only", () => {
+    const html = renderWithFunds(stated, funds());
+    const shown = block(html);
+    expect(shown).toContain("Источник средств — указал пациент в кабинете");
+    expect(shown).toContain("Сбережения, Другое");
+    expect(shown).toContain("Stipendium der Stiftung");
+    expect(shown).toContain("Подтверждение · необязательно");
+    expect(shown).toContain("kontoauszug.pdf · 07.10.2026 · просмотрен");
+    // Nothing of it is an input.
+    expect(shown).not.toMatch(/<(input|select|textarea)\b/);
+    const german = block(renderWithFunds(stated, funds({ proof_required: true, proof_documents: [] }), de));
+    expect(german).toContain("Herkunft der Mittel – Angaben des Patienten im Portal");
+    expect(german).toContain("Ersparnisse, Sonstiges");
+    expect(german).toContain("Nachweis · erforderlich (verstärkte Prüfung)");
+    expect(german).toContain("nicht hochgeladen");
+  });
+
+  it("does not ask staff for a source of their own once the lead stated it", () => {
+    const html = renderWithFunds(stated, funds());
+    const select = html.slice(0, html.indexOf('aria-label="Источник средств"'));
+    const label = select.slice(select.lastIndexOf("<label"));
+    expect(label).not.toContain("text-destructive");
+    const open = renderWithFunds({ ...stated, self_funds_sources: [] }, funds({ sources: [] }));
+    const openSelect = open.slice(0, open.indexOf('aria-label="Источник средств"'));
+    expect(openSelect.slice(openSelect.lastIndexOf("<label"))).toContain("text-destructive");
+  });
+
+  it("shows the answers without files while the portal state is not loaded, and nothing for a third party", () => {
+    const withoutIntake = block(renderWithFunds(stated, null));
+    expect(withoutIntake).toContain("Сбережения, Другое");
+    expect(withoutIntake).not.toContain("lead-payer-self-funds-proof");
+    const thirdParty = renderWithFunds({ ...stated, payer_kind: "third_party", self_funds_sources: [] }, funds({ asked: false }));
+    expect(thirdParty).not.toContain('data-testid="lead-payer-self-funds"');
+    // An older server knows nothing of it.
+    expect(renderSection(selfPayer)).not.toContain('data-testid="lead-payer-self-funds"');
+  });
+});
+
 describe("reload of the payer declaration on cabinet changes", () => {
-  it("follows who pays and sections 7–8, nothing else", () => {
+  it("follows who pays, sections 7–8 and the self-payer's source of funds, nothing else", () => {
     expect(payerDeclarationChanged("payer")).toBe(true);
     expect(payerDeclarationChanged("billing")).toBe(true);
+    expect(payerDeclarationChanged("self_funds")).toBe(true);
     expect(payerDeclarationChanged("identification")).toBe(false);
     expect(payerDeclarationChanged("representation")).toBe(false);
     expect(payerDeclarationChanged(undefined)).toBe(false);

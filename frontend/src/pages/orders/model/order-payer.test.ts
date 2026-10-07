@@ -40,6 +40,27 @@ describe("order payer", () => {
     });
   });
 
+  it("keeps the role invoice_address (the party at another address) and drops an unknown role", () => {
+    const stored = {
+      payer_patient_relation_id: null,
+      payer_role: "invoice_address",
+      payer_contact_name: "Beispiel GmbH",
+      payer_contact_relationship: null,
+      payer_contact_email: "rechnung@example.com",
+      payer_contact_phone: null,
+      payer_address_street: "Industriestraße 9",
+      payer_notes: null,
+    };
+    const form = orderPayerToForm(stored);
+    expect(form.role).toBe("invoice_address");
+    expect(orderPayerPayload({ ...form, notes: "Rechnung per Post" })).toMatchObject({
+      payer_role: "invoice_address",
+      payer_contact_name: "Beispiel GmbH",
+      payer_notes: "Rechnung per Post",
+    });
+    expect(orderPayerToForm({ ...stored, payer_role: "guarantor" }).role).toBe("");
+  });
+
   it("checks e-mail addresses like the server", () => {
     expect(isPlausiblePayerEmail("")).toBe(true);
     expect(isPlausiblePayerEmail("max@example.test")).toBe(true);

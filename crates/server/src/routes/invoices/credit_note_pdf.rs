@@ -877,6 +877,15 @@ pub(crate) fn build_credit_note_pdf(
         for line in recipient.address_lines() {
             layout.paragraph(&line, 10.5, false, Tone::Body);
         }
+        // As on the invoice: the recipient's USt-IdNr. frozen with it.
+        if let Some(vat_id) = recipient.vat_id.as_deref() {
+            layout.paragraph(
+                &format!("{}: {vat_id}", label(language, "vat_id")),
+                9.5,
+                false,
+                Tone::Body,
+            );
+        }
         layout.space(8.0);
     }
 

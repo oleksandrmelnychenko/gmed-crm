@@ -1331,6 +1331,119 @@ async fn a_staff_save_keeps_the_leads_invoice_recipient_and_payment_route() {
     assert_eq!(stored, (None, None, None));
 }
 
+#[tokio::test]
+async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_staff_saves() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let ceo = app.bearer("ceo");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+    let missing = |body: &Value| -> Vec<String> {
+        body["status"]["missing"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    };
+
+    // Staff said the patient pays and left the source of funds open.
+    let own = json!({ "payer_kind": "self", "acts_on_own_account": true });
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(own.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
+    assert_eq!(body["declaration"]["self_funds_sources"], json!([]));
+    assert!(body["declaration"]["self_funds_description"].is_null());
+
+    // The lead stated it in the cabinet: savings and a scholarship. That is
+    // the declaration's source of funds; staff need not repeat it.
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET self_funds_sources = '{savings,other}', self_funds_description = 'Stipendium'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(&app, "GET", &path, &ceo, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["declaration"]["self_funds_sources"],
+        json!(["savings", "other"]),
+        "{body}"
+    );
+    assert_eq!(body["declaration"]["self_funds_description"], "Stipendium");
+    assert!(missing(&body).is_empty(), "{body}");
+    assert_eq!(body["status"]["complete"], true, "{body}");
+    let (_, lead) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &ceo, None).await;
+    assert!(!has_reason(&lead, "Source of funds is missing"), "{lead}");
+
+    // A staff save keeps the lead's answer, also with a source of its own;
+    // staff cannot write it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &path,
+        &ceo,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true, "source_of_funds": "savings" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["source_of_funds"], "savings", "{body}");
+    assert_eq!(
+        body["declaration"]["self_funds_sources"],
+        json!(["savings", "other"]),
+        "{body}"
+    );
+    let mut written = own.clone();
+    written["self_funds_sources"] = json!(["employment"]);
+    let (status, _) = json_request(&app, "POST", &path, &ceo, Some(written)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Without the words for "other" the lead's answer is incomplete.
+    sqlx::query(
+        "UPDATE lead_payer_declarations SET self_funds_description = NULL, source_of_funds = NULL WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, body) = json_request(&app, "GET", &path, &ceo, None).await;
+    assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
+
+    // A third party pays: the patient's own sources go with the save (the
+    // table refuses them for a third party), the payer's source is the
+    // payer's own answer.
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(third_party_payer())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["declaration"]["self_funds_sources"],
+        json!([]),
+        "{body}"
+    );
+    let refused = sqlx::query(
+        "UPDATE lead_payer_declarations SET self_funds_sources = '{savings}' WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await;
+    assert!(
+        refused.is_err(),
+        "a third party holds no self-payer sources"
+    );
+    let refused = sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_kind = 'self', self_funds_sources = '{loan}' WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await;
+    assert!(refused.is_err(), "only the person list");
+}
+
 async fn payer_informed(
     pool: &PgPool,
     lead_id: Uuid,

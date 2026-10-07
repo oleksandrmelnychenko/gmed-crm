@@ -20,8 +20,11 @@
 //! party who joins the debt, wherever the invoice goes.
 //!
 //! The recipient is resolved by the database function
-//! `invoice_recipient_resolve` and frozen into `recipient_snapshot` when the
-//! invoice is released; [`release_recipient_snapshot`] checks it first:
+//! `invoice_recipient_resolve`; when the declaration names it, a draft's
+//! recipient also carries the e-mail for invoices and the USt-IdNr. and
+//! Steuernummer of section 7 ([`add_declared_recipient_details`]). It is
+//! frozen into `recipient_snapshot` when the invoice is released;
+//! [`release_recipient_snapshot`] checks it first:
 //! a full postal address (§ 14 Abs. 4 Nr. 1 UStG), a minor patient as
 //! recipient, a recipient other than the contracting party, and advances of
 //! the order billed to someone else (§ 14 Abs. 5 Satz 2 UStG). See
@@ -612,6 +615,125 @@ fn invoice_address_record(declaration: &lead_payer::Declaration) -> Option<Payer
         payer_role: Some(PAYER_ROLE_INVOICE_ADDRESS.to_string()),
         ..PayerRecord::default()
     })
+}
+
+/// Whom the patient's payer declaration addresses invoices to (section 7 of
+/// the lead's form), to recognise that recipient on a draft.
+enum DeclaredAddressee {
+    /// The contracting party — the patient, a minor's parents: "to me", or a
+    /// self-payer who left section 7 open.
+    Party,
+    /// A free-text contact under this name: the party at the other address,
+    /// or the third party who pays ("to the payer", or no answer).
+    Named(String),
+}
+
+impl DeclaredAddressee {
+    /// `None` for another address without a name: the chain then names the
+    /// party as for "to me", but the e-mail and the tax numbers were given
+    /// for the other address.
+    fn of(declaration: &lead_payer::Declaration) -> Option<Self> {
+        match declaration.invoice_to.as_deref() {
+            Some(lead_payer::INVOICE_TO_SELF) => Some(Self::Party),
+            Some(lead_payer::INVOICE_TO_OTHER) => invoice_address_record(declaration)?
+                .contact_name
+                .map(Self::Named),
+            _ if declaration.is_third_party() => declaration.payer_name().map(Self::Named),
+            _ => Some(Self::Party),
+        }
+    }
+}
+
+/// The same name, ignoring case and runs of whitespace.
+fn same_name(left: &str, right: &str) -> bool {
+    let normal = |value: &str| {
+        value
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase()
+    };
+    let left = normal(left);
+    !left.is_empty() && left == normal(right)
+}
+
+/// Completes a draft's recipient (as `invoice_recipient_resolve` builds it)
+/// with what the patient's payer declaration says about the invoice
+/// recipient (section 7 of the lead's form): the e-mail for invoices and the
+/// USt-IdNr. and Steuernummer staff added (keys `vat_id`, `tax_number`).
+///
+/// Only the recipient the declaration names is completed: the contracting
+/// party (the patient, a minor's parents) for "to me" and for a self-payer,
+/// otherwise a contact under the declared name — the party at the other
+/// address or the third party who pays. A payer staff chose instead gets
+/// nothing. "To me" replaces the patient's or parents' e-mail; the other
+/// address's e-mail fills a contact without one (a staff-entered e-mail
+/// stays). The release freezes the result in `recipient_snapshot`; a released
+/// invoice keeps what it was issued with.
+pub(crate) async fn add_declared_recipient_details(
+    conn: &mut PgConnection,
+    recipient: &mut Value,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+) -> Result<(), sqlx::Error> {
+    if !recipient.is_object() {
+        return Ok(());
+    }
+    let Some(declared) = lead_payer::patient_declaration(conn, patient_id).await? else {
+        return Ok(());
+    };
+    let declaration = declared.declaration;
+    let email = normalize_optional(declaration.invoice_email.as_deref());
+    let vat_id = normalize_optional(declaration.invoice_vat_id.as_deref());
+    let tax_number = normalize_optional(declaration.invoice_tax_number.as_deref());
+    if email.is_none() && vat_id.is_none() && tax_number.is_none() {
+        return Ok(());
+    }
+    let Some(addressee) = DeclaredAddressee::of(&declaration) else {
+        return Ok(());
+    };
+    let kind = recipient
+        .get("kind")
+        .and_then(Value::as_str)
+        .unwrap_or("patient");
+    let named_by_declaration = match &addressee {
+        DeclaredAddressee::Party if kind == "patient" => true,
+        DeclaredAddressee::Party => {
+            contracting_party::resolve(conn, patient_id, order_id, None, crate::app_time::today())
+                .await?
+                .is_recipient(recipient)
+        }
+        DeclaredAddressee::Named(name) => {
+            kind == "contact"
+                && recipient
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .is_some_and(|recipient_name| same_name(recipient_name, name))
+        }
+    };
+    if !named_by_declaration {
+        return Ok(());
+    }
+    let Some(map) = recipient.as_object_mut() else {
+        return Ok(());
+    };
+    if let Some(email) = email {
+        let replace = declaration.invoice_to.as_deref() == Some(lead_payer::INVOICE_TO_SELF);
+        let fill = declaration.invoice_to.as_deref() == Some(lead_payer::INVOICE_TO_OTHER)
+            && map
+                .get("email")
+                .and_then(Value::as_str)
+                .is_none_or(|current| current.trim().is_empty());
+        if replace || fill {
+            map.insert("email".into(), json!(email));
+        }
+    }
+    for (key, value) in [("vat_id", vat_id), ("tax_number", tax_number)] {
+        if let Some(value) = value {
+            map.insert(key.into(), json!(value));
+        }
+    }
+    Ok(())
 }
 
 /// Whether the recipient's name is the contracting party's own (trimmed,
@@ -1221,5 +1343,44 @@ mod tests {
         ] {
             assert_eq!(payer_from_input(&input, Some(patient)).unwrap_err().0, code);
         }
+    }
+
+    #[test]
+    fn the_declared_invoice_recipient_follows_section_7() {
+        let addressee =
+            |declaration: &lead_payer::Declaration| match DeclaredAddressee::of(declaration) {
+                Some(DeclaredAddressee::Party) => "party".to_string(),
+                Some(DeclaredAddressee::Named(name)) => name,
+                None => "none".to_string(),
+            };
+        let own = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..Default::default()
+        };
+        assert_eq!(addressee(&own), "party");
+        let viktor = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some(lead_payer::PAYER_TYPE_PERSON.into()),
+            first_name: Some("Viktor".into()),
+            last_name: Some("Zahler".into()),
+            ..Default::default()
+        };
+        assert_eq!(addressee(&viktor), "Viktor Zahler");
+        for (invoice_to, name, expected) in [
+            ("payer", None, "Viktor Zahler"),
+            ("self", None, "party"),
+            ("other", Some(" Beispiel GmbH "), "Beispiel GmbH"),
+            ("other", None, "none"),
+        ] {
+            let declaration = lead_payer::Declaration {
+                invoice_to: Some(invoice_to.into()),
+                invoice_name: name.map(Into::into),
+                ..viktor.clone()
+            };
+            assert_eq!(addressee(&declaration), expected, "{invoice_to}");
+        }
+        assert!(same_name(" Viktor  Zahler", "viktor zahler"));
+        assert!(!same_name("", ""));
+        assert!(!same_name("Viktor Zahler", "Viktoria Zahler"));
     }
 }

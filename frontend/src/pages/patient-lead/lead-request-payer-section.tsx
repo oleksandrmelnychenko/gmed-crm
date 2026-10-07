@@ -55,6 +55,8 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
+import { SelfFundsBlock } from "./lead-request-self-funds";
+import { selfFundsAsked } from "./lead-request-self-funds-model";
 import { SummaryRows } from "./lead-request-send-step";
 import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
 import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -67,7 +69,9 @@ import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead
  * saved as a whole; the server keeps it in the lead's payer declaration, where
  * the sanctions screening picks it up. With the GwG statements
  * (`identification`) the block also asks for the own economic interest and,
- * for a third party, why that payer pays.
+ * for a third party, why that payer pays. When the patient pays himself, the
+ * block ends with where the money comes from and its proof
+ * (`SelfFundsBlock`, owner request 2026-10-05).
  */
 export function PayerSection({
   request,
@@ -77,6 +81,7 @@ export function PayerSection({
   enqueue,
   onChange,
   onSaveState,
+  onSelfFundsSaveState,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -86,6 +91,8 @@ export function PayerSection({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
+  /** The save state of the self-payer's source of funds, a part of its own; `onSaveState` when absent. */
+  onSelfFundsSaveState?: (state: SaveState) => void;
 }) {
   const guardian = request.access_kind === "guardian";
   // An older server knows only a person as payer, with the relationship in words.
@@ -514,6 +521,19 @@ export function PayerSection({
               </LabeledField>
             ) : null}
           </>
+        ) : null}
+        {/* Where the money comes from when the patient pays: once the server has the answer, saved on its own. */}
+        {draft.payer_kind === "self" && request.self_funds && selfFundsAsked(request) ? (
+          <SelfFundsBlock
+            request={request}
+            selfFunds={request.self_funds}
+            text={text}
+            lang={lang}
+            enqueue={enqueue}
+            onChange={onChange}
+            onSaveState={onSelfFundsSaveState ?? onSaveState}
+            className="sm:col-span-2"
+          />
         ) : null}
         {fieldError === "payer" ? (
           <p role="alert" className="text-xs text-destructive sm:col-span-2">

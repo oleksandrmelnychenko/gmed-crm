@@ -23,14 +23,17 @@ import {
   invoiceStatusFormProblem,
   isInvoiceReleased,
   invoiceRecipientAddressLines,
+  invoiceToPayerForm,
+  knownPayerRole,
   payerFormToPayload,
   payerRelationOptionLabel,
+  payerRoleLabel,
   effectiveAdvanceBasis,
   netForGross,
   prepaymentAdvanceSplit,
   quoteRequiredPrepayment,
 } from "./invoice-model";
-import type { InvoiceLineItem, QuoteOption } from "./types";
+import type { InvoiceItem, InvoiceLineItem, QuoteOption } from "./types";
 
 it("calls an invoice covered by prepayment only when the credited advance settled it", () => {
   // 1,000 final invoice, 300 advance credited, 700 still open: not covered.
@@ -234,6 +237,42 @@ describe("invoice payer and recipient", () => {
     expect(payerFormToPayload({ ...base, payerRole: "cost_bearer" })).toMatchObject({
       payer_role: null,
     });
+  });
+
+  it("shows and keeps the role invoice_address (the party at another address)", () => {
+    const invoice = {
+      payer: {
+        role: "invoice_address",
+        contact_name: "Beispiel GmbH",
+        contact_email: "rechnung@example.com",
+        address_street: "Industriestraße 9",
+        address_zip: "50667",
+        address_city: "Köln",
+        address_country: "DE",
+      },
+    } as unknown as InvoiceItem;
+    const form = invoiceToPayerForm(invoice);
+    expect(form.payerRole).toBe("invoice_address");
+    expect(payerFormToPayload({ ...form, contactPhone: "+49 221 0000" })).toMatchObject({
+      payer_role: "invoice_address",
+      payer_contact_name: "Beispiel GmbH",
+      payer_contact_phone: "+49 221 0000",
+    });
+    const labels = {
+      contracting_party: "Rechnungsempfänger ist Vertragspartner",
+      cost_bearer: "Abweichender Rechnungsempfänger (Kostenübernehmer)",
+      invoice_address: "Rechnungsanschrift (keine Kostenübernahme)",
+    };
+    expect(payerRoleLabel("invoice_address", labels, "nicht gesetzt")).toBe(
+      "Rechnungsanschrift (keine Kostenübernahme)",
+    );
+    expect(payerRoleLabel("cost_bearer", labels, "nicht gesetzt")).toBe(labels.cost_bearer);
+    expect(payerRoleLabel(null, labels, "nicht gesetzt")).toBe("nicht gesetzt");
+    // A role this client does not know reads as unset and is not sent back.
+    expect(knownPayerRole("guarantor")).toBe("");
+    expect(
+      invoiceToPayerForm({ payer: { role: "guarantor" } } as unknown as InvoiceItem).payerRole,
+    ).toBe("");
   });
 
   it("labels a relative offered as payer by name, relation and patient number", () => {

@@ -49,7 +49,9 @@ PDF будує `build_enhanced_due_diligence_pdf` у `routes/documents.rs`; да
   countries }`. Її читають: готовність ліда (`enhanced_due_diligence_document_generated`
   / `…_signed` блокують конвертацію лише за `required`), рівень перевірки
   платника за посиланням (рівень 2 = `required`, тоді підтвердження походження
-  коштів обов'язкове), лист ідентифікації GwG (5 a) і
+  коштів обов'язкове), підтвердження походження коштів самоплатника в кабінеті
+  ліда (`self_funds_proof_upload` для відправки лише за `required`; див.
+  [декларацію платника, § 2e](lead-payer-declaration_ua.md)), лист ідентифікації GwG (5 a) і
   `patients.legal_status.aml_enhanced_due_diligence_required` при створенні
   проспекта й конвертації.
 - `GET /leads/{id}/enhanced-check` → `{ "required": bool, "reasons": [...],

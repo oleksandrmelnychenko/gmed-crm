@@ -148,6 +148,17 @@ export type LeadRequestText = {
   /** The same two when a parent fills in the request of a child. */
   ownAccountQuestionGuardian: string;
   beneficialOwnerGuardian: string;
+  /**
+   * Where the money comes from when the patient pays himself (owner request
+   * 2026-10-05), part of "who pays". The sources and the description carry
+   * the labels of the paying person's questions (`payerQuestionnaireFields`,
+   * `fundsSourceOptions`); "required" / "optional" and the upload button are
+   * the payer's too.
+   */
+  selfFundsTitle: string;
+  selfFundsIntro: string;
+  selfFundsProofTitle: string;
+  selfFundsProofHint: string;
   /** The statements for the GwG identification (owner spec 2026-10-05). */
   identificationFields: Record<IdentificationField, string>;
   /** Questions that say "you", for a parent who fills in the request of a child. */
@@ -503,6 +514,10 @@ export function submitFieldLabel(
   if (field === "payer_contact_consent") return `${text.payerPerson}: ${text.payerConsentShort}`;
   if (field === "payer_cost_estimate_consent") return `${text.payerPerson}: ${text.payerCostEstimateConsentShort}`;
   if (field === "payer_relationship") return `${text.payerPerson}: ${text.payerRelationship} – ${text.payerRelationshipOther}`;
+  // The self-payer's source of funds: the labels speak for themselves.
+  if (field === "self_funds_sources") return text.selfFundsTitle;
+  if (field === "self_funds_description") return text.payerQuestionnaireFields.funds_description;
+  if (field === "self_funds_proof_upload") return text.selfFundsProofTitle;
   if (field.startsWith("payer_")) {
     return `${text.payerPerson}: ${payerFieldLabel(text, field as PayerField, guardian, payerType)}`;
   }
@@ -691,6 +706,10 @@ const de: LeadRequestText = {
   ownAccountQuestionGuardian: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?",
   beneficialOwnerGuardian:
     "In wessen Interesse handelt die Patientin / der Patient? (Name, Geburtsdatum, Geburtsort, Anschrift)",
+  selfFundsTitle: "Herkunft der Mittel",
+  selfFundsIntro: "Woher stammt das Geld für die Behandlung? Mehrere Antworten sind möglich.",
+  selfFundsProofTitle: "Nachweis der Mittelherkunft (z. B. Kontoauszug, Gehaltsnachweis)",
+  selfFundsProofHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
   identificationFields: {
     salutation: "Anrede",
     former_names: "Frühere Namen (z. B. Geburtsname)",
@@ -1049,6 +1068,10 @@ const ru: LeadRequestText = {
   beneficialOwner: "В чьих интересах вы действуете? (имя, дата рождения, место рождения, адрес)",
   ownAccountQuestionGuardian: "Пациент действует в собственных экономических интересах?",
   beneficialOwnerGuardian: "В чьих интересах действует пациент? (имя, дата рождения, место рождения, адрес)",
+  selfFundsTitle: "Происхождение средств",
+  selfFundsIntro: "Откуда деньги на лечение? Можно выбрать несколько вариантов.",
+  selfFundsProofTitle: "Подтверждение происхождения средств (например, выписка со счёта, справка о зарплате)",
+  selfFundsProofHint: "PDF, JPG или PNG, до 25 МБ на файл.",
   identificationFields: {
     salutation: "Обращение",
     former_names: "Прежние имена и фамилии (например, фамилия при рождении)",
@@ -1411,6 +1434,10 @@ const uk: LeadRequestText = {
   beneficialOwner: "В чиїх інтересах ви дієте? (ім'я, дата народження, місце народження, адреса)",
   ownAccountQuestionGuardian: "Пацієнт діє у власних економічних інтересах?",
   beneficialOwnerGuardian: "В чиїх інтересах діє пацієнт? (ім'я, дата народження, місце народження, адреса)",
+  selfFundsTitle: "Походження коштів",
+  selfFundsIntro: "Звідки гроші на лікування? Можна вибрати кілька варіантів.",
+  selfFundsProofTitle: "Підтвердження походження коштів (наприклад, виписка з рахунку, довідка про зарплату)",
+  selfFundsProofHint: "PDF, JPG або PNG, до 25 МБ на файл.",
   identificationFields: {
     salutation: "Звертання",
     former_names: "Попередні імена та прізвища (наприклад, прізвище при народженні)",
@@ -1773,6 +1800,10 @@ const en: LeadRequestText = {
   beneficialOwner: "In whose interest are you acting? (name, date of birth, place of birth, address)",
   ownAccountQuestionGuardian: "Is the patient acting in their own economic interest?",
   beneficialOwnerGuardian: "In whose interest is the patient acting? (name, date of birth, place of birth, address)",
+  selfFundsTitle: "Source of funds",
+  selfFundsIntro: "Where does the money for the treatment come from? You can choose more than one answer.",
+  selfFundsProofTitle: "Proof of the source of funds (e.g. bank statement, payslip)",
+  selfFundsProofHint: "PDF, JPG or PNG, up to 25 MB per file.",
   identificationFields: {
     salutation: "Title",
     former_names: "Former names (e.g. name at birth)",

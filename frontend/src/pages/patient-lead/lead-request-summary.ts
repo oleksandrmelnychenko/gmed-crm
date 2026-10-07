@@ -21,6 +21,7 @@ import {
   representativeInSlot,
   type RepresentativeField,
 } from "./lead-request-representation-model";
+import { selfFundsAsked } from "./lead-request-self-funds-model";
 import {
   identificationFieldLabel,
   invoiceToLabel,
@@ -319,6 +320,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         costEstimateConsentRow(party.cost_estimate_consent_at, text),
       ];
     };
+    // Where the money comes from when the patient pays, with the proof.
+    const selfFunds = selfFundsAsked(request) ? request.self_funds : undefined;
     group("payer", text.sectionPayer, [
       [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer)],
       ...(thirdParty ? thirdPartyRows(thirdParty) : []),
@@ -327,6 +330,16 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         payerFieldLabel(text, "payer_beneficial_owner", guardian),
         payer?.acts_on_own_account === false ? payer.beneficial_owner : "",
       ],
+      ...(selfFunds
+        ? ([
+            [
+              text.selfFundsTitle,
+              selfFunds.sources.map((source) => option(text.fundsSourceOptions, source)).filter(Boolean).join(", "),
+            ],
+            [text.payerQuestionnaireFields.funds_description, selfFunds.description],
+            [text.selfFundsProofTitle, fileNames(selfFunds.proof_documents)],
+          ] satisfies Array<[string, string | null | undefined]>)
+        : []),
     ]);
   }
 

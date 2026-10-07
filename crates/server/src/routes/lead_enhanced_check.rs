@@ -28,8 +28,9 @@
 //!
 //! [`enhanced_check_triggers`] is the one place that decides it: the lead
 //! readiness, the staff wizard (`GET /leads/{id}/enhanced-check`), the
-//! payer's check level (proof of funds), the GwG identification sheet and
-//! the patient's legal status read it. See
+//! payer's check level (proof of funds), the self-payer's proof of funds in
+//! the lead cabinet, the GwG identification sheet and the patient's legal
+//! status read it. See
 //! docs/architecture/aml-enhanced-due-diligence_ua.md.
 
 use axum::{

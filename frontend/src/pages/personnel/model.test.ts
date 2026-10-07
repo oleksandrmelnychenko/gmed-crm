@@ -267,9 +267,11 @@ describe("translations", () => {
         "abmahnung",
         "kuendigung",
         "zeugnis",
+        "gwg_unterweisung",
         "schriftverkehr",
         "sonstiges",
       ].flatMap((code) => [`personnel_category_${code}`, `personnel_category_short_${code}`]),
+      ...["upload", "scan", "import", "generated"].map((source) => `personnel_source_${source}`),
     ];
     for (const catalog of [personnelRu, personnelDe]) {
       const labels = catalog as unknown as Record<string, string | undefined>;

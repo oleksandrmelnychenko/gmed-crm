@@ -192,6 +192,7 @@ export interface PersonnelTranslations {
   personnel_source_upload: string;
   personnel_source_scan: string;
   personnel_source_import: string;
+  personnel_source_generated: string;
   personnel_journal_empty: string;
   personnel_event_employee_created: string;
   personnel_event_employee_updated: string;
@@ -221,6 +222,7 @@ export interface PersonnelTranslations {
   personnel_category_abmahnung: string;
   personnel_category_kuendigung: string;
   personnel_category_zeugnis: string;
+  personnel_category_gwg_unterweisung: string;
   personnel_category_schriftverkehr: string;
   personnel_category_sonstiges: string;
   personnel_my_file_missing: string;
@@ -243,6 +245,7 @@ export interface PersonnelTranslations {
   personnel_category_short_abmahnung: string;
   personnel_category_short_kuendigung: string;
   personnel_category_short_zeugnis: string;
+  personnel_category_short_gwg_unterweisung: string;
   personnel_category_short_schriftverkehr: string;
   personnel_category_short_sonstiges: string;
   personnel_period: string;
@@ -454,6 +457,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_source_upload: "загружен",
   personnel_source_scan: "скан",
   personnel_source_import: "из профиля",
+  personnel_source_generated: "сформирован в GMED",
   personnel_journal_empty: "Записей нет",
   personnel_event_employee_created: "Дело создано",
   personnel_event_employee_updated: "Данные сотрудника изменены",
@@ -483,6 +487,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_category_abmahnung: "Выговор (Abmahnung)",
   personnel_category_kuendigung: "Увольнение",
   personnel_category_zeugnis: "Характеристика (Arbeitszeugnis)",
+  personnel_category_gwg_unterweisung: "GwG-инструктаж (§ 6 GwG)",
   personnel_category_schriftverkehr: "Переписка",
   personnel_category_sonstiges: "Прочее",
   personnel_my_file_missing: "К вашему аккаунту не привязано личное дело.",
@@ -505,6 +510,7 @@ export const personnelRu: PersonnelTranslations = {
   personnel_category_short_abmahnung: "Выговор",
   personnel_category_short_kuendigung: "Увольн.",
   personnel_category_short_zeugnis: "Характ.",
+  personnel_category_short_gwg_unterweisung: "GwG",
   personnel_category_short_schriftverkehr: "Перепис.",
   personnel_category_short_sonstiges: "Прочее",
   personnel_period: "Период",
@@ -716,6 +722,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_source_upload: "hochgeladen",
   personnel_source_scan: "Scan",
   personnel_source_import: "aus Profil",
+  personnel_source_generated: "in GMED erstellt",
   personnel_journal_empty: "Keine Protokolleinträge",
   personnel_event_employee_created: "Akte angelegt",
   personnel_event_employee_updated: "Stammdaten geändert",
@@ -745,6 +752,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_category_abmahnung: "Abmahnung",
   personnel_category_kuendigung: "Kündigung",
   personnel_category_zeugnis: "Zeugnis",
+  personnel_category_gwg_unterweisung: "GwG-Unterweisung (§ 6 GwG)",
   personnel_category_schriftverkehr: "Schriftverkehr",
   personnel_category_sonstiges: "Sonstiges",
   personnel_my_file_missing: "Mit Ihrem Konto ist keine Personalakte verknüpft.",
@@ -767,6 +775,7 @@ export const personnelDe: PersonnelTranslations = {
   personnel_category_short_abmahnung: "Abmahn.",
   personnel_category_short_kuendigung: "Künd.",
   personnel_category_short_zeugnis: "Zeugnis",
+  personnel_category_short_gwg_unterweisung: "GwG",
   personnel_category_short_schriftverkehr: "Schrift.",
   personnel_category_short_sonstiges: "Sonst.",
   personnel_period: "Zeitraum",

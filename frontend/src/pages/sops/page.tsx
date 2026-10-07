@@ -41,6 +41,7 @@ import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { statusTone } from "./appearance/status-appearance";
+import { GwgTrainingSection } from "./ui/gwg-training-section";
 import {
   acknowledgeSop,
   fetchSopsWorkspace,
@@ -1014,6 +1015,8 @@ function useSopsPageContent() {
             </AdminTableCard>
           </div>
         </section>
+
+        <GwgTrainingSection />
       </div>
 
       <Sheet

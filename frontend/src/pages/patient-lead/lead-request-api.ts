@@ -408,6 +408,33 @@ export type LeadPayerQuestionnaire = {
 /** Only the changed keys the paying parent may write; `null` clears a text, a choice or an answer. */
 export type PayerQuestionnairePatch = Partial<Record<keyof LeadPayerAnswers, string | string[] | boolean | null>>;
 
+/**
+ * Where the money comes from when the patient pays himself (owner request
+ * 2026-10-05, "proof of income"): the sources of the person list, a
+ * description (required with `other`) and a proof. The proof is required
+ * only while the enhanced check of the money laundering act is required
+ * (owner rule 2026-10-07); the reasons are never shown. Absent on an older
+ * server.
+ */
+export type LeadRequestSelfFunds = {
+  /** The patient pays himself: the block is asked. */
+  asked: boolean;
+  /** Subset of `source_options`, in form order. */
+  sources: string[];
+  description: string | null;
+  /** The person list of sources, in form order. */
+  source_options: string[];
+  proof_required: boolean;
+  /** The uploaded proofs (bank statement, salary slip …). */
+  proof_documents: LeadRequestDocument[];
+};
+
+/** Only the changed keys: `[]` clears the sources, `""` the description. */
+export type SelfFundsPatch = {
+  self_funds_sources?: string[];
+  self_funds_description?: string;
+};
+
 /** The keys of the billing the cabinet writes: everything but what the server computes. */
 export type BillingKey = Exclude<keyof LeadRequestBilling, "payer_declared" | "payment_route_by" | "account_holder_suggestion">;
 
@@ -438,6 +465,8 @@ export type LeadRequest = {
   billing?: LeadRequestBilling;
   /** The paying parent's own questionnaire; set only for the parent who pays (phase 3a). */
   payer_questionnaire?: LeadRequestPayerQuestionnaireSummary | null;
+  /** The self-payer's source of funds with its proof; absent on an older server. */
+  self_funds?: LeadRequestSelfFunds;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -583,6 +612,28 @@ export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<Le
     method: "POST",
     body: JSON.stringify(patch),
   });
+}
+
+/** The refusal of the source of funds when somebody else pays (any more). */
+export const PAYER_NOT_SELF = "payer_not_self";
+
+/**
+ * Saves the changed keys of the self-payer's source of funds. The server
+ * answers 422 `invalid_field` with the key it refuses and 409
+ * `payer_not_self` when somebody else pays.
+ */
+export function saveLeadSelfFunds(leadId: string, patch: SelfFundsPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/self-funds`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** A proof of the own funds; like the identity document it needs the request consent first. */
+export function uploadLeadFundsProof(leadId: string, file: File): Promise<LeadRequest> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<LeadRequest>(`${base(leadId)}/funds-proof`, { method: "POST", body: form });
 }
 
 /** Withdraws an own upload: a medical document, a copy of an identity document or a proof of authority. */

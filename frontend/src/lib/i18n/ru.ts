@@ -4,6 +4,7 @@ import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
 import { extractedUiRu } from "./catalogs/extracted-ui";
 import { financeBalancesRu } from "./catalogs/finance-balances";
+import { gwgTrainingRu } from "./catalogs/gwg-training";
 import { operationsRu } from "./catalogs/operations";
 import { patientsPortalRu } from "./catalogs/patients-portal";
 import { personnelRu } from "./catalogs/personnel";
@@ -1798,6 +1799,7 @@ export const ru = {
   ...casesClinicalRu,
   ...clinicalRu,
   ...financeBalancesRu,
+  ...gwgTrainingRu,
   ...operationsRu,
   ...patientsPortalRu,
   ...personnelRu,

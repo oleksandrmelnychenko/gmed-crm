@@ -244,6 +244,22 @@ fn tax_groups(lines: &[EInvoiceLine]) -> Vec<TaxGroup> {
     groups
 }
 
+/// The buyer's USt-IdNr. as the e-invoice carries it (BT-48): spaces, dots
+/// and dashes removed, upper case. `None` unless it starts with a two-letter
+/// country prefix (BR-CO-09) — the printed invoice still shows the entered
+/// value, the XML stays valid.
+pub(super) fn buyer_vat_identifier(value: Option<&str>) -> Option<String> {
+    let compact = value?
+        .chars()
+        .filter(|c| !c.is_whitespace() && !matches!(c, '.' | '-'))
+        .collect::<String>()
+        .to_uppercase();
+    let mut chars = compact.chars();
+    let prefixed = chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic());
+    (prefixed && compact.len() > 2).then_some(compact)
+}
+
 fn party_xml(tag: &str, party: &EInvoiceParty) -> String {
     let mut xml = format!("<ram:{tag}>");
     // BR-CO-26: a seller without a VAT id still needs an identifier (BT-29);
@@ -281,7 +297,12 @@ fn party_xml(tag: &str, party: &EInvoiceParty) -> String {
             escape(email)
         ));
     }
+    // VAT id (BT-31 / BT-48) and, for the seller only, the tax number
+    // (BT-32): EN 16931 has no tax number of the buyer.
     for (scheme, value) in [("VA", &party.vat_id), ("FC", &party.tax_number)] {
+        if scheme == "FC" && tag != "SellerTradeParty" {
+            continue;
+        }
         if let Some(value) = text(value) {
             xml.push_str(&format!(
                 r#"<ram:SpecifiedTaxRegistration><ram:ID schemeID="{scheme}">{}</ram:ID></ram:SpecifiedTaxRegistration>"#,
@@ -986,6 +1007,17 @@ mod tests {
     fn sample_final_with_advances() -> EInvoice {
         let mut invoice = sample();
         invoice.number = "INV-2026-0003".to_string();
+        // A company receives the invoice with its USt-IdNr. (BT-48).
+        invoice.buyer = EInvoiceParty {
+            name: "Beispiel GmbH".to_string(),
+            address_line: Some("Industriestraße 9".to_string()),
+            postcode: Some("50667".to_string()),
+            city: Some("Köln".to_string()),
+            country_code: Some("DE".to_string()),
+            email: Some("rechnung@example.com".to_string()),
+            vat_id: buyer_vat_identifier(Some("de 987.654.321")),
+            tax_number: Some("214/5678/9012".to_string()),
+        };
         invoice.issue_date = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
         invoice.due_date = NaiveDate::from_ymd_opt(2026, 10, 12);
         invoice.service_period = Some((
@@ -1058,6 +1090,23 @@ mod tests {
             "</ram:BillingSpecifiedPeriod><ram:SpecifiedTradePaymentTerms>"
         )));
 
+        // The buyer's VAT id (BT-48) and e-mail (BT-49); its tax number has
+        // no place in EN 16931.
+        let buyer = xml
+            .split("<ram:BuyerTradeParty>")
+            .nth(1)
+            .and_then(|rest| rest.split("</ram:BuyerTradeParty>").next())
+            .unwrap();
+        assert!(
+            buyer.contains(concat!(
+                r#"<ram:URIUniversalCommunication><ram:URIID schemeID="EM">rechnung@example.com</ram:URIID></ram:URIUniversalCommunication>"#,
+                r#"<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">DE987654321</ram:ID></ram:SpecifiedTaxRegistration>"#,
+            )),
+            "{buyer}"
+        );
+        assert!(!buyer.contains("FC"), "{buyer}");
+        assert!(!buyer.contains("214/5678/9012"), "{buyer}");
+
         // Two advances: one reference each.
         let mut two = invoice.clone();
         two.prepaid_invoices.push(EInvoiceReference {
@@ -1115,6 +1164,22 @@ mod tests {
         assert!(xml.contains("<ram:ExemptionReasonCode>VATEX-EU-132</ram:ExemptionReasonCode>"));
         let with_vat_id = sample();
         assert!(!build_cii_xml(&with_vat_id).contains("<ram:SellerTradeParty><ram:ID>"));
+    }
+
+    #[test]
+    fn the_buyer_vat_id_needs_a_country_prefix() {
+        assert_eq!(
+            buyer_vat_identifier(Some(" de 987.654-321 ")).as_deref(),
+            Some("DE987654321")
+        );
+        assert_eq!(
+            buyer_vat_identifier(Some("ATU12345678")).as_deref(),
+            Some("ATU12345678")
+        );
+        assert_eq!(buyer_vat_identifier(Some("987654321")), None);
+        assert_eq!(buyer_vat_identifier(Some("DE")), None);
+        assert_eq!(buyer_vat_identifier(Some("  ")), None);
+        assert_eq!(buyer_vat_identifier(None), None);
     }
 
     #[test]

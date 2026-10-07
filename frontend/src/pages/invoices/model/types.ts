@@ -228,7 +228,11 @@ type InvoicePayer = {
   patient_id?: string | null;
   patient_name?: string | null;
   patient_pid?: string | null;
-  /** `contracting_party`, or `cost_bearer` for a deliberately different recipient. */
+  /**
+   * `contracting_party`; `cost_bearer` for a deliberately different recipient
+   * (Kostenübernehmer); `invoice_address` for the contracting party at another
+   * address (no Kostenübernahme).
+   */
   role?: PayerRole | null;
   patient_relation_id?: string | null;
   contact_name?: string | null;
@@ -264,9 +268,15 @@ export type InvoiceRecipient = {
   frozen?: boolean;
   /** Leistungsempfänger printed when the invoice goes to someone else. */
   service_recipient_name?: string | null;
+  /**
+   * USt-IdNr. and Steuernummer of the recipient from the patient's payer
+   * declaration (printed and in the e-invoice); frozen at release.
+   */
+  vat_id?: string | null;
+  tax_number?: string | null;
 };
 
-export type PayerRole = "contracting_party" | "cost_bearer";
+export type PayerRole = "contracting_party" | "cost_bearer" | "invoice_address";
 
 /** A warning the release of a draft will raise about its recipient. */
 export type InvoiceReleaseWarning = {

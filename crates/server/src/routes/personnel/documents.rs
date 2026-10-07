@@ -285,7 +285,6 @@ pub(crate) async fn archive(
     })?;
     let taken = taken_names(state, employee.id).await?;
     let name = unique_archive_name(employee, target, extension, &taken)?;
-    let document_id = Uuid::new_v4();
     let late = late_days(state).await;
 
     let mut tx = state
@@ -293,6 +292,65 @@ pub(crate) async fn archive(
         .begin()
         .await
         .map_err(|error| internal(error, "begin archive"))?;
+    let (document_id, document) = archive_in_transaction(
+        &mut tx,
+        auth,
+        employee,
+        target,
+        blob,
+        ArchiveEntry {
+            name: &name,
+            title,
+            source,
+            received_at,
+            intake_item_id,
+        },
+        late,
+    )
+    .await?;
+    tx.commit()
+        .await
+        .map_err(|error| internal(error, "commit archive"))?;
+
+    audit_event(
+        state,
+        "personnel_document_archived",
+        auth.user_id,
+        Some(document_id),
+        json!({ "employee_id": employee.id, "category": target.category.code }),
+    );
+    Ok(document)
+}
+
+/// How one document enters the archive: its archive name, title and origin.
+pub(crate) struct ArchiveEntry<'a> {
+    pub name: &'a str,
+    pub title: Option<&'a str>,
+    pub source: &'a str,
+    pub received_at: Option<DateTime<Utc>>,
+    pub intake_item_id: Option<Uuid>,
+}
+
+/// The archive row and its journal entry inside the caller's transaction, so
+/// a record that refers to the document (a GwG instruction) commits or rolls
+/// back with it. Returns the new id and the document as the API shows it.
+pub(crate) async fn archive_in_transaction(
+    conn: &mut sqlx::PgConnection,
+    auth: &AuthUser,
+    employee: &Employee,
+    target: &Target,
+    blob: &Blob,
+    entry: ArchiveEntry<'_>,
+    late: i64,
+) -> Result<(Uuid, Value), Response> {
+    let ArchiveEntry {
+        name,
+        title,
+        source,
+        received_at,
+        intake_item_id,
+    } = entry;
+    let document_id = Uuid::new_v4();
     let inserted = sqlx::query(
         r#"INSERT INTO personnel_documents (
                id, employee_id, category, period_month, document_date, title,
@@ -311,7 +369,7 @@ pub(crate) async fn archive(
     .bind(target.period_month)
     .bind(target.document_date)
     .bind(title)
-    .bind(&name)
+    .bind(name)
     .bind(&blob.original_file_name)
     .bind(&blob.mime_type)
     .bind(blob.file_size)
@@ -323,7 +381,7 @@ pub(crate) async fn archive(
     .bind(target.correction_reason.as_deref())
     .bind(auth.user_id)
     .bind(blob.source_document_id)
-    .execute(&mut *tx)
+    .execute(&mut *conn)
     .await;
     if let Err(error) = inserted {
         if let sqlx::Error::Database(db_error) = &error {
@@ -363,7 +421,7 @@ pub(crate) async fn archive(
         .bind(item_id)
         .bind(document_id)
         .bind(auth.user_id)
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await
         .map_err(|error| internal(error, "resolve intake item"))?;
         if updated.rows_affected() != 1 {
@@ -379,7 +437,7 @@ pub(crate) async fn archive(
         "document_archived"
     };
     record_event(
-        &mut tx,
+        &mut *conn,
         Some(employee.id),
         Some(document_id),
         Some(auth.user_id),
@@ -399,21 +457,10 @@ pub(crate) async fn archive(
     // must not treat a failure as a rollback and remove the blob.
     let row = sqlx::query(&document_select("d.id = $1"))
         .bind(document_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *conn)
         .await
         .map_err(|error| internal(error, "reload personnel document"))?;
-    tx.commit()
-        .await
-        .map_err(|error| internal(error, "commit archive"))?;
-
-    audit_event(
-        state,
-        "personnel_document_archived",
-        auth.user_id,
-        Some(document_id),
-        json!({ "employee_id": employee.id, "category": target.category.code }),
-    );
-    Ok(document_json(&row, late))
+    Ok((document_id, document_json(&row, late)))
 }
 
 // ---------------------------------------------------------------------------

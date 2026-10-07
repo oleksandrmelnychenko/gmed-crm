@@ -50,6 +50,11 @@ pub(crate) struct InvoiceRecipient {
     /// The Leistungsempfänger (contracting party) when the invoice is
     /// addressed to someone else, e.g. a Kostenübernehmer.
     pub service_recipient_name: Option<String>,
+    /// USt-IdNr. and Steuernummer of the recipient as staff added them to
+    /// the patient's payer declaration (section 7 of the lead's form): a
+    /// draft reads them live, the release freezes them in the snapshot.
+    pub vat_id: Option<String>,
+    pub tax_number: Option<String>,
 }
 
 fn clean(value: Option<&str>) -> Option<String> {
@@ -106,6 +111,8 @@ impl InvoiceRecipient {
             kind: text("kind").unwrap_or_else(|| "patient".to_string()),
             frozen,
             service_recipient_name: text("service_recipient_name"),
+            vat_id: text("vat_id"),
+            tax_number: text("tax_number"),
         }
     }
 
@@ -151,6 +158,8 @@ impl InvoiceRecipient {
             "kind": self.kind,
             "frozen": self.frozen,
             "service_recipient_name": self.service_recipient_name,
+            "vat_id": self.vat_id,
+            "tax_number": self.tax_number,
             "has_postal_address": self.has_postal_address(),
             "has_complete_address": self.has_complete_address(),
             "missing_address_parts": missing_address_parts(self),
@@ -158,7 +167,9 @@ impl InvoiceRecipient {
     }
 }
 
-/// Reads the recipient selected with [`RECIPIENT_COLUMNS`].
+/// Reads the recipient selected with [`RECIPIENT_COLUMNS`] as stored: the
+/// snapshot of a released invoice (dunning letters), or the bare live
+/// recipient. The printed draft reads it with [`read_recipient`].
 pub(super) fn recipient_from_row(row: &PgRow) -> InvoiceRecipient {
     let value = row
         .try_get::<Option<Value>, _>("rcpt_recipient")
@@ -168,28 +179,69 @@ pub(super) fn recipient_from_row(row: &PgRow) -> InvoiceRecipient {
     InvoiceRecipient::from_json(&value, frozen)
 }
 
-/// The live recipient of an invoice as JSON (before release).
+/// Reads the recipient selected with [`RECIPIENT_COLUMNS`] the way the
+/// invoice names it: a released invoice's snapshot as frozen; a draft's live
+/// recipient with what the patient's payer declaration adds (the e-mail for
+/// invoices, USt-IdNr. and Steuernummer,
+/// [`super::payer::add_declared_recipient_details`]) and the
+/// Leistungsempfänger line — what its release will freeze.
+pub(super) async fn read_recipient(
+    conn: &mut PgConnection,
+    row: &PgRow,
+    patient_id: Uuid,
+    order_id: Option<Uuid>,
+) -> Result<InvoiceRecipient, sqlx::Error> {
+    let mut value = row
+        .try_get::<Option<Value>, _>("rcpt_recipient")
+        .unwrap_or_default()
+        .unwrap_or(Value::Null);
+    if row.try_get::<bool, _>("rcpt_frozen").unwrap_or(false) {
+        return Ok(InvoiceRecipient::from_json(&value, true));
+    }
+    super::payer::add_declared_recipient_details(conn, &mut value, patient_id, order_id).await?;
+    let mut recipient = InvoiceRecipient::from_json(&value, false);
+    if recipient.is_payer {
+        recipient.service_recipient_name =
+            live_service_recipient_name(conn, &value, patient_id, order_id).await?;
+    }
+    Ok(recipient)
+}
+
+/// The live recipient of an invoice as JSON (before release), with what the
+/// patient's payer declaration adds to it.
 pub(super) async fn resolve_live_recipient(
     conn: &mut PgConnection,
     invoice_id: Uuid,
 ) -> Result<Value, sqlx::Error> {
-    sqlx::query_scalar::<_, Option<Value>>(
-        r#"SELECT invoice_recipient_resolve(
+    let Some(row) = sqlx::query(
+        r#"SELECT i.patient_id, i.order_id, invoice_recipient_resolve(
                i.patient_id, i.payer_patient_id, i.payer_patient_relation_id,
                i.payer_contact_name, i.payer_contact_email,
                i.payer_address_street, i.payer_address_zip, i.payer_address_city,
-               i.payer_address_country)
+               i.payer_address_country) AS recipient
            FROM invoices i WHERE i.id = $1"#,
     )
     .bind(invoice_id)
-    .fetch_optional(conn)
-    .await
-    .map(|value| value.flatten().unwrap_or(Value::Null))
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(Value::Null);
+    };
+    let mut recipient = row
+        .try_get::<Option<Value>, _>("recipient")?
+        .unwrap_or(Value::Null);
+    super::payer::add_declared_recipient_details(
+        conn,
+        &mut recipient,
+        row.try_get("patient_id")?,
+        row.try_get("order_id")?,
+    )
+    .await?;
+    Ok(recipient)
 }
 
 /// Loads the recipient of one invoice: the frozen one of a released invoice,
-/// the live one of a draft (naming the contracting party when the invoice goes
-/// to someone else, as the release will).
+/// the live one of a draft as its release will freeze it ([`read_recipient`]).
 pub(super) async fn load_invoice_recipient(
     conn: &mut PgConnection,
     invoice_id: Uuid,
@@ -204,20 +256,15 @@ pub(super) async fn load_invoice_recipient(
     else {
         return Ok(None);
     };
-    let mut recipient = recipient_from_row(&row);
-    if !recipient.frozen && recipient.is_payer {
-        recipient.service_recipient_name = live_service_recipient_name(
-            conn,
-            &row.try_get::<Option<Value>, _>("rcpt_recipient")
-                .unwrap_or_default()
-                .unwrap_or(Value::Null),
-            row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
-            row.try_get::<Option<Uuid>, _>("order_id")
-                .unwrap_or_default(),
-        )
-        .await?;
-    }
-    Ok(Some(recipient))
+    read_recipient(
+        conn,
+        &row,
+        row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+    )
+    .await
+    .map(Some)
 }
 
 /// The contracting party's name when it is not the invoice recipient — and

@@ -406,6 +406,8 @@ async fn the_roles_of_the_card_and_a_patient_without_a_lead() {
             "city": "Berlin",
             "country": "DE",
             "email": null,
+            "vat_id": null,
+            "tax_number": null,
             "payer_patient_relation_id": null,
             "payer_patient_id": null,
             "missing": [],
@@ -563,6 +565,9 @@ async fn a_self_payer_adult_and_a_third_party_person() {
             "city": "Wien",
             "country": "AT",
             "email": "viktor.zahler@example.com",
+            // The USt-IdNr. staff added for the recipient the lead named.
+            "vat_id": "ATU12345678",
+            "tax_number": null,
             "payer_patient_relation_id": null,
             "payer_patient_id": null,
             "missing": [],
@@ -635,6 +640,8 @@ async fn a_self_payer_adult_and_a_third_party_person() {
             "city": "München",
             "country": "DE",
             "email": "rechnung@example.com",
+            "vat_id": null,
+            "tax_number": "12/345/67890",
             "payer_patient_relation_id": null,
             "payer_patient_id": null,
             "missing": [],
@@ -642,6 +649,42 @@ async fn a_self_payer_adult_and_a_third_party_person() {
         }),
         "{body}"
     );
+
+    // "To me" with an e-mail for invoices: it replaces the patient's own
+    // e-mail on the recipient the card names, with the USt-IdNr.
+    let own_invoice = seed_patient(&app, "Finn", "1980-05-05").await;
+    let own_invoice_lead = seed_converted_lead(
+        &app,
+        own_invoice,
+        "Finn",
+        "1980-05-05",
+        json!([]),
+        minutes_ago(60),
+    )
+    .await;
+    seed_declaration(
+        &app,
+        own_invoice_lead,
+        Some(own_invoice),
+        json!({
+            "payer_kind": "self",
+            "source_of_funds": "employment",
+            "invoice_to": "self",
+            "invoice_email": "finn.rechnung@example.com",
+            "invoice_vat_id": "DE987654321"
+        }),
+        minutes_ago(90),
+    )
+    .await;
+    let body = summary(&app, own_invoice, "billing").await;
+    assert_eq!(body["invoice_recipient"]["kind"], "patient", "{body}");
+    assert_eq!(body["invoice_recipient"]["name"], "Finn Muster");
+    assert_eq!(
+        body["invoice_recipient"]["email"], "finn.rechnung@example.com",
+        "{body}"
+    );
+    assert_eq!(body["invoice_recipient"]["vat_id"], "DE987654321");
+    assert!(body["invoice_recipient"]["tax_number"].is_null());
 
     // An organisation is named by its name; its signer's QES is the payer's.
     let company = seed_patient(&app, "Dora", "1980-05-05").await;
@@ -828,6 +871,8 @@ async fn a_minor_whose_parent_pays_and_a_minor_paid_by_a_relative() {
             "city": "Berlin",
             "country": "DE",
             "email": "anna.muster@example.com",
+            "vat_id": null,
+            "tax_number": null,
             "payer_patient_relation_id": anna_relation,
             "payer_patient_id": null,
             "missing": [],

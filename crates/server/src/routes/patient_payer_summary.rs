@@ -44,7 +44,8 @@ use uuid::Uuid;
 
 use crate::auth::middleware::AuthUser;
 use crate::routes::invoices::payer::{
-    InheritedPayer, InvoiceRecipient, inherited_invoice_payer, missing_address_parts,
+    InheritedPayer, InvoiceRecipient, add_declared_recipient_details, inherited_invoice_payer,
+    missing_address_parts,
 };
 use crate::routes::lead_identification::{self, IdentificationStatus};
 use crate::routes::lead_payer::{self, PatientDeclaration};
@@ -83,6 +84,8 @@ impl RecipientSummary {
             "city": self.recipient.city,
             "country": self.recipient.country,
             "email": self.recipient.email,
+            "vat_id": self.recipient.vat_id,
+            "tax_number": self.recipient.tax_number,
             "payer_patient_relation_id": self.payer_patient_relation_id,
             "payer_patient_id": self.payer_patient_id,
             "missing": missing_address_parts(&self.recipient),
@@ -146,7 +149,7 @@ async fn load_recipient(
 ) -> Result<RecipientSummary, sqlx::Error> {
     let inherited = inherited_invoice_payer(conn, None, patient_id).await?;
     let record = &inherited.record;
-    let resolved = sqlx::query_scalar::<_, Option<Value>>(
+    let mut resolved = sqlx::query_scalar::<_, Option<Value>>(
         "SELECT invoice_recipient_resolve($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(patient_id)
@@ -161,6 +164,9 @@ async fn load_recipient(
     .fetch_one(&mut *conn)
     .await?
     .unwrap_or(Value::Null);
+    // The e-mail for invoices and the tax numbers of section 7, as a draft
+    // of the patient would carry them.
+    add_declared_recipient_details(conn, &mut resolved, patient_id, None).await?;
     let uuid = |key: &str| {
         resolved
             .get(key)

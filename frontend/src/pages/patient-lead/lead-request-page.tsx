@@ -405,7 +405,14 @@ function LeadRequestView({
 }
 
 /** The parts of step "data" that save on their own; the footer shows one state for all. */
-type SavePart = "personal" | "payer" | "identification" | "representation" | "billing" | "payerQuestionnaire";
+type SavePart =
+  | "personal"
+  | "payer"
+  | "selfFunds"
+  | "identification"
+  | "representation"
+  | "billing"
+  | "payerQuestionnaire";
 
 /**
  * Step "data" in the order of the GwG form (owner spec 2026-10-05): consent
@@ -435,6 +442,7 @@ function PersonalDataStep({
   const [saveStates, setSaveStates] = useState<Record<SavePart, SaveState>>({
     personal: "idle",
     payer: "idle",
+    selfFunds: "idle",
     identification: "idle",
     representation: "idle",
     billing: "idle",
@@ -447,6 +455,7 @@ function PersonalDataStep({
     setSaveStates((current) => (current[part] === state ? current : { ...current, [part]: state }));
   }, []);
   const setPayerSaveState = useCallback((state: SaveState) => setSaveState("payer", state), [setSaveState]);
+  const setSelfFundsSaveState = useCallback((state: SaveState) => setSaveState("selfFunds", state), [setSaveState]);
   const setIdentificationSaveState = useCallback(
     (state: SaveState) => setSaveState("identification", state),
     [setSaveState],
@@ -837,6 +846,7 @@ function PersonalDataStep({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={setPayerSaveState}
+          onSelfFundsSaveState={setSelfFundsSaveState}
         />
       ) : null}
 

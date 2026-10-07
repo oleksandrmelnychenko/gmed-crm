@@ -14,6 +14,7 @@ import type {
   LeadPortalBilling,
   LeadPortalIntake,
   LeadPortalPayerLink,
+  LeadPortalSelfFunds,
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
@@ -25,7 +26,44 @@ export type Tx = (ru: string, de: string) => string;
 export const EMPTY_STATEMENT = "—";
 
 type GwgIntake = Pick<LeadPortalIntake, "identification" | "identification_updated_at" | "identity_documents">
-  & Partial<Pick<LeadPortalIntake, "representation" | "representation_updated_at" | "billing" | "billing_updated_at">>;
+  & Partial<
+    Pick<LeadPortalIntake, "representation" | "representation_updated_at" | "billing" | "billing_updated_at" | "self_funds">
+  >;
+
+/**
+ * Whether the self-payer's source of funds is shown: while the patient pays
+ * himself, and while files of it are on record (also after another payer was
+ * named).
+ */
+export function selfFundsShown(
+  selfFunds: LeadPortalSelfFunds | null | undefined,
+): selfFunds is LeadPortalSelfFunds {
+  return Boolean(selfFunds && (selfFunds.asked || selfFunds.proof_documents.length > 0));
+}
+
+/** Whether the lead stated anything of it: a source, a description or a file. */
+export function hasSelfFundsStatements(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
+  return Boolean(
+    selfFunds && (selfFunds.sources.length > 0 || selfFunds.description || selfFunds.proof_documents.length > 0),
+  );
+}
+
+/**
+ * The enhanced check is required (owner rule 2026-10-07) and the self-paying
+ * patient has not uploaded the proof of funds yet: staff see an amber line.
+ */
+export function selfFundsProofMissing(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
+  return Boolean(selfFunds?.proof_required && selfFundsProofOutstanding(selfFunds));
+}
+
+/**
+ * The patient pays himself and no proof of funds is on file — whether it is
+ * required is the caller's to say (the enhanced-check panel of the wizard
+ * decides with the black-list countries it shows).
+ */
+export function selfFundsProofOutstanding(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
+  return Boolean(selfFunds?.asked && selfFunds.proof_documents.length === 0);
+}
 
 /** The keys of sections 7–8 the lead answers in the cabinet (not the staff fields, not the derived flags). */
 const BILLING_ANSWER_KEYS = [
@@ -89,6 +127,7 @@ export function hasGwgStatements(intake: GwgIntake | null | undefined): boolean 
   if (!intake) return false;
   if (intake.identification_updated_at || intake.identity_documents.length > 0) return true;
   if (hasRepresentationStatements(intake) || hasBillingStatements(intake)) return true;
+  if (hasSelfFundsStatements(intake.self_funds)) return true;
   return Object.values(intake.identification ?? {}).some((value) =>
     Array.isArray(value) ? value.length > 0 : typeof value === "boolean" || Boolean(value),
   );

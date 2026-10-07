@@ -734,3 +734,62 @@ describe("LeadGwgStatements: the payer's answers", () => {
     expect(html).toContain("Анкета плательщика");
   });
 });
+
+describe("LeadGwgStatements: the self-payer's source of funds", () => {
+  const selfFunds = (patch: Record<string, unknown> = {}) => ({
+    asked: true,
+    sources: ["employment", "other"],
+    description: "Stipendium der Stiftung",
+    proof_required: false,
+    proof_documents: [{ id: "doc-7", file_name: "gehaltsnachweis.pdf", uploaded_at: "2026-10-07T08:00:00Z", reviewed: false }],
+    updated_at: "2026-10-07T08:05:00Z",
+    ...patch,
+  });
+
+  it("lists the sources, the words and the proof after the economic interest", () => {
+    const html = render(portalState({ self_funds: selfFunds() }));
+    const group = part(html, "lead-gwg-self-funds", "</dl>");
+    expect(group).toContain("Происхождение средств (пациент платит сам)");
+    expect(group).toContain("от пациента · 07.10.2026 10:05");
+    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Заработная плата / работа по найму, Другое");
+    expect(statement(html, "lead-gwg-self-funds-description")).toContain("Stipendium der Stiftung");
+    const proof = statement(html, "lead-gwg-self-funds-proof");
+    expect(proof).toContain("Подтверждение источника средств · необязательно");
+    expect(proof).toContain("gehaltsnachweis.pdf");
+    expect(proof).not.toContain('data-warning="true"');
+    expect(html).not.toContain("lead-self-funds-proof-missing");
+    expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf("lead-gwg-self-funds"));
+    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+  });
+
+  it("warns in amber while the enhanced check requires the proof and none is uploaded", () => {
+    const html = render(portalState({ self_funds: selfFunds({ proof_required: true, proof_documents: [] }) }), undefined, "de");
+    expect(statement(html, "lead-gwg-self-funds-proof")).toContain('data-warning="true"');
+    expect(statement(html, "lead-gwg-self-funds-proof")).toContain("Nachweis der Mittelherkunft · erforderlich");
+    expect(part(html, "lead-self-funds-proof-missing", "</p>")).toContain(
+      "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
+    );
+    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Gehalt / nichtselbständige Arbeit, Sonstiges");
+  });
+
+  it("shows nothing of it while a third party pays and no file is on record, and the files when one is", () => {
+    const none = render(portalState({ self_funds: selfFunds({ asked: false, sources: [], description: null, proof_documents: [] }) }));
+    expect(none).not.toContain("lead-gwg-self-funds");
+    const kept = render(portalState({ self_funds: selfFunds({ asked: false, sources: [], description: null, proof_required: true }) }));
+    expect(statement(kept, "lead-gwg-self-funds-proof")).toContain("gehaltsnachweis.pdf");
+    expect(kept).not.toContain("lead-self-funds-proof-missing");
+  });
+
+  it("counts as a statement of the lead on its own", () => {
+    const html = render(
+      portalState({
+        identification: {},
+        identification_updated_at: null,
+        identity_documents: [],
+        self_funds: selfFunds({ proof_documents: [] }),
+      }),
+    );
+    expect(html).not.toContain("lead-gwg-statements-empty");
+    expect(html).toContain("lead-gwg-self-funds");
+  });
+});

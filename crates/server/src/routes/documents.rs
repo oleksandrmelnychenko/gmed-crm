@@ -7259,6 +7259,8 @@ fn generated_typed_document_number(
         "privacy_information" => "DS",
         "enhanced_due_diligence" => "AML",
         "gwg_identification" => "GWG",
+        // Staff instruction sheet in the personnel file, numbered by its record.
+        GWG_STAFF_TRAINING_TEMPLATE_ID => "GWU",
         _ => return None,
     };
     let simple = document_id.simple().to_string();
@@ -21239,6 +21241,411 @@ fn build_gwg_identification_pdf(
 }
 
 // ---------------------------------------------------------------------------
+// GwG instruction and reliability of the staff (§ 6 Abs. 2 Nr. 5, 6 GwG),
+// owner request 2026-10-05: "Risikomanagement: Dokumentation interner
+// Sicherungsmaßnahmen" in the GMED layout. Not a patient document: the sheet
+// is archived in the employee's personnel file
+// (`routes::sops_gwg_training`). The exception for goods traders (cash
+// payments) does not apply to a service provider and is left out.
+// ---------------------------------------------------------------------------
+
+pub(crate) const GWG_STAFF_TRAINING_TEMPLATE_ID: &str = "gwg_staff_training";
+pub(crate) const GWG_STAFF_TRAINING_LABEL: &str =
+    "GwG-Unterweisung und Zuverlässigkeit (§ 6 Abs. 2 GwG)";
+
+/// The instructions of section 2 as (code, text), in the order of the sheet.
+pub(crate) const GWG_STAFF_INSTRUCTIONS: [(&str, &str); 6] = [
+    (
+        "identify_partner",
+        "den Geschäfts-/Vertragspartner zu identifizieren (§ 10 Abs. 1 Nr. 1 GwG).",
+    ),
+    (
+        "identify_acting_person",
+        "die ggf. für den Vertragspartner auftretende Person zu identifizieren und zu prüfen, ob diese dazu berechtigt ist.",
+    ),
+    (
+        "beneficial_owner",
+        "den wirtschaftlich Berechtigten zu ermitteln (§ 10 Abs. 1 Nr. 2 GwG).",
+    ),
+    (
+        "enhanced_due_diligence",
+        "verstärkte Sorgfaltspflichten zu erfüllen (§ 15 GwG), wenn",
+    ),
+    (
+        "suspicious_activity_report",
+        "bei ungewöhnlichen Geschäftsvorfällen eine Verdachtsmeldung abzugeben (§ 43 GwG).",
+    ),
+    (
+        "record_keeping",
+        "die erhobenen Angaben und eingeholten Informationen aufzuzeichnen und 5 Jahre aufzubewahren (§ 8 GwG).",
+    ),
+];
+
+/// The cases of the enhanced due diligence instruction.
+const GWG_STAFF_ENHANCED_DUE_DILIGENCE_CASES: [&str; 4] = [
+    "im Rahmen der Risikoanalyse oder im Einzelfall ein erhöhtes Risiko festzustellen ist,",
+    "der Vertragspartner oder der wirtschaftlich Berechtigte eine „Politisch exponierte Person“ ist,",
+    "der Vertragspartner in einem Drittstaat mit hohem Risiko niedergelassen ist,",
+    "es sich um eine, im Verhältnis zu vergleichbaren Fällen, außergewöhnliche Transaktion handelt.",
+];
+
+/// Section 3: how the reliability of the employee was checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum GwgStaffReliability {
+    /// a) A long-standing employee; no doubts.
+    LongStanding,
+    /// b) A new employee, checked by the question about relevant previous
+    /// convictions, a certificate of good conduct or something else.
+    NewEmployee {
+        interview: bool,
+        certificate: bool,
+        other: Option<String>,
+    },
+}
+
+/// Everything the sheet prints: the employee profile and one record.
+#[derive(Clone, Debug)]
+pub(crate) struct GwgStaffTrainingSheet {
+    pub(crate) last_name: String,
+    pub(crate) first_name: String,
+    pub(crate) employment_start: Option<NaiveDate>,
+    /// "als" and "im Bereich".
+    pub(crate) position: String,
+    pub(crate) department: String,
+    pub(crate) instructed_on: NaiveDate,
+    /// `None`: instructed in-house ("betriebsintern").
+    pub(crate) delivered_by_other: Option<String>,
+    pub(crate) form_oral: bool,
+    pub(crate) form_material: bool,
+    pub(crate) form_other: Option<String>,
+    /// Codes of [`GWG_STAFF_INSTRUCTIONS`] that were given.
+    pub(crate) instructions: Vec<String>,
+    pub(crate) reliability: GwgStaffReliability,
+    /// Printed under the management's signature line.
+    pub(crate) management_name: String,
+}
+
+/// "Muster, Anna" as printed in the name fields.
+fn gwg_staff_listed_name(last_name: &str, first_name: &str) -> String {
+    match (last_name.trim(), first_name.trim()) {
+        ("", "") => "—".to_string(),
+        (last, "") => last.to_string(),
+        ("", first) => first.to_string(),
+        (last, first) => format!("{last}, {first}"),
+    }
+}
+
+/// "Ort, Datum" over two signature lines: the signature on the left, the
+/// printed name on the right, each with its caption below, as on the form.
+fn gwg_staff_signature_block(
+    layout: &mut TreatmentPlanPdfLayout,
+    signature_caption: &str,
+    printed_name: &str,
+) {
+    const UNDERLINE: &str = "________________________________";
+    const RIGHT_COLUMN_X_MM: f32 = 122.0;
+    layout.spacer(5.0);
+    layout.ensure_space(24.0);
+    let place_y = layout.y_mm;
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        "Ort, Datum: ________________________________",
+        PDF_LEFT_MARGIN_MM,
+        place_y,
+        10.0,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    let line_y = place_y - 13.0;
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        UNDERLINE,
+        PDF_LEFT_MARGIN_MM,
+        line_y,
+        10.0,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        &truncate_text_to_width(printed_name, 10.0, 62.0),
+        RIGHT_COLUMN_X_MM,
+        line_y + 1.5,
+        10.0,
+        &layout.bold_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        UNDERLINE,
+        RIGHT_COLUMN_X_MM,
+        line_y,
+        10.0,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    for (text, x) in [
+        (signature_caption, PDF_LEFT_MARGIN_MM),
+        ("Name, Vorname in Druckbuchstaben", RIGHT_COLUMN_X_MM),
+    ] {
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            text,
+            x,
+            line_y - 4.5,
+            8.5,
+            &layout.regular_font,
+            TreatmentPlanPdfColor::Muted,
+        );
+    }
+    layout.y_mm = line_y - 8.0;
+}
+
+/// A numbered section heading, smaller than [`admin_heading`] so that the
+/// employee's part (sections 1 and 2) fits on page 1 as on the form.
+fn gwg_staff_heading(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(text, 11.5, true, 0.0, TreatmentPlanPdfColor::Body, 2.5, 1.0);
+}
+
+/// A bold lead-in line ("Die Unterrichtung erfolgte", "in Form").
+fn gwg_staff_lead_in(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+    layout.text_block(text, 10.0, true, 0.0, TreatmentPlanPdfColor::Body, 1.0, 0.3);
+}
+
+/// One "[X] text" line; `indent_mm` 9 for the sub-list of section 3 b.
+fn gwg_staff_checkbox(
+    layout: &mut TreatmentPlanPdfLayout,
+    checked: bool,
+    text: &str,
+    indent_mm: f32,
+) {
+    layout.text_block_justified(
+        &format!("[{}]  {text}", if checked { "X" } else { " " }),
+        9.5,
+        false,
+        3.0 + indent_mm,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.6,
+    );
+}
+
+/// "Sonstiges: text" of a ticked free-text box, a blank line otherwise.
+fn gwg_staff_other_text(label: &str, value: Option<&str>) -> String {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => format!("{label}: {value}"),
+        None => format!("{label}: ____________________"),
+    }
+}
+
+/// The GwG instruction and reliability sheet of one employee (template
+/// `gwg_staff_training`): page 1 is signed by the employee, page 2
+/// (reliability) by the management.
+fn build_gwg_staff_training_pdf(
+    sheet: &GwgStaffTrainingSheet,
+    agency: &AgencyContractSettings,
+    document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let date = |value: NaiveDate| value.format("%d.%m.%Y").to_string();
+    let text_or_dash = |value: &str| {
+        let value = value.trim();
+        if value.is_empty() {
+            "—".to_string()
+        } else {
+            value.to_string()
+        }
+    };
+    let listed_name = gwg_staff_listed_name(&sheet.last_name, &sheet.first_name);
+    let instructed_on = date(sheet.instructed_on);
+
+    adult_legal_document_header(
+        &mut layout,
+        "Risikomanagement (§ 6 Abs. 2 GwG)",
+        "Dokumentation interner Sicherungsmaßnahmen",
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            ("Name, Vorname", listed_name.clone()),
+            (
+                "Im Unternehmen beschäftigt seit",
+                sheet
+                    .employment_start
+                    .map(date)
+                    .unwrap_or_else(|| "—".to_string()),
+            ),
+            ("als", text_or_dash(&sheet.position)),
+            ("im Bereich", text_or_dash(&sheet.department)),
+        ],
+    );
+
+    gwg_staff_heading(&mut layout, "1. Unterrichtung der Beschäftigten");
+    layout.text_block_justified(
+        &format!(
+            "Die/Der Beschäftigte wurde über Typologien und aktuelle Methoden und die zur Verhinderung der Geldwäsche und Terrorismusfinanzierung bestehenden Pflichten unterrichtet am {instructed_on}."
+        ),
+        10.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        0.8,
+    );
+    gwg_staff_lead_in(&mut layout, "Die Unterrichtung erfolgte");
+    gwg_staff_checkbox(
+        &mut layout,
+        sheet.delivered_by_other.is_none(),
+        "betriebsintern",
+        0.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        sheet.delivered_by_other.is_some(),
+        &gwg_staff_other_text("durch Sonstige", sheet.delivered_by_other.as_deref()),
+        0.0,
+    );
+    gwg_staff_lead_in(&mut layout, "in Form");
+    gwg_staff_checkbox(
+        &mut layout,
+        sheet.form_oral,
+        "einer mündlichen Unterweisung",
+        0.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        sheet.form_material,
+        "der Aushändigung des von der zuständigen Aufsichtsbehörde bereitgestellten Informationsmaterials, insbesondere des Dokumentationsbogens.",
+        0.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        sheet.form_other.is_some(),
+        &gwg_staff_other_text("Sonstiges", sheet.form_other.as_deref()),
+        0.0,
+    );
+
+    gwg_staff_heading(
+        &mut layout,
+        "2. Die/Der Beschäftigte wurde gleichzeitig angewiesen,",
+    );
+    for (code, text) in GWG_STAFF_INSTRUCTIONS {
+        let given = sheet.instructions.iter().any(|value| value == code);
+        gwg_staff_checkbox(&mut layout, given, text, 0.0);
+        if code == "enhanced_due_diligence" {
+            for case in GWG_STAFF_ENHANCED_DUE_DILIGENCE_CASES {
+                layout.text_block_justified(
+                    &format!("–  {case}"),
+                    9.0,
+                    false,
+                    12.0,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.3,
+                );
+            }
+        }
+    }
+    gwg_staff_signature_block(
+        &mut layout,
+        "Unterschrift der/des Beschäftigten",
+        &listed_name,
+    );
+
+    // Page 2, as on the form: the management confirms the reliability. When
+    // long free texts already pushed the employee's signature to page 2,
+    // section 3 follows it there instead of opening a third page.
+    if layout.page_number == 1 {
+        layout.page_break();
+    }
+    gwg_staff_heading(
+        &mut layout,
+        "3. Risikoangemessene Kontrolle auf Zuverlässigkeit der Beschäftigten",
+    );
+    let (interview, certificate, other) = match &sheet.reliability {
+        GwgStaffReliability::LongStanding => (false, false, None),
+        GwgStaffReliability::NewEmployee {
+            interview,
+            certificate,
+            other,
+        } => (*interview, *certificate, other.as_deref()),
+    };
+    let new_employee = matches!(sheet.reliability, GwgStaffReliability::NewEmployee { .. });
+    gwg_staff_checkbox(
+        &mut layout,
+        !new_employee,
+        "a) Nach erfolgter Überprüfung der/des Beschäftigten bestehen keine Zweifel an der Zuverlässigkeit, da es sich um eine langjährige Mitarbeiterin/einen langjährigen Mitarbeiter handelt, die/der die Gewähr dafür bietet, dass sie/er die gesetzlichen und vertraglichen Pflichten jederzeit sorgfältig beachtet und in vollem Umfang erfüllt.",
+        0.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        new_employee,
+        "b) Die Zuverlässigkeit neu eingestellter Mitarbeiterinnen/Mitarbeiter wurde überprüft durch",
+        0.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        interview,
+        "die gezielte Nachfrage nach evtl. vorhandenen geldwäscherelevanten Vorstrafen im Vorstellungsgespräch bzw. Personalfragebogen und/oder durch",
+        9.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        certificate,
+        "die Vorlage und Aufbewahrung eines Führungszeugnisses in den Personalunterlagen.",
+        9.0,
+    );
+    gwg_staff_checkbox(
+        &mut layout,
+        other.is_some(),
+        &gwg_staff_other_text("Sonstiges", other),
+        9.0,
+    );
+    layout.text_block_justified(
+        "Die Zuverlässigkeit ist mit geeigneten Personalkontrollsystemen kontinuierlich zu überwachen.",
+        10.0,
+        false,
+        0.0,
+        TreatmentPlanPdfColor::Body,
+        3.0,
+        1.0,
+    );
+    gwg_staff_signature_block(
+        &mut layout,
+        "Unterschrift der Geschäftsleitung",
+        &text_or_dash(&sheet.management_name),
+    );
+
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// The sheet of one GwG instruction record with the configured company
+/// identity; its number (`GWU-…`) is derived from the record id.
+pub(crate) async fn render_gwg_staff_training_pdf(
+    state: &AppState,
+    sheet: &GwgStaffTrainingSheet,
+    record_id: Uuid,
+    generated_at: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<u8>, axum::response::Response> {
+    let agency = load_agency_contract_settings(state).await?;
+    let reference = generated_document_number_for_template(
+        GWG_STAFF_TRAINING_TEMPLATE_ID,
+        record_id,
+        generated_at,
+    );
+    build_gwg_staff_training_pdf(sheet, &agency, &reference)
+        .map(|generated| generated.bytes)
+        .map_err(|error| {
+            tracing::error!(error, "build GwG instruction sheet");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to generate the GwG instruction sheet",
+            )
+        })
+}
+
+// ---------------------------------------------------------------------------
 // The payer's signature package (phase 3b, owner decisions 2026-10-06): the
 // self-disclosure, the statement about the payer and the payer's copy of the
 // cost estimate. Only the payer and GMED sign them (signature frame `payer`);
@@ -32651,6 +33058,143 @@ mod tests {
         assert!(text.contains("liegt vor (Bestellungsurkunde bzw. Betreuerausweis)"));
         assert!(!text.contains("liegt vor (Vollmacht)"));
         assert!(text.contains("[X] Bei Betreuten"));
+    }
+
+    fn gwg_staff_sheet() -> super::GwgStaffTrainingSheet {
+        super::GwgStaffTrainingSheet {
+            last_name: "Muster".to_string(),
+            first_name: "Anna".to_string(),
+            employment_start: NaiveDate::from_ymd_opt(2019, 3, 1),
+            position: "Dolmetscher/in".to_string(),
+            department: "Dolmetscherdienst".to_string(),
+            instructed_on: NaiveDate::from_ymd_opt(2026, 10, 7).unwrap(),
+            delivered_by_other: None,
+            form_oral: true,
+            form_material: true,
+            form_other: None,
+            instructions: super::GWG_STAFF_INSTRUCTIONS
+                .iter()
+                .map(|(code, _)| code.to_string())
+                .collect(),
+            reliability: super::GwgStaffReliability::LongStanding,
+            management_name: "Ben Beispiel".to_string(),
+        }
+    }
+
+    #[test]
+    fn gwg_staff_training_sheet_prints_the_record_on_two_pages_without_the_goods_trader_rule() {
+        let generated = super::build_gwg_staff_training_pdf(
+            &gwg_staff_sheet(),
+            &legal_test_agency(),
+            "GWU-20261007-UNITTEST0001",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&generated.bytes, "GWU-20261007-UNITTEST0001");
+        // As on the form: the employee signs page 1, the management page 2.
+        let pages = normalized_pdf_pages(&generated.bytes);
+        assert_eq!(pages.len(), 2, "{pages:#?}");
+        assert!(
+            pages[0].contains("Unterschrift der/des Beschäftigten"),
+            "{}",
+            pages[0]
+        );
+        assert!(!pages[0].contains("3. Risikoangemessene"));
+        assert!(pages[1].contains("3. Risikoangemessene"));
+        assert!(pages[1].contains("Unterschrift der Geschäftsleitung"));
+
+        assert!(text.contains("Risikomanagement (§ 6 Abs. 2 GwG)"));
+        assert!(text.contains("Dokumentation interner Sicherungsmaßnahmen"));
+        assert!(text.contains("Muster, Anna"));
+        assert!(text.contains("01.03.2019"));
+        assert!(text.contains("Dolmetscher/in"));
+        assert!(text.contains("Dolmetscherdienst"));
+        assert!(text.contains("unterrichtet am 07.10.2026."));
+        assert!(text.contains("[X] betriebsintern"));
+        assert!(text.contains("[ ] durch Sonstige: ____"));
+        assert!(text.contains("[X] einer mündlichen Unterweisung"));
+        assert!(text.contains("[X] der Aushändigung des von der zuständigen Aufsichtsbehörde"));
+        assert!(text.contains("[ ] Sonstiges: ____"));
+        assert!(text.contains("2. Die/Der Beschäftigte wurde gleichzeitig angewiesen,"));
+        assert!(text.contains(
+            "[X] den Geschäfts-/Vertragspartner zu identifizieren (§ 10 Abs. 1 Nr. 1 GwG)."
+        ));
+        assert!(text.contains("auftretende Person zu identifizieren"));
+        assert!(
+            text.contains(
+                "[X] den wirtschaftlich Berechtigten zu ermitteln (§ 10 Abs. 1 Nr. 2 GwG)."
+            )
+        );
+        assert!(text.contains("[X] verstärkte Sorgfaltspflichten zu erfüllen (§ 15 GwG), wenn"));
+        assert!(text.contains("„Politisch exponierte Person“"));
+        assert!(text.contains("Drittstaat mit hohem Risiko"));
+        assert!(text.contains("außergewöhnliche Transaktion"));
+        assert!(text.contains("Verdachtsmeldung abzugeben (§ 43 GwG)."));
+        assert!(text.contains("5 Jahre aufzubewahren (§ 8 GwG)."));
+        assert!(text.contains("Unterschrift der/des Beschäftigten"));
+        assert!(text.contains("Name, Vorname in Druckbuchstaben"));
+        // Page 2: the management confirms the reliability of a long-standing employee.
+        assert!(
+            text.contains("3. Risikoangemessene Kontrolle auf Zuverlässigkeit der Beschäftigten")
+        );
+        assert!(text.contains("[X] a) Nach erfolgter Überprüfung"));
+        assert!(text.contains("[ ] b) Die Zuverlässigkeit neu eingestellter"));
+        assert!(text.contains("kontinuierlich zu überwachen."));
+        assert!(text.contains("Unterschrift der Geschäftsleitung"));
+        assert!(text.contains("Ben Beispiel"));
+        // GMED is a service provider: the goods trader exception is not printed.
+        assert!(!text.contains("Güterhändler"));
+        assert!(!text.contains("Bargeld"));
+        assert!(!text.contains("10.000"));
+    }
+
+    #[test]
+    fn gwg_staff_training_sheet_of_a_new_employee_ticks_only_what_was_done() {
+        let sheet = super::GwgStaffTrainingSheet {
+            employment_start: NaiveDate::from_ymd_opt(2026, 9, 1),
+            delivered_by_other: Some("Kanzlei Beispiel GmbH".to_string()),
+            form_material: false,
+            form_other: Some("Online-Schulung".to_string()),
+            instructions: vec!["identify_partner".to_string(), "record_keeping".to_string()],
+            reliability: super::GwgStaffReliability::NewEmployee {
+                interview: false,
+                certificate: true,
+                other: Some("Referenz des Vorarbeitgebers".to_string()),
+            },
+            position: String::new(),
+            ..gwg_staff_sheet()
+        };
+        let generated = super::build_gwg_staff_training_pdf(
+            &sheet,
+            &legal_test_agency(),
+            "GWU-20261007-UNITTEST0002",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&generated.bytes, "GWU-20261007-UNITTEST0002");
+        assert_eq!(normalized_pdf_pages(&generated.bytes).len(), 2);
+        assert!(text.contains("[ ] betriebsintern"));
+        assert!(text.contains("[X] durch Sonstige: Kanzlei Beispiel GmbH"));
+        assert!(text.contains("[ ] der Aushändigung"));
+        assert!(text.contains("[X] Sonstiges: Online-Schulung"));
+        assert!(text.contains("[X] den Geschäfts-/Vertragspartner zu identifizieren"));
+        assert!(text.contains("[ ] den wirtschaftlich Berechtigten zu ermitteln"));
+        assert!(text.contains("[ ] verstärkte Sorgfaltspflichten"));
+        assert!(text.contains("[X] die erhobenen Angaben"));
+        assert!(text.contains("[ ] a) Nach erfolgter Überprüfung"));
+        assert!(text.contains("[X] b) Die Zuverlässigkeit neu eingestellter"));
+        assert!(text.contains("[ ] die gezielte Nachfrage"));
+        assert!(text.contains("[X] die Vorlage und Aufbewahrung eines Führungszeugnisses"));
+        assert!(text.contains("[X] Sonstiges: Referenz des Vorarbeitgebers"));
+        assert!(!text.contains("Güterhändler"));
+    }
+
+    #[test]
+    fn gwg_staff_training_sheets_are_numbered_from_their_record() {
+        let record_id = Uuid::parse_str("01234567-89ab-cdef-0123-456789abcdef").unwrap();
+        let generated_at = Utc.with_ymd_and_hms(2026, 10, 7, 9, 30, 0).unwrap();
+        assert_eq!(
+            generated_document_number_for_template("gwg_staff_training", record_id, generated_at),
+            "GWU-20261007-0123456789AB"
+        );
     }
 
     fn parents_as_party() -> super::ContractingDoc {

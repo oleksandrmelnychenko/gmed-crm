@@ -5,7 +5,18 @@
  * inherit it as one whole record.
  */
 
-export type OrderPayerRole = "contracting_party" | "cost_bearer";
+/**
+ * How the payer relates to the contracting party: the party itself, a
+ * Kostenübernehmer, or the party at another invoice address (no
+ * Kostenübernahme; e.g. the lead's "invoice to another address").
+ */
+export type OrderPayerRole = "contracting_party" | "cost_bearer" | "invoice_address";
+
+const ORDER_PAYER_ROLES: readonly OrderPayerRole[] = [
+  "contracting_party",
+  "cost_bearer",
+  "invoice_address",
+];
 
 export type OrderPayerForm = {
   relationId: string;
@@ -52,11 +63,9 @@ export const EMPTY_ORDER_PAYER: OrderPayerForm = {
   notes: "",
 };
 
-/** The stored payer as form values (the relation is kept, not dropped). */
+/** The stored payer as form values (the relation and the role are kept, not dropped). */
 export function orderPayerToForm(source: OrderPayerSource): OrderPayerForm {
-  const role = source.payer_role === "contracting_party" || source.payer_role === "cost_bearer"
-    ? source.payer_role
-    : "";
+  const role = ORDER_PAYER_ROLES.find((known) => known === source.payer_role) ?? "";
   return {
     relationId: source.payer_patient_relation_id ?? "",
     patientPid: source.payer_patient_pid ?? "",

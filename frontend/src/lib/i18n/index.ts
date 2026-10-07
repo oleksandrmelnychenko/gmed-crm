@@ -7,6 +7,7 @@ import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
 import type { ExtractedUiTranslations } from "./catalogs/extracted-ui";
 import type { FinanceBalancesTranslations } from "./catalogs/finance-balances";
+import type { GwgTrainingTranslations } from "./catalogs/gwg-training";
 import type { OperationsTranslations } from "./catalogs/operations";
 import type { PatientsPortalTranslations } from "./catalogs/patients-portal";
 import type { PersonnelTranslations } from "./catalogs/personnel";
@@ -22,6 +23,7 @@ export interface Translations
     ClinicalTranslations,
     ExtractedUiTranslations,
     FinanceBalancesTranslations,
+    GwgTrainingTranslations,
     OperationsTranslations,
     PatientsPortalTranslations,
     PersonnelTranslations,

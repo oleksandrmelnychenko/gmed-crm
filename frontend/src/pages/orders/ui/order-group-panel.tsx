@@ -479,6 +479,9 @@ export function OrderGroupPanel({
                 <option value="cost_bearer">
                   {tx("Другой получатель счёта (сторонний плательщик)", "Abweichender Rechnungsempfänger (Kostenübernehmer)")}
                 </option>
+                <option value="invoice_address">
+                  {tx("Адрес для счёта (без принятия расходов)", "Rechnungsanschrift (keine Kostenübernahme)")}
+                </option>
               </select>
               <Input
                 value={payer.notes}

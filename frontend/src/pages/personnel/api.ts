@@ -9,7 +9,8 @@ import { apiFetch, apiFetchFile, downloadApiFile } from "@/lib/api";
 import { fileNameQuery, type ArchiveTarget } from "./model";
 
 export type PersonnelSalutation = "frau" | "herr" | "none";
-export type PersonnelDocumentSource = "upload" | "scan" | "import";
+/** `generated`: a sheet GMED made itself (the GwG instruction, /sops). */
+export type PersonnelDocumentSource = "upload" | "scan" | "import" | "generated";
 
 export type PersonnelCategory = {
   code: string;

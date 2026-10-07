@@ -60,6 +60,14 @@ export type PayerDeclaration = {
   source_of_funds: SourceOfFunds | null;
   source_of_funds_description: string | null;
   source_of_funds_document_id: string | null;
+  /**
+   * The self-paying patient's own statement in the cabinet (owner request
+   * 2026-10-05): the sources of the person list and the description.
+   * Read-only for staff; it counts as the source of funds of the
+   * declaration. Absent on an older server.
+   */
+  self_funds_sources?: string[];
+  self_funds_description?: string | null;
   first_name: string | null;
   last_name: string | null;
   date_of_birth: string | null;
@@ -236,6 +244,11 @@ export type PayerDeclarationForm = {
   sourceOfFunds: SourceOfFunds | "";
   sourceOfFundsDescription: string;
   sourceOfFundsDocumentId: string;
+  /**
+   * The self-paying lead stated the source of funds in the cabinet (read-only,
+   * never sent): staff need not choose one of their own.
+   */
+  leadSelfFundsStated: boolean;
   firstName: string;
   lastName: string;
   birthDate: string;
@@ -282,6 +295,7 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   sourceOfFunds: "",
   sourceOfFundsDescription: "",
   sourceOfFundsDocumentId: "",
+  leadSelfFundsStated: false,
   firstName: "",
   lastName: "",
   birthDate: "",
@@ -364,6 +378,7 @@ export function payerDeclarationToForm(
     sourceOfFunds: isSourceOfFunds(declaration.source_of_funds) ? declaration.source_of_funds : "",
     sourceOfFundsDescription: declaration.source_of_funds_description ?? "",
     sourceOfFundsDocumentId: declaration.source_of_funds_document_id ?? "",
+    leadSelfFundsStated: leadSelfFundsStated(declaration),
     firstName: declaration.first_name ?? "",
     lastName: declaration.last_name ?? "",
     birthDate: declaration.date_of_birth ?? "",
@@ -539,6 +554,31 @@ export function payerRelationshipKindLabel(value: PayerRelationshipKind, tx: Tx)
     other: tx("Другое (уточните)", "Sonstiges (bitte angeben)"),
   };
   return labels[value];
+}
+
+/**
+ * Whether the self-paying lead stated the source of funds in the cabinet: at
+ * least one source and, with "other", the words (the server's rule).
+ */
+export function leadSelfFundsStated(
+  declaration: Pick<PayerDeclaration, "payer_kind" | "self_funds_sources" | "self_funds_description"> | null | undefined,
+): boolean {
+  const sources = declaration?.self_funds_sources ?? [];
+  if (declaration?.payer_kind !== "self" || sources.length === 0) return false;
+  return !sources.includes("other") || Boolean(declaration.self_funds_description?.trim());
+}
+
+/**
+ * The sources the lead ticked, in words and form order: "other" is named
+ * plainly (the description stands beside it); an unknown value as it is.
+ */
+export function selfFundsSourcesLabel(sources: readonly string[], tx: Tx): string {
+  return [
+    ...SOURCE_OF_FUNDS.filter((source) => sources.includes(source)).map((source) =>
+      source === "other" ? tx("Другое", "Sonstiges") : sourceOfFundsLabel(source, tx),
+    ),
+    ...sources.filter((source) => !isSourceOfFunds(source)),
+  ].join(", ");
 }
 
 export function sourceOfFundsLabel(value: SourceOfFunds, tx: Tx) {
@@ -744,7 +784,10 @@ export function payerFormMissing(form: PayerDeclarationForm): string[] {
   if (!form.actsOnOwnAccount && !form.beneficialOwnerName.trim()) {
     missing.push("payer_beneficial_owner_missing");
   }
-  if (!form.sourceOfFunds || (form.sourceOfFunds === "other" && !form.sourceOfFundsDescription.trim())) {
+  const staffStated = Boolean(form.sourceOfFunds)
+    && (form.sourceOfFunds !== "other" || Boolean(form.sourceOfFundsDescription.trim()));
+  // A self-paying lead who stated the source in the cabinet has stated it.
+  if (!staffStated && !(form.kind === "self" && form.leadSelfFundsStated)) {
     missing.push("payer_source_of_funds_missing");
   }
   if (form.kind === "third_party") {

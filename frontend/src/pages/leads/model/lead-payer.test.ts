@@ -12,6 +12,7 @@ import {
   invoiceTaxLine,
   invoiceToLabel,
   isOrganisationPayerForm,
+  leadSelfFundsStated,
   normalizePayerDeclarationResponse,
   payerAmlCountries,
   payerDeclarationPayload,
@@ -25,6 +26,7 @@ import {
   payerSignatureSequence,
   payerStatusBadge,
   payerTypeLabel,
+  selfFundsSourcesLabel,
   type PayerDeclaration,
   type PayerDeclarationStatus,
 } from "./lead-payer";
@@ -609,5 +611,47 @@ describe("payer AML and signing order", () => {
     const labels = payerReadinessReasonLabels(tx);
     expect(labels["Cost assumption declaration is not signed"]).toBe("Получите подпись плательщика на согласии");
     expect(Object.values(labels)).not.toContain("Проверьте данные плательщика");
+  });
+});
+
+describe("the self-payer's source of funds from the cabinet", () => {
+  const own: PayerDeclaration = {
+    ...thirdParty,
+    payer_kind: "self",
+    source_of_funds: null,
+    self_funds_sources: ["savings", "other"],
+    self_funds_description: "Stipendium",
+  };
+
+  it("counts as stated with a source and, for 'other', the words", () => {
+    expect(leadSelfFundsStated(own)).toBe(true);
+    expect(leadSelfFundsStated({ ...own, self_funds_description: " " })).toBe(false);
+    expect(leadSelfFundsStated({ ...own, self_funds_sources: ["savings"], self_funds_description: null })).toBe(true);
+    expect(leadSelfFundsStated({ ...own, self_funds_sources: [] })).toBe(false);
+    expect(leadSelfFundsStated({ ...own, payer_kind: "third_party" })).toBe(false);
+    // An older server does not send the keys.
+    expect(leadSelfFundsStated({ ...thirdParty, payer_kind: "self" })).toBe(false);
+    expect(leadSelfFundsStated(null)).toBe(false);
+  });
+
+  it("spares staff a source of their own, like the server", () => {
+    const form = payerDeclarationToForm(own);
+    expect(form.leadSelfFundsStated).toBe(true);
+    expect(payerFormMissing(form)).toEqual([]);
+    // Never sent: the server refuses keys it does not know.
+    expect(payerDeclarationPayload(form)).not.toHaveProperty("leadSelfFundsStated");
+    expect(payerDeclarationPayload(form)).not.toHaveProperty("self_funds_sources");
+    // A third party states its own source; the lead's does not count for it.
+    expect(payerFormMissing({ ...form, kind: "third_party" })).toContain("payer_source_of_funds_missing");
+    expect(payerFormMissing(payerDeclarationToForm({ ...own, self_funds_sources: [] }))).toEqual([
+      "payer_source_of_funds_missing",
+    ]);
+  });
+
+  it("names the sources in form order, 'other' plainly", () => {
+    expect(selfFundsSourcesLabel(["other", "savings"], tx)).toBe("Сбережения, Другое");
+    expect(selfFundsSourcesLabel(["employment", "other"], de)).toBe("Gehalt / nichtselbständige Arbeit, Sonstiges");
+    expect(selfFundsSourcesLabel(["lottery"], de)).toBe("lottery");
+    expect(selfFundsSourcesLabel([], tx)).toBe("");
   });
 });

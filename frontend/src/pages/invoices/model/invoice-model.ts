@@ -22,6 +22,7 @@ import type {
   InvoicesPermissions,
   PayerForm,
   PayerRelationOption,
+  PayerRole,
   QuoteOption,
   StatusForm,
   VisibilityForm,
@@ -483,11 +484,33 @@ export function invoiceToVisibilityForm(invoice: InvoiceItem): VisibilityForm {
   };
 }
 
+/** The payer roles the server knows, in the order the dialog offers them. */
+export const PAYER_ROLES: readonly PayerRole[] = [
+  "contracting_party",
+  "cost_bearer",
+  "invoice_address",
+];
+
+/** A stored payer role as the dialog's value; an unknown one reads as unset. */
+export function knownPayerRole(value?: string | null): PayerRole | "" {
+  return PAYER_ROLES.find((role) => role === value) ?? "";
+}
+
+/** Label of a payer role; `unset` when there is none (or an unknown one). */
+export function payerRoleLabel(
+  value: string | null | undefined,
+  labels: Record<PayerRole, string>,
+  unset: string,
+) {
+  const role = knownPayerRole(value);
+  return role ? labels[role] : unset;
+}
+
 export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
   return {
     payerPatientRelationId: invoice.payer?.patient_relation_id ?? "",
     payerPatientPid: invoice.payer?.patient_pid ?? "",
-    payerRole: invoice.payer?.role ?? "",
+    payerRole: knownPayerRole(invoice.payer?.role),
     contactName: invoice.payer?.contact_name ?? "",
     contactEmail: invoice.payer?.contact_email ?? "",
     contactPhone: invoice.payer?.contact_phone ?? "",

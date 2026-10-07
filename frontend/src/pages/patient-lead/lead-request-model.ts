@@ -13,6 +13,7 @@ import type {
 } from "./lead-request-api";
 import { BILLING_SUBMIT_FIELDS, type BillingSubmitField } from "./lead-request-billing-model";
 import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
+import { SELF_FUNDS_SUBMIT_FIELDS, type SelfFundsSubmitField } from "./lead-request-self-funds-model";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -689,8 +690,18 @@ export function stillRejectedIdentification(
 /** Keys of the identification in `progress.missing_for_submit`: its fields and the upload. */
 export type IdentificationSubmitField = IdentificationField | "id_document_upload";
 
-/** A field of the personal data, of the payer block, of the identification, of the representation or of the billing. */
-export type SubmitField = PersonalField | PayerField | IdentificationSubmitField | RepresentationSubmitField | BillingSubmitField;
+/**
+ * A field of the personal data, of the payer block (with the self-payer's
+ * source of funds), of the identification, of the representation or of the
+ * billing.
+ */
+export type SubmitField =
+  | PersonalField
+  | PayerField
+  | SelfFundsSubmitField
+  | IdentificationSubmitField
+  | RepresentationSubmitField
+  | BillingSubmitField;
 
 /** Everything `progress.missing_for_submit` can name, in the order of the form. */
 export const SUBMIT_FIELDS: SubmitField[] = [
@@ -752,6 +763,8 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "payer_cost_estimate_consent",
   "payer_own_account",
   "payer_beneficial_owner",
+  // Where the self-payer's money comes from, with the proof
+  ...SELF_FUNDS_SUBMIT_FIELDS,
   // Invoice recipient and payment route
   ...BILLING_SUBMIT_FIELDS,
   // Legal questions

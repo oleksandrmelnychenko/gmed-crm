@@ -28,6 +28,30 @@ type Billing = {
 
 type Payer = Record<string, unknown> & { payer_kind: "self" | "third_party" };
 
+/** The self-payer's source of funds (owner request 2026-10-05), as the server sends it. */
+type SelfFunds = {
+  asked: boolean;
+  sources: string[];
+  description: string | null;
+  source_options: string[];
+  proof_required: boolean;
+  proof_documents: Record<string, unknown>[];
+};
+
+const PERSON_SOURCES = ["employment", "business_income", "savings", "asset_sale", "inheritance_gift", "other"];
+
+function selfFunds(overrides: Partial<SelfFunds> = {}): SelfFunds {
+  return {
+    asked: true,
+    sources: [],
+    description: null,
+    source_options: PERSON_SOURCES,
+    proof_required: false,
+    proof_documents: [],
+    ...overrides,
+  };
+}
+
 const INVOICE_KEYS = ["invoice_to", "invoice_name", "invoice_street", "invoice_zip", "invoice_city", "invoice_country", "invoice_email"];
 const PAYMENT_ROUTE_KEYS = [
   "payment_method",
@@ -174,6 +198,8 @@ function leadRequest(minor: boolean) {
       ? undefined
       : { has_representative: false, under_guardianship: false, custody: null, custody_stated: false, representatives: [] },
     billing: emptyBilling() as Billing | undefined,
+    // Absent like on a server before the source of funds; a test sets it.
+    self_funds: undefined as SelfFunds | undefined,
     minor,
     documents: [] as Record<string, unknown>[],
     max_documents: 30,
@@ -260,6 +286,17 @@ function recompute(request: Request) {
     if (billing.via_third_party == null) missing.push("via_third_party");
     else if (billing.via_third_party && !billing.via_third_party_details) missing.push("via_third_party_details");
   }
+  // The self-payer's source of funds: always the sources, the words with
+  // "other", the proof only while the enhanced check is required.
+  const funds = request.self_funds;
+  if (funds) {
+    funds.asked = payer?.payer_kind === "self";
+    if (funds.asked) {
+      if (funds.sources.length === 0) missing.push("self_funds_sources");
+      else if (funds.sources.includes("other") && !funds.description) missing.push("self_funds_description");
+      if (funds.proof_required && funds.proof_documents.length === 0) missing.push("self_funds_proof_upload");
+    }
+  }
   request.progress.missing_for_submit = missing;
 }
 
@@ -292,6 +329,9 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
     /** Bodies of `POST …/billing`. */
     billing: [] as Record<string, unknown>[],
     payer: [] as Record<string, unknown>[],
+    /** Bodies of `POST …/self-funds`, and the names of the proofs uploaded. */
+    selfFunds: [] as Record<string, unknown>[],
+    proofs: [] as string[],
     loads: 0,
     submits: 0,
     /** Writes of the other parts of the form; none is expected here. */
@@ -397,6 +437,46 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
         }
         if (kind !== "third_party" && billing.invoice_to === "payer") billing.invoice_to = null;
       }
+      changed();
+      return route.fulfill({ json: answer() });
+    }
+    if (path === `${base}/self-funds` && method === "POST") {
+      const patch = req.postDataJSON() as Record<string, unknown>;
+      calls.selfFunds.push(patch);
+      const funds = request.self_funds;
+      if (!funds || request.payer?.payer_kind !== "self") {
+        return route.fulfill({ status: 409, json: { code: "payer_not_self", message: "payer_not_self" } });
+      }
+      const unknown = Object.keys(patch).find((key) => key !== "self_funds_sources" && key !== "self_funds_description");
+      if (unknown) return route.fulfill({ status: 422, json: { code: "invalid_field", field: unknown, message: "invalid" } });
+      if (Array.isArray(patch.self_funds_sources)) funds.sources = patch.self_funds_sources as string[];
+      if (typeof patch.self_funds_description === "string") funds.description = patch.self_funds_description || null;
+      changed();
+      return route.fulfill({ json: answer() });
+    }
+    if (path === `${base}/funds-proof` && method === "POST") {
+      const funds = request.self_funds;
+      if (!funds || request.payer?.payer_kind !== "self") {
+        return route.fulfill({ status: 409, json: { code: "payer_not_self", message: "payer_not_self" } });
+      }
+      const name = /filename="([^"]+)"/.exec(req.postData() ?? "")?.[1] ?? "nachweis.pdf";
+      calls.proofs.push(name);
+      funds.proof_documents.push({
+        id: `proof-${calls.proofs.length}`,
+        file_name: name,
+        size_bytes: 2048,
+        mime_type: "application/pdf",
+        uploaded_at: "2026-10-05T09:25:00Z",
+        uploaded_by_me: true,
+        reviewed: false,
+        can_delete: true,
+      });
+      changed();
+      return route.fulfill({ status: 201, json: answer() });
+    }
+    if (path.startsWith(`${base}/documents/`) && method === "DELETE") {
+      const funds = request.self_funds;
+      if (funds) funds.proof_documents = funds.proof_documents.filter((document) => !path.endsWith(`/${document.id}`));
       changed();
       return route.fulfill({ json: answer() });
     }
@@ -841,5 +921,148 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       expect(await width(page.locator(`#lead-request-${field}`)), field).toBe(sectionWidth);
     }
     expect(calls.billing).toEqual([]);
+  });
+});
+
+/** Sections 7 and 8 answered: the patient gets the invoice and pays cash, nobody else involved. */
+function completeBilling(request: Request) {
+  Object.assign(request.billing ?? {}, { invoice_to: "self", payment_method: "cash", via_third_party: false });
+}
+
+const PROOF_TITLE = "Nachweis der Mittelherkunft (z. B. Kontoauszug, Gehaltsnachweis)";
+
+test.describe("lead cabinet: where the self-payer's money comes from", () => {
+  test("the patient ticks the sources, describes 'other' and may add a proof", async ({ page }) => {
+    const { calls } = await setup(page, {
+      prepare: (request) => {
+        request.self_funds = selfFunds();
+        completeBilling(request);
+      },
+    });
+    await page.goto("/");
+    const block = page.getByTestId("lead-request-payer").getByTestId("lead-request-self-funds");
+    const missing = page.getByTestId("lead-request-missing");
+
+    // Part of "who pays" while the patient pays: the person list, the proof optional.
+    await expect(block).toContainText("Herkunft der Mittel");
+    await expect(block).toContainText("Woher stammt das Geld für die Behandlung? Mehrere Antworten sind möglich.");
+    await expect(block.getByRole("checkbox")).toHaveCount(6);
+    await expect(block.getByRole("checkbox", { checked: true })).toHaveCount(0);
+    await expect(block.getByTestId("lead-request-self-funds-proof")).toContainText(PROOF_TITLE);
+    await expect(block.getByTestId("lead-request-self-funds-proof-need")).toHaveText("optional");
+    await expect(block.getByRole("note")).toHaveCount(0);
+
+    // Without a source the request cannot be sent.
+    await page.locator('[data-step="send"]').click();
+    await expect(missing.getByRole("listitem")).toHaveText(["Herkunft der Mittel"]);
+    await page.locator('[data-step="data"]').click();
+    await block.getByRole("checkbox", { name: "Ersparnisse" }).check();
+    await block.getByRole("checkbox", { name: "Sonstiges" }).check();
+    await expect.poll(() => calls.selfFunds.at(-1)).toEqual({ self_funds_sources: ["savings", "other"] });
+
+    // "Other" asks for the words.
+    await page.locator('[data-step="send"]').click();
+    await expect(missing.getByRole("listitem")).toHaveText(["Beschreibung der Herkunft der Mittel"]);
+    await page.locator('[data-step="data"]').click();
+    await block.getByRole("textbox", { name: "Beschreibung der Herkunft der Mittel" }).fill(" Stipendium der Stiftung ");
+    await expect.poll(() => calls.selfFunds.at(-1)).toEqual({ self_funds_description: "Stipendium der Stiftung" });
+
+    // A proof can be added though it is not required.
+    await block.locator("#lead-request-self-funds-proof-files").setInputFiles({
+      name: "kontoauszug.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\n% synthetic proof of funds\n%%EOF\n"),
+    });
+    await expect(block.getByTestId("lead-request-self-funds-proof-list")).toContainText("kontoauszug.pdf");
+    expect(calls.proofs).toEqual(["kontoauszug.pdf"]);
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toHaveCount(0);
+    const summary = page.getByTestId("lead-request-summary-payer");
+    await expect(summary).toContainText("Ersparnisse, Sonstiges");
+    await expect(summary).toContainText("Stipendium der Stiftung");
+    await expect(summary).toContainText("kontoauszug.pdf");
+    await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+    await page.getByTestId("lead-request-submit").click();
+    await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
+    expect(calls.submits).toBe(1);
+    expect(calls.other).toEqual([]);
+  });
+
+  test("with the enhanced check required nothing is sent without the proof", async ({ page }) => {
+    const { calls } = await setup(page, {
+      prepare: (request) => {
+        request.self_funds = selfFunds({ sources: ["employment"], proof_required: true });
+        completeBilling(request);
+      },
+    });
+    await page.goto("/");
+    const block = page.getByTestId("lead-request-self-funds");
+    const missing = page.getByTestId("lead-request-missing");
+    await expect(block.getByRole("checkbox", { name: "Gehalt / nichtselbständige Arbeit" })).toBeChecked();
+    await expect(block.getByTestId("lead-request-self-funds-proof-need")).toHaveText("erforderlich");
+    await expect(block.getByRole("note")).toHaveText(
+      "Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.",
+    );
+
+    await page.locator('[data-step="send"]').click();
+    await expect(missing.getByRole("listitem")).toHaveText([PROOF_TITLE]);
+    await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
+
+    await page.locator('[data-step="data"]').click();
+    await page.locator("#lead-request-self-funds-proof-files").setInputFiles({
+      name: "gehaltsnachweis.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("%PDF-1.4\n% synthetic payslip\n%%EOF\n"),
+    });
+    await expect(block.getByTestId("lead-request-self-funds-proof-list")).toContainText("gehaltsnachweis.pdf");
+    await page.locator('[data-step="send"]').click();
+    await expect(missing).toHaveCount(0);
+    await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
+    await page.getByTestId("lead-request-submit").click();
+    await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
+    // The answers were not touched; only the file went up.
+    expect(calls.selfFunds).toEqual([]);
+    expect(calls.proofs).toEqual(["gehaltsnachweis.pdf"]);
+  });
+
+  test("the source of funds fits a phone screen", async ({ page }) => {
+    await setup(page, {
+      prepare: (request) => {
+        request.self_funds = selfFunds({
+          sources: ["business_income", "inheritance_gift", "other"],
+          description: "Verkauf-einer-Ferienwohnung-an-der-Ostsee-im-Jahr-2025-über-einen-Notar",
+          proof_required: true,
+          proof_documents: [
+            {
+              id: "proof-1",
+              file_name: "kaufvertrag-ferienwohnung-ostsee-notariell-beglaubigt-2025.pdf",
+              size_bytes: 4096,
+              mime_type: "application/pdf",
+              uploaded_at: "2026-10-05T09:25:00Z",
+              uploaded_by_me: true,
+              reviewed: false,
+              can_delete: true,
+            },
+          ],
+        });
+        completeBilling(request);
+      },
+    });
+    await page.setViewportSize({ width: 390, height: 900 });
+    await page.goto("/");
+    const block = page.getByTestId("lead-request-self-funds");
+    await expect(block.getByTestId("lead-request-self-funds-proof-list")).toContainText("kaufvertrag-ferienwohnung");
+    await expect(block.getByRole("note")).toBeVisible();
+    expect(await overflow(page)).toBeLessThanOrEqual(1);
+    expect(await widestOverhang(page, "lead-request-data")).toBeLessThanOrEqual(1);
+  });
+
+  test("an older server shows no source of funds", async ({ page }) => {
+    await setup(page, { prepare: completeBilling });
+    await page.goto("/");
+    await expect(page.getByTestId("lead-request-payer")).toBeVisible();
+    await expect(page.getByTestId("lead-request-self-funds")).toHaveCount(0);
   });
 });

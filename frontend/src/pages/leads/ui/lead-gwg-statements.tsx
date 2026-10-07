@@ -12,6 +12,7 @@ import type {
   LeadPortalBilling,
   LeadPortalIntake,
   LeadPortalPayerLink,
+  LeadPortalSelfFunds,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
 import {
@@ -31,6 +32,8 @@ import {
   representativeName,
   representativeRoleLabel,
   salutationLabel,
+  selfFundsProofMissing,
+  selfFundsShown,
   type BillingStatement,
   type GwgPayerStatement,
   type RepresentationStatements,
@@ -43,6 +46,7 @@ import {
   payerQuestionnaireGroups,
   type PayerStatementRow,
 } from "../model/lead-payer-link";
+import { selfFundsSourcesLabel } from "../model/lead-payer";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
@@ -370,6 +374,53 @@ function BillingGroup({
   );
 }
 
+/**
+ * Where the self-paying patient's money comes from (owner request
+ * 2026-10-05): the sources, the description and the proof as the lead stated
+ * them in the cabinet, with the time of the last change. The proof is
+ * required while the enhanced check is (owner rule 2026-10-07); an amber line
+ * says when it is missing then. Read-only.
+ */
+function SelfFundsGroup({ selfFunds, tx }: { selfFunds: LeadPortalSelfFunds; tx: Tx }) {
+  const proofMissing = selfFundsProofMissing(selfFunds);
+  const proofLabel = `${tx("Подтверждение источника средств", "Nachweis der Mittelherkunft")} · ${
+    selfFunds.proof_required ? tx("обязательно", "erforderlich") : tx("необязательно", "optional")
+  }`;
+  return (
+    <div className="space-y-2" data-testid="lead-gwg-self-funds">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-xs font-semibold text-foreground">
+          {tx("Происхождение средств (пациент платит сам)", "Herkunft der Mittel (Selbstzahler)")}
+        </h4>
+        {selfFunds.updated_at ? (
+          <span className="inline-flex" data-testid="lead-gwg-self-funds-updated">
+            <PatientFieldBadge marker={{ at: selfFunds.updated_at, access_kind: null }} tx={tx} />
+          </span>
+        ) : null}
+      </div>
+      <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+        <Statement label={tx("Источники", "Quellen")} testId="lead-gwg-self-funds-sources">
+          {selfFundsSourcesLabel(selfFunds.sources, tx)}
+        </Statement>
+        <Statement label={tx("Описание", "Beschreibung")} className="sm:col-span-2" testId="lead-gwg-self-funds-description">
+          {selfFunds.description ? <span className="whitespace-pre-line">{selfFunds.description}</span> : null}
+        </Statement>
+        <Statement label={proofLabel} className="col-span-full" warning={proofMissing} testId="lead-gwg-self-funds-proof">
+          {selfFunds.proof_documents.length > 0 ? <UploadedFiles documents={selfFunds.proof_documents} tx={tx} /> : null}
+        </Statement>
+      </dl>
+      {proofMissing ? (
+        <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-self-funds-proof-missing">
+          {tx(
+            "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
+            "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
+          )}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 /** One answer of the payer: the value (or the files) and what the payer added to it. */
 function PayerStatement({ statement, tx }: { statement: PayerStatementRow; tx: Tx }) {
   const documents = statement.documents;
@@ -637,6 +688,8 @@ export function LeadGwgStatements({
           {identification.payment_background}
         </Statement>
       </StatementGroup>
+
+      {selfFundsShown(intake.self_funds) ? <SelfFundsGroup selfFunds={intake.self_funds} tx={tx} /> : null}
 
       {intake.billing ? (
         <BillingGroup

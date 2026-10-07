@@ -234,6 +234,8 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   // Uploads of the payer on the payer link: never the patient's documents.
   payer_funds_proof: "Nachweis der Mittelherkunft",
   payer_identity: "Ausweis (Zahler/in)",
+  // The self-paying patient's own proof of funds from the lead cabinet.
+  self_funds_proof: "Nachweis der Mittelherkunft (Patient/in)",
   // Uploads of the lead cabinet for a person who acts for the lead.
   representative_authority: "Vertretungsnachweis",
   representative_identity: "Ausweis (Vertreter/in)",

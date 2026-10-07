@@ -4880,20 +4880,16 @@ async fn load_invoice_pdf_context_on(
     )
     .await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
-    // A draft previews the Leistungsempfänger line its release will freeze.
-    let mut recipient = document::recipient_from_row(&row);
-    if !recipient.frozen && recipient.is_payer {
-        recipient.service_recipient_name = document::live_service_recipient_name(
-            conn,
-            &row.try_get::<Option<Value>, _>("rcpt_recipient")
-                .unwrap_or_default()
-                .unwrap_or(Value::Null),
-            patient_id,
-            row.try_get::<Option<Uuid>, _>("order_id")
-                .unwrap_or_default(),
-        )
-        .await?;
-    }
+    // A draft previews the recipient its release will freeze: the
+    // Leistungsempfänger line, the declared e-mail and tax numbers.
+    let recipient = document::read_recipient(
+        conn,
+        &row,
+        patient_id,
+        row.try_get::<Option<Uuid>, _>("order_id")
+            .unwrap_or_default(),
+    )
+    .await?;
     let setting = |key: &str| {
         row.try_get::<Option<String>, _>(key)
             .unwrap_or_default()
@@ -5227,6 +5223,20 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     );
     for line in context.recipient.address_lines() {
         layout.text_block(&line, 10.0, false, 0.0, InvoicePdfColor::Body, 0.0, 0.0);
+    }
+    // The recipient's USt-IdNr. when known (from the payer declaration):
+    // required only for reverse charge and intra-EU supplies, harmless
+    // otherwise.
+    if let Some(vat_id) = context.recipient.vat_id.as_deref() {
+        layout.text_block(
+            &format!("{}: {vat_id}", invoice_pdf_label(language, "vat_id")),
+            9.0,
+            false,
+            0.0,
+            InvoicePdfColor::Body,
+            0.0,
+            0.0,
+        );
     }
     layout.spacer(6.0);
 
@@ -11445,7 +11455,7 @@ async fn load_einvoice(
         r#"SELECT i.invoice_number, i.invoice_type, i.issued_at, i.created_at, i.due_date,
                   i.currency, i.total_net, i.total_vat, i.total_gross,
                   i.prepayment_applied_amount, i.line_items, i.notes, i.order_id,
-                  o.order_number,
+                  i.patient_id, o.order_number,
                   {recipient_columns},
                   (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
                     WHERE key LIKE 'agency\_%') AS agency
@@ -11463,19 +11473,23 @@ async fn load_einvoice(
         return Ok(None);
     };
     // The buyer is the recipient printed on the invoice: the payer with the
-    // payer's own address, or the patient.
-    let recipient = document::recipient_from_row(&row);
+    // payer's own address, or the patient; with the e-mail and the USt-IdNr.
+    // the payer declaration gives for that recipient.
+    let order_id = row
+        .try_get::<Option<Uuid>, _>("order_id")
+        .unwrap_or_default();
+    let recipient = document::read_recipient(
+        conn,
+        &row,
+        row.try_get::<Uuid, _>("patient_id").unwrap_or_default(),
+        order_id,
+    )
+    .await?;
     let line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| json!([]));
     // Service period and deducted advances as printed on the invoice.
-    let service_period = document::load_invoice_service_period(
-        conn,
-        row.try_get::<Option<Uuid>, _>("order_id")
-            .unwrap_or_default(),
-        &line_items,
-    )
-    .await?;
+    let service_period = document::load_invoice_service_period(conn, order_id, &line_items).await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     let currency = row
         .try_get::<String, _>("currency")
@@ -11573,7 +11587,9 @@ async fn load_einvoice(
             city: recipient.city,
             country_code: recipient.country_code,
             email: recipient.email,
-            vat_id: None,
+            // BT-48; EN 16931 has no tax number of the buyer, so the
+            // Steuernummer stays in the snapshot and out of the XML.
+            vat_id: zugferd::buyer_vat_identifier(recipient.vat_id.as_deref()),
             tax_number: None,
         },
         lines,
@@ -13662,6 +13678,19 @@ mod tests {
         assert!(text.contains("Kyivska 5"));
         assert!(text.contains("01001 Kyiv"));
         assert!(text.contains("Ukraine"));
+        assert!(
+            !text.contains("USt-IdNr.:"),
+            "no recipient VAT id without one"
+        );
+        // The recipient's USt-IdNr. when known, under the address.
+        context.recipient.vat_id = Some("DE987654321".to_string());
+        let company_text = pdf_text(&context);
+        context.recipient.vat_id = None;
+        let address_at = company_text.find("01001 Kyiv").unwrap();
+        let vat_id_at = company_text
+            .find("USt-IdNr.: DE987654321")
+            .unwrap_or_else(|| panic!("{company_text}"));
+        assert!(address_at < vat_id_at, "{company_text}");
         // Return address line of the agency above the recipient.
         assert!(text.contains("Albert-Schweitzer-Straße 56 · 81735 München"));
         assert!(text.contains("Leistungszeitraum"));

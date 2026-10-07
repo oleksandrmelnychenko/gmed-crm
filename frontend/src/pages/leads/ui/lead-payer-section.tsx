@@ -25,12 +25,12 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { ApiRequestError } from "@/lib/api";
-import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
-import type { PatientFieldMarker } from "../data/lead-portal-intake-api";
+import type { LeadPortalSelfFunds, PatientFieldMarker } from "../data/lead-portal-intake-api";
 import { standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
@@ -56,6 +56,7 @@ import {
   payerSignatureSequence,
   payerStatusBadge,
   payerTypeLabel,
+  selfFundsSourcesLabel,
   sourceOfFundsLabel,
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
@@ -147,6 +148,7 @@ export function LeadPayerDeclarationSection({
   payerLinkCanEdit,
   leadLanguage,
   onPayerLinkSent,
+  selfFunds,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -168,6 +170,11 @@ export function LeadPayerDeclarationSection({
   leadLanguage?: string | null;
   /** A payer link went out: the server marked the payer as informed, the declaration is to be reloaded. */
   onPayerLinkSent?: () => void;
+  /**
+   * The self-payer's source of funds from the cabinet with the proofs (the
+   * portal state); without it the declaration's answers are shown without files.
+   */
+  selfFunds?: LeadPortalSelfFunds | null;
 }) {
   // The stored declaration is the first form state as well, so a render
   // without effects (static markup) already shows it.
@@ -212,6 +219,20 @@ export function LeadPayerDeclarationSection({
   const invoiceTo = data?.declaration?.invoice_to;
   const invoiceToKnown = invoiceTo !== undefined;
   const invoiceTaxShown = invoiceTaxFieldsShown(form);
+  // The self-paying lead's own source of funds (read-only): shown while the
+  // stored declaration says the patient pays and the server knows the answer.
+  const leadSelfFunds = data?.declaration?.payer_kind === "self"
+    && (data.declaration.self_funds_sources !== undefined || Boolean(selfFunds))
+    ? {
+        sources: selfFunds?.sources ?? data.declaration.self_funds_sources ?? [],
+        description: selfFunds?.description ?? data.declaration.self_funds_description ?? null,
+        proofDocuments: selfFunds?.proof_documents ?? null,
+        proofRequired: selfFunds?.proof_required ?? false,
+        updatedAt: selfFunds?.updated_at ?? null,
+      }
+    : null;
+  // A source the lead stated is the declaration's: staff need not choose one.
+  const sourceRequired = !(form.kind === "self" && form.leadSelfFundsStated);
 
   async function save() {
     if (!form.kind) {
@@ -390,7 +411,7 @@ export function LeadPayerDeclarationSection({
             label={thirdParty
               ? tx("Источник средств плательщика", "Herkunft der Mittel des Kostenübernehmers")
               : tx("Источник средств", "Herkunft der Mittel")}
-            required
+            required={sourceRequired}
           >
             <NativeComboboxSelect
               value={form.sourceOfFunds}
@@ -443,6 +464,52 @@ export function LeadPayerDeclarationSection({
             </Button>
           ) : null}
         </div>
+
+        {leadSelfFunds ? (
+          <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/10 p-3 text-xs" data-testid="lead-payer-self-funds">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-semibold text-foreground">
+                {tx("Источник средств — указал пациент в кабинете", "Herkunft der Mittel – Angaben des Patienten im Portal")}
+              </span>
+              {leadSelfFunds.updatedAt ? (
+                <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} tx={tx} />
+              ) : null}
+            </div>
+            <p data-testid="lead-payer-self-funds-sources">
+              <span className="text-muted-foreground">{tx("Источники", "Quellen")}: </span>
+              {leadSelfFunds.sources.length > 0
+                ? selfFundsSourcesLabel(leadSelfFunds.sources, tx)
+                : tx("ещё не указаны", "noch nicht angegeben")}
+            </p>
+            {leadSelfFunds.description ? (
+              <p className="whitespace-pre-line" data-testid="lead-payer-self-funds-description">
+                <span className="text-muted-foreground">{tx("Описание", "Beschreibung")}: </span>
+                {leadSelfFunds.description}
+              </p>
+            ) : null}
+            {leadSelfFunds.proofDocuments ? (
+              <div data-testid="lead-payer-self-funds-proof">
+                <span className="text-muted-foreground">
+                  {tx("Подтверждение", "Nachweis")}
+                  {" · "}
+                  {leadSelfFunds.proofRequired
+                    ? tx("обязательно (усиленная проверка)", "erforderlich (verstärkte Prüfung)")
+                    : tx("необязательно", "optional")}
+                  {": "}
+                </span>
+                {leadSelfFunds.proofDocuments.length > 0
+                  ? leadSelfFunds.proofDocuments
+                    .map((document) => [
+                      document.file_name || "—",
+                      document.uploaded_at ? formatAppDate(document.uploaded_at) : "",
+                      document.reviewed ? tx("просмотрен", "geprüft") : "",
+                    ].filter(Boolean).join(" · "))
+                    .join(", ")
+                  : tx("не загружено", "nicht hochgeladen")}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {thirdParty ? (
           <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3">

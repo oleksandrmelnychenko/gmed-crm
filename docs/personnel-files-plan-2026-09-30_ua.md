@@ -78,6 +78,11 @@
 про здоров'я (`Arbeitsunfaehigkeit` → доступ лише для ролей з правом
 `personnel.health.view`).
 
+Додано 2026-10-07: `gwg_unterweisung` — лист GwG-інструктажу й перевірки
+надійності з «SOP и обучение» (джерело `generated`, підписаний скан — версія
+2), 5 років від кінця року інструктажу; див.
+[GwG-Unterweisung](architecture/gwg-staff-training_ua.md).
+
 ### 3.3 Незмінність і доказ цілісності
 
 1. Тригер `BEFORE UPDATE` пропускає лише службові поля (`legal_hold`,

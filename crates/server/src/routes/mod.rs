@@ -73,6 +73,7 @@ pub mod sanctions;
 pub mod security_incidents;
 pub mod service_packages;
 pub mod sops;
+pub mod sops_gwg_training;
 pub mod staff_access;
 pub mod stats;
 pub mod tasks;
@@ -101,6 +102,7 @@ pub fn protected_router() -> Router<AppState> {
         .merge(providers::router())
         .merge(projects::router())
         .merge(sops::router())
+        .merge(sops_gwg_training::router())
         .merge(cases::router())
         .merge(clinical_document_imports::router())
         .merge(company_financials::router())

@@ -1021,6 +1021,261 @@ async fn the_lead_says_where_the_invoice_goes_and_the_order_keeps_its_cost_beare
     assert_eq!(role.as_deref(), Some("invoice_address"));
 }
 
+async fn binary_get(app: &axum::Router, path: &str, bearer: &str) -> (StatusCode, Vec<u8>) {
+    let request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 32 * 1024 * 1024)
+        .await
+        .unwrap();
+    (status, bytes.to_vec())
+}
+
+/// The issuer data an e-invoice needs: name, country and a tax number.
+async fn seed_agency_invoice_settings(pool: &PgPool, admin_id: Uuid) {
+    for (key, value) in [
+        ("agency_name", "GMED Test Agentur"),
+        (
+            "agency_address",
+            "Albert-Schweitzer-Straße 56\n81735 München",
+        ),
+        ("agency_country_code", "DE"),
+        ("agency_tax_number", "143/999/00001"),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO system_settings (key, value, description, updated_by)
+               VALUES ($1, to_jsonb($2::text), $1, $3)
+               ON CONFLICT (key)
+               DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by"#,
+        )
+        .bind(key)
+        .bind(value)
+        .bind(admin_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// The buyer of the e-invoice of `invoice_id`.
+async fn einvoice_buyer(fx: &Fixture, invoice_id: &str) -> String {
+    let (status, xml) = binary_get(
+        &fx.app,
+        &format!("/api/v1/invoices/{invoice_id}/zugferd.xml"),
+        &fx.billing,
+    )
+    .await;
+    let xml = String::from_utf8(xml).unwrap();
+    assert_eq!(status, StatusCode::OK, "{xml}");
+    xml.split("<ram:BuyerTradeParty>")
+        .nth(1)
+        .and_then(|rest| rest.split("</ram:BuyerTradeParty>").next())
+        .unwrap()
+        .to_string()
+}
+
+/// Section 7 reaches the invoice: the e-mail for invoices and the USt-IdNr.
+/// and Steuernummer staff added go with the recipient the lead named — on
+/// the draft, frozen at release, in the e-invoice buyer (BT-48, BT-49) and
+/// under the address of the printed invoice — and with nobody else.
+#[tokio::test]
+async fn the_declared_invoice_email_and_tax_numbers_reach_the_invoice() {
+    let Some(fx) = fixture("payer-invoice-tax").await else {
+        return;
+    };
+    seed_agency_invoice_settings(&fx.pool, fx.admin_id).await;
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    sqlx::query("UPDATE patients SET email = 'kind.muster@example.com' WHERE id = $1")
+        .bind(patient)
+        .execute(&fx.pool)
+        .await
+        .unwrap();
+    let lead = seed_converted_declaration(&fx.pool, patient, "third_party").await;
+    let set_tax_numbers = |vat_id: &'static str, tax_number: &'static str| {
+        let pool = fx.pool.clone();
+        async move {
+            sqlx::query(
+                r#"UPDATE lead_payer_declarations
+                   SET invoice_vat_id = $2, invoice_tax_number = $3 WHERE lead_id = $1"#,
+            )
+            .bind(lead)
+            .bind(vat_id)
+            .bind(tax_number)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    let new_quote = |suffix: &'static str| {
+        let (app, pool, manager) = (fx.app.clone(), fx.pool.clone(), fx.manager.clone());
+        let (admin_id, tag) = (fx.admin_id, format!("{}-{suffix}", fx.tag));
+        async move {
+            let order = seed_order(&pool, patient, admin_id, &tag).await;
+            create_quote(&app, &manager, order).await
+        }
+    };
+
+    // "To another address": Beispiel GmbH receives the invoice with the
+    // e-mail for invoices, its USt-IdNr. and Steuernummer.
+    set_invoice_to(&fx.pool, lead, Some("other"), Some("Beispiel GmbH")).await;
+    set_tax_numbers("DE 987 654 321", "214/5678/9012").await;
+    let quote = new_quote("a").await;
+    let draft = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+    assert_eq!(draft["recipient"]["name"], "Beispiel GmbH", "{draft}");
+    assert_eq!(draft["recipient"]["email"], "rechnung@example.com");
+    assert_eq!(draft["recipient"]["vat_id"], "DE 987 654 321", "{draft}");
+    assert_eq!(draft["recipient"]["tax_number"], "214/5678/9012");
+    // Billing corrects the e-mail of the same party: it stays, the tax
+    // numbers still belong to that party.
+    let (status, corrected) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &invoice_id,
+        json!({
+            "payer_contact_name": "Beispiel GmbH",
+            "payer_contact_email": "buchhaltung@example.com",
+            "payer_address_street": "Nebenweg 2",
+            "payer_address_zip": "10115",
+            "payer_address_city": "Berlin",
+            "payer_address_country": "DE",
+            "payer_role": "invoice_address"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected}");
+    assert_eq!(corrected["recipient"]["email"], "buchhaltung@example.com");
+    assert_eq!(corrected["recipient"]["vat_id"], "DE 987 654 321");
+    let (status, released) = release(&fx.app, &fx.billing, &invoice_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&invoice_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot["name"], "Beispiel GmbH", "{snapshot}");
+    assert_eq!(snapshot["email"], "buchhaltung@example.com");
+    assert_eq!(snapshot["vat_id"], "DE 987 654 321");
+    assert_eq!(snapshot["tax_number"], "214/5678/9012");
+    // The e-invoice buyer: e-mail (BT-49) and VAT id (BT-48) in the
+    // standard's form; EN 16931 has no buyer tax number.
+    let buyer = einvoice_buyer(&fx, &invoice_id).await;
+    assert!(
+        buyer.contains("<ram:Name>Beispiel GmbH</ram:Name>"),
+        "{buyer}"
+    );
+    assert!(
+        buyer.contains(r#"<ram:URIID schemeID="EM">buchhaltung@example.com</ram:URIID>"#),
+        "{buyer}"
+    );
+    assert!(
+        buyer.contains(r#"<ram:ID schemeID="VA">DE987654321</ram:ID>"#),
+        "{buyer}"
+    );
+    assert!(!buyer.contains("214/5678/9012"), "{buyer}");
+    // The printed invoice names the USt-IdNr. under the address.
+    let (status, pdf) = binary_get(
+        &fx.app,
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &fx.billing,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+    assert!(text.contains("USt-IdNr.: DE 987 654 321"), "{text}");
+    // A later change of the declaration leaves the issued invoice alone.
+    set_tax_numbers("DE111111111", "999/9999/9999").await;
+    let (status, issued) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{issued}");
+    assert_eq!(issued["recipient"]["frozen"], true, "{issued}");
+    assert_eq!(issued["recipient"]["vat_id"], "DE 987 654 321");
+    assert!(
+        einvoice_buyer(&fx, &invoice_id)
+            .await
+            .contains("DE987654321")
+    );
+    set_tax_numbers("DE 987 654 321", "214/5678/9012").await;
+
+    // "To me" while Viktor pays: the patient receives the invoice at the
+    // e-mail for invoices instead of the own one, with the tax numbers.
+    set_invoice_to(&fx.pool, lead, Some("self"), None).await;
+    let quote = new_quote("b").await;
+    let mine = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let mine_id = mine["id"].as_str().unwrap().to_string();
+    assert_eq!(mine["recipient"]["kind"], "patient", "{mine}");
+    assert_eq!(mine["recipient"]["email"], "rechnung@example.com", "{mine}");
+    assert_eq!(mine["recipient"]["vat_id"], "DE 987 654 321");
+    // A payer billing chooses instead gets none of it.
+    let (status, other) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &mine_id,
+        json!({
+            "payer_contact_name": "Ivan Zahler",
+            "payer_contact_email": "ivan.zahler@example.com",
+            "payer_address_street": "Kyivska 5",
+            "payer_address_zip": "01001",
+            "payer_address_city": "Kyiv",
+            "payer_address_country": "UA",
+            "payer_role": "cost_bearer"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{other}");
+    assert_eq!(other["recipient"]["email"], "ivan.zahler@example.com");
+    assert!(other["recipient"]["vat_id"].is_null(), "{other}");
+    assert!(other["recipient"]["tax_number"].is_null(), "{other}");
+    let buyer = einvoice_buyer(&fx, &mine_id).await;
+    assert!(!buyer.contains("SpecifiedTaxRegistration"), "{buyer}");
+
+    // "To the payer": Viktor's own e-mail, the tax numbers are his.
+    set_invoice_to(&fx.pool, lead, Some("payer"), None).await;
+    let quote = new_quote("c").await;
+    let viktor = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    assert_eq!(viktor["recipient"]["name"], "Viktor Zahler", "{viktor}");
+    assert_eq!(viktor["recipient"]["email"], "viktor.zahler@example.com");
+    assert_eq!(viktor["recipient"]["vat_id"], "DE 987 654 321");
+
+    // A minor, "to me": the parents receive the invoice at the e-mail for
+    // invoices instead of the relation's own.
+    let child_tag = format!("{}-kid", fx.tag);
+    let child = seed_patient(&fx.pool, fx.admin_id, &child_tag, "2016-03-04", true).await;
+    seed_relation(&fx.pool, child, "Erika Muster", "parent", None, true).await;
+    let child_lead = seed_converted_declaration(&fx.pool, child, "self").await;
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET invoice_to = 'self', invoice_email = 'eltern.rechnung@example.com'
+           WHERE lead_id = $1"#,
+    )
+    .bind(child_lead)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let child_order = seed_order(&fx.pool, child, fx.admin_id, &child_tag).await;
+    let child_quote = create_quote(&fx.app, &fx.manager, child_order).await;
+    let parents = create_draft(&fx.app, &fx.billing, &child_quote, "final").await;
+    assert_eq!(parents["recipient"]["kind"], "relation", "{parents}");
+    assert_eq!(parents["recipient"]["name"], "Erika Muster");
+    assert_eq!(
+        parents["recipient"]["email"], "eltern.rechnung@example.com",
+        "{parents}"
+    );
+    assert!(parents["recipient"]["vat_id"].is_null());
+}
+
 #[tokio::test]
 async fn framework_contract_party_choice_is_followed_by_its_orders() {
     let Some(fx) = fixture("payer-contract").await else {

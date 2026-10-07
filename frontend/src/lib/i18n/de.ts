@@ -4,6 +4,7 @@ import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
 import { extractedUiDe } from "./catalogs/extracted-ui";
 import { financeBalancesDe } from "./catalogs/finance-balances";
+import { gwgTrainingDe } from "./catalogs/gwg-training";
 import { operationsDe } from "./catalogs/operations";
 import { patientsPortalDe } from "./catalogs/patients-portal";
 import { personnelDe } from "./catalogs/personnel";
@@ -1807,6 +1808,7 @@ export const de = {
   ...casesClinicalDe,
   ...clinicalDe,
   ...financeBalancesDe,
+  ...gwgTrainingDe,
   ...operationsDe,
   ...patientsPortalDe,
   ...personnelDe,

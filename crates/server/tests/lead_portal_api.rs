@@ -218,11 +218,11 @@ fn complete_billing() -> Value {
 }
 
 /// Fills in everything "send to the manager" needs, as the cabinet does: the
-/// personal data, who pays (the patient, in the own interest), where the
-/// invoice goes and how the patient pays, the statements for the
-/// identification, that nobody acts for the (adult) patient, the request
-/// consent and a copy of the identity document. Returns the request as the
-/// last save answered it.
+/// personal data, who pays (the patient, in the own interest, from the
+/// salary), where the invoice goes and how the patient pays, the statements
+/// for the identification, that nobody acts for the (adult) patient, the
+/// request consent and a copy of the identity document. Returns the request
+/// as the last save answered it.
 async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &str) -> Value {
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     for (part, body) in [
@@ -241,6 +241,10 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
         (
             "payer",
             json!({ "payer_kind": "self", "acts_on_own_account": true }),
+        ),
+        (
+            "self-funds",
+            json!({ "self_funds_sources": ["employment"] }),
         ),
         ("billing", complete_billing()),
         ("identification", complete_identification()),
@@ -767,12 +771,15 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // A self-payer states where the money comes from, after the own
+    // interest (owner request 2026-10-05).
     assert_eq!(
         body["progress"]["missing_for_submit"],
         json!([
             "id_document_upload",
             "has_representative",
             "under_guardianship",
+            "self_funds_sources",
             "invoice_to",
             "payment_method",
             "via_third_party"
@@ -794,6 +801,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         body["progress"]["missing_for_submit"],
         json!([
             "id_document_upload",
+            "self_funds_sources",
             "invoice_to",
             "payment_method",
             "via_third_party"
@@ -812,9 +820,26 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
+        json!(["id_document_upload", "self_funds_sources"]),
+        "{body}"
+    );
+    // Without a trigger of the enhanced check the source is enough; the
+    // proof is optional.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/self-funds"),
+        &patient,
+        Some(json!({ "self_funds_sources": ["employment", "savings"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
         json!(["id_document_upload"]),
         "{body}"
     );
+    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
     assert!(
         body["identification"]["declared_correct_at"].is_null(),
         "{body}"
@@ -1327,6 +1352,9 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "contact_consent_required",
         "cost_estimate_consent_at",
         "cost_estimate_consent_required",
+        // The self-payer's own answers from the cabinet: read-only for staff.
+        "self_funds_sources",
+        "self_funds_description",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }
@@ -2270,8 +2298,22 @@ async fn purging_a_lead_clears_the_portal_intake() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     // The whole request with the GwG statements, a copy of the identity
-    // document and the confirmation, as sent to the manager.
+    // document, a proof of the own funds and the confirmation, as sent to
+    // the manager.
     fill_in_complete_request(router, lead_id, &patient).await;
+    let (status, body) = upload(
+        router,
+        &format!("/api/v1/me/lead-requests/{lead_id}/funds-proof"),
+        &patient,
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let funds_proof: Uuid = body["self_funds"]["proof_documents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let (status, sent) = json_request(
         router,
         "POST",
@@ -2371,11 +2413,20 @@ async fn purging_a_lead_clears_the_portal_intake() {
         .unwrap();
     assert_eq!(updates, json!({}));
     assert_eq!(uploads, 0);
-    // The lead's own statements, the payer answer and the copy of the
-    // identity document go with the lead.
+    // The lead's own statements, the payer answer with the source of funds,
+    // the copy of the identity document and the proof of funds go with the
+    // lead.
     assert_eq!(statements, 0);
     assert_eq!(payer, 0);
     assert_eq!(documents, 0);
+    let proof_files: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM documents WHERE id = $1 AND storage_key IS NOT NULL",
+    )
+    .bind(funds_proof)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(proof_files, 0);
     // So does what the request held about the representative: the row, the
     // trusted contact and both files.
     let (representatives, contacts, files): (i64, Value, i64) = sqlx::query_as(
@@ -4068,4 +4119,450 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
             .contains(&json!("id_document_upload")),
         "{body}"
     );
+}
+
+/// The keys of the self-payer's source of funds in `progress.missing_for_submit`.
+fn self_funds_missing(body: &Value) -> Vec<&str> {
+    body["progress"]["missing_for_submit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|key| key.starts_with("self_funds"))
+        .collect()
+}
+
+/// The answer "Viktor Zahler pays" of the cabinet.
+fn viktor_pays() -> Value {
+    json!({
+        "payer_kind": "third_party",
+        "payer_type": "person",
+        "first_name": "Viktor",
+        "last_name": "Zahler"
+    })
+}
+
+#[tokio::test]
+async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Mia", "mia.selffunds@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let self_funds = format!("{request}/self-funds");
+    let funds_proof = format!("{request}/funds-proof");
+    let intake_path = format!("/api/v1/leads/{lead_id}/portal-intake");
+
+    // Nothing to patch before the answer who pays; nothing for a third party.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &self_funds,
+        &patient,
+        Some(json!({ "self_funds_sources": ["savings"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_declared", "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &patient,
+        Some(viktor_pays()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["self_funds"]["asked"], false, "{body}");
+    assert!(self_funds_missing(&body).is_empty(), "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &self_funds,
+        &patient,
+        Some(json!({ "self_funds_sources": ["savings"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_self", "{body}");
+    let (status, body) = upload(router, &funds_proof, &patient, PDF).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_self", "{body}");
+
+    // The patient pays: the sources are asked, the proof is optional while
+    // the enhanced check is not required (owner rule 2026-10-07).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["self_funds"]["asked"], true, "{body}");
+    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
+    assert_eq!(body["self_funds"]["sources"], json!([]), "{body}");
+    assert_eq!(
+        body["self_funds"]["source_options"],
+        json!([
+            "employment",
+            "business_income",
+            "savings",
+            "asset_sale",
+            "inheritance_gift",
+            "other"
+        ]),
+        "{body}"
+    );
+    assert_eq!(self_funds_missing(&body), ["self_funds_sources"], "{body}");
+
+    // Only the person list and the two keys.
+    for (patch, field) in [
+        (
+            json!({ "self_funds_sources": ["loan"] }),
+            "self_funds_sources",
+        ),
+        (
+            json!({ "self_funds_sources": "savings" }),
+            "self_funds_sources",
+        ),
+        (
+            json!({ "self_funds_description": 7 }),
+            "self_funds_description",
+        ),
+        (json!({ "source_of_funds": "savings" }), "source_of_funds"),
+    ] {
+        let (status, body) = json_request(router, "POST", &self_funds, &patient, Some(patch)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "invalid_field", "{body}");
+        assert_eq!(body["field"], field, "{body}");
+    }
+    // "Other" needs the words.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &self_funds,
+        &patient,
+        Some(json!({ "self_funds_sources": ["other", "savings"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["self_funds"]["sources"],
+        json!(["savings", "other"]),
+        "form order: {body}"
+    );
+    assert_eq!(
+        self_funds_missing(&body),
+        ["self_funds_description"],
+        "{body}"
+    );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &self_funds,
+        &patient,
+        Some(json!({ "self_funds_description": " Stipendium der Stiftung " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["self_funds"]["description"], "Stipendium der Stiftung",
+        "{body}"
+    );
+    assert!(self_funds_missing(&body).is_empty(), "{body}");
+    // The audit names the fields, never the values; the same answer again
+    // writes nothing.
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_self_funds", lead_id).await,
+        2
+    );
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'lead_portal_update_self_funds' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["fields"], json!(["self_funds_description"]));
+    assert!(!context.to_string().contains("Stipendium"), "{context}");
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &self_funds,
+        &patient,
+        Some(json!({ "self_funds_sources": ["savings", "other"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_self_funds", lead_id).await,
+        2
+    );
+
+    // The proof needs the consent to process the request data, like the
+    // identity document; PDF, JPG or PNG.
+    let (status, body) = upload(router, &funds_proof, &patient, PDF).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "inquiry_consent_required", "{body}");
+    give_consent(router, lead_id, &patient, "lead_inquiry_processing").await;
+    let (status, body) = upload_file(
+        router,
+        &funds_proof,
+        &patient,
+        "auszug.txt",
+        "text/plain",
+        b"not a statement",
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "unsupported_file_type", "{body}");
+    let (status, body) = upload_file(
+        router,
+        &funds_proof,
+        &patient,
+        "kontoauszug.png",
+        "image/png",
+        PNG,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    // Listed with the source of funds; never a medical document nor a copy
+    // of the identity document.
+    let listed = &body["self_funds"]["proof_documents"][0];
+    assert_eq!(listed["file_name"], "kontoauszug.png", "{body}");
+    assert_eq!(listed["uploaded_by_me"], true, "{body}");
+    assert_eq!(listed["can_delete"], true, "{body}");
+    assert_eq!(body["documents"], json!([]), "{body}");
+    assert_eq!(body["identity_documents"], json!([]), "{body}");
+    assert!(
+        body["progress"]["missing_for_submit"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("id_document_upload")),
+        "{body}"
+    );
+    let proof: Uuid = listed["id"].as_str().unwrap().parse().unwrap();
+    let (art, category, is_medical, uploaded_by, kind): (String, String, bool, Uuid, String) =
+        sqlx::query_as(
+            r#"SELECT d.art, COALESCE(d.category, ''), d.is_medical, d.uploaded_by, u.kind
+               FROM documents d JOIN lead_portal_uploads u ON u.document_id = d.id
+               WHERE d.id = $1 AND d.lead_id = $2"#,
+        )
+        .bind(proof)
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(art, "self_funds_proof");
+    assert_eq!(category, "finance");
+    assert!(!is_medical);
+    assert_eq!(uploaded_by, user_id);
+    assert_eq!(kind, "self_funds_proof");
+
+    // Staff read the answers and the file in "Данные от пациента"; the
+    // concierge gets none of it. The declaration counts the lead's
+    // statement as its source of funds.
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &intake_path,
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    let staff_view = &intake["self_funds"];
+    assert_eq!(staff_view["asked"], true, "{intake}");
+    assert_eq!(
+        staff_view["sources"],
+        json!(["savings", "other"]),
+        "{intake}"
+    );
+    assert_eq!(
+        staff_view["description"], "Stipendium der Stiftung",
+        "{intake}"
+    );
+    assert_eq!(staff_view["proof_required"], false, "{intake}");
+    assert!(staff_view["updated_at"].is_string(), "{intake}");
+    assert_eq!(
+        staff_view["proof_documents"][0]["file_name"], "kontoauszug.png",
+        "{intake}"
+    );
+    assert_eq!(intake["identity_documents"], json!([]), "{intake}");
+    let (status, hidden) =
+        json_request(router, "GET", &intake_path, &app.staff("concierge"), None).await;
+    assert_eq!(status, StatusCode::OK, "{hidden}");
+    assert!(hidden["self_funds"].is_null(), "{hidden}");
+    let (status, declaration) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/payer-declaration"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{declaration}");
+    assert_eq!(
+        declaration["declaration"]["self_funds_sources"],
+        json!(["savings", "other"]),
+        "{declaration}"
+    );
+    assert!(
+        !declaration["status"]["missing"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("payer_source_of_funds_missing")),
+        "{declaration}"
+    );
+
+    // A black-list citizenship requires the enhanced check: the proof is
+    // required now. Without a file it is missing again.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["DE", "IR"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["self_funds"]["proof_required"], true, "{body}");
+    assert!(self_funds_missing(&body).is_empty(), "{body}");
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("{request}/documents/{proof}"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["self_funds"]["proof_documents"], json!([]), "{body}");
+    assert_eq!(
+        self_funds_missing(&body),
+        ["self_funds_proof_upload"],
+        "{body}"
+    );
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &intake_path,
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(intake["self_funds"]["proof_required"], true, "{intake}");
+    assert_eq!(
+        intake["self_funds"]["proof_documents"],
+        json!([]),
+        "{intake}"
+    );
+
+    // A third party pays after all: the patient's own sources go, and
+    // nothing of them is asked.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &patient,
+        Some(viktor_pays()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["self_funds"]["asked"], false, "{body}");
+    assert_eq!(body["self_funds"]["sources"], json!([]), "{body}");
+    assert!(body["self_funds"]["description"].is_null(), "{body}");
+    assert!(self_funds_missing(&body).is_empty(), "{body}");
+    let stored: (Vec<String>, Option<String>) = sqlx::query_as(
+        "SELECT self_funds_sources, self_funds_description FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (Vec::new(), None));
+}
+
+#[tokio::test]
+async fn the_proof_of_funds_is_required_to_send_only_with_the_enhanced_check() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead_id, _, patient) = lead_with_login(&app, "Ben", "ben.selffunds@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let submit = format!("{request}/submit");
+
+    // A complete self-paying request without a black-list country or a
+    // confirmed sanctions match is sent without a proof.
+    let body = fill_in_complete_request(router, lead_id, &patient).await;
+    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
+    assert_eq!(body["self_funds"]["proof_documents"], json!([]), "{body}");
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed_since_submit"], false, "{body}");
+
+    // A changed source after sending asks to send again.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/self-funds"),
+        &patient,
+        Some(json!({ "self_funds_description": "Gehalt als Lehrerin" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed_since_submit"], true, "{body}");
+
+    // The habitual residence in a black-list country requires the enhanced
+    // check: nothing is sent without the proof any more.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(json!({ "habitual_residence_country": "IR" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!(["self_funds_proof_upload"]),
+        "{body}"
+    );
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["missing"],
+        json!(["self_funds_proof_upload"]),
+        "{body}"
+    );
+    let (status, body) = upload_file(
+        router,
+        &format!("{request}/funds-proof"),
+        &patient,
+        "gehaltsnachweis.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["changed_since_submit"], false, "{body}");
+    let counted: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'lead_portal_submit' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(counted["self_funds_documents"], 1, "{counted}");
+    assert_eq!(counted["identity_documents"], 1, "{counted}");
 }

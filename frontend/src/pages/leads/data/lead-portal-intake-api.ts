@@ -269,10 +269,33 @@ export type LeadPortalIntake = {
   /** The payer's own link in short; null on an older server or for a role that may not read it. */
   payer_link: LeadPortalPayerLink | null;
   /**
+   * Where the self-paying patient's money comes from, with the proof (owner
+   * request 2026-10-05); null on an older server or for a role that may not
+   * read the payer block.
+   */
+  self_funds?: LeadPortalSelfFunds | null;
+  /**
    * The lead changed answers after sending and has not sent again (the same
    * meaning as in the lead's own request); null on an older server.
    */
   changed_since_submit?: boolean | null;
+};
+
+/**
+ * The self-payer's source of funds as the lead stated it in the cabinet: the
+ * sources of the person list, the description, the uploaded proofs and
+ * whether the proof is required (the enhanced check is, owner rule
+ * 2026-10-07). `asked` is false while somebody else pays; files uploaded
+ * before are still listed.
+ */
+export type LeadPortalSelfFunds = {
+  asked: boolean;
+  sources: string[];
+  description: string | null;
+  proof_required: boolean;
+  proof_documents: LeadIdentityDocument[];
+  /** Last change by the lead while the answers are still what the lead entered. */
+  updated_at: string | null;
 };
 
 export type LeadGuardianAccessIssued = {
@@ -323,7 +346,24 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     billing: normalizeLeadPortalBilling(raw.billing),
     billing_updated_at: textOrNull(raw.billing_updated_at),
     payer_link: normalizeLeadPortalPayerLink((raw as Record<string, unknown>).payer_link),
+    self_funds: normalizeLeadPortalSelfFunds((raw as Record<string, unknown>).self_funds),
     changed_since_submit: answerOrNull((raw as Record<string, unknown>).changed_since_submit),
+  };
+}
+
+/** The self-payer's source of funds with every key present; null when the server sent none. */
+export function normalizeLeadPortalSelfFunds(value: unknown): LeadPortalSelfFunds | null {
+  const raw = asRecord(value);
+  if (!raw) return null;
+  return {
+    asked: raw.asked === true,
+    sources: Array.isArray(raw.sources)
+      ? raw.sources.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+      : [],
+    description: textOrNull(raw.description),
+    proof_required: raw.proof_required === true,
+    proof_documents: normalizeIdentityDocuments(raw.proof_documents),
+    updated_at: textOrNull(raw.updated_at),
   };
 }
 

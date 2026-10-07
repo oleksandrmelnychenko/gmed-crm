@@ -166,6 +166,7 @@ import {
   DEFAULT_INVOICE_PAYMENT_TERM_DAYS,
   invoiceRecipientAddressLines,
   payerFormToPayload,
+  payerRoleLabel,
   payerRelationOptionLabel,
   invoicesPermissions,
   isCoveredByPrepaymentOnly,
@@ -664,11 +665,18 @@ function useStaffInvoicesPageContent() {
       lang === "de"
         ? "Abweichender Rechnungsempfänger (Kostenübernehmer)"
         : "Другой получатель счёта (сторонний плательщик)",
+    payerRoleInvoiceAddress:
+      lang === "de"
+        ? "Rechnungsanschrift (keine Kostenübernahme)"
+        : "Адрес для счёта (без принятия расходов)",
     payerRoleUnset: lang === "de" ? "Bei Ausstellung prüfen" : "Проверить при выпуске",
     payerRoleHint:
       lang === "de"
-        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an einen Kostenübernehmer, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger."
-        : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг.",
+        ? "Die Rechnung nennt den Leistungsempfänger. Geht sie an einen Kostenübernehmer, druckt sie den Vertragspartner zusätzlich als Leistungsempfänger. „Rechnungsanschrift“: der Vertragspartner unter einer anderen Anschrift, z. B. aus dem Patientenformular – keine Kostenübernahme."
+        : "Счёт называет получателя услуг. Если счёт выставлен стороннему плательщику, в нём дополнительно указывается сторона договора как получатель услуг. «Адрес для счёта»: сторона договора по другому адресу, например из анкеты пациента, — без принятия расходов.",
+    recipientEmail: lang === "de" ? "E-Mail für Rechnungen" : "E-mail для счетов",
+    recipientVatId: lang === "de" ? "USt-IdNr." : "USt-IdNr. (ИНН НДС)",
+    recipientTaxNumber: lang === "de" ? "Steuernummer" : "Steuernummer (налоговый номер)",
     payerPatientPid: lang === "de" ? "Zahler ist Patient (Patientennummer)" : "Плательщик — пациент (номер пациента)",
     payerPatient: lang === "de" ? "Zahler (Patient)" : "Плательщик (пациент)",
     serviceRecipient: lang === "de" ? "Leistungsempfänger" : "Получатель услуг",
@@ -3810,13 +3818,15 @@ function useStaffInvoicesPageContent() {
                         />
                         <MiniMetric
                           label={text.payerRole}
-                          value={
-                            detail.payer?.role === "cost_bearer"
-                              ? text.payerRoleCostBearer
-                              : detail.payer?.role === "contracting_party"
-                                ? text.payerRoleContractingParty
-                                : t.common_not_set
-                          }
+                          value={payerRoleLabel(
+                            detail.payer?.role,
+                            {
+                              contracting_party: text.payerRoleContractingParty,
+                              cost_bearer: text.payerRoleCostBearer,
+                              invoice_address: text.payerRoleInvoiceAddress,
+                            },
+                            t.common_not_set,
+                          )}
                         />
                         <MiniMetric
                           label={t.revenue_invoices_relationship}
@@ -3846,6 +3856,19 @@ function useStaffInvoicesPageContent() {
                           {invoiceRecipientAddressLines(detail.recipient).map((line) => (
                             <p key={line}>{line}</p>
                           ))}
+                          {(
+                            [
+                              [text.recipientEmail, detail.recipient.email],
+                              [text.recipientVatId, detail.recipient.vat_id],
+                              [text.recipientTaxNumber, detail.recipient.tax_number],
+                            ] as const
+                          ).map(([label, value]) =>
+                            value ? (
+                              <p key={label} className="text-xs text-muted-foreground">
+                                {label}: <span className="text-foreground">{value}</span>
+                              </p>
+                            ) : null,
+                          )}
                           {detail.recipient.service_recipient_name ? (
                             <p className="text-xs text-muted-foreground">
                               {text.serviceRecipient}: {detail.recipient.service_recipient_name}
@@ -4725,6 +4748,7 @@ function useStaffInvoicesPageContent() {
                     <option value="">{text.payerRoleUnset}</option>
                     <option value="contracting_party">{text.payerRoleContractingParty}</option>
                     <option value="cost_bearer">{text.payerRoleCostBearer}</option>
+                    <option value="invoice_address">{text.payerRoleInvoiceAddress}</option>
                   </NativeComboboxSelect>
                   <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.payerRoleHint}</p>
                 </Field>
