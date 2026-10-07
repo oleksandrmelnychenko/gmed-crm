@@ -88,7 +88,7 @@ export function StepFooter({
 }) {
   return (
     // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
-    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
+    <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border lg:mt-auto bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
         <span>{text.stepOf(index, total)}</span>
         {status}

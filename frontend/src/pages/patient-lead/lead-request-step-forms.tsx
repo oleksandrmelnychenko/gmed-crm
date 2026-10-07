@@ -381,7 +381,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               ))}
             </NativeComboboxSelect>
           </FormField>
-          <FormField field="citizenships" text={text} error={errorFor("citizenships")} required>
+          <FormField field="citizenships" text={text} error={errorFor("citizenships")} required className="sm:col-span-2">
             <CitizenshipMultiSelect
               id="lead-request-citizenships"
               value={draft.citizenships}

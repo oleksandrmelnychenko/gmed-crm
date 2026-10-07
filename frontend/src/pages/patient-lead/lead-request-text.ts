@@ -296,6 +296,8 @@ export type LeadRequestText = {
   representativeLimit: string;
   representativeEmailLocked: string;
   representativeEmailDuplicate: string;
+  /** A representative must be of full age (the server refuses a younger one). */
+  representativeMinor: string;
   /** Invoice recipient and payment route (owner spec sections 7 and 8, contract phase 2). */
   sectionBilling: string;
   sectionPaymentRoute: string;
@@ -990,6 +992,7 @@ const de: LeadRequestText = {
   representativeInUse: "Diese Person kann hier nicht entfernt werden. Bitte sprechen Sie uns an.",
   representativeLimit: "Für diese Anfrage kann keine weitere Person angegeben werden.",
   representativeEmailLocked: "Diese Adresse ist eine Anmeldeadresse und kann hier nicht geändert werden.",
+  representativeMinor: "Die vertretende Person muss volljährig sein (mindestens 18 Jahre).",
   representativeEmailDuplicate:
     "Diese E-Mail-Adresse ist bereits bei einer anderen Person angegeben. Für die Unterschrift braucht jede Person eine eigene Adresse.",
   sectionBilling: "Rechnungsempfänger",
@@ -1446,6 +1449,7 @@ const ru: LeadRequestText = {
   representativeInUse: "Этого человека нельзя удалить здесь. Пожалуйста, свяжитесь с нами.",
   representativeLimit: "В этой заявке больше нельзя указать ни одного человека.",
   representativeEmailLocked: "Это адрес для входа, изменить его здесь нельзя.",
+  representativeMinor: "Представитель должен быть совершеннолетним (не младше 18 лет).",
   representativeEmailDuplicate:
     "Этот адрес e-mail уже указан для другого человека. Для подписи каждому нужен собственный адрес.",
   sectionBilling: "Получатель счёта",
@@ -1903,6 +1907,7 @@ const uk: LeadRequestText = {
   representativeInUse: "Цю людину не можна видалити тут. Будь ласка, зв'яжіться з нами.",
   representativeLimit: "У цій заявці більше не можна вказати жодної людини.",
   representativeEmailLocked: "Це адреса для входу, змінити її тут не можна.",
+  representativeMinor: "Представник має бути повнолітнім (щонайменше 18 років).",
   representativeEmailDuplicate:
     "Цю адресу e-mail уже вказано для іншої людини. Для підпису кожному потрібна власна адреса.",
   sectionBilling: "Отримувач рахунку",
@@ -2353,6 +2358,7 @@ const en: LeadRequestText = {
   representativeInUse: "This person cannot be removed here. Please contact us.",
   representativeLimit: "No further person can be named for this request.",
   representativeEmailLocked: "This is a sign-in address and cannot be changed here.",
+  representativeMinor: "The representative must be of full age (at least 18).",
   representativeEmailDuplicate:
     "This e-mail address is already given for another person. Each person needs an address of their own to sign.",
   sectionBilling: "Invoice recipient",

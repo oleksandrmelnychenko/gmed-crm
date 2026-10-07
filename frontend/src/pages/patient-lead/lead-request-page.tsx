@@ -259,7 +259,10 @@ function LeadRequestView({
     setChosenStep(next);
     // A long step was left at its bottom: the next one starts at its top.
     const top = topRef.current;
-    if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: "start" });
+    if (top && top.getBoundingClientRect().top < 0) {
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
+    }
   }, []);
 
   const nav: StepNav = {
@@ -303,7 +306,13 @@ function LeadRequestView({
           missing={missing}
           onSelect={go}
         />
-        <div className="min-w-0 px-4 pt-5 sm:px-5" data-testid="lead-request-step" data-current-step={step}>
+        {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
+        <div
+          key={step}
+          className="min-w-0 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
+          data-testid="lead-request-step"
+          data-current-step={step}
+        >
           {step === "person" ? <PersonStep {...props} /> : null}
           {step === "contact" ? <ContactStep {...props} /> : null}
           {step === "identity" ? <IdentityStep {...props} /> : null}

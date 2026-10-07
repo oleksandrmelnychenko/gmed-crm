@@ -112,6 +112,13 @@ type RepresentativeForm = {
 
 type RefusedValues = { values: RejectedRepresentative; codes: Partial<Record<RepresentativeField, string>> };
 
+/** The latest date of birth of a person of full age today (`YYYY-MM-DD`); 29 February falls back to the 28th. */
+function adultBirthDateLimit(): string {
+  const today = appDateKey();
+  const monthDay = today.slice(5) === "02-29" ? "02-28" : today.slice(5);
+  return `${Number(today.slice(0, 4)) - 18}-${monthDay}`;
+}
+
 function refusalText(text: LeadRequestText, code: string | undefined): string {
   switch (code) {
     case "id_document_expired":
@@ -241,7 +248,11 @@ function useRepresentativeForm({
     errorFor: (field) => {
       // The message belongs to the refused value: it goes as soon as the value is changed.
       const value = refused.values[field];
-      if (value !== undefined && value === representativeValue(field, draft)) return refusalText(text, refused.codes[field]);
+      if (value !== undefined && value === representativeValue(field, draft)) {
+        // A representative born after the adult limit: say why, not only "check this field".
+        if (field === "date_of_birth" && draft.date_of_birth && draft.date_of_birth > adultBirthDateLimit()) return text.representativeMinor;
+        return refusalText(text, refused.codes[field]);
+      }
       // Nothing about a person is saved before the last name is there.
       if (field === "last_name" && !representativeValue(field, draft) && hasRepresentativeEntries(draft)) return text.required;
       return undefined;
@@ -563,7 +574,7 @@ function RepresentativeBlock({
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
         {asked("date_of_birth") ? (
-          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth", appDateKey())}</LabeledField>
+          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth", adultBirthDateLimit())}</LabeledField>
         ) : null}
         {asked("birth_place") ? <LabeledField {...labeled("birth_place")}>{textInput("birth_place", 200)}</LabeledField> : null}
         {asked("birth_country") ? (

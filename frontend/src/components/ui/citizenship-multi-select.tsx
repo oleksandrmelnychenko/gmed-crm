@@ -46,12 +46,6 @@ export function CitizenshipMultiSelect({
   const selected = normalizeCitizenships(value);
   const options = COUNTRY_CODES.map((code) => ({ value: code, label: `${countryLabel(code, lang)} (${code})` }))
     .sort((left, right) => left.label.localeCompare(right.label, lang));
-  const triggerLabel =
-    selected.length === 0
-      ? placeholder
-      : selected.length === 1
-        ? countryLabel(selected[0], lang)
-        : `${placeholder}: ${selected.length}`;
 
   const toggle = (code: string) => {
     if (!code) return;
@@ -62,13 +56,41 @@ export function CitizenshipMultiSelect({
     );
   };
 
+  // One field: the chosen countries as chips in a row, then the picker that
+  // adds the next one (owner 2026-10-07: chips inline, no greyed-out look).
   return (
-    <div className="space-y-2">
+    <div
+      className={cn(
+        "flex w-full min-w-0 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-field text-sm transition focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30",
+        className,
+        "h-auto min-h-9 px-1 py-1",
+        invalid && "border-destructive",
+        disabled && "opacity-80",
+      )}
+    >
+      {selected.map((code) => (
+        <button
+          key={code}
+          type="button"
+          onClick={() => toggle(code)}
+          disabled={disabled}
+          className={cn(
+            "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40",
+            disabled && "cursor-default hover:border-border hover:bg-card",
+          )}
+          title={countryLabel(code, lang)}
+          aria-label={`${t.common_remove}: ${countryLabel(code, lang)}`}
+        >
+          <span className="font-mono text-[11px] text-muted-foreground">{code}</span>
+          <span className="min-w-0 truncate">{countryLabel(code, lang)}</span>
+          {!disabled ? <X className="size-3 shrink-0" /> : null}
+        </button>
+      ))}
       <NativeComboboxSelect
         id={id}
         value=""
         onChange={(event) => toggle(event.target.value)}
-        className={cn(className, invalid && "border-destructive")}
+        className="h-7 w-auto min-w-[10rem] flex-1 border-0 bg-transparent px-2 shadow-none hover:bg-transparent focus-visible:ring-0 data-placeholder:text-muted-foreground"
         aria-invalid={invalid || undefined}
         disabled={disabled}
         selectedValues={selected}
@@ -76,35 +98,13 @@ export function CitizenshipMultiSelect({
         hidePlaceholderOption
         title={selected.map((code) => countryLabel(code, lang)).join(", ") || placeholder}
       >
-        <option value="">{triggerLabel}</option>
+        <option value="">{placeholder}</option>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
       </NativeComboboxSelect>
-      {selected.length > 0 ? (
-        <div className="flex min-h-8 flex-wrap gap-1.5 rounded-lg border border-border/70 bg-muted/20 p-1.5">
-          {selected.map((code) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() => toggle(code)}
-              disabled={disabled}
-              className={cn(
-                "inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-[12px] font-medium text-foreground transition-colors hover:border-foreground/30 hover:bg-muted/40",
-                disabled && "cursor-default opacity-80 hover:border-border hover:bg-card",
-              )}
-              title={countryLabel(code, lang)}
-              aria-label={`${t.common_remove}: ${countryLabel(code, lang)}`}
-            >
-              <span className="font-mono text-[11px] text-muted-foreground">{code}</span>
-              <span className="min-w-0 truncate">{countryLabel(code, lang)}</span>
-              {!disabled ? <X className="size-3 shrink-0" /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
     </div>
   );
 }
