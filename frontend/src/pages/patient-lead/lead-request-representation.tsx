@@ -720,14 +720,15 @@ export function RepresentationSection({
   // then knows whom it holds for that place), and closes with the answer.
   const stored = shownSlots(minor, draftFromRepresentation(representation));
   const answered = shownSlots(minor, draft).filter((slot) => stored.includes(slot));
-  // What the step asks of each person: everything in block G; in the first step a
-  // minor's parents give names and contacts, an adult's persons nothing. A
-  // server that still lists more of a person as missing in the first step (an
-  // older one) gets the whole person there — from the visit's start on, so the
-  // form does not lose a field the moment it is saved.
+  // What the step asks of each person: everything in block G; in the first step
+  // an adult's representative or guardian whole (owner 2026-10-07: identified
+  // before sending), a minor's parents names and contacts. A server that lists
+  // more of a parent as missing in the first step gets the whole person there —
+  // from the visit's start on, so the form does not lose a field the moment it
+  // is saved.
   const [missingAtStart] = useState(() => slotsBeyondBase(stepMissing));
   const missingNow = slotsBeyondBase(stepMissing);
-  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || missingAtStart.has(slot) || missingNow.has(slot);
+  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || !minor || missingAtStart.has(slot) || missingNow.has(slot);
   const fieldsOf = (slot: RepresentativeSlot): ReadonlySet<RepresentativeField> =>
     new Set(whole(slot) ? REPRESENTATIVE_FIELDS : minor ? BASE_REPRESENTATIVE_FIELDS : []);
   const shown = answered.filter((slot) => minor || whole(slot));

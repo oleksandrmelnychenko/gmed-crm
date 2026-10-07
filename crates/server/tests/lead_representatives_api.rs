@@ -253,8 +253,13 @@ fn missing_representation(body: &Value) -> Vec<String> {
                 || key == "under_guardianship"
         })
         .collect();
+    // Block G asks what the first step still misses once more: each key once.
     if let Some(block) = body["follow_up"]["missing"]["G"].as_array() {
-        keys.extend(block.iter().filter_map(Value::as_str).map(str::to_string));
+        for key in block.iter().filter_map(Value::as_str) {
+            if !keys.iter().any(|known| known == key) {
+                keys.push(key.to_string());
+            }
+        }
     }
     keys
 }
@@ -436,12 +441,11 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["representation"]["has_representative"], true);
     assert_eq!(body["representation"]["under_guardianship"], false);
-    // The base form does not ask for the person (trigger flow 2026-10-07):
-    // once the assessment runs, follow-up block G does — everything of that
-    // person but staff's identity data.
+    // The base form asks for the whole person but staff's identity data
+    // (owner 2026-10-07: identified before sending).
     assert_eq!(
         missing_representation(&body),
-        Vec::<String>::new(),
+        keys("agent", &ADULT_FIELDS),
         "{body}"
     );
     start_assessment(&app, lead_id).await;
@@ -910,6 +914,7 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     assert_eq!(status, StatusCode::OK, "{body}");
     start_assessment(&app, lead_id).await;
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    // Asked in the first step and, once the assessment runs, in block G.
     assert_eq!(
         missing_representation(&body),
         keys("guardian", &ADULT_FIELDS),
@@ -1699,10 +1704,14 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     // second question was never answered) and cannot reuse the id of the
     // contact that stayed.
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
-    // The person's details are follow-up block G once the assessment runs.
+    // The person's details are asked in the first step again.
     assert_eq!(
         missing_representation(&body),
-        vec!["under_guardianship".to_string()],
+        [
+            keys("agent", &ADULT_FIELDS),
+            vec!["under_guardianship".to_string()]
+        ]
+        .concat(),
         "{body}"
     );
     let (status, error) = json_request(

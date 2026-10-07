@@ -79,7 +79,10 @@ pub fn is_id_data_key(key: &str) -> bool {
         .any(|data| key == *data || key.ends_with(&format!("_{data}")))
 }
 
-/// A key of an adult's representative or legal guardian (block G).
+/// A key of an adult's representative or legal guardian (block G). Since
+/// 2026-10-07 (owner) the base form asks them too: whoever acts for the lead
+/// is identified before sending (§ 10 (1) Nr. 1 GwG); block G stays for what
+/// is missing later or what staff request.
 pub fn is_adult_representative_key(key: &str) -> bool {
     key.starts_with("agent_") || key.starts_with("guardian_")
 }
@@ -107,10 +110,7 @@ const DROPPED_KEYS: [&str; 17] = [
 ];
 
 fn dropped(key: &str) -> bool {
-    DROPPED_KEYS.contains(&key)
-        || is_id_data_key(key)
-        || is_adult_representative_key(key)
-        || key.starts_with("enhanced_")
+    DROPPED_KEYS.contains(&key) || is_id_data_key(key) || key.starts_with("enhanced_")
 }
 
 /// What the base form needs besides the stored keys.
@@ -1213,6 +1213,8 @@ mod tests {
                 "birth_place",
                 "id_document_upload",
                 "rep1_first_name",
+                "agent_first_name",
+                "guardian_id_upload",
                 "has_representative",
                 "payer_own_account",
                 "invoice_to",
