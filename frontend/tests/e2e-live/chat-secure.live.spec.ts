@@ -39,6 +39,15 @@ async function reopenConversation(
   await expect(page.getByText(peer.name).first()).toBeVisible();
 }
 
+/**
+ * The message bubble with that text. Since the chat stores messages on the
+ * server, the conversation list also previews the text ("Du: …"), so a plain
+ * text lookup would find two elements.
+ */
+function messageBubble(page: import("@playwright/test").Page, text: string) {
+  return page.locator('[data-testid^="chat-message-text-"]').filter({ hasText: text });
+}
+
 async function waitForConversationContent(
   page: import("@playwright/test").Page,
   peer: ChatPeer,
@@ -184,7 +193,7 @@ test.describe("secure chat live workflows", () => {
         "Patient secure update for the care team",
       );
       await expect(
-        patientPage.getByText("Patient secure update for the care team"),
+        messageBubble(patientPage, "Patient secure update for the care team"),
       ).toBeVisible();
 
       await reopenConversation(conciergePage, {
@@ -227,7 +236,7 @@ test.describe("secure chat live workflows", () => {
         uploadResponse.ok(),
         `secure attachment upload failed: ${uploadResponse.status()} ${await uploadResponse.text()}`,
       ).toBeTruthy();
-      await expect(patientPage.getByText("patient-secure-note.pdf")).toBeVisible();
+      await expect(patientPage.getByText("patient-secure-note.pdf").first()).toBeVisible();
 
       await waitForConversationContent(
         conciergePage,
@@ -294,7 +303,7 @@ test.describe("secure chat live workflows", () => {
         .click();
       expect((await deleteResponsePromise).ok()).toBeTruthy();
       await expect(
-        patientPage.getByText("Patient secure update for the care team"),
+        messageBubble(patientPage, "Patient secure update for the care team"),
       ).toHaveCount(0);
 
       await reopenConversation(conciergePage, {
@@ -303,7 +312,7 @@ test.describe("secure chat live workflows", () => {
         role: "patient",
       });
       await expect(
-        conciergePage.getByText("Patient secure update for the care team"),
+        messageBubble(conciergePage, "Patient secure update for the care team"),
       ).toHaveCount(0);
       expect(keyRegistrations).toEqual([]);
     } finally {
