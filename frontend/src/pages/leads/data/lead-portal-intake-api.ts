@@ -1,6 +1,14 @@
 import { apiFetch } from "@/lib/api";
 
 import { INVOICE_TO_VALUES, PAYMENT_METHODS, type InvoiceTo, type PaymentMethod } from "../model/lead-payer";
+import {
+  normalizeFollowUpAnswers,
+  normalizeRequestReason,
+  normalizeStaffIdDataMarks,
+  type LeadGwgFollowUpAnswers,
+  type LeadPortalRequestReason,
+  type LeadStaffIdDataMarks,
+} from "../model/lead-risk-intake";
 
 export type Step1FillMode = "staff" | "patient";
 
@@ -82,7 +90,7 @@ export type LeadGwgIdentification = {
   payment_background: string | null;
   /** Set by the server when the lead sends the request with the confirmation. */
   declared_correct_at: string | null;
-};
+} & LeadStaffIdDataMarks & LeadGwgFollowUpAnswers;
 
 /** A photo or scan of the identity document the lead uploaded in the cabinet. */
 export type LeadIdentityDocument = {
@@ -140,7 +148,7 @@ export type LeadRepresentative = {
   has_data: boolean;
   /** `portal` when the cabinet created the trusted contact, `staff` when it existed. */
   contact_origin: string | null;
-};
+} & LeadStaffIdDataMarks;
 
 /** Who acts for the lead, as stated in the cabinet (and, for the custody, by staff). */
 export type LeadRepresentation = {
@@ -269,31 +277,54 @@ export type LeadPortalIntake = {
   /** The payer's own link in short; null on an older server or for a role that may not read it. */
   payer_link: LeadPortalPayerLink | null;
   /**
-   * Where the self-paying patient's money comes from, with the proof (owner
-   * request 2026-10-05); null on an older server or for a role that may not
-   * read the payer block.
+   * The answers of the cabinet's extra step "Zusätzliche Angaben" (two-stage
+   * form 2026-10-07) with the self-payer's proofs; null on an older server or
+   * for a role that may not read the payer block.
    */
-  self_funds?: LeadPortalSelfFunds | null;
+  enhanced_details?: LeadPortalEnhancedDetails | null;
   /**
    * The lead changed answers after sending and has not sent again (the same
    * meaning as in the lead's own request); null on an older server.
    */
   changed_since_submit?: boolean | null;
+  /** The lead's own reason for the request (trigger flow 13.1); null when nothing was entered. */
+  request_reason?: LeadPortalRequestReason | null;
+};
+
+/** Which questions the cabinet's extra step asks (the server's `ExtraQuestions`). */
+export type LeadEnhancedDetailsAsks = {
+  payment_background: boolean;
+  payer_funds: boolean;
+  funds: boolean;
+  occupation: boolean;
+  sector: boolean;
+  funds_proof: boolean;
+  payer_states_funds: boolean;
 };
 
 /**
- * The self-payer's source of funds as the lead stated it in the cabinet: the
- * sources of the person list, the description, the uploaded proofs and
- * whether the proof is required (the enhanced check is, owner rule
- * 2026-10-07). `asked` is false while somebody else pays; files uploaded
- * before are still listed.
+ * The extra step "Zusätzliche Angaben" of the lead's cabinet as staff read
+ * it (block A / B answers of the trigger flow): whether the step is shown
+ * (`required`), whether the enhanced check requires it (`check_required`),
+ * which questions it asks, the answers — the self-payer's own source of funds
+ * (one choice) with the words, what the patient knows of a third party's funds
+ * ("со слов пациента"), profession and sector — and the self-payer's proofs.
+ * "Why the third party pays" is `identification.payment_background`.
  */
-export type LeadPortalSelfFunds = {
-  asked: boolean;
-  sources: string[];
-  description: string | null;
-  proof_required: boolean;
-  proof_documents: LeadIdentityDocument[];
+export type LeadPortalEnhancedDetails = {
+  required: boolean;
+  check_required: boolean;
+  asks: LeadEnhancedDetailsAsks;
+  answers: {
+    /** The self-payer's sources: one choice today (`funds_source`), a list once the cabinet asks several. */
+    funds_sources: string[];
+    funds_description: string | null;
+    payer_funds_source: string | null;
+    payer_funds_description: string | null;
+    occupation: string | null;
+    sector: string | null;
+  };
+  funds_proof_documents: LeadIdentityDocument[];
   /** Last change by the lead while the answers are still what the lead entered. */
   updated_at: string | null;
 };
@@ -346,23 +377,43 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     billing: normalizeLeadPortalBilling(raw.billing),
     billing_updated_at: textOrNull(raw.billing_updated_at),
     payer_link: normalizeLeadPortalPayerLink((raw as Record<string, unknown>).payer_link),
-    self_funds: normalizeLeadPortalSelfFunds((raw as Record<string, unknown>).self_funds),
+    enhanced_details: normalizeLeadPortalEnhancedDetails((raw as Record<string, unknown>).enhanced_details),
     changed_since_submit: answerOrNull((raw as Record<string, unknown>).changed_since_submit),
+    request_reason: normalizeRequestReason(raw as Record<string, unknown>),
   };
 }
 
-/** The self-payer's source of funds with every key present; null when the server sent none. */
-export function normalizeLeadPortalSelfFunds(value: unknown): LeadPortalSelfFunds | null {
+/** The extra step's answers with every key present; null when the server sent none. */
+export function normalizeLeadPortalEnhancedDetails(value: unknown): LeadPortalEnhancedDetails | null {
   const raw = asRecord(value);
   if (!raw) return null;
+  const asks = asRecord(raw.asks) ?? {};
+  const answers = asRecord(raw.answers) ?? {};
+  const listed = Array.isArray(answers.funds_sources)
+    ? answers.funds_sources.filter((item): item is string => typeof item === "string" && item.trim() !== "")
+    : [];
+  const single = textOrNull(answers.funds_source);
   return {
-    asked: raw.asked === true,
-    sources: Array.isArray(raw.sources)
-      ? raw.sources.filter((item): item is string => typeof item === "string" && item.trim() !== "")
-      : [],
-    description: textOrNull(raw.description),
-    proof_required: raw.proof_required === true,
-    proof_documents: normalizeIdentityDocuments(raw.proof_documents),
+    required: raw.required === true,
+    check_required: raw.check_required === true,
+    asks: {
+      payment_background: asks.payment_background === true,
+      payer_funds: asks.payer_funds === true,
+      funds: asks.funds === true,
+      occupation: asks.occupation === true,
+      sector: asks.sector === true,
+      funds_proof: asks.funds_proof === true,
+      payer_states_funds: asks.payer_states_funds === true,
+    },
+    answers: {
+      funds_sources: listed.length > 0 ? listed : single ? [single] : [],
+      funds_description: textOrNull(answers.funds_description),
+      payer_funds_source: textOrNull(answers.payer_funds_source),
+      payer_funds_description: textOrNull(answers.payer_funds_description),
+      occupation: textOrNull(answers.occupation),
+      sector: textOrNull(answers.sector),
+    },
+    funds_proof_documents: normalizeIdentityDocuments(raw.funds_proof_documents),
     updated_at: textOrNull(raw.updated_at),
   };
 }
@@ -416,6 +467,8 @@ function normalizeIdentification(value: unknown): LeadGwgIdentification | null {
     sanctions_links_details: textOrNull(raw.sanctions_links_details),
     payment_background: textOrNull(raw.payment_background),
     declared_correct_at: textOrNull(raw.declared_correct_at),
+    ...normalizeStaffIdDataMarks(raw),
+    ...normalizeFollowUpAnswers(raw),
   };
 }
 
@@ -468,6 +521,7 @@ function normalizeRepresentative(value: unknown): LeadRepresentative | null {
     has_login: raw.has_login === true,
     has_data: raw.has_data === true,
     contact_origin: textOrNull(raw.contact_origin),
+    ...normalizeStaffIdDataMarks(raw),
   };
 }
 

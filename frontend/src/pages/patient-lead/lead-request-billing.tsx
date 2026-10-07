@@ -16,12 +16,21 @@ import { cn } from "@/lib/utils";
 import {
   fetchMyLeadRequests,
   saveLeadBilling,
+  saveLeadBillingExtras,
   type LeadRequest,
   type LeadRequestBilling,
   type PaymentRouteBy,
 } from "./lead-request-api";
 import {
+  BILLING_EXTRAS_FIELDS,
   PAYMENT_METHODS,
+  VIA_THIRD_PARTY_KINDS,
+  billingExtrasPatch,
+  billingExtrasValue,
+  draftFromBillingExtras,
+  parseEuroAmount,
+  type BillingExtrasDraft,
+  type BillingExtrasField,
   asksAccount,
   asksBillingField,
   asksPaymentRoute,
@@ -184,9 +193,10 @@ function useBillingForm({
 }
 
 /**
- * The sections "invoice recipient" and "payment route" of step "data",
- * between "who pays" and the legal questions. Section 8 is asked of the
- * patient or the paying parent; when the payer answers it, a note says so.
+ * The sections "invoice recipient" (`part="invoice"`, step "Versicherung &
+ * Rechnung") and "payment route" (`part="route"`, follow-up block C, trigger
+ * flow 2026-10-07). Section 8 is asked of the patient or the paying parent;
+ * when the payer answers it, a note says so.
  */
 export function BillingSections({
   request,
@@ -196,6 +206,7 @@ export function BillingSections({
   enqueue,
   onChange,
   onSaveState,
+  part,
 }: {
   request: LeadRequest;
   billing: LeadRequestBilling;
@@ -204,6 +215,7 @@ export function BillingSections({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
+  part: "invoice" | "route";
 }) {
   const guardian = request.access_kind === "guardian";
   const form = useBillingForm({ request, billing, text, enqueue, onChange, onSaveState });
@@ -257,6 +269,7 @@ export function BillingSections({
 
   return (
     <>
+      {part === "invoice" ? (
       <Section title={text.sectionBilling}>
         <div className="space-y-3" data-testid="lead-request-billing">
           <div
@@ -309,9 +322,9 @@ export function BillingSections({
           </div>
           {/* Another address exists only for the answer "another address". */}
           {draft.invoice_to === "other" ? (
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-invoice-address">
-              <LabeledField {...labeled("invoice_name", "sm:col-span-2")}>{textInput("invoice_name", 200)}</LabeledField>
-              <LabeledField {...labeled("invoice_street", "sm:col-span-2")}>{textInput("invoice_street", 200)}</LabeledField>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-invoice-address">
+              <LabeledField {...labeled("invoice_name", "sm:col-span-2 lg:col-span-3")}>{textInput("invoice_name", 200)}</LabeledField>
+              <LabeledField {...labeled("invoice_street", "sm:col-span-2 lg:col-span-3")}>{textInput("invoice_street", 200)}</LabeledField>
               <LabeledField {...labeled("invoice_zip")}>{textInput("invoice_zip", 20)}</LabeledField>
               <LabeledField {...labeled("invoice_city")}>{textInput("invoice_city", 200)}</LabeledField>
               <LabeledField {...labeled("invoice_country")}>{countrySelect("invoice_country")}</LabeledField>
@@ -328,11 +341,13 @@ export function BillingSections({
           <p className="text-xs leading-5 text-muted-foreground">{text.vatHint}</p>
         </div>
       </Section>
+      ) : null}
 
+      {part === "route" ? (
       <Section title={text.sectionPaymentRoute}>
         {asksPaymentRoute(context.routeBy) ? (
           <div className="space-y-4" data-testid="lead-request-payment-route">
-            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               <LabeledField {...labeled("payment_method")}>
                 <NativeComboboxSelect
                   {...control("payment_method")}
@@ -360,7 +375,7 @@ export function BillingSections({
               {flagged ? (
                 <p
                   role="note"
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-snug text-amber-900 sm:col-span-2 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm leading-snug text-amber-900 sm:col-span-2 lg:col-span-3 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
                   data-testid="lead-request-payment-method-note"
                 >
                   {text.cashCryptoNote}
@@ -402,7 +417,21 @@ export function BillingSections({
                 </LabeledField>
               ) : null}
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">{text.totalAmountHint}</p>
+            {/* Block C asks through whom a payment via a third party goes, and the expected total. */}
+            {billing.via_third_party_kind !== undefined || billing.expected_total_eur !== undefined ? (
+              <BillingExtras
+                request={request}
+                billing={billing}
+                viaThirdParty={draft.via_third_party === "yes"}
+                text={text}
+                enqueue={enqueue}
+                onChange={onChange}
+                onSaveState={onSaveState}
+              />
+            ) : (
+              // A server without block C asks no amount: GMED enters it.
+              <p className="text-xs leading-5 text-muted-foreground">{text.totalAmountHint}</p>
+            )}
           </div>
         ) : (
           <p
@@ -414,6 +443,134 @@ export function BillingSections({
           </p>
         )}
       </Section>
+      ) : null}
     </>
+  );
+}
+
+/**
+ * Block C's extras (trigger flow 2026-10-07): through whom a payment via a
+ * third party goes (a person or a payment service provider) and the expected
+ * total in EUR. They save on the billing route on their own, only what
+ * changed; an amount that is no number is not sent and is marked.
+ */
+function BillingExtras({
+  request,
+  billing,
+  viaThirdParty,
+  text,
+  enqueue,
+  onChange,
+  onSaveState,
+}: {
+  request: LeadRequest;
+  billing: LeadRequestBilling;
+  /** The answer "through a third party?" as typed above. */
+  viaThirdParty: boolean;
+  text: LeadRequestText;
+  enqueue: RequestQueue;
+  onChange: (request: LeadRequest) => void;
+  onSaveState: (state: SaveState) => void;
+}) {
+  const [draft, setDraft] = useState<BillingExtrasDraft>(() => draftFromBillingExtras(billing));
+  const savedRef = useRef<BillingExtrasDraft>(draftFromBillingExtras(billing));
+  const refusedRef = useRef<Partial<Record<BillingExtrasField, string>>>({});
+  const [refused, setRefused] = useState<Partial<Record<BillingExtrasField, string>>>({});
+
+  // "Through a third party?" answered with no clears the kind on the server: the draft follows.
+  useEffect(() => {
+    const incoming = draftFromBillingExtras(billing);
+    const saved = savedRef.current;
+    const changed = BILLING_EXTRAS_FIELDS.filter((field) => billingExtrasValue(field, incoming) !== billingExtrasValue(field, saved));
+    if (changed.length === 0) return;
+    savedRef.current = incoming;
+    setDraft((current) => {
+      const next = { ...current };
+      for (const field of changed) next[field] = incoming[field];
+      return next;
+    });
+  }, [billing]);
+
+  const save = useCallback(
+    (snapshot: BillingExtrasDraft) => {
+      void enqueue(async () => {
+        const patch = billingExtrasPatch(savedRef.current, snapshot, refusedRef.current);
+        if (Object.keys(patch).length === 0) return;
+        onSaveState("saving");
+        try {
+          const next = await saveLeadBillingExtras(request.lead_id, patch);
+          if (next.billing) savedRef.current = draftFromBillingExtras(next.billing);
+          refusedRef.current = {};
+          setRefused({});
+          onSaveState("saved");
+          onChange(next);
+        } catch (cause) {
+          const field = errorBody(cause)?.field;
+          if (field === "via_third_party_kind" || field === "expected_total_eur") {
+            refusedRef.current = { ...refusedRef.current, [field]: billingExtrasValue(field, snapshot) };
+            setRefused(refusedRef.current);
+          }
+          onSaveState("error");
+        }
+      });
+    },
+    [enqueue, onChange, onSaveState, request.lead_id],
+  );
+
+  useAutosave(draft, save);
+
+  const amountInvalid = parseEuroAmount(draft.expected_total_eur) === undefined;
+  const errorFor = (field: BillingExtrasField) => {
+    if (field === "expected_total_eur" && amountInvalid) return text.invalidField;
+    return refused[field] !== undefined && refused[field] === billingExtrasValue(field, draft) ? text.invalidField : undefined;
+  };
+  const control = (field: BillingExtrasField) => ({
+    id: `lead-request-${field}`,
+    "aria-invalid": Boolean(errorFor(field)) || undefined,
+    "aria-describedby": errorFor(field) ? `lead-request-${field}-error` : undefined,
+  });
+
+  return (
+    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-payment-route-extras">
+      {viaThirdParty ? (
+        <LabeledField
+          id="lead-request-via_third_party_kind"
+          label={text.billingExtrasFields.via_third_party_kind}
+          error={errorFor("via_third_party_kind")}
+          required
+        >
+          <NativeComboboxSelect
+            {...control("via_third_party_kind")}
+            className={selectClass}
+            value={draft.via_third_party_kind}
+            onChange={(event) => setDraft((current) => ({ ...current, via_third_party_kind: event.target.value }))}
+          >
+            <option value="">{text.choose}</option>
+            {VIA_THIRD_PARTY_KINDS.map((kind) => (
+              <option key={kind} value={kind}>
+                {text.viaThirdPartyKindOptions[kind]}
+              </option>
+            ))}
+          </NativeComboboxSelect>
+        </LabeledField>
+      ) : null}
+      <LabeledField
+        id="lead-request-expected_total_eur"
+        label={text.billingExtrasFields.expected_total_eur}
+        error={errorFor("expected_total_eur")}
+        className="sm:col-start-1"
+      >
+        <Input
+          {...control("expected_total_eur")}
+          className={inputClass}
+          inputMode="decimal"
+          autoComplete="off"
+          maxLength={20}
+          value={draft.expected_total_eur}
+          onChange={(event) => setDraft((current) => ({ ...current, expected_total_eur: event.target.value }))}
+        />
+        <p className="text-xs leading-5 text-muted-foreground">{text.expectedTotalHint}</p>
+      </LabeledField>
+    </div>
   );
 }

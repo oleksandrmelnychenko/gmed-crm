@@ -64,6 +64,9 @@ pub const REASON_PATIENT_SANCTIONED: &str = "patient_sanctioned";
 pub const REASON_PAYER_SANCTIONED: &str = "payer_sanctioned";
 /// Information only: a possible match waits for the CEO's decision.
 pub const REASON_SANCTIONS_REVIEW_PENDING: &str = "sanctions_review_pending";
+/// The stored risk assessment of the lead is at level 2 or 3 (see
+/// [`crate::risk`]) while the old rule alone would not require the check.
+pub const REASON_RISK_ASSESSMENT: &str = "risk_assessment";
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/leads/{lead_id}/enhanced-check", get(get_enhanced_check))
@@ -78,6 +81,9 @@ pub(crate) struct EnhancedCheck {
     pub reasons: Vec<&'static str>,
     /// The black-list codes that triggered, for the labels.
     pub countries: Vec<String>,
+    /// Block E of the risk assessment is open: the paying organisation states
+    /// its legal form and why it pays on the own link (never shown as why).
+    pub organisation_follow_up: bool,
 }
 
 impl EnhancedCheck {
@@ -324,10 +330,31 @@ pub(crate) async fn enhanced_check_triggers(
     conn: &mut PgConnection,
     lead_id: Uuid,
 ) -> Result<EnhancedCheck, sqlx::Error> {
-    Ok(load_subjects(conn, lead_id)
+    let Some(subjects) = load_subjects(conn, lead_id).await? else {
+        return Ok(EnhancedCheck::default());
+    };
+    let check = evaluate(&subjects);
+    let level = crate::risk::store::load(conn, lead_id)
         .await?
-        .map(|subjects| evaluate(&subjects))
-        .unwrap_or_default())
+        .filter(crate::risk::store::Assessment::started)
+        .map(|assessment| assessment.score.level)
+        .unwrap_or(1);
+    let mut check = with_risk_level(check, level);
+    check.organisation_follow_up = crate::risk::store::block_open(conn, lead_id, "E").await?;
+    Ok(check)
+}
+
+/// The enhanced check is also required while the stored risk assessment is
+/// at level 2 or 3 (contract 5, § 15 GwG): the old rule is a part of level 2
+/// (a black-list country is list 2, a confirmed match is T16), so nothing
+/// required before becomes optional. `risk_assessment` names the level when
+/// only the level requires it.
+pub(crate) fn with_risk_level(mut check: EnhancedCheck, level: i16) -> EnhancedCheck {
+    if level >= 2 && !check.required {
+        check.required = true;
+        check.reasons.insert(0, REASON_RISK_ASSESSMENT);
+    }
+    check
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -366,7 +393,10 @@ async fn get_enhanced_check(
         Err(error) => return database_error(error),
     };
     match load_subjects(&mut conn, lead_id).await {
-        Ok(Some(subjects)) => Json(evaluate(&subjects).to_json()).into_response(),
+        Ok(Some(_)) => match enhanced_check_triggers(&mut conn, lead_id).await {
+            Ok(check) => Json(check.to_json()).into_response(),
+            Err(error) => database_error(error),
+        },
         Ok(None) => error(StatusCode::NOT_FOUND, "not_found", "Lead not found"),
         Err(error) => database_error(error),
     }
@@ -550,6 +580,35 @@ mod tests {
                 "reasons": all.reasons,
                 "countries": ["IR", "KP", "MM"],
             })
+        );
+    }
+
+    #[test]
+    fn a_stored_level_two_requires_the_check_too() {
+        let none = with_risk_level(EnhancedCheck::default(), 2);
+        assert!(none.required);
+        assert_eq!(none.reasons, vec![REASON_RISK_ASSESSMENT]);
+        assert_eq!(
+            with_risk_level(EnhancedCheck::default(), 1),
+            EnhancedCheck::default()
+        );
+        // The old rule keeps its own reasons; the level adds nothing then.
+        let black_list = evaluate(&Subjects {
+            patient_residence: codes(&["IR"]),
+            ..Subjects::default()
+        });
+        assert_eq!(with_risk_level(black_list.clone(), 3), black_list);
+        let pending = with_risk_level(
+            EnhancedCheck {
+                reasons: vec![REASON_SANCTIONS_REVIEW_PENDING],
+                ..EnhancedCheck::default()
+            },
+            3,
+        );
+        assert!(pending.required);
+        assert_eq!(
+            pending.reasons,
+            vec![REASON_RISK_ASSESSMENT, REASON_SANCTIONS_REVIEW_PENDING]
         );
     }
 

@@ -12,11 +12,12 @@ import {
 /**
  * Whether a `lead.portal_updated` change touches the payer declaration row:
  * "who pays" (`payer`), the invoice recipient / payment route of sections
- * 7–8 (`billing`) and the self-payer's source of funds (`self_funds`) are
- * stored on it.
+ * 7–8 (`billing`) and the answers of the cabinet's extra step
+ * (`enhanced_details`: the self-payer's source of funds, what the patient
+ * knows of a third party's funds) are stored on it.
  */
 export function payerDeclarationChanged(change: unknown): boolean {
-  return change === "payer" || change === "billing" || change === "self_funds";
+  return change === "payer" || change === "billing" || change === "enhanced_details";
 }
 
 /**

@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ExternalLink, Globe2, ListChecks, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ExternalLink, Gauge, Globe2, ListChecks, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
 import { Banner, PageHeader, StatusBadge, SuccessBanner, TabLoader, tokens } from "@/components/ui-shell";
@@ -24,6 +24,7 @@ import {
 } from "./api";
 import { SanctionsReasonDialog } from "./components";
 import { SanctionsListSettings } from "./list-settings";
+import { RiskSettingsTab } from "./risk-settings";
 import {
   FISALIS_URL,
   countryList,
@@ -38,8 +39,8 @@ import {
   subjectKindLabel,
 } from "./model";
 
-type Tab = "open" | "decided" | "countries" | "list";
-const TABS: Tab[] = ["open", "decided", "countries", "list"];
+type Tab = "open" | "decided" | "countries" | "list" | "risk";
+const TABS: Tab[] = ["open", "decided", "countries", "list", "risk"];
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -426,12 +427,14 @@ export function SanctionsPage() {
     decided: t.sanctions_tab_decided,
     countries: t.sanctions_tab_countries,
     list: t.sanctions_tab_list,
+    risk: t.sanctions_tab_risk,
   };
   const icons: Record<Tab, ReactNode> = {
     open: <ShieldAlert className="size-4" aria-hidden />,
     decided: <ListChecks className="size-4" aria-hidden />,
     countries: <Globe2 className="size-4" aria-hidden />,
     list: <ShieldCheck className="size-4" aria-hidden />,
+    risk: <Gauge className="size-4" aria-hidden />,
   };
 
   return (
@@ -460,6 +463,7 @@ export function SanctionsPage() {
       {tab === "decided" ? <HitsTab status="decided" /> : null}
       {tab === "countries" ? <CountriesTab /> : null}
       {tab === "list" ? <SanctionsListSettings /> : null}
+      {tab === "risk" ? <RiskSettingsTab /> : null}
     </div>
   );
 }

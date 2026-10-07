@@ -30,7 +30,7 @@ import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
-import type { LeadPortalSelfFunds, PatientFieldMarker } from "../data/lead-portal-intake-api";
+import type { LeadPortalEnhancedDetails, PatientFieldMarker } from "../data/lead-portal-intake-api";
 import { standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
@@ -56,7 +56,7 @@ import {
   payerSignatureSequence,
   payerStatusBadge,
   payerTypeLabel,
-  selfFundsSourcesLabel,
+  statedFundsSourcesLabel,
   sourceOfFundsLabel,
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
@@ -148,7 +148,7 @@ export function LeadPayerDeclarationSection({
   payerLinkCanEdit,
   leadLanguage,
   onPayerLinkSent,
-  selfFunds,
+  enhancedDetails,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -171,10 +171,10 @@ export function LeadPayerDeclarationSection({
   /** A payer link went out: the server marked the payer as informed, the declaration is to be reloaded. */
   onPayerLinkSent?: () => void;
   /**
-   * The self-payer's source of funds from the cabinet with the proofs (the
-   * portal state); without it the declaration's answers are shown without files.
+   * The cabinet's extra step with the self-payer's proofs (the portal state);
+   * without it the declaration's answers are shown without files.
    */
-  selfFunds?: LeadPortalSelfFunds | null;
+  enhancedDetails?: LeadPortalEnhancedDetails | null;
 }) {
   // The stored declaration is the first form state as well, so a render
   // without effects (static markup) already shows it.
@@ -221,14 +221,15 @@ export function LeadPayerDeclarationSection({
   const invoiceTaxShown = invoiceTaxFieldsShown(form);
   // The self-paying lead's own source of funds (read-only): shown while the
   // stored declaration says the patient pays and the server knows the answer.
+  const storedSource = data?.declaration?.self_funds_source?.trim();
   const leadSelfFunds = data?.declaration?.payer_kind === "self"
-    && (data.declaration.self_funds_sources !== undefined || Boolean(selfFunds))
+    && (data.declaration.self_funds_source !== undefined || Boolean(enhancedDetails))
     ? {
-        sources: selfFunds?.sources ?? data.declaration.self_funds_sources ?? [],
-        description: selfFunds?.description ?? data.declaration.self_funds_description ?? null,
-        proofDocuments: selfFunds?.proof_documents ?? null,
-        proofRequired: selfFunds?.proof_required ?? false,
-        updatedAt: selfFunds?.updated_at ?? null,
+        sources: enhancedDetails?.answers.funds_sources ?? (storedSource ? [storedSource] : []),
+        description: enhancedDetails?.answers.funds_description ?? data.declaration.self_funds_description ?? null,
+        proofDocuments: enhancedDetails?.funds_proof_documents ?? null,
+        proofRequired: enhancedDetails?.asks.funds_proof ?? false,
+        updatedAt: enhancedDetails?.updated_at ?? null,
       }
     : null;
   // A source the lead stated is the declaration's: staff need not choose one.
@@ -478,7 +479,7 @@ export function LeadPayerDeclarationSection({
             <p data-testid="lead-payer-self-funds-sources">
               <span className="text-muted-foreground">{tx("Источники", "Quellen")}: </span>
               {leadSelfFunds.sources.length > 0
-                ? selfFundsSourcesLabel(leadSelfFunds.sources, tx)
+                ? statedFundsSourcesLabel(leadSelfFunds.sources, tx)
                 : tx("ещё не указаны", "noch nicht angegeben")}
             </p>
             {leadSelfFunds.description ? (
@@ -600,6 +601,26 @@ export function LeadPayerDeclarationSection({
               <PayerField label={tx("Телефон", "Telefon")}>
                 <Input className={inputClass} type="tel" value={form.phone} disabled={readOnly} onChange={(event) => patch("phone", event.target.value)} />
               </PayerField>
+              {form.messengerSupport !== "unsupported" ? (
+                canEdit ? (
+                  <PayerField label={tx("WhatsApp / мессенджер", "WhatsApp / Messenger")}>
+                    <Input
+                      className={inputClass}
+                      type="tel"
+                      name="payer_messenger"
+                      maxLength={60}
+                      value={form.messenger}
+                      disabled={readOnly}
+                      onChange={(event) => patch("messenger", event.target.value)}
+                    />
+                  </PayerField>
+                ) : (
+                  <p className="min-w-0 self-end text-xs" data-testid="lead-payer-messenger">
+                    <span className="text-muted-foreground">{tx("WhatsApp / мессенджер", "WhatsApp / Messenger")}: </span>
+                    {form.messenger.trim() || "—"}
+                  </p>
+                )
+              ) : null}
               {organisation ? (
                 <fieldset className="col-span-full min-w-0 space-y-3">
                   <legend className="text-xs font-semibold text-foreground">

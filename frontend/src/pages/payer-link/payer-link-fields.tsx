@@ -32,6 +32,11 @@ export type StepContext = {
   required: (field: PayerField) => boolean;
   /** The sources of funds offered, in form order (the server's list for the payer type). */
   fundsSources: readonly FundsSource[];
+  /**
+   * The server knows block E of an organisation (legal form, VAT id, why it
+   * pays; trigger flow 2026-10-07): it sends the keys. Absent on an older server.
+   */
+  organisationExtras?: boolean;
 };
 
 /** Uploads of one kind, as the form runs them. */
@@ -191,5 +196,5 @@ export function ChoiceInput<Value extends string>({
 }
 
 export function SubHeading({ children }: { children: ReactNode }) {
-  return <p className="pt-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground sm:col-span-2">{children}</p>;
+  return <p className="pt-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground sm:col-span-2 lg:col-span-3">{children}</p>;
 }

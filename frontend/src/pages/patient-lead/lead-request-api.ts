@@ -47,6 +47,8 @@ export type LeadRequestPayer = {
   relationship: string | null;
   email: string | null;
   phone: string | null;
+  /** WhatsApp / messenger number of a third party (2026-10-07); absent while none is stored. */
+  messenger?: string | null;
   /**
    * Own economic interest (GwG): `null` until answered, absent on an older
    * server. On "no" the person in whose interest the patient acts is named.
@@ -61,7 +63,18 @@ export type LeadRequestPayer = {
    */
   payer_type?: PayerType | null;
   organisation_name?: string | null;
-  /** `spouse`, `parent`, `child`, `relative`, `employer`, `friend`, `business_partner` or `other`. */
+  /**
+   * The organisation mask (trigger flow, 2026-10-07): legal form, register
+   * number and the contact person of a company, organisation or insurer.
+   * `null` for a person; absent on an older server.
+   */
+  organisation_legal_form?: string | null;
+  organisation_register_number?: string | null;
+  organisation_contact_name?: string | null;
+  /**
+   * `spouse`, `parent`, `child`, `sibling`, `grandparent`, `relative`,
+   * `employer`, `friend`, `business_partner` or `other`.
+   */
   relationship_kind?: string | null;
   contact_consent_at?: string | null;
   /**
@@ -96,6 +109,8 @@ export type LeadRequestPayerInput = {
   relationship?: string;
   email?: string;
   phone?: string;
+  /** Always sent with a third party: `""` clears it. */
+  messenger?: string;
   /** Left out until answered: the server then keeps the stored answer. */
   acts_on_own_account?: boolean;
   /** Sent with the answer "no" only. */
@@ -103,6 +118,10 @@ export type LeadRequestPayerInput = {
   /** Sent with a third party to a server that knows the payer type. */
   payer_type?: PayerType;
   organisation_name?: string;
+  /** The organisation mask; sent with a company, organisation or insurer only. */
+  organisation_legal_form?: string;
+  organisation_register_number?: string;
+  organisation_contact_name?: string;
   relationship_kind?: string;
   /** `true` records the consent (the first time stays), `false` removes it. */
   contact_consent?: boolean;
@@ -131,7 +150,11 @@ export type PayerSelfTemplate = {
 /**
  * The lead's own statements for the GwG identification sheet (owner spec
  * "Patientenformular", 2026-10-05). Everything is optional until the request
- * is sent.
+ * is sent. Since the trigger flow (2026-10-07) the identity document's data
+ * are staff's (`id_*` are gone; a write answers 422 `staff_only`), the legal
+ * questions are yes/no only, and the details of a "yes" are asked in the
+ * follow-up blocks (F, B, H, J). Keys of the follow-up are absent on an older
+ * server.
  */
 export type LeadRequestIdentification = {
   /** `mr`, `ms` or `none`. */
@@ -143,23 +166,35 @@ export type LeadRequestIdentification = {
   habitual_residence_country: string | null;
   /** Subset of `email`, `phone`, `messenger`. */
   contact_channels: string[];
-  /** `passport`, `id_card` or `residence_permit`. */
-  id_document_type: string | null;
-  id_document_number: string | null;
-  id_issuing_authority: string | null;
-  id_issuing_country: string | null;
-  id_issued_on: string | null;
-  id_valid_until: string | null;
   pep_self: boolean | null;
-  pep_self_details: string | null;
   pep_related: boolean | null;
-  pep_related_details: string | null;
-  high_risk_country: boolean | null;
-  high_risk_country_code: string | null;
   sanctions_links: boolean | null;
-  sanctions_links_details: string | null;
-  /** Why another person pays; asked with a third-party payer only. */
+  /** Why another person pays (block B). */
   payment_background: string | null;
+  /** Block B: since when the patient and the payer know each other (≤ 100). */
+  relationship_since?: string | null;
+  /** Block F: residence and citizenships. */
+  residence_since?: string | null;
+  other_residences?: string | null;
+  /** ISO codes. */
+  former_citizenships?: string[];
+  /** `work`, `study`, `family` or `other`. */
+  stay_reason?: string | null;
+  stay_reason_details?: string | null;
+  /** Block H: the public office (the patient's own "yes"). */
+  pep_office?: string | null;
+  /** ISO code. */
+  pep_country?: string | null;
+  pep_period?: string | null;
+  pep_relationship?: string | null;
+  pep_wealth_origin?: string | null;
+  /** Block J: the link to a sanctioned person or company. */
+  sanctions_link_name?: string | null;
+  /** `family`, `business`, `ownership` or `other`. */
+  sanctions_link_kind?: string | null;
+  sanctions_link_since_extent?: string | null;
+  /** "Grund der Anfrage" (owner 2026-10-07, 13.1): the lead's own words, ≤ 4000. */
+  request_reason?: string | null;
   /** Set by the server when the request is sent with the confirmation. */
   declared_correct_at: string | null;
 };
@@ -224,13 +259,6 @@ export type LeadRequestRepresentative = {
   country: string | null;
   email: string | null;
   phone: string | null;
-  /** `passport`, `id_card` or `residence_permit`. */
-  id_document_type: string | null;
-  id_document_number: string | null;
-  id_issuing_authority: string | null;
-  id_issuing_country: string | null;
-  id_issued_on: string | null;
-  id_valid_until: string | null;
   /** Photos or scans of this person's identity document. */
   identity_documents: LeadRequestDocument[];
   /** Proof that this person may act: power of attorney, appointment, sole custody. */
@@ -325,6 +353,19 @@ export type LeadRequestBilling = {
   via_third_party_details: string | null;
   /** The name of the person who pays, offered for the account holder; `null` for `payer`. */
   account_holder_suggestion: string | null;
+  /**
+   * Block C of the follow-up (trigger flow): through whom the payment goes
+   * (`person` or `psp`, only with `via_third_party`), and the expected total
+   * in EUR. Absent on an older server.
+   */
+  via_third_party_kind?: "person" | "psp" | null;
+  expected_total_eur?: number | string | null;
+};
+
+/** What the block-C extras of the billing route take: `null` clears a value. */
+export type BillingExtrasPatch = {
+  via_third_party_kind?: string | null;
+  expected_total_eur?: number | null;
 };
 
 /**
@@ -409,31 +450,64 @@ export type LeadPayerQuestionnaire = {
 export type PayerQuestionnairePatch = Partial<Record<keyof LeadPayerAnswers, string | string[] | boolean | null>>;
 
 /**
- * Where the money comes from when the patient pays himself (owner request
- * 2026-10-05, "proof of income"): the sources of the person list, a
- * description (required with `other`) and a proof. The proof is required
- * only while the enhanced check of the money laundering act is required
- * (owner rule 2026-10-07); the reasons are never shown. Absent on an older
- * server.
+ * The follow-up blocks the cabinet asks (trigger flow, contract 3.1): A
+ * funds, B relationship to the payer, C payment route, F residence and
+ * citizenships, G representation, H public office, I identity document, J
+ * links to sanctioned persons. D and E belong to the payer's own link.
  */
-export type LeadRequestSelfFunds = {
-  /** The patient pays himself: the block is asked. */
-  asked: boolean;
-  /** Subset of `source_options`, in form order. */
-  sources: string[];
-  description: string | null;
-  /** The person list of sources, in form order. */
-  source_options: string[];
-  proof_required: boolean;
-  /** The uploaded proofs (bank statement, salary slip …). */
-  proof_documents: LeadRequestDocument[];
+export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J";
+
+/**
+ * "Wir benötigen ergänzende Angaben" (contract 3.1): which blocks are open,
+ * in letter order, and what each still misses; with the answers of block A
+ * and the proofs of blocks A and B. The cabinet learns nothing else — never
+ * why (no points, level, trigger or reason). Absent on an older server.
+ */
+export type LeadRequestFollowUp = {
+  required: boolean;
+  blocks: string[];
+  missing: Record<string, string[]>;
+  answered_at: string | null;
+  /** Block A's answers as saved through `…/enhanced-details`. */
+  answers?: Partial<ExtraAnswers>;
+  /** The source list the server offers, in form order. */
+  funds_source_options?: string[];
+  /** Block A: the uploaded proofs of the own funds (bank statement, salary slip …). */
+  funds_proof_documents?: LeadRequestDocument[];
+  /** Block B: proofs of the relationship to the payer. */
+  relationship_proof_documents?: LeadRequestDocument[];
 };
 
-/** Only the changed keys: `[]` clears the sources, `""` the description. */
-export type SelfFundsPatch = {
-  self_funds_sources?: string[];
-  self_funds_description?: string;
+/** Which questions of block A this login is asked (from who pays and what the server misses). */
+export type ExtraQuestionAsks = {
+  /** What the patient knows of the third party's funds. */
+  payer_funds: boolean;
+  /** The self-payer's own source of funds and its words. */
+  funds: boolean;
+  occupation: boolean;
+  sector: boolean;
+  /** The proofs of the own funds (at least one file). */
+  funds_proof: boolean;
+  /** A note: the paying person states its funds and proofs through the own link. */
+  payer_states_funds: boolean;
 };
+
+/**
+ * The answers of block A, saved through `…/enhanced-details`: one source
+ * (`income`, `savings`, `asset_sale`, `inheritance_gift`, `other`) with the
+ * words, profession and sector.
+ */
+export type ExtraAnswers = {
+  funds_source: string | null;
+  funds_description: string | null;
+  payer_funds_source: string | null;
+  payer_funds_description: string | null;
+  occupation: string | null;
+  sector: string | null;
+};
+
+/** Only the changed keys: `""` clears one. */
+export type EnhancedDetailsPatch = Partial<Record<keyof ExtraAnswers, string>>;
 
 /** The keys of the billing the cabinet writes: everything but what the server computes. */
 export type BillingKey = Exclude<keyof LeadRequestBilling, "payer_declared" | "payment_route_by" | "account_holder_suggestion">;
@@ -447,7 +521,17 @@ export type LeadRequest = {
   access_kind: "self" | "guardian";
   created_at: string;
   personal_data: LeadRequestPersonalData;
-  progress: { filled: number; total: number; missing_for_submit: string[] };
+  progress: {
+    filled: number;
+    total: number;
+    missing_for_submit: string[];
+    /**
+     * The same keys by the step of the cabinet they are answered in (contract
+     * 3.1): `person`, `contact`, `identity`, `payer`, `billing`,
+     * `declarations`. Absent on an older server: the cabinet then maps the keys itself.
+     */
+    missing_by_step?: Partial<Record<string, string[]>>;
+  };
   /** `null` until the question is answered; absent on an older server. */
   payer?: LeadRequestPayer | null;
   /**
@@ -465,8 +549,13 @@ export type LeadRequest = {
   billing?: LeadRequestBilling;
   /** The paying parent's own questionnaire; set only for the parent who pays (phase 3a). */
   payer_questionnaire?: LeadRequestPayerQuestionnaireSummary | null;
-  /** The self-payer's source of funds with its proof; absent on an older server. */
-  self_funds?: LeadRequestSelfFunds;
+  /** The follow-up blocks to answer; never why. Absent on an older server. */
+  follow_up?: LeadRequestFollowUp;
+  /**
+   * True from sending until GMED sends the first document for signature, for
+   * every request alike: "Ihre Angaben werden geprüft". Absent on an older server.
+   */
+  review_notice?: boolean;
   minor: boolean;
   documents: LeadRequestDocument[];
   max_documents: number;
@@ -614,16 +703,26 @@ export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<Le
   });
 }
 
-/** The refusal of the source of funds when somebody else pays (any more). */
+/** Block C: through whom the payment goes and the expected total, on the billing route. */
+export function saveLeadBillingExtras(leadId: string, patch: BillingExtrasPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+/** The refusal of the own source of funds when somebody else pays (any more). */
 export const PAYER_NOT_SELF = "payer_not_self";
+/** The refusal of the payer's funds when nobody else pays (any more). */
+export const PAYER_NOT_THIRD_PARTY = "payer_not_third_party";
 
 /**
- * Saves the changed keys of the self-payer's source of funds. The server
- * answers 422 `invalid_field` with the key it refuses and 409
- * `payer_not_self` when somebody else pays.
+ * Saves the changed keys of block A. The server answers 422
+ * `invalid_field` with the key it refuses, and 409 `payer_not_self` /
+ * `payer_not_third_party` / `payer_not_declared` when who pays changed.
  */
-export function saveLeadSelfFunds(leadId: string, patch: SelfFundsPatch): Promise<LeadRequest> {
-  return apiFetch<LeadRequest>(`${base(leadId)}/self-funds`, {
+export function saveLeadEnhancedDetails(leadId: string, patch: EnhancedDetailsPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/enhanced-details`, {
     method: "POST",
     body: JSON.stringify(patch),
   });
@@ -634,6 +733,25 @@ export function uploadLeadFundsProof(leadId: string, file: File): Promise<LeadRe
   const form = new FormData();
   form.append("file", file);
   return apiFetch<LeadRequest>(`${base(leadId)}/funds-proof`, { method: "POST", body: form });
+}
+
+/** Block B: a proof of the relationship to the payer; needs the request consent first. */
+export function uploadLeadRelationshipProof(leadId: string, file: File): Promise<LeadRequest> {
+  const form = new FormData();
+  form.append("file", file);
+  return apiFetch<LeadRequest>(`${base(leadId)}/relationship-proof`, { method: "POST", body: form });
+}
+
+/** The refusal of "send the follow-up" while a block misses something; the body carries `missing`. */
+export const FOLLOW_UP_INCOMPLETE = "follow_up_incomplete";
+
+/**
+ * Sends the answers of the follow-up blocks (contract 3.2). 422
+ * `follow_up_incomplete` with `missing` (by block) while a block misses
+ * something; otherwise the request with `follow_up.answered_at` set.
+ */
+export function submitLeadFollowUp(leadId: string): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/follow-up/submit`, { method: "POST" });
 }
 
 /** Withdraws an own upload: a medical document, a copy of an identity document or a proof of authority. */

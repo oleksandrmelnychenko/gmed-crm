@@ -23,8 +23,6 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import {
-  IdentificationFormField,
-  IdentificationTextArea,
   type IdentificationForm,
 } from "./lead-request-identification";
 import {
@@ -34,12 +32,13 @@ import {
   costEstimateConsentAsked,
   draftAnswer,
   draftFromPayer,
+  knowsOrganisationMask,
   knowsPayerType,
   payerAnswer,
   payerInput,
   payerSelfOffered,
   payerTypeOf,
-  paymentBackgroundAsked,
+  payerContactRequired,
   withPayerAnswer,
   withPayerType,
   withRelationshipKind,
@@ -55,8 +54,6 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
-import { SelfFundsBlock } from "./lead-request-self-funds";
-import { selfFundsAsked } from "./lead-request-self-funds-model";
 import { SummaryRows } from "./lead-request-send-step";
 import { answeredPayerRows, payerAnsweredByPayer } from "./lead-request-summary";
 import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead-request-text";
@@ -68,10 +65,11 @@ import { asLeadCabinetLang, payerFieldLabel, type LeadRequestText } from "./lead
  * the patient and the consent that GMED may contact that payer. The answer is
  * saved as a whole; the server keeps it in the lead's payer declaration, where
  * the sanctions screening picks it up. With the GwG statements
- * (`identification`) the block also asks for the own economic interest and,
- * for a third party, why that payer pays. When the patient pays himself, the
- * block ends with where the money comes from and its proof
- * (`SelfFundsBlock`, owner request 2026-10-05).
+ * (`identification`) the block also asks for the own economic interest. A
+ * third party's basic data (owner request 2026-10-07): name, citizenships,
+ * e-mail, phone, WhatsApp / messenger and the residence. Why a third party
+ * pays and where the money comes from are asked only in the extra step
+ * ("Zusätzliche Angaben", `ExtraStep`).
  */
 export function PayerSection({
   request,
@@ -81,7 +79,6 @@ export function PayerSection({
   enqueue,
   onChange,
   onSaveState,
-  onSelfFundsSaveState,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -91,8 +88,6 @@ export function PayerSection({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
-  /** The save state of the self-payer's source of funds, a part of its own; `onSaveState` when absent. */
-  onSelfFundsSaveState?: (state: SaveState) => void;
 }) {
   const guardian = request.access_kind === "guardian";
   // An older server knows only a person as payer, with the relationship in words.
@@ -113,8 +108,13 @@ export function PayerSection({
   // (an older one) gets the box, or the request could not be sent.
   const serverAsksConsent = request.progress.missing_for_submit.includes("payer_contact_consent");
   const consentAsked = typed && (!draft.guardian_pays || serverAsksConsent);
-  // Why somebody pays is asked about a third party, not about the paying parent.
-  const backgroundAsked = paymentBackgroundAsked(draft, request);
+  // E-mail, phone and residence of a third party are required, not of the paying parent.
+  const contactRequired = (name: "payer_email" | "payer_phone" | "payer_country" | "payer_city") =>
+    payerContactRequired(draft, request, name);
+  // "Same as phone": the messenger number follows the phone.
+  const [messengerSameAsPhone, setMessengerSameAsPhone] = useState(
+    () => Boolean(draft.messenger) && draft.messenger === draft.phone,
+  );
   // A child does not pay (only an older request keeps that answer).
   const selfOffered = payerSelfOffered(request);
 
@@ -194,12 +194,6 @@ export function PayerSection({
           <div data-testid="lead-request-payer-readonly">
             <SummaryRows rows={answeredPayerRows(request, text)} />
           </div>
-          {/* Why the payer pays is the lead's own statement (saved with the identification), not the payer's. */}
-          {identification && request.payer?.payer_kind === "third_party" ? (
-            <IdentificationFormField form={identification} field="payment_background" text={text} required>
-              <IdentificationTextArea form={identification} field="payment_background" />
-            </IdentificationFormField>
-          ) : null}
           {/* So is the consent to pass the cost estimate on: it stays the lead's to give or take back. */}
           {costEstimateConsentAsked(request, parentPays) ? <CostEstimateConsent {...costConsent} /> : null}
         </div>
@@ -220,6 +214,8 @@ export function PayerSection({
   const thirdParty = draft.payer_kind === "third_party";
   const payerType = typed ? payerTypeOf(draft) : "person";
   const organisation = payerType !== "person";
+  // The organisation mask (trigger flow): a server that sends its keys knows it.
+  const orgMask = typed && knowsOrganisationMask(request);
   const consentAt = request.payer?.contact_consent_at ?? null;
   const errorFor = (field: PayerField) => (fieldError === field ? text.invalidField : undefined);
   const fieldProps = (field: PayerField) => ({
@@ -237,8 +233,8 @@ export function PayerSection({
 
   return (
     <Section title={text.sectionPayer}>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-payer">
-        <LabeledField {...field("payer_kind", true, "sm:col-span-2")}>
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-payer">
+        <LabeledField {...field("payer_kind", true, "sm:col-span-2 lg:col-span-3")}>
           <NativeComboboxSelect
             {...fieldProps("payer_kind")}
             className={selectClass}
@@ -254,10 +250,10 @@ export function PayerSection({
         {/* A third party's data exist only when a third party pays. */}
         {thirdParty ? (
           <>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerIntro}</p>
+            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3">{text.payerIntro}</p>
             {/* "I pay (as a parent)" has said both: a person, the patient's parent. */}
             {typed && !draft.guardian_pays ? (
-              <LabeledField {...field("payer_type", true, "sm:col-span-2")}>
+              <LabeledField {...field("payer_type", true, "sm:col-span-2 lg:col-span-3")}>
                 <NativeComboboxSelect
                   {...fieldProps("payer_type")}
                   className={selectClass}
@@ -273,17 +269,54 @@ export function PayerSection({
               </LabeledField>
             ) : null}
             {organisation ? (
-              // A company, organisation or insurer is named; it has no date of birth and no citizenship.
-              <LabeledField {...field("payer_organisation_name", true, "sm:col-span-2")}>
-                <Input
-                  {...fieldProps("payer_organisation_name")}
-                  className={inputClass}
-                  autoComplete="off"
-                  maxLength={200}
-                  value={draft.organisation_name}
-                  onChange={(event) => set("organisation_name", event.target.value)}
-                />
-              </LabeledField>
+              // The organisation mask: a company, organisation or insurer has a name, a legal form,
+              // a register number and a contact person; no date of birth and no citizenship.
+              <>
+                <LabeledField {...field("payer_organisation_name", true, "sm:col-span-2")}>
+                  <Input
+                    {...fieldProps("payer_organisation_name")}
+                    className={inputClass}
+                    autoComplete="off"
+                    maxLength={200}
+                    value={draft.organisation_name}
+                    onChange={(event) => set("organisation_name", event.target.value)}
+                  />
+                </LabeledField>
+                {orgMask ? (
+                  <>
+                    <LabeledField {...field("payer_legal_form", true)}>
+                      <Input
+                        {...fieldProps("payer_legal_form")}
+                        className={inputClass}
+                        autoComplete="off"
+                        maxLength={100}
+                        value={draft.organisation_legal_form}
+                        onChange={(event) => set("organisation_legal_form", event.target.value)}
+                      />
+                    </LabeledField>
+                    <LabeledField {...field("payer_register_number")}>
+                      <Input
+                        {...fieldProps("payer_register_number")}
+                        className={inputClass}
+                        autoComplete="off"
+                        maxLength={60}
+                        value={draft.organisation_register_number}
+                        onChange={(event) => set("organisation_register_number", event.target.value)}
+                      />
+                    </LabeledField>
+                    <LabeledField {...field("payer_contact_name", true)}>
+                      <Input
+                        {...fieldProps("payer_contact_name")}
+                        className={inputClass}
+                        autoComplete="off"
+                        maxLength={200}
+                        value={draft.organisation_contact_name}
+                        onChange={(event) => set("organisation_contact_name", event.target.value)}
+                      />
+                    </LabeledField>
+                  </>
+                ) : null}
+              </>
             ) : (
               <>
                 <LabeledField {...field("payer_first_name", true)}>
@@ -330,7 +363,7 @@ export function PayerSection({
               </>
             )}
             {!typed ? (
-              <LabeledField {...field("payer_relationship", false, "sm:col-span-2")}>
+              <LabeledField {...field("payer_relationship", false, "sm:col-span-2 lg:col-span-3")}>
                 <Input
                   {...fieldProps("payer_relationship")}
                   className={inputClass}
@@ -375,7 +408,99 @@ export function PayerSection({
                 ) : null}
               </>
             )}
-            <LabeledField {...field("payer_street", false, "sm:col-span-2")}>
+            {/* Contact (owner request 2026-10-07): e-mail and phone are required of a third person, the
+                messenger is not; an organisation needs one of the two. */}
+            {organisation && orgMask ? (
+              <p
+                id="lead-request-payer_email_or_phone-hint"
+                className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3"
+                data-testid="lead-request-payer-email-or-phone"
+              >
+                {text.payerEmailOrPhone}
+                <RequiredMark />
+                {` – ${text.payerEmailOrPhoneHint}`}
+              </p>
+            ) : null}
+            <LabeledField {...field("payer_email", !organisation && contactRequired("payer_email"))}>
+              <Input
+                {...fieldProps("payer_email")}
+                className={inputClass}
+                type="email"
+                autoComplete="off"
+                value={draft.email}
+                onChange={(event) => set("email", event.target.value)}
+              />
+            </LabeledField>
+            <LabeledField {...field("payer_phone", !organisation && contactRequired("payer_phone"))}>
+              <Input
+                {...fieldProps("payer_phone")}
+                className={inputClass}
+                type="tel"
+                autoComplete="off"
+                value={draft.phone}
+                onChange={(event) => {
+                  const phone = event.target.value;
+                  setDraft((current) => ({
+                    ...current,
+                    phone,
+                    // "Same as phone" keeps the two numbers equal.
+                    messenger: messengerSameAsPhone ? phone : current.messenger,
+                  }));
+                }}
+              />
+            </LabeledField>
+            {typed ? (
+              <LabeledField {...field("payer_messenger")}>
+                <Input
+                  {...fieldProps("payer_messenger")}
+                  className={inputClass}
+                  type="tel"
+                  autoComplete="off"
+                  maxLength={60}
+                  disabled={messengerSameAsPhone}
+                  value={draft.messenger}
+                  onChange={(event) => set("messenger", event.target.value)}
+                />
+                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className={checkboxClass}
+                    checked={messengerSameAsPhone}
+                    data-testid="lead-request-payer-messenger-same"
+                    onChange={(event) => {
+                      const same = event.target.checked;
+                      setMessengerSameAsPhone(same);
+                      if (same) setDraft((current) => ({ ...current, messenger: current.phone }));
+                    }}
+                  />
+                  {text.payerMessengerSameAsPhone}
+                </label>
+              </LabeledField>
+            ) : null}
+            {/* Residence: country and city are required of a person; street and ZIP may be unknown. */}
+            {organisation ? null : (
+              <p className="pt-1 text-sm font-medium sm:col-span-2 lg:col-span-3">{text.payerResidence}</p>
+            )}
+            {/* The country of the seat is what the screening of an organisation works with. */}
+            <LabeledField {...field("payer_country", organisation || contactRequired("payer_country"))}>
+              <CountrySelect
+                value={draft.country || null}
+                lang={lang}
+                className={selectClass}
+                aria-label={payerFieldLabel(text, "payer_country", guardian, payerType)}
+                onChange={(code) => set("country", code ?? "")}
+              />
+            </LabeledField>
+            <LabeledField {...field("payer_city", !organisation && contactRequired("payer_city"))}>
+              <Input
+                {...fieldProps("payer_city")}
+                className={inputClass}
+                autoComplete="off"
+                value={draft.city}
+                onChange={(event) => set("city", event.target.value)}
+              />
+            </LabeledField>
+            <LabeledField {...field("payer_street")}>
               <Input
                 {...fieldProps("payer_street")}
                 className={inputClass}
@@ -393,64 +518,14 @@ export function PayerSection({
                 onChange={(event) => set("zip", event.target.value)}
               />
             </LabeledField>
-            <LabeledField {...field("payer_city")}>
-              <Input
-                {...fieldProps("payer_city")}
-                className={inputClass}
-                autoComplete="off"
-                value={draft.city}
-                onChange={(event) => set("city", event.target.value)}
-              />
-            </LabeledField>
-            {/* The country of the seat is what the screening of an organisation works with. */}
-            <LabeledField {...field("payer_country", organisation)}>
-              <CountrySelect
-                value={draft.country || null}
-                lang={lang}
-                className={selectClass}
-                aria-label={payerFieldLabel(text, "payer_country", guardian, payerType)}
-                onChange={(code) => set("country", code ?? "")}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_phone")}>
-              <Input
-                {...fieldProps("payer_phone")}
-                className={inputClass}
-                type="tel"
-                autoComplete="off"
-                value={draft.phone}
-                onChange={(event) => set("phone", event.target.value)}
-              />
-            </LabeledField>
-            <LabeledField {...field("payer_email", false, "sm:col-span-2")}>
-              <Input
-                {...fieldProps("payer_email")}
-                className={inputClass}
-                type="email"
-                autoComplete="off"
-                value={draft.email}
-                onChange={(event) => set("email", event.target.value)}
-              />
-            </LabeledField>
             {/* Another natural person has to be told; a parent who pays is the one typing. */}
             {!organisation && !draft.guardian_pays ? (
-              <p className="text-xs leading-5 text-muted-foreground sm:col-span-2">{text.payerInformHint}</p>
-            ) : null}
-            {identification && backgroundAsked ? (
-              <IdentificationFormField
-                form={identification}
-                field="payment_background"
-                text={text}
-                required
-                className="sm:col-span-2"
-              >
-                <IdentificationTextArea form={identification} field="payment_background" />
-              </IdentificationFormField>
+              <p className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3">{text.payerInformHint}</p>
             ) : null}
             {consentAsked ? (
               // The consent is part of the answer: it is saved with it, and it is needed to send.
               <div
-                className="space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3 sm:col-span-2"
+                className="space-y-1.5 rounded-lg border border-border bg-muted/10 px-3 py-3 sm:col-span-2 lg:col-span-3"
                 data-testid="lead-request-payer-consent"
               >
                 <label className="flex items-start gap-3 text-sm">
@@ -488,14 +563,14 @@ export function PayerSection({
             ) : null}
             {/* Below the contact consent, saved on its own: about the third party the server has stored. */}
             {costEstimateConsentAsked(request, draft.guardian_pays) ? (
-              <CostEstimateConsent {...costConsent} className="sm:col-span-2" />
+              <CostEstimateConsent {...costConsent} className="sm:col-span-2 lg:col-span-3" />
             ) : null}
           </>
         ) : null}
         {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
         {identification && draft.payer_kind ? (
           <>
-            <LabeledField {...field("payer_own_account", true, "sm:col-span-2")}>
+            <LabeledField {...field("payer_own_account", true, "sm:col-span-2 lg:col-span-3")}>
               <YesNoSelect
                 id="lead-request-payer_own_account"
                 className="sm:max-w-[calc(50%-0.5rem)]"
@@ -508,7 +583,7 @@ export function PayerSection({
               />
             </LabeledField>
             {draft.acts_on_own_account === "no" ? (
-              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2")}>
+              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2 lg:col-span-3")}>
                 <textarea
                   {...fieldProps("payer_beneficial_owner")}
                   className={cn(textareaClass, "text-base md:text-sm")}
@@ -522,21 +597,8 @@ export function PayerSection({
             ) : null}
           </>
         ) : null}
-        {/* Where the money comes from when the patient pays: once the server has the answer, saved on its own. */}
-        {draft.payer_kind === "self" && request.self_funds && selfFundsAsked(request) ? (
-          <SelfFundsBlock
-            request={request}
-            selfFunds={request.self_funds}
-            text={text}
-            lang={lang}
-            enqueue={enqueue}
-            onChange={onChange}
-            onSaveState={onSelfFundsSaveState ?? onSaveState}
-            className="sm:col-span-2"
-          />
-        ) : null}
         {fieldError === "payer" ? (
-          <p role="alert" className="text-xs text-destructive sm:col-span-2">
+          <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3">
             {text.notSaved}
           </p>
         ) : null}

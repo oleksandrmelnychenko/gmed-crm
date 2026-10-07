@@ -71,9 +71,11 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
   const details: Row[] = organisation
     ? rows(
         row("organisation_name", draft.organisation_name),
+        row("legal_form", draft.legal_form),
         ...address(text.seatLabel),
         row("register_court", draft.register_court),
         row("register_number", draft.register_number),
+        row("vat_id", draft.vat_id),
         row("representative_first_name", draft.representative_first_name, text.representativeLabel(label("representative_first_name"))),
         row("representative_last_name", draft.representative_last_name, text.representativeLabel(label("representative_last_name"))),
         row("representative_role", draft.representative_role, text.representativeLabel(label("representative_role"))),
@@ -133,6 +135,7 @@ function summaryGroups(questionnaire: PayerQuestionnaire, draft: PayerDraft, ste
             .join(": ")
         : "",
     ),
+    organisation ? row("payment_reason", draft.payment_reason) : null,
     organisation ? row("industry", draft.industry) : row("occupation", draft.occupation),
     row(
       "funds_sources",

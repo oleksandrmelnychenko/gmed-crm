@@ -1134,3 +1134,92 @@ async fn screening_results_follow_the_lead_retention() {
     .unwrap();
     assert_eq!(notifications, 0);
 }
+
+/// The risk assessment of a lead as staff read it (trigger flow 2026-10-07).
+async fn risk_assessment(app: &TestApp, lead_id: Uuid) -> Value {
+    let (status, body) = request(
+        app,
+        "GET",
+        &format!("/leads/{lead_id}/risk-assessment"),
+        &app.pm(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+#[tokio::test]
+async fn an_open_hit_is_a_knockout_and_only_a_false_positive_withdraws_it() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let lead_id = insert_lead(
+        &app,
+        "Testomir",
+        "Korneev",
+        Some("1961-11-30"),
+        &[],
+        json!([]),
+    )
+    .await;
+    let status = lead_status(&app, lead_id).await;
+    assert_eq!(status["open_hits"], 1, "{status}");
+
+    // The CEO starts the assessment: the open hit is T16, a knock-out.
+    let (code, started) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{started}");
+    assert_eq!(started["level"], 3, "{started}");
+    assert_eq!(started["knockout"], true);
+    let has_t16 = |body: &Value| {
+        body["triggers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|trigger| trigger["key"] == "T16" && trigger["subject"] == "patient")
+    };
+    assert!(has_t16(&started), "{started}");
+    // Level 3 requires the enhanced check, next to the pending match.
+    assert_eq!(
+        enhanced_check(&app, lead_id).await,
+        json!({
+            "required": true,
+            "reasons": ["risk_assessment", "sanctions_review_pending"],
+            "countries": []
+        })
+    );
+
+    // A false positive leaves no open or confirmed hit: T16 is withdrawn,
+    // with the CEO as actor; the other triggers stay.
+    let hit_id = open_hits(&app).await[0]["id"].as_str().unwrap().to_string();
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/sanctions/hits/{hit_id}/decision"),
+        &app.ceo(),
+        Some(json!({ "decision": "false_positive", "reason": "Born in another city, passport checked" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let after = risk_assessment(&app, lead_id).await;
+    assert!(!has_t16(&after), "{after}");
+    assert_eq!(after["knockout"], false, "{after}");
+    assert_eq!(after["level"], 1, "{after}");
+    let withdrawn = after["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["kind"] == "trigger_withdrawn")
+        .cloned()
+        .unwrap_or_else(|| panic!("no withdrawal: {after}"));
+    assert_eq!(withdrawn["cause"], "hit_decision");
+    assert_eq!(withdrawn["actor"], json!(app.ceo_id));
+}

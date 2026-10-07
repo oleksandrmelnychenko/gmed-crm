@@ -397,22 +397,21 @@ const overflow = (page: Page) =>
 
 const TITLE = "Angaben als zahlende Person";
 
+/** Opens a step of the cabinet by its tab. */
+const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
+
 test.describe("lead cabinet: the paying parent's questionnaire", () => {
   test("the paying parent acknowledges the notice first, then the answers save on their own and are sent", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
     const { calls } = await setup(page);
     await page.goto("/");
+    await step(page, "payer");
     const section = page.getByTestId("lead-request-payer-questionnaire");
 
-    // After the payment route, before the legal questions of the request.
+    // In step "Wer zahlt", after the answer who pays.
     await expect(page.getByRole("heading", { name: TITLE, exact: true })).toBeVisible();
-    const order = await page.getByTestId("lead-request-data").locator("h3").evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order.slice(order.indexOf("Rechnungsempfänger"), order.indexOf("Gesetzliche Fragen (Geldwäscheprävention)") + 1)).toEqual([
-      "Rechnungsempfänger",
-      "Zahlungsweg",
-      TITLE,
-      "Gesetzliche Fragen (Geldwäscheprävention)",
-    ]);
+    const order = await page.getByTestId("lead-request-step-payer").locator("h3").evaluateAll((titles) => titles.map((title) => title.textContent));
+    expect(order).toEqual(["Wer zahlt", TITLE]);
     await expect(section).toContainText("Name, Anschrift und Ausweis geben Sie im Abschnitt „Gesetzliche Vertreter“ an.");
 
     // The notice comes first: nothing else is asked before it.
@@ -520,10 +519,11 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
   });
 
   test("what the representatives' block still lacks is named with that section, and the phone layout holds", async ({ page }, testInfo) => {
-    const { calls } = await setup(page, { representativeMissing: ["birth_place", "id_document_number", "id_document_upload"] });
+    const { calls } = await setup(page, { representativeMissing: ["birth_place", "id_document_upload"] });
     for (const width of [1440, 390]) {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/");
+      await step(page, "payer");
       const section = page.getByTestId("lead-request-payer-questionnaire");
       await section.getByTestId("lead-request-payer-notice").getByRole("checkbox", { name: "Ich habe die Datenschutzhinweise gelesen." }).check();
       await expect(section.getByTestId("lead-request-payer-fields")).toBeVisible();
@@ -531,7 +531,6 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       await expect(elsewhere).toContainText("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");
       await expect(elsewhere.getByRole("listitem")).toHaveText([
         "Geburtsort",
-        "Ausweisdokument: Dokumentnummer",
         "Ausweisdokument: Foto oder Scan des Ausweises",
       ]);
       expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);
@@ -551,6 +550,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     });
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("/");
+    await step(page, "payer");
     const section = page.getByTestId("lead-request-payer-questionnaire");
     await expect(section.getByTestId("lead-request-payer-sent")).toContainText("Ihre Angaben als zahlende Person wurden am 06.10.2026 12:30 gesendet.");
 
@@ -566,6 +566,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     // Signed and back at GMED: the questionnaire says so and wins over the short form.
     state.questionnaireSignature = { status: "signed", sent_at: "2026-10-06T12:00:00Z", signed_at: "2026-10-08T09:00:00Z" };
     await page.reload();
+    await step(page, "payer");
     await expect(status).toHaveAttribute("data-status", "signed");
     await expect(status).toHaveText("Vielen Dank – die unterschriebenen Unterlagen sind am 08.10.2026 bei GMED eingegangen.");
     for (const width of [1440, 390]) {
@@ -578,6 +579,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     // No package any more (withdrawn): nothing is said.
     state.questionnaireSignature = null;
     await page.reload();
+    await step(page, "payer");
     await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
     await expect(status).toHaveCount(0);
   });
@@ -585,6 +587,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
   test("an older server says nothing about signing: the section is as before", async ({ page }) => {
     await setup(page, { submitted: true });
     await page.goto("/");
+    await step(page, "payer");
     const section = page.getByTestId("lead-request-payer-questionnaire");
     await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
     await expect(section.getByTestId("lead-request-payer-signature")).toHaveCount(0);
@@ -593,16 +596,20 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
   test("the other parent, who does not pay, and an adult self-payer see no such section", async ({ page }) => {
     const other = await setup(page, { paying: false });
     await page.goto("/");
-    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toBeVisible();
+    await step(page, "payer");
     await expect(page.getByRole("heading", { name: TITLE })).toHaveCount(0);
     await expect(page.getByTestId("lead-request-payer-questionnaire")).toHaveCount(0);
+    await step(page, "billing");
+    await expect(page.getByTestId("lead-request-payment-route-by-payer")).toBeVisible();
     expect(other.calls.loads).toBe(0);
 
     await page.unrouteAll({ behavior: "ignoreErrors" });
     const adult = await setup(page, { adult: true });
     await page.goto("/");
-    await expect(page.getByTestId("lead-request-billing")).toBeVisible();
+    await step(page, "payer");
     await expect(page.getByTestId("lead-request-payer-questionnaire")).toHaveCount(0);
+    await step(page, "billing");
+    await expect(page.getByTestId("lead-request-billing")).toBeVisible();
     expect(adult.calls.loads).toBe(0);
   });
 });

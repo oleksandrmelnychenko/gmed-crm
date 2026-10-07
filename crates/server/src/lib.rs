@@ -24,6 +24,7 @@ pub(crate) mod pdf_logo;
 pub(crate) mod pdf_text;
 pub mod rate_limit;
 pub mod realtime;
+pub mod risk;
 pub mod routes;
 pub mod sanctions;
 pub mod security_headers;
@@ -110,6 +111,13 @@ fn build_app_inner(app_state: state::AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             routes::lead_portal_intake::lead_portal_guard,
+        ))
+        // After the sanctions gate: the risk assessment holds the guarded
+        // staff actions until staff decided (docs/architecture/
+        // aml-enhanced-due-diligence_ua.md, «Тригери й рівні ризику»).
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            risk::gate::middleware,
         ))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),

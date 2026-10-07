@@ -15052,6 +15052,47 @@ async fn generate_document(
     {
         return response;
     }
+    // "Herkunft der eingesetzten Vermögenswerte" left empty by staff: the
+    // lead's own answer of the cabinet's extra step (choice and words).
+    if template.id == "enhanced_due_diligence"
+        && let Some(aml) = bindings.aml_enhanced_due_diligence.as_mut()
+        && aml
+            .asset_origin
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+    {
+        let declaration = match state.db.acquire().await {
+            Ok(mut conn) => match (lead_id, patient_id) {
+                (Some(lead_uuid), _) => {
+                    super::lead_payer::load_declaration(&mut conn, lead_uuid).await
+                }
+                (None, Some(patient_uuid)) => {
+                    super::lead_payer::patient_declaration(&mut conn, patient_uuid)
+                        .await
+                        .map(|found| found.map(|found| found.declaration))
+                }
+                (None, None) => Ok(None),
+            },
+            Err(error) => Err(error),
+        };
+        match declaration {
+            Ok(declaration) => {
+                if let Some(origin) = declaration
+                    .as_ref()
+                    .and_then(super::lead_payer::Declaration::stated_asset_origin)
+                {
+                    aml.asset_origin = Some(origin);
+                }
+            }
+            Err(error) => {
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the lead's source of funds");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load the source of funds",
+                );
+            }
+        }
+    }
     let mut generated_bindings_snapshot = generated_binding_snapshot(&bindings);
     if let Some(context) = intake_context.as_ref().or(repeat_context.as_ref()) {
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
@@ -22179,6 +22220,8 @@ fn payer_relationship_label(kind: Option<&str>, words: Option<&str>) -> Option<S
         Some("spouse") => "Ehepartner/in",
         Some("parent") => "Elternteil",
         Some("child") => "Kind",
+        Some("sibling") => "Bruder/Schwester",
+        Some("grandparent") => "Großmutter/Großvater",
         Some("relative") => "Verwandte/r",
         Some("employer") => "Arbeitgeber",
         Some("friend") => "Freund/in",

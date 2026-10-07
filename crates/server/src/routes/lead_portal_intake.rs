@@ -34,15 +34,20 @@
 //! the payment route depends on who looks at the cabinet
 //! ([`payment_route_by`]).
 //!
-//! A patient who pays himself states the source of the funds in the same
-//! section (owner request 2026-10-05, "proof of income"): the sources of the
-//! person list and a description on the payer declaration
-//! ([`crate::routes::lead_payer::save_self_funds_from_portal`]) and a proof
-//! as a portal upload of its own kind (`self_funds_proof`, under the consent
-//! to process the request data, counted toward the request's uploads, never
-//! an identity document). The proof is required only while the enhanced
-//! check of the lead is required
-//! ([`crate::routes::lead_enhanced_check::enhanced_check_triggers`]).
+//! The form has two stages (owner requests 2026-10-07): the base form, and
+//! the follow-up blocks of the risk assessment (`follow_up`, trigger flow
+//! 2026-10-07, [`crate::risk::cabinet`]) after the request was sent: the
+//! cabinet learns which blocks to answer, never why (§ 47 GwG, no
+//! tipping-off; no points, level or reason). The former extra step
+//! ([`ExtraQuestions`]) remains the staff view `enhanced_details`. Block A
+//! asks, depending on who pays: the self-payer's source of funds with a
+//! proof (a portal upload of its own kind, `self_funds_proof`, under the
+//! consent to process the request data), profession and sector of the
+//! contract partner, why a third party pays (`payment_background`) and what
+//! the patient knows of that party's funds. The answers are saved through
+//! `POST /me/lead-requests/{id}/enhanced-details` (funds on the payer
+//! declaration, profession and sector on `lead_gwg_declarations`); why a
+//! third party pays through the statements' route.
 //!
 //! A third-party payer answers its own questions through a link of its own
 //! (phase 3a, [`crate::routes::lead_payer_link`], which also registers the
@@ -73,8 +78,8 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
 use crate::routes::lead_payer::{
-    self, PaymentRouteBy, PortalBillingError, PortalBillingPatch, PortalPayerError,
-    PortalPayerInput, PortalSelfFundsError, PortalSelfFundsPatch, SelfFundsProof,
+    self, PaymentRouteBy, PortalBillingError, PortalBillingPatch, PortalFundsError,
+    PortalFundsPatch, PortalPayerError, PortalPayerInput,
 };
 use crate::routes::lead_representatives;
 use crate::state::AppState;
@@ -282,10 +287,10 @@ pub fn router() -> Router<AppState> {
             "/me/lead-requests/{lead_id}/billing",
             post(update_my_billing),
         )
-        // The self-payer's source of funds and its proof.
+        // The answers of the extra step and the self-payer's proof of funds.
         .route(
-            "/me/lead-requests/{lead_id}/self-funds",
-            post(update_my_self_funds),
+            "/me/lead-requests/{lead_id}/enhanced-details",
+            post(update_my_enhanced_details),
         )
         .route(
             "/me/lead-requests/{lead_id}/funds-proof",
@@ -634,8 +639,8 @@ const PAYER_MARKER: &str = "payer";
 /// in `leads.portal_field_updates`; separate from [`PAYER_MARKER`], so a
 /// billing save leaves "who pays — from the patient" as it is.
 const BILLING_MARKER: &str = "billing";
-/// Key of the self-payer's source of funds in `leads.portal_field_updates`.
-const SELF_FUNDS_MARKER: &str = "self_funds";
+/// Key of the answers of the extra step in `leads.portal_field_updates`.
+const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
 
 /// Fields counted in "N of M filled" (the middle name is optional for everyone;
 /// of the insurance block only the answer whether there is one, because the
@@ -1086,6 +1091,9 @@ fn patient_field_markers(lead_id: Uuid, data: &PersonalData, updates: &Value) ->
 /// Key of the statements in `leads.portal_field_updates`: like a personal data
 /// field it says when the patient last changed them.
 const IDENTIFICATION_MARKER: &str = "identification";
+/// Key of the statements of the follow-up blocks and the reason of the
+/// request in `leads.portal_field_updates`.
+const STATEMENTS_MARKER: &str = "statements";
 
 const SALUTATION_VALUES: [&str; 3] = ["mr", "ms", "none"];
 /// In the order of the form; stored in this order.
@@ -1151,6 +1159,11 @@ pub(crate) struct Identification {
     pub(crate) sanctions_links: Option<bool>,
     pub(crate) sanctions_links_details: Option<String>,
     pub(crate) payment_background: Option<String>,
+    /// Profession and sector of the contract partner, asked in the extra
+    /// step while the enhanced check is required. Not among
+    /// [`IDENTIFICATION_FIELDS`]: written through the extra step's route.
+    pub(crate) occupation: Option<String>,
+    pub(crate) sector: Option<String>,
     /// When the request was last sent with the confirmation that the
     /// statements are complete and true.
     pub(crate) declared_correct_at: Option<DateTime<Utc>>,
@@ -1186,6 +1199,8 @@ impl Identification {
             sanctions_links: answer("sanctions_links"),
             sanctions_links_details: text("sanctions_links_details"),
             payment_background: text("payment_background"),
+            occupation: text("occupation"),
+            sector: text("sector"),
             declared_correct_at: row
                 .try_get::<Option<DateTime<Utc>>, _>("declared_correct_at")
                 .ok()
@@ -1359,7 +1374,7 @@ pub(crate) struct IdentificationPatch {
 }
 
 /// A free text that may run over several lines: only the ends are trimmed.
-fn clean_long_text(
+pub(crate) fn clean_long_text(
     value: &str,
     field: &'static str,
     max_chars: usize,
@@ -1571,9 +1586,9 @@ async fn store_identification(
                id_document_number, id_issuing_authority, id_issuing_country, id_issued_on,
                id_valid_until, pep_self, pep_self_details, pep_related, pep_related_details,
                high_risk_country, high_risk_country_code, sanctions_links,
-               sanctions_links_details, payment_background, updated_by)
+               sanctions_links_details, payment_background, updated_by, occupation, sector)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-                   $17, $18, $19, $20, $21, $22, $23)
+                   $17, $18, $19, $20, $21, $22, $23, $24, $25)
            ON CONFLICT (lead_id) DO UPDATE SET
                salutation = EXCLUDED.salutation,
                former_names = EXCLUDED.former_names,
@@ -1596,6 +1611,8 @@ async fn store_identification(
                sanctions_links = EXCLUDED.sanctions_links,
                sanctions_links_details = EXCLUDED.sanctions_links_details,
                payment_background = EXCLUDED.payment_background,
+               occupation = EXCLUDED.occupation,
+               sector = EXCLUDED.sector,
                updated_by = EXCLUDED.updated_by,
                updated_at = now()"#,
     )
@@ -1622,6 +1639,8 @@ async fn store_identification(
     .bind(&statements.sanctions_links_details)
     .bind(&statements.payment_background)
     .bind(actor)
+    .bind(&statements.occupation)
+    .bind(&statements.sector)
     .execute(&mut **tx)
     .await
     .map(|_| ())
@@ -1655,10 +1674,17 @@ pub(crate) enum UploadKind {
     /// statement, salary slip …), under the consent to process the request
     /// data. The patient's own document; never an identity document.
     SelfFundsProof,
+    /// The proof of the relationship to the paying person (block B of the
+    /// risk assessment), under the consent to process the request data;
+    /// only while a third party pays.
+    RelationshipProof,
 }
 
 /// `lead_portal_uploads.kind` of the self-payer's proof of funds.
 pub(crate) const SELF_FUNDS_PROOF_KIND: &str = "self_funds_proof";
+
+/// `lead_portal_uploads.kind` of the proof of the relationship to the payer.
+pub(crate) const RELATIONSHIP_PROOF_KIND: &str = "relationship_proof";
 
 /// `lead_portal_uploads.kind` of the payer's files.
 pub(crate) const PAYER_UPLOAD_KINDS: [&str; 2] = ["payer_identity", "payer_funds_proof"];
@@ -1673,6 +1699,7 @@ impl UploadKind {
             UploadKind::PayerIdentity => PAYER_UPLOAD_KINDS[0],
             UploadKind::PayerFundsProof => PAYER_UPLOAD_KINDS[1],
             UploadKind::SelfFundsProof => SELF_FUNDS_PROOF_KIND,
+            UploadKind::RelationshipProof => RELATIONSHIP_PROOF_KIND,
         }
     }
 
@@ -1686,7 +1713,8 @@ impl UploadKind {
             UploadKind::Identity
             | UploadKind::RepresentativeIdentity
             | UploadKind::RepresentativeAuthority
-            | UploadKind::SelfFundsProof => Some(ConsentPurpose::InquiryProcessing),
+            | UploadKind::SelfFundsProof
+            | UploadKind::RelationshipProof => Some(ConsentPurpose::InquiryProcessing),
             UploadKind::PayerIdentity | UploadKind::PayerFundsProof => None,
         }
     }
@@ -1727,16 +1755,180 @@ pub(crate) fn payment_route_by(
     }
 }
 
+/// The extra step "Zusätzliche Angaben" of the cabinet (owner requests
+/// 2026-10-07) and which of its questions the login answers. The step is
+/// shown (`required`) while the enhanced check is required by its triggers
+/// or a third party outside the first circle pays; the cabinet learns only
+/// that, never why.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ExtraQuestions {
+    /// The enhanced check is required by its triggers (black-list country,
+    /// confirmed sanctions match).
+    pub check_required: bool,
+    /// The step is shown.
+    pub required: bool,
+    /// The self-payer's own source of funds, its description and the proof
+    /// (with the triggers only).
+    pub funds: bool,
+    /// Profession of the contract partner (with the triggers; a paying
+    /// parent states it in the own payer section).
+    pub occupation: bool,
+    /// Sector of the contract partner (with the triggers).
+    pub sector: bool,
+    /// Why the third party pays (whenever the step is shown and a third
+    /// party pays, not of the paying parent in the own login).
+    pub payment_background: bool,
+    /// What the patient knows of the third party's funds (outside the first
+    /// circle, until the payer answered through the own link).
+    pub payer_funds: bool,
+    /// A note that the paying person states the source of funds and the
+    /// proofs through the own link (third party, with the triggers).
+    pub payer_states_funds: bool,
+}
+
+impl ExtraQuestions {
+    /// What the login answers: `check_required` are the triggers, `payer`
+    /// the declaration, `route_by` who answers the payment route
+    /// ([`payment_route_by`]: `Guardian` is the paying parent in the own
+    /// login, who counts as the first circle), `answered_by_payer` whether
+    /// the payer answered through the own link.
+    pub(crate) fn of(
+        check_required: bool,
+        payer: Option<&lead_payer::Declaration>,
+        route_by: PaymentRouteBy,
+        answered_by_payer: bool,
+    ) -> Self {
+        let third_party = payer.is_some_and(lead_payer::Declaration::is_third_party);
+        let self_pays = payer.is_some_and(|payer| payer.payer_kind == lead_payer::PAYER_KIND_SELF);
+        let paying_parent = route_by == PaymentRouteBy::Guardian;
+        let outside = third_party && !paying_parent && lead_payer::outside_first_circle(payer);
+        let required = check_required || outside;
+        Self {
+            check_required,
+            required,
+            funds: check_required && self_pays,
+            occupation: check_required && !paying_parent,
+            sector: check_required,
+            payment_background: required && third_party && !paying_parent,
+            payer_funds: outside && !answered_by_payer,
+            payer_states_funds: check_required && third_party && !paying_parent,
+        }
+    }
+
+    /// The cabinet's view: whether the step is shown and which questions it
+    /// asks; nothing about why (the triggers are `enhanced_check.required`
+    /// of the request, without reasons).
+    pub(crate) fn to_json(self) -> Value {
+        json!({
+            "required": self.required,
+            "asks": {
+                "payment_background": self.payment_background,
+                "payer_funds": self.payer_funds,
+                "funds": self.funds,
+                "occupation": self.occupation,
+                "sector": self.sector,
+                "funds_proof": self.funds,
+                "payer_states_funds": self.payer_states_funds,
+            },
+            "funds_source_options": lead_payer::STATED_FUNDS_SOURCES,
+        })
+    }
+}
+
+/// The answers of the extra step that live outside the statements
+/// (`payment_background` is one of them): the funds on the payer
+/// declaration, profession and sector on `lead_gwg_declarations`.
+fn enhanced_answers_json(
+    payer: Option<&lead_payer::Declaration>,
+    identification: &Identification,
+) -> Value {
+    json!({
+        "funds_source": payer.and_then(|payer| payer.self_funds_source.clone()),
+        "funds_description": payer.and_then(|payer| payer.self_funds_description.clone()),
+        "payer_funds_source": payer.and_then(|payer| payer.payer_funds_source_stated.clone()),
+        "payer_funds_description": payer
+            .and_then(|payer| payer.payer_funds_description_stated.clone()),
+        "occupation": identification.occupation,
+        "sector": identification.sector,
+    })
+}
+
+/// Stable text of the extra step's answers, for the "entered by the
+/// patient" marker of the lead.
+fn enhanced_marker_value(
+    payer: Option<&lead_payer::Declaration>,
+    identification: &Identification,
+) -> String {
+    enhanced_answers_json(payer, identification).to_string()
+}
+
+/// What [`missing_for_submit`] needs besides the answers: the extra step's
+/// questions, whether a proof of the own funds is on file, and whether the
+/// third party's contact data are known otherwise (a paying parent with a
+/// cabinet login, or the payer answered through the own link).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct ExtraState {
+    pub questions: ExtraQuestions,
+    pub funds_proof_uploaded: bool,
+    pub payer_contact_known: bool,
+}
+
+/// The keys of the extra step still open, in form order: why a third party
+/// pays, what the patient knows of its funds, the own source of funds,
+/// profession, sector, the proof.
+fn missing_extra(
+    payer: Option<&lead_payer::Declaration>,
+    identification: &Identification,
+    extra: ExtraState,
+) -> Vec<&'static str> {
+    let questions = extra.questions;
+    if !questions.required {
+        return Vec::new();
+    }
+    let blank = |value: Option<&String>| value.is_none_or(|value| value.trim().is_empty());
+    let mut missing = Vec::new();
+    if questions.payment_background && blank(identification.payment_background.as_ref()) {
+        missing.push("enhanced_payment_background");
+    }
+    if questions.payer_funds {
+        if payer.is_none_or(|payer| payer.payer_funds_source_stated.is_none()) {
+            missing.push("enhanced_payer_funds_source");
+        }
+        if blank(payer.and_then(|payer| payer.payer_funds_description_stated.as_ref())) {
+            missing.push("enhanced_payer_funds_description");
+        }
+    }
+    if questions.funds {
+        if payer.is_none_or(|payer| payer.self_funds_source.is_none()) {
+            missing.push("enhanced_funds_source");
+        }
+        if blank(payer.and_then(|payer| payer.self_funds_description.as_ref())) {
+            missing.push("enhanced_funds_description");
+        }
+    }
+    if questions.occupation && blank(identification.occupation.as_ref()) {
+        missing.push("enhanced_occupation");
+    }
+    if questions.sector && blank(identification.sector.as_ref()) {
+        missing.push("enhanced_sector");
+    }
+    if questions.funds && !extra.funds_proof_uploaded {
+        missing.push("enhanced_funds_proof_upload");
+    }
+    missing
+}
+
 /// Everything still missing before the request can be sent, as the keys of
-/// `progress.missing_for_submit`: the personal data, who pays, then the
-/// statements for the identification in form order. `representation` is what
-/// [`lead_representatives::missing_for_submit`] says about who acts for the
-/// lead; the form asks it after the identity document. A self-payer's source
-/// of funds follows the own-interest question
-/// ([`lead_payer::portal_missing_self_funds`]; `self_funds_proof` says whether
-/// the proof is required and on file). Where the invoice goes and, for
-/// whoever is asked, the payment route come after it
-/// ([`lead_payer::portal_missing_billing`]).
+/// `progress.missing_for_submit`: the personal data, who pays with the third
+/// party's contact data, then the statements for the identification in form
+/// order. `representation` is what [`lead_representatives::missing_for_submit`]
+/// says about who acts for the lead; the form asks it after the identity
+/// document. Where the invoice goes and, for whoever is asked, the payment
+/// route follow the own-interest question
+/// ([`lead_payer::portal_missing_billing`]). The trigger flow (2026-10-07)
+/// reshapes the list ([`crate::risk::cabinet::reshape_missing`]): staff's
+/// identity data, the payment route and the follow-up blocks leave it, the
+/// organisation mask and the reason of the request join it.
 #[allow(clippy::too_many_arguments)]
 fn missing_for_submit(
     data: &PersonalData,
@@ -1745,8 +1937,9 @@ fn missing_for_submit(
     identity_document_uploaded: bool,
     representation: Vec<String>,
     payment_route_by: PaymentRouteBy,
-    self_funds_proof: SelfFundsProof,
+    extra: ExtraState,
     today: NaiveDate,
+    base: &crate::risk::cabinet::BaseExtra,
 ) -> Vec<String> {
     let mut missing = data.missing_for_submit();
     missing.extend(
@@ -1764,6 +1957,11 @@ fn missing_for_submit(
                     )
             }),
     );
+    // The third party's e-mail, phone and residence (owner request
+    // 2026-10-07), unless its data are known otherwise.
+    if !extra.payer_contact_known && payment_route_by != PaymentRouteBy::Guardian {
+        missing.extend(lead_payer::portal_missing_contact(payer));
+    }
     missing.extend(identification.missing_identity(today));
     if !identity_document_uploaded {
         missing.push("id_document_upload");
@@ -1773,24 +1971,14 @@ fn missing_for_submit(
     missing.extend(
         lead_payer::portal_missing_own_account(payer)
             .into_iter()
-            .chain(lead_payer::portal_missing_self_funds(
-                payer,
-                self_funds_proof,
-            ))
             .chain(lead_payer::portal_missing_billing(payer, payment_route_by))
             .chain(identification.missing_legal())
             .map(str::to_string),
     );
-    // Why another person pays is asked with a third-party payer only, and not
-    // of the paying parent's own login: that parent is the one who pays (QA
-    // 2026-10-06, B4).
-    if payer.is_some_and(lead_payer::Declaration::is_third_party)
-        && payment_route_by != PaymentRouteBy::Guardian
-        && identification.payment_background.is_none()
-    {
-        missing.push("payment_background".to_string());
-    }
-    missing
+    // The trigger flow (2026-10-07): staff's identity data, the follow-up
+    // blocks (`follow_up`) and the extra step's questions leave the base
+    // form; the organisation mask and the reason of the request join it.
+    crate::risk::cabinet::reshape_missing(missing, base)
 }
 
 /// Staff took a portal upload over: marked it as reviewed or, for a copy of
@@ -1832,17 +2020,22 @@ where
     .await
 }
 
-/// Whether the self-payer's proof of funds is required — the enhanced check
-/// of the lead is (owner rule 2026-10-07) — and whether one is on file, in
-/// the caller's connection or transaction.
-pub(crate) async fn self_funds_proof_state(
+/// The extra step of the cabinet for the login `caller` (or the staff view
+/// with `None`) and what [`missing_for_submit`] needs with it, in the
+/// caller's connection or transaction.
+pub(crate) async fn extra_state(
     conn: &mut sqlx::PgConnection,
     lead_id: Uuid,
-) -> Result<SelfFundsProof, sqlx::Error> {
-    let required = crate::routes::lead_enhanced_check::enhanced_check_triggers(conn, lead_id)
+    payer: Option<&lead_payer::Declaration>,
+    representation: &lead_representatives::Representation,
+    caller: Option<Uuid>,
+) -> Result<ExtraState, sqlx::Error> {
+    let check_required = crate::routes::lead_enhanced_check::enhanced_check_triggers(conn, lead_id)
         .await?
         .required;
-    let uploaded: bool = sqlx::query_scalar(
+    let answered_by_payer =
+        crate::routes::lead_payer_link::answered_by_payer(conn, lead_id, payer).await?;
+    let funds_proof_uploaded: bool = sqlx::query_scalar(
         r#"SELECT EXISTS (
                SELECT 1 FROM lead_portal_uploads u
                JOIN documents d ON d.id = u.document_id
@@ -1853,11 +2046,17 @@ pub(crate) async fn self_funds_proof_state(
     .bind(lead_id)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(SelfFundsProof { required, uploaded })
+    let route_by = payment_route_by(payer, representation, caller);
+    Ok(ExtraState {
+        questions: ExtraQuestions::of(check_required, payer, route_by, answered_by_payer),
+        funds_proof_uploaded,
+        payer_contact_known: answered_by_payer
+            || !lead_payer::contact_consent_required(payer, representation),
+    })
 }
 
 /// Whether the stored declaration says that the patient pays himself: only
-/// then the cabinet takes the source of funds and its proof.
+/// then the cabinet takes the proof of the own funds.
 async fn pays_himself(conn: &mut sqlx::PgConnection, lead_id: Uuid) -> Result<bool, sqlx::Error> {
     Ok(lead_payer::load_declaration(conn, lead_id)
         .await?
@@ -2027,6 +2226,9 @@ pub(crate) async fn request_payload(
     user_id: Uuid,
     kind: AccessKind,
 ) -> Result<Value, sqlx::Error> {
+    // Every load reassesses a started risk assessment (P3): every write of
+    // the cabinet ends here, right after its commit.
+    crate::risk::cabinet::reassess_for_cabinet(&state.db, lead_id, user_id).await?;
     let row = sqlx::query(&format!(
         r#"SELECT {PERSONAL_DATA_COLUMNS}, l.created_at, l.qualification_status,
                   l.compliance_status, l.portal_submitted_at,
@@ -2039,27 +2241,35 @@ pub(crate) async fn request_payload(
     .await?;
     let data = PersonalData::from_row(&row);
     // Who pays, who acts for the lead, whether the payer answered through
-    // its own link, and whether the enhanced check is required (then a
-    // self-payer's proof of funds is).
-    let (payer, representation, answered_by_payer, enhanced_check_required) = {
+    // its own link, and the extra step of this login (computed on every
+    // load, so it appears as soon as an answer makes it required).
+    let (payer, representation, answered_by_payer, extra, risk) = {
         let mut conn = state.db.acquire().await?;
         let payer = lead_payer::load_declaration(&mut conn, lead_id).await?;
         let answered_by_payer =
             crate::routes::lead_payer_link::answered_by_payer(&mut conn, lead_id, payer.as_ref())
                 .await?;
-        let enhanced_check_required =
-            crate::routes::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
-                .await?
-                .required;
-        (
-            payer,
-            lead_representatives::load(&mut conn, lead_id)
-                .await?
-                .unwrap_or_default(),
-            answered_by_payer,
-            enhanced_check_required,
+        let representation = lead_representatives::load(&mut conn, lead_id)
+            .await?
+            .unwrap_or_default();
+        let extra = extra_state(
+            &mut conn,
+            lead_id,
+            payer.as_ref(),
+            &representation.representation,
+            Some(user_id),
         )
+        .await?;
+        let risk = (
+            crate::risk::cabinet::base_extra(&mut conn, lead_id, payer.as_ref()).await?,
+            crate::risk::cabinet::follow_up_json(&mut conn, lead_id, user_id).await?,
+            crate::risk::store::review_notice(&mut conn, lead_id).await?,
+            crate::risk::cabinet::load_statements(&mut conn, lead_id).await?,
+            crate::risk::cabinet::payer_extras(&mut conn, lead_id).await?,
+        );
+        (payer, representation, answered_by_payer, extra, risk)
     };
+    let (base, mut follow_up, review_notice, statements, (payer_extras, billing_extras)) = risk;
     let (identification, _) = load_identification(&state.db, lead_id).await?;
     let payer_self_template = match kind {
         AccessKind::Guardian => {
@@ -2117,14 +2327,10 @@ pub(crate) async fn request_payload(
             .collect()
     };
     // The files of a representative are listed with that person, never here;
-    // the self-payer's proof of funds with the source of funds.
+    // the self-payer's proof of funds in the extra step.
     let documents = uploads_of(UploadKind::Medical);
     let identity_documents = uploads_of(UploadKind::Identity);
-    let self_funds_documents = uploads_of(UploadKind::SelfFundsProof);
-    let self_funds_proof = SelfFundsProof {
-        required: enhanced_check_required,
-        uploaded: !self_funds_documents.is_empty(),
-    };
+    let funds_proof_documents = uploads_of(UploadKind::SelfFundsProof);
     let today = crate::app_time::today();
     // Who is asked for the payment route, and whose name the account holder
     // is pre-filled with: the lead's, or the paying parent's.
@@ -2158,26 +2364,27 @@ pub(crate) async fn request_payload(
         !identity_documents.is_empty(),
         lead_representatives::missing_for_submit(&representation, today),
         route_by,
-        self_funds_proof,
+        extra,
         today,
+        &base,
     );
-    // The self-payer's source of funds: asked while the patient pays; the
-    // proof is required while the enhanced check is (no reasons are shown).
-    let self_funds = json!({
-        "asked": payer
-            .as_ref()
-            .is_some_and(|payer| payer.payer_kind == lead_payer::PAYER_KIND_SELF),
-        "sources": payer
-            .as_ref()
-            .map(|payer| payer.self_funds_sources.clone())
-            .unwrap_or_default(),
-        "description": payer
-            .as_ref()
-            .and_then(|payer| payer.self_funds_description.clone()),
-        "source_options": lead_payer::SOURCE_OF_FUNDS,
-        "proof_required": self_funds_proof.required,
-        "proof_documents": self_funds_documents,
-    });
+    // The follow-up blocks of the risk assessment: which blocks to answer
+    // and what each still misses, the answers kept on the payer declaration
+    // and the proofs — never why (P2, § 47 GwG).
+    follow_up["answers"] = enhanced_answers_json(payer.as_ref(), &identification);
+    follow_up["funds_source_options"] = json!(lead_payer::STATED_FUNDS_SOURCES);
+    follow_up["funds_proof_documents"] = json!(funds_proof_documents);
+    follow_up["relationship_proof_documents"] = json!(uploads_of(UploadKind::RelationshipProof));
+    let mut payer_json = lead_payer::portal_payload(payer.as_ref(), answered_by_payer);
+    if !payer_json.is_null() {
+        crate::risk::cabinet::merge_into(&mut payer_json, payer_extras);
+    }
+    let mut billing_json = lead_payer::portal_billing_payload(
+        payer.as_ref(),
+        route_by,
+        account_holder_suggestion.as_deref(),
+    );
+    crate::risk::cabinet::merge_into(&mut billing_json, billing_extras);
     // A paying parent answers the payer's questions in the own cabinet
     // (phase 3a); nobody else sees anything of the payer's answers or link.
     let payer_questionnaire = if route_by == PaymentRouteBy::Guardian {
@@ -2215,18 +2422,21 @@ pub(crate) async fn request_payload(
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
+            "missing_by_step": crate::risk::cabinet::missing_by_step(&missing),
             "missing_for_submit": missing,
         },
-        "payer": lead_payer::portal_payload(payer.as_ref(), answered_by_payer),
+        "payer": payer_json,
         "payer_self_template": payer_self_template,
-        "billing": lead_payer::portal_billing_payload(
-            payer.as_ref(),
-            route_by,
-            account_holder_suggestion.as_deref(),
-        ),
+        "billing": billing_json,
         "payer_questionnaire": payer_questionnaire,
-        "self_funds": self_funds,
-        "identification": identification.to_json(),
+        // The follow-up blocks and the neutral notice after sending, for
+        // every lead alike — no points, level or reason (P2).
+        "follow_up": follow_up,
+        "review_notice": review_notice,
+        "identification": crate::risk::cabinet::cabinet_identification(
+            identification.to_json(),
+            &statements,
+        ),
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, today),
         "representation": lead_representatives::portal_payload(&representation, user_id),
         "documents": documents,
@@ -2496,11 +2706,24 @@ async fn update_my_payer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
-    Json(input): Json<PortalPayerInput>,
+    Json(mut body): Json<Value>,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
     }
+    // The organisation mask (trigger flow 2026-10-07) is stored apart.
+    let mask = crate::risk::cabinet::take_keys(&mut body, &crate::risk::cabinet::ORGANISATION_KEYS);
+    let input: PortalPayerInput = match serde_json::from_value(body) {
+        Ok(input) => input,
+        Err(error) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_body",
+                &error.to_string(),
+                json!({}),
+            );
+        }
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -2551,8 +2774,33 @@ async fn update_my_payer(
         }
         Err(PortalPayerError::Database(error)) => return internal(error, "save payer"),
     };
+    let mask_changed =
+        match crate::risk::cabinet::save_organisation_mask(&mut tx, lead_id, &mask).await {
+            Ok(Ok(changed)) => changed,
+            Ok(Err(error)) => return error.into_response(),
+            Err(error) => return internal(error, "save organisation"),
+        };
+    if !mask_changed.is_empty()
+        && let Err(error) = crate::risk::cabinet::audit_keys(
+            &mut tx,
+            "lead_portal_update_payer_organisation",
+            auth.user_id,
+            lead_id,
+            &mask_changed,
+            kind.as_str(),
+        )
+        .await
+    {
+        return internal(error, "audit organisation");
+    }
     let Some(declaration) = saved else {
-        drop(tx);
+        if !mask_changed.is_empty() {
+            if let Err(error) = tx.commit().await {
+                return internal(error, "commit organisation");
+            }
+        } else {
+            drop(tx);
+        }
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
             Ok(payload) => Json(payload).into_response(),
             Err(error) => internal(error, "load request"),
@@ -2611,7 +2859,7 @@ async fn update_my_billing(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
-    Json(body): Json<Value>,
+    Json(mut body): Json<Value>,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
@@ -2624,6 +2872,9 @@ async fn update_my_billing(
             json!({ "field": field }),
         )
     };
+    // Block C of the risk assessment (expected total, through whom another
+    // person pays) is stored apart (trigger flow 2026-10-07).
+    let block_c = crate::risk::cabinet::take_keys(&mut body, &crate::risk::cabinet::BLOCK_C_KEYS);
     let patch = match PortalBillingPatch::parse(&body) {
         Ok(patch) => patch,
         Err(PortalBillingError::Invalid { field, message }) => return invalid(&field, message),
@@ -2652,6 +2903,24 @@ async fn update_my_billing(
         &representation.representation,
         Some(auth.user_id),
     );
+    if !block_c.is_empty() {
+        if payer.is_none() {
+            return coded(
+                StatusCode::CONFLICT,
+                "payer_not_declared",
+                "Please answer who pays first",
+                json!({}),
+            );
+        }
+        if !route_by.asks() {
+            return coded(
+                StatusCode::CONFLICT,
+                "payment_route_by_payer",
+                "The payer states the payment route; the cabinet does not ask for it",
+                json!({}),
+            );
+        }
+    }
     let saved = match lead_payer::save_billing_from_portal(
         &mut tx,
         lead_id,
@@ -2682,8 +2951,33 @@ async fn update_my_billing(
         }
         Err(PortalBillingError::Database(error)) => return internal(error, "save billing"),
     };
+    let block_c_changed = match crate::risk::cabinet::save_block_c(&mut tx, lead_id, &block_c).await
+    {
+        Ok(Ok(changed)) => changed,
+        Ok(Err(error)) => return error.into_response(),
+        Err(error) => return internal(error, "save payment route"),
+    };
+    if !block_c_changed.is_empty()
+        && let Err(error) = crate::risk::cabinet::audit_keys(
+            &mut tx,
+            "lead_portal_update_payment_route_details",
+            auth.user_id,
+            lead_id,
+            &block_c_changed,
+            kind.as_str(),
+        )
+        .await
+    {
+        return internal(error, "audit payment route");
+    }
     let Some(declaration) = saved else {
-        drop(tx);
+        if !block_c_changed.is_empty() {
+            if let Err(error) = tx.commit().await {
+                return internal(error, "commit payment route");
+            }
+        } else {
+            drop(tx);
+        }
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
             Ok(payload) => Json(payload).into_response(),
             Err(error) => internal(error, "load request"),
@@ -2730,14 +3024,75 @@ async fn update_my_billing(
     }
 }
 
-/// `POST /me/lead-requests/{lead_id}/self-funds`: autosave of the
-/// self-payer's source of funds (`self_funds_sources`, the person list;
-/// `self_funds_description`), only the changed keys. It lands in the payer
-/// declaration, where staff read it and where it counts as the source of
-/// funds of the declaration. Without an answer who pays: 409
-/// `payer_not_declared`; when a third party pays: 409 `payer_not_self`. The
-/// audit event names the changed fields, never their values.
-async fn update_my_self_funds(
+/// The body of `POST /me/lead-requests/{lead_id}/enhanced-details`: only the
+/// changed keys; `null` or `""` clears a value. Unknown keys are refused.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct EnhancedDetailsPatch {
+    /// The self-payer's own source of funds ([`lead_payer::STATED_FUNDS_SOURCES`]).
+    #[serde(default, deserialize_with = "sent")]
+    funds_source: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    funds_description: Option<Option<String>>,
+    /// What the patient knows of a third party's funds.
+    #[serde(default, deserialize_with = "sent")]
+    payer_funds_source: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    payer_funds_description: Option<Option<String>>,
+    /// Profession and sector of the contract partner (≤ 200 characters).
+    #[serde(default, deserialize_with = "sent")]
+    occupation: Option<Option<String>>,
+    #[serde(default, deserialize_with = "sent")]
+    sector: Option<Option<String>>,
+}
+
+impl EnhancedDetailsPatch {
+    fn funds(&self) -> PortalFundsPatch {
+        PortalFundsPatch {
+            funds_source: self.funds_source.clone(),
+            funds_description: self.funds_description.clone(),
+            payer_funds_source: self.payer_funds_source.clone(),
+            payer_funds_description: self.payer_funds_description.clone(),
+        }
+    }
+}
+
+/// Profession and sector applied to the statements; the keys that changed.
+pub(crate) fn apply_profile_patch(
+    current: &Identification,
+    patch: &EnhancedDetailsPatch,
+) -> Result<(Identification, Vec<&'static str>), FieldError> {
+    let text = |value: &Option<String>| value.as_deref().unwrap_or_default().to_string();
+    let mut next = current.clone();
+    if let Some(value) = &patch.occupation {
+        next.occupation = clean_text(&text(value), "occupation", 200)?;
+    }
+    if let Some(value) = &patch.sector {
+        next.sector = clean_text(&text(value), "sector", 200)?;
+    }
+    let mut changed = Vec::new();
+    if next.occupation != current.occupation {
+        changed.push("occupation");
+    }
+    if next.sector != current.sector {
+        changed.push("sector");
+    }
+    Ok((next, changed))
+}
+
+/// `POST /me/lead-requests/{lead_id}/enhanced-details`: autosave of the
+/// answers of the extra step "Zusätzliche Angaben", only the changed keys:
+/// `funds_source` / `funds_description` (the self-payer's own funds; 409
+/// `payer_not_self` when a third party pays), `payer_funds_source` /
+/// `payer_funds_description` (what the patient knows of a third party's
+/// funds; 409 `payer_not_third_party` otherwise), `occupation` and `sector`
+/// (the contract partner). Without an answer who pays the funds keys answer
+/// 409 `payer_not_declared`. A value the cabinet has to correct: 422
+/// `invalid_field` with the key. The funds land in the payer declaration,
+/// profession and sector in the lead's statements. One audit event names the
+/// changed keys, never their values. Why a third party pays is a statement
+/// of its own (`payment_background`, through `…/identification`).
+async fn update_my_enhanced_details(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
@@ -2754,9 +3109,23 @@ async fn update_my_self_funds(
             json!({ "field": field }),
         )
     };
-    let patch = match PortalSelfFundsPatch::parse(&body) {
+    if let Some(unknown) = body.as_object().and_then(|object| {
+        object.keys().find(|key| {
+            ![
+                "funds_source",
+                "funds_description",
+                "payer_funds_source",
+                "payer_funds_description",
+                "occupation",
+                "sector",
+            ]
+            .contains(&key.as_str())
+        })
+    }) {
+        return invalid(unknown.as_str(), "Unknown field");
+    }
+    let patch: EnhancedDetailsPatch = match serde_json::from_value(body) {
         Ok(patch) => patch,
-        Err(PortalSelfFundsError::Invalid { field, message }) => return invalid(&field, message),
         Err(_) => return invalid("body", "The body could not be read"),
     };
     let mut tx = match state.db.begin().await {
@@ -2768,44 +3137,72 @@ async fn update_my_self_funds(
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
-    let saved = match lead_payer::save_self_funds_from_portal(
-        &mut tx,
-        lead_id,
-        auth.user_id,
-        kind.as_str(),
-        &patch,
-    )
-    .await
-    {
-        Ok(saved) => saved,
-        Err(PortalSelfFundsError::Invalid { field, message }) => return invalid(&field, message),
-        Err(PortalSelfFundsError::NotDeclared) => {
-            return coded(
-                StatusCode::CONFLICT,
-                "payer_not_declared",
-                "Please answer who pays first",
-                json!({}),
-            );
-        }
-        Err(PortalSelfFundsError::NotSelf) => return payer_not_self(),
-        Err(PortalSelfFundsError::Database(error)) => return internal(error, "save self funds"),
+    let current = match load_identification(&mut *tx, lead_id).await {
+        Ok((current, _)) => current,
+        Err(error) => return internal(error, "load identification"),
     };
-    let Some(declaration) = saved else {
+    let (statements, mut changed) = match apply_profile_patch(&current, &patch) {
+        Ok(applied) => applied,
+        Err(error) => return error.into_response(),
+    };
+    let funds = patch.funds();
+    let declaration = if funds.is_empty() {
+        match lead_payer::load_declaration(&mut tx, lead_id).await {
+            Ok(declaration) => declaration,
+            Err(error) => return internal(error, "load payer"),
+        }
+    } else {
+        match lead_payer::save_funds_from_portal(&mut tx, lead_id, auth.user_id, &funds).await {
+            Ok(Some((declaration, funds_changed))) => {
+                changed.extend(funds_changed);
+                Some(declaration)
+            }
+            Ok(None) => match lead_payer::load_declaration(&mut tx, lead_id).await {
+                Ok(declaration) => declaration,
+                Err(error) => return internal(error, "load payer"),
+            },
+            Err(PortalFundsError::Invalid { field, message }) => return invalid(field, message),
+            Err(PortalFundsError::NotDeclared) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    "payer_not_declared",
+                    "Please answer who pays first",
+                    json!({}),
+                );
+            }
+            Err(PortalFundsError::NotSelf) => return payer_not_self(),
+            Err(PortalFundsError::NotThirdParty) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    "payer_not_third_party",
+                    "The payer's funds are asked when another person pays",
+                    json!({}),
+                );
+            }
+            Err(PortalFundsError::Database(error)) => return internal(error, "save funds"),
+        }
+    };
+    if changed.is_empty() {
         drop(tx);
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
             Ok(payload) => Json(payload).into_response(),
             Err(error) => internal(error, "load request"),
         };
-    };
+    }
+    if statements != current
+        && let Err(error) = store_identification(&mut tx, lead_id, &statements, auth.user_id).await
+    {
+        return internal(error, "store profession");
+    }
     let marker = json!({
-        SELF_FUNDS_MARKER: {
+        ENHANCED_DETAILS_MARKER: {
             "at": Utc::now(),
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(
                 lead_id,
-                SELF_FUNDS_MARKER,
-                Some(&declaration.self_funds_marker_value()),
+                ENHANCED_DETAILS_MARKER,
+                Some(&enhanced_marker_value(declaration.as_ref(), &statements)),
             ),
         }
     });
@@ -2819,17 +3216,31 @@ async fn update_my_self_funds(
     .execute(&mut *tx)
     .await
     {
-        return internal(error, "mark self funds");
+        return internal(error, "mark enhanced details");
+    }
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_portal_update_enhanced_details",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({ "fields": changed, "access_kind": kind.as_str() }),
+        ),
+    )
+    .await
+    {
+        return internal(error, "audit enhanced details");
     }
     if let Err(error) = tx.commit().await {
-        return internal(error, "commit self funds");
+        return internal(error, "commit enhanced details");
     }
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),
         "lead.portal_updated",
         lead_id,
-        json!({ "change": SELF_FUNDS_MARKER, "access_kind": kind.as_str() }),
+        json!({ "change": ENHANCED_DETAILS_MARKER, "access_kind": kind.as_str() }),
     )
     .await;
     match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -2841,15 +3252,34 @@ async fn update_my_self_funds(
 /// `POST /me/lead-requests/{lead_id}/identification`: autosave of the lead's
 /// own statements for the GwG identification sheet (only the changed keys).
 /// The audit event names the changed fields, never their values.
+/// Staff's identity document data (`id_*`) answer 422 `staff_only` (the lead
+/// only uploads the document, staff enter its data); the statements of the
+/// follow-up blocks F, B, H, J and the reason of the request
+/// ([`crate::risk::cabinet::STATEMENT_KEYS`]) are taken here too.
 async fn update_my_identification(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(lead_id): Path<Uuid>,
-    Json(patch): Json<IdentificationPatch>,
+    Json(body): Json<Value>,
 ) -> axum::response::Response {
     if let Err(response) = require_patient(&auth) {
         return response;
     }
+    let (body, statements_body) = match crate::risk::cabinet::split_identification_body(body) {
+        Ok(split) => split,
+        Err(response) => return response,
+    };
+    let patch: IdentificationPatch = match serde_json::from_value(body) {
+        Ok(patch) => patch,
+        Err(error) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "invalid_body",
+                &error.to_string(),
+                json!({}),
+            );
+        }
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -2868,24 +3298,52 @@ async fn update_my_identification(
         Err(error) => return error.into_response(),
     };
     let changed = changed_identification_fields(&current, &next);
-    if changed.is_empty() {
+    let statements_changed = match crate::risk::cabinet::save_statements(
+        &mut tx,
+        lead_id,
+        &statements_body,
+        auth.user_id,
+    )
+    .await
+    {
+        Ok(Ok(changed)) => changed,
+        Ok(Err(error)) => return error.into_response(),
+        Err(error) => return internal(error, "store statements"),
+    };
+    if changed.is_empty() && statements_changed.is_empty() {
         drop(tx);
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
             Ok(payload) => Json(payload).into_response(),
             Err(error) => internal(error, "load request"),
         };
     }
-    if let Err(error) = store_identification(&mut tx, lead_id, &next, auth.user_id).await {
+    if !changed.is_empty()
+        && let Err(error) = store_identification(&mut tx, lead_id, &next, auth.user_id).await
+    {
         return internal(error, "store identification");
     }
-    let marker = json!({
-        IDENTIFICATION_MARKER: {
+    let mut marker = json!({});
+    if !changed.is_empty() {
+        marker[IDENTIFICATION_MARKER] = json!({
             "at": Utc::now(),
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(lead_id, IDENTIFICATION_MARKER, Some(&next.marker_value())),
-        }
-    });
+        });
+    }
+    if !statements_changed.is_empty() {
+        marker[STATEMENTS_MARKER] = json!({
+            "at": Utc::now(),
+            "by": auth.user_id,
+            "kind": kind.as_str(),
+            "hash": value_marker(
+                lead_id,
+                STATEMENTS_MARKER,
+                Some(&format!("{}|{}", statements_changed.join(","), Utc::now())),
+            ),
+        });
+    }
+    let changed: Vec<&str> = changed.into_iter().chain(statements_changed).collect();
     if let Err(error) = sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
@@ -3306,6 +3764,27 @@ pub(crate) async fn store_my_upload(
             Err(error) => return internal(error, "load payer"),
         }
     }
+    // A proof of the relationship exists only while a third party pays.
+    if upload_kind == UploadKind::RelationshipProof {
+        let third_party = match state.db.acquire().await {
+            Ok(mut conn) => lead_payer::load_declaration(&mut conn, lead_id)
+                .await
+                .map(|payer| payer.is_some_and(|payer| payer.is_third_party())),
+            Err(error) => Err(error),
+        };
+        match third_party {
+            Ok(true) => {}
+            Ok(false) => {
+                return coded(
+                    StatusCode::CONFLICT,
+                    "payer_not_third_party",
+                    "The proof of the relationship is asked when another person pays",
+                    json!({}),
+                );
+            }
+            Err(error) => return internal(error, "load payer"),
+        }
+    }
     match active_consent(&state.db, lead_id, auth.user_id, consent_purpose).await {
         Ok(Some(_)) => {}
         Ok(None) => {
@@ -3375,7 +3854,10 @@ pub(crate) async fn store_my_upload(
         return coded(
             StatusCode::UNPROCESSABLE_ENTITY,
             "unsupported_file_type",
-            if upload_kind == UploadKind::SelfFundsProof {
+            if matches!(
+                upload_kind,
+                UploadKind::SelfFundsProof | UploadKind::RelationshipProof
+            ) {
                 "Upload the document as PDF, JPG or PNG"
             } else {
                 "Upload the identity document as PDF, JPG or PNG"
@@ -3424,6 +3906,12 @@ pub(crate) async fn store_my_upload(
             SELF_FUNDS_PROOF_KIND,
             "finance",
             "financial",
+        ),
+        UploadKind::RelationshipProof => (
+            "Proof of relationship to the payer".to_string(),
+            RELATIONSHIP_PROOF_KIND,
+            "administrative",
+            "internal",
         ),
         UploadKind::PayerIdentity | UploadKind::PayerFundsProof => return not_found(),
     };
@@ -3839,9 +4327,21 @@ async fn submit_my_lead_request(
         Ok(representation) => representation.unwrap_or_default(),
         Err(error) => return internal(error, "load representation"),
     };
-    let self_funds_proof = match self_funds_proof_state(&mut tx, lead_id).await {
-        Ok(proof) => proof,
-        Err(error) => return internal(error, "load proof of funds"),
+    let extra = match extra_state(
+        &mut tx,
+        lead_id,
+        payer.as_ref(),
+        &representation.representation,
+        Some(auth.user_id),
+    )
+    .await
+    {
+        Ok(extra) => extra,
+        Err(error) => return internal(error, "load extra questions"),
+    };
+    let base = match crate::risk::cabinet::base_extra(&mut tx, lead_id, payer.as_ref()).await {
+        Ok(base) => base,
+        Err(error) => return internal(error, "load request reason"),
     };
     let today = crate::app_time::today();
     let missing = missing_for_submit(
@@ -3855,8 +4355,9 @@ async fn submit_my_lead_request(
             &representation.representation,
             Some(auth.user_id),
         ),
-        self_funds_proof,
+        extra,
         today,
+        &base,
     );
     if !missing.is_empty() {
         return coded(
@@ -3960,6 +4461,19 @@ async fn submit_my_lead_request(
     .await
     {
         return internal(error, "audit submit");
+    }
+    // "Send to the manager" starts the risk assessment (before it nothing is
+    // scored, so a missing upload of a draft never counts).
+    if let Err(error) = crate::risk::store::start(
+        &mut tx,
+        lead_id,
+        crate::risk::store::Cause::Cabinet,
+        Some(auth.user_id),
+        false,
+    )
+    .await
+    {
+        return internal(error, "start risk assessment");
     }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit submit");
@@ -4212,70 +4726,72 @@ async fn get_lead_portal_intake(
         .filter(|_| statements_visible)
         .map(staff_file)
         .collect();
-    // The self-payer's source of funds with its proof, for the same roles:
-    // whether the proof is required (the enhanced check is), and when the
-    // lead last changed the answers while they still are what the lead
-    // entered. The files are listed also when another payer was named since.
-    let self_funds = if statements_visible {
-        let required = match state.db.acquire().await {
-            Ok(mut conn) => {
-                crate::routes::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
-                    .await
-                    .map(|check| check.required)
-            }
-            Err(error) => Err(error),
-        };
-        let required = match required {
-            Ok(required) => required,
-            Err(error) => return internal(error, "load enhanced check"),
-        };
-        let updated_at = declaration.as_ref().and_then(|declaration| {
-            let update = updates.get(SELF_FUNDS_MARKER)?;
-            let current = value_marker(
-                lead_id,
-                SELF_FUNDS_MARKER,
-                Some(&declaration.self_funds_marker_value()),
-            );
-            if update.get("hash").and_then(Value::as_str) == Some(current.as_str()) {
-                update.get("at").cloned()
-            } else {
-                None
-            }
-        });
-        json!({
-            "asked": declaration
-                .as_ref()
-                .is_some_and(|declaration| declaration.payer_kind == lead_payer::PAYER_KIND_SELF),
-            "sources": declaration
-                .as_ref()
-                .map(|declaration| declaration.self_funds_sources.clone())
-                .unwrap_or_default(),
-            "description": declaration
-                .as_ref()
-                .and_then(|declaration| declaration.self_funds_description.clone()),
-            "proof_required": required,
-            "proof_documents": uploads_of(UploadKind::SelfFundsProof)
-                .iter()
-                .map(staff_file)
-                .collect::<Vec<_>>(),
-            "updated_at": updated_at,
-        })
-    } else {
-        Value::Null
-    };
     // Who acts for the lead, for the same roles as the statements; with it
-    // where the invoice goes and how the payer will pay (sections 7 and 8).
-    let (representation, representation_updated_at, billing, billing_updated_at) =
+    // where the invoice goes and how the payer will pay (sections 7 and 8),
+    // and the answers of the extra step with the self-payer's proofs: whether
+    // the step is shown to the cabinet, which questions it asks, and when the
+    // lead last changed the answers while they still are what the lead
+    // entered. The proofs are listed also when another payer was named since.
+    let (representation, representation_updated_at, billing, billing_updated_at, enhanced_details) =
         if statements_visible {
             let loaded = match state.db.acquire().await {
-                Ok(mut conn) => lead_representatives::load(&mut conn, lead_id).await,
+                Ok(mut conn) => match lead_representatives::load(&mut conn, lead_id).await {
+                    Ok(loaded) => {
+                        let loaded = loaded.unwrap_or_default();
+                        extra_state(
+                            &mut conn,
+                            lead_id,
+                            declaration.as_ref(),
+                            &loaded.representation,
+                            None,
+                        )
+                        .await
+                        .map(|extra| (loaded, extra))
+                    }
+                    Err(error) => Err(error),
+                },
                 Err(error) => Err(error),
             };
             match loaded {
-                Ok(loaded) => {
-                    let loaded = loaded.unwrap_or_default();
+                Ok((loaded, extra)) => {
                     let route_by =
                         payment_route_by(declaration.as_ref(), &loaded.representation, None);
+                    let updated_at = updates.get(ENHANCED_DETAILS_MARKER).and_then(|update| {
+                        let current = value_marker(
+                            lead_id,
+                            ENHANCED_DETAILS_MARKER,
+                            Some(&enhanced_marker_value(
+                                declaration.as_ref(),
+                                &identification,
+                            )),
+                        );
+                        (update.get("hash").and_then(Value::as_str) == Some(current.as_str()))
+                            .then(|| update.get("at").cloned())
+                            .flatten()
+                    });
+                    let mut enhanced_details = extra.questions.to_json();
+                    enhanced_details["check_required"] = json!(extra.questions.check_required);
+                    enhanced_details["answers"] =
+                        enhanced_answers_json(declaration.as_ref(), &identification);
+                    enhanced_details["funds_proof_documents"] = json!(
+                        uploads_of(UploadKind::SelfFundsProof)
+                            .iter()
+                            .map(staff_file)
+                            .collect::<Vec<_>>()
+                    );
+                    enhanced_details["updated_at"] = json!(updated_at);
+                    // What the former extra step would still ask (information for
+                    // staff; the cabinet asks the follow-up blocks of the risk
+                    // assessment now).
+                    enhanced_details["missing"] =
+                        json!(missing_extra(declaration.as_ref(), &identification, extra));
+                    // The relationship proofs of block B.
+                    enhanced_details["relationship_proof_documents"] = json!(
+                        uploads_of(UploadKind::RelationshipProof)
+                            .iter()
+                            .map(staff_file)
+                            .collect::<Vec<_>>()
+                    );
                     (
                         lead_representatives::staff_payload(&loaded),
                         lead_representatives::updated_at(&loaded, &updates),
@@ -4284,12 +4800,13 @@ async fn get_lead_portal_intake(
                             .unwrap_or_default()
                             .billing_staff_json(route_by),
                         billing_updated_at,
+                        enhanced_details,
                     )
                 }
                 Err(error) => return internal(error, "load representation"),
             }
         } else {
-            (Value::Null, None, Value::Null, None)
+            (Value::Null, None, Value::Null, None, Value::Null)
         };
     // The payer's own link (phase 3a), for the same roles: how far it is and
     // the check level of the payer's answers.
@@ -4386,6 +4903,22 @@ async fn get_lead_portal_intake(
             .flatten()
             .map(|_| "self")
     };
+    // The statements of the follow-up blocks with the lead's GwG statements;
+    // staff's identity data with who entered them; the lead's own reason of
+    // the request only for roles with medical access (13.1).
+    let (identification_json, patient_request_reason) =
+        match crate::risk::cabinet::staff_statements(
+            &state.db,
+            lead_id,
+            identification.to_json(),
+            statements_visible,
+            medical,
+        )
+        .await
+        {
+            Ok(loaded) => loaded,
+            Err(error) => return internal(error, "load statements"),
+        };
     Json(json!({
         "lead_id": lead_id,
         "fill_mode": fill_mode,
@@ -4407,15 +4940,16 @@ async fn get_lead_portal_intake(
         "consents": consent_items,
         "uploads": upload_items,
         "uploads_hidden": !medical,
-        "identification": identification.to_json(),
+        "identification": identification_json,
         "identification_updated_at": identification_updated_at,
+        "patient_request_reason": patient_request_reason,
         "identification_hidden": !statements_visible,
         "identity_documents": identity_documents,
         "representation": representation,
         "representation_updated_at": representation_updated_at,
         "billing": billing,
         "billing_updated_at": billing_updated_at,
-        "self_funds": self_funds,
+        "enhanced_details": enhanced_details,
         "payer_link": payer_link,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
@@ -5170,27 +5704,22 @@ mod tests {
                 false,
                 representation(),
                 PaymentRouteBy::Patient,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             ),
+            // Staff enter the identity data, the payment route is block C and
+            // the high-risk question is gone (trigger flow 2026-10-07).
             vec![
                 "payer_kind",
                 "birth_place",
                 "birth_country",
-                "id_document_type",
-                "id_document_number",
-                "id_issuing_authority",
-                "id_issuing_country",
-                "id_valid_until",
                 "id_document_upload",
                 "has_representative",
                 "payer_own_account",
                 "invoice_to",
-                "payment_method",
-                "via_third_party",
                 "pep_self",
                 "pep_related",
-                "high_risk_country",
                 "sanctions_links"
             ]
         );
@@ -5223,7 +5752,8 @@ mod tests {
             ..Default::default()
         };
         // The third party answers the payment route itself: of the billing
-        // only where the invoice goes is asked here.
+        // only where the invoice goes is asked here. Its e-mail, phone and
+        // residence follow the payer's other keys (owner request 2026-10-07).
         assert_eq!(
             missing_for_submit(
                 &data,
@@ -5232,20 +5762,20 @@ mod tests {
                 true,
                 Vec::new(),
                 PaymentRouteBy::Payer,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             ),
             vec![
                 "payer_relationship_kind",
                 "payer_contact_consent",
                 "payer_cost_estimate_consent",
-                "id_valid_until",
+                "payer_email",
+                "payer_phone",
+                "payer_country",
+                "payer_city",
                 "payer_beneficial_owner",
-                "invoice_to",
-                "pep_self_details",
-                "high_risk_country_code",
-                "sanctions_links_details",
-                "payment_background"
+                "invoice_to"
             ]
         );
 
@@ -5254,17 +5784,22 @@ mod tests {
             pep_self: Some(false),
             high_risk_country: Some(false),
             sanctions_links: Some(false),
-            payment_background: Some("Mein Onkel zahlt.".into()),
             ..stated
         };
         let payer = lead_payer::Declaration {
             beneficial_owner_name: Some("Viktor Zahler".into()),
-            relationship_kind: Some("relative".into()),
+            relationship_kind: Some("parent".into()),
             contact_consent_at: Some(Utc::now()),
             cost_estimate_consent_at: Some(Utc::now()),
             invoice_to: Some("payer".into()),
+            email: Some("viktor@example.com".into()),
+            phone: Some("+43 1 234".into()),
+            country: Some("AT".into()),
+            city: Some("Wien".into()),
             ..payer
         };
+        // Without the extra step nothing more is asked — neither the source
+        // of funds nor why another person pays.
         assert!(
             missing_for_submit(
                 &data,
@@ -5273,24 +5808,53 @@ mod tests {
                 true,
                 Vec::new(),
                 PaymentRouteBy::Payer,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             )
             .is_empty()
         );
-        // A paying parent is asked for the route like the patient.
+        // A paying parent is asked for the route like the patient; the own
+        // contact data are known (the parent's own row).
+        let unreachable = lead_payer::Declaration {
+            email: None,
+            phone: None,
+            city: None,
+            ..payer.clone()
+        };
         assert_eq!(
             missing_for_submit(
                 &data,
-                Some(&payer),
+                Some(&unreachable),
                 &complete,
                 true,
                 Vec::new(),
                 PaymentRouteBy::Guardian,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             ),
-            vec!["payment_method", "via_third_party"]
+            // The payment route is block C of the follow-up now.
+            Vec::<String>::new()
+        );
+        // Known otherwise (a paying parent with a login, the payer answered
+        // on the own link): not asked of the lead's login either.
+        assert_eq!(
+            missing_for_submit(
+                &data,
+                Some(&unreachable),
+                &complete,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                ExtraState {
+                    payer_contact_known: true,
+                    ..ExtraState::default()
+                },
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
+            ),
+            Vec::<String>::new()
         );
         // The paying parent is the payer: no consent to contact somebody
         // else or to pass the cost estimate on is asked of that login; the
@@ -5312,8 +5876,9 @@ mod tests {
                 true,
                 Vec::new(),
                 PaymentRouteBy::Guardian,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             )
             .is_empty()
         );
@@ -5325,46 +5890,66 @@ mod tests {
                 true,
                 Vec::new(),
                 PaymentRouteBy::Payer,
-                SelfFundsProof::default(),
-                today()
+                ExtraState::default(),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             ),
             vec!["payer_contact_consent", "payer_cost_estimate_consent"]
         );
-        // Nor why "another person" pays (QA 2026-10-06, B4): that login is
-        // the one who pays. The lead's own login is still asked.
-        let without_background = Identification {
-            payment_background: None,
-            ..complete
+        // With the extra step, why another person pays is its first
+        // question; the paying parent in the own login is never asked it.
+        let triggered = |route_by| ExtraState {
+            questions: ExtraQuestions::of(true, Some(&without_consent), route_by, false),
+            ..ExtraState::default()
         };
-        assert!(
+        assert_eq!(
             missing_for_submit(
                 &data,
                 Some(&without_consent),
-                &without_background,
+                &complete,
                 true,
                 Vec::new(),
                 PaymentRouteBy::Guardian,
-                SelfFundsProof::default(),
-                today()
-            )
-            .is_empty()
+                triggered(PaymentRouteBy::Guardian),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
+            ),
+            // The extra step's questions are follow-up blocks now.
+            Vec::<String>::new()
         );
         assert_eq!(
             missing_for_submit(
                 &data,
                 Some(&without_consent),
-                &without_background,
+                &complete,
                 true,
                 Vec::new(),
                 PaymentRouteBy::Payer,
-                SelfFundsProof::default(),
-                today()
+                triggered(PaymentRouteBy::Payer),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             ),
-            vec![
-                "payer_contact_consent",
-                "payer_cost_estimate_consent",
-                "payment_background"
-            ]
+            vec!["payer_contact_consent", "payer_cost_estimate_consent"]
+        );
+        let answered = Identification {
+            payment_background: Some("Mein Vater unterstützt mich.".into()),
+            occupation: Some("Lehrerin".into()),
+            sector: Some("Bildung".into()),
+            ..complete
+        };
+        assert_eq!(
+            missing_for_submit(
+                &data,
+                Some(&without_consent),
+                &answered,
+                true,
+                Vec::new(),
+                PaymentRouteBy::Payer,
+                triggered(PaymentRouteBy::Payer),
+                today(),
+                &crate::risk::cabinet::BaseExtra::default(),
+            ),
+            vec!["payer_contact_consent", "payer_cost_estimate_consent"]
         );
     }
 
@@ -5628,11 +6213,11 @@ mod tests {
     }
 
     #[test]
-    fn a_self_payer_states_the_source_of_funds_after_the_own_interest() {
+    fn the_extra_step_asks_the_funds_of_a_self_payer_only_with_the_triggers() {
         let mut data = anna();
         data.date_of_birth = NaiveDate::from_ymd_opt(1988, 5, 1);
         data.legal_sex = Some("female".into());
-        data.citizenships = vec!["UA".into()];
+        data.citizenships = vec!["KP".into()];
         data.street_address = Some("Musterweg 1".into());
         data.zip_code = Some("10115".into());
         data.city = Some("Berlin".into());
@@ -5660,75 +6245,252 @@ mod tests {
             via_third_party: Some(false),
             ..Default::default()
         };
-        let missing = |payer: &lead_payer::Declaration, proof: SelfFundsProof| {
+        let missing = |payer: &lead_payer::Declaration,
+                       statements: &Identification,
+                       triggers: bool,
+                       uploaded: bool| {
             missing_for_submit(
                 &data,
                 Some(payer),
-                &complete,
+                statements,
                 true,
                 Vec::new(),
                 PaymentRouteBy::Patient,
-                proof,
+                ExtraState {
+                    questions: ExtraQuestions::of(
+                        triggers,
+                        Some(payer),
+                        PaymentRouteBy::Patient,
+                        false,
+                    ),
+                    funds_proof_uploaded: uploaded,
+                    payer_contact_known: false,
+                },
                 today(),
+                &crate::risk::cabinet::BaseExtra::default(),
             )
         };
-        let required = SelfFundsProof {
-            required: true,
-            uploaded: false,
-        };
-        // The source is always asked of a self-payer, the proof only while
-        // the enhanced check is required.
-        assert_eq!(
-            missing(&own, SelfFundsProof::default()),
-            ["self_funds_sources"]
-        );
-        assert_eq!(
-            missing(&own, required),
-            ["self_funds_sources", "self_funds_proof_upload"]
-        );
+        // Without triggers a self-payer is asked nothing more.
+        assert!(missing(&own, &complete, false, false).is_empty());
+        assert!(!ExtraQuestions::of(false, Some(&own), PaymentRouteBy::Patient, false).required);
+        // With them the questions are follow-up block A (`risk::store`): the
+        // base form asks nothing more either.
+        assert!(missing(&own, &complete, true, false).is_empty());
         let stated = lead_payer::Declaration {
-            self_funds_sources: vec!["savings".into(), "other".into()],
+            self_funds_source: Some("income".into()),
+            self_funds_description: Some("Gehalt als Lehrerin".into()),
             ..own.clone()
         };
-        assert_eq!(
-            missing(&stated, required),
-            ["self_funds_description", "self_funds_proof_upload"]
-        );
-        let described = lead_payer::Declaration {
-            self_funds_description: Some("Stipendium".into()),
-            ..stated
+        let profile = Identification {
+            occupation: Some("Lehrerin".into()),
+            sector: Some("Bildung".into()),
+            ..complete.clone()
         };
-        assert!(missing(&described, SelfFundsProof::default()).is_empty());
-        assert!(
-            missing(
-                &described,
-                SelfFundsProof {
-                    required: true,
-                    uploaded: true
+        assert!(missing(&stated, &profile, true, false).is_empty());
+        // The extra step's own list (the staff view) still names them.
+        let undescribed = lead_payer::Declaration {
+            self_funds_description: None,
+            ..stated.clone()
+        };
+        assert_eq!(
+            missing_extra(
+                Some(&undescribed),
+                &profile,
+                ExtraState {
+                    questions: ExtraQuestions::of(
+                        true,
+                        Some(&undescribed),
+                        PaymentRouteBy::Patient,
+                        false
+                    ),
+                    funds_proof_uploaded: true,
+                    payer_contact_known: false,
                 }
-            )
-            .is_empty()
+            ),
+            ["enhanced_funds_description"]
         );
-        // After the own-interest question, before where the invoice goes.
-        let unanswered = lead_payer::Declaration {
-            own_account_answered: false,
-            invoice_to: None,
-            ..own
-        };
+        // The cabinet learns which questions are asked, never why.
+        let shown = ExtraQuestions::of(true, Some(&own), PaymentRouteBy::Patient, false).to_json();
+        assert_eq!(shown["required"], true);
+        assert_eq!(shown["asks"]["funds"], true);
+        assert_eq!(shown["asks"]["funds_proof"], true);
+        assert_eq!(shown["asks"]["payment_background"], false);
         assert_eq!(
-            missing(&unanswered, required),
-            [
-                "payer_own_account",
-                "self_funds_sources",
-                "self_funds_proof_upload",
-                "invoice_to"
-            ]
+            shown["funds_source_options"],
+            json!([
+                "income",
+                "savings",
+                "asset_sale",
+                "inheritance_gift",
+                "other"
+            ])
         );
+        let text = shown.to_string();
+        for word in ["reason", "countr", "sanction", "blacklist", "KP"] {
+            assert!(!text.contains(word), "{word}");
+        }
         assert_eq!(UploadKind::SelfFundsProof.as_str(), "self_funds_proof");
         assert_eq!(
             UploadKind::SelfFundsProof.consent(),
             Some(ConsentPurpose::InquiryProcessing)
         );
         assert!(!UploadKind::SelfFundsProof.of_representative());
+    }
+
+    #[test]
+    fn a_payer_outside_the_first_circle_opens_the_extra_step_without_triggers() {
+        let person = |kind: &str| lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some(lead_payer::PAYER_TYPE_PERSON.into()),
+            first_name: Some("Mia".into()),
+            last_name: Some("Muster".into()),
+            relationship_kind: Some(kind.into()),
+            ..Default::default()
+        };
+        let route = PaymentRouteBy::Payer;
+        // First circle without triggers: no step.
+        for kind in ["spouse", "parent", "child"] {
+            let questions = ExtraQuestions::of(false, Some(&person(kind)), route, false);
+            assert_eq!(questions, ExtraQuestions::default(), "{kind}");
+        }
+        // A sister, a friend, a company: why and what the patient knows of
+        // the payer's funds; no upload, no profession, no sector.
+        let company = lead_payer::Declaration {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            ..person("employer")
+        };
+        for payer in [person("sibling"), person("friend"), company] {
+            let questions = ExtraQuestions::of(false, Some(&payer), route, false);
+            assert!(questions.required);
+            assert!(!questions.check_required);
+            assert!(questions.payment_background && questions.payer_funds);
+            assert!(!questions.funds && !questions.occupation && !questions.sector);
+            assert!(!questions.payer_states_funds);
+            let missing = missing_extra(
+                Some(&payer),
+                &Identification::default(),
+                ExtraState {
+                    questions,
+                    ..ExtraState::default()
+                },
+            );
+            assert_eq!(
+                missing,
+                [
+                    "enhanced_payment_background",
+                    "enhanced_payer_funds_source",
+                    "enhanced_payer_funds_description"
+                ]
+            );
+        }
+        // Answered: nothing open.
+        let sister = lead_payer::Declaration {
+            payer_funds_source_stated: Some("savings".into()),
+            payer_funds_description_stated: Some("Ersparnisse aus ihrem Gehalt".into()),
+            ..person("sibling")
+        };
+        let questions = ExtraQuestions::of(false, Some(&sister), route, false);
+        let why = Identification {
+            payment_background: Some("Meine Schwester hilft mir.".into()),
+            ..Default::default()
+        };
+        assert!(
+            missing_extra(
+                Some(&sister),
+                &why,
+                ExtraState {
+                    questions,
+                    ..ExtraState::default()
+                }
+            )
+            .is_empty()
+        );
+        // The payer answered on the own link: the patient's guess is not
+        // asked any more, the "why" still is.
+        let answered = ExtraQuestions::of(false, Some(&sister), route, true);
+        assert!(answered.payment_background && !answered.payer_funds);
+        // With triggers: both and profession, sector, the note on the
+        // payer's own proofs.
+        let full = ExtraQuestions::of(true, Some(&person("grandparent")), route, false);
+        assert!(full.payment_background && full.payer_funds && full.payer_states_funds);
+        assert!(full.occupation && full.sector && !full.funds);
+        assert_eq!(
+            missing_extra(
+                Some(&person("grandparent")),
+                &Identification::default(),
+                ExtraState {
+                    questions: full,
+                    ..ExtraState::default()
+                }
+            ),
+            [
+                "enhanced_payment_background",
+                "enhanced_payer_funds_source",
+                "enhanced_payer_funds_description",
+                "enhanced_occupation",
+                "enhanced_sector"
+            ]
+        );
+        // A first-circle payer with triggers: why, profession, sector.
+        let parent = ExtraQuestions::of(true, Some(&person("parent")), route, false);
+        assert!(parent.payment_background && !parent.payer_funds);
+        // The paying parent in the own login is first circle: only the
+        // sector (the profession is in the own payer section).
+        let own_login = ExtraQuestions::of(
+            true,
+            Some(&person("parent")),
+            PaymentRouteBy::Guardian,
+            false,
+        );
+        assert!(own_login.sector && !own_login.occupation);
+        assert!(!own_login.payment_background && !own_login.payer_funds);
+        assert!(
+            !ExtraQuestions::of(
+                false,
+                Some(&person("friend")),
+                PaymentRouteBy::Guardian,
+                false
+            )
+            .required
+        );
+    }
+
+    fn enhanced_patch(body: Value) -> Result<EnhancedDetailsPatch, serde_json::Error> {
+        serde_json::from_value(body)
+    }
+
+    #[test]
+    fn the_extra_steps_profile_is_validated_and_names_the_changed_keys() {
+        let current = Identification::default();
+        let patch = enhanced_patch(json!({
+            "occupation": "  Lehrerin ",
+            "sector": "Bildung",
+            "funds_source": "income"
+        }))
+        .unwrap();
+        let (next, changed) = apply_profile_patch(&current, &patch).unwrap();
+        assert_eq!(next.occupation.as_deref(), Some("Lehrerin"));
+        assert_eq!(next.sector.as_deref(), Some("Bildung"));
+        assert_eq!(changed, ["occupation", "sector"]);
+        assert_eq!(patch.funds().funds_source, Some(Some("income".to_string())));
+        // `null` clears, a value over 200 characters is refused.
+        let (cleared, changed) =
+            apply_profile_patch(&next, &enhanced_patch(json!({ "sector": null })).unwrap())
+                .unwrap();
+        assert_eq!(cleared.sector, None);
+        assert_eq!(changed, ["sector"]);
+        let too_long = enhanced_patch(json!({ "occupation": "x".repeat(201) })).unwrap();
+        assert_eq!(
+            apply_profile_patch(&current, &too_long).unwrap_err().field,
+            "occupation"
+        );
+        // Unknown keys (the old list key above all) are refused.
+        assert!(enhanced_patch(json!({ "self_funds_sources": ["savings"] })).is_err());
+        assert!(enhanced_patch(json!({ "occupation": 5 })).is_err());
+        // Profession and sector are no statement of the identification
+        // route and do not change its marker.
+        assert_eq!(current.marker_value(), next.marker_value());
+        assert!(!IDENTIFICATION_FIELDS.contains(&"occupation"));
     }
 }

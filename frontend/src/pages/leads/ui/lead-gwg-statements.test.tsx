@@ -735,61 +735,151 @@ describe("LeadGwgStatements: the payer's answers", () => {
   });
 });
 
-describe("LeadGwgStatements: the self-payer's source of funds", () => {
-  const selfFunds = (patch: Record<string, unknown> = {}) => ({
-    asked: true,
-    sources: ["employment", "other"],
-    description: "Stipendium der Stiftung",
-    proof_required: false,
-    proof_documents: [{ id: "doc-7", file_name: "gehaltsnachweis.pdf", uploaded_at: "2026-10-07T08:00:00Z", reviewed: false }],
+describe("LeadGwgStatements: the extra step «Дополнительные сведения»", () => {
+  const details = (patch: Record<string, unknown> = {}, answers: Record<string, unknown> = {}, asks: Record<string, unknown> = {}) => ({
+    required: true,
+    check_required: false,
+    asks: {
+      payment_background: false,
+      payer_funds: false,
+      funds: true,
+      occupation: true,
+      sector: true,
+      funds_proof: false,
+      payer_states_funds: false,
+      ...asks,
+    },
+    answers: {
+      funds_source: "income",
+      funds_description: "Gehalt als Ingenieurin",
+      payer_funds_source: null,
+      payer_funds_description: null,
+      occupation: "Ingenieurin",
+      sector: "Maschinenbau",
+      ...answers,
+    },
+    funds_proof_documents: [{ id: "doc-7", file_name: "gehaltsnachweis.pdf", uploaded_at: "2026-10-07T08:00:00Z", reviewed: false }],
     updated_at: "2026-10-07T08:05:00Z",
     ...patch,
   });
 
-  it("lists the sources, the words and the proof after the economic interest", () => {
-    const html = render(portalState({ self_funds: selfFunds() }));
-    const group = part(html, "lead-gwg-self-funds", "</dl>");
-    expect(group).toContain("Происхождение средств (пациент платит сам)");
+  it("lists the source, the words, profession, sector and the proof after the economic interest", () => {
+    const html = render(portalState({ enhanced_details: details() }));
+    const group = part(html, "lead-gwg-enhanced-details", "</dl>");
+    expect(group).toContain("Дополнительные сведения");
     expect(group).toContain("от пациента · 07.10.2026 10:05");
-    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Заработная плата / работа по найму, Другое");
-    expect(statement(html, "lead-gwg-self-funds-description")).toContain("Stipendium der Stiftung");
+    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Доход");
+    expect(statement(html, "lead-gwg-self-funds-description")).toContain("Gehalt als Ingenieurin");
+    expect(statement(html, "lead-gwg-enhanced-occupation")).toContain("Ingenieurin");
+    expect(statement(html, "lead-gwg-enhanced-sector")).toContain("Maschinenbau");
     const proof = statement(html, "lead-gwg-self-funds-proof");
     expect(proof).toContain("Подтверждение источника средств · необязательно");
     expect(proof).toContain("gehaltsnachweis.pdf");
-    expect(proof).not.toContain('data-warning="true"');
     expect(html).not.toContain("lead-self-funds-proof-missing");
-    expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf("lead-gwg-self-funds"));
+    expect(html.indexOf("lead-gwg-own-account")).toBeLessThan(html.indexOf("lead-gwg-enhanced-details"));
     expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
   });
 
   it("warns in amber while the enhanced check requires the proof and none is uploaded", () => {
-    const html = render(portalState({ self_funds: selfFunds({ proof_required: true, proof_documents: [] }) }), undefined, "de");
+    const html = render(
+      portalState({ enhanced_details: details({ check_required: true, funds_proof_documents: [] }, {}, { funds_proof: true }) }),
+      undefined,
+      "de",
+    );
     expect(statement(html, "lead-gwg-self-funds-proof")).toContain('data-warning="true"');
     expect(statement(html, "lead-gwg-self-funds-proof")).toContain("Nachweis der Mittelherkunft · erforderlich");
     expect(part(html, "lead-self-funds-proof-missing", "</p>")).toContain(
       "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
     );
-    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Gehalt / nichtselbständige Arbeit, Sonstiges");
+    expect(html).toContain("verstärkte Prüfung erforderlich");
+    expect(statement(html, "lead-gwg-self-funds-sources")).toContain("Einkommen");
   });
 
-  it("shows nothing of it while a third party pays and no file is on record, and the files when one is", () => {
-    const none = render(portalState({ self_funds: selfFunds({ asked: false, sources: [], description: null, proof_documents: [] }) }));
-    expect(none).not.toContain("lead-gwg-self-funds");
-    const kept = render(portalState({ self_funds: selfFunds({ asked: false, sources: [], description: null, proof_required: true }) }));
-    expect(statement(kept, "lead-gwg-self-funds-proof")).toContain("gehaltsnachweis.pdf");
-    expect(kept).not.toContain("lead-self-funds-proof-missing");
-  });
-
-  it("counts as a statement of the lead on its own", () => {
+  it("shows what the patient knows of a third party's funds as the patient's words", () => {
     const html = render(
       portalState({
-        identification: {},
-        identification_updated_at: null,
-        identity_documents: [],
-        self_funds: selfFunds({ proof_documents: [] }),
+        enhanced_details: details(
+          { funds_proof_documents: [] },
+          { funds_source: null, funds_description: null, payer_funds_source: "savings", payer_funds_description: "Rente meines Bruders" },
+          { funds: false, payer_funds: true, payer_states_funds: true, occupation: false, sector: false },
+        ),
       }),
     );
-    expect(html).not.toContain("lead-gwg-statements-empty");
-    expect(html).toContain("lead-gwg-self-funds");
+    const payerFunds = statement(html, "lead-gwg-enhanced-payer-funds");
+    expect(payerFunds).toContain("Средства плательщика — со слов пациента");
+    expect(payerFunds).toContain("Сбережения");
+    expect(payerFunds).toContain("Rente meines Bruders");
+    expect(html).toContain("lead-gwg-enhanced-payer-states-funds");
+    // No own funds asked or answered: no proof row, no amber line.
+    expect(html).not.toContain("lead-gwg-self-funds-proof");
+    expect(html).not.toContain("lead-self-funds-proof-missing");
+  });
+
+  it("shows nothing while the step is not asked and nothing was answered, and counts answers on their own", () => {
+    const none = render(
+      portalState({
+        enhanced_details: details(
+          { required: false, funds_proof_documents: [], updated_at: null },
+          { funds_source: null, funds_description: null, occupation: null, sector: null },
+          { funds: false, occupation: false, sector: false },
+        ),
+      }),
+    );
+    expect(none).not.toContain("lead-gwg-enhanced-details");
+    const alone = render(
+      portalState({ identification: {}, identification_updated_at: null, identity_documents: [], enhanced_details: details() }),
+    );
+    expect(alone).not.toContain("lead-gwg-statements-empty");
+    expect(alone).toContain("lead-gwg-enhanced-details");
   });
 });
+
+describe("LeadGwgStatements: trigger flow additions", () => {
+  it("labels the identity document data with the staff member who entered them", () => {
+    const html = render(
+      portalState({
+        identification: {
+          id_document_type: "passport",
+          id_document_number: "FA1234567",
+          id_valid_until: "2031-04-30",
+          id_document_unreadable: true,
+          id_data_entered_by_name: "Ben Muster",
+          id_data_entered_at: "2026-10-07T10:00:00Z",
+        },
+      }),
+      undefined,
+      "de",
+    );
+    const line = part(html, "lead-gwg-id-entered-by", "</p>");
+    expect(line).toContain("Erfasst von: Ben Muster · 07.10.2026 12:00");
+    expect(line).toContain("Ausweis unleserlich");
+  });
+
+  it("shows the follow-up answers F, B, H and J only when given", () => {
+    const html = render(
+      portalState({
+        identification: {
+          residence_since: "2019",
+          former_citizenships: ["ru"],
+          stay_reason: "work",
+          stay_reason_details: "Projekt in Wien",
+          relationship_since: "2010",
+          pep_office: "Bürgermeister",
+          pep_country: "at",
+          sanctions_link_name: "Beispiel GmbH",
+          sanctions_link_kind: "business",
+        },
+      }),
+    );
+    expect(statement(html, "lead-gwg-residence-since")).toContain("2019");
+    expect(html).toContain("Россия");
+    expect(html).toContain("работа — Projekt in Wien");
+    expect(statement(html, "lead-gwg-relationship-since")).toContain("2010");
+    expect(statement(html, "lead-gwg-pep-office")).toContain("Bürgermeister");
+    expect(html).toContain("Австрия");
+    expect(statement(html, "lead-gwg-sanctions-link-name")).toContain("Beispiel GmbH");
+    expect(html).toContain("деловая");
+    expect(render(portalState())).not.toContain("lead-gwg-follow-up-answers");
+  });
+});
+

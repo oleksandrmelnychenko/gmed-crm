@@ -46,16 +46,26 @@
 //! person are compliance flags for staff ([`Declaration::payment_route_flags`]);
 //! they block nothing.
 //!
-//! A patient who pays himself states the source of the funds in the cabinet
-//! too (owner request 2026-10-05, "proof of income"): the sources of the
-//! person list ([`SOURCE_OF_FUNDS`]) and a description
-//! (`self_funds_sources`, `self_funds_description`), patched with
-//! [`save_self_funds_from_portal`] and kept by every other save
-//! ([`Declaration::carry_self_funds`]) while the patient pays. The proof is a
-//! portal upload (`self_funds_proof`), required only while the enhanced check
-//! is required ([`portal_missing_self_funds`]). The lead's statement counts
-//! for the source of funds of the declaration as well as staff's
-//! ([`Declaration::source_of_funds_stated`]).
+//! The extra step of the cabinet ("Zusätzliche Angaben", owner requests
+//! 2026-10-07) asks two statements that live on this row, patched with
+//! [`save_funds_from_portal`]:
+//! - a patient who pays himself states the source of the funds while the
+//!   enhanced check is required: one choice of [`STATED_FUNDS_SOURCES`] and a
+//!   description (`self_funds_source`, `self_funds_description`), kept by
+//!   every other save while the patient pays ([`Declaration::carry_self_funds`]);
+//!   the proof is a portal upload (`self_funds_proof`). The lead's statement
+//!   counts for the source of funds of the declaration as well as staff's
+//!   ([`Declaration::source_of_funds_stated`]);
+//! - for a third party outside the first circle ([`outside_first_circle`])
+//!   the patient says what he knows of the payer's funds
+//!   (`payer_funds_source_stated`, `payer_funds_description_stated`): the
+//!   patient's words, never the payer's declaration; they belong to the payer
+//!   named ([`Declaration::carry_payer_funds_stated`]).
+//!
+//! A third-party payer's basic data in the cabinet (owner request 2026-10-07):
+//! besides the name and citizenships the e-mail, the phone and the residence
+//! (country and city) are required ([`portal_missing_contact`]); a messenger
+//! or WhatsApp number (`messenger`) is optional.
 
 use axum::{
     Json, Router,
@@ -96,6 +106,8 @@ pub const RELATIONSHIP_KINDS: &[&str] = &[
     "spouse",
     "parent",
     "child",
+    "sibling",
+    "grandparent",
     "relative",
     "employer",
     "friend",
@@ -103,6 +115,11 @@ pub const RELATIONSHIP_KINDS: &[&str] = &[
     RELATIONSHIP_KIND_OTHER,
 ];
 const RELATIONSHIP_KIND_OTHER: &str = "other";
+
+/// The first circle of relatives (owner rule 2026-10-07): a spouse, a parent
+/// or a child of the patient. Any other person, and any company,
+/// organisation or insurer, is outside it.
+pub const FIRST_CIRCLE_RELATIONSHIPS: &[&str] = &["spouse", "parent", "child"];
 
 /// Categories of the source of funds (Herkunft der Mittel).
 pub const SOURCE_OF_FUNDS: &[&str] = &[
@@ -113,6 +130,47 @@ pub const SOURCE_OF_FUNDS: &[&str] = &[
     "inheritance_gift",
     "other",
 ];
+
+/// The one choice of the cabinet's extra step for the source of funds
+/// (owner request 2026-10-07): Einkommen, Ersparnisse, Verkauf von
+/// Vermögenswerten, Erbschaft, Sonstiges — of the self-payer's own funds and
+/// of what the patient knows of a third party's funds.
+pub const STATED_FUNDS_SOURCES: &[&str] = &[
+    "income",
+    "savings",
+    "asset_sale",
+    "inheritance_gift",
+    "other",
+];
+
+/// The German label of a source of the extra step, for the documents.
+pub(crate) fn stated_funds_source_label(source: &str) -> &str {
+    match source {
+        "income" => "Einkommen",
+        "savings" => "Ersparnisse",
+        "asset_sale" => "Verkauf von Vermögenswerten",
+        "inheritance_gift" => "Erbschaft",
+        "other" => "Sonstiges",
+        other => other,
+    }
+}
+
+/// Whether a third-party payer is outside the first circle (owner rule
+/// 2026-10-07): a company, an organisation or an insurer, or a person whose
+/// relationship is not spouse, parent or child. A person whose relationship
+/// is not stated yet is not (the cabinet asks it first); a self-payer never.
+pub(crate) fn outside_first_circle(declaration: Option<&Declaration>) -> bool {
+    let Some(declaration) = declaration.filter(|declaration| declaration.is_third_party()) else {
+        return false;
+    };
+    if declaration.is_organisation() {
+        return true;
+    }
+    declaration
+        .relationship_kind
+        .as_deref()
+        .is_some_and(|kind| !FIRST_CIRCLE_RELATIONSHIPS.contains(&kind))
+}
 
 /// Where the invoice goes (`invoice_to`, section 7): to the patient, to the
 /// declared third party (only with one) or to the patient at another address.
@@ -197,6 +255,9 @@ pub(crate) struct Declaration {
     pub relationship: Option<String>,
     pub email: Option<String>,
     pub phone: Option<String>,
+    /// A messenger / WhatsApp number of the third party (owner request
+    /// 2026-10-07); optional, cleared with another payer.
+    pub messenger: Option<String>,
     /// Staff confirmed that the payer was informed about the processing of
     /// the payer's data (Art. 14 DSGVO: the data come from the patient side).
     pub payer_informed_at: Option<DateTime<Utc>>,
@@ -249,28 +310,33 @@ pub(crate) struct Declaration {
     /// ([`Declaration::carry_identity_adoption`]); another payer clears them.
     pub identity_adopted_at: Option<DateTime<Utc>>,
     pub identity_adopted_key: Option<Value>,
-    /// The self-payer's own statement in the cabinet: the sources of the
-    /// funds ([`SOURCE_OF_FUNDS`], form order) and a description (required
-    /// with `other`). Only the cabinet writes them; empty for a third party.
-    pub self_funds_sources: Vec<String>,
+    /// The self-payer's own statement in the cabinet's extra step: one source
+    /// of the funds ([`STATED_FUNDS_SOURCES`]) and a description. Only the
+    /// cabinet writes them; empty for a third party.
+    pub self_funds_source: Option<String>,
     pub self_funds_description: Option<String>,
+    /// What the patient knows of a third party's funds (outside the first
+    /// circle): one of [`STATED_FUNDS_SOURCES`] and a description. The
+    /// patient's words, not the payer's; empty for a self-payer.
+    pub payer_funds_source_stated: Option<String>,
+    pub payer_funds_description_stated: Option<String>,
 }
 
 const DECLARATION_COLUMNS: &str = "payer_kind, acts_on_own_account, own_account_answered, \
      beneficial_owner_name, beneficial_owner_note, source_of_funds, source_of_funds_description, \
      source_of_funds_document_id, payer_type, organisation_name, first_name, last_name, \
      date_of_birth, place_of_birth, street, zip, city, country, citizenships, \
-     relationship_kind, relationship, email, phone, payer_informed_at, payer_informed_by, \
-     contact_consent_at, invoice_to, invoice_name, invoice_street, invoice_zip, invoice_city, \
-     invoice_country, invoice_email, invoice_vat_id, invoice_tax_number, payment_method, \
-     payment_method_details, account_country, account_holder, bank_name, via_third_party, \
-     via_third_party_details, identity_adopted_at, identity_adopted_key, identity_changed_at, \
-     cost_estimate_consent_at, self_funds_sources, self_funds_description, patient_id, \
-     created_at, updated_at";
+     relationship_kind, relationship, email, phone, messenger, payer_informed_at, \
+     payer_informed_by, contact_consent_at, invoice_to, invoice_name, invoice_street, \
+     invoice_zip, invoice_city, invoice_country, invoice_email, invoice_vat_id, \
+     invoice_tax_number, payment_method, payment_method_details, account_country, \
+     account_holder, bank_name, via_third_party, via_third_party_details, identity_adopted_at, \
+     identity_adopted_key, identity_changed_at, cost_estimate_consent_at, self_funds_source, \
+     self_funds_description, payer_funds_source_stated, payer_funds_description_stated, \
+     patient_id, created_at, updated_at";
 
-/// The two keys of the self-payer's source of funds the cabinet edits (API
-/// keys = column names = keys of `progress.missing_for_submit`).
-const SELF_FUNDS_PORTAL_FIELDS: [&str; 2] = ["self_funds_sources", "self_funds_description"];
+/// Longest messenger / WhatsApp number (the database checks the same).
+const MESSENGER_MAX: usize = 60;
 
 /// The 14 keys of sections 7 and 8 the cabinet edits (API keys = column
 /// names), in form order; the two tax fields of section 7 are staff's.
@@ -342,6 +408,7 @@ impl Declaration {
             relationship: row.try_get("relationship").unwrap_or_default(),
             email: row.try_get("email").unwrap_or_default(),
             phone: row.try_get("phone").unwrap_or_default(),
+            messenger: row.try_get("messenger").unwrap_or_default(),
             payer_informed_at: row.try_get("payer_informed_at").unwrap_or_default(),
             payer_informed_by: row.try_get("payer_informed_by").unwrap_or_default(),
             contact_consent_at: row.try_get("contact_consent_at").unwrap_or_default(),
@@ -364,12 +431,12 @@ impl Declaration {
             via_third_party_details: row.try_get("via_third_party_details").unwrap_or_default(),
             identity_adopted_at: row.try_get("identity_adopted_at").unwrap_or_default(),
             identity_adopted_key: row.try_get("identity_adopted_key").unwrap_or_default(),
-            self_funds_sources: row
-                .try_get::<Option<Vec<String>>, _>("self_funds_sources")
-                .ok()
-                .flatten()
-                .unwrap_or_default(),
+            self_funds_source: row.try_get("self_funds_source").unwrap_or_default(),
             self_funds_description: row.try_get("self_funds_description").unwrap_or_default(),
+            payer_funds_source_stated: row.try_get("payer_funds_source_stated").unwrap_or_default(),
+            payer_funds_description_stated: row
+                .try_get("payer_funds_description_stated")
+                .unwrap_or_default(),
         }
     }
 
@@ -405,6 +472,8 @@ impl Declaration {
             "spouse" => "Ehepartner/in",
             "parent" => "Elternteil",
             "child" => "Kind",
+            "sibling" => "Bruder/Schwester",
+            "grandparent" => "Großmutter/Großvater",
             "relative" => "Verwandte/r",
             "employer" => "Arbeitgeber",
             "friend" => "Freund/in",
@@ -517,6 +586,7 @@ impl Declaration {
             "relationship": self.relationship,
             "email": self.email,
             "phone": self.phone,
+            "messenger": self.messenger,
             "payer_informed_at": self.payer_informed_at.map(|at| at.to_rfc3339()),
             "payer_informed_by": self.payer_informed_by,
             "contact_consent_at": self.contact_consent_at.map(|at| at.to_rfc3339()),
@@ -541,20 +611,21 @@ impl Declaration {
             // Read-only: set by the payer's own link, kept for the same payer.
             "identity_adopted_at": self.identity_adopted_at.map(|at| at.to_rfc3339()),
             // Read-only: the self-payer's own statement in the cabinet.
-            "self_funds_sources": self.self_funds_sources,
+            "self_funds_source": self.self_funds_source,
             "self_funds_description": self.self_funds_description,
+            // Read-only: what the patient knows of the third party's funds.
+            "payer_funds_source_stated": self.payer_funds_source_stated,
+            "payer_funds_description_stated": self.payer_funds_description_stated,
         })
     }
 
-    /// The self-payer stated the source of the funds in the cabinet: at least
-    /// one source, and the description with `other`.
+    /// The self-payer stated the source of the funds in the cabinet: the
+    /// choice, and the words with `other` (the cabinet asks the words for
+    /// every choice; for staff a described choice is enough).
     pub(crate) fn self_funds_stated(&self) -> bool {
         self.payer_kind == PAYER_KIND_SELF
-            && !self.self_funds_sources.is_empty()
-            && (!self
-                .self_funds_sources
-                .iter()
-                .any(|source| source == "other")
+            && self.self_funds_source.is_some()
+            && (self.self_funds_source.as_deref() != Some("other")
                 || !blank(&self.self_funds_description))
     }
 
@@ -636,6 +707,11 @@ struct DeclarationInput {
     relationship: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    /// Messenger / WhatsApp number (2026-10-07): a key that is left out keeps
+    /// the stored value for the same payer (older clients), `null` or `""`
+    /// clears it.
+    #[serde(default, deserialize_with = "sent")]
+    messenger: Option<Option<String>>,
     /// Staff checkbox: the third-party payer was informed about the
     /// processing of their data. The server records who and when.
     #[serde(default)]
@@ -794,12 +870,21 @@ fn declaration_from_input(
         declaration.relationship_kind = relationship_kind;
         declaration.email = email;
         declaration.phone = text(&input.phone, SHORT_TEXT_MAX)?;
+        // A sent key wins; an absent one keeps the number of the same payer.
+        declaration.messenger = match &input.messenger {
+            Some(value) => text(value, MESSENGER_MAX).map_err(|_| "payer_messenger_too_long")?,
+            None => stored
+                .filter(|stored| stored.payer_key() == declaration.payer_key())
+                .and_then(|stored| stored.messenger.clone()),
+        };
     }
     // The lead's answers of sections 7 and 8 survive the save; staff may set
     // the two tax fields of the invoice recipient.
     declaration.carry_billing(previous);
-    // So does the self-payer's source of funds, while the patient pays.
+    // So does the self-payer's source of funds, while the patient pays, and
+    // what the patient said of the funds of the same third party.
     declaration.carry_self_funds(previous);
+    declaration.carry_payer_funds_stated(previous);
     // So does the record that the payer stated this identity itself.
     declaration.carry_identity_adoption(previous);
     if let Some(value) = &input.invoice_vat_id {
@@ -1888,12 +1973,13 @@ async fn store_declaration(
                invoice_country, invoice_email, invoice_vat_id, invoice_tax_number,
                payment_method, payment_method_details, account_country, account_holder,
                bank_name, via_third_party, via_third_party_details, identity_adopted_at,
-               identity_adopted_key, cost_estimate_consent_at, self_funds_sources,
-               self_funds_description)
+               identity_adopted_key, cost_estimate_consent_at, self_funds_source,
+               self_funds_description, payer_funds_source_stated,
+               payer_funds_description_stated, messenger)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
                    $16, $17, $18, $19, $20, $23, $24, clock_timestamp(), $21, $21, $25,
                    $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39,
-                   $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50)
+                   $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53)
            ON CONFLICT (lead_id) DO UPDATE SET
                payer_kind = EXCLUDED.payer_kind,
                payer_type = EXCLUDED.payer_type,
@@ -1940,8 +2026,11 @@ async fn store_declaration(
                via_third_party_details = EXCLUDED.via_third_party_details,
                identity_adopted_at = EXCLUDED.identity_adopted_at,
                identity_adopted_key = EXCLUDED.identity_adopted_key,
-               self_funds_sources = EXCLUDED.self_funds_sources,
+               self_funds_source = EXCLUDED.self_funds_source,
                self_funds_description = EXCLUDED.self_funds_description,
+               payer_funds_source_stated = EXCLUDED.payer_funds_source_stated,
+               payer_funds_description_stated = EXCLUDED.payer_funds_description_stated,
+               messenger = EXCLUDED.messenger,
                identity_changed_at = CASE WHEN $22 THEN clock_timestamp()
                                           ELSE lead_payer_declarations.identity_changed_at END,
                updated_by = EXCLUDED.updated_by,
@@ -1995,8 +2084,11 @@ async fn store_declaration(
     .bind(declaration.identity_adopted_at)
     .bind(&declaration.identity_adopted_key)
     .bind(declaration.cost_estimate_consent_at)
-    .bind(&declaration.self_funds_sources)
+    .bind(&declaration.self_funds_source)
     .bind(&declaration.self_funds_description)
+    .bind(&declaration.payer_funds_source_stated)
+    .bind(&declaration.payer_funds_description_stated)
+    .bind(&declaration.messenger)
     .execute(conn)
     .await
     .map(|_| ())
@@ -2016,9 +2108,10 @@ async fn store_declaration(
 /// country policy see the payer the moment the cabinet saves it.
 ///
 /// The body is the whole "who pays" answer: a payer field that is left out is
-/// cleared. Only the own-interest answer and the contact consent are kept
-/// when their keys are left out.
-#[derive(Default, Deserialize)]
+/// cleared. Only the own-interest answer, the contact consent and the
+/// messenger number (of the same payer) are kept when their keys are left
+/// out.
+#[derive(Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PortalPayerInput {
     payer_kind: String,
@@ -2040,6 +2133,11 @@ pub(crate) struct PortalPayerInput {
     relationship: Option<String>,
     email: Option<String>,
     phone: Option<String>,
+    /// Messenger / WhatsApp number (2026-10-07). Left out (an older
+    /// cabinet): the stored number of the same payer stays; `null` or `""`
+    /// clears it.
+    #[serde(default, deserialize_with = "sent")]
+    messenger: Option<Option<String>>,
     /// The checkbox "GMED may contact the payer about the costs and tell
     /// them my name": `true` records the consent with the current time unless
     /// one is recorded for this payer, `false` removes it. Left out: the
@@ -2077,6 +2175,7 @@ fn portal_field_of(code: &str) -> &'static str {
         "payer_relationship_kind_invalid" => "payer_relationship_kind",
         "payer_date_of_birth_invalid" => "payer_date_of_birth",
         "payer_email_invalid" => "payer_email",
+        "payer_messenger_too_long" => "payer_messenger",
         "payer_country_invalid" => "payer_country",
         "payer_citizenships_invalid" => "payer_citizenships",
         "payer_beneficial_owner_too_long" => "payer_beneficial_owner",
@@ -2101,7 +2200,7 @@ impl Declaration {
 
     /// The part of the declaration the lead cabinet shows and edits.
     fn portal_json(&self) -> Value {
-        json!({
+        let mut value = json!({
             "payer_kind": self.payer_kind,
             "payer_type": self.payer_type,
             "organisation_name": self.organisation_name,
@@ -2125,7 +2224,13 @@ impl Declaration {
                 .beneficial_owner_name
                 .as_ref()
                 .filter(|_| self.own_account_answered && !self.acts_on_own_account),
-        })
+        });
+        // Only with a number: the "entered by the patient" marker of a row
+        // without one stays what it was before the key existed.
+        if let Some(messenger) = &self.messenger {
+            value["messenger"] = json!(messenger);
+        }
+        value
     }
 }
 
@@ -2202,7 +2307,7 @@ pub(crate) async fn patient_declaration(
 
 /// The payer's identity, address and contact keys of [`portal_payload`] the
 /// lead no longer sees once the payer answered through its own link.
-const PAYER_ANSWERED_HIDDEN_KEYS: [&str; 8] = [
+const PAYER_ANSWERED_HIDDEN_KEYS: [&str; 9] = [
     "date_of_birth",
     "street",
     "zip",
@@ -2211,6 +2316,7 @@ const PAYER_ANSWERED_HIDDEN_KEYS: [&str; 8] = [
     "citizenships",
     "email",
     "phone",
+    "messenger",
 ];
 
 /// The cabinet's view of the declaration; `null` until the question is
@@ -2282,6 +2388,35 @@ pub(crate) fn portal_missing(declaration: Option<&Declaration>) -> Vec<&'static 
         // (phase 3b, owner decision 2026-10-06).
         if declaration.cost_estimate_consent_at.is_none() {
             missing.push("payer_cost_estimate_consent");
+        }
+    }
+    missing
+}
+
+/// The basic contact data of a third party the cabinet needs before sending
+/// (owner request 2026-10-07), after the keys of [`portal_missing`]: a
+/// person's e-mail, phone and residence (country and city; street and ZIP
+/// stay optional, the patient may not know them), an organisation's e-mail
+/// and phone (its seat country is in [`portal_missing`]). The caller leaves
+/// them out where the payer's data are known otherwise: a paying parent with
+/// a cabinet login, or a payer who answered through its own link.
+pub(crate) fn portal_missing_contact(declaration: Option<&Declaration>) -> Vec<&'static str> {
+    let Some(declaration) = declaration.filter(|declaration| declaration.is_third_party()) else {
+        return Vec::new();
+    };
+    let mut missing = Vec::new();
+    if blank(&declaration.email) {
+        missing.push("payer_email");
+    }
+    if blank(&declaration.phone) {
+        missing.push("payer_phone");
+    }
+    if !declaration.is_organisation() {
+        if declaration.country.is_none() {
+            missing.push("payer_country");
+        }
+        if blank(&declaration.city) {
+            missing.push("payer_city");
         }
     }
     missing
@@ -2367,6 +2502,8 @@ fn declaration_from_portal(
         relationship: input.relationship.clone(),
         email: input.email.clone(),
         phone: input.phone.clone(),
+        // Left out by an older cabinet: kept for the same payer.
+        messenger: input.messenger.clone(),
         payer_informed: false,
         // The tax fields of the invoice recipient are staff's: kept as stored.
         invoice_vat_id: None,
@@ -2991,11 +3128,24 @@ impl Declaration {
         let kept = previous.filter(|previous| {
             self.payer_kind == PAYER_KIND_SELF && previous.payer_kind == PAYER_KIND_SELF
         });
-        self.self_funds_sources = kept
-            .map(|previous| previous.self_funds_sources.clone())
-            .unwrap_or_default();
+        self.self_funds_source = kept.and_then(|previous| previous.self_funds_source.clone());
         self.self_funds_description =
             kept.and_then(|previous| previous.self_funds_description.clone());
+    }
+
+    /// What the patient said of a third party's funds survives every save
+    /// that names the same payer; with another payer, or a self-payer, it
+    /// goes like the payer's other data.
+    pub(crate) fn carry_payer_funds_stated(&mut self, previous: Option<&Declaration>) {
+        let kept = previous.filter(|previous| {
+            self.is_third_party()
+                && previous.is_third_party()
+                && previous.payer_key() == self.payer_key()
+        });
+        self.payer_funds_source_stated =
+            kept.and_then(|previous| previous.payer_funds_source_stated.clone());
+        self.payer_funds_description_stated =
+            kept.and_then(|previous| previous.payer_funds_description_stated.clone());
     }
 
     /// The record that the payer stated its identity through its own link
@@ -3382,217 +3532,196 @@ pub(crate) fn portal_missing_billing(
 }
 
 // ----------------------------------------------------------------------------
-// Lead cabinet: the self-payer's source of funds
+// Lead cabinet: the funds questions of the extra step
 // ----------------------------------------------------------------------------
 
-/// Why a save of the self-payer's source of funds was refused.
+/// Why a save of the funds questions of the cabinet's extra step was
+/// refused.
 #[derive(Debug)]
-pub(crate) enum PortalSelfFundsError {
+pub(crate) enum PortalFundsError {
     /// A value the cabinet has to correct (422 `invalid_field`).
     Invalid {
-        field: String,
+        field: &'static str,
         message: &'static str,
     },
     /// Nobody has said who pays yet (409 `payer_not_declared`).
     NotDeclared,
-    /// A third party pays: its source of funds is the payer's own answer
-    /// (409 `payer_not_self`).
+    /// The own source of funds while a third party pays (409
+    /// `payer_not_self`).
     NotSelf,
+    /// What the patient knows of the payer's funds while nobody else pays
+    /// (409 `payer_not_third_party`).
+    NotThirdParty,
     Database(sqlx::Error),
 }
 
-impl From<sqlx::Error> for PortalSelfFundsError {
+impl From<sqlx::Error> for PortalFundsError {
     fn from(error: sqlx::Error) -> Self {
         Self::Database(error)
     }
 }
 
-/// Partial update of the self-payer's source of funds (only the changed
-/// keys): `self_funds_sources` a list of [`SOURCE_OF_FUNDS`] (`null` or `[]`
-/// clears it), `self_funds_description` a text (`null` or `""` clears it).
-/// Unknown keys are refused.
-#[derive(Debug, Default)]
-pub(crate) struct PortalSelfFundsPatch {
-    sources: Option<Vec<String>>,
-    description: Option<Option<String>>,
+/// The funds keys of `POST /me/lead-requests/{id}/enhanced-details`, only
+/// the changed ones (`Some(None)` clears): the self-payer's own source and
+/// description, and what the patient knows of a third party's funds.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PortalFundsPatch {
+    pub funds_source: Option<Option<String>>,
+    pub funds_description: Option<Option<String>>,
+    pub payer_funds_source: Option<Option<String>>,
+    pub payer_funds_description: Option<Option<String>>,
 }
 
-impl PortalSelfFundsPatch {
-    /// Reads the body of the endpoint; the first unknown key or value of the
-    /// wrong type names its field.
-    pub(crate) fn parse(body: &Value) -> Result<Self, PortalSelfFundsError> {
-        let invalid = |field: &str, message: &'static str| PortalSelfFundsError::Invalid {
-            field: field.to_string(),
-            message,
-        };
-        let Some(object) = body.as_object() else {
-            return Err(invalid("body", "A JSON object is expected"));
-        };
-        let mut patch = Self::default();
-        for (key, value) in object {
-            match (key.as_str(), value) {
-                ("self_funds_sources", Value::Null) => patch.sources = Some(Vec::new()),
-                ("self_funds_sources", Value::Array(items)) => {
-                    let mut sources = Vec::with_capacity(items.len());
-                    for item in items {
-                        let Some(source) = item.as_str() else {
-                            return Err(invalid(
-                                "self_funds_sources",
-                                "A list of texts is expected",
-                            ));
-                        };
-                        sources.push(source.trim().to_string());
-                    }
-                    patch.sources = Some(sources);
-                }
-                ("self_funds_sources", _) => {
-                    return Err(invalid("self_funds_sources", "A list of texts is expected"));
-                }
-                ("self_funds_description", Value::Null) => patch.description = Some(None),
-                ("self_funds_description", Value::String(text)) => {
-                    patch.description = Some(Some(text.clone()));
-                }
-                ("self_funds_description", _) => {
-                    return Err(invalid("self_funds_description", "A text is expected"));
-                }
-                (key, _) => return Err(invalid(key, "Unknown field")),
-            }
-        }
-        Ok(patch)
+impl PortalFundsPatch {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.funds_source.is_none()
+            && self.funds_description.is_none()
+            && self.payer_funds_source.is_none()
+            && self.payer_funds_description.is_none()
+    }
+
+    fn touches_own_funds(&self) -> bool {
+        self.funds_source.is_some() || self.funds_description.is_some()
+    }
+
+    fn touches_payer_funds(&self) -> bool {
+        self.payer_funds_source.is_some() || self.payer_funds_description.is_some()
     }
 }
 
-/// Applies the cabinet's patch to the stored declaration of a self-payer:
-/// the sources in form order without duplicates, the description trimmed at
-/// its ends. A source that is not on the person list, or a description over
-/// 2000 characters, is refused with the key it names.
-pub(crate) fn apply_self_funds_patch(
+/// One choice of [`STATED_FUNDS_SOURCES`]; `""` clears it.
+fn stated_source(
+    value: Option<&str>,
+    field: &'static str,
+) -> Result<Option<String>, PortalFundsError> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        None => Ok(None),
+        Some(value) if STATED_FUNDS_SOURCES.contains(&value) => Ok(Some(value.to_string())),
+        Some(_) => Err(PortalFundsError::Invalid {
+            field,
+            message: "Not one of the sources of funds",
+        }),
+    }
+}
+
+/// Applies the cabinet's patch: the choices from [`STATED_FUNDS_SOURCES`],
+/// the descriptions trimmed at their ends and at most 2000 characters. The
+/// own funds belong to a self-payer, the statement about the payer's funds
+/// to a third party.
+pub(crate) fn apply_funds_patch(
     current: &Declaration,
-    patch: &PortalSelfFundsPatch,
-) -> Result<Declaration, PortalSelfFundsError> {
-    let invalid = |field: &str, message: &'static str| PortalSelfFundsError::Invalid {
-        field: field.to_string(),
-        message,
+    patch: &PortalFundsPatch,
+) -> Result<Declaration, PortalFundsError> {
+    if patch.touches_own_funds() && current.payer_kind != PAYER_KIND_SELF {
+        return Err(PortalFundsError::NotSelf);
+    }
+    if patch.touches_payer_funds() && !current.is_third_party() {
+        return Err(PortalFundsError::NotThirdParty);
+    }
+    let long_text = |value: &Option<String>, field: &'static str| {
+        billing_long_text(value.as_deref(), LONG_TEXT_MAX)
+            .map_err(|message| PortalFundsError::Invalid { field, message })
     };
     let mut next = current.clone();
-    if let Some(sources) = &patch.sources {
-        if sources
-            .iter()
-            .any(|source| !SOURCE_OF_FUNDS.contains(&source.as_str()))
-        {
-            return Err(invalid(
-                "self_funds_sources",
-                "Not one of the sources of funds",
-            ));
-        }
-        next.self_funds_sources = SOURCE_OF_FUNDS
-            .iter()
-            .filter(|known| sources.iter().any(|source| source == *known))
-            .map(|known| known.to_string())
-            .collect();
+    if let Some(value) = &patch.funds_source {
+        next.self_funds_source = stated_source(value.as_deref(), "funds_source")?;
     }
-    if let Some(description) = &patch.description {
-        next.self_funds_description = billing_long_text(description.as_deref(), LONG_TEXT_MAX)
-            .map_err(|message| invalid("self_funds_description", message))?;
+    if let Some(value) = &patch.funds_description {
+        next.self_funds_description = long_text(value, "funds_description")?;
+    }
+    if let Some(value) = &patch.payer_funds_source {
+        next.payer_funds_source_stated = stated_source(value.as_deref(), "payer_funds_source")?;
+    }
+    if let Some(value) = &patch.payer_funds_description {
+        next.payer_funds_description_stated = long_text(value, "payer_funds_description")?;
     }
     Ok(next)
 }
 
-/// The keys of the self-payer's source of funds whose value differs.
-fn changed_self_funds_fields(before: &Declaration, after: &Declaration) -> Vec<&'static str> {
+/// The funds keys whose value differs, as the endpoint names them.
+pub(crate) fn changed_funds_fields(before: &Declaration, after: &Declaration) -> Vec<&'static str> {
     let mut changed = Vec::new();
-    if before.self_funds_sources != after.self_funds_sources {
-        changed.push(SELF_FUNDS_PORTAL_FIELDS[0]);
+    if before.self_funds_source != after.self_funds_source {
+        changed.push("funds_source");
     }
     if before.self_funds_description != after.self_funds_description {
-        changed.push(SELF_FUNDS_PORTAL_FIELDS[1]);
+        changed.push("funds_description");
+    }
+    if before.payer_funds_source_stated != after.payer_funds_source_stated {
+        changed.push("payer_funds_source");
+    }
+    if before.payer_funds_description_stated != after.payer_funds_description_stated {
+        changed.push("payer_funds_description");
     }
     changed
 }
 
 impl Declaration {
-    /// Stable text of the self-payer's statement, for the "entered by the
-    /// patient" marker of the lead.
-    pub(crate) fn self_funds_marker_value(&self) -> String {
-        json!([self.self_funds_sources, self.self_funds_description]).to_string()
+    /// The lead's own answer for "Herkunft der eingesetzten Vermögenswerte"
+    /// of the enhanced due-diligence sheet, when staff left it empty: the
+    /// self-payer's choice and words, or what the patient said of a third
+    /// party's funds (marked as the patient's statement).
+    pub(crate) fn stated_asset_origin(&self) -> Option<String> {
+        let line = |source: Option<&String>, words: Option<&String>| {
+            let words = words
+                .map(|words| words.trim())
+                .filter(|words| !words.is_empty());
+            match (source, words) {
+                (Some(source), Some(words)) => {
+                    Some(format!("{}: {words}", stated_funds_source_label(source)))
+                }
+                (Some(source), None) => Some(stated_funds_source_label(source).to_string()),
+                (None, Some(words)) => Some(words.to_string()),
+                (None, None) => None,
+            }
+        };
+        if self.payer_kind == PAYER_KIND_SELF {
+            return line(
+                self.self_funds_source.as_ref(),
+                self.self_funds_description.as_ref(),
+            );
+        }
+        line(
+            self.payer_funds_source_stated.as_ref(),
+            self.payer_funds_description_stated.as_ref(),
+        )
+        .map(|text| format!("{text} (Angabe der Patientin/des Patienten zur zahlenden Person)"))
+    }
+
+    /// Stable text of the funds answers of the extra step, for the "entered
+    /// by the patient" marker of the lead.
+    #[cfg(test)]
+    pub(crate) fn funds_marker_value(&self) -> String {
+        json!([
+            self.self_funds_source,
+            self.self_funds_description,
+            self.payer_funds_source_stated,
+            self.payer_funds_description_stated,
+        ])
+        .to_string()
     }
 }
 
-/// Saves the cabinet's patch of the self-payer's source of funds in the
-/// caller's transaction (the lead is locked by `lock_my_lead`), with the
-/// audit event that names the changed fields, never their values. Returns
-/// the declaration when something changed. Only a declaration that says the
-/// patient pays takes it.
-pub(crate) async fn save_self_funds_from_portal(
+/// Saves the funds answers of the cabinet's extra step in the caller's
+/// transaction (the lead is locked by `lock_my_lead`). Returns the stored
+/// declaration and the changed keys when something changed; the caller
+/// writes the audit event (field names, never values) and the marker.
+pub(crate) async fn save_funds_from_portal(
     conn: &mut PgConnection,
     lead_id: Uuid,
     actor: Uuid,
-    access_kind: &str,
-    patch: &PortalSelfFundsPatch,
-) -> Result<Option<Declaration>, PortalSelfFundsError> {
+    patch: &PortalFundsPatch,
+) -> Result<Option<(Declaration, Vec<&'static str>)>, PortalFundsError> {
     let Some(previous) = load_declaration(conn, lead_id).await? else {
-        return Err(PortalSelfFundsError::NotDeclared);
+        return Err(PortalFundsError::NotDeclared);
     };
-    if previous.payer_kind != PAYER_KIND_SELF {
-        return Err(PortalSelfFundsError::NotSelf);
-    }
-    let next = apply_self_funds_patch(&previous, patch)?;
-    let changed = changed_self_funds_fields(&previous, &next);
+    let next = apply_funds_patch(&previous, patch)?;
+    let changed = changed_funds_fields(&previous, &next);
     if changed.is_empty() {
         return Ok(None);
     }
     store_declaration(conn, lead_id, &next, Some(actor), false).await?;
-    audit::write_in_transaction(
-        conn,
-        &audit::domain_event(
-            "lead_portal_update_self_funds",
-            Some(actor),
-            "lead",
-            Some(lead_id),
-            json!({ "fields": changed, "access_kind": access_kind }),
-        ),
-    )
-    .await?;
-    Ok(Some(next))
-}
-
-/// Whether the self-payer's proof of funds is required, and whether one is
-/// on file (a portal upload `self_funds_proof` of the lead).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct SelfFundsProof {
-    /// The enhanced check of the lead is required (owner rule 2026-10-07).
-    pub required: bool,
-    pub uploaded: bool,
-}
-
-/// What the cabinet still needs of the self-payer's source of funds before
-/// the request can be sent: always the sources and, with `other`, the
-/// description; the proof only while the enhanced check is required. Nothing
-/// while nobody said who pays or a third party pays.
-pub(crate) fn portal_missing_self_funds(
-    declaration: Option<&Declaration>,
-    proof: SelfFundsProof,
-) -> Vec<&'static str> {
-    let Some(declaration) =
-        declaration.filter(|declaration| declaration.payer_kind == PAYER_KIND_SELF)
-    else {
-        return Vec::new();
-    };
-    let mut missing = Vec::new();
-    if declaration.self_funds_sources.is_empty() {
-        missing.push("self_funds_sources");
-    } else if declaration
-        .self_funds_sources
-        .iter()
-        .any(|source| source == "other")
-        && blank(&declaration.self_funds_description)
-    {
-        missing.push("self_funds_description");
-    }
-    if proof.required && !proof.uploaded {
-        missing.push("self_funds_proof_upload");
-    }
-    missing
+    Ok(Some((next, changed)))
 }
 
 #[cfg(test)]
@@ -3624,6 +3753,7 @@ mod tests {
             relationship: Some("Tochter".into()),
             email: Some("erika@example.org".into()),
             phone: None,
+            messenger: None,
             payer_informed: true,
             invoice_vat_id: None,
             invoice_tax_number: None,
@@ -4648,65 +4778,41 @@ mod tests {
         assert_eq!(hidden["payment_route_by"], "payer");
     }
 
-    fn self_funds_patch(body: Value) -> PortalSelfFundsPatch {
-        PortalSelfFundsPatch::parse(&body).unwrap()
-    }
-
-    fn refused_self_funds(result: Result<PortalSelfFundsPatch, PortalSelfFundsError>) -> String {
+    fn refused_funds(result: Result<Declaration, PortalFundsError>) -> &'static str {
         match result {
-            Err(PortalSelfFundsError::Invalid { field, .. }) => field,
+            Err(PortalFundsError::Invalid { field, .. }) => field,
             other => panic!("expected a refused field, got {other:?}"),
         }
     }
 
+    fn set(value: &str) -> Option<Option<String>> {
+        Some(Some(value.to_string()))
+    }
+
     #[test]
-    fn the_self_payer_states_the_source_of_funds_and_staff_need_not_repeat_it() {
+    fn the_self_payer_states_one_source_of_funds_and_staff_need_not_repeat_it() {
         let own = Declaration {
             payer_kind: PAYER_KIND_SELF.into(),
             ..Declaration::default()
         };
-        // Nothing stated: the sources are asked, the proof only when the
-        // enhanced check is required (owner rule 2026-10-07).
-        let optional = SelfFundsProof::default();
-        let required = SelfFundsProof {
-            required: true,
-            uploaded: false,
-        };
-        assert_eq!(
-            portal_missing_self_funds(Some(&own), optional),
-            ["self_funds_sources"]
-        );
-        assert_eq!(
-            portal_missing_self_funds(Some(&own), required),
-            ["self_funds_sources", "self_funds_proof_upload"]
-        );
         assert!(own.missing().contains(&PayerReason::SourceOfFundsMissing));
-
-        // The list of a person, in form order and without duplicates; the
-        // description is kept as typed, trimmed at its ends.
-        let stated = apply_self_funds_patch(
+        let stated = apply_funds_patch(
             &own,
-            &self_funds_patch(json!({
-                "self_funds_sources": ["other", "employment", "other"],
-                "self_funds_description": "  Stipendium \n der Stiftung  "
-            })),
+            &PortalFundsPatch {
+                funds_source: set(" income "),
+                funds_description: set("  Gehalt als Lehrerin \n seit 2010  "),
+                ..PortalFundsPatch::default()
+            },
         )
         .unwrap();
-        assert_eq!(stated.self_funds_sources, ["employment", "other"]);
+        assert_eq!(stated.self_funds_source.as_deref(), Some("income"));
         assert_eq!(
             stated.self_funds_description.as_deref(),
-            Some("Stipendium \n der Stiftung")
+            Some("Gehalt als Lehrerin \n seit 2010")
         );
-        assert!(portal_missing_self_funds(Some(&stated), optional).is_empty());
         assert_eq!(
-            portal_missing_self_funds(
-                Some(&stated),
-                SelfFundsProof {
-                    required: true,
-                    uploaded: true
-                }
-            ),
-            Vec::<&str>::new()
+            changed_funds_fields(&own, &stated),
+            ["funds_source", "funds_description"]
         );
         // The lead's statement is the declaration's source of funds as well.
         assert!(stated.source_of_funds_stated());
@@ -4715,91 +4821,276 @@ mod tests {
                 .missing()
                 .contains(&PayerReason::SourceOfFundsMissing)
         );
-        assert_eq!(
-            stated.to_json()["self_funds_sources"],
-            json!(["employment", "other"])
-        );
-
-        // "Other" needs the words.
-        let undescribed = apply_self_funds_patch(
+        assert_eq!(stated.to_json()["self_funds_source"], "income");
+        // "Other" without words is no statement for staff.
+        let other = apply_funds_patch(
             &stated,
-            &self_funds_patch(json!({ "self_funds_description": null })),
+            &PortalFundsPatch {
+                funds_source: set("other"),
+                funds_description: Some(None),
+                ..PortalFundsPatch::default()
+            },
         )
         .unwrap();
-        assert_eq!(
-            portal_missing_self_funds(Some(&undescribed), optional),
-            ["self_funds_description"]
-        );
-        assert!(!undescribed.source_of_funds_stated());
-        let cleared = apply_self_funds_patch(
-            &stated,
-            &self_funds_patch(json!({ "self_funds_sources": null, "self_funds_description": "" })),
-        )
-        .unwrap();
-        assert!(cleared.self_funds_sources.is_empty());
-        assert!(cleared.self_funds_description.is_none());
-        assert_eq!(
-            changed_self_funds_fields(&stated, &cleared),
-            ["self_funds_sources", "self_funds_description"]
-        );
+        assert!(!other.source_of_funds_stated());
+        assert_ne!(stated.funds_marker_value(), other.funds_marker_value());
 
-        // Refused: an organisation's source, a wrong type, an unknown key, a
-        // description over 2000 characters.
-        assert!(matches!(
-            apply_self_funds_patch(
-                &own,
-                &self_funds_patch(json!({ "self_funds_sources": ["loan"] }))
-            ),
-            Err(PortalSelfFundsError::Invalid { ref field, .. }) if field == "self_funds_sources"
-        ));
-        for (body, field) in [
-            (
-                json!({ "self_funds_sources": "savings" }),
-                "self_funds_sources",
-            ),
-            (json!({ "self_funds_sources": [1] }), "self_funds_sources"),
-            (
-                json!({ "self_funds_description": 5 }),
-                "self_funds_description",
-            ),
-            (json!({ "source_of_funds": "savings" }), "source_of_funds"),
-        ] {
+        // Refused: a code of the old list, an organisation's source, too
+        // many words; the payer's funds while the patient pays.
+        for value in ["employment", "loan", "income,savings"] {
             assert_eq!(
-                refused_self_funds(PortalSelfFundsPatch::parse(&body)),
-                field,
-                "{body}"
+                refused_funds(apply_funds_patch(
+                    &own,
+                    &PortalFundsPatch {
+                        funds_source: set(value),
+                        ..PortalFundsPatch::default()
+                    }
+                )),
+                "funds_source",
+                "{value}"
             );
         }
-        assert!(matches!(
-            apply_self_funds_patch(
+        assert_eq!(
+            refused_funds(apply_funds_patch(
                 &own,
-                &self_funds_patch(json!({ "self_funds_description": "x".repeat(2001) }))
+                &PortalFundsPatch {
+                    funds_description: set(&"x".repeat(2001)),
+                    ..PortalFundsPatch::default()
+                }
+            )),
+            "funds_description"
+        );
+        assert!(matches!(
+            apply_funds_patch(
+                &own,
+                &PortalFundsPatch {
+                    payer_funds_source: set("savings"),
+                    ..PortalFundsPatch::default()
+                }
             ),
-            Err(PortalSelfFundsError::Invalid { ref field, .. }) if field == "self_funds_description"
+            Err(PortalFundsError::NotThirdParty)
         ));
 
         // A staff save keeps the statement while the patient pays; a third
-        // party drops it, and nothing is asked of a third party.
-        let mut staff = from_input(&input(PAYER_KIND_SELF)).unwrap();
-        staff.carry_self_funds(Some(&stated));
-        assert_eq!(staff.self_funds_sources, ["employment", "other"]);
+        // party drops it.
         let resaved =
             declaration_from_input(&input(PAYER_KIND_SELF), Some(&stated), today()).unwrap();
-        assert_eq!(resaved.self_funds_sources, stated.self_funds_sources);
+        assert_eq!(resaved.self_funds_source, stated.self_funds_source);
         assert_eq!(
             resaved.self_funds_description,
             stated.self_funds_description
         );
         let third =
             declaration_from_input(&input(PAYER_KIND_THIRD_PARTY), Some(&stated), today()).unwrap();
-        assert!(third.self_funds_sources.is_empty());
+        assert!(third.self_funds_source.is_none());
         assert!(third.self_funds_description.is_none());
-        assert!(portal_missing_self_funds(Some(&third), required).is_empty());
-        assert!(portal_missing_self_funds(None, required).is_empty());
-        // The marker follows the statement.
-        assert_ne!(
-            stated.self_funds_marker_value(),
-            cleared.self_funds_marker_value()
+    }
+
+    #[test]
+    fn the_patient_states_what_he_knows_of_the_payers_funds_for_the_same_payer() {
+        let third = from_input(&input(PAYER_KIND_THIRD_PARTY)).unwrap();
+        assert!(matches!(
+            apply_funds_patch(
+                &third,
+                &PortalFundsPatch {
+                    funds_source: set("savings"),
+                    ..PortalFundsPatch::default()
+                }
+            ),
+            Err(PortalFundsError::NotSelf)
+        ));
+        let stated = apply_funds_patch(
+            &third,
+            &PortalFundsPatch {
+                payer_funds_source: set("inheritance_gift"),
+                payer_funds_description: set("Erbe der Großmutter"),
+                ..PortalFundsPatch::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            stated.payer_funds_source_stated.as_deref(),
+            Some("inheritance_gift")
+        );
+        assert_eq!(
+            changed_funds_fields(&third, &stated),
+            ["payer_funds_source", "payer_funds_description"]
+        );
+        // The patient's words are no declaration of the payer.
+        assert!(!stated.self_funds_stated());
+        assert_eq!(
+            stated.to_json()["payer_funds_description_stated"],
+            "Erbe der Großmutter"
+        );
+        // Kept for the same payer, gone with another one or a self-payer.
+        let same =
+            declaration_from_input(&input(PAYER_KIND_THIRD_PARTY), Some(&stated), today()).unwrap();
+        assert_eq!(
+            same.payer_funds_source_stated,
+            stated.payer_funds_source_stated
+        );
+        let mut other_person = input(PAYER_KIND_THIRD_PARTY);
+        other_person.first_name = Some("Mia".into());
+        let other = declaration_from_input(&other_person, Some(&stated), today()).unwrap();
+        assert!(other.payer_funds_source_stated.is_none());
+        assert!(other.payer_funds_description_stated.is_none());
+        let own = declaration_from_input(&input(PAYER_KIND_SELF), Some(&stated), today()).unwrap();
+        assert!(own.payer_funds_source_stated.is_none());
+    }
+
+    #[test]
+    fn the_first_circle_is_spouse_parent_and_child() {
+        let person = |kind: Option<&str>| Declaration {
+            payer_kind: PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some(PAYER_TYPE_PERSON.into()),
+            relationship_kind: kind.map(str::to_string),
+            ..Declaration::default()
+        };
+        for kind in ["spouse", "parent", "child"] {
+            assert!(!outside_first_circle(Some(&person(Some(kind)))), "{kind}");
+        }
+        for kind in [
+            "sibling",
+            "grandparent",
+            "relative",
+            "employer",
+            "friend",
+            "business_partner",
+            "other",
+        ] {
+            assert!(outside_first_circle(Some(&person(Some(kind)))), "{kind}");
+            assert!(RELATIONSHIP_KINDS.contains(&kind));
+        }
+        // Not stated yet: the cabinet asks the relationship first.
+        assert!(!outside_first_circle(Some(&person(None))));
+        // A company, an organisation or an insurer is always outside.
+        let company = Declaration {
+            payer_type: Some("company".into()),
+            ..person(Some("parent"))
+        };
+        assert!(outside_first_circle(Some(&company)));
+        let own = Declaration {
+            payer_kind: PAYER_KIND_SELF.into(),
+            ..Declaration::default()
+        };
+        assert!(!outside_first_circle(Some(&own)));
+        assert!(!outside_first_circle(None));
+        // The two new kinds are accepted and named on the order payer.
+        let mut sister = input(PAYER_KIND_THIRD_PARTY);
+        sister.relationship_kind = Some(Some("sibling".into()));
+        let declaration = from_input(&sister).unwrap();
+        assert_eq!(
+            declaration.relationship_label().as_deref(),
+            Some("Bruder/Schwester")
+        );
+        assert_eq!(
+            stated_funds_source_label("asset_sale"),
+            "Verkauf von Vermögenswerten"
+        );
+    }
+
+    #[test]
+    fn a_third_party_needs_its_contact_data_and_keeps_its_messenger() {
+        // Contact and residence of a person; e-mail and phone of an
+        // organisation (its seat country is asked with the name).
+        let bare = from_portal(None, &portal_person()).unwrap();
+        assert_eq!(
+            portal_missing_contact(Some(&bare)),
+            ["payer_email", "payer_phone", "payer_country", "payer_city"]
+        );
+        let mut answer = portal_person();
+        answer.email = Some("viktor@example.com".into());
+        answer.phone = Some("+49 30 1234".into());
+        answer.messenger = Some(Some(" +49 170 5555 ".into()));
+        answer.country = Some("at".into());
+        answer.city = Some("Wien".into());
+        let complete = from_portal(Some(&bare), &answer).unwrap();
+        assert!(portal_missing_contact(Some(&complete)).is_empty());
+        assert_eq!(complete.messenger.as_deref(), Some("+49 170 5555"));
+        assert_eq!(complete.portal_json()["messenger"], "+49 170 5555");
+        assert_eq!(complete.to_json()["messenger"], "+49 170 5555");
+        let company = PortalPayerInput {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            ..portal("third_party")
+        };
+        assert_eq!(
+            portal_missing_contact(Some(&from_portal(None, &company).unwrap())),
+            ["payer_email", "payer_phone"]
+        );
+        assert!(
+            portal_missing_contact(Some(&from_portal(None, &portal("self")).unwrap())).is_empty()
+        );
+        assert!(portal_missing_contact(None).is_empty());
+        // An invalid e-mail is refused as before; a messenger over 60 chars.
+        let mut invalid = answer.clone();
+        invalid.email = Some("no address".into());
+        assert_eq!(
+            declaration_from_portal(Some(&complete), &invalid, today(), now()),
+            Err("payer_email_invalid")
+        );
+        let mut long = answer.clone();
+        long.messenger = Some(Some("1".repeat(61)));
+        assert_eq!(
+            declaration_from_portal(Some(&complete), &long, today(), now()),
+            Err("payer_messenger_too_long")
+        );
+        assert_eq!(
+            portal_field_of("payer_messenger_too_long"),
+            "payer_messenger"
+        );
+        // An older cabinet leaves the key out: the number stays.
+        let mut older = answer.clone();
+        older.messenger = None;
+        let kept = from_portal(Some(&complete), &older).unwrap();
+        assert_eq!(kept.messenger, complete.messenger);
+        // A staff save without the key keeps it, with `null` clears it.
+        let mut staff = input(PAYER_KIND_THIRD_PARTY);
+        staff.first_name = Some("Viktor".into());
+        staff.last_name = Some("Zahler".into());
+        staff.date_of_birth = None;
+        let resaved = declaration_from_input(&staff, Some(&complete), today()).unwrap();
+        assert_eq!(resaved.messenger, complete.messenger);
+        staff.messenger = Some(None);
+        let cleared = declaration_from_input(&staff, Some(&complete), today()).unwrap();
+        assert_eq!(cleared.messenger, None);
+        // Another payer: the number goes.
+        let mut other = answer.clone();
+        other.first_name = Some("Ben".into());
+        other.messenger = None;
+        let changed = from_portal(Some(&complete), &other).unwrap();
+        assert_eq!(changed.messenger, None);
+        // Hidden once the payer answered on the own link.
+        assert!(portal_payload(Some(&complete), true)["messenger"].is_null());
+        // A row without a number keeps the marker it had before the key.
+        assert!(bare.portal_json().get("messenger").is_none());
+    }
+
+    #[test]
+    fn the_due_diligence_sheet_takes_the_leads_answer_on_the_source_of_funds() {
+        let own = Declaration {
+            payer_kind: PAYER_KIND_SELF.into(),
+            self_funds_source: Some("income".into()),
+            self_funds_description: Some(" Gehalt als Lehrerin ".into()),
+            ..Declaration::default()
+        };
+        assert_eq!(
+            own.stated_asset_origin().as_deref(),
+            Some("Einkommen: Gehalt als Lehrerin")
+        );
+        let nothing = Declaration {
+            payer_kind: PAYER_KIND_SELF.into(),
+            ..Declaration::default()
+        };
+        assert_eq!(nothing.stated_asset_origin(), None);
+        let third = Declaration {
+            payer_kind: PAYER_KIND_THIRD_PARTY.into(),
+            payer_funds_source_stated: Some("inheritance_gift".into()),
+            ..Declaration::default()
+        };
+        assert_eq!(
+            third.stated_asset_origin().as_deref(),
+            Some("Erbschaft (Angabe der Patientin/des Patienten zur zahlenden Person)")
         );
     }
 }

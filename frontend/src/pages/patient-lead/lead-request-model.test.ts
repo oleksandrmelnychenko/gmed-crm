@@ -20,7 +20,7 @@ import {
   payerInput,
   payerSelfOffered,
   payerTypeOf,
-  paymentBackgroundAsked,
+  payerContactRequired,
   personalDataPatch,
   rejectedValue,
   stillRejectedIdentification,
@@ -108,20 +108,9 @@ const identification: LeadRequestIdentification = {
   birth_country: "UA",
   habitual_residence_country: null,
   contact_channels: ["phone"],
-  id_document_type: "passport",
-  id_document_number: "FE123456",
-  id_issuing_authority: null,
-  id_issuing_country: null,
-  id_issued_on: null,
-  id_valid_until: null,
   pep_self: null,
-  pep_self_details: null,
   pep_related: null,
-  pep_related_details: null,
-  high_risk_country: null,
-  high_risk_country_code: null,
   sanctions_links: null,
-  sanctions_links_details: null,
   payment_background: null,
   declared_correct_at: null,
 };
@@ -132,50 +121,53 @@ describe("lead request identification autosave", () => {
     const draft = {
       ...saved,
       birth_place: "  Lviv ",
-      id_issuing_authority: " Ministry  of the Interior ",
-      id_valid_until: "2031-05-01",
+      former_names: " Anna  Beispiel ",
       salutation: "ms",
     };
     expect(identificationPatch(saved, draft)).toEqual({
       salutation: "ms",
+      former_names: "Anna Beispiel",
       birth_place: "Lviv",
-      id_issuing_authority: "Ministry of the Interior",
-      id_valid_until: "2031-05-01",
     });
     expect(identificationPatch(saved, saved)).toEqual({});
     // A removed text, date or choice is cleared with an empty string.
-    expect(identificationPatch(saved, { ...saved, birth_country: "", id_document_number: " " })).toEqual({
+    expect(identificationPatch(saved, { ...saved, birth_country: "", birth_place: " " })).toEqual({
+      birth_place: "",
       birth_country: "",
-      id_document_number: "",
     });
     // Nothing entered yet, and an older server without the statements: an empty form.
     expect(draftFromIdentification(undefined)).toMatchObject({ birth_place: "", contact_channels: [], pep_self: "" });
     expect(identificationPatch(draftFromIdentification(undefined), draftFromIdentification(null))).toEqual({});
+    // The identity document's data are staff's (trigger flow): the form has no such field and never sends one.
+    expect(Object.keys(draftFromIdentification(identification)).some((key) => key.startsWith("id_"))).toBe(false);
   });
 
-  it("sends the legal answers as true, false or null and the details only with a yes", () => {
+  it("sends the legal answers as true, false or null, without details", () => {
     const saved = draftFromIdentification(identification);
-    const yes = { ...withLegalAnswer(saved, "pep_self", "yes"), pep_self_details: " Minister,\nUkraine, 2020–2024 " };
-    // Several lines stay several lines.
-    expect(identificationPatch(saved, yes)).toEqual({ pep_self: true, pep_self_details: "Minister,\nUkraine, 2020–2024" });
+    expect(identificationPatch(saved, withLegalAnswer(saved, "pep_self", "yes"))).toEqual({ pep_self: true });
     expect(identificationPatch(saved, withLegalAnswer(saved, "sanctions_links", "no"))).toEqual({ sanctions_links: false });
+    const stored = draftFromIdentification({ ...identification, pep_related: true });
+    expect(stored).toMatchObject({ pep_related: "yes" });
+    expect(identificationPatch(stored, withLegalAnswer(stored, "pep_related", ""))).toEqual({ pep_related: null });
+  });
 
-    const stored = draftFromIdentification({
-      ...identification,
-      pep_self: true,
-      pep_self_details: "Minister",
-      high_risk_country: true,
-      high_risk_country_code: "IR",
-    });
-    expect(stored).toMatchObject({ pep_self: "yes", high_risk_country: "yes", high_risk_country_code: "IR" });
-    // "No" and "not answered" drop the details, as the server does.
-    expect(identificationPatch(stored, withLegalAnswer(stored, "pep_self", "no"))).toEqual({
-      pep_self: false,
-      pep_self_details: "",
-    });
-    expect(identificationPatch(stored, withLegalAnswer(stored, "high_risk_country", ""))).toEqual({
-      high_risk_country: null,
-      high_risk_country_code: "",
+  it("sends the follow-up statements: several lines stay, former citizenships as codes", () => {
+    const saved = draftFromIdentification({ ...identification, former_citizenships: ["ru"], request_reason: null });
+    expect(saved.former_citizenships).toEqual(["RU"]);
+    const draft = {
+      ...saved,
+      former_citizenships: ["RU", "ua", "RU"],
+      pep_wealth_origin: " Gehalt,\nErbschaft ",
+      residence_since: " 2015 ",
+      request_reason: " Zweitmeinung\nzur Knie-OP ",
+      stay_reason: "work",
+    };
+    expect(identificationPatch(saved, draft)).toEqual({
+      residence_since: "2015",
+      former_citizenships: ["RU", "UA"],
+      stay_reason: "work",
+      pep_wealth_origin: "Gehalt,\nErbschaft",
+      request_reason: "Zweitmeinung\nzur Knie-OP",
     });
   });
 
@@ -193,25 +185,26 @@ describe("lead request identification autosave", () => {
 
   it("does not repeat a value the server refused until the patient changes it", () => {
     const saved = draftFromIdentification(identification);
-    const draft = { ...saved, id_valid_until: "2020-01-01", id_document_number: "FE999" };
-    const rejected = withRejectedIdentification({}, "id_valid_until", draft);
-    expect(rejected).toEqual({ id_valid_until: "2020-01-01" });
-    // The refused date stays out; the rest of the patch still goes.
-    expect(identificationPatch(saved, draft, rejected ?? {})).toEqual({ id_document_number: "FE999" });
+    const draft = { ...saved, residence_since: "x".repeat(61), birth_place: "Lviv" };
+    const rejected = withRejectedIdentification({}, "residence_since", draft);
+    expect(rejected).toEqual({ residence_since: "x".repeat(61) });
+    // The refused value stays out; the rest of the patch still goes.
+    expect(identificationPatch(saved, draft, rejected ?? {})).toEqual({ birth_place: "Lviv" });
     // A second refusal keeps the first.
-    expect(withRejectedIdentification(rejected ?? {}, "id_document_number", draft)).toEqual({
-      id_valid_until: "2020-01-01",
-      id_document_number: "FE999",
+    expect(withRejectedIdentification(rejected ?? {}, "birth_place", draft)).toEqual({
+      residence_since: "x".repeat(61),
+      birth_place: "Lviv",
     });
     // A changed value may be sent again.
-    const corrected = { ...draft, id_valid_until: "2031-01-01" };
+    const corrected = { ...draft, residence_since: "2015" };
     expect(stillRejectedIdentification(rejected ?? {}, draft)).toEqual(rejected);
     expect(stillRejectedIdentification(rejected ?? {}, corrected)).toEqual({});
     expect(identificationPatch(saved, corrected, stillRejectedIdentification(rejected ?? {}, corrected))).toMatchObject({
-      id_valid_until: "2031-01-01",
+      residence_since: "2015",
     });
-    // A field the form does not know is not the form's to hold back.
+    // A field the form does not know (also staff's `id_*`) is not the form's to hold back.
     expect(withRejectedIdentification({}, "declared_correct_at", draft)).toBeNull();
+    expect(withRejectedIdentification({}, "id_valid_until", draft)).toBeNull();
   });
 });
 
@@ -329,6 +322,8 @@ describe("lead request send step", () => {
       first_name: "Viktor",
       last_name: "Zahler",
       city: "München Ost",
+      // Always sent with a third party: an emptied number is cleared.
+      messenger: "",
       citizenships: ["UA", "DE"],
       contact_consent: false,
     });
@@ -364,6 +359,7 @@ describe("lead request send step", () => {
       date_of_birth: "1960-02-03",
       citizenships: ["UA"],
       relationship_kind: "parent",
+      messenger: "",
       contact_consent: true,
     });
     // A name of an organisation typed by mistake is not a person's.
@@ -433,8 +429,32 @@ describe("lead request send step", () => {
       street: "Musterstraße 1",
       country: "DE",
       email: "kontakt@example.com",
+      messenger: "",
       contact_consent: false,
     });
+    // The organisation mask (trigger flow): legal form, register number and contact person, trimmed.
+    const masked = {
+      ...company,
+      organisation_name: "Beispiel GmbH",
+      organisation_legal_form: " GmbH ",
+      organisation_register_number: "HRB  12345",
+      organisation_contact_name: "Ben Muster",
+    };
+    expect(payerInput(masked)).toMatchObject({
+      organisation_legal_form: "GmbH",
+      organisation_register_number: "HRB 12345",
+      organisation_contact_name: "Ben Muster",
+    });
+    // An older server without the payer type gets none of them.
+    expect(payerInput(masked, false)).not.toHaveProperty("organisation_legal_form");
+    // Back to a person: the whole mask goes, as on the server.
+    expect(withPayerType(masked, "person")).toMatchObject({
+      organisation_name: "",
+      organisation_legal_form: "",
+      organisation_register_number: "",
+      organisation_contact_name: "",
+    });
+    expect(payerInput(withPayerType(masked, "person"))).not.toHaveProperty("organisation_contact_name");
     // An insurer is named the same way: the name stays.
     const insurer = withPayerType({ ...company, organisation_name: "Beispiel Versicherung AG" }, "insurance");
     expect(insurer.organisation_name).toBe("Beispiel Versicherung AG");
@@ -461,6 +481,7 @@ describe("lead request send step", () => {
       relationship_kind: "other",
       relationship: "Stipendium",
       country: "CH",
+      messenger: "",
       contact_consent: true,
     });
     expect(organisationPayerType("organisation")).toBe("organisation");
@@ -490,6 +511,7 @@ describe("lead request send step", () => {
       date_of_birth: "1985-04-12",
       relationship_kind: "parent",
       email: "maria.muster@example.com",
+      messenger: "",
       contact_consent: false,
       acts_on_own_account: true,
     });
@@ -515,6 +537,7 @@ describe("lead request send step", () => {
       expect(payerInput(other)).toEqual({
         payer_kind: "third_party",
         payer_type: "person",
+        messenger: "",
         contact_consent: false,
         acts_on_own_account: true,
       });
@@ -568,6 +591,7 @@ describe("lead request send step", () => {
       country: "DE",
       phone: "+49 30 1234567",
       email: "anna.muster@example.com",
+      messenger: "",
       citizenships: ["DE", "AT"],
     });
     expect(input).not.toHaveProperty("contact_consent");
@@ -592,12 +616,12 @@ describe("lead request send step", () => {
     expect(payerSelfOffered({ minor: true, payer: { ...storedPayer, payer_kind: "self" } })).toBe(true);
   });
 
-  it("asks why the payer pays about a third party, not about the paying parent", () => {
+  it("requires the contact data of a third party, not of the paying parent", () => {
     const progress = (missing: string[]) => ({ progress: { filled: 0, total: 0, missing_for_submit: missing } });
-    expect(paymentBackgroundAsked({ guardian_pays: false }, progress([]))).toBe(true);
-    expect(paymentBackgroundAsked({ guardian_pays: true }, progress([]))).toBe(false);
-    // An older server still requires it from the parent: the field stays, or the request could not be sent.
-    expect(paymentBackgroundAsked({ guardian_pays: true }, progress(["payment_background"]))).toBe(true);
+    expect(payerContactRequired({ guardian_pays: false }, progress([]), "payer_email")).toBe(true);
+    expect(payerContactRequired({ guardian_pays: true }, progress([]), "payer_city")).toBe(false);
+    // A server that lists it as missing gets the mark, or the request could not be sent.
+    expect(payerContactRequired({ guardian_pays: true }, progress(["payer_phone"]), "payer_phone")).toBe(true);
   });
 
   it("asks for the consent to pass the cost estimate on about a stored third party, not about the paying parent", () => {
@@ -698,20 +722,25 @@ describe("lead request send step", () => {
           "payer_own_account",
           "payer_cost_estimate_consent",
           "payer_contact_consent",
-          "payment_background",
+          "payer_email_or_phone",
           "payer_country",
           "payer_relationship",
+          "payer_contact_name",
           "payer_relationship_kind",
+          "payer_legal_form",
           "payer_organisation_name",
         ],
       },
     });
     expect(organisation).toEqual([
+      // The organisation mask (trigger flow): name, legal form, contact person.
       "payer_organisation_name",
+      "payer_legal_form",
+      "payer_contact_name",
       "payer_relationship_kind",
       "payer_relationship",
+      "payer_email_or_phone",
       "payer_country",
-      "payment_background",
       "payer_contact_consent",
       // The consent to pass the cost estimate on comes right after the one to contact the payer.
       "payer_cost_estimate_consent",
@@ -762,42 +791,41 @@ describe("lead request send step", () => {
     expect(draftFromPayer(olderServer).acts_on_own_account).toBe("");
   });
 
-  it("lists the missing statements of the identification in form order", () => {
+  it("lists the missing statements of the identification in the order of the steps", () => {
     const missing = missingForSubmit({
       progress: {
         filled: 3,
         total: 12,
         missing_for_submit: [
+          "request_reason",
           "sanctions_links",
-          "pep_self_details",
           "payer_beneficial_owner",
-          "payment_background",
+          "has_representative",
           "id_document_upload",
-          "id_valid_until",
           "birth_country",
           "city",
           "birth_place",
           "payer_own_account",
           "payer_kind",
           "pep_self",
-          "high_risk_country_code",
+          // Keys of an older server the steps no longer ask are left out.
+          "pep_self_details",
+          "id_valid_until",
         ],
       },
     });
     expect(missing).toEqual([
       "birth_place",
       "birth_country",
+      "has_representative",
       "city",
-      "id_valid_until",
       "id_document_upload",
       "payer_kind",
-      "payment_background",
       "payer_own_account",
       "payer_beneficial_owner",
       "pep_self",
-      "pep_self_details",
-      "high_risk_country_code",
       "sanctions_links",
+      "request_reason",
     ]);
   });
 

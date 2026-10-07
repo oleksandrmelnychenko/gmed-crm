@@ -71,20 +71,9 @@ function request(overrides: Partial<LeadRequest> = {}): LeadRequest {
       birth_country: "UA",
       habitual_residence_country: null,
       contact_channels: ["email", "messenger"],
-      id_document_type: "passport",
-      id_document_number: "FE123456",
-      id_issuing_authority: "8001",
-      id_issuing_country: "UA",
-      id_issued_on: "2021-03-04",
-      id_valid_until: "2031-03-04",
       pep_self: false,
-      pep_self_details: null,
       pep_related: true,
-      pep_related_details: "Viktor Zahler, Vater, Minister, Ukraine",
-      high_risk_country: true,
-      high_risk_country_code: "IR",
       sanctions_links: null,
-      sanctions_links_details: null,
       payment_background: "Mein Vater unterstützt mich.",
       declared_correct_at: null,
     },
@@ -150,13 +139,8 @@ describe("lead request summary", () => {
       "Bevorzugte Sprache": "Ukrainisch",
       "Wie dürfen wir Sie kontaktieren?": "E-Mail, Messenger",
     });
+    // The identity document: the copies only, GMED enters the data (trigger flow).
     expect(rows(groups, "identity")).toEqual({
-      "Art des Dokuments": "Reisepass",
-      Dokumentnummer: "FE123456",
-      "Ausstellende Behörde": "8001",
-      Ausstellungsland: "Ukraine",
-      "Ausgestellt am": "04.03.2021",
-      "Gültig bis": "04.03.2031",
       "Foto oder Scan des Ausweises": "pass-vorne.jpg, pass-hinten.jpg",
     });
     expect(rows(groups, "insurance")).toEqual({
@@ -175,18 +159,14 @@ describe("lead request summary", () => {
       "Beziehung zur Patientin / zum Patienten": "Elternteil",
       Ort: "München",
       Wohnsitzland: "Deutschland",
-      "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
       "Einverständnis zur Kontaktaufnahme": "Zugestimmt am 05.10.2026 11:25",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
     });
-    // An answered question shows its answer, a "yes" its details; an open one is left to the missing list.
+    // An answered question shows its answer (yes or no only); an open one is left to the missing list.
     expect(rows(groups, "legal")).toEqual({
       [de.identificationFields.pep_self]: "Nein",
       [de.identificationFields.pep_related]: "Ja",
-      "Name der Person, Beziehung, Amt und Land": "Viktor Zahler, Vater, Minister, Ukraine",
-      [de.identificationFields.high_risk_country]: "Ja",
-      "Welches Land?": "Iran",
     });
     expect(groups.at(-1)?.rows).toEqual([{ label: "", value: "befund.pdf" }]);
   });
@@ -199,17 +179,8 @@ describe("lead request summary", () => {
       identification: {
         ...request().identification!,
         salutation: null,
-        id_document_type: null,
-        id_document_number: null,
-        id_issuing_authority: null,
-        id_issuing_country: null,
-        id_issued_on: null,
-        id_valid_until: null,
         pep_self: null,
         pep_related: null,
-        pep_related_details: null,
-        high_risk_country: null,
-        high_risk_country_code: null,
       },
     });
     const groups = requestSummary(empty, de, "de");
@@ -260,9 +231,22 @@ describe("lead request summary", () => {
       "Sitz (Straße und Hausnummer)": "Musterstraße 1",
       Ort: "München",
       "Land des Sitzes": "Deutschland",
-      "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
       // The consent not given yet is left to the missing list.
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Ja",
+    });
+    // The organisation mask (trigger flow): legal form, register number, contact person.
+    const masked = request({
+      payer: {
+        ...company.payer!,
+        organisation_legal_form: "GmbH",
+        organisation_register_number: "HRB 12345",
+        organisation_contact_name: "Ben Muster",
+      },
+    });
+    expect(rows(requestSummary(masked, de, "de"), "payer")).toMatchObject({
+      Rechtsform: "GmbH",
+      "Registernummer (falls vorhanden)": "HRB 12345",
+      Ansprechperson: "Ben Muster",
     });
     const insurer = request({
       payer: { ...company.payer!, payer_type: "insurance", relationship_kind: "other", relationship: " Auslandskrankenversicherung " },
@@ -330,7 +314,7 @@ describe("lead request summary", () => {
     };
     expect(Object.fromEntries(answeredPayerRows(answered, de).map((row) => [row.label, row.value]))).toEqual(expected);
     const groups = requestSummary(answered, de, "de");
-    expect(rows(groups, "payer")).toEqual({ ...expected, "Warum zahlt diese Person?": "Mein Vater unterstützt mich." });
+    expect(rows(groups, "payer")).toEqual(expected);
     expect(groups.find((group) => group.id === "payer")?.note).toBe(
       "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
     );
@@ -396,7 +380,6 @@ describe("lead request summary", () => {
       "Beziehung zur Patientin / zum Patienten": "Vater",
       Ort: "München",
       Wohnsitzland: "Deutschland",
-      "Warum zahlt diese Person?": "Mein Vater unterstützt mich.",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Nein",
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)": "Viktor Zahler, 03.02.1960, Kyiv",
     });
@@ -410,9 +393,61 @@ describe("lead request summary", () => {
     });
     expect(Object.keys(rows(groups, "legal"))).toContain(de.identificationFieldsGuardian.pep_self);
     expect(requestSummary(request(), leadRequestText("en"), "en").find((group) => group.id === "legal")?.rows).toContainEqual({
-      label: "Which country?",
-      value: "Iran",
+      label: "Is an immediate family member or a person close to you politically exposed?",
+      value: "Yes",
     });
+  });
+
+  it("shows the answers of the open follow-up blocks and the reason of the request", () => {
+    const base = request();
+    const followUp = request({
+      submitted_at: "2026-10-07T09:30:00Z",
+      payer: { ...base.payer!, payer_kind: "self" },
+      identification: {
+        ...base.identification!,
+        relationship_since: "2010",
+        residence_since: "2015",
+        stay_reason: "work",
+        former_citizenships: ["RU"],
+        pep_office: "Bürgermeister",
+        pep_country: "UA",
+        request_reason: "Zweitmeinung zur Knie-OP",
+      },
+      follow_up: {
+        required: true,
+        blocks: ["A", "F", "H", "D"],
+        missing: {},
+        answered_at: null,
+        answers: {
+          funds_source: "income",
+          funds_description: "Gehalt",
+          occupation: "Ingenieurin",
+          sector: "Maschinenbau",
+          payer_funds_source: null,
+          payer_funds_description: null,
+        },
+        funds_proof_documents: [upload("proof-1", "kontoauszug.pdf")],
+      },
+    });
+    const groups = requestSummary(followUp, de, "de");
+    expect(groups.map((group) => group.id).slice(-3)).toEqual(["follow_up", "request", "documents"]);
+    expect(groups.find((group) => group.id === "follow_up")?.title).toBe("Ergänzende Angaben");
+    // Only the blocks the server opened (D is the payer link's); never why.
+    expect(rows(groups, "follow_up")).toEqual({
+      "Herkunft der Mittel": "Einkommen",
+      "Bitte beschreiben Sie die Herkunft der Mittel": "Gehalt",
+      Beruf: "Ingenieurin",
+      "Branche / Sektor": "Maschinenbau",
+      "Nachweise zur Herkunft der Mittel": "kontoauszug.pdf",
+      "Seit wann wohnen Sie in Ihrem Wohnsitzland?": "2015",
+      "Grund des Aufenthalts im Wohnsitzland": "Arbeit",
+      "Frühere Staatsangehörigkeiten": "Russland",
+      "Amt bzw. Funktion": "Bürgermeister",
+      Land: "Ukraine",
+    });
+    expect(rows(groups, "request")).toEqual({ "Grund der Anfrage": "Zweitmeinung zur Knie-OP" });
+    // Without open blocks nothing of the follow-up is listed.
+    expect(requestSummary(request(), de, "de").map((group) => group.id)).not.toContain("follow_up");
   });
 
   it("shows who acts for an adult after the identity document: the answers, then each person with the files", () => {
@@ -437,12 +472,6 @@ describe("lead request summary", () => {
       country: "DE",
       email: null,
       phone: null,
-      id_document_type: "id_card",
-      id_document_number: "L01X00T47",
-      id_issuing_authority: "Bürgeramt Mitte",
-      id_issuing_country: "DE",
-      id_issued_on: null,
-      id_valid_until: "2031-03-04",
       identity_documents: [upload("rep-id-1", "ausweis-ben.jpg")],
       authority_documents: [upload("rep-auth-1", "vollmacht.pdf")],
     };
@@ -476,11 +505,6 @@ describe("lead request summary", () => {
       Postleitzahl: "10115",
       Ort: "Berlin",
       Wohnsitzland: "Deutschland",
-      "Art des Dokuments": "Personalausweis",
-      Dokumentnummer: "L01X00T47",
-      "Ausstellende Behörde": "Bürgeramt Mitte",
-      Ausstellungsland: "Deutschland",
-      "Gültig bis": "04.03.2031",
       "Foto oder Scan des Ausweises": "ausweis-ben.jpg",
       "Nachweis der Vertretungsmacht (z. B. Vollmacht)": "vollmacht.pdf",
     });
@@ -525,12 +549,6 @@ describe("lead request summary", () => {
       country: null,
       email: "anna.muster@example.com",
       phone: null,
-      id_document_type: null,
-      id_document_number: null,
-      id_issuing_authority: null,
-      id_issuing_country: null,
-      id_issued_on: null,
-      id_valid_until: null,
       identity_documents: [],
       authority_documents: [upload("rep-auth-2", "urkunde.pdf")],
       ...overrides,

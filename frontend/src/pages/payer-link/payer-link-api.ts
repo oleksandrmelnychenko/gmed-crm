@@ -72,6 +72,13 @@ export type PayerAnswers = {
   id_issued_on: string | null;
   id_valid_until: string | null;
   organisation_name: string | null;
+  /**
+   * Block E of an organisation (trigger flow 2026-10-07): the legal form, the
+   * VAT id and why the organisation pays. Absent on an older server.
+   */
+  legal_form?: string | null;
+  vat_id?: string | null;
+  payment_reason?: string | null;
   register_court: string | null;
   register_number: string | null;
   representative_first_name: string | null;

@@ -456,6 +456,37 @@ describe("autosave body", () => {
     expect(fieldOfPayerType("street", "insurance")).toBe(true);
   });
 
+  it("sends block E of an organisation: legal form, VAT id and why it pays", () => {
+    const saved = draftFromQuestionnaire(questionnaire("company", { legal_form: null, vat_id: null, payment_reason: null }));
+    const draft: PayerDraft = {
+      ...saved,
+      legal_form: " GmbH ",
+      vat_id: "DE123456789",
+      payment_reason: " Betriebliche\nGesundheitsvorsorge ",
+    };
+    expect(answersPatch(saved, draft, company)).toEqual({
+      legal_form: "GmbH",
+      vat_id: "DE123456789",
+      payment_reason: "Betriebliche\nGesundheitsvorsorge",
+    });
+    // A person has no block E; a server without it never gets the keys unless typed.
+    expect(fieldOfPayerType("legal_form", "person")).toBe(false);
+    expect(fieldOfPayerType("payment_reason", "insurance")).toBe(true);
+    expect(answersPatch(draftFromQuestionnaire(questionnaire("company")), draftFromQuestionnaire(questionnaire("company")), company)).toEqual({});
+    // Legal form and reason are needed, the VAT id is not; the reason is asked with the relationship.
+    expect(requiredFields("company").has("legal_form")).toBe(true);
+    expect(requiredFields("company").has("payment_reason")).toBe(true);
+    expect(requiredFields("company").has("vat_id")).toBe(false);
+    expect(stepOfMissing("payment_reason")).toBe("funds");
+    expect(stepOfMissing("legal_form")).toBe("details");
+    expect(sortMissing(["payment_reason", "vat_id", "legal_form", "organisation_name"], "company")).toEqual([
+      "organisation_name",
+      "legal_form",
+      "vat_id",
+      "payment_reason",
+    ]);
+  });
+
   it("sends the payment through a third party as a boolean, cleared as null", () => {
     const saved = draftFromQuestionnaire(questionnaire("person"));
     expect(answersPatch(saved, { ...saved, via_third_party: "no" }, person)).toEqual({ via_third_party: false });

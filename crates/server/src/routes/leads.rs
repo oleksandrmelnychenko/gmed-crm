@@ -1297,6 +1297,10 @@ struct LeadConversionReadinessInput {
     /// "Кто платит": the payer declaration and, for a third-party payer, the
     /// signed Kostenübernahmeerklärung (see `lead_payer.rs`).
     payer: super::lead_payer::PayerReadiness,
+    /// The risk assessment holds the lead until staff decided (level ≥ 2 not
+    /// released, or rejected; `crate::risk`). Level 1, released and
+    /// grandfathered leads pass.
+    risk_assessment_held: bool,
 }
 
 fn evaluate_lead_conversion_readiness(
@@ -1363,6 +1367,7 @@ fn evaluate_lead_conversion_readiness(
         && (input.package_covered || input.quote_accepted)
         && (input.package_covered || cost_estimate_ready);
 
+    let risk_assessment_released = !input.risk_assessment_held;
     let mut checks = vec![
         json!({
             "key": "lead_qualified",
@@ -1375,6 +1380,13 @@ fn evaluate_lead_conversion_readiness(
             "key": "compliance_completed",
             "label": "Compliance completed",
             "passed": compliance_completed,
+            "blocking_for": "qualification",
+            "stage": "documents",
+        }),
+        json!({
+            "key": "risk_assessment_released",
+            "label": "Risk assessment released",
+            "passed": risk_assessment_released,
             "blocking_for": "qualification",
             "stage": "documents",
         }),
@@ -1583,6 +1595,9 @@ fn evaluate_lead_conversion_readiness(
     if !input.consent_healthcare {
         qualification_reasons.push("Healthcare consent is missing".to_string());
     }
+    if !risk_assessment_released {
+        qualification_reasons.push("Risk assessment waits for a staff decision".to_string());
+    }
 
     let qualification_ready = qualification_reasons.is_empty();
     let mut conversion_reasons = qualification_reasons.clone();
@@ -1750,6 +1765,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         debt_attention_reason: None,
         package_covered: false,
         payer: Default::default(),
+        risk_assessment_held: false,
     }
 }
 
@@ -2046,6 +2062,9 @@ async fn load_lead_conversion_readiness(
             .await
             .map_err(enhanced_check_failed)?
             .required;
+    input.risk_assessment_held = crate::risk::store::readiness_held(&mut conn, lead_id)
+        .await
+        .map_err(enhanced_check_failed)?;
     drop(conn);
     apply_repeat_patient_readiness(state, lead_id, &mut input).await?;
     Ok(Some(evaluate_lead_conversion_readiness(&input)))
@@ -5378,7 +5397,16 @@ async fn create_prospect_patient(
     };
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
     let nationality = lead_wizard_text(&wizard_state, "registration_country");
-    let passport_expiry = lead_wizard_date(&wizard_state, "passport_expiry");
+    // Staff's identity data on the GwG statements are the one source; the
+    // wizard field of older leads is the fallback (trigger flow 2026-10-07).
+    let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {
+        Ok(Some(valid_until)) => Some(valid_until),
+        Ok(None) => lead_wizard_date(&wizard_state, "passport_expiry"),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load identity document validity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let lead_snapshot: Value = lead.try_get("lead_snapshot").unwrap_or_else(|_| json!({}));
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
 
@@ -5847,7 +5875,16 @@ async fn convert_lead(
     let lead_notes: Option<String> = lead.try_get("notes").ok().flatten();
     let wizard_state: Value = lead.try_get("wizard_state").unwrap_or_else(|_| json!({}));
     let nationality = lead_wizard_text(&wizard_state, "registration_country");
-    let passport_expiry = lead_wizard_date(&wizard_state, "passport_expiry");
+    // Staff's identity data on the GwG statements are the one source; the
+    // wizard field of older leads is the fallback (trigger flow 2026-10-07).
+    let passport_expiry = match crate::risk::store::staff_id_valid_until(&mut tx, lead_id).await {
+        Ok(Some(valid_until)) => Some(valid_until),
+        Ok(None) => lead_wizard_date(&wizard_state, "passport_expiry"),
+        Err(error) => {
+            tracing::error!(error = %error, lead_id = %lead_id, "load identity document validity");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
     let selected_work_type_ids = wizard_state
         .get("selected_specialization_work_type_ids")
         .and_then(Value::as_array)
@@ -9096,6 +9133,7 @@ mod lead_conversion_readiness_tests {
             debt_attention_reason: None,
             package_covered: false,
             payer: crate::routes::lead_payer::PayerReadiness::ready(),
+            risk_assessment_held: false,
         }
     }
 

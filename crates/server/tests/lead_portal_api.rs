@@ -186,15 +186,12 @@ fn complete_identification() -> Value {
     json!({
         "birth_place": "Kyiv",
         "birth_country": "UA",
-        "id_document_type": "passport",
-        "id_document_number": "AB123456",
-        "id_issuing_authority": "Stadt Kyiv",
-        "id_issuing_country": "UA",
-        "id_valid_until": "2099-12-31",
         "pep_self": false,
         "pep_related": false,
-        "high_risk_country": false,
-        "sanctions_links": false
+        "sanctions_links": false,
+        // The lead's own reason of the request (13.1); staff enter the
+        // identity document data (trigger flow 2026-10-07).
+        "request_reason": "Zweitmeinung zur Knie-OP"
     })
 }
 
@@ -218,8 +215,9 @@ fn complete_billing() -> Value {
 }
 
 /// Fills in everything "send to the manager" needs, as the cabinet does: the
-/// personal data, who pays (the patient, in the own interest, from the
-/// salary), where the invoice goes and how the patient pays, the statements
+/// personal data, who pays (the patient, in the own interest; without the
+/// triggers of the enhanced check no source of funds is asked), where the
+/// invoice goes and how the patient pays, the statements
 /// for the identification, that nobody acts for the (adult) patient, the
 /// request consent and a copy of the identity document. Returns the request
 /// as the last save answered it.
@@ -241,10 +239,6 @@ async fn fill_in_complete_request(app: &axum::Router, lead_id: Uuid, bearer: &st
         (
             "payer",
             json!({ "payer_kind": "self", "acts_on_own_account": true }),
-        ),
-        (
-            "self-funds",
-            json!({ "self_funds_sources": ["employment"] }),
         ),
         ("billing", complete_billing()),
         ("identification", complete_identification()),
@@ -710,26 +704,22 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // identification, whether somebody acts for the patient, and where the
     // invoice goes and how the patient pays (phase 2) are part of what the
     // manager needs, in form order.
+    // Since the trigger flow (2026-10-07) staff enter the identity data, the
+    // payment route is a follow-up block and the lead states the reason of
+    // the request.
     let still_missing = json!([
         "payer_kind",
         "birth_place",
         "birth_country",
-        "id_document_type",
-        "id_document_number",
-        "id_issuing_authority",
-        "id_issuing_country",
-        "id_valid_until",
         "id_document_upload",
         "has_representative",
         "under_guardianship",
         "payer_own_account",
         "invoice_to",
-        "payment_method",
-        "via_third_party",
         "pep_self",
         "pep_related",
-        "high_risk_country",
-        "sanctions_links"
+        "sanctions_links",
+        "request_reason"
     ]);
     assert_eq!(
         body["progress"]["missing_for_submit"], still_missing,
@@ -771,21 +761,21 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // A self-payer states where the money comes from, after the own
-    // interest (owner request 2026-10-05).
+    // Without a trigger of the enhanced check a self-payer is asked nothing
+    // about the source of funds (owner request 2026-10-07).
     assert_eq!(
         body["progress"]["missing_for_submit"],
         json!([
             "id_document_upload",
             "has_representative",
             "under_guardianship",
-            "self_funds_sources",
-            "invoice_to",
-            "payment_method",
-            "via_third_party"
+            "invoice_to"
         ]),
         "{body}"
     );
+    // Nothing is scored before the send: no follow-up blocks.
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+    assert!(body.get("enhanced_check").is_none(), "{body}");
     // An adult says whether somebody acts for him and whether he is under
     // legal guardianship; "no" to both asks for nobody else.
     let (status, body) = json_request(
@@ -799,13 +789,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!([
-            "id_document_upload",
-            "self_funds_sources",
-            "invoice_to",
-            "payment_method",
-            "via_third_party"
-        ]),
+        json!(["id_document_upload", "invoice_to"]),
         "{body}"
     );
     // Where the invoice goes and how the patient pays (phase 2).
@@ -820,26 +804,9 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!(["id_document_upload", "self_funds_sources"]),
-        "{body}"
-    );
-    // Without a trigger of the enhanced check the source is enough; the
-    // proof is optional.
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/self-funds"),
-        &patient,
-        Some(json!({ "self_funds_sources": ["employment", "savings"] })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["progress"]["missing_for_submit"],
         json!(["id_document_upload"]),
         "{body}"
     );
-    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
     assert!(
         body["identification"]["declared_correct_at"].is_null(),
         "{body}"
@@ -1212,13 +1179,15 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     assert_eq!(body["payer"]["relationship_kind"], "relative", "{body}");
     assert!(body["payer"]["contact_consent_at"].is_string(), "{body}");
     // The consent to pass the cost estimate on has an endpoint of its own
-    // (phase 3b); until it is given it is the only payer key missing (the
-    // background of the payment is a question of the GwG step).
+    // (phase 3b); until it is given it is the only payer key of the base
+    // form missing. Why another relative pays is a follow-up block of the
+    // risk assessment now (trigger flow 2026-10-07), never a base key.
     assert_eq!(
         missing_for_the_payer(&body),
-        ["payer_cost_estimate_consent", "payment_background"],
+        ["payer_cost_estimate_consent"],
         "{body}"
     );
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
     let (status, body) = json_request(
         router,
         "POST",
@@ -1352,9 +1321,11 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
         "contact_consent_required",
         "cost_estimate_consent_at",
         "cost_estimate_consent_required",
-        // The self-payer's own answers from the cabinet: read-only for staff.
-        "self_funds_sources",
+        // The lead's own answers of the extra step: read-only for staff.
+        "self_funds_source",
         "self_funds_description",
+        "payer_funds_source_stated",
+        "payer_funds_description_stated",
     ] {
         confirmed.as_object_mut().unwrap().remove(key);
     }
@@ -1622,7 +1593,11 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     let (status, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let empty = &body["identification"];
-    assert_eq!(empty.as_object().unwrap().len(), 22, "{body}");
+    // Without staff's identity data, with the statements of the follow-up
+    // blocks and the reason of the request (trigger flow 2026-10-07).
+    assert_eq!(empty.as_object().unwrap().len(), 32, "{body}");
+    assert!(empty.get("id_document_number").is_none(), "{body}");
+    assert!(empty["request_reason"].is_null(), "{body}");
     assert!(empty["birth_place"].is_null(), "{body}");
     assert!(empty["pep_self"].is_null(), "{body}");
     assert_eq!(empty["contact_channels"], json!([]), "{body}");
@@ -1673,24 +1648,24 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
             "invalid_field",
         ),
         (
-            json!({ "id_document_type": "driving_licence" }),
+            json!({ "id_document_type": "passport" }),
             "id_document_type",
-            "invalid_field",
+            "staff_only",
         ),
         (
-            json!({ "id_document_number": "1".repeat(61) }),
+            json!({ "id_document_number": "AB123456" }),
             "id_document_number",
-            "invalid_field",
+            "staff_only",
         ),
         (
-            json!({ "id_issued_on": "2999-01-01" }),
+            json!({ "id_issued_on": "2021-01-01" }),
             "id_issued_on",
-            "invalid_field",
+            "staff_only",
         ),
         (
-            json!({ "id_valid_until": "2020-01-01" }),
+            json!({ "id_valid_until": "2099-01-01" }),
             "id_valid_until",
-            "id_document_expired",
+            "staff_only",
         ),
     ] {
         let (status, error) =
@@ -1717,12 +1692,7 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
             "birth_country": "ua",
             "habitual_residence_country": "at",
             "contact_channels": ["phone", "email", "phone"],
-            "id_document_type": "passport",
-            "id_document_number": " AB  123456 ",
-            "id_issuing_authority": "Stadt Kyiv",
-            "id_issuing_country": "ua",
-            "id_issued_on": "2021-02-01",
-            "id_valid_until": "2099-12-31",
+            "residence_since": " 2019 ",
             "pep_self": false,
             "pep_related": true,
             "pep_related_details": " Bruder,\nMinister ",
@@ -1740,9 +1710,8 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     assert_eq!(stated["birth_country"], "UA", "{saved}");
     assert_eq!(stated["habitual_residence_country"], "AT", "{saved}");
     assert_eq!(stated["contact_channels"], json!(["email", "phone"]));
-    assert_eq!(stated["id_document_number"], "AB 123456", "{saved}");
-    assert_eq!(stated["id_issued_on"], "2021-02-01", "{saved}");
-    assert_eq!(stated["id_valid_until"], "2099-12-31", "{saved}");
+    assert_eq!(stated["residence_since"], "2019", "{saved}");
+    assert!(stated.get("id_document_number").is_none(), "{saved}");
     assert_eq!(stated["pep_self"], false, "{saved}");
     assert_eq!(stated["pep_related_details"], "Bruder,\nMinister");
     assert_eq!(stated["high_risk_country_code"], "IR", "{saved}");
@@ -1764,11 +1733,12 @@ async fn the_lead_states_the_identification_and_staff_read_it() {
     assert_eq!(audited_by, Some(user_id));
     assert_eq!(context["access_kind"], "self", "{context}");
     let fields = context["fields"].as_array().unwrap();
-    assert!(fields.contains(&json!("id_document_number")), "{context}");
+    assert!(fields.contains(&json!("birth_place")), "{context}");
+    assert!(fields.contains(&json!("residence_since")), "{context}");
     assert!(fields.contains(&json!("pep_related_details")), "{context}");
     assert!(!fields.contains(&json!("sanctions_links_details")));
     let audited = context.to_string();
-    assert!(!audited.contains("AB 123456") && !audited.contains("Minister"));
+    assert!(!audited.contains("Kyiv") && !audited.contains("Minister"));
     let (updated_by, marked): (Option<Uuid>, bool) = sqlx::query_as(
         r#"SELECT g.updated_by, l.portal_field_updates ? 'identification'
            FROM lead_gwg_declarations g JOIN leads l ON l.id = g.lead_id
@@ -2309,7 +2279,7 @@ async fn purging_a_lead_clears_the_portal_intake() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
-    let funds_proof: Uuid = body["self_funds"]["proof_documents"][0]["id"]
+    let funds_proof: Uuid = body["follow_up"]["funds_proof_documents"][0]["id"]
         .as_str()
         .unwrap()
         .parse()
@@ -2457,7 +2427,9 @@ fn missing_for_the_payer(body: &Value) -> Vec<&str> {
         .unwrap()
         .iter()
         .filter_map(Value::as_str)
-        .filter(|key| key.starts_with("payer") || *key == "payment_background")
+        // The payer's keys of the base form and, of the extra step, why the
+        // third party pays and what the patient knows of its funds.
+        .filter(|key| key.starts_with("payer") || key.starts_with("enhanced_pay"))
         .collect()
 }
 
@@ -2484,7 +2456,11 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
             "street": "Ringstr. 9",
             "zip": "1010",
             "city": "Wien",
-            "email": "kosten@example.com"
+            "email": "kosten@example.com",
+            "phone": "+43 1 5555",
+            // The organisation mask (trigger flow 2026-10-07).
+            "organisation_legal_form": "GmbH",
+            "organisation_contact_name": "Erika Muster"
         });
         for (key, value) in extra.as_object().unwrap() {
             body[key.as_str()] = value.clone();
@@ -2544,17 +2520,18 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     }
     assert_eq!(body["payer"]["citizenships"], json!([]), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
+    // Why a company pays is a follow-up block now (trigger flow 2026-10-07).
     assert_eq!(
         missing_for_the_payer(&body),
         [
             "payer_relationship_kind",
             "payer_country",
             "payer_contact_consent",
-            "payer_cost_estimate_consent",
-            "payment_background"
+            "payer_cost_estimate_consent"
         ],
         "{body}"
     );
+    assert_eq!(body["payer"]["organisation_legal_form"], "GmbH", "{body}");
     assert!(
         screening_queued_at(pool, lead_id).await.is_some(),
         "an organisation named in the cabinet queues the lead for screening"
@@ -2579,8 +2556,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
         [
             "payer_relationship",
             "payer_contact_consent",
-            "payer_cost_estimate_consent",
-            "payment_background"
+            "payer_cost_estimate_consent"
         ],
         "{body}"
     );
@@ -2619,7 +2595,8 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(body["payer"]["relationship_kind"], "employer", "{body}");
     assert!(body["payer"]["relationship"].is_null(), "{body}");
 
-    // Why the company pays is one of the lead's statements.
+    // Why the company pays is one of the lead's statements; what the lead
+    // knows of its funds goes to the declaration as the lead's words.
     let (status, body) = json_request(
         router,
         "POST",
@@ -2634,6 +2611,35 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
         json!(["payer_contact_consent", "payer_cost_estimate_consent"]),
         "{body}"
     );
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/enhanced-details"),
+        &patient,
+        Some(json!({ "payer_funds_source": "income", "payer_funds_description": "Umsatz der Firma" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["follow_up"]["answers"]["payer_funds_source"], "income",
+        "{body}"
+    );
+    assert_eq!(
+        body["progress"]["missing_for_submit"],
+        json!(["payer_contact_consent", "payer_cost_estimate_consent"]),
+        "{body}"
+    );
+    // The own source of funds belongs to a self-payer.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/enhanced-details"),
+        &patient,
+        Some(json!({ "funds_source": "savings" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_self", "{body}");
 
     // Without the consents of the lead nothing is sent.
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
@@ -2718,6 +2724,7 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
         "city": "Wien",
         "country": "AT",
         "email": "kosten@example.com",
+        "phone": "+43 1 5555",
         "payer_informed": true
     });
     let (status, saved) = json_request(
@@ -2788,14 +2795,23 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     assert_eq!(body["payer"]["payer_type"], "person", "{body}");
     assert!(body["payer"]["organisation_name"].is_null(), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
-    // Both consents of the lead were given for the company.
+    // Both consents of the lead were given for the company, and so were
+    // the lead's words on its funds. A person needs e-mail, phone and
+    // residence (owner request 2026-10-07).
     assert!(
         body["payer"]["cost_estimate_consent_at"].is_null(),
         "{body}"
     );
     assert_eq!(
         missing_for_the_payer(&body),
-        ["payer_contact_consent", "payer_cost_estimate_consent"],
+        [
+            "payer_contact_consent",
+            "payer_cost_estimate_consent",
+            "payer_email",
+            "payer_phone",
+            "payer_country",
+            "payer_city"
+        ],
         "{body}"
     );
 
@@ -3031,13 +3047,17 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
             "payment_method": null, "payment_method_details": null, "account_country": null,
             "account_holder": null, "bank_name": null, "via_third_party": null,
             "via_third_party_details": null,
-            "account_holder_suggestion": "Anna Portal"
+            "account_holder_suggestion": "Anna Portal",
+            // Block C of the risk assessment (trigger flow 2026-10-07).
+            "expected_total_eur": null, "via_third_party_kind": null
         }),
         "{body}"
     );
     assert_eq!(
         missing_for_the_billing(&body),
-        ["invoice_to", "payment_method", "via_third_party"],
+        // The payment route (section 8) is follow-up block C since the trigger
+        // flow (2026-10-07): the base form asks only where the invoice goes.
+        ["invoice_to"],
         "{body}"
     );
     let (status, body) = json_request(
@@ -3129,7 +3149,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(shown["payment_route_by"], "patient", "{body}");
     assert_eq!(
         missing_for_the_billing(&body),
-        ["invoice_country", "bank_name", "via_third_party_details"],
+        ["invoice_country"],
         "{body}"
     );
     assert_eq!(
@@ -3349,7 +3369,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(body["billing"]["payment_route_by"], "patient", "{body}");
     assert_eq!(
         missing_for_the_billing(&body),
-        ["invoice_to", "payment_method", "via_third_party"],
+        // The payment route (section 8) is follow-up block C since the trigger
+        // flow (2026-10-07): the base form asks only where the invoice goes.
+        ["invoice_to"],
         "{body}"
     );
     let stored: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
@@ -3437,22 +3459,28 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     );
     assert_eq!(
         missing_for_the_billing(&body),
-        ["invoice_to", "payment_method", "via_third_party"],
+        // The payment route (section 8) is follow-up block C since the trigger
+        // flow (2026-10-07): the base form asks only where the invoice goes.
+        ["invoice_to"],
         "{body}"
     );
-    // Why "another person" pays is not asked of the paying parent's own
-    // login (QA 2026-10-06, B4); the other parent's login still asks it.
+    // Why "another person" pays is asked only in the extra step (owner rule
+    // 2026-10-07): a parent is the first circle, and without the triggers of
+    // the enhanced check neither login is asked it; the paying parent's own
+    // login never is (QA 2026-10-06, B4).
     let asks_background = |body: &Value| {
         body["progress"]["missing_for_submit"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|key| key == "payment_background")
+            .any(|key| key == "payment_background" || key == "enhanced_payment_background")
     };
     assert!(!asks_background(&body), "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
     let (status, body) = json_request(router, "GET", &request, ben, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert!(asks_background(&body), "{body}");
+    assert!(!asks_background(&body), "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
     assert_eq!(body["billing"]["payment_route_by"], "payer", "{body}");
     assert!(
         body["billing"]["account_holder_suggestion"].is_null(),
@@ -4121,94 +4149,115 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     );
 }
 
-/// The keys of the self-payer's source of funds in `progress.missing_for_submit`.
-fn self_funds_missing(body: &Value) -> Vec<&str> {
-    body["progress"]["missing_for_submit"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(Value::as_str)
-        .filter(|key| key.starts_with("self_funds"))
-        .collect()
-}
-
-/// The answer "Viktor Zahler pays" of the cabinet.
-fn viktor_pays() -> Value {
-    json!({
-        "payer_kind": "third_party",
-        "payer_type": "person",
-        "first_name": "Viktor",
-        "last_name": "Zahler"
-    })
+/// The follow-up blocks the cabinet shows and what each still misses.
+fn follow_up_missing(body: &Value) -> Value {
+    body["follow_up"]["missing"].clone()
 }
 
 #[tokio::test]
-async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
+async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     let Some(app) = test_app().await else { return };
     let router = &app.suite.app;
     let pool = &app.suite.pool;
-    let (lead_id, user_id, patient) =
-        lead_with_login(&app, "Mia", "mia.selffunds@example.com").await;
+    let (lead_id, _, patient) = lead_with_login(&app, "Mia", "mia.extra@example.com").await;
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
-    let self_funds = format!("{request}/self-funds");
+    let enhanced = format!("{request}/enhanced-details");
     let funds_proof = format!("{request}/funds-proof");
+    let submit = format!("{request}/submit");
+    let follow_up_submit = format!("{request}/follow-up/submit");
     let intake_path = format!("/api/v1/leads/{lead_id}/portal-intake");
+    let ceo_id = seed_user(&app.suite.pool, "lead-portal-risk", "ceo").await;
+    let ceo = bearer(ceo_id, "ceo");
 
-    // Nothing to patch before the answer who pays; nothing for a third party.
+    // No funds question before the answer who pays.
     let (status, body) = json_request(
         router,
         "POST",
-        &self_funds,
+        &enhanced,
         &patient,
-        Some(json!({ "self_funds_sources": ["savings"] })),
+        Some(json!({ "funds_source": "savings" })),
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["code"], "payer_not_declared", "{body}");
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/payer"),
-        &patient,
-        Some(viktor_pays()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["self_funds"]["asked"], false, "{body}");
-    assert!(self_funds_missing(&body).is_empty(), "{body}");
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &self_funds,
-        &patient,
-        Some(json!({ "self_funds_sources": ["savings"] })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "payer_not_self", "{body}");
-    let (status, body) = upload(router, &funds_proof, &patient, PDF).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "payer_not_self", "{body}");
 
-    // The patient pays: the sources are asked, the proof is optional while
-    // the enhanced check is not required (owner rule 2026-10-07).
+    // A complete self-paying request: nothing is scored before the send, so
+    // there is nothing more to add; the extra step of 2026-10-07 is gone.
+    let body = fill_in_complete_request(router, lead_id, &patient).await;
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+    assert!(body.get("enhanced_check").is_none(), "{body}");
+    assert!(body.get("extra_questions").is_none(), "{body}");
+    assert!(body.get("self_funds").is_none(), "{body}");
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["review_notice"], true, "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+
+    // A black-list citizenship: block F appears at once — and nothing about
+    // why.
     let (status, body) = json_request(
         router,
         "POST",
-        &format!("{request}/payer"),
+        &format!("{request}/personal-data"),
         &patient,
-        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
+        Some(json!({ "citizenships": ["DE", "KP"] })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["self_funds"]["asked"], true, "{body}");
-    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
-    assert_eq!(body["self_funds"]["sources"], json!([]), "{body}");
+    assert_eq!(body["follow_up"]["required"], true, "{body}");
+    assert_eq!(body["follow_up"]["blocks"], json!(["F"]), "{body}");
     assert_eq!(
-        body["self_funds"]["source_options"],
+        follow_up_missing(&body),
+        json!({ "F": ["residence_since", "stay_reason"] }),
+        "{body}"
+    );
+    let whole = body.to_string();
+    for word in [
+        "\"reasons\"",
+        "\"countries\"",
+        "_blacklist",
+        "patient_sanctioned",
+        "\"level\"",
+        "\"points\"",
+        "list_2",
+    ] {
+        assert!(!whole.contains(word), "{word}: {whole}");
+    }
+    // The request itself stays sent; the base form misses nothing.
+    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
+
+    // Staff ask for the source of funds (block A).
+    let (status, decided) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &ceo,
+        Some(json!({
+            "decision": "request_more",
+            "reason": "Please state the source of the funds",
+            "blocks": ["A"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{decided}");
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["blocks"], json!(["A", "F"]), "{body}");
+    assert_eq!(
+        follow_up_missing(&body)["A"],
         json!([
-            "employment",
-            "business_income",
+            "funds_source",
+            "funds_description",
+            "occupation",
+            "sector",
+            "funds_proof_upload"
+        ]),
+        "{body}"
+    );
+    assert_eq!(
+        body["follow_up"]["funds_source_options"],
+        json!([
+            "income",
             "savings",
             "asset_sale",
             "inheritance_gift",
@@ -4216,100 +4265,109 @@ async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
         ]),
         "{body}"
     );
-    assert_eq!(self_funds_missing(&body), ["self_funds_sources"], "{body}");
+    let (status, refused) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["code"], "follow_up_incomplete", "{refused}");
 
-    // Only the person list and the two keys.
+    // Refused values name their key.
     for (patch, field) in [
+        (json!({ "funds_source": "employment" }), "funds_source"),
+        (json!({ "funds_source": "income,savings" }), "funds_source"),
         (
-            json!({ "self_funds_sources": ["loan"] }),
+            json!({ "funds_description": "x".repeat(2001) }),
+            "funds_description",
+        ),
+        (json!({ "occupation": "x".repeat(201) }), "occupation"),
+        (json!({ "sector": "x".repeat(201) }), "sector"),
+        (
+            json!({ "self_funds_sources": ["savings"] }),
             "self_funds_sources",
         ),
         (
-            json!({ "self_funds_sources": "savings" }),
-            "self_funds_sources",
+            json!({ "payment_background": "Weil" }),
+            "payment_background",
         ),
-        (
-            json!({ "self_funds_description": 7 }),
-            "self_funds_description",
-        ),
-        (json!({ "source_of_funds": "savings" }), "source_of_funds"),
+        (json!({ "occupation": 5 }), "body"),
     ] {
-        let (status, body) = json_request(router, "POST", &self_funds, &patient, Some(patch)).await;
+        let (status, body) = json_request(router, "POST", &enhanced, &patient, Some(patch)).await;
         assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
         assert_eq!(body["code"], "invalid_field", "{body}");
         assert_eq!(body["field"], field, "{body}");
     }
-    // "Other" needs the words.
+    // What the patient knows of a payer's funds needs a third party.
     let (status, body) = json_request(
         router,
         "POST",
-        &self_funds,
+        &enhanced,
         &patient,
-        Some(json!({ "self_funds_sources": ["other", "savings"] })),
+        Some(json!({ "payer_funds_source": "savings" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["self_funds"]["sources"],
-        json!(["savings", "other"]),
-        "form order: {body}"
-    );
-    assert_eq!(
-        self_funds_missing(&body),
-        ["self_funds_description"],
-        "{body}"
-    );
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_third_party", "{body}");
+
+    // The answers, only the changed keys; the audit names the keys only.
     let (status, body) = json_request(
         router,
         "POST",
-        &self_funds,
+        &enhanced,
         &patient,
-        Some(json!({ "self_funds_description": " Stipendium der Stiftung " })),
+        Some(json!({
+            "funds_source": "income",
+            "funds_description": " Gehalt als Lehrerin ",
+            "occupation": "Lehrerin",
+            "sector": "Bildung"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let answers = &body["follow_up"]["answers"];
+    assert_eq!(answers["funds_source"], "income", "{body}");
     assert_eq!(
-        body["self_funds"]["description"], "Stipendium der Stiftung",
+        answers["funds_description"], "Gehalt als Lehrerin",
         "{body}"
     );
-    assert!(self_funds_missing(&body).is_empty(), "{body}");
-    // The audit names the fields, never the values; the same answer again
-    // writes nothing.
+    assert_eq!(answers["occupation"], "Lehrerin", "{body}");
+    assert_eq!(answers["sector"], "Bildung", "{body}");
     assert_eq!(
-        audit_count(pool, "lead_portal_update_self_funds", lead_id).await,
-        2
+        follow_up_missing(&body)["A"],
+        json!(["funds_proof_upload"]),
+        "{body}"
+    );
+    assert_eq!(
+        audit_count(pool, "lead_portal_update_enhanced_details", lead_id).await,
+        1
     );
     let context: Value = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
-           WHERE action = 'lead_portal_update_self_funds' AND entity_id = $1
-           ORDER BY created_at DESC LIMIT 1"#,
+           WHERE action = 'lead_portal_update_enhanced_details' AND entity_id = $1"#,
     )
     .bind(lead_id)
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(context["fields"], json!(["self_funds_description"]));
-    assert!(!context.to_string().contains("Stipendium"), "{context}");
+    assert_eq!(
+        context["fields"],
+        json!(["occupation", "sector", "funds_source", "funds_description"]),
+        "{context}"
+    );
+    assert!(!context.to_string().contains("Lehrerin"), "{context}");
     let (status, _) = json_request(
         router,
         "POST",
-        &self_funds,
+        &enhanced,
         &patient,
-        Some(json!({ "self_funds_sources": ["savings", "other"] })),
+        Some(json!({ "occupation": "Lehrerin" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        audit_count(pool, "lead_portal_update_self_funds", lead_id).await,
-        2
+        audit_count(pool, "lead_portal_update_enhanced_details", lead_id).await,
+        1,
+        "the same answer writes nothing"
     );
 
-    // The proof needs the consent to process the request data, like the
-    // identity document; PDF, JPG or PNG.
-    let (status, body) = upload(router, &funds_proof, &patient, PDF).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
-    assert_eq!(body["code"], "inquiry_consent_required", "{body}");
-    give_consent(router, lead_id, &patient, "lead_inquiry_processing").await;
+    // One or more proofs, PDF, JPG or PNG.
     let (status, body) = upload_file(
         router,
         &funds_proof,
@@ -4321,52 +4379,41 @@ async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "unsupported_file_type", "{body}");
-    let (status, body) = upload_file(
-        router,
-        &funds_proof,
-        &patient,
-        "kontoauszug.png",
-        "image/png",
-        PNG,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    // Listed with the source of funds; never a medical document nor a copy
-    // of the identity document.
-    let listed = &body["self_funds"]["proof_documents"][0];
-    assert_eq!(listed["file_name"], "kontoauszug.png", "{body}");
-    assert_eq!(listed["uploaded_by_me"], true, "{body}");
-    assert_eq!(listed["can_delete"], true, "{body}");
-    assert_eq!(body["documents"], json!([]), "{body}");
-    assert_eq!(body["identity_documents"], json!([]), "{body}");
-    assert!(
-        body["progress"]["missing_for_submit"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("id_document_upload")),
-        "{body}"
-    );
-    let proof: Uuid = listed["id"].as_str().unwrap().parse().unwrap();
-    let (art, category, is_medical, uploaded_by, kind): (String, String, bool, Uuid, String) =
-        sqlx::query_as(
-            r#"SELECT d.art, COALESCE(d.category, ''), d.is_medical, d.uploaded_by, u.kind
-               FROM documents d JOIN lead_portal_uploads u ON u.document_id = d.id
-               WHERE d.id = $1 AND d.lead_id = $2"#,
-        )
-        .bind(proof)
-        .bind(lead_id)
-        .fetch_one(pool)
-        .await
+    for (name, mime, bytes) in [
+        ("kontoauszug.png", "image/png", PNG),
+        ("gehaltsnachweis.pdf", "application/pdf", PDF),
+    ] {
+        let (status, body) = upload_file(router, &funds_proof, &patient, name, mime, bytes).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+    }
+    let (status, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let proofs = body["follow_up"]["funds_proof_documents"]
+        .as_array()
         .unwrap();
-    assert_eq!(art, "self_funds_proof");
-    assert_eq!(category, "finance");
-    assert!(!is_medical);
-    assert_eq!(uploaded_by, user_id);
-    assert_eq!(kind, "self_funds_proof");
+    assert_eq!(proofs.len(), 2, "{body}");
+    assert_eq!(proofs[0]["can_delete"], true, "{body}");
+    assert_eq!(body["documents"], json!([]), "{body}");
+    assert_eq!(follow_up_missing(&body)["A"], json!([]), "{body}");
+    let proof: Uuid = proofs[0]["id"].as_str().unwrap().parse().unwrap();
+    let (art, category, kind): (String, String, String) = sqlx::query_as(
+        r#"SELECT d.art, COALESCE(d.category, ''), u.kind
+           FROM documents d JOIN lead_portal_uploads u ON u.document_id = d.id
+           WHERE d.id = $1 AND d.lead_id = $2"#,
+    )
+    .bind(proof)
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (art.as_str(), category.as_str(), kind.as_str()),
+        ("self_funds_proof", "finance", "self_funds_proof")
+    );
 
-    // Staff read the answers and the file in "Данные от пациента"; the
-    // concierge gets none of it. The declaration counts the lead's
-    // statement as its source of funds.
+    // Staff read the answers and the files in "Данные от пациента"; the
+    // concierge gets none of it. The lead's statement counts as the
+    // declaration's source of funds; level 2 requires the enhanced check.
     let (status, intake) = json_request(
         router,
         "GET",
@@ -4376,28 +4423,23 @@ async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{intake}");
-    let staff_view = &intake["self_funds"];
-    assert_eq!(staff_view["asked"], true, "{intake}");
+    let staff_view = &intake["enhanced_details"];
+    assert_eq!(staff_view["check_required"], true, "{intake}");
+    assert_eq!(staff_view["answers"]["funds_source"], "income", "{intake}");
+    assert_eq!(staff_view["answers"]["sector"], "Bildung", "{intake}");
     assert_eq!(
-        staff_view["sources"],
-        json!(["savings", "other"]),
+        staff_view["funds_proof_documents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2,
         "{intake}"
     );
-    assert_eq!(
-        staff_view["description"], "Stipendium der Stiftung",
-        "{intake}"
-    );
-    assert_eq!(staff_view["proof_required"], false, "{intake}");
     assert!(staff_view["updated_at"].is_string(), "{intake}");
-    assert_eq!(
-        staff_view["proof_documents"][0]["file_name"], "kontoauszug.png",
-        "{intake}"
-    );
-    assert_eq!(intake["identity_documents"], json!([]), "{intake}");
     let (status, hidden) =
         json_request(router, "GET", &intake_path, &app.staff("concierge"), None).await;
     assert_eq!(status, StatusCode::OK, "{hidden}");
-    assert!(hidden["self_funds"].is_null(), "{hidden}");
+    assert!(hidden["enhanced_details"].is_null(), "{hidden}");
     let (status, declaration) = json_request(
         router,
         "GET",
@@ -4408,161 +4450,154 @@ async fn a_self_payer_states_the_source_of_funds_and_may_add_a_proof() {
     .await;
     assert_eq!(status, StatusCode::OK, "{declaration}");
     assert_eq!(
-        declaration["declaration"]["self_funds_sources"],
-        json!(["savings", "other"]),
-        "{declaration}"
-    );
-    assert!(
-        !declaration["status"]["missing"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("payer_source_of_funds_missing")),
+        declaration["declaration"]["self_funds_source"], "income",
         "{declaration}"
     );
 
-    // A black-list citizenship requires the enhanced check: the proof is
-    // required now. Without a file it is missing again.
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/personal-data"),
-        &patient,
-        Some(json!({ "citizenships": ["DE", "IR"] })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["self_funds"]["proof_required"], true, "{body}");
-    assert!(self_funds_missing(&body).is_empty(), "{body}");
-    let (status, body) = json_request(
-        router,
-        "DELETE",
-        &format!("{request}/documents/{proof}"),
-        &patient,
-        None,
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["self_funds"]["proof_documents"], json!([]), "{body}");
-    assert_eq!(
-        self_funds_missing(&body),
-        ["self_funds_proof_upload"],
-        "{body}"
-    );
-    let (_, intake) = json_request(
-        router,
-        "GET",
-        &intake_path,
-        &app.staff("patient_manager"),
-        None,
-    )
-    .await;
-    assert_eq!(intake["self_funds"]["proof_required"], true, "{intake}");
-    assert_eq!(
-        intake["self_funds"]["proof_documents"],
-        json!([]),
-        "{intake}"
-    );
-
-    // A third party pays after all: the patient's own sources go, and
-    // nothing of them is asked.
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/payer"),
-        &patient,
-        Some(viktor_pays()),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["self_funds"]["asked"], false, "{body}");
-    assert_eq!(body["self_funds"]["sources"], json!([]), "{body}");
-    assert!(body["self_funds"]["description"].is_null(), "{body}");
-    assert!(self_funds_missing(&body).is_empty(), "{body}");
-    let stored: (Vec<String>, Option<String>) = sqlx::query_as(
-        "SELECT self_funds_sources, self_funds_description FROM lead_payer_declarations WHERE lead_id = $1",
-    )
-    .bind(lead_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
-    assert_eq!(stored, (Vec::new(), None));
-}
-
-#[tokio::test]
-async fn the_proof_of_funds_is_required_to_send_only_with_the_enhanced_check() {
-    let Some(app) = test_app().await else { return };
-    let router = &app.suite.app;
-    let (lead_id, _, patient) = lead_with_login(&app, "Ben", "ben.selffunds@example.com").await;
-    let request = format!("/api/v1/me/lead-requests/{lead_id}");
-    let submit = format!("{request}/submit");
-
-    // A complete self-paying request without a black-list country or a
-    // confirmed sanctions match is sent without a proof.
-    let body = fill_in_complete_request(router, lead_id, &patient).await;
-    assert_eq!(body["self_funds"]["proof_required"], false, "{body}");
-    assert_eq!(body["self_funds"]["proof_documents"], json!([]), "{body}");
-    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["changed_since_submit"], false, "{body}");
-
-    // A changed source after sending asks to send again.
-    let (status, body) = json_request(
-        router,
-        "POST",
-        &format!("{request}/self-funds"),
-        &patient,
-        Some(json!({ "self_funds_description": "Gehalt als Lehrerin" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["changed_since_submit"], true, "{body}");
-
-    // The habitual residence in a black-list country requires the enhanced
-    // check: nothing is sent without the proof any more.
+    // Block F answered: the follow-up goes to the manager.
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/identification"),
         &patient,
-        Some(json!({ "habitual_residence_country": "IR" })),
+        Some(json!({ "residence_since": "2015", "stay_reason": "family" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["progress"]["missing_for_submit"],
-        json!(["self_funds_proof_upload"]),
-        "{body}"
-    );
-    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
-    assert_eq!(
-        body["missing"],
-        json!(["self_funds_proof_upload"]),
-        "{body}"
-    );
-    let (status, body) = upload_file(
-        router,
-        &format!("{request}/funds-proof"),
-        &patient,
-        "gehaltsnachweis.pdf",
-        "application/pdf",
-        PDF,
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{body}");
-    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
+    let (status, body) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["changed_since_submit"], false, "{body}");
     let counted: Value = sqlx::query_scalar(
         r#"SELECT context FROM audit_log
            WHERE action = 'lead_portal_submit' AND entity_id = $1
            ORDER BY created_at DESC LIMIT 1"#,
     )
     .bind(lead_id)
-    .fetch_one(&app.suite.pool)
+    .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(counted["self_funds_documents"], 1, "{counted}");
-    assert_eq!(counted["identity_documents"], 1, "{counted}");
+    assert_eq!(counted["self_funds_documents"], 2, "{counted}");
+
+    // A third party pays after all: the own source goes.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/payer"),
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "relationship_kind": "parent",
+            "citizenships": ["AT"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["follow_up"]["answers"]["funds_source"].is_null(),
+        "{body}"
+    );
+    let stored: (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT self_funds_source, self_funds_description FROM lead_payer_declarations WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, (None, None));
+    let (status, body) = upload(router, &funds_proof, &patient, PDF).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "payer_not_self", "{body}");
+}
+
+#[tokio::test]
+async fn a_sister_who_pays_alone_asks_nothing_more() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let (lead_id, _, patient) = lead_with_login(&app, "Anna", "anna.sister@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let payer = format!("{request}/payer");
+    fill_in_complete_request(router, lead_id, &patient).await;
+    let sister = json!({
+        "payer_kind": "third_party",
+        "payer_type": "person",
+        "first_name": "Mia",
+        "last_name": "Muster",
+        "citizenships": ["AT"],
+        "relationship_kind": "sibling",
+        "email": "mia.muster@example.com",
+        "phone": "+43 660 1234",
+        "messenger": " +43 660 1234 ",
+        "country": "AT",
+        "city": "Wien",
+        "contact_consent": true
+    });
+    let (status, body) = json_request(router, "POST", &payer, &patient, Some(sister.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // The messenger number goes with the payer.
+    assert_eq!(body["payer"]["messenger"], "+43 660 1234", "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{payer}/cost-estimate-consent"),
+        &patient,
+        Some(json!({ "consent": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // A sister paying alone is T4 + T5 = 3 points, level 1 (contract 8): the
+    // base form asks nothing more, and after the send nothing follows up.
+    assert_eq!(body["progress"]["missing_for_submit"], json!([]), "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+    // What the patient knows of her funds may still be stated.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/enhanced-details"),
+        &patient,
+        Some(json!({
+            "payer_funds_source": "savings",
+            "payer_funds_description": "Ersparnisse aus ihrem Gehalt"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(
+        intake["enhanced_details"]["answers"]["payer_funds_source"], "savings",
+        "{intake}"
+    );
+    assert_eq!(
+        intake["enhanced_details"]["check_required"], false,
+        "{intake}"
+    );
+    // An older cabinet leaves the messenger out: it stays.
+    let mut older = sister.clone();
+    older.as_object_mut().unwrap().remove("messenger");
+    let (status, body) = json_request(router, "POST", &payer, &patient, Some(older)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["payer"]["messenger"], "+43 660 1234", "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+    assert_eq!(body["review_notice"], true, "{body}");
 }

@@ -13,7 +13,6 @@ import type {
 } from "./lead-request-api";
 import { BILLING_SUBMIT_FIELDS, type BillingSubmitField } from "./lead-request-billing-model";
 import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
-import { SELF_FUNDS_SUBMIT_FIELDS, type SelfFundsSubmitField } from "./lead-request-self-funds-model";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
 export type PersonalDraft = {
@@ -149,6 +148,8 @@ export const RELATIONSHIP_KINDS = [
   "spouse",
   "parent",
   "child",
+  "sibling",
+  "grandparent",
   "relative",
   "employer",
   "friend",
@@ -175,6 +176,10 @@ export type PayerDraft = {
   payer_type: string;
   /** Name of the company, organisation or insurer. */
   organisation_name: string;
+  /** The organisation mask: legal form, register number and contact person. */
+  organisation_legal_form: string;
+  organisation_register_number: string;
+  organisation_contact_name: string;
   first_name: string;
   last_name: string;
   date_of_birth: string;
@@ -189,6 +194,8 @@ export type PayerDraft = {
   country: string;
   phone: string;
   email: string;
+  /** WhatsApp / messenger number (optional). */
+  messenger: string;
   /** The lead agrees that GMED contacts the payer and tells them the lead's name. */
   contact_consent: boolean;
   /** Own economic interest: "yes", "no" or "" (not answered yet). */
@@ -202,6 +209,10 @@ export type PayerField =
   | "payer_kind"
   | "payer_type"
   | "payer_organisation_name"
+  | "payer_legal_form"
+  | "payer_register_number"
+  | "payer_contact_name"
+  | "payer_email_or_phone"
   | "payer_first_name"
   | "payer_last_name"
   | "payer_date_of_birth"
@@ -214,6 +225,7 @@ export type PayerField =
   | "payer_country"
   | "payer_phone"
   | "payer_email"
+  | "payer_messenger"
   | "payer_contact_consent"
   | "payer_cost_estimate_consent"
   | "payer_own_account"
@@ -223,6 +235,10 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_kind",
   "payer_type",
   "payer_organisation_name",
+  "payer_legal_form",
+  "payer_register_number",
+  "payer_contact_name",
+  "payer_email_or_phone",
   "payer_first_name",
   "payer_last_name",
   "payer_date_of_birth",
@@ -235,6 +251,7 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_country",
   "payer_phone",
   "payer_email",
+  "payer_messenger",
   "payer_contact_consent",
   "payer_cost_estimate_consent",
   "payer_own_account",
@@ -263,6 +280,16 @@ function oneLine(value: string | null | undefined): string {
  */
 export function knowsPayerType(request: Pick<LeadRequest, "payer" | "payer_self_template">): boolean {
   return request.payer ? request.payer.payer_type !== undefined : request.payer_self_template !== undefined;
+}
+
+/**
+ * Whether the server knows the organisation mask (legal form, register
+ * number, contact person; trigger flow 2026-10-07): a stored payer carries
+ * its keys; before that, the follow-up object shows a server of that kind.
+ */
+export function knowsOrganisationMask(request: Pick<LeadRequest, "payer" | "follow_up">): boolean {
+  if (request.payer) return request.payer.organisation_legal_form !== undefined;
+  return request.follow_up !== undefined;
 }
 
 /** The kind of organisation that pays; `null` for a natural person, also while the type is not stated. */
@@ -305,16 +332,16 @@ export function payerSelfOffered(request: Pick<LeadRequest, "minor" | "payer">):
 }
 
 /**
- * Whether "why does this person pay?" is asked: about a third party, not
- * about the parent who pays (answer "I pay (as a parent)"). A server that
- * still lists it as missing for the parent (an older one) gets the field, or
- * the request could not be sent.
+ * Whether the third party's e-mail, phone and residence are required to send
+ * (owner request 2026-10-07): not of the parent who pays (the own data are
+ * known), and a server that lists one as missing gets the mark in any case.
  */
-export function paymentBackgroundAsked(
+export function payerContactRequired(
   draft: Pick<PayerDraft, "guardian_pays">,
   request: Pick<LeadRequest, "progress">,
+  field: "payer_email" | "payer_phone" | "payer_country" | "payer_city",
 ): boolean {
-  return !draft.guardian_pays || request.progress.missing_for_submit.includes("payment_background");
+  return !draft.guardian_pays || request.progress.missing_for_submit.includes(field);
 }
 
 /**
@@ -349,6 +376,9 @@ export function draftFromPayer(
     guardian_pays: payerAnswer(payer, template) === "guardian",
     payer_type: payer?.payer_type ?? "",
     organisation_name: payer?.organisation_name ?? "",
+    organisation_legal_form: payer?.organisation_legal_form ?? "",
+    organisation_register_number: payer?.organisation_register_number ?? "",
+    organisation_contact_name: payer?.organisation_contact_name ?? "",
     first_name: payer?.first_name ?? "",
     last_name: payer?.last_name ?? "",
     date_of_birth: payer?.date_of_birth ?? "",
@@ -361,6 +391,7 @@ export function draftFromPayer(
     country: payer?.country ?? "",
     phone: payer?.phone ?? "",
     email: payer?.email ?? "",
+    messenger: payer?.messenger ?? "",
     contact_consent: Boolean(payer?.contact_consent_at),
     acts_on_own_account: answerFromBoolean(payer?.acts_on_own_account),
     beneficial_owner: payer?.beneficial_owner ?? "",
@@ -374,6 +405,9 @@ function withoutPayerParty(draft: PayerDraft): PayerDraft {
     guardian_pays: false,
     payer_type: "",
     organisation_name: "",
+    organisation_legal_form: "",
+    organisation_register_number: "",
+    organisation_contact_name: "",
     first_name: "",
     last_name: "",
     date_of_birth: "",
@@ -386,6 +420,7 @@ function withoutPayerParty(draft: PayerDraft): PayerDraft {
     country: "",
     phone: "",
     email: "",
+    messenger: "",
   };
 }
 
@@ -435,9 +470,10 @@ export function withPayerAnswer(
 
 /**
  * The draft after "who is the payer?". A company, organisation or insurer has
- * a name and no data of a natural person, and the other way round: what does
- * not apply goes, and so does the consent, which was given for the payer
- * named before (the server does the same).
+ * the organisation mask (name, legal form, register number, contact person)
+ * and no data of a natural person, and the other way round: what does not
+ * apply goes, and so does the consent, which was given for the payer named
+ * before (the server does the same).
  */
 export function withPayerType(draft: PayerDraft, type: string): PayerDraft {
   if (type === payerTypeOf(draft)) return draft;
@@ -445,7 +481,13 @@ export function withPayerType(draft: PayerDraft, type: string): PayerDraft {
   if (organisationPayerType(type)) {
     return { ...next, first_name: "", last_name: "", date_of_birth: "", citizenships: [] };
   }
-  return { ...next, organisation_name: "" };
+  return {
+    ...next,
+    organisation_name: "",
+    organisation_legal_form: "",
+    organisation_register_number: "",
+    organisation_contact_name: "",
+  };
 }
 
 /** The draft after the relationship was chosen: the text belongs to "other" only. */
@@ -473,7 +515,21 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
   if (draft.payer_kind === "third_party") {
     const type = typed ? payerTypeOf(draft) : "person";
     const put = (
-      field: "organisation_name" | "first_name" | "last_name" | "date_of_birth" | "relationship" | "street" | "zip" | "city" | "country" | "phone" | "email",
+      field:
+        | "organisation_name"
+        | "organisation_legal_form"
+        | "organisation_register_number"
+        | "organisation_contact_name"
+        | "first_name"
+        | "last_name"
+        | "date_of_birth"
+        | "relationship"
+        | "street"
+        | "zip"
+        | "city"
+        | "country"
+        | "phone"
+        | "email",
     ) => {
       const value = oneLine(draft[field]);
       if (value) input[field] = value;
@@ -485,6 +541,12 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
       put("date_of_birth");
     } else {
       put("organisation_name");
+      // The organisation mask exists on a server that knows the payer type only.
+      if (typed) {
+        put("organisation_legal_form");
+        put("organisation_register_number");
+        put("organisation_contact_name");
+      }
     }
     if (typed && draft.relationship_kind) input.relationship_kind = draft.relationship_kind;
     // In words for "other"; a text stored before the list existed stays until a kind is chosen.
@@ -495,6 +557,8 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
     put("country");
     put("phone");
     put("email");
+    // Always with a server that knows the payer type: `""` clears a number.
+    if (typed) input.messenger = oneLine(draft.messenger);
     if (type === "person" && draft.citizenships.length > 0) input.citizenships = [...draft.citizenships];
     if (typed && withConsent) input.contact_consent = draft.contact_consent;
   }
@@ -507,8 +571,12 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
   return input;
 }
 
-/** The four legal yes/no questions (GwG, spec section 9), in form order. */
-export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "high_risk_country", "sanctions_links"] as const;
+/**
+ * The legal yes/no questions (GwG, trigger flow 2026-10-07), in form order.
+ * Only the answer is asked here; the details of a "yes" are follow-up blocks
+ * H (public office) and J (sanctions), asked when GMED needs them.
+ */
+export const LEGAL_QUESTIONS = ["pep_self", "pep_related", "sanctions_links"] as const;
 
 export type LegalQuestion = (typeof LEGAL_QUESTIONS)[number];
 
@@ -521,25 +589,37 @@ export type IdentificationDraft = {
   birth_country: string;
   habitual_residence_country: string;
   contact_channels: string[];
-  id_document_type: string;
-  id_document_number: string;
-  id_issuing_authority: string;
-  id_issuing_country: string;
-  id_issued_on: string;
-  id_valid_until: string;
-  payment_background: string;
   /** The legal questions: "yes", "no" or "" (not answered yet). */
   pep_self: string;
-  pep_self_details: string;
   pep_related: string;
-  pep_related_details: string;
-  high_risk_country: string;
-  high_risk_country_code: string;
   sanctions_links: string;
-  sanctions_links_details: string;
+  /** Block B: why another person pays, and since when they know each other. */
+  payment_background: string;
+  relationship_since: string;
+  /** Block F: residence and citizenships. */
+  residence_since: string;
+  other_residences: string;
+  former_citizenships: string[];
+  stay_reason: string;
+  stay_reason_details: string;
+  /** Block H: the public office. */
+  pep_office: string;
+  pep_country: string;
+  pep_period: string;
+  pep_relationship: string;
+  pep_wealth_origin: string;
+  /** Block J: the link to a sanctioned person or company. */
+  sanctions_link_name: string;
+  sanctions_link_kind: string;
+  sanctions_link_since_extent: string;
+  /** "Grund der Anfrage" (13.1). */
+  request_reason: string;
 };
 
 export type IdentificationField = keyof IdentificationDraft;
+
+/** The statements typed as text, a date, a country or one choice (not a list). */
+export type IdentificationTextField = Exclude<IdentificationField, "contact_channels" | "former_citizenships">;
 
 export const IDENTIFICATION_FIELDS: IdentificationField[] = [
   "salutation",
@@ -548,46 +628,57 @@ export const IDENTIFICATION_FIELDS: IdentificationField[] = [
   "birth_country",
   "habitual_residence_country",
   "contact_channels",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_issued_on",
-  "id_valid_until",
-  "payment_background",
   "pep_self",
-  "pep_self_details",
   "pep_related",
-  "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links",
-  "sanctions_links_details",
+  "payment_background",
+  "relationship_since",
+  "residence_since",
+  "other_residences",
+  "former_citizenships",
+  "stay_reason",
+  "stay_reason_details",
+  "pep_office",
+  "pep_country",
+  "pep_period",
+  "pep_relationship",
+  "pep_wealth_origin",
+  "sanctions_link_name",
+  "sanctions_link_kind",
+  "sanctions_link_since_extent",
+  "request_reason",
 ];
-
-/** What a "yes" to a legal question asks for: a text, or the country for the high-risk question. */
-export const LEGAL_DETAILS = {
-  pep_self: "pep_self_details",
-  pep_related: "pep_related_details",
-  high_risk_country: "high_risk_country_code",
-  sanctions_links: "sanctions_links_details",
-} as const satisfies Record<LegalQuestion, IdentificationField>;
 
 export const CONTACT_CHANNELS = ["email", "phone", "messenger"] as const;
 
 export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
 
+/** Why the patient lives in the country of residence (block F), in form order. */
+export const STAY_REASONS = ["work", "study", "family", "other"] as const;
+
+/** What links the patient to a sanctioned person or company (block J), in form order. */
+export const SANCTIONS_LINK_KINDS = ["family", "business", "ownership", "other"] as const;
+
 /** Free texts that may run over several lines: only the ends are trimmed. */
 const MULTILINE_FIELDS: ReadonlySet<IdentificationField> = new Set([
   "payment_background",
-  "pep_self_details",
-  "pep_related_details",
-  "sanctions_links_details",
+  "other_residences",
+  "stay_reason_details",
+  "pep_office",
+  "pep_relationship",
+  "pep_wealth_origin",
+  "sanctions_link_since_extent",
+  "request_reason",
 ]);
 
 /** The chosen channels without duplicates, in the order of the form. */
 function contactChannels(values: readonly string[]): string[] {
   return CONTACT_CHANNELS.filter((channel) => values.includes(channel));
+}
+
+/** Country codes without duplicates, in the order chosen. */
+function countryCodes(values: readonly string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim().toUpperCase()).filter(Boolean)));
 }
 
 export function draftFromIdentification(data: LeadRequestIdentification | null | undefined): IdentificationDraft {
@@ -598,32 +689,31 @@ export function draftFromIdentification(data: LeadRequestIdentification | null |
     birth_country: data?.birth_country ?? "",
     habitual_residence_country: data?.habitual_residence_country ?? "",
     contact_channels: contactChannels(data?.contact_channels ?? []),
-    id_document_type: data?.id_document_type ?? "",
-    id_document_number: data?.id_document_number ?? "",
-    id_issuing_authority: data?.id_issuing_authority ?? "",
-    id_issuing_country: data?.id_issuing_country ?? "",
-    id_issued_on: data?.id_issued_on ?? "",
-    id_valid_until: data?.id_valid_until ?? "",
-    payment_background: data?.payment_background ?? "",
     pep_self: answerFromBoolean(data?.pep_self),
-    pep_self_details: data?.pep_self_details ?? "",
     pep_related: answerFromBoolean(data?.pep_related),
-    pep_related_details: data?.pep_related_details ?? "",
-    high_risk_country: answerFromBoolean(data?.high_risk_country),
-    high_risk_country_code: data?.high_risk_country_code ?? "",
     sanctions_links: answerFromBoolean(data?.sanctions_links),
-    sanctions_links_details: data?.sanctions_links_details ?? "",
+    payment_background: data?.payment_background ?? "",
+    relationship_since: data?.relationship_since ?? "",
+    residence_since: data?.residence_since ?? "",
+    other_residences: data?.other_residences ?? "",
+    former_citizenships: countryCodes(data?.former_citizenships ?? []),
+    stay_reason: data?.stay_reason ?? "",
+    stay_reason_details: data?.stay_reason_details ?? "",
+    pep_office: data?.pep_office ?? "",
+    pep_country: data?.pep_country ?? "",
+    pep_period: data?.pep_period ?? "",
+    pep_relationship: data?.pep_relationship ?? "",
+    pep_wealth_origin: data?.pep_wealth_origin ?? "",
+    sanctions_link_name: data?.sanctions_link_name ?? "",
+    sanctions_link_kind: data?.sanctions_link_kind ?? "",
+    sanctions_link_since_extent: data?.sanctions_link_since_extent ?? "",
+    request_reason: data?.request_reason ?? "",
   };
 }
 
-/**
- * The draft after the answer to a legal question. The details belong to a
- * "yes" only: with any other answer they go (the server does the same).
- */
+/** The draft after the answer to a legal question: only the answer (the details are follow-up blocks). */
 export function withLegalAnswer(draft: IdentificationDraft, question: LegalQuestion, answer: string): IdentificationDraft {
-  const next: IdentificationDraft = { ...draft, [question]: answer };
-  if (answer !== "yes") next[LEGAL_DETAILS[question]] = "";
-  return next;
+  return { ...draft, [question]: answer };
 }
 
 /** A contact channel switched on or off. */
@@ -635,6 +725,7 @@ export function withContactChannel(draft: IdentificationDraft, channel: ContactC
 /** The comparable form of a field: what would be sent, as text. */
 export function identificationValue(field: IdentificationField, draft: IdentificationDraft): string {
   if (field === "contact_channels") return contactChannels(draft.contact_channels).join(",");
+  if (field === "former_citizenships") return countryCodes(draft.former_citizenships).join(",");
   const value = draft[field].trim();
   return MULTILINE_FIELDS.has(field) ? value : value.replace(/\s+/g, " ");
 }
@@ -658,6 +749,7 @@ export function identificationPatch(
     if (next === identificationValue(field, saved)) continue;
     if (rejected[field] === next) continue;
     if (field === "contact_channels") patch[field] = contactChannels(draft.contact_channels);
+    else if (field === "former_citizenships") patch[field] = countryCodes(draft.former_citizenships);
     else if ((LEGAL_QUESTIONS as readonly string[]).includes(field)) patch[field] = booleanFromAnswer(next);
     else patch[field] = next;
   }
@@ -687,23 +779,30 @@ export function stillRejectedIdentification(
   return next;
 }
 
-/** Keys of the identification in `progress.missing_for_submit`: its fields and the upload. */
+/**
+ * Keys of the identification in `progress.missing_for_submit`: its fields
+ * and the upload of the identity document.
+ */
 export type IdentificationSubmitField = IdentificationField | "id_document_upload";
 
 /**
- * A field of the personal data, of the payer block (with the self-payer's
- * source of funds), of the identification, of the representation or of the
- * billing.
+ * A field of the personal data, of the payer block, of the identification, of
+ * the representation or of the billing.
  */
 export type SubmitField =
   | PersonalField
   | PayerField
-  | SelfFundsSubmitField
   | IdentificationSubmitField
   | RepresentationSubmitField
   | BillingSubmitField;
 
-/** Everything `progress.missing_for_submit` can name, in the order of the form. */
+/**
+ * Everything `progress.missing_for_submit` can name, in the order of the
+ * steps (trigger flow 2026-10-07): person and representation, contact and
+ * residence, identity document (upload only), who pays, insurance and
+ * invoice, declarations, the reason of the request. The payment route
+ * (section 8) is a follow-up block now; its keys stay for an older server.
+ */
 export const SUBMIT_FIELDS: SubmitField[] = [
   // Person
   "salutation",
@@ -716,7 +815,9 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "birth_country",
   "legal_sex",
   "citizenships",
-  // Address
+  // Who acts for the lead: the answers and the persons
+  ...REPRESENTATION_SUBMIT_FIELDS,
+  // Address and residence
   "street_address",
   "zip_code",
   "city",
@@ -726,56 +827,48 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "phone",
   "primary_language",
   "contact_channels",
-  // Identity document
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_issued_on",
-  "id_valid_until",
+  // Identity document: the copy only, the data are entered by GMED
   "id_document_upload",
-  // Who acts for the lead: the answers and the persons
-  ...REPRESENTATION_SUBMIT_FIELDS,
+  // Who pays
+  "payer_kind",
+  "payer_type",
+  "payer_organisation_name",
+  "payer_legal_form",
+  "payer_register_number",
+  "payer_contact_name",
+  "payer_first_name",
+  "payer_last_name",
+  "payer_citizenships",
+  "payer_date_of_birth",
+  "payer_relationship_kind",
+  "payer_relationship",
+  "payer_email_or_phone",
+  "payer_email",
+  "payer_phone",
+  "payer_messenger",
+  // The payer's residence or seat: country and city, then street and ZIP
+  "payer_country",
+  "payer_city",
+  "payer_street",
+  "payer_zip",
+  "payer_contact_consent",
+  "payer_cost_estimate_consent",
+  "payer_own_account",
+  "payer_beneficial_owner",
   // Insurance
   "has_insurance",
   "insurance_type",
   "insurance_provider",
   "insurance_number",
   "insurance_covers_germany",
-  // Who pays
-  "payer_kind",
-  "payer_type",
-  "payer_organisation_name",
-  "payer_first_name",
-  "payer_last_name",
-  "payer_date_of_birth",
-  "payer_citizenships",
-  "payer_relationship_kind",
-  "payer_relationship",
-  "payer_street",
-  "payer_zip",
-  "payer_city",
-  "payer_country",
-  "payer_phone",
-  "payer_email",
-  "payment_background",
-  "payer_contact_consent",
-  "payer_cost_estimate_consent",
-  "payer_own_account",
-  "payer_beneficial_owner",
-  // Where the self-payer's money comes from, with the proof
-  ...SELF_FUNDS_SUBMIT_FIELDS,
-  // Invoice recipient and payment route
+  // Invoice recipient (and, from an older server, the payment route)
   ...BILLING_SUBMIT_FIELDS,
-  // Legal questions
+  // Declarations
   "pep_self",
-  "pep_self_details",
   "pep_related",
-  "pep_related_details",
-  "high_risk_country",
-  "high_risk_country_code",
   "sanctions_links",
-  "sanctions_links_details",
+  // The reason of the request (13.1)
+  "request_reason",
 ];
 
 /** Fields still missing for "send to the manager", in form order. */

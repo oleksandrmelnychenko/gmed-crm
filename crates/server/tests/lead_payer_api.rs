@@ -1353,14 +1353,15 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     let (status, body) = json_request(&app, "POST", &path, &ceo, Some(own.clone())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
-    assert_eq!(body["declaration"]["self_funds_sources"], json!([]));
+    assert!(body["declaration"]["self_funds_source"].is_null());
     assert!(body["declaration"]["self_funds_description"].is_null());
 
-    // The lead stated it in the cabinet: savings and a scholarship. That is
-    // the declaration's source of funds; staff need not repeat it.
+    // The lead stated it in the cabinet's extra step: one choice and its
+    // words. That is the declaration's source of funds; staff need not
+    // repeat it.
     sqlx::query(
         r#"UPDATE lead_payer_declarations
-           SET self_funds_sources = '{savings,other}', self_funds_description = 'Stipendium'
+           SET self_funds_source = 'other', self_funds_description = 'Stipendium'
            WHERE lead_id = $1"#,
     )
     .bind(lead_id)
@@ -1369,11 +1370,7 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     .unwrap();
     let (status, body) = json_request(&app, "GET", &path, &ceo, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(
-        body["declaration"]["self_funds_sources"],
-        json!(["savings", "other"]),
-        "{body}"
-    );
+    assert_eq!(body["declaration"]["self_funds_source"], "other", "{body}");
     assert_eq!(body["declaration"]["self_funds_description"], "Stipendium");
     assert!(missing(&body).is_empty(), "{body}");
     assert_eq!(body["status"]["complete"], true, "{body}");
@@ -1393,13 +1390,9 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["declaration"]["source_of_funds"], "savings", "{body}");
-    assert_eq!(
-        body["declaration"]["self_funds_sources"],
-        json!(["savings", "other"]),
-        "{body}"
-    );
+    assert_eq!(body["declaration"]["self_funds_source"], "other", "{body}");
     let mut written = own.clone();
-    written["self_funds_sources"] = json!(["employment"]);
+    written["self_funds_source"] = json!("income");
     let (status, _) = json_request(&app, "POST", &path, &ceo, Some(written)).await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
@@ -1414,34 +1407,113 @@ async fn the_self_payers_source_of_funds_from_the_cabinet_counts_and_survives_st
     let (_, body) = json_request(&app, "GET", &path, &ceo, None).await;
     assert_eq!(missing(&body), ["payer_source_of_funds_missing"], "{body}");
 
-    // A third party pays: the patient's own sources go with the save (the
-    // table refuses them for a third party), the payer's source is the
-    // payer's own answer.
+    // A third party pays: the patient's own source goes with the save (the
+    // table refuses it for a third party), the payer's source is the payer's
+    // own answer.
     let (status, body) = json_request(&app, "POST", &path, &ceo, Some(third_party_payer())).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["declaration"]["self_funds_source"].is_null(), "{body}");
+    let refused = sqlx::query(
+        "UPDATE lead_payer_declarations SET self_funds_source = 'savings' WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await;
+    assert!(refused.is_err(), "a third party holds no self-payer source");
+    let refused = sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_kind = 'self', self_funds_source = 'employment' WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await;
+    assert!(refused.is_err(), "only the five choices of the extra step");
+}
+
+#[tokio::test]
+async fn the_payers_messenger_and_the_patients_word_on_its_funds_follow_the_payer() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let lead_id = seed_lead(pool).await;
+    let ceo = app.bearer("ceo");
+    let path = format!("/api/v1/leads/{lead_id}/payer-declaration");
+
+    // Staff name a sister with a WhatsApp number (the two new kinds of
+    // relationship are accepted).
+    let mut sister = third_party_payer();
+    sister["relationship_kind"] = json!("sibling");
+    sister["messenger"] = json!(" +43 660 1234 ");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(sister.clone())).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["messenger"], "+43 660 1234", "{body}");
     assert_eq!(
-        body["declaration"]["self_funds_sources"],
-        json!([]),
+        body["declaration"]["relationship_kind"], "sibling",
+        "{body}"
+    );
+    let mut grandmother = sister.clone();
+    grandmother["relationship_kind"] = json!("grandparent");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(grandmother)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["relationship_kind"], "grandparent");
+    let mut too_long = sister.clone();
+    too_long["messenger"] = json!("1".repeat(61));
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(too_long)).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "payer_messenger_too_long", "{body}");
+
+    // The patient said in the cabinet what he knows of her funds.
+    sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payer_funds_source_stated = 'savings',
+               payer_funds_description_stated = 'Ersparnisse aus ihrem Gehalt'
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // A staff form of an older client leaves the key out: both stay.
+    let mut older = sister.clone();
+    older.as_object_mut().unwrap().remove("messenger");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(older)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["declaration"]["messenger"], "+43 660 1234", "{body}");
+    assert_eq!(
+        body["declaration"]["payer_funds_source_stated"], "savings",
+        "{body}"
+    );
+    assert_eq!(
+        body["declaration"]["payer_funds_description_stated"], "Ersparnisse aus ihrem Gehalt",
+        "{body}"
+    );
+    // The patient's word is no declaration of the payer.
+    assert_eq!(body["declaration"]["source_of_funds"], "business_income");
+
+    // Another payer: the number and the patient's word go.
+    let mut other = sister.clone();
+    other["first_name"] = json!("Mia");
+    other.as_object_mut().unwrap().remove("messenger");
+    let (status, body) = json_request(&app, "POST", &path, &ceo, Some(other)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["declaration"]["messenger"].is_null(), "{body}");
+    assert!(
+        body["declaration"]["payer_funds_source_stated"].is_null(),
         "{body}"
     );
     let refused = sqlx::query(
-        "UPDATE lead_payer_declarations SET self_funds_sources = '{savings}' WHERE lead_id = $1",
-    )
-    .bind(lead_id)
-    .execute(pool)
-    .await;
-    assert!(
-        refused.is_err(),
-        "a third party holds no self-payer sources"
-    );
-    let refused = sqlx::query(
         r#"UPDATE lead_payer_declarations
-           SET payer_kind = 'self', self_funds_sources = '{loan}' WHERE lead_id = $1"#,
+           SET payer_kind = 'self', payer_type = NULL, first_name = NULL, last_name = NULL,
+               date_of_birth = NULL, street = NULL, zip = NULL, city = NULL, country = NULL,
+               citizenships = '{}', relationship = NULL, relationship_kind = NULL,
+               email = NULL, phone = NULL, contact_consent_at = NULL,
+               cost_estimate_consent_at = NULL, messenger = '+49 1'
+           WHERE lead_id = $1"#,
     )
     .bind(lead_id)
     .execute(pool)
     .await;
-    assert!(refused.is_err(), "only the person list");
+    assert!(refused.is_err(), "a self-payer has no payer messenger");
 }
 
 async fn payer_informed(

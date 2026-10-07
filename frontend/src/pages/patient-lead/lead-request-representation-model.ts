@@ -150,7 +150,11 @@ export function newRepresentativeId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-/** The form of one person as it is typed (strings, citizenships as codes). */
+/**
+ * The form of one person as it is typed (strings, citizenships as codes).
+ * The identity document's data are entered by GMED from the uploaded copy
+ * (trigger flow 2026-10-07; the server answers 422 `staff_only`).
+ */
 export type RepresentativeDraft = {
   first_name: string;
   last_name: string;
@@ -164,13 +168,6 @@ export type RepresentativeDraft = {
   country: string;
   email: string;
   phone: string;
-  /** "passport", "id_card", "residence_permit" or "". */
-  id_document_type: string;
-  id_document_number: string;
-  id_issuing_authority: string;
-  id_issuing_country: string;
-  id_issued_on: string;
-  id_valid_until: string;
 };
 
 export type RepresentativeField = keyof RepresentativeDraft;
@@ -189,13 +186,15 @@ export const REPRESENTATIVE_FIELDS: RepresentativeField[] = [
   "country",
   "email",
   "phone",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_issued_on",
-  "id_valid_until",
 ];
+
+/**
+ * What the step "Einwilligung & Person" asks of a minor's legal
+ * representatives (they consent and sign): the names and how to reach them.
+ * The rest of a person — and an adult's representative — is the follow-up
+ * block G.
+ */
+export const BASE_REPRESENTATIVE_FIELDS: readonly RepresentativeField[] = ["first_name", "last_name", "email", "phone"];
 
 export function draftFromRepresentative(person: LeadRequestRepresentative | null | undefined): RepresentativeDraft {
   return {
@@ -211,12 +210,6 @@ export function draftFromRepresentative(person: LeadRequestRepresentative | null
     country: person?.country ?? "",
     email: person?.email ?? "",
     phone: person?.phone ?? "",
-    id_document_type: person?.id_document_type ?? "",
-    id_document_number: person?.id_document_number ?? "",
-    id_issuing_authority: person?.id_issuing_authority ?? "",
-    id_issuing_country: person?.id_issuing_country ?? "",
-    id_issued_on: person?.id_issued_on ?? "",
-    id_valid_until: person?.id_valid_until ?? "",
   };
 }
 
@@ -248,11 +241,6 @@ const ADULT_REQUIRED: ReadonlySet<RepresentativeField> = new Set([
   "zip",
   "city",
   "country",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_valid_until",
 ]);
 
 const MINOR_REQUIRED: ReadonlySet<RepresentativeField> = new Set([

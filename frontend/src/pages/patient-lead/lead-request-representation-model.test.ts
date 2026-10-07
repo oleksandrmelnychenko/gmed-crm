@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { LeadRequestRepresentation, LeadRequestRepresentative } from "./lead-request-api";
 import { SUBMIT_FIELDS, missingForSubmit } from "./lead-request-model";
 import {
+  BASE_REPRESENTATIVE_FIELDS,
   REPRESENTATION_SUBMIT_FIELDS,
   REPRESENTATIVE_FIELDS,
   ROLE_OF_SLOT,
@@ -59,12 +60,6 @@ function person(overrides: Partial<LeadRequestRepresentative> = {}): LeadRequest
     country: null,
     email: "anna.muster@example.com",
     phone: null,
-    id_document_type: null,
-    id_document_number: null,
-    id_issuing_authority: null,
-    id_issuing_country: null,
-    id_issued_on: null,
-    id_valid_until: null,
     identity_documents: [],
     authority_documents: [],
     ...overrides,
@@ -257,9 +252,12 @@ describe("the body of a save", () => {
   it("patches a known person with the changed keys only, trimmed, without the role", () => {
     const saved = draftFromRepresentative(person());
     expect(representativePatch(saved, saved)).toBeNull();
-    expect(
-      representativePatch(saved, { ...saved, street: " Musterstraße  1 ", zip: "10115", id_document_type: "passport" }),
-    ).toEqual({ street: "Musterstraße 1", zip: "10115", id_document_type: "passport" });
+    expect(representativePatch(saved, { ...saved, street: " Musterstraße  1 ", zip: "10115" })).toEqual({
+      street: "Musterstraße 1",
+      zip: "10115",
+    });
+    // The identity document's data are staff's (trigger flow): the form has no such field.
+    expect(Object.keys(saved).some((key) => key.startsWith("id_"))).toBe(false);
     // A cleared text is sent as an empty string; a person keeps the last name.
     expect(representativePatch(saved, { ...saved, first_name: "", last_name: " " })).toEqual({ first_name: "" });
     expect(representativePatch(saved, { ...saved, citizenships: ["UA", "DE"] })).toEqual({ citizenships: ["UA", "DE"] });
@@ -284,8 +282,9 @@ describe("the body of a save", () => {
   });
 
   it("puts a refusal of the server at its field", () => {
-    expect(refusedRepresentativeField("id_document_expired", "id_valid_until")).toBe("id_valid_until");
     expect(refusedRepresentativeField("invalid_field", "date_of_birth")).toBe("date_of_birth");
+    // Staff's identity document data are no field of the form.
+    expect(refusedRepresentativeField("staff_only", "id_valid_until")).toBeNull();
     // The refusals of an e-mail need no field.
     expect(refusedRepresentativeField("representative_email_duplicate", undefined)).toBe("email");
     expect(refusedRepresentativeField("representative_email_is_login", undefined)).toBe("email");
@@ -328,10 +327,11 @@ describe("what is needed about a person", () => {
       expect(requiresRepresentativeField("rep2", field), field).toBe(true);
     }
     for (const slot of ["agent", "guardian", "rep1", "rep2"] as const) {
-      expect(requiresRepresentativeField(slot, "id_valid_until")).toBe(true);
-      expect(requiresRepresentativeField(slot, "id_issued_on")).toBe(false);
+      expect(requiresRepresentativeField(slot, "last_name")).toBe(true);
       expect(requiresRepresentativeField(slot, "birth_country")).toBe(false);
     }
+    // The first step asks a minor's parents for names and contacts only; the rest is block G.
+    expect(BASE_REPRESENTATIVE_FIELDS).toEqual(["first_name", "last_name", "email", "phone"]);
   });
 
   it("asks for the proof of authority that fits the person", () => {
@@ -360,11 +360,6 @@ describe("what is missing about the representation", () => {
     "zip",
     "city",
     "country",
-    "id_document_type",
-    "id_document_number",
-    "id_issuing_authority",
-    "id_issuing_country",
-    "id_valid_until",
     "id_upload",
     "authority_upload",
   ];
@@ -380,11 +375,6 @@ describe("what is missing about the representation", () => {
     "country",
     "email",
     "phone",
-    "id_document_type",
-    "id_document_number",
-    "id_issuing_authority",
-    "id_issuing_country",
-    "id_valid_until",
     "id_upload",
   ];
 
@@ -398,16 +388,17 @@ describe("what is missing about the representation", () => {
       "rep1_authority_upload",
       ...parent.map((part) => `rep2_${part}`),
     ]);
-    // After the lead's own identity document, before the insurance.
+    // In the first step, after the person, before address and residence (trigger flow).
     const first = SUBMIT_FIELDS.indexOf("has_representative");
-    expect(SUBMIT_FIELDS[first - 1]).toBe("id_document_upload");
-    expect(SUBMIT_FIELDS[first + REPRESENTATION_SUBMIT_FIELDS.length]).toBe("has_insurance");
+    expect(SUBMIT_FIELDS[first - 1]).toBe("citizenships");
+    expect(SUBMIT_FIELDS[first + REPRESENTATION_SUBMIT_FIELDS.length]).toBe("street_address");
     expect(new Set(SUBMIT_FIELDS).size).toBe(SUBMIT_FIELDS.length);
   });
 
   it("reads a key as a person and a field or upload", () => {
     expect(representativeSubmitPart("rep1_first_name")).toEqual({ slot: "rep1", part: "first_name" });
-    expect(representativeSubmitPart("guardian_id_valid_until")).toEqual({ slot: "guardian", part: "id_valid_until" });
+    // Staff's identity document data are no part of a person in the form.
+    expect(representativeSubmitPart("guardian_id_valid_until")).toBeNull();
     expect(representativeSubmitPart("agent_authority_upload")).toEqual({ slot: "agent", part: "authority_upload" });
     expect(representativeSubmitPart("rep2_id_upload")).toEqual({ slot: "rep2", part: "id_upload" });
     expect(representativeSubmitPart("payer_first_name")).toBeNull();
@@ -431,32 +422,29 @@ describe("what is missing about the representation", () => {
           "rep1_authority_upload",
           "rep1_citizenships",
           "id_document_upload",
-          "rep1_id_valid_until",
           "rep2_email",
           "rep1_birth_place",
         ],
       },
     });
     expect(missing).toEqual([
-      "id_document_upload",
       "rep1_birth_place",
       "rep1_citizenships",
-      "rep1_id_valid_until",
       "rep1_authority_upload",
       "rep2_last_name",
       "rep2_email",
       "rep2_id_upload",
+      "id_document_upload",
       "payer_kind",
     ]);
     expect(missing.map((field) => submitFieldLabel(de, field, true))).toEqual([
-      "Ausweisdokument: Foto oder Scan des Ausweises",
       "1. Vertreter/in: Geburtsort",
       "1. Vertreter/in: Staatsangehörigkeit(en)",
-      "1. Vertreter/in: Gültig bis",
       "1. Vertreter/in: Bestallungsurkunde",
       "2. Vertreter/in: Nachname",
       "2. Vertreter/in: E-Mail",
       "2. Vertreter/in: Foto oder Scan des Ausweises",
+      "Ausweisdokument: Foto oder Scan des Ausweises",
       "Wer übernimmt die Kosten der Behandlung?",
     ]);
   });
@@ -471,7 +459,6 @@ describe("what is missing about the representation", () => {
           "guardian_id_upload",
           "under_guardianship",
           "agent_authority_upload",
-          "agent_id_document_type",
           "agent_street",
           "has_representative",
         ],
@@ -480,7 +467,6 @@ describe("what is missing about the representation", () => {
     expect(missing.map((field) => submitFieldLabel(de, field))).toEqual([
       "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
       "Vertretende Person: Straße und Hausnummer",
-      "Vertretende Person: Art des Dokuments",
       "Vertretende Person: Nachweis der Vertretungsmacht (z. B. Vollmacht)",
       "Stehen Sie unter rechtlicher Betreuung?",
       "Betreuer/in: Ausweis der Betreuerin / des Betreuers",

@@ -150,3 +150,42 @@
 ## Видалення
 
 Разом із лідом очищаються `portal_field_updates`, `portal_submitted_*`, `lead_portal_uploads` (усі види), власні твердження ліда для GwG `lead_gwg_declarations`, дані про представників `lead_representatives`, відповіді й посилання платника (`lead_payer_statements`, `lead_payer_links` з журналом `lead_payer_link_emails`), пакети підписів платника (`lead_payer_signature_packages`) і журнал листів із входом `portal_login_emails`; документи, зокрема копія документа особи, файли представників і підтвердження походження коштів самоплатника (`self_funds_proof`), видаляються звичайною процедурою видалення ліда; джерела й опис самоплатника йдуть разом із декларацією платника неконвертованого ліда. Твердження конвертованого ліда, рядки його представників і відповіді платника лишаються з діловими відносинами, як і декларація платника (§ 8 Abs. 4 GwG; посилання платника конвертація відкликає); у запис пацієнта дані представників не переносяться (довірені особи стають `patient_relations`, як і раніше). Рядки `consent_records` лишаються як доказ (без власних персональних даних, крім посилання на анонімізований акаунт). Див. [Löschkonzept](../compliance/04_loeschkonzept.md) і [політику зберігання лідів](../engineering/03_lead-retention-policy_ua.md).
+
+## Оцінка ризику в кабінеті (trigger flow, 2026-10-07)
+
+Кабінет **не бачить** оцінки ризику (P2): ні балів, ні рівня, ні тригерів, ні
+причин, ні рішень. Об'єкт заявки (`GET /me/lead-requests/{id}`) має:
+
+- `follow_up: { required, blocks, missing, answered_at, answers,
+  funds_source_options, funds_proof_documents, relationship_proof_documents }`
+  — нейтральні блоки дозапиту кабінету (A B C F G H I J; D/E — посилання
+  платника) у порядку літер і чого кожному бракує. Відповіді:
+  `…/enhanced-details` (A: кошти, професія, галузь), `…/funds-proof` (доказ A),
+  `…/identification` (B `payment_background`, `relationship_since`; F
+  `residence_since`, `other_residences`, `former_citizenships`, `stay_reason`,
+  `stay_reason_details`; H `pep_office`, `pep_country`, `pep_period`,
+  `pep_relationship`, `pep_wealth_origin`; J `sanctions_link_name`,
+  `sanctions_link_kind`, `sanctions_link_since_extent`), `…/billing`
+  (C: розділ 8, `expected_total_eur`, `via_third_party_kind`),
+  `POST …/relationship-proof` (доказ B), `…/identity-document` (I),
+  представники (G). `POST …/follow-up/submit` → 422 `follow_up_incomplete`
+  з `missing`, інакше фіксує час, переоцінює і повідомляє персонал.
+  Об'єкти `enhanced_check` і `extra_questions` проміжного етапу «Zusätzliche
+  Angaben» прибрано.
+- `review_notice` — від відправлення до першого запиту підпису документа ліда
+  (згода DSGVO не рахується), для кожного ліда однаково.
+- `progress.missing_by_step` — ключі `missing_for_submit` за кроками
+  `person`, `contact`, `identity`, `payer`, `billing`, `declarations`,
+  `documents`.
+- Базова форма більше не питає: дані документа особи (`id_*` → 422
+  `staff_only`; їх вносить персонал через
+  `PUT /leads/{id}/identity-document-data`, також для представника), деталі
+  PEP/санкцій, питання про країну високого ризику, `payment_background`,
+  розділ 8, кошти самоплатника, дані дорослого представника (блок G). Додано
+  маску організації (`organisation_legal_form`, `organisation_register_number`,
+  `organisation_contact_name` на `/payer`; ключі `payer_legal_form`,
+  `payer_contact_name`, `payer_email_or_phone`) і **причину звернення**
+  `request_reason` (13.1; `…/identification`, ≤ 4000 символів, зберігається в
+  `lead_gwg_declarations.request_reason`, видаляється разом із твердженнями
+  ліда; персонал бачить її в `portal-intake.patient_request_reason` лише з
+  `patients.medical.view`, Sales — ні).

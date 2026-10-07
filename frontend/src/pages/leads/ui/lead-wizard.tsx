@@ -247,7 +247,12 @@ import {
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
 import { LeadGwgStatements } from "./lead-gwg-statements";
-import { selfFundsProofOutstanding } from "../model/lead-gwg-statements";
+import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
+import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
+import { LeadIdentityDocumentData } from "./lead-identity-document-data";
+import { LeadPatientConcern } from "./lead-patient-concern";
+import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
+import { riskGateErrorText } from "../model/lead-risk-assessment";
 import { LeadIdentificationStatus } from "./lead-identification-status";
 import { LeadQuestionnaireFacts } from "./lead-questionnaire-facts";
 import { PortalCredentialsDialog, type PortalCredentials } from "./lead-portal-access";
@@ -2175,7 +2180,7 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
 }
 
 function errorText(error: unknown, tx: Tx): string {
-  const payerGate = payerGateErrorText(error, tx);
+  const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx);
   if (payerGate) return payerGate;
   const representation = gwgSheetErrorText(error, tx) ?? identificationErrorText(error, tx);
   if (representation) return representation;
@@ -2218,6 +2223,7 @@ function readinessReasonLabel(reason: string, tx: Tx) {
     "Signed confidentiality release is missing": tx("Создайте и подтвердите освобождение от медицинской тайны", "Schweigepflichtsentbindung erstellen und bestätigen"),
     "Enhanced due diligence document is missing": tx("Заполните усиленную AML-проверку и создайте документ", "Verstärkte AML-Sorgfaltsprüfung ausfüllen und Dokument erstellen"),
     "Enhanced due diligence document is not signed": tx("Получите подпись на документе усиленной AML-проверки", "Unterschrift für die verstärkte AML-Sorgfaltsprüfung einholen"),
+    "Risk assessment waits for a staff decision": tx("Нужно решение по оценке риска (документы → «Оценка риска»)", "Entscheidung zur Risikobewertung nötig (Unterlagen → „Risikobewertung“)"),
     "Anamnesis intake is incomplete": tx("Укажите причину обращения", "Anliegen angeben"),
     "Framework contract is not signed": tx("Подпишите рамочный договор", "Rahmenvertrag unterzeichnen"),
     "Framework contract was terminated; create a new contract": tx("Рамочный договор расторгнут — оформите новый договор", "Rahmenvertrag wurde gekündigt – neuen Vertrag erstellen"),
@@ -2257,6 +2263,7 @@ function readinessReasonStep(reason: string): StepId {
     "Signed confidentiality release is missing": "documents",
     "Enhanced due diligence document is missing": "documents",
     "Enhanced due diligence document is not signed": "documents",
+    "Risk assessment waits for a staff decision": "documents",
     "Anamnesis intake is incomplete": "medical",
     "Framework contract is not signed": "commercial",
     "Framework contract was terminated; create a new contract": "commercial",
@@ -3648,6 +3655,8 @@ export function LeadWizard({
     payer.data?.declaration?.updated_at ?? null,
     representationVersion,
   );
+  // Trigger flow 2026-10-07: points, level, blocks and staff decisions of the lead's risk assessment.
+  const risk = useLeadRiskAssessment(open && step === "documents" ? leadId : null, enhancedCheckVersion);
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   const patientUploadDocuments = useMemo(() => {
     const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
@@ -7317,6 +7326,17 @@ ${serviceCommentLines.join("\n")}`
                 specialtyLabel={specialtyLabel}
                 onUse={(concern) => patch("concern", concern)}
               />
+              {/* Trigger flow 13.2: what the lead wrote in the cabinet, with the lead's medical uploads. */}
+              <LeadPatientConcern
+                reason={step1Portal.intake?.request_reason}
+                documents={patientUploadDocuments}
+                currentConcern={draft.concern}
+                onTransfer={(text) => patch("concern", text)}
+                onOpen={(document) => void openOrDownloadDocument(document)}
+                onDownload={(document) => void downloadDocument(document)}
+                tx={tx}
+                disabled={isBusy}
+              />
               <Field
                 required
                 label={tx("Причина обращения", "Anliegen")}
@@ -7591,7 +7611,7 @@ ${serviceCommentLines.join("\n")}`
                   lang={lang}
                   tx={tx}
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
-                  selfFunds={step1Portal.intake?.self_funds ?? null}
+                  enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
                   payerLink={payerLink}
                   payerLinkCanEdit={canEditPayerLink}
                   leadLanguage={draft.language}
@@ -7677,6 +7697,9 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Section>
               ) : null}
+              {leadId ? (
+                <LeadRiskAssessmentPanel assessment={risk.assessment} controller={risk.controller} tx={tx} disabled={isBusy} />
+              ) : null}
               {/* Always here: required by the owner's rule (2026-10-07) or carried out voluntarily. */}
               <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
                 <Section
@@ -7716,7 +7739,7 @@ ${serviceCommentLines.join("\n")}`
                       </p>
                     ))}
                     {/* The check is required: a self-paying patient owes the proof of funds (owner rule 2026-10-07). */}
-                    {amlRequired && selfFundsProofOutstanding(step1Portal.intake?.self_funds) ? (
+                    {amlRequired && enhancedFundsProofOutstanding(step1Portal.intake?.enhanced_details) ? (
                       <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-self-funds-proof-missing">
                         {tx(
                           "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
@@ -7971,20 +7994,24 @@ ${serviceCommentLines.join("\n")}`
                   </span>
                 )}
               >
-                <div className="grid gap-3 sm:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] sm:items-end">
-                  <Field label={tx("Действителен до", "Gültig bis")}>
-                    <Input
-                      name="passport_expiry"
-                      type="date"
-                      className={inputClass}
-                      value={draft.passportExpiry}
-                      onChange={(event) => patch("passportExpiry", event.target.value)}
-                    />
-                  </Field>
-                  <p className="pb-2 text-xs text-muted-foreground">
-                    {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
-                  </p>
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
+                </p>
+                {/* Trigger flow 2026-10-07: staff enter the document data from the scan; the lead only uploads it. */}
+                {leadId ? (
+                  <LeadIdentityDocumentData
+                    leadId={leadId}
+                    intake={step1Portal.intake}
+                    fallbackValidUntil={draft.passportExpiry}
+                    tx={tx}
+                    lang={lang}
+                    disabled={isBusy}
+                    onSaved={() => {
+                      void reloadStep1PortalState();
+                      void risk.controller.reload();
+                    }}
+                  />
+                ) : null}
                 <WizardDocumentRows
                   documents={wizardDocuments.identity}
                   complianceKind="identity"

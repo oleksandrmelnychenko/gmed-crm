@@ -416,7 +416,15 @@ function DraftForm({
     if (field === "bank_name") return form.draft.payment_method === "bank_transfer";
     return true;
   };
-  const context: StepContext = { form, text, lang, payerType, required, fundsSources: fundsSourceOptions(questionnaire) };
+  const context: StepContext = {
+    form,
+    text,
+    lang,
+    payerType,
+    required,
+    fundsSources: fundsSourceOptions(questionnaire),
+    organisationExtras: questionnaire.answers.legal_form !== undefined,
+  };
 
   const goTo = (next: PayerStep) => {
     if (next !== "privacy" && !consented) {

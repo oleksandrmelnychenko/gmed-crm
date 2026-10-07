@@ -299,7 +299,7 @@ function PayerQuestionnaireForm({
   };
   // The legal questions ask the parent about themself: the cabinet's wording with "Sie".
   const labelOf = (field: PayerQuestionnaireField) =>
-    LEGAL_FIELDS.has(field) ? text.identificationFields[field as LegalField] : payerQuestionnaireFieldLabel(text, field);
+    LEGAL_FIELDS.has(field) ? text.payerLegalFields[field as LegalField] : payerQuestionnaireFieldLabel(text, field);
 
   /** Acknowledges the notice, or sends the changed contact channels with it once it is acknowledged. */
   async function acknowledge(nextChannels: string[]) {
@@ -440,7 +440,7 @@ function PayerQuestionnaireForm({
         </p>
       ) : (
         <fieldset disabled={readOnly} className="min-w-0 space-y-5" data-testid="lead-request-payer-fields">
-          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+          <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             <LabeledField id={fieldId("salutation")} label={labelOf("salutation")} error={errorFor("salutation")}>
               <NativeComboboxSelect
                 {...control("salutation")}
@@ -500,7 +500,7 @@ function PayerQuestionnaireForm({
               label={labelOf("occupation")}
               error={errorFor("occupation")}
               required
-              className="sm:col-span-2"
+              className="sm:col-span-2 lg:col-span-3"
             >
               <Input
                 {...control("occupation")}
@@ -523,7 +523,7 @@ function PayerQuestionnaireForm({
                 {labelOf("funds_sources")}
                 <RequiredMark />
               </p>
-              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {FUNDS_SOURCES.map((source) => (
                   <label key={source} className="inline-flex items-start gap-2 text-sm leading-snug">
                     <input

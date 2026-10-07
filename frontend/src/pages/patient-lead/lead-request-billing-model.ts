@@ -1,4 +1,5 @@
 import type {
+  BillingExtrasPatch,
   BillingPatch,
   InvoiceTo,
   LeadRequest,
@@ -260,6 +261,89 @@ export const BILLING_SUBMIT_FIELDS: BillingSubmitField[] = [
 
 export function isBillingField(field: string): field is BillingField {
   return BILLING_FIELDS.includes(field as BillingField);
+}
+
+// ---------------------------------------------------------------------------
+// Block C of the follow-up (trigger flow 2026-10-07): through whom the payment
+// goes and the expected total. Saved on the billing route like section 8, but
+// kept apart from its fields, which the payer's own link shares.
+// ---------------------------------------------------------------------------
+
+/** Through whom a payment via a third party goes, in form order. */
+export const VIA_THIRD_PARTY_KINDS = ["person", "psp"] as const;
+
+export type BillingExtrasField = "via_third_party_kind" | "expected_total_eur";
+
+export const BILLING_EXTRAS_FIELDS: readonly BillingExtrasField[] = ["via_third_party_kind", "expected_total_eur"];
+
+/** The two extras as typed: the kind ("person", "psp" or ""), the amount as text. */
+export type BillingExtrasDraft = Record<BillingExtrasField, string>;
+
+export function draftFromBillingExtras(
+  billing: Pick<LeadRequestBilling, "via_third_party_kind" | "expected_total_eur"> | null | undefined,
+): BillingExtrasDraft {
+  const amount = billing?.expected_total_eur;
+  return {
+    via_third_party_kind: billing?.via_third_party_kind ?? "",
+    expected_total_eur: amount == null || amount === "" ? "" : String(amount),
+  };
+}
+
+/**
+ * An amount in EUR as typed: "12.500", "12.500,50", "12500.5" or "€ 900".
+ * `null` for nothing typed, `undefined` for something that is no amount.
+ */
+export function parseEuroAmount(value: string): number | null | undefined {
+  const compact = value.replace(/[\s€]/g, "").replace(/EUR$/i, "");
+  if (!compact) return null;
+  let normalized = compact;
+  const comma = compact.lastIndexOf(",");
+  const dot = compact.lastIndexOf(".");
+  if (comma >= 0 && dot >= 0) {
+    // The later separator is the decimal one, the other groups thousands.
+    normalized = comma > dot ? compact.replace(/\./g, "").replace(",", ".") : compact.replace(/,/g, "");
+  } else if (comma >= 0) {
+    normalized = /^\d{1,3}(,\d{3})+$/.test(compact) ? compact.replace(/,/g, "") : compact.replace(",", ".");
+  } else if (dot >= 0 && /^\d{1,3}(\.\d{3})+$/.test(compact)) {
+    normalized = compact.replace(/\./g, "");
+  }
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return undefined;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : undefined;
+}
+
+/** The comparable form of an extra: the kind, or the amount as a number. */
+export function billingExtrasValue(field: BillingExtrasField, draft: BillingExtrasDraft): string {
+  if (field === "expected_total_eur") {
+    const amount = parseEuroAmount(draft.expected_total_eur);
+    return amount === undefined ? `invalid:${draft.expected_total_eur.trim()}` : amount === null ? "" : String(amount);
+  }
+  return draft[field].trim();
+}
+
+/**
+ * Only the extras that differ from the last saved state: the kind as text
+ * (`null` clears it), the amount as a number (`null` clears it). An amount
+ * that is no number is not sent; neither is a refused value.
+ */
+export function billingExtrasPatch(
+  saved: BillingExtrasDraft,
+  draft: BillingExtrasDraft,
+  rejected: Partial<Record<BillingExtrasField, string>> = {},
+): BillingExtrasPatch {
+  const patch: BillingExtrasPatch = {};
+  for (const field of BILLING_EXTRAS_FIELDS) {
+    const next = billingExtrasValue(field, draft);
+    if (next === billingExtrasValue(field, saved) || rejected[field] === next) continue;
+    if (field === "expected_total_eur") {
+      const amount = parseEuroAmount(draft.expected_total_eur);
+      if (amount === undefined) continue;
+      patch.expected_total_eur = amount;
+    } else {
+      patch.via_third_party_kind = next || null;
+    }
+  }
+  return patch;
 }
 
 /**

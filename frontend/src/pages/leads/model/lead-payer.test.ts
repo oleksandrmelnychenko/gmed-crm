@@ -26,7 +26,9 @@ import {
   payerSignatureSequence,
   payerStatusBadge,
   payerTypeLabel,
-  selfFundsSourcesLabel,
+  STATED_FUNDS_SOURCES,
+  statedFundsSourceLabel,
+  statedFundsSourcesLabel,
   type PayerDeclaration,
   type PayerDeclarationStatus,
 } from "./lead-payer";
@@ -359,7 +361,7 @@ describe("payer type: person, company, organisation or insurer", () => {
     expect(PAYER_TYPES.map((value) => payerTypeLabel(value, de)))
       .toEqual(["Privatperson", "Unternehmen", "Organisation", "Versicherung"]);
     expect(PAYER_RELATIONSHIP_KINDS).toEqual([
-      "spouse", "parent", "child", "relative", "employer", "friend", "business_partner", "other",
+      "spouse", "parent", "child", "sibling", "grandparent", "relative", "employer", "friend", "business_partner", "other",
     ]);
     for (const translate of [tx, de]) {
       const labels = PAYER_RELATIONSHIP_KINDS.map((value) => payerRelationshipKindLabel(value, translate));
@@ -619,15 +621,16 @@ describe("the self-payer's source of funds from the cabinet", () => {
     ...thirdParty,
     payer_kind: "self",
     source_of_funds: null,
-    self_funds_sources: ["savings", "other"],
+    // The extra step asks one choice (two-stage form 2026-10-07).
+    self_funds_source: "other",
     self_funds_description: "Stipendium",
   };
 
-  it("counts as stated with a source and, for 'other', the words", () => {
+  it("counts as stated with the choice and, for 'other', the words", () => {
     expect(leadSelfFundsStated(own)).toBe(true);
     expect(leadSelfFundsStated({ ...own, self_funds_description: " " })).toBe(false);
-    expect(leadSelfFundsStated({ ...own, self_funds_sources: ["savings"], self_funds_description: null })).toBe(true);
-    expect(leadSelfFundsStated({ ...own, self_funds_sources: [] })).toBe(false);
+    expect(leadSelfFundsStated({ ...own, self_funds_source: "savings", self_funds_description: null })).toBe(true);
+    expect(leadSelfFundsStated({ ...own, self_funds_source: null })).toBe(false);
     expect(leadSelfFundsStated({ ...own, payer_kind: "third_party" })).toBe(false);
     // An older server does not send the keys.
     expect(leadSelfFundsStated({ ...thirdParty, payer_kind: "self" })).toBe(false);
@@ -640,18 +643,49 @@ describe("the self-payer's source of funds from the cabinet", () => {
     expect(payerFormMissing(form)).toEqual([]);
     // Never sent: the server refuses keys it does not know.
     expect(payerDeclarationPayload(form)).not.toHaveProperty("leadSelfFundsStated");
-    expect(payerDeclarationPayload(form)).not.toHaveProperty("self_funds_sources");
+    expect(payerDeclarationPayload(form)).not.toHaveProperty("self_funds_source");
     // A third party states its own source; the lead's does not count for it.
     expect(payerFormMissing({ ...form, kind: "third_party" })).toContain("payer_source_of_funds_missing");
-    expect(payerFormMissing(payerDeclarationToForm({ ...own, self_funds_sources: [] }))).toEqual([
+    expect(payerFormMissing(payerDeclarationToForm({ ...own, self_funds_source: null }))).toEqual([
       "payer_source_of_funds_missing",
     ]);
   });
 
-  it("names the sources in form order, 'other' plainly", () => {
-    expect(selfFundsSourcesLabel(["other", "savings"], tx)).toBe("Сбережения, Другое");
-    expect(selfFundsSourcesLabel(["employment", "other"], de)).toBe("Gehalt / nichtselbständige Arbeit, Sonstiges");
-    expect(selfFundsSourcesLabel(["lottery"], de)).toBe("lottery");
-    expect(selfFundsSourcesLabel([], tx)).toBe("");
+  it("names a stated source in words, of the extra step or of the staff list", () => {
+    expect(statedFundsSourceLabel("income", tx)).toBe("Доход");
+    expect(statedFundsSourceLabel("inheritance_gift", de)).toBe("Erbschaft");
+    expect(statedFundsSourceLabel("other", de)).toBe("Sonstiges");
+    expect(statedFundsSourceLabel("employment", de)).toBe("Gehalt / nichtselbständige Arbeit");
+    expect(statedFundsSourceLabel("lottery", de)).toBe("lottery");
+    expect(statedFundsSourceLabel(null, tx)).toBe("");
+    expect(statedFundsSourcesLabel(["savings", "other"], tx)).toBe("Сбережения, Другое");
+    expect(STATED_FUNDS_SOURCES).toEqual(["income", "savings", "asset_sale", "inheritance_gift", "other"]);
+  });
+});
+
+describe("the third-party payer's messenger / WhatsApp number", () => {
+  it("is read, edited and sent for a server that stores it", () => {
+    const form = payerDeclarationToForm({ ...thirdParty, messenger: "+49 151 0000000" });
+    expect(form.messenger).toBe("+49 151 0000000");
+    expect(form.messengerSupport).toBe("supported");
+    expect(payerDeclarationPayload({ ...form, messenger: "  +49 160 1111111 " })).toMatchObject({ messenger: "+49 160 1111111" });
+    expect(payerDeclarationPayload({ ...form, messenger: "" })).toMatchObject({ messenger: null });
+    // The patient pays: nothing of a third party's number is kept.
+    expect(payerDeclarationPayload({ ...form, kind: "self" })).toMatchObject({ messenger: null });
+  });
+
+  it("is not sent to an older server, and before the first save only when typed", () => {
+    const older = payerDeclarationToForm(thirdParty);
+    expect(older.messengerSupport).toBe("unsupported");
+    expect(payerDeclarationPayload({ ...older, messenger: "+49 151 0000000" })).not.toHaveProperty("messenger");
+    const fresh = { ...payerDeclarationToForm(null), kind: "third_party" as const };
+    expect(payerDeclarationPayload(fresh)).not.toHaveProperty("messenger");
+    expect(payerDeclarationPayload({ ...fresh, messenger: "+49 151 0000000" })).toMatchObject({ messenger: "+49 151 0000000" });
+  });
+
+  it("labels the new relationship kinds", () => {
+    expect(payerRelationshipKindLabel("sibling", tx)).toBe("Брат / сестра");
+    expect(payerRelationshipKindLabel("grandparent", tx)).toBe("Бабушка / дедушка");
+    expect(payerRelationshipKindLabel("relative", tx)).toBe("Другой родственник");
   });
 });

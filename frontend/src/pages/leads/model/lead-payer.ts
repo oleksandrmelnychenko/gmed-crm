@@ -30,6 +30,8 @@ export const PAYER_RELATIONSHIP_KINDS = [
   "spouse",
   "parent",
   "child",
+  "sibling",
+  "grandparent",
   "relative",
   "employer",
   "friend",
@@ -61,13 +63,22 @@ export type PayerDeclaration = {
   source_of_funds_description: string | null;
   source_of_funds_document_id: string | null;
   /**
-   * The self-paying patient's own statement in the cabinet (owner request
-   * 2026-10-05): the sources of the person list and the description.
+   * The self-paying patient's own statement in the cabinet's extra step
+   * (two-stage form 2026-10-07): one choice of the stated sources (income,
+   * savings, asset_sale, inheritance_gift, other) and the description.
    * Read-only for staff; it counts as the source of funds of the
    * declaration. Absent on an older server.
    */
-  self_funds_sources?: string[];
+  self_funds_source?: string | null;
   self_funds_description?: string | null;
+  /**
+   * What the patient knows of a third party's funds ("soweit bekannt"): the
+   * patient's statement, never the payer's declaration. Read-only.
+   */
+  payer_funds_source_stated?: string | null;
+  payer_funds_description_stated?: string | null;
+  /** Messenger / WhatsApp number of a third-party payer; absent on an older server. */
+  messenger?: string | null;
   first_name: string | null;
   last_name: string | null;
   date_of_birth: string | null;
@@ -261,6 +272,10 @@ export type PayerDeclarationForm = {
   relationship: string;
   email: string;
   phone: string;
+  /** Messenger / WhatsApp number of a third party. */
+  messenger: string;
+  /** Whether the server stores `messenger` (a loaded declaration carries the key). */
+  messengerSupport: PayerTypeSupport;
   payerInformed: boolean;
   /** Only meaningful for a third party; a person unless stated otherwise. */
   payerType: PayerType;
@@ -308,6 +323,8 @@ export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   relationship: "",
   email: "",
   phone: "",
+  messenger: "",
+  messengerSupport: "unknown",
   payerInformed: false,
   payerType: "person",
   organisationName: "",
@@ -391,6 +408,8 @@ export function payerDeclarationToForm(
     relationship: declaration.relationship ?? "",
     email: declaration.email ?? "",
     phone: declaration.phone ?? "",
+    messenger: declaration.messenger ?? "",
+    messengerSupport: Object.hasOwn(declaration, "messenger") ? "supported" : "unsupported",
     payerInformed: Boolean(declaration.payer_informed_at),
     payerType: declaredPayerType(declaration) ?? "person",
     organisationName: declaration.organisation_name ?? "",
@@ -474,6 +493,13 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
         invoice_tax_number: text(form.invoiceTaxNumber),
       }
     : {};
+  // Messenger / WhatsApp (2026-10-07): an older server rejects the key; an
+  // absent key keeps the stored number of the same payer.
+  const sendsMessenger = form.messengerSupport === "supported"
+    || (form.messengerSupport === "unknown" && form.messenger.trim() !== "");
+  const messenger: { messenger?: string | null } = sendsMessenger
+    ? { messenger: thirdParty ? text(form.messenger) : null }
+    : {};
   return {
     payer_kind: form.kind || "self",
     acts_on_own_account: form.actsOnOwnAccount,
@@ -495,6 +521,7 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
     email: thirdParty ? text(form.email) : null,
     phone: thirdParty ? text(form.phone) : null,
     payer_informed: thirdParty && form.payerInformed,
+    ...messenger,
     ...typed,
     ...invoiceTax,
   };
@@ -547,7 +574,9 @@ export function payerRelationshipKindLabel(value: PayerRelationshipKind, tx: Tx)
     spouse: tx("Супруг / супруга", "Ehepartner/in"),
     parent: tx("Родитель", "Elternteil"),
     child: tx("Сын / дочь", "Kind"),
-    relative: tx("Другой родственник", "Andere/r Verwandte/r"),
+    sibling: tx("Брат / сестра", "Bruder / Schwester"),
+    grandparent: tx("Бабушка / дедушка", "Großmutter / Großvater"),
+    relative: tx("Другой родственник", "anderer Verwandter"),
     employer: tx("Работодатель", "Arbeitgeber"),
     friend: tx("Друг / подруга", "Freund/in"),
     business_partner: tx("Деловой партнёр", "Geschäftspartner/in"),
@@ -557,28 +586,46 @@ export function payerRelationshipKindLabel(value: PayerRelationshipKind, tx: Tx)
 }
 
 /**
- * Whether the self-paying lead stated the source of funds in the cabinet: at
- * least one source and, with "other", the words (the server's rule).
+ * Whether the self-paying lead stated the source of funds in the cabinet: the
+ * choice and, with "other", the words (the server's `self_funds_stated`).
  */
 export function leadSelfFundsStated(
-  declaration: Pick<PayerDeclaration, "payer_kind" | "self_funds_sources" | "self_funds_description"> | null | undefined,
+  declaration: Pick<PayerDeclaration, "payer_kind" | "self_funds_source" | "self_funds_description"> | null | undefined,
 ): boolean {
-  const sources = declaration?.self_funds_sources ?? [];
-  if (declaration?.payer_kind !== "self" || sources.length === 0) return false;
-  return !sources.includes("other") || Boolean(declaration.self_funds_description?.trim());
+  const source = declaration?.self_funds_source?.trim();
+  if (declaration?.payer_kind !== "self" || !source) return false;
+  return source !== "other" || Boolean(declaration.self_funds_description?.trim());
 }
 
+/** The choices of the cabinet's extra step for a source of funds (server `STATED_FUNDS_SOURCES`). */
+export const STATED_FUNDS_SOURCES = ["income", "savings", "asset_sale", "inheritance_gift", "other"] as const;
+
 /**
- * The sources the lead ticked, in words and form order: "other" is named
- * plainly (the description stands beside it); an unknown value as it is.
+ * A source of funds the lead stated in the cabinet, in words: one of the
+ * extra step's choices (Einkommen, Ersparnisse, …) or of the staff list;
+ * "other" is named plainly (the description stands beside it); an unknown
+ * value as it is.
  */
-export function selfFundsSourcesLabel(sources: readonly string[], tx: Tx): string {
-  return [
-    ...SOURCE_OF_FUNDS.filter((source) => sources.includes(source)).map((source) =>
-      source === "other" ? tx("Другое", "Sonstiges") : sourceOfFundsLabel(source, tx),
-    ),
-    ...sources.filter((source) => !isSourceOfFunds(source)),
-  ].join(", ");
+export function statedFundsSourceLabel(source: string | null | undefined, tx: Tx): string {
+  switch (source) {
+    case "income":
+      return tx("Доход", "Einkommen");
+    case "savings":
+      return tx("Сбережения", "Ersparnisse");
+    case "asset_sale":
+      return tx("Продажа имущества", "Verkauf von Vermögenswerten");
+    case "inheritance_gift":
+      return tx("Наследство", "Erbschaft");
+    case "other":
+      return tx("Другое", "Sonstiges");
+    default:
+      return isSourceOfFunds(source) ? sourceOfFundsLabel(source, tx) : (source ?? "");
+  }
+}
+
+/** Several stated sources (a future multi-select) in words, in their order. */
+export function statedFundsSourcesLabel(sources: readonly string[], tx: Tx): string {
+  return sources.map((source) => statedFundsSourceLabel(source, tx)).join(", ");
 }
 
 export function sourceOfFundsLabel(value: SourceOfFunds, tx: Tx) {

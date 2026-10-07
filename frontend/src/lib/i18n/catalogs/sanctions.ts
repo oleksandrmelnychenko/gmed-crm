@@ -105,6 +105,37 @@ export interface SanctionsTranslations {
   sanctions_badge_country_lifted: string;
   sanctions_notification_title: string;
   sanctions_notification_body: string;
+  // Lead risk assessment (trigger flow 2026-10-07): the tab /sanctions?tab=risk.
+  sanctions_tab_risk: string;
+  risk_config_title: string;
+  risk_config_hint: string;
+  risk_config_version: string;
+  risk_list_1: string;
+  risk_list_2: string;
+  risk_lists_hint: string;
+  risk_points: string;
+  risk_points_list_1: string;
+  risk_points_list_2: string;
+  risk_knockout: string;
+  risk_threshold_1: string;
+  risk_threshold_2: string;
+  risk_level_2_from: string;
+  risk_level_3_from: string;
+  risk_level_2_blocks_automatic: string;
+  risk_reviewers: string;
+  risk_reviewers_hint: string;
+  risk_reviewers_none: string;
+  risk_config_saved: string;
+  risk_config_error_codes: string;
+  risk_config_error_lists: string;
+  risk_config_error_points: string;
+  risk_config_error_thresholds: string;
+  risk_config_error_levels: string;
+  risk_queue_title: string;
+  risk_queue_hint: string;
+  risk_queue_empty: string;
+  risk_queue_since: string;
+  risk_queue_proposal: string;
 }
 
 export const sanctionsRu: SanctionsTranslations = {
@@ -219,6 +250,39 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_badge_country_lifted: "Страна: снято",
   sanctions_notification_title: "Возможное совпадение с санкционным списком ЕС",
   sanctions_notification_body: "Проверьте совпадение на странице санкционных проверок.",
+  sanctions_tab_risk: "Оценка риска",
+  risk_config_title: "Настройки оценки риска",
+  risk_config_hint:
+    "Баллы за триггеры, списки стран, пороги и границы уровней. Система только считает и показывает — решения принимают сотрудники. Изменение не понижает уже сохранённые оценки; повышение действует при следующем пересчёте.",
+  risk_config_version: "Версия {version}",
+  risk_list_1: "Список 1 (повышенный риск)",
+  risk_list_2: "Список 2 (высокий риск)",
+  risk_lists_hint:
+    "Страна стоит только в одном списке: при добавлении в список 2 она убирается из списка 1. Страна — повод для проверки, никогда не для отказа.",
+  risk_points: "Баллы за триггеры",
+  risk_points_list_1: "список 1",
+  risk_points_list_2: "список 2",
+  risk_knockout: "K.o.: сразу уровень 3",
+  risk_threshold_1: "Порог 1, EUR (сумма обращения)",
+  risk_threshold_2: "Порог 2, EUR (сумма плательщика за 12 месяцев)",
+  risk_level_2_from: "Уровень 2 от, баллов",
+  risk_level_3_from: "Уровень 3 от, баллов",
+  risk_level_2_blocks_automatic: "На уровне 2 дополнительные вопросы задаются автоматически",
+  risk_reviewers: "Проверяющие — заместители CEO",
+  risk_reviewers_hint:
+    "CEO проверяет всегда. Уровень 3 решают два разных человека: пока нет заместителя, уровень 3 нельзя разрешить.",
+  risk_reviewers_none: "Нет подходящих сотрудников",
+  risk_config_saved: "Настройки оценки риска сохранены",
+  risk_config_error_codes: "Коды стран: две латинские буквы (ISO).",
+  risk_config_error_lists: "Страна не может стоять в обоих списках.",
+  risk_config_error_points: "Баллы — целые числа от 0 до 20.",
+  risk_config_error_thresholds: "Пороги должны быть больше 0.",
+  risk_config_error_levels: "Уровень 2 начинается раньше уровня 3 и больше 0 (целые баллы).",
+  risk_queue_title: "Очередь проверки",
+  risk_queue_hint: "Обращения, которые ждут решения, сведений или второго проверяющего — сначала самые старые.",
+  risk_queue_empty: "Нет обращений на проверке",
+  risk_queue_since: "с {date}",
+  risk_queue_proposal: "Предложение: {decision} — {name}, {date}",
 };
 
 export const sanctionsDe: SanctionsTranslations = {
@@ -333,4 +397,37 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_badge_country_lifted: "Land: aufgehoben",
   sanctions_notification_title: "Möglicher Treffer der EU-Sanktionsliste",
   sanctions_notification_body: "Bitte den Treffer auf der Seite Sanktionsprüfung prüfen.",
+  sanctions_tab_risk: "Risikobewertung",
+  risk_config_title: "Einstellungen der Risikobewertung",
+  risk_config_hint:
+    "Punkte je Auslöser, Länderlisten, Schwellen und Stufengrenzen. Das System rechnet und zeigt nur – entscheiden die Mitarbeitenden. Eine Änderung senkt gespeicherte Bewertungen nicht; eine Erhöhung gilt bei der nächsten Neuberechnung.",
+  risk_config_version: "Version {version}",
+  risk_list_1: "Liste 1 (erhöhtes Risiko)",
+  risk_list_2: "Liste 2 (hohes Risiko)",
+  risk_lists_hint:
+    "Ein Land steht nur in einer Liste: Beim Hinzufügen zu Liste 2 wird es aus Liste 1 entfernt. Ein Land ist Anlass zur Prüfung, nie zur Ablehnung.",
+  risk_points: "Punkte je Auslöser",
+  risk_points_list_1: "Liste 1",
+  risk_points_list_2: "Liste 2",
+  risk_knockout: "K.o.: sofort Stufe 3",
+  risk_threshold_1: "Schwelle 1, EUR (Wert der Anfrage)",
+  risk_threshold_2: "Schwelle 2, EUR (12-Monats-Summe des Zahlers)",
+  risk_level_2_from: "Stufe 2 ab Punkten",
+  risk_level_3_from: "Stufe 3 ab Punkten",
+  risk_level_2_blocks_automatic: "Auf Stufe 2 werden ergänzende Angaben automatisch abgefragt",
+  risk_reviewers: "Prüfende – Vertretung des CEO",
+  risk_reviewers_hint:
+    "Der CEO prüft immer. Stufe 3 entscheiden zwei verschiedene Personen: Ohne Vertretung kann Stufe 3 nicht freigegeben werden.",
+  risk_reviewers_none: "Keine geeigneten Mitarbeitenden",
+  risk_config_saved: "Einstellungen der Risikobewertung gespeichert",
+  risk_config_error_codes: "Ländercodes: zwei lateinische Buchstaben (ISO).",
+  risk_config_error_lists: "Ein Land kann nicht in beiden Listen stehen.",
+  risk_config_error_points: "Punkte sind ganze Zahlen von 0 bis 20.",
+  risk_config_error_thresholds: "Schwellen müssen größer als 0 sein.",
+  risk_config_error_levels: "Stufe 2 beginnt vor Stufe 3 und über 0 (ganze Punkte).",
+  risk_queue_title: "Prüfwarteschlange",
+  risk_queue_hint: "Anfragen, die auf eine Entscheidung, Angaben oder die Zweitprüfung warten – die ältesten zuerst.",
+  risk_queue_empty: "Keine Anfragen in Prüfung",
+  risk_queue_since: "seit {date}",
+  risk_queue_proposal: "Vorschlag: {decision} – {name}, {date}",
 };

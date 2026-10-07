@@ -249,7 +249,8 @@ test("staff turn a private payer into a company: name and seat instead of the pe
 
   // A kind from the list replaces the free text.
   await relationship.click();
-  await expect(page.getByRole("option")).toHaveCount(9);
+  // Empty choice + ten kinds (sibling and grandparent since 2026-10-07).
+  await expect(page.getByRole("option")).toHaveCount(11);
   await page.getByRole("option", { name: "Работодатель", exact: true }).click();
   await expect(relationshipText).toHaveCount(0);
   await relationship.click();

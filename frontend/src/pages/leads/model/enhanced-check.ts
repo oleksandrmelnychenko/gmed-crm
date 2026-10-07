@@ -27,6 +27,12 @@ export const ENHANCED_CHECK_TRIGGER_REASONS = [
 /** Information only: a possible sanctions match waits for the CEO's decision. */
 export const SANCTIONS_REVIEW_PENDING = "sanctions_review_pending";
 
+/**
+ * Trigger flow 2026-10-07: the stored risk level (2 or 3) requires the check
+ * although no rule above does (PEP, list-1 country, payer, amount …).
+ */
+export const RISK_ASSESSMENT_REASON = "risk_assessment";
+
 export type LeadEnhancedCheck = {
   required: boolean;
   /** Trigger keys, and `sanctions_review_pending` as information. */
@@ -99,6 +105,8 @@ export function enhancedCheckReasonLabel(reason: string, tx: Tx): string {
       return tx("пациент в санкционном списке (подтверждено)", "Patient auf einer Sanktionsliste (bestätigt)");
     case "payer_sanctioned":
       return tx("плательщик в санкционном списке (подтверждено)", "Zahler auf einer Sanktionsliste (bestätigt)");
+    case RISK_ASSESSMENT_REASON:
+      return tx("уровень оценки риска 2 или выше", "Risikobewertung Stufe 2 oder höher");
     case SANCTIONS_REVIEW_PENDING:
       return tx(
         "возможное совпадение с санкционным списком ждёт решения",

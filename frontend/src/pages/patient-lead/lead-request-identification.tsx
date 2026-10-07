@@ -3,6 +3,7 @@ import { LoaderCircle, Upload } from "lucide-react";
 
 import { Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
@@ -13,7 +14,6 @@ import {
   textareaClass,
   tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
-import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
@@ -25,7 +25,6 @@ import {
 } from "./lead-request-api";
 import {
   CONTACT_CHANNELS,
-  LEGAL_DETAILS,
   LEGAL_QUESTIONS,
   MAX_UPLOAD_BYTES,
   consentGiven,
@@ -38,6 +37,7 @@ import {
   withRejectedIdentification,
   type IdentificationDraft,
   type IdentificationField,
+  type IdentificationTextField,
   type RejectedIdentification,
   type SaveState,
 } from "./lead-request-model";
@@ -51,7 +51,7 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
-import { asLeadCabinetLang, identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { identificationFieldLabel, type LeadRequestText } from "./lead-request-text";
 
 // The lead's own statements for the GwG identification sheet (owner spec
 // "Patientenformular", 2026-10-05). They are one record on the server and are
@@ -198,7 +198,7 @@ export function IdentificationTextInput({
   autoComplete = "off",
 }: {
   form: IdentificationForm;
-  field: Exclude<IdentificationField, "contact_channels">;
+  field: IdentificationTextField;
   maxLength: number;
   autoComplete?: string;
 }) {
@@ -218,21 +218,54 @@ export function IdentificationTextInput({
 export function IdentificationTextArea({
   form,
   field,
+  maxLength = 2000,
+  rows = 3,
 }: {
   form: IdentificationForm;
-  field: Exclude<IdentificationField, "contact_channels">;
+  field: IdentificationTextField;
+  maxLength?: number;
+  rows?: number;
 }) {
   return (
     <textarea
       {...controlProps(form, field)}
       // 16 px on phones: a smaller text makes iOS zoom into the field.
       className={cn(textareaClass, "text-base md:text-sm")}
-      rows={3}
-      maxLength={2000}
+      rows={rows}
+      maxLength={maxLength}
       autoComplete="off"
       value={form.draft[field]}
       onChange={(event) => form.set(field, event.target.value)}
     />
+  );
+}
+
+/** One choice of a list as a statement (block F's reason, block J's kind of link). */
+export function IdentificationChoiceSelect({
+  form,
+  field,
+  options,
+  text,
+}: {
+  form: IdentificationForm;
+  field: IdentificationTextField;
+  options: Record<string, string>;
+  text: LeadRequestText;
+}) {
+  return (
+    <NativeComboboxSelect
+      {...controlProps(form, field)}
+      className={selectClass}
+      value={form.draft[field]}
+      onChange={(event) => form.set(field, event.target.value)}
+    >
+      <option value="">{text.choose}</option>
+      {Object.entries(options).map(([value, label]) => (
+        <option key={value} value={value}>
+          {label}
+        </option>
+      ))}
+    </NativeComboboxSelect>
   );
 }
 
@@ -245,7 +278,7 @@ export function IdentificationCountrySelect({
   guardian = false,
 }: {
   form: IdentificationForm;
-  field: "birth_country" | "habitual_residence_country" | "id_issuing_country" | "high_risk_country_code";
+  field: "birth_country" | "habitual_residence_country" | "pep_country";
   text: LeadRequestText;
   lang: string;
   guardian?: boolean;
@@ -286,29 +319,36 @@ export function ContactChannelsField({ form, text }: { form: IdentificationForm;
 }
 
 /**
- * The identity document: what it says, and a photo or scan of it. The upload
- * needs the request consent first (the server refuses it otherwise).
+ * The identity document (trigger flow 2026-10-07): a photo or scan of it
+ * only — GMED enters the document's data from the copy. The upload needs the
+ * request consent first (the server refuses it otherwise). `title` and
+ * `intro` let follow-up block I ask for a new copy with the same parts.
  */
 export function IdentityDocumentSection({
   request,
-  form,
   text,
   lang,
   enqueue,
   onChange,
+  title,
+  intro,
+  showNote = true,
+  bare = false,
 }: {
   request: LeadRequest;
-  form: IdentificationForm;
   text: LeadRequestText;
   lang: string;
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
+  title?: string;
+  intro?: string;
+  showNote?: boolean;
+  bare?: boolean;
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const pickerLang = asLeadCabinetLang(lang) ?? undefined;
 
   async function uploadFiles(files: File[]) {
     if (files.length === 0) return;
@@ -342,61 +382,9 @@ export function IdentityDocumentSection({
     }
   }
 
-  return (
-    <Section title={text.sectionIdentity}>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="lead-request-identity">
-        <IdentificationFormField form={form} field="id_document_type" text={text} required>
-          <NativeComboboxSelect
-            {...controlProps(form, "id_document_type")}
-            className={selectClass}
-            value={form.draft.id_document_type}
-            onChange={(event) => form.set("id_document_type", event.target.value)}
-          >
-            <option value="">{text.choose}</option>
-            {(Object.keys(text.idDocumentTypeOptions) as Array<keyof LeadRequestText["idDocumentTypeOptions"]>).map((value) => (
-              <option key={value} value={value}>
-                {text.idDocumentTypeOptions[value]}
-              </option>
-            ))}
-          </NativeComboboxSelect>
-        </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_document_number" text={text} required>
-          <IdentificationTextInput form={form} field="id_document_number" maxLength={60} />
-        </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_issuing_authority" text={text} required>
-          <IdentificationTextInput form={form} field="id_issuing_authority" maxLength={200} />
-        </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_issuing_country" text={text} required>
-          <IdentificationCountrySelect form={form} field="id_issuing_country" text={text} lang={lang} />
-        </IdentificationFormField>
-        <IdentificationFormField form={form} field="id_issued_on" text={text}>
-          <Input
-            key={`id_issued_on-${lang}`}
-            {...controlProps(form, "id_issued_on")}
-            className={inputClass}
-            type="date"
-            autoComplete="off"
-            pickerLang={pickerLang}
-            max={appDateKey()}
-            value={form.draft.id_issued_on}
-            onChange={(event) => form.set("id_issued_on", event.target.value)}
-          />
-        </IdentificationFormField>
-        {/* No lower bound here: the server says when a document has expired, and the message says what to do. */}
-        <IdentificationFormField form={form} field="id_valid_until" text={text} required>
-          <Input
-            key={`id_valid_until-${lang}`}
-            {...controlProps(form, "id_valid_until")}
-            className={inputClass}
-            type="date"
-            autoComplete="off"
-            pickerLang={pickerLang}
-            value={form.draft.id_valid_until}
-            onChange={(event) => form.set("id_valid_until", event.target.value)}
-          />
-        </IdentificationFormField>
-      </div>
-
+  const body = (
+    <>
+      {intro ? <p className="text-sm leading-6 text-muted-foreground">{intro}</p> : null}
       <div className="space-y-2" data-testid="lead-request-identity-upload">
         <p className={tokens.text.label}>
           {text.identityFiles}
@@ -443,61 +431,71 @@ export function IdentityDocumentSection({
           testId="lead-request-identity-list"
           onRemove={(documentId) => void remove(documentId)}
         />
-        <p className="text-xs leading-5 text-muted-foreground">{text.identityNote}</p>
+        {showNote ? <p className="text-xs leading-5 text-muted-foreground">{text.identityNote}</p> : null}
       </div>
-    </Section>
+    </>
   );
+  // Inside a follow-up block the block's own section carries the title.
+  return bare ? body : <Section title={title ?? text.sectionIdentity}>{body}</Section>;
 }
 
 /**
- * The legal questions of the money laundering act (spec section 9): each is
- * answered with yes or no, and a "yes" asks for the details.
+ * The legal questions of the money laundering act (trigger flow 2026-10-07):
+ * each is answered with yes or no only. The details of a "yes" are asked in
+ * the follow-up blocks when GMED needs them.
  */
 export function LegalQuestionsSection({
   form,
   text,
-  lang,
   guardian,
 }: {
   form: IdentificationForm;
   text: LeadRequestText;
-  lang: string;
   guardian: boolean;
 }) {
   return (
     <Section title={text.sectionLegal}>
       <p className="text-xs leading-5 text-muted-foreground">{text.legalIntro}</p>
       <div className="space-y-5" data-testid="lead-request-legal">
-        {LEGAL_QUESTIONS.map((question) => {
-          const details = LEGAL_DETAILS[question];
-          return (
-            <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
-              <IdentificationFormField form={form} field={question} text={text} guardian={guardian} required question>
-                <YesNoSelect
-                  id={`lead-request-${question}`}
-                  className="sm:max-w-[calc(50%-0.5rem)]"
-                  value={form.draft[question]}
-                  text={text}
-                  invalid={Boolean(form.errorFor(question))}
-                  onChange={(answer) => form.update((current) => withLegalAnswer(current, question, answer))}
-                />
-              </IdentificationFormField>
-              {/* The details exist only for a "yes". */}
-              {form.draft[question] === "yes" ? (
-                <IdentificationFormField form={form} field={details} text={text} guardian={guardian} required>
-                  {details === "high_risk_country_code" ? (
-                    <div className="sm:max-w-[calc(50%-0.5rem)]">
-                      <IdentificationCountrySelect form={form} field={details} text={text} lang={lang} guardian={guardian} />
-                    </div>
-                  ) : (
-                    <IdentificationTextArea form={form} field={details} />
-                  )}
-                </IdentificationFormField>
-              ) : null}
-            </div>
-          );
-        })}
+        {LEGAL_QUESTIONS.map((question) => (
+          <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
+            <IdentificationFormField form={form} field={question} text={text} guardian={guardian} required question>
+              <YesNoSelect
+                id={`lead-request-${question}`}
+                className="sm:max-w-[calc(50%-0.5rem)]"
+                value={form.draft[question]}
+                text={text}
+                invalid={Boolean(form.errorFor(question))}
+                onChange={(answer) => form.update((current) => withLegalAnswer(current, question, answer))}
+              />
+            </IdentificationFormField>
+          </div>
+        ))}
       </div>
     </Section>
+  );
+}
+
+/** A list of countries as a statement (block F's former citizenships). */
+export function IdentificationCountriesSelect({
+  form,
+  field,
+  text,
+  lang,
+}: {
+  form: IdentificationForm;
+  field: "former_citizenships";
+  text: LeadRequestText;
+  lang: string;
+}) {
+  return (
+    <CitizenshipMultiSelect
+      id={`lead-request-${field}`}
+      value={form.draft[field]}
+      lang={lang}
+      placeholder={text.citizenshipsPlaceholder}
+      invalid={Boolean(form.errorFor(field))}
+      onChange={(next) => form.set(field, next)}
+    />
   );
 }

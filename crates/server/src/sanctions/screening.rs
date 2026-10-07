@@ -746,7 +746,13 @@ pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport
         .await?
         .map(|lead| lead.subjects)
         .unwrap_or_default();
-    screen_owner(state, &index, Owner::Lead(lead_id), subjects).await
+    let report = screen_owner(state, &index, Owner::Lead(lead_id), subjects).await?;
+    // A new open hit is T16 of the risk assessment (sticky, P3).
+    let mut tx = state.db.begin().await?;
+    crate::risk::store::reassess(&mut tx, lead_id, crate::risk::store::Cause::Screening, None)
+        .await?;
+    tx.commit().await?;
+    Ok(report)
 }
 
 /// Screens a patient and stores its possible matches.

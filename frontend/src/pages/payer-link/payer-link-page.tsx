@@ -344,7 +344,7 @@ export function PayerLinkPage() {
   return (
     <div lang={lang} className="min-h-dvh bg-background text-foreground" data-testid="payer-link-page">
       <header className="border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3 px-4 py-3">
+        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3">
           <span className="inline-flex shrink-0 items-center">
             <GmedWordmark className="h-6 w-auto text-[#04060c] dark:text-foreground" />
             <span className="sr-only">GMED</span>
@@ -352,7 +352,7 @@ export function PayerLinkPage() {
           <LanguageSwitch lang={lang} label={text.language} onChange={setChosenLang} />
         </div>
       </header>
-      <main className="mx-auto w-full max-w-2xl px-4 py-6 pb-16">
+      <main className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
         {/* Another link opened in this tab starts every step afresh. */}
         <div key={generation} className="rounded-2xl border border-border bg-card px-4 py-5 shadow-sm sm:px-6 sm:py-6">
           {body}

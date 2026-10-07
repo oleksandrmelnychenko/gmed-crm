@@ -87,6 +87,7 @@ export const ALL_CAPABILITIES = [
   "datev.read",
   "incidents.manage",
   "sanctions.review",
+  "risk.review",
   "personnel.view",
   "personnel.upload",
   "personnel.manage",

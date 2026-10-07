@@ -239,9 +239,11 @@ fn missing(body: &Value) -> Vec<String> {
         .collect()
 }
 
-/// The representation keys of the missing list (with the two adult answers).
+/// The representation keys of the missing list (with the two adult answers)
+/// and, once the risk assessment runs, of follow-up block G (an adult's
+/// representative or guardian, trigger flow 2026-10-07).
 fn missing_representation(body: &Value) -> Vec<String> {
-    missing(body)
+    let mut keys: Vec<String> = missing(body)
         .into_iter()
         .filter(|key| {
             ["rep1_", "rep2_", "agent_", "guardian_"]
@@ -250,7 +252,26 @@ fn missing_representation(body: &Value) -> Vec<String> {
                 || key == "has_representative"
                 || key == "under_guardianship"
         })
-        .collect()
+        .collect();
+    if let Some(block) = body["follow_up"]["missing"]["G"].as_array() {
+        keys.extend(block.iter().filter_map(Value::as_str).map(str::to_string));
+    }
+    keys
+}
+
+/// Starts the risk assessment of the lead (a reviewer's restart): from then
+/// on an adult's representative is asked in follow-up block G.
+async fn start_assessment(app: &TestApp, lead_id: Uuid) {
+    let ceo = bearer(seed_user(&app.suite.pool, "ceo").await, "ceo");
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/restart"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 fn keys(slot: &str, fields: &[&str]) -> Vec<String> {
@@ -260,7 +281,8 @@ fn keys(slot: &str, fields: &[&str]) -> Vec<String> {
         .collect()
 }
 
-const ADULT_FIELDS: [&str; 14] = [
+// Staff enter the identity document data (trigger flow 2026-10-07).
+const ADULT_FIELDS: [&str; 9] = [
     "first_name",
     "last_name",
     "date_of_birth",
@@ -268,16 +290,11 @@ const ADULT_FIELDS: [&str; 14] = [
     "zip",
     "city",
     "country",
-    "id_document_type",
-    "id_document_number",
-    "id_issuing_authority",
-    "id_issuing_country",
-    "id_valid_until",
     "id_upload",
     "authority_upload",
 ];
 
-const MINOR_FIELDS: [&str; 17] = [
+const MINOR_FIELDS: [&str; 12] = [
     "first_name",
     "last_name",
     "date_of_birth",
@@ -289,11 +306,6 @@ const MINOR_FIELDS: [&str; 17] = [
     "country",
     "email",
     "phone",
-    "id_document_type",
-    "id_document_number",
-    "id_issuing_authority",
-    "id_issuing_country",
-    "id_valid_until",
     "id_upload",
 ];
 
@@ -317,12 +329,7 @@ fn complete_adult_person(role: &str) -> Value {
         "street": "Nebenweg 2",
         "zip": "80331",
         "city": "München",
-        "country": "de",
-        "id_document_type": "passport",
-        "id_document_number": "C01X00T47",
-        "id_issuing_authority": "Stadt München",
-        "id_issuing_country": "DE",
-        "id_valid_until": "2099-12-31"
+        "country": "de"
     })
 }
 
@@ -337,12 +344,7 @@ fn complete_parent_details() -> Value {
         "zip": "10115",
         "city": "Berlin",
         "country": "DE",
-        "phone": "+49 30 000000",
-        "id_document_type": "id_card",
-        "id_document_number": "L01X00T47",
-        "id_issuing_authority": "Stadt Berlin",
-        "id_issuing_country": "DE",
-        "id_valid_until": "2099-12-31"
+        "phone": "+49 30 000000"
     })
 }
 
@@ -434,21 +436,22 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["representation"]["has_representative"], true);
     assert_eq!(body["representation"]["under_guardianship"], false);
-    // "Yes" without a person: everything of that person is missing, after the
-    // lead's own identity document and before the own-interest question.
+    // The base form does not ask for the person (trigger flow 2026-10-07):
+    // once the assessment runs, follow-up block G does — everything of that
+    // person but staff's identity data.
+    assert_eq!(
+        missing_representation(&body),
+        Vec::<String>::new(),
+        "{body}"
+    );
+    start_assessment(&app, lead_id).await;
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(body["follow_up"]["blocks"], json!(["G", "I"]), "{body}");
     assert_eq!(
         missing_representation(&body),
         keys("agent", &ADULT_FIELDS),
         "{body}"
     );
-    let all = missing(&body);
-    let position = |key: &str| {
-        all.iter()
-            .position(|missing| missing == key)
-            .unwrap_or_else(|| panic!("{key} is not missing: {all:?}"))
-    };
-    assert!(position("id_document_upload") < position("agent_first_name"));
-    assert!(position("agent_authority_upload") < position("payer_own_account"));
 
     // The role is needed, fits an adult, and a person has a last name.
     for (refused, code) in [
@@ -540,8 +543,8 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         ),
         (json!({ "country": "Germany" }), "invalid_field", "country"),
         (
-            json!({ "id_valid_until": "2020-01-01" }),
-            "id_document_expired",
+            json!({ "id_valid_until": "2099-01-01" }),
+            "staff_only",
             "id_valid_until",
         ),
         (
@@ -570,7 +573,7 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     assert_eq!(person["first_name"], "Ben", "{person}");
     assert_eq!(person["date_of_birth"], "1984-07-09", "{person}");
     assert_eq!(person["country"], "DE", "{person}");
-    assert_eq!(person["id_valid_until"], "2099-12-31", "{person}");
+    assert!(person["id_valid_until"].is_null(), "{person}");
     assert_eq!(
         missing_representation(&body),
         vec!["agent_id_upload", "agent_authority_upload"],
@@ -628,7 +631,7 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         events[1]["fields"]
             .as_array()
             .unwrap()
-            .contains(&json!("id_document_number")),
+            .contains(&json!("street")),
         "{events:?}"
     );
     let logged = serde_json::to_string(&events).unwrap();
@@ -905,6 +908,8 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    start_assessment(&app, lead_id).await;
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(
         missing_representation(&body),
         keys("guardian", &ADULT_FIELDS),
@@ -1694,9 +1699,12 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     // second question was never answered) and cannot reuse the id of the
     // contact that stayed.
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
-    let mut expected = keys("agent", &ADULT_FIELDS);
-    expected.push("under_guardianship".to_string());
-    assert_eq!(missing_representation(&body), expected, "{body}");
+    // The person's details are follow-up block G once the assessment runs.
+    assert_eq!(
+        missing_representation(&body),
+        vec!["under_guardianship".to_string()],
+        "{body}"
+    );
     let (status, error) = json_request(
         router,
         "POST",

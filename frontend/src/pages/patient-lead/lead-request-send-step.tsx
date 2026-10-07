@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, CircleAlert, LoaderCircle, Pencil, Send, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleAlert, Info, LoaderCircle, Pencil, Send, Upload } from "lucide-react";
 
 import { Banner, Section, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,10 @@ import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import { INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
-import { canSubmit, changedSinceSubmit, consentGiven, missingForSubmit } from "./lead-request-model";
+import { followUpAnswered, followUpShown } from "./lead-request-follow-up-model";
+import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
 import { RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
+import { firstIncompleteStep, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -24,6 +26,8 @@ export function SendStep({
   enqueue,
   onChange,
   onEdit,
+  index = 8,
+  total = 8,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -31,13 +35,22 @@ export function SendStep({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onEdit: (step: Step) => void;
+  index?: number;
+  total?: number;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const guardian = request.access_kind === "guardian";
-  const missing = missingForSubmit(request);
+  // What is still missing, by the step it is answered in (the follow-up is sent on its own).
+  const byStep = missingByStep(request);
+  const missingSteps = visibleSteps(request).filter(
+    (step): step is Exclude<StepId, "send" | "follow_up"> => step !== "send" && step !== "follow_up" && byStep[step].length > 0,
+  );
+  const missingCount = missingSteps.reduce((count, step) => count + byStep[step].length, 0);
   const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
+  // After sending, GMED may ask for more: the neutral pointer to the step (never why).
+  const followUpOpen = Boolean(request.submitted_at) && followUpShown(request) && !followUpAnswered(request);
   const ready = canSubmit(request, INQUIRY_CONSENT);
   const sent = Boolean(request.submitted_at);
   // Sent and unchanged: there is nothing to send. Sent and changed: send again.
@@ -70,7 +83,32 @@ export function SendStep({
           <SuccessBanner>
             <p className="font-semibold">{text.sentTitle}</p>
             <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
+            {/* For every request alike until GMED sends documents for signature (contract 3.1). */}
+            {request.review_notice ? (
+              <p className="mt-1" data-testid="lead-request-review-notice">
+                {text.reviewNotice}
+              </p>
+            ) : null}
           </SuccessBanner>
+          {followUpOpen ? (
+            <div
+              role="note"
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
+              data-testid="lead-request-follow-up-open"
+            >
+              <span className="flex items-start gap-2">
+                <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                <span>
+                  <span className="block font-medium">{text.followUpTitle}</span>
+                  <span className="block">{text.followUpOpen}</span>
+                </span>
+              </span>
+              <Button type="button" size="sm" className="gap-1.5" onClick={() => onEdit("follow_up")}>
+                {text.followUpGo}
+                <ArrowRight aria-hidden="true" className="size-3.5" />
+              </Button>
+            </div>
+          ) : null}
           {changed ? (
             <div
               role="status"
@@ -101,24 +139,43 @@ export function SendStep({
       <Section title={sendable ? text.sendTitle : text.sentSummaryTitle}>
         {sendable ? <p className="text-sm text-muted-foreground">{text.summaryIntro}</p> : null}
         <RequestSummary groups={requestSummary(request, text, lang)} />
-        {missing.length > 0 || !inquiryConsent ? (
+        {missingCount > 0 || !inquiryConsent ? (
           <div
-            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+            className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="lead-request-missing"
           >
             <p className="font-medium">{text.missingTitle}</p>
-            <ul className="mt-1 list-inside list-disc">
-              {missing.map((field) => (
-                <li key={field}>{submitFieldLabel(text, field, guardian, request.payer?.payer_type)}</li>
-              ))}
-              {!inquiryConsent ? <li>{text.inquiryConsentMissing}</li> : null}
-            </ul>
+            {!inquiryConsent ? (
+              <ul className="list-inside list-disc">
+                <li>{text.inquiryConsentMissing}</li>
+              </ul>
+            ) : null}
+            {/* Grouped by step, each with a way there. */}
+            {missingSteps.map((step) => (
+              <div key={step} data-testid={`lead-request-missing-${step}`}>
+                <button
+                  type="button"
+                  className="text-xs font-semibold underline-offset-2 hover:underline"
+                  onClick={() => onEdit(step)}
+                >
+                  {text.steps[step]}
+                </button>
+                <ul className="list-inside list-disc">
+                  {byStep[step].map((field) => (
+                    <li key={field} className="break-words">
+                      {submitFieldLabel(text, field as SubmitField, guardian, request.payer?.payer_type)}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="mt-2 gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
-              onClick={() => onEdit("data")}
+              className="gap-1.5 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+              // To the first step that still misses something.
+              onClick={() => onEdit(firstIncompleteStep(request) ?? "person")}
             >
               <Pencil aria-hidden="true" className="size-3.5" />
               {text.editData}
@@ -155,11 +212,11 @@ export function SendStep({
         </Section>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
-      <StepFooter index={3} text={text}>
+      <StepFooter index={index} total={total} text={text}>
         {request.submitted_at ? (
           // Sent already: changing the request is the secondary path, not the next step.
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("data")}>
+            <Button type="button" variant="outline" className="h-9 gap-1.5" onClick={() => onEdit("person")}>
               <Pencil aria-hidden="true" className="size-3.5" />
               {text.editData}
             </Button>

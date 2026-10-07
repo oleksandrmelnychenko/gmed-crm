@@ -2,9 +2,9 @@ import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
-import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
+import { asksAccount, asksPaymentRoute, draftFromBillingExtras, type BillingField } from "./lead-request-billing-model";
+import { STATED_FUNDS_SOURCES, blockAAsks, draftFromExtra, openFollowUpBlocks, type StatedFundsSource } from "./lead-request-follow-up-model";
 import {
-  LEGAL_DETAILS,
   LEGAL_QUESTIONS,
   answerFromBoolean,
   languageName,
@@ -21,7 +21,6 @@ import {
   representativeInSlot,
   type RepresentativeField,
 } from "./lead-request-representation-model";
-import { selfFundsAsked } from "./lead-request-self-funds-model";
 import {
   identificationFieldLabel,
   invoiceToLabel,
@@ -45,6 +44,8 @@ export type SummaryGroupId =
   | "payer"
   | "billing"
   | "legal"
+  | "follow_up"
+  | "request"
   | "documents";
 
 /** A person inside a group: a representative with the own statements and files. */
@@ -185,16 +186,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     ],
   ]);
 
+  // The identity document: the copies only, GMED enters the data.
   if (identification) {
-    group("identity", text.sectionIdentity, [
-      [identificationLabel("id_document_type"), option(text.idDocumentTypeOptions, identification.id_document_type)],
-      [identificationLabel("id_document_number"), identification.id_document_number],
-      [identificationLabel("id_issuing_authority"), identification.id_issuing_authority],
-      [identificationLabel("id_issuing_country"), country(identification.id_issuing_country)],
-      [identificationLabel("id_issued_on"), formatAppDate(identification.id_issued_on)],
-      [identificationLabel("id_valid_until"), formatAppDate(identification.id_valid_until)],
-      [text.identityFiles, fileNames(request.identity_documents)],
-    ]);
+    group("identity", text.sectionIdentity, [[text.identityFiles, fileNames(request.identity_documents)]]);
   }
 
   // Who acts for the lead: the answers of an adult or the custody of a minor,
@@ -208,14 +202,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
           return countries(person.citizenships);
         case "birth_country":
         case "country":
-        case "id_issuing_country":
           return country(person[field]);
         case "date_of_birth":
-        case "id_issued_on":
-        case "id_valid_until":
           return formatAppDate(person[field]);
-        case "id_document_type":
-          return option(text.idDocumentTypeOptions, person.id_document_type);
         default:
           return person[field];
       }
@@ -275,10 +264,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     groups.push({
       id: "payer",
       title: text.sectionPayer,
-      rows: [
-        ...answeredPayerRows(request, text),
-        ...enteredRows([[identificationLabel("payment_background"), identification?.payment_background]]),
-      ],
+      rows: answeredPayerRows(request, text),
       empty: text.summaryEmpty,
       note: text.payerAnsweredByPayer,
     });
@@ -290,7 +276,12 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     const thirdPartyRows = (party: NonNullable<typeof thirdParty>): Array<[string, string | null | undefined]> => {
       // A company, organisation or insurer has a name; a person has an identity.
       const named: Array<[string, string | null | undefined]> = organisationPayerType(party.payer_type)
-        ? [[payerLabel("payer_organisation_name"), party.organisation_name]]
+        ? [
+            [payerLabel("payer_organisation_name"), party.organisation_name],
+            [payerLabel("payer_legal_form"), party.organisation_legal_form],
+            [payerLabel("payer_register_number"), party.organisation_register_number],
+            [payerLabel("payer_contact_name"), party.organisation_contact_name],
+          ]
         : [
             [payerLabel("payer_first_name"), party.first_name],
             [payerLabel("payer_last_name"), party.last_name],
@@ -306,13 +297,13 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         [payerLabel("payer_type"), party.payer_type === undefined ? "" : text.payerTypeOptions[payerTypeOf(party)]],
         ...named,
         [payerLabel("payer_relationship"), relationship],
+        [payerLabel("payer_email"), party.email],
+        [payerLabel("payer_phone"), party.phone],
+        [payerLabel("payer_messenger"), party.messenger],
+        [payerLabel("payer_country"), country(party.country)],
+        [payerLabel("payer_city"), party.city],
         [payerLabel("payer_street"), party.street],
         [payerLabel("payer_zip"), party.zip],
-        [payerLabel("payer_city"), party.city],
-        [payerLabel("payer_country"), country(party.country)],
-        [payerLabel("payer_phone"), party.phone],
-        [payerLabel("payer_email"), party.email],
-        [identificationLabel("payment_background"), identification?.payment_background],
         [
           text.payerConsentShort,
           party.contact_consent_at ? text.consentGivenAt(formatAppDateTime(party.contact_consent_at)) : "",
@@ -320,8 +311,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         costEstimateConsentRow(party.cost_estimate_consent_at, text),
       ];
     };
-    // Where the money comes from when the patient pays, with the proof.
-    const selfFunds = selfFundsAsked(request) ? request.self_funds : undefined;
     group("payer", text.sectionPayer, [
       [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer)],
       ...(thirdParty ? thirdPartyRows(thirdParty) : []),
@@ -330,16 +319,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         payerFieldLabel(text, "payer_beneficial_owner", guardian),
         payer?.acts_on_own_account === false ? payer.beneficial_owner : "",
       ],
-      ...(selfFunds
-        ? ([
-            [
-              text.selfFundsTitle,
-              selfFunds.sources.map((source) => option(text.fundsSourceOptions, source)).filter(Boolean).join(", "),
-            ],
-            [text.payerQuestionnaireFields.funds_description, selfFunds.description],
-            [text.selfFundsProofTitle, fileNames(selfFunds.proof_documents)],
-          ] satisfies Array<[string, string | null | undefined]>)
-        : []),
     ]);
   }
 
@@ -371,27 +350,78 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
             [label("bank_name"), account ? billing.bank_name : ""],
             [label("via_third_party"), yesNo(billing.via_third_party)],
             [label("via_third_party_details"), billing.via_third_party ? billing.via_third_party_details : ""],
+            [
+              text.billingExtrasFields.via_third_party_kind,
+              billing.via_third_party && billing.via_third_party_kind
+                ? text.viaThirdPartyKindOptions[billing.via_third_party_kind]
+                : "",
+            ],
+            [text.billingExtrasFields.expected_total_eur, draftFromBillingExtras(billing).expected_total_eur],
           ] satisfies Array<[string, string | null | undefined]>)
         : [[text.sectionPaymentRoute, text.paymentRouteByPayerShort] satisfies [string, string]]),
     ]);
   }
 
+  // The declarations: yes or no only (the details are follow-up blocks).
   if (identification) {
     group(
       "legal",
       text.sectionLegal,
-      LEGAL_QUESTIONS.flatMap((question): Array<[string, string | null | undefined]> => {
-        const details = LEGAL_DETAILS[question];
-        const stated = identification[details];
-        return [
-          [identificationLabel(question), yesNo(identification[question])],
-          [
-            identificationLabel(details),
-            identification[question] ? (details === "high_risk_country_code" ? country(stated) : stated) : "",
-          ],
-        ];
-      }),
+      LEGAL_QUESTIONS.map((question): [string, string] => [identificationLabel(question), yesNo(identification[question])]),
     );
+  }
+
+  // The follow-up blocks the server opened, answered (C, G and I are in their groups above).
+  const blocks = openFollowUpBlocks(request);
+  if (blocks.length > 0) {
+    const rows: Array<[string, string | null | undefined]> = [];
+    if (blocks.includes("A")) {
+      const asks = blockAAsks(request);
+      const answers = draftFromExtra(request.follow_up);
+      const source = (value: string) =>
+        (STATED_FUNDS_SOURCES as readonly string[]).includes(value) ? text.statedFundsSourceOptions[value as StatedFundsSource] : value;
+      if (asks.payer_funds) {
+        rows.push([text.extraFields.payer_funds_source, source(answers.payer_funds_source)]);
+        rows.push([text.extraFields.payer_funds_description, answers.payer_funds_description]);
+      }
+      if (asks.funds) {
+        rows.push([text.extraFields.funds_source, source(answers.funds_source)]);
+        rows.push([text.extraFields.funds_description, answers.funds_description]);
+      }
+      if (asks.occupation) rows.push([text.extraFields.occupation, answers.occupation]);
+      if (asks.sector) rows.push([text.extraFields.sector, answers.sector]);
+      if (asks.funds_proof) rows.push([text.extraFields.funds_proof, fileNames(request.follow_up?.funds_proof_documents)]);
+    }
+    if (blocks.includes("B")) {
+      rows.push([identificationLabel("payment_background"), identification?.payment_background]);
+      rows.push([identificationLabel("relationship_since"), identification?.relationship_since]);
+      rows.push([text.relationshipProofTitle, fileNames(request.follow_up?.relationship_proof_documents)]);
+    }
+    if (blocks.includes("F")) {
+      rows.push([identificationLabel("residence_since"), identification?.residence_since]);
+      rows.push([identificationLabel("stay_reason"), option(text.stayReasonOptions, identification?.stay_reason)]);
+      rows.push([identificationLabel("stay_reason_details"), identification?.stay_reason_details]);
+      rows.push([identificationLabel("former_citizenships"), countries(identification?.former_citizenships)]);
+      rows.push([identificationLabel("other_residences"), identification?.other_residences]);
+    }
+    if (blocks.includes("H")) {
+      rows.push([identificationLabel("pep_office"), identification?.pep_office]);
+      rows.push([identificationLabel("pep_country"), country(identification?.pep_country)]);
+      rows.push([identificationLabel("pep_period"), identification?.pep_period]);
+      rows.push([identificationLabel("pep_relationship"), identification?.pep_relationship]);
+      rows.push([identificationLabel("pep_wealth_origin"), identification?.pep_wealth_origin]);
+    }
+    if (blocks.includes("J")) {
+      rows.push([identificationLabel("sanctions_link_name"), identification?.sanctions_link_name]);
+      rows.push([identificationLabel("sanctions_link_kind"), option(text.sanctionsLinkKindOptions, identification?.sanctions_link_kind)]);
+      rows.push([identificationLabel("sanctions_link_since_extent"), identification?.sanctions_link_since_extent]);
+    }
+    group("follow_up", text.steps.follow_up, rows);
+  }
+
+  // The reason of the request (13.1), from a server that knows it.
+  if (identification && "request_reason" in identification) {
+    group("request", text.sectionRequest, [[identificationLabel("request_reason"), identification.request_reason]]);
   }
 
   group(

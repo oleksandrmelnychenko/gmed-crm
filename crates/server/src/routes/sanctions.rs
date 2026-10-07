@@ -609,6 +609,21 @@ async fn decide_hit(
             ),
         )
         .await?;
+        // The risk assessment of the leads concerned: a false positive that
+        // leaves no open or confirmed hit withdraws T16 (the only way down, P3).
+        let affected: Vec<Uuid> = sqlx::query_scalar(
+            r#"SELECT id FROM leads
+               WHERE id = $1
+                  OR ($2::uuid IS NOT NULL
+                      AND (prospect_patient_id = $2 OR converted_patient_id = $2))"#,
+        )
+        .bind(lead_id)
+        .bind(patient_id)
+        .fetch_all(&mut *tx)
+        .await?;
+        for affected_lead in affected {
+            crate::risk::store::after_hit_decision(&mut tx, affected_lead, auth.user_id).await?;
+        }
         tx.commit().await?;
         Ok::<_, sqlx::Error>(Ok(lead_id))
     }

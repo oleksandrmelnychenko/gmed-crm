@@ -182,6 +182,7 @@ async fn payer_app() -> Option<PayerApp> {
         "ceo_assistant",
         "billing",
         "concierge",
+        "ceo",
     ] {
         let id: Uuid = sqlx::query_scalar(
             "INSERT INTO users (email, password_hash, name, role) VALUES ($1, 'x', $2, $3) RETURNING id",
@@ -1150,10 +1151,16 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     .await;
     assert_eq!(status, StatusCode::OK, "{estimated}");
     assert_eq!(estimated["estimated_total_eur"], "12000.00");
-    assert_eq!(estimated["questionnaire"]["check_level"], 1, "{estimated}");
-    assert_eq!(estimated["questionnaire"]["check_reasons"], json!([]));
-    assert_eq!(estimated["questionnaire"]["funds_proof_required"], false);
-    // Neither does a public office of the payer or a Russian citizenship.
+    // Since the trigger flow (2026-10-07) the lead's value counts: a friend
+    // (T4 + T5) paying more than 10 000 EUR (T10) is level 2 of the risk
+    // assessment, which requires the enhanced check and the proof of funds.
+    assert_eq!(estimated["questionnaire"]["check_level"], 2, "{estimated}");
+    assert_eq!(
+        estimated["questionnaire"]["check_reasons"],
+        json!(["risk_assessment"])
+    );
+    assert_eq!(estimated["questionnaire"]["funds_proof_required"], true);
+    // A public office of the payer (a knock-out) keeps it so.
     let (status, body) = patch(
         &app,
         &token,
@@ -1166,8 +1173,12 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["funds_proof_required"], false, "{body}");
-    assert_eq!(body["missing_for_submit"], json!([]), "{body}");
+    assert_eq!(body["funds_proof_required"], true, "{body}");
+    assert_eq!(
+        body["missing_for_submit"],
+        json!(["funds_proof_upload"]),
+        "{body}"
+    );
     let (status, body) = patch(
         &app,
         &token,
@@ -1498,6 +1509,25 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
     assert_eq!(info["link"]["status"], "submitted", "{info}");
 
+    // The payer's public office was a knock-out (level 3 of the risk
+    // assessment, trigger flow 2026-10-07): the link waits for staff until
+    // they ask for the payer's answers again (block D).
+    let (status, held) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{held}");
+    assert_eq!(held["code"], "risk_review_required", "{held}");
+    let (status, requested) = with_login(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/risk-assessment/decisions"),
+        &app.staff("ceo"),
+        Some(json!({
+            "decision": "request_more",
+            "reason": "The payer states the public office",
+            "blocks": ["D"]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{requested}");
     // A resend needs "reopen", which keeps the answers; the payer corrects
     // them, so the lead still sees nothing of them.
     let (status, refused) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
@@ -1640,7 +1670,11 @@ async fn an_organisation_states_its_representative_and_beneficial_owners() {
         json!(40.0)
     );
     let missing = body["missing_for_submit"].as_array().unwrap();
-    assert_eq!(missing[0], "street", "{body}");
+    // The seat in a black-list country opens block E of the risk
+    // assessment: the legal form and why the organisation pays are asked.
+    assert_eq!(missing[0], "legal_form", "{body}");
+    assert_eq!(missing[1], "street", "{body}");
+    assert!(missing.contains(&json!("payment_reason")));
     assert!(missing.contains(&json!("register_court")));
     assert!(!missing.contains(&json!("beneficial_owners")));
     assert!(!missing.contains(&json!("first_name")));

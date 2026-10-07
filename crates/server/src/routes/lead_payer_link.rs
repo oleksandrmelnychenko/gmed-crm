@@ -113,7 +113,7 @@ const STATEMENT_TEXT_MAX: usize = 2000;
 
 /// What the payer answers (API keys = columns of `lead_payer_statements`), in
 /// column order.
-const ANSWER_KEYS: [&str; 43] = [
+const ANSWER_KEYS: [&str; 46] = [
     "salutation",
     "first_name",
     "last_name",
@@ -157,6 +157,9 @@ const ANSWER_KEYS: [&str; 43] = [
     "high_risk_country_code",
     "sanctions_links",
     "sanctions_links_details",
+    "legal_form",
+    "vat_id",
+    "payment_reason",
 ];
 
 /// Keys only a natural person answers.
@@ -174,8 +177,11 @@ const PERSON_KEYS: [&str; 10] = [
 ];
 
 /// Keys only a company, an organisation or an insurer answers.
-const ORGANISATION_KEYS: [&str; 9] = [
+const ORGANISATION_KEYS: [&str; 12] = [
     "organisation_name",
+    "legal_form",
+    "vat_id",
+    "payment_reason",
     "register_court",
     "register_number",
     "representative_first_name",
@@ -567,6 +573,11 @@ struct Answers {
     high_risk_country_code: Option<String>,
     sanctions_links: Option<bool>,
     sanctions_links_details: Option<String>,
+    /// Block E of the risk assessment (an organisation): legal form, VAT id
+    /// and why the organisation pays.
+    legal_form: Option<String>,
+    vat_id: Option<String>,
+    payment_reason: Option<String>,
 }
 
 impl Answers {
@@ -618,6 +629,9 @@ impl Answers {
             "high_risk_country_code" => json!(self.high_risk_country_code),
             "sanctions_links" => json!(self.sanctions_links),
             "sanctions_links_details" => json!(self.sanctions_links_details),
+            "legal_form" => json!(self.legal_form),
+            "vat_id" => json!(self.vat_id),
+            "payment_reason" => json!(self.payment_reason),
             _ => Value::Null,
         }
     }
@@ -693,8 +707,8 @@ const STATEMENT_COLUMNS: &str = "link_id, privacy_ack_at, privacy_text_version, 
      representative_role, beneficial_owners, beneficial_owners_none, relationship_kind, \
      relationship, occupation, industry, funds_sources, funds_description, pep_self, \
      pep_self_details, pep_related, pep_related_details, high_risk_country, \
-     high_risk_country_code, sanctions_links, sanctions_links_details, \
-     estimated_total_eur::text AS estimated_total_eur, declared_correct_at, submitted_at, \
+     high_risk_country_code, sanctions_links, sanctions_links_details, legal_form, vat_id, \
+     payment_reason, estimated_total_eur::text AS estimated_total_eur, declared_correct_at, submitted_at, \
      adopted_at, updated_at";
 
 impl Statement {
@@ -773,6 +787,9 @@ impl Statement {
                 high_risk_country_code: text("high_risk_country_code"),
                 sanctions_links: answer("sanctions_links"),
                 sanctions_links_details: text("sanctions_links_details"),
+                legal_form: text("legal_form"),
+                vat_id: text("vat_id"),
+                payment_reason: text("payment_reason"),
             },
             estimated_total_cents: text("estimated_total_eur")
                 .and_then(|value| parse_cents(&value, MAX_TOTAL_CENTS)),
@@ -828,7 +845,8 @@ async fn store_answers(
                pep_self = $37, pep_self_details = $38, pep_related = $39,
                pep_related_details = $40, high_risk_country = $41,
                high_risk_country_code = $42, sanctions_links = $43,
-               sanctions_links_details = $44, answered_by_user = $45, updated_at = now()
+               sanctions_links_details = $44, legal_form = $45, vat_id = $46,
+               payment_reason = $47, answered_by_user = $48, updated_at = now()
            WHERE lead_id = $1"#,
     )
     .bind(lead_id)
@@ -875,6 +893,9 @@ async fn store_answers(
     .bind(&answers.high_risk_country_code)
     .bind(answers.sanctions_links)
     .bind(&answers.sanctions_links_details)
+    .bind(&answers.legal_form)
+    .bind(&answers.vat_id)
+    .bind(&answers.payment_reason)
     .bind(answered_by)
     .execute(&mut *conn)
     .await
@@ -971,6 +992,9 @@ fn effective_answers(
         answers.beneficial_owners = Vec::new();
         answers.beneficial_owners_none = None;
         answers.industry = None;
+        answers.legal_form = None;
+        answers.vat_id = None;
+        answers.payment_reason = None;
         return answers;
     }
     for (target, fallback, max) in [
@@ -1026,6 +1050,9 @@ struct Requirements<'a> {
     /// Section 8 as stored, when this questionnaire asks it (the link; a
     /// paying parent answers it in the billing section).
     payment_route: Option<&'a Declaration>,
+    /// Block E of the risk assessment is open: an organisation states its
+    /// legal form and why it pays.
+    organisation_follow_up: bool,
     today: NaiveDate,
 }
 
@@ -1065,6 +1092,9 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
         vec![("privacy_ack", required.privacy_acknowledged)];
     if organisation {
         checks.push(("organisation_name", filled(&answers.organisation_name)));
+        if required.organisation_follow_up {
+            checks.push(("legal_form", filled(&answers.legal_form)));
+        }
         checks.extend(address);
         if company {
             checks.push(("register_court", filled(&answers.register_court)));
@@ -1088,6 +1118,9 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
         }
         checks.push(("relationship_kind", answers.relationship_kind.is_some()));
         checks.push(("relationship", relationship_described));
+        if required.organisation_follow_up {
+            checks.push(("payment_reason", filled(&answers.payment_reason)));
+        }
         checks.push(("industry", filled(&answers.industry)));
     } else {
         checks.extend([
@@ -1462,6 +1495,9 @@ fn apply_answers_patch(
             }
             "occupation" => next.occupation = intake::clean_text(text_of(value, key)?, key, 200)?,
             "industry" => next.industry = intake::clean_text(text_of(value, key)?, key, 200)?,
+            "legal_form" => next.legal_form = intake::clean_text(text_of(value, key)?, key, 100)?,
+            "vat_id" => next.vat_id = intake::clean_text(text_of(value, key)?, key, 20)?,
+            "payment_reason" => next.payment_reason = long_text(text_of(value, key)?, key)?,
             "funds_sources" => {
                 let options = funds_source_options(organisation);
                 let chosen = list_of(value, key)?;
@@ -1875,6 +1911,7 @@ fn questionnaire(
             funds_proof_required: level == 2,
             funds_proof_uploaded: !funds_proof_documents.is_empty(),
             payment_route: asked.then_some(&declaration),
+            organisation_follow_up: check.organisation_follow_up,
             today,
         },
     );
@@ -2577,6 +2614,10 @@ async fn save_patch(
     )
     .await
     .map_err(database)?;
+    // The payer's answers count for the risk assessment at once (P3).
+    crate::risk::store::reassess(conn, lead_id, crate::risk::store::Cause::PayerLink, None)
+        .await
+        .map_err(database)?;
     Ok(true)
 }
 
@@ -2922,6 +2963,9 @@ async fn submit_in_tx(
     )
     .await
     .map_err(database)?;
+    crate::risk::store::reassess(conn, lead_id, crate::risk::store::Cause::PayerLink, None)
+        .await
+        .map_err(database)?;
     Ok(built.level)
 }
 
@@ -4602,6 +4646,14 @@ async fn staff_estimated_total(
                 ),
             )
             .await?;
+            // The lead's value counts for the risk assessment (T10, T11).
+            crate::risk::store::reassess(
+                &mut tx,
+                lead_id,
+                crate::risk::store::Cause::Staff,
+                Some(auth.user_id),
+            )
+            .await?;
             tx.commit().await
         }
         .await;
@@ -4797,6 +4849,7 @@ async fn reset_statement(
                    pep_self_details = NULL, pep_related = NULL, pep_related_details = NULL,
                    high_risk_country = NULL, high_risk_country_code = NULL,
                    sanctions_links = NULL, sanctions_links_details = NULL,
+                   legal_form = NULL, vat_id = NULL, payment_reason = NULL,
                    declared_correct_at = NULL, submitted_at = NULL, adopted_at = NULL,
                    updated_at = now()
                WHERE lead_id = $1
@@ -5583,6 +5636,7 @@ mod tests {
             funds_proof_required: level == 2,
             funds_proof_uploaded: false,
             payment_route: None,
+            organisation_follow_up: false,
             today: today(),
         };
         let (level, reasons) = check_level(&EnhancedCheck::default());
@@ -5602,6 +5656,7 @@ mod tests {
             funds_proof_required: true,
             funds_proof_uploaded: false,
             payment_route: Some(&declaration),
+            organisation_follow_up: false,
             today: today(),
         };
         assert_eq!(
@@ -5650,6 +5705,7 @@ mod tests {
             funds_proof_required: false,
             funds_proof_uploaded: false,
             payment_route: None,
+            organisation_follow_up: false,
             today: today(),
         };
         let missing = missing_for_submit(&answers, &required);
@@ -5669,6 +5725,31 @@ mod tests {
         assert!(missing.contains(&"industry"));
         assert!(!missing.contains(&"first_name"));
         assert!(!missing.contains(&"payment_method"), "not asked here");
+        assert!(!missing.contains(&"legal_form"), "only with block E");
+        // Block E open: the legal form after the name, why it pays after the relationship.
+        let missing = missing_for_submit(
+            &answers,
+            &Requirements {
+                organisation_follow_up: true,
+                ..required
+            },
+        );
+        let at = |key: &str| missing.iter().position(|known| *known == key);
+        assert_eq!(at("legal_form"), Some(0));
+        assert!(at("payment_reason") > at("relationship") && at("payment_reason") < at("industry"));
+        let answered = Answers {
+            legal_form: Some("GmbH".into()),
+            payment_reason: Some("Arbeitgeber".into()),
+            ..answers.clone()
+        };
+        let missing = missing_for_submit(
+            &answered,
+            &Requirements {
+                organisation_follow_up: true,
+                ..required
+            },
+        );
+        assert!(!missing.contains(&"legal_form") && !missing.contains(&"payment_reason"));
     }
 
     #[test]

@@ -4,6 +4,7 @@ import { cabinetLocale, formatFileSize, languageName } from "./lead-request-mode
 import {
   LEAD_CABINET_LANGS,
   asLeadCabinetLang,
+  followUpFieldLabel,
   identificationFieldLabel,
   invoiceToLabel,
   leadRequestText,
@@ -17,8 +18,8 @@ describe("lead cabinet languages", () => {
     expect(LEAD_CABINET_LANGS.map((option) => option.value)).toEqual(["de", "en", "uk", "ru"]);
     expect(leadRequestText("de").title).toBe("Ihre Anfrage");
     expect(leadRequestText("en").title).toBe("Your request");
-    expect(leadRequestText("uk").stepDocuments).toBe("Документи");
-    expect(leadRequestText("ru").stepDocuments).toBe("Документы");
+    expect(leadRequestText("uk").steps.documents).toBe("Звернення й документи");
+    expect(leadRequestText("ru").steps.documents).toBe("Обращение и документы");
   });
 
   it("reads stored and preferred language codes", () => {
@@ -141,35 +142,36 @@ describe("lead cabinet languages", () => {
     // Labels that speak for themselves stand alone; the others carry their section.
     expect(submitFieldLabel(de, "birth_place")).toBe("Geburtsort");
     expect(submitFieldLabel(de, "birth_country")).toBe("Geburtsland");
-    expect(submitFieldLabel(de, "id_document_type")).toBe("Ausweisdokument: Art des Dokuments");
-    expect(submitFieldLabel(de, "id_valid_until")).toBe("Ausweisdokument: Gültig bis");
     expect(submitFieldLabel(de, "id_document_upload")).toBe("Ausweisdokument: Foto oder Scan des Ausweises");
-    expect(submitFieldLabel(de, "payment_background")).toBe("Zahler: Warum zahlt diese Person?");
+    expect(submitFieldLabel(de, "request_reason")).toBe("Grund der Anfrage");
     expect(submitFieldLabel(de, "payer_own_account")).toBe("Handeln Sie im eigenen wirtschaftlichen Interesse?");
     expect(submitFieldLabel(de, "payer_beneficial_owner")).toBe(
       "In wessen Interesse handeln Sie? (Name, Geburtsdatum, Geburtsort, Anschrift)",
     );
-    // The legal questions are long: the list names their topic, and what a "yes" still needs.
+    // The legal questions are long: the list names their topic.
     expect(submitFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
-    expect(submitFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Öffentliches Amt – Amt, Land und Zeitraum");
-    expect(submitFieldLabel(de, "high_risk_country_code")).toBe("Gesetzliche Fragen: Land mit hohem Risiko – Welches Land?");
     expect(submitFieldLabel(de, "sanctions_links")).toBe("Gesetzliche Fragen: Sanktionen");
-    expect(submitFieldLabel(leadRequestText("ru"), "id_document_number")).toBe(
-      "Документ, удостоверяющий личность: Номер документа",
-    );
     expect(submitFieldLabel(leadRequestText("uk"), "pep_related")).toBe(
       "Запитання за законом: Політично значуща близька особа",
     );
     expect(submitFieldLabel(leadRequestText("en"), "id_document_upload")).toBe(
       "Identity document: Photo or scan of the document",
     );
+    // The reason of the request in the owner's words (13.1).
+    expect(LEAD_CABINET_LANGS.map((option) => submitFieldLabel(leadRequestText(option.value), "request_reason"))).toEqual([
+      "Grund der Anfrage",
+      "Reason for your request",
+      "Причина звернення",
+      "Причина обращения",
+    ]);
+    // A key of another server the cabinet has no words for is shown as it is, never empty.
+    expect(submitFieldLabel(de, "id_document_type" as never)).toBe("id_document_type");
   });
 
   it("asks a parent about the patient, not about 'you'", () => {
     const de = leadRequestText("de");
     expect(identificationFieldLabel(de, "pep_self")).toContain("Üben Sie ein hochrangiges öffentliches Amt aus");
     expect(identificationFieldLabel(de, "pep_self", true)).toContain("Übt die Patientin / der Patient");
-    expect(identificationFieldLabel(de, "high_risk_country", true)).toContain("Hat die Patientin / der Patient");
     // A question that does not say "you" is the same for both.
     expect(identificationFieldLabel(de, "sanctions_links", true)).toBe(identificationFieldLabel(de, "sanctions_links"));
     expect(identificationFieldLabel(de, "birth_place", true)).toBe("Geburtsort");
@@ -179,11 +181,81 @@ describe("lead cabinet languages", () => {
     expect(submitFieldLabel(de, "payer_beneficial_owner", true)).toContain("handelt die Patientin / der Patient");
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
-      for (const field of ["pep_self", "pep_related", "high_risk_country"] as const) {
+      for (const field of ["pep_self", "pep_related", "residence_since"] as const) {
         expect(identificationFieldLabel(text, field, true)).not.toBe(identificationFieldLabel(text, field));
       }
       expect(text.ownAccountQuestionGuardian).not.toBe(text.ownAccountQuestion);
     }
+  });
+
+  it("names the steps and the follow-up in every language, in the owner's words, without an assessment", () => {
+    expect(leadRequestText("de").steps).toEqual({
+      person: "Einwilligung & Person",
+      contact: "Kontakt & Wohnsitz",
+      identity: "Ausweis",
+      payer: "Wer zahlt",
+      billing: "Versicherung & Rechnung",
+      declarations: "Erklärungen",
+      follow_up: "Ergänzende Angaben",
+      documents: "Anliegen & Unterlagen",
+      send: "Prüfen & Senden",
+    });
+    // The neutral heading and notice of contract 3.1, word for word.
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpTitle)).toEqual([
+      "Wir benötigen ergänzende Angaben",
+      "We need some additional information",
+      "Нам потрібні додаткові відомості",
+      "Нам нужны дополнительные сведения",
+    ]);
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).reviewNotice)).toEqual([
+      "Vielen Dank. Ihre Angaben werden geprüft. Wir melden uns bei Ihnen.",
+      "Thank you. Your details are being reviewed. We will get in touch with you.",
+      "Дякуємо. Ваші дані перевіряються. Ми зв'яжемося з вами.",
+      "Спасибо. Ваши данные проверяются. Мы свяжемся с вами.",
+    ]);
+    // No text of the follow-up speaks of points, levels, triggers, risk or a decision (P2).
+    const risk = /risiko|risk|punkt|point|stufe|level|trigger|abgelehnt|reject|ризик|риск|бал/i;
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      const words = [
+        text.followUpTitle,
+        text.followUpIntro,
+        text.followUpOpen,
+        text.followUpIncomplete,
+        text.followUpAnsweredAt("07.10.2026 10:00"),
+        text.reviewNotice,
+        ...Object.values(text.followUpBlocks),
+        ...Object.values(text.steps),
+      ];
+      for (const word of words) expect(word, option.value).not.toMatch(risk);
+    }
+  });
+
+  it("labels what a follow-up block still misses", () => {
+    const de = leadRequestText("de");
+    expect(followUpFieldLabel(de, "funds_sources")).toBe("Herkunft der Mittel");
+    // An older key of the same question gets the same label.
+    expect(followUpFieldLabel(de, "self_funds_sources")).toBe("Herkunft der Mittel");
+    expect(followUpFieldLabel(de, "enhanced_funds_proof_upload")).toBe("Nachweise zur Herkunft der Mittel");
+    expect(followUpFieldLabel(de, "funds_proof_upload")).toBe("Nachweise zur Herkunft der Mittel");
+    expect(followUpFieldLabel(de, "relationship_since")).toBe("Seit wann besteht die Beziehung?");
+    expect(followUpFieldLabel(de, "relationship_proof_upload")).toBe("Nachweis der Beziehung");
+    expect(followUpFieldLabel(de, "expected_total_eur")).toBe("Voraussichtlicher Gesamtbetrag (EUR)");
+    expect(followUpFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
+    expect(followUpFieldLabel(de, "pep_wealth_origin")).toBe("Herkunft des Vermögens");
+    expect(followUpFieldLabel(de, "sanctions_link_kind")).toBe("Art der Verbindung");
+    expect(followUpFieldLabel(de, "id_document_upload")).toBe("Foto oder Scan des Ausweises");
+    expect(followUpFieldLabel(de, "agent_last_name")).toBe("Vertretende Person: Nachname");
+    expect(followUpFieldLabel(de, "residence_since", true)).toBe("Seit wann wohnt die Patientin / der Patient im Wohnsitzland?");
+    expect(followUpFieldLabel(de, "unknown_key")).toBe("unknown_key");
+  });
+
+  it("names the organisation mask of a payer", () => {
+    const de = leadRequestText("de");
+    expect(submitFieldLabel(de, "payer_legal_form")).toBe("Zahler: Rechtsform");
+    expect(submitFieldLabel(de, "payer_contact_name")).toBe("Zahler: Ansprechperson");
+    expect(submitFieldLabel(de, "payer_email_or_phone")).toBe("Zahler: E-Mail oder Telefon");
+    expect(submitFieldLabel(leadRequestText("en"), "payer_register_number")).toBe("Payer: Register number (if any)");
   });
 
   it("names what is still missing about invoice and payment, with the section where a label alone would not do", () => {

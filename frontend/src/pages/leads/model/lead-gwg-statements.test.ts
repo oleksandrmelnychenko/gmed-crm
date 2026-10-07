@@ -63,6 +63,23 @@ const EMPTY_IDENTIFICATION: LeadGwgIdentification = {
   sanctions_links_details: null,
   payment_background: null,
   declared_correct_at: null,
+  // Trigger flow 2026-10-07: who entered the document data, the follow-up answers F / B / H / J.
+  id_data_entered_by_name: null,
+  id_data_entered_at: null,
+  residence_since: null,
+  other_residences: null,
+  former_citizenships: [],
+  stay_reason: null,
+  stay_reason_details: null,
+  relationship_since: null,
+  pep_office: null,
+  pep_country: null,
+  pep_period: null,
+  pep_relationship: null,
+  pep_wealth_origin: null,
+  sanctions_link_name: null,
+  sanctions_link_kind: null,
+  sanctions_link_since_extent: null,
 };
 
 describe("GwG statements in the portal state of a lead", () => {
@@ -398,6 +415,9 @@ describe("who acts for the lead, in the portal state", () => {
           has_login: true,
           has_data: true,
           contact_origin: "staff",
+          // Staff enter the document data (trigger flow 2026-10-07): nobody did yet.
+          id_data_entered_by_name: null,
+          id_data_entered_at: null,
         },
       ],
     });

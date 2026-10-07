@@ -238,9 +238,11 @@ describe("paying parent's questionnaire: what is missing, and where", () => {
     expect(payerQuestionnaireFieldLabel(de, "funds_proof_upload")).toBe("Nachweis der Herkunft der Mittel");
     expect(payerQuestionnaireFieldLabel(de, "occupation")).toBe("Beruf / Tätigkeit");
     expect(payerQuestionnaireFieldLabel(de, "street")).toBe("Straße und Hausnummer");
-    expect(payerQuestionnaireFieldLabel(de, "id_document_number")).toBe("Ausweisdokument: Dokumentnummer");
     expect(payerQuestionnaireFieldLabel(de, "id_document_upload")).toBe("Ausweisdokument: Foto oder Scan des Ausweises");
-    expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Öffentliches Amt – Amt, Land und Zeitraum");
+    // The paying parent's own legal questions keep their details (the lead's are yes/no since the trigger flow).
+    expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
+    expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Amt, Land und Zeitraum");
+    expect(payerQuestionnaireFieldLabel(de, "high_risk_country_code")).toBe("Gesetzliche Fragen: Welches Land?");
     expect(payerQuestionnaireFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
     expect(payerQuestionnaireFieldLabel(de, "relationship")).toBe("Beziehung zur Patientin / zum Patienten – Bitte angeben");
     expect(de.payerElsewhere(de.sectionLegalRepresentatives)).toBe("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");

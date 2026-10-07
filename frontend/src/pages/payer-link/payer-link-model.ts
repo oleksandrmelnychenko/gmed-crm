@@ -37,6 +37,8 @@ export const RELATIONSHIP_KINDS = [
   "spouse",
   "parent",
   "child",
+  "sibling",
+  "grandparent",
   "relative",
   "employer",
   "friend",
@@ -106,6 +108,8 @@ export const PAYER_TEXT_FIELDS = [
   "id_issued_on",
   "id_valid_until",
   "organisation_name",
+  "legal_form",
+  "vat_id",
   "register_court",
   "register_number",
   "representative_first_name",
@@ -113,6 +117,7 @@ export const PAYER_TEXT_FIELDS = [
   "representative_role",
   "relationship_kind",
   "relationship",
+  "payment_reason",
   "occupation",
   "industry",
   "funds_description",
@@ -159,6 +164,8 @@ export const PAYER_FIELDS: readonly PayerField[] = [
   "id_issued_on",
   "id_valid_until",
   "organisation_name",
+  "legal_form",
+  "vat_id",
   "register_court",
   "register_number",
   "representative_first_name",
@@ -168,6 +175,7 @@ export const PAYER_FIELDS: readonly PayerField[] = [
   "beneficial_owners_none",
   "relationship_kind",
   "relationship",
+  "payment_reason",
   "occupation",
   "industry",
   "funds_sources",
@@ -200,6 +208,9 @@ const PERSON_ONLY: ReadonlySet<PayerField> = new Set([
 /** Keys only a company, an organisation or an insurer has. */
 const ORGANISATION_ONLY: ReadonlySet<PayerField> = new Set([
   "organisation_name",
+  "legal_form",
+  "vat_id",
+  "payment_reason",
   "register_court",
   "register_number",
   "representative_first_name",
@@ -230,6 +241,7 @@ const MULTILINE_FIELDS: ReadonlySet<PayerField> = new Set([
   "pep_related_details",
   "sanctions_links_details",
   "via_third_party_details",
+  "payment_reason",
 ]);
 
 export const OWNER_FIELDS = [
@@ -640,18 +652,21 @@ export const PERSON_MISSING_ORDER: readonly string[] = [
 export const ORGANISATION_MISSING_ORDER: readonly string[] = [
   "privacy_ack",
   "organisation_name",
+  "legal_form",
   "street",
   "zip",
   "city",
   "country",
   "register_court",
   "register_number",
+  "vat_id",
   "representative_first_name",
   "representative_last_name",
   ...ID_MISSING,
   "beneficial_owners",
   "relationship_kind",
   "relationship",
+  "payment_reason",
   "industry",
   ...FUNDS_MISSING,
   ...PAYMENT_ROUTE_MISSING,
@@ -663,7 +678,7 @@ export function stepOfMissing(key: string): PayerStep {
   if (key === "privacy_ack") return "privacy";
   if ((ID_MISSING as readonly string[]).includes(key)) return "identity";
   if (key === "beneficial_owners" || key === "beneficial_owners_none") return "owners";
-  if (["relationship_kind", "relationship", "occupation", "industry", ...FUNDS_MISSING].includes(key)) return "funds";
+  if (["relationship_kind", "relationship", "occupation", "industry", "payment_reason", ...FUNDS_MISSING].includes(key)) return "funds";
   if ((PAYMENT_ROUTE_MISSING as readonly string[]).includes(key)) return "payment";
   if ((DECLARATIONS_MISSING as readonly string[]).includes(key)) return "declarations";
   if (isPayerField(key) || key === "email") return "details";
@@ -689,6 +704,8 @@ export function requiredFields(payerType: PayerType): ReadonlySet<string> {
   const required = new Set(isOrganisation(payerType) ? ORGANISATION_MISSING_ORDER : PERSON_MISSING_ORDER);
   // Asked, but never missing on its own (contract 3.5 names five ID keys for a person).
   required.delete("id_issued_on");
+  // The VAT id is asked, never required (block E).
+  required.delete("vat_id");
   if (payerType !== "company") {
     required.delete("register_court");
     required.delete("register_number");

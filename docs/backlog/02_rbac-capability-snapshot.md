@@ -81,6 +81,7 @@
 | `datev.read` | x |   |   |   |   |   | x |   |   |
 | `incidents.manage` | x |   |   |   |   |   |   |   | x |
 | `sanctions.review` | x |   |   |   |   |   |   |   |   |
+| `risk.review` | x |   |   |   |   |   |   |   |   |
 | `personnel.view` | x |   |   |   |   |   |   |   |   |
 | `personnel.upload` | x |   |   |   |   |   |   |   |   |
 | `personnel.manage` | x |   |   |   |   |   |   |   |   |

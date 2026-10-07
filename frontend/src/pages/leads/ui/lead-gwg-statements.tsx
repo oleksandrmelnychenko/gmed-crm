@@ -11,8 +11,9 @@ import type {
   LeadIdentityDocument,
   LeadPortalBilling,
   LeadPortalIntake,
+  LeadGwgIdentification,
+  LeadPortalEnhancedDetails,
   LeadPortalPayerLink,
-  LeadPortalSelfFunds,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
 import {
@@ -32,8 +33,8 @@ import {
   representativeName,
   representativeRoleLabel,
   salutationLabel,
-  selfFundsProofMissing,
-  selfFundsShown,
+  enhancedDetailsShown,
+  enhancedFundsProofMissing,
   type BillingStatement,
   type GwgPayerStatement,
   type RepresentationStatements,
@@ -46,7 +47,8 @@ import {
   payerQuestionnaireGroups,
   type PayerStatementRow,
 } from "../model/lead-payer-link";
-import { selfFundsSourcesLabel } from "../model/lead-payer";
+import { statedFundsSourceLabel, statedFundsSourcesLabel } from "../model/lead-payer";
+import { identityDocumentEnteredLine } from "../model/lead-identity-document-data";
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
@@ -374,41 +376,198 @@ function BillingGroup({
   );
 }
 
+function stayReasonLabel(value: string | null | undefined, tx: Tx): string {
+  switch (value) {
+    case "work":
+      return tx("работа", "Arbeit");
+    case "study":
+      return tx("учёба", "Studium");
+    case "family":
+      return tx("семья", "Familie");
+    case "other":
+      return tx("другое", "Sonstiges");
+    default:
+      return value ?? "";
+  }
+}
+
+function sanctionsLinkKindLabel(value: string | null | undefined, tx: Tx): string {
+  switch (value) {
+    case "family":
+      return tx("семейная", "familiär");
+    case "business":
+      return tx("деловая", "geschäftlich");
+    case "ownership":
+      return tx("участие / владение", "Beteiligung / Eigentum");
+    case "other":
+      return tx("другое", "Sonstiges");
+    default:
+      return value ?? "";
+  }
+}
+
 /**
- * Where the self-paying patient's money comes from (owner request
- * 2026-10-05): the sources, the description and the proof as the lead stated
- * them in the cabinet, with the time of the last change. The proof is
- * required while the enhanced check is (owner rule 2026-10-07); an amber line
- * says when it is missing then. Read-only.
+ * The lead's answers to the follow-up blocks of the risk assessment (trigger
+ * flow 2026-10-07): F stay and former citizenships, B since when the payer is
+ * known, H PEP details, J the sanctions link. Only blocks with an answer are
+ * shown; nothing for a lead who was not asked. Read-only.
  */
-function SelfFundsGroup({ selfFunds, tx }: { selfFunds: LeadPortalSelfFunds; tx: Tx }) {
-  const proofMissing = selfFundsProofMissing(selfFunds);
+function LeadGwgFollowUpAnswers({
+  identification,
+  tx,
+  lang,
+}: {
+  identification: LeadGwgIdentification;
+  tx: Tx;
+  lang: string;
+}) {
+  const country = (code: string | null | undefined) => countryNameForDisplay(code ?? null, lang);
+  const stay = [
+    identification.residence_since,
+    identification.other_residences,
+    identification.stay_reason,
+    identification.stay_reason_details,
+  ].some(Boolean) || (identification.former_citizenships?.length ?? 0) > 0;
+  const pep = [
+    identification.pep_office,
+    identification.pep_country,
+    identification.pep_period,
+    identification.pep_relationship,
+    identification.pep_wealth_origin,
+  ].some(Boolean);
+  const sanctions = [
+    identification.sanctions_link_name,
+    identification.sanctions_link_kind,
+    identification.sanctions_link_since_extent,
+  ].some(Boolean);
+  if (!stay && !pep && !sanctions && !identification.relationship_since) return null;
+  return (
+    <div className="space-y-3" data-testid="lead-gwg-follow-up-answers">
+      {stay ? (
+        <StatementGroup title={tx("Проживание и гражданства (доп. сведения)", "Aufenthalt und Staatsangehörigkeiten (ergänzend)")} columns={STATEMENT_COLUMNS}>
+          <Statement label={tx("Проживает там с", "Wohnhaft dort seit")} testId="lead-gwg-residence-since">{identification.residence_since}</Statement>
+          <Statement label={tx("Другие места проживания", "Weitere Wohnsitze")}>{identification.other_residences}</Statement>
+          <Statement label={tx("Прежние гражданства", "Frühere Staatsangehörigkeiten")}>
+            {(identification.former_citizenships ?? []).map((code) => country(code)).join(", ")}
+          </Statement>
+          <Statement label={tx("Причина пребывания", "Aufenthaltsgrund")} className="sm:col-span-2">
+            {[stayReasonLabel(identification.stay_reason, tx), identification.stay_reason_details].filter(Boolean).join(" — ")}
+          </Statement>
+        </StatementGroup>
+      ) : null}
+      {identification.relationship_since ? (
+        <StatementGroup title={tx("Отношение к плательщику (доп. сведения)", "Beziehung zum Zahler (ergänzend)")} columns={STATEMENT_COLUMNS}>
+          <Statement label={tx("Знакомы с", "Bekannt seit")} testId="lead-gwg-relationship-since">{identification.relationship_since}</Statement>
+        </StatementGroup>
+      ) : null}
+      {pep ? (
+        <StatementGroup title={tx("PEP: подробности", "PEP: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+          <Statement label={tx("Должность", "Amt / Funktion")} testId="lead-gwg-pep-office">{identification.pep_office}</Statement>
+          <Statement label={tx("Страна", "Land")}>{country(identification.pep_country)}</Statement>
+          <Statement label={tx("Период", "Zeitraum")}>{identification.pep_period}</Statement>
+          <Statement label={tx("Кем приходится PEP", "Beziehung zur PEP")}>{identification.pep_relationship}</Statement>
+          <Statement label={tx("Происхождение состояния", "Herkunft des Vermögens")} className="sm:col-span-2">
+            {identification.pep_wealth_origin ? <span className="whitespace-pre-line">{identification.pep_wealth_origin}</span> : null}
+          </Statement>
+        </StatementGroup>
+      ) : null}
+      {sanctions ? (
+        <StatementGroup title={tx("Связи с санкционными лицами: подробности", "Sanktionsbezug: Einzelheiten")} columns={STATEMENT_COLUMNS}>
+          <Statement label={tx("Лицо или организация", "Person oder Organisation")} testId="lead-gwg-sanctions-link-name">
+            {identification.sanctions_link_name}
+          </Statement>
+          <Statement label={tx("Вид связи", "Art der Verbindung")}>{sanctionsLinkKindLabel(identification.sanctions_link_kind, tx)}</Statement>
+          <Statement label={tx("С какого времени и в каком объёме", "Seit wann, in welchem Umfang")}>
+            {identification.sanctions_link_since_extent}
+          </Statement>
+        </StatementGroup>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * "Дополнительные сведения": the answers of the cabinet's extra step
+ * (two-stage form 2026-10-07; blocks A and B of the risk assessment) — the
+ * self-payer's own source of funds with the words and the proof, profession
+ * and sector, and what the patient knows of a third party's funds ("со слов
+ * пациента", never the payer's own declaration). The proof is required while
+ * the enhanced check is; an amber line says when it is missing then.
+ * Read-only.
+ */
+function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDetails; tx: Tx }) {
+  const answers = details.answers;
+  const proofMissing = enhancedFundsProofMissing(details);
+  const ownFunds = details.asks.funds || answers.funds_sources.length > 0 || Boolean(answers.funds_description)
+    || details.funds_proof_documents.length > 0;
+  const payerFunds = details.asks.payer_funds || Boolean(answers.payer_funds_source || answers.payer_funds_description);
   const proofLabel = `${tx("Подтверждение источника средств", "Nachweis der Mittelherkunft")} · ${
-    selfFunds.proof_required ? tx("обязательно", "erforderlich") : tx("необязательно", "optional")
+    details.asks.funds_proof ? tx("обязательно", "erforderlich") : tx("необязательно", "optional")
   }`;
   return (
-    <div className="space-y-2" data-testid="lead-gwg-self-funds">
+    <div className="space-y-2" data-testid="lead-gwg-enhanced-details">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
-          {tx("Происхождение средств (пациент платит сам)", "Herkunft der Mittel (Selbstzahler)")}
+          {tx("Дополнительные сведения", "Zusätzliche Angaben")}
         </h4>
-        {selfFunds.updated_at ? (
-          <span className="inline-flex" data-testid="lead-gwg-self-funds-updated">
-            <PatientFieldBadge marker={{ at: selfFunds.updated_at, access_kind: null }} tx={tx} />
+        {details.updated_at ? (
+          <span className="inline-flex" data-testid="lead-gwg-enhanced-details-updated">
+            <PatientFieldBadge marker={{ at: details.updated_at, access_kind: null }} tx={tx} />
+          </span>
+        ) : null}
+        {details.check_required ? (
+          <span className="text-[11px] text-muted-foreground" data-testid="lead-gwg-enhanced-details-check">
+            {tx("усиленная проверка обязательна", "verstärkte Prüfung erforderlich")}
           </span>
         ) : null}
       </div>
       <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
-        <Statement label={tx("Источники", "Quellen")} testId="lead-gwg-self-funds-sources">
-          {selfFundsSourcesLabel(selfFunds.sources, tx)}
-        </Statement>
-        <Statement label={tx("Описание", "Beschreibung")} className="sm:col-span-2" testId="lead-gwg-self-funds-description">
-          {selfFunds.description ? <span className="whitespace-pre-line">{selfFunds.description}</span> : null}
-        </Statement>
-        <Statement label={proofLabel} className="col-span-full" warning={proofMissing} testId="lead-gwg-self-funds-proof">
-          {selfFunds.proof_documents.length > 0 ? <UploadedFiles documents={selfFunds.proof_documents} tx={tx} /> : null}
-        </Statement>
+        {ownFunds ? (
+          <>
+            <Statement label={tx("Источник средств (пациент платит сам)", "Herkunft der Mittel (Selbstzahler)")} testId="lead-gwg-self-funds-sources">
+              {statedFundsSourcesLabel(answers.funds_sources, tx)}
+            </Statement>
+            <Statement label={tx("Описание", "Beschreibung")} className="sm:col-span-2" testId="lead-gwg-self-funds-description">
+              {answers.funds_description ? <span className="whitespace-pre-line">{answers.funds_description}</span> : null}
+            </Statement>
+          </>
+        ) : null}
+        {details.asks.occupation || answers.occupation ? (
+          <Statement label={tx("Профессия", "Beruf")} testId="lead-gwg-enhanced-occupation">{answers.occupation}</Statement>
+        ) : null}
+        {details.asks.sector || answers.sector ? (
+          <Statement label={tx("Отрасль", "Branche")} testId="lead-gwg-enhanced-sector">{answers.sector}</Statement>
+        ) : null}
+        {payerFunds ? (
+          <Statement
+            label={tx("Средства плательщика — со слов пациента", "Mittel des Zahlers – laut Patient/in")}
+            className="col-span-full"
+            testId="lead-gwg-enhanced-payer-funds"
+          >
+            {answers.payer_funds_source || answers.payer_funds_description ? (
+              <>
+                {answers.payer_funds_source ? <span>{statedFundsSourceLabel(answers.payer_funds_source, tx)}</span> : null}
+                {answers.payer_funds_description ? (
+                  <span className="mt-0.5 block whitespace-pre-line">{answers.payer_funds_description}</span>
+                ) : null}
+              </>
+            ) : null}
+          </Statement>
+        ) : null}
+        {ownFunds ? (
+          <Statement label={proofLabel} className="col-span-full" warning={proofMissing} testId="lead-gwg-self-funds-proof">
+            {details.funds_proof_documents.length > 0 ? <UploadedFiles documents={details.funds_proof_documents} tx={tx} /> : null}
+          </Statement>
+        ) : null}
       </dl>
+      {details.asks.payer_states_funds ? (
+        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-gwg-enhanced-payer-states-funds">
+          {tx(
+            "Источник средств и подтверждение плательщик указывает сам — по своей ссылке.",
+            "Herkunft der Mittel und Nachweis gibt der Zahler selbst an – über den eigenen Link.",
+          )}
+        </p>
+      ) : null}
       {proofMissing ? (
         <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-self-funds-proof-missing">
           {tx(
@@ -665,6 +824,18 @@ export function LeadGwgStatements({
           {intake.identity_documents.length > 0 ? <UploadedFiles documents={intake.identity_documents} tx={tx} /> : null}
         </Statement>
       </StatementGroup>
+      {/* Since 2026-10-07 the document data are entered by staff from the scan. */}
+      {identityDocumentEnteredLine(identification, tx) || identification.id_document_unreadable ? (
+        <p className="-mt-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-id-entered-by">
+          {identityDocumentEnteredLine(identification, tx)}
+          {identification.id_document_unreadable ? (
+            <span className={cn("font-medium", WARNING_TEXT)}>
+              {identityDocumentEnteredLine(identification, tx) ? " · " : ""}
+              {tx("документ нечитаем", "Ausweis unleserlich")}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
 
       {representationGroup}
 
@@ -689,7 +860,10 @@ export function LeadGwgStatements({
         </Statement>
       </StatementGroup>
 
-      {selfFundsShown(intake.self_funds) ? <SelfFundsGroup selfFunds={intake.self_funds} tx={tx} /> : null}
+      {enhancedDetailsShown(intake.enhanced_details) ? <EnhancedDetailsGroup details={intake.enhanced_details} tx={tx} /> : null}
+
+      <LeadGwgFollowUpAnswers identification={identification} tx={tx} lang={lang} />
+
 
       {intake.billing ? (
         <BillingGroup

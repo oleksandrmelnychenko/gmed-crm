@@ -33,12 +33,6 @@ const PERSON_FIELDS = [
   "country",
   "email",
   "phone",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_issued_on",
-  "id_valid_until",
 ] as const;
 
 type Person = {
@@ -72,12 +66,6 @@ function person(overrides: Partial<Person> = {}): Person {
     country: null,
     email: null,
     phone: null,
-    id_document_type: null,
-    id_document_number: null,
-    id_issuing_authority: null,
-    id_issuing_country: null,
-    id_issued_on: null,
-    id_valid_until: null,
     identity_documents: [],
     authority_documents: [],
     ...overrides,
@@ -166,20 +154,9 @@ function leadRequest(minor: boolean) {
       birth_country: "DE",
       habitual_residence_country: null,
       contact_channels: ["email"],
-      id_document_type: "passport",
-      id_document_number: "C01X00T47",
-      id_issuing_authority: "Bürgeramt Mitte",
-      id_issuing_country: "DE",
-      id_issued_on: null,
-      id_valid_until: "2031-03-04",
       pep_self: false,
-      pep_self_details: null,
       pep_related: false,
-      pep_related_details: null,
-      high_risk_country: false,
-      high_risk_country_code: null,
       sanctions_links: false,
-      sanctions_links_details: null,
       payment_background: null,
       declared_correct_at: null as string | null,
     },
@@ -225,11 +202,6 @@ const ADULT_REQUIRED = [
   "zip",
   "city",
   "country",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_valid_until",
 ] as const;
 const MINOR_REQUIRED = [
   "first_name",
@@ -243,14 +215,10 @@ const MINOR_REQUIRED = [
   "country",
   "email",
   "phone",
-  "id_document_type",
-  "id_document_number",
-  "id_issuing_authority",
-  "id_issuing_country",
-  "id_valid_until",
 ] as const;
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Opens a step of the cabinet by its tab. */
+const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 
 /** The place a person has in the form, like the server: by role and answer, or by order and custody. */
 function slotOf(request: Request, who: Person): string | null {
@@ -272,7 +240,7 @@ function missingForSubmit(request: Request): string[] {
   const personKeys = (slot: string, fields: readonly (typeof PERSON_FIELDS)[number][], authority: boolean) => {
     const who = inSlot(slot);
     const keys = fields
-      .filter((field) => !who || empty(who[field]) || (field === "id_valid_until" && String(who[field]) < today()))
+      .filter((field) => !who || empty(who[field]))
       .map((field) => `${slot}_${field}`);
     if (!who || who.identity_documents.length === 0) keys.push(`${slot}_id_upload`);
     if (authority && (!who || who.authority_documents.length === 0)) keys.push(`${slot}_authority_upload`);
@@ -453,10 +421,8 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
           return route.fulfill({ status, json: { code, message: code, ...(field ? { field } : {}) } });
         };
         const unknown = Object.keys(fields).find((key) => !(PERSON_FIELDS as readonly string[]).includes(key));
-        if (unknown) return refuse(422, "invalid_field", unknown);
-        if (typeof fields.id_valid_until === "string" && fields.id_valid_until && fields.id_valid_until < today()) {
-          return refuse(422, "id_document_expired", "id_valid_until");
-        }
+        // The identity document's data are staff's since the trigger flow.
+        if (unknown) return refuse(422, unknown.startsWith("id_") ? "staff_only" : "invalid_field", unknown);
         // The two refusals of an e-mail name no field: the code says which one it is.
         if ("email" in fields && known?.email_locked) return refuse(422, "representative_email_is_login");
         const email = typeof fields.email === "string" ? fields.email.trim().toLowerCase() : "";
@@ -553,17 +519,13 @@ test.describe("lead cabinet: who acts for an adult", () => {
     const acts = block.getByRole("combobox", { name: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?" });
     const guardianship = block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" });
 
-    // The block stands between the identity document and the insurance.
+    // The block closes the first step, after the person (trigger flow).
     await expect(page.getByRole("heading", { name: "Vertretung", exact: true })).toBeVisible();
     const order = await page
-      .getByTestId("lead-request-data")
+      .getByTestId("lead-request-step-person")
       .locator("h3")
       .evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order.slice(order.indexOf("Ausweisdokument"), order.indexOf("Versicherung") + 1)).toEqual([
-      "Ausweisdokument",
-      "Vertretung",
-      "Versicherung",
-    ]);
+    expect(order).toEqual(["Datenschutz und Einwilligung", "Persönliche Daten", "Vertretung"]);
 
     // Until both questions are answered the request cannot be sent.
     await page.locator('[data-step="send"]').click();
@@ -575,7 +537,7 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(page.getByTestId("lead-request-summary-representation")).toContainText("Noch keine Angaben");
     await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
 
-    await page.locator('[data-step="data"]').click();
+    await step(page, "person");
     await choose(page, acts, "Nein");
     await expect.poll(() => calls.answers).toEqual([{ has_representative: false }]);
     await choose(page, guardianship, "Nein");
@@ -646,11 +608,12 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id, status: 200, body: { date_of_birth: "1980-01-15" } });
     await agent.getByRole("textbox", { name: "Straße und Hausnummer" }).fill("Musterstraße 2");
     await choose(page, agent.getByRole("combobox", { name: "Wohnsitzland" }), "Deutschland");
-    await choose(page, agent.getByRole("combobox", { name: "Art des Dokuments" }), "Personalausweis");
-    await agent.getByRole("textbox", { name: "Dokumentnummer" }).fill("L01X00T47");
     await expect
       .poll(() => Object.assign({}, ...calls.persons.slice(2).map((call) => call.body)))
-      .toEqual({ street: "Musterstraße 2", country: "DE", id_document_type: "id_card", id_document_number: "L01X00T47" });
+      .toEqual({ street: "Musterstraße 2", country: "DE" });
+    // The identity document's data are entered by GMED from the copy: no such fields.
+    await expect(agent.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(0);
+    await expect(page.locator("#lead-request-agent_id_valid_until")).toHaveCount(0);
     expect(calls.persons.every((call) => call.id === id)).toBe(true);
     expect(request.representation.representatives).toHaveLength(1);
 
@@ -660,7 +623,9 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(identity).toContainText("Foto oder Scan des Ausweises");
     await expect(authority).toContainText("Nachweis der Vertretungsmacht (z. B. Vollmacht)");
     await expect(identity.getByRole("button", { name: /Dateien auswählen/ })).toBeDisabled();
-    await expect(identity).toContainText("Zum Hochladen bitte zuerst oben der Verarbeitung Ihrer Angaben zustimmen.");
+    await expect(identity).toContainText(
+      "Zum Hochladen bitte zuerst im Schritt „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zustimmen.",
+    );
     await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
     await expect(identity.getByRole("button", { name: "Foto oder Scan des Ausweises: Dateien auswählen" })).toBeEnabled();
     await page.locator("#lead-request-agent-identity-files").setInputFiles(scan);
@@ -673,6 +638,7 @@ test.describe("lead cabinet: who acts for an adult", () => {
       { id, kind: "authority" },
     ]);
     // A representative's scan is not the lead's own identity document.
+    await step(page, "identity");
     await expect(page.getByTestId("lead-request-identity-list").getByRole("listitem")).toHaveText([/reisepass\.jpg/]);
 
     // The send step names what is still missing about that person, with the caption.
@@ -681,9 +647,6 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(missing.getByRole("listitem")).toHaveText([
       "Vertretende Person: Postleitzahl",
       "Vertretende Person: Ort",
-      "Vertretende Person: Ausstellende Behörde",
-      "Vertretende Person: Ausstellungsland",
-      "Vertretende Person: Gültig bis",
       "Stehen Sie unter rechtlicher Betreuung?",
     ]);
     const summary = page.getByTestId("lead-request-summary-representation");
@@ -692,12 +655,11 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(summarized).toContainText("Vertretende Person");
     await expect(summarized).toContainText("Ben");
     await expect(summarized).toContainText("15.01.1980");
-    await expect(summarized).toContainText("Personalausweis");
     await expect(summarized).toContainText("ausweis.jpg");
     await expect(summarized).toContainText("nachweis.pdf");
 
     // Back on the step the person is there; an own upload can be taken back.
-    await page.locator('[data-step="data"]').click();
+    await step(page, "person");
     await expect(agent.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
     await expect(page.locator("#lead-request-agent_date_of_birth")).toHaveValue("15.01.1980");
     await page.getByTestId("lead-request-agent-authority-list").getByRole("button", { name: "Entfernen" }).click();
@@ -901,7 +863,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByTestId("lead-request-summary-representation-rep2")).toContainText("ausweis.jpg");
 
     // Sole custody needs one representative: the form asks before the second one is removed.
-    await page.locator('[data-step="data"]').click();
+    await step(page, "person");
     await expect(second.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
     const asked: string[] = [];
     onNextConfirm(page, false, asked);
@@ -932,7 +894,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByTestId("lead-request-summary-representation-rep2")).toHaveCount(0);
 
     // A guardian shows the certificate of appointment, and the request needs it.
-    await page.locator('[data-step="data"]').click();
+    await step(page, "person");
     await choose(page, custody, "Vormund oder Pfleger");
     await expect.poll(() => calls.answers.at(-1)).toEqual({ custody: "guardian" });
     expect(asked).toHaveLength(2);
@@ -946,7 +908,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(appointment).toContainText("*");
     await page.locator('[data-step="send"]').click();
     await expect(missing).toContainText("1. Vertreter/in: Bestallungsurkunde");
-    await page.locator('[data-step="data"]').click();
+    await step(page, "person");
     await page.locator("#lead-request-rep1-authority-files").setInputFiles(proof);
     await expect(page.getByTestId("lead-request-rep1-authority-list")).toContainText("nachweis.pdf");
     expect(calls.uploads.at(-1)).toEqual({ id: ANNA, kind: "authority" });
@@ -954,7 +916,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(calls.other).toEqual([]);
   });
 
-  test("a refused e-mail or document is shown at its field and not sent again", async ({ page }) => {
+  test("a refused e-mail is shown at its field and not sent again", async ({ page }) => {
     const { calls } = await setup(page, {
       minor: true,
       prepare: (prepared) =>
@@ -980,24 +942,15 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id: BEN, status: 200, body: { phone: "+49 30 1234567" } });
     await expect(emailError).toBeVisible();
     await expect(saveState).toHaveText("Nicht gespeichert");
-
-    // An expired document is refused the same way, at its own field.
-    await setDatePickerValue(page.locator("#lead-request-rep2_id_valid_until"), "2020-01-01");
-    await expect(page.locator("#lead-request-rep2_id_valid_until-error")).toHaveText(
-      "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
-    );
-    expect(calls.persons.at(-1)).toEqual({ id: BEN, status: 422, body: { id_valid_until: "2020-01-01" } });
     expect(calls.persons.filter((call) => "email" in call.body)).toHaveLength(1);
 
-    // Changed values go through, and each message goes with its refused value.
+    // A changed value goes through, and the message goes with the refused value.
     await email.fill("ben.muster@example.com");
     await expect(emailError).toHaveCount(0);
     await expect.poll(() => calls.persons.at(-1)).toEqual({ id: BEN, status: 200, body: { email: "ben.muster@example.com" } });
-    await expect(saveState).toHaveText("Nicht gespeichert");
-    await setDatePickerValue(page.locator("#lead-request-rep2_id_valid_until"), "2031-03-04");
-    await expect(page.locator("#lead-request-rep2_id_valid_until-error")).toHaveCount(0);
-    await expect.poll(() => calls.persons.at(-1)).toEqual({ id: BEN, status: 200, body: { id_valid_until: "2031-03-04" } });
     await expect(saveState).toHaveText("Gespeichert");
+    // The identity document's data are staff's: the form has none to refuse.
+    await expect(page.locator("#lead-request-rep2_id_valid_until")).toHaveCount(0);
   });
 
   test("the second representative can be removed and leaves an empty form", async ({ page }) => {
@@ -1093,7 +1046,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
             first_name: "Benedikt-Maximilian-Alexander",
             last_name: "Muster-Beispielhausen-von-und-zu-Langenname",
             email: "benedikt-maximilian.muster-beispielhausen@example.com",
-            id_issuing_authority: "Landeshauptstadt-Musterstadt-Bürgeramt-Mitte-Passstelle",
+            city: "Landeshauptstadt-Musterstadt-Bezirk-Mitte-Nord",
             identity_documents: [upload("rep-doc-0", "ausweis-vorderseite-und-rückseite-benedikt-maximilian-muster.jpg")],
           }),
         );
@@ -1109,12 +1062,12 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
         return Math.max(0, ...Array.from(step.querySelectorAll("*"), (node) => node.getBoundingClientRect().right - width));
       });
     expect(await overflow()).toBeLessThanOrEqual(1);
-    expect(await overhang("lead-request-data")).toBeLessThanOrEqual(1);
+    expect(await overhang("lead-request-step-person")).toBeLessThanOrEqual(1);
     // The fields are stacked: each is as wide as the person's form allows.
     const first = page.getByTestId("lead-request-representative-rep1");
     const width = async (locator: Locator) => Math.round((await locator.boundingBox())?.width ?? 0);
     const fieldWidth = await width(page.locator("#lead-request-rep1_street"));
-    for (const field of ["first_name", "last_name", "zip", "city", "email", "phone", "id_document_number"]) {
+    for (const field of ["first_name", "last_name", "zip", "city", "email", "phone"]) {
       expect(await width(page.locator(`#lead-request-rep1_${field}`)), field).toBe(fieldWidth);
     }
     expect(fieldWidth).toBeGreaterThan(((await width(first)) * 4) / 5);
@@ -1124,7 +1077,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     await expect(page.getByTestId("lead-request-rep1-authority-upload")).toBeVisible();
     await expect(page.getByTestId("lead-request-representative-on-file")).toContainText("Langenname");
     expect(await overflow()).toBeLessThanOrEqual(1);
-    expect(await overhang("lead-request-data")).toBeLessThanOrEqual(1);
+    expect(await overhang("lead-request-step-person")).toBeLessThanOrEqual(1);
 
     await page.locator('[data-step="send"]').click();
     await expect(page.getByTestId("lead-request-summary-representation-rep1")).toBeVisible();

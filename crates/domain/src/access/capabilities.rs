@@ -152,6 +152,10 @@ capabilities! {
     // EU sanctions list screening: possible matches, decisions, list file,
     // blocked countries and their per-lead lift (CEO only, decision 2026-10-03).
     SanctionsReview => "sanctions.review",
+    // Points-based risk assessment of leads: decide release / request more /
+    // reject (four eyes at level 3). CEO by role; deputies are named in the
+    // configuration (owner spec 2026-10-07).
+    RiskReview => "risk.review",
     // Personnel files (Personalakte); the employee's own file is an
     // ownership check, not a capability.
     PersonnelView => "personnel.view",
@@ -652,6 +656,15 @@ mod tests {
             assert_eq!(role.can(C::SanctionsReview), *role == Role::Ceo, "{role:?}");
         }
         assert!(C::SanctionsReview.is_write());
+    }
+
+    #[test]
+    fn only_ceo_reviews_risk_assessments_by_role() {
+        for role in STAFF_ROLES {
+            assert_eq!(role.can(C::RiskReview), *role == Role::Ceo, "{role:?}");
+        }
+        assert!(C::RiskReview.is_write());
+        assert_eq!(C::RiskReview.as_str(), "risk.review");
     }
 
     #[test]

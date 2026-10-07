@@ -37,7 +37,9 @@ import {
   type RequestQueue,
 } from "./lead-request-parts";
 import {
+  BASE_REPRESENTATIVE_FIELDS,
   CUSTODIES,
+  REPRESENTATIVE_FIELDS,
   ROLE_OF_SLOT,
   asksRepresentativeField,
   authorityProofOf,
@@ -52,6 +54,7 @@ import {
   representativeInSlot,
   representativeName,
   representativePatch,
+  representativeSubmitPart,
   representativeValue,
   representativesOnFile,
   requiresRepresentativeField,
@@ -81,6 +84,19 @@ import {
 
 /** The save state of the answers; a person's form reports under its slot. */
 const ANSWERS = "answers";
+
+/**
+ * The persons of whom the missing keys name more than the first step's names
+ * and contacts (`<slot>_<part>`, the uploads included).
+ */
+function slotsBeyondBase(missing: readonly string[]): Set<RepresentativeSlot> {
+  const slots = new Set<RepresentativeSlot>();
+  for (const key of missing) {
+    const part = representativeSubmitPart(key);
+    if (part && !(BASE_REPRESENTATIVE_FIELDS as readonly string[]).includes(part.part)) slots.add(part.slot);
+  }
+  return slots;
+}
 
 /** The form of one person as typed, with what the server refused. */
 type RepresentativeForm = {
@@ -360,12 +376,19 @@ function RepresentativeUpload({
   );
 }
 
-/** One person who acts for the lead: who that is, the identity document and the uploads. */
+/**
+ * One person who acts for the lead: who that is and the uploads of the
+ * identity document and of the authority. `fields` are the fields asked in
+ * this step (a minor's parents give names and contacts in the first step,
+ * the rest in block G); `uploads` whether the uploads are asked here.
+ */
 function RepresentativeBlock({
   request,
   slot,
   person,
   custody,
+  fields,
+  uploads,
   text,
   lang,
   enqueue,
@@ -381,6 +404,8 @@ function RepresentativeBlock({
   person: LeadRequestRepresentative | null;
   /** A minor's custody as chosen in the form; `null` for an adult. */
   custody: Custody | null;
+  fields: ReadonlySet<RepresentativeField>;
+  uploads: boolean;
   text: LeadRequestText;
   lang: string;
   enqueue: RequestQueue;
@@ -451,7 +476,8 @@ function RepresentativeBlock({
       onChange={(event) => form.set(field, event.target.value)}
     />
   );
-  const dateInput = (field: "date_of_birth" | "id_issued_on" | "id_valid_until", max?: string) => (
+  const asked = (field: RepresentativeField) => fields.has(field) && asksRepresentativeField(slot, field);
+  const dateInput = (field: "date_of_birth", max?: string) => (
     <Input
       key={`${fieldId(field)}-${lang}`}
       {...control(field)}
@@ -464,7 +490,7 @@ function RepresentativeBlock({
       onChange={(event) => form.set(field, event.target.value)}
     />
   );
-  const countrySelect = (field: "birth_country" | "country" | "id_issuing_country") => (
+  const countrySelect = (field: "birth_country" | "country") => (
     <CountrySelect
       value={form.draft[field] || null}
       lang={lang}
@@ -533,27 +559,31 @@ function RepresentativeBlock({
       </div>
       {/* The other parent has to be told that the data are given here. */}
       {slot === "rep2" ? <p className="text-xs leading-5 text-muted-foreground">{text.representativeInformHint}</p> : null}
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-        <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField>
-        <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField>
-        <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth", appDateKey())}</LabeledField>
-        <LabeledField {...labeled("birth_place")}>{textInput("birth_place", 200)}</LabeledField>
-        {asksRepresentativeField(slot, "birth_country") ? (
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+        {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
+        {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
+        {asked("date_of_birth") ? (
+          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth", appDateKey())}</LabeledField>
+        ) : null}
+        {asked("birth_place") ? <LabeledField {...labeled("birth_place")}>{textInput("birth_place", 200)}</LabeledField> : null}
+        {asked("birth_country") ? (
           <LabeledField {...labeled("birth_country")}>{countrySelect("birth_country")}</LabeledField>
         ) : null}
-        <LabeledField {...labeled("citizenships")}>
-          <CitizenshipMultiSelect
-            id={fieldId("citizenships")}
-            value={form.draft.citizenships}
-            lang={lang}
-            placeholder={text.citizenshipsPlaceholder}
-            invalid={Boolean(form.errorFor("citizenships"))}
-            onChange={(next) => form.set("citizenships", next)}
-          />
-        </LabeledField>
+        {asked("citizenships") ? (
+          <LabeledField {...labeled("citizenships")}>
+            <CitizenshipMultiSelect
+              id={fieldId("citizenships")}
+              value={form.draft.citizenships}
+              lang={lang}
+              placeholder={text.citizenshipsPlaceholder}
+              invalid={Boolean(form.errorFor("citizenships"))}
+              onChange={(next) => form.set("citizenships", next)}
+            />
+          </LabeledField>
+        ) : null}
         {/* A parent usually lives with the child: the address need not be typed twice. */}
-        {minor ? (
-          <div className="sm:col-span-2">
+        {minor && asked("street") ? (
+          <div className="sm:col-span-2 lg:col-span-3">
             <Button
               type="button"
               variant="outline"
@@ -566,71 +596,53 @@ function RepresentativeBlock({
             </Button>
           </div>
         ) : null}
-        <LabeledField {...labeled("street", "sm:col-span-2")}>{textInput("street", 200)}</LabeledField>
-        <LabeledField {...labeled("zip")}>{textInput("zip", 20)}</LabeledField>
-        <LabeledField {...labeled("city")}>{textInput("city", 200)}</LabeledField>
-        <LabeledField {...labeled("country")}>{countrySelect("country")}</LabeledField>
-        <LabeledField {...labeled("email", "sm:col-start-1")}>
-          <Input
-            {...control("email")}
-            aria-describedby={emailDescribedBy}
-            className={cn(inputClass, locked && "bg-muted/40 text-muted-foreground")}
-            type="email"
-            autoComplete="off"
-            maxLength={254}
-            // A sign-in address is changed by staff only.
-            readOnly={locked}
-            value={form.draft.email}
-            onChange={(event) => form.set("email", event.target.value)}
-          />
-          {emailHint ? (
-            <p id={`${fieldId("email")}-hint`} className="text-xs leading-5 text-muted-foreground">
-              {emailHint}
-            </p>
-          ) : null}
-        </LabeledField>
-        <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField>
+        {asked("street") ? (
+          <LabeledField {...labeled("street", "sm:col-span-2 lg:col-span-3")}>{textInput("street", 200)}</LabeledField>
+        ) : null}
+        {asked("zip") ? <LabeledField {...labeled("zip")}>{textInput("zip", 20)}</LabeledField> : null}
+        {asked("city") ? <LabeledField {...labeled("city")}>{textInput("city", 200)}</LabeledField> : null}
+        {asked("country") ? <LabeledField {...labeled("country")}>{countrySelect("country")}</LabeledField> : null}
+        {asked("email") ? (
+          <LabeledField {...labeled("email", "sm:col-start-1")}>
+            <Input
+              {...control("email")}
+              aria-describedby={emailDescribedBy}
+              className={cn(inputClass, locked && "bg-muted/40 text-muted-foreground")}
+              type="email"
+              autoComplete="off"
+              maxLength={254}
+              // A sign-in address is changed by staff only.
+              readOnly={locked}
+              value={form.draft.email}
+              onChange={(event) => form.set("email", event.target.value)}
+            />
+            {emailHint ? (
+              <p id={`${fieldId("email")}-hint`} className="text-xs leading-5 text-muted-foreground">
+                {emailHint}
+              </p>
+            ) : null}
+          </LabeledField>
+        ) : null}
+        {asked("phone") ? <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField> : null}
       </div>
 
-      <p className="pt-1 text-xs font-semibold text-foreground">{text.sectionIdentity}</p>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
-        <LabeledField {...labeled("id_document_type")}>
-          <NativeComboboxSelect
-            {...control("id_document_type")}
-            className={selectClass}
-            value={form.draft.id_document_type}
-            onChange={(event) => form.set("id_document_type", event.target.value)}
-          >
-            <option value="">{text.choose}</option>
-            {(Object.keys(text.idDocumentTypeOptions) as Array<keyof LeadRequestText["idDocumentTypeOptions"]>).map((value) => (
-              <option key={value} value={value}>
-                {text.idDocumentTypeOptions[value]}
-              </option>
-            ))}
-          </NativeComboboxSelect>
-        </LabeledField>
-        <LabeledField {...labeled("id_document_number")}>{textInput("id_document_number", 60)}</LabeledField>
-        <LabeledField {...labeled("id_issuing_authority")}>{textInput("id_issuing_authority", 200)}</LabeledField>
-        <LabeledField {...labeled("id_issuing_country")}>{countrySelect("id_issuing_country")}</LabeledField>
-        <LabeledField {...labeled("id_issued_on")}>{dateInput("id_issued_on", appDateKey())}</LabeledField>
-        {/* No lower bound: the server says when a document has expired, and the message says what to do. */}
-        <LabeledField {...labeled("id_valid_until")}>{dateInput("id_valid_until")}</LabeledField>
-      </div>
-
-      <RepresentativeUpload
-        request={request}
-        slot={slot}
-        kind="identity"
-        label={representativeUploadLabel(text, slot, "identity")}
-        required
-        person={person}
-        documents={person?.identity_documents ?? []}
-        text={text}
-        lang={lang}
-        enqueue={enqueue}
-        onChange={onChange}
-      />
-      {proof ? (
+      {/* The identity document: a copy only; GMED enters its data. */}
+      {uploads ? (
+        <RepresentativeUpload
+          request={request}
+          slot={slot}
+          kind="identity"
+          label={representativeUploadLabel(text, slot, "identity")}
+          required
+          person={person}
+          documents={person?.identity_documents ?? []}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+        />
+      ) : null}
+      {uploads && proof ? (
         <RepresentativeUpload
           request={request}
           slot={slot}
@@ -655,8 +667,13 @@ function RepresentativeBlock({
 }
 
 /**
- * The block of step "data" between the identity document and the insurance.
- * `request.minor` says which questions are asked; nobody is asked for it.
+ * Who acts for the lead (trigger flow 2026-10-07). `mode="base"` is the part
+ * of step "Einwilligung & Person": an adult's two yes/no questions, or a
+ * minor's custody with the names and contacts of the parents (they consent
+ * and sign). `mode="follow_up"` is block G: the persons named by those
+ * answers with the rest of their data and the uploads. A key the server
+ * still lists as missing in the step (`stepMissing`) is asked there in any
+ * case. `request.minor` says which questions are asked.
  */
 export function RepresentationSection({
   request,
@@ -665,6 +682,8 @@ export function RepresentationSection({
   enqueue,
   onChange,
   onSaveState,
+  mode,
+  stepMissing = [],
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -672,6 +691,8 @@ export function RepresentationSection({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
+  mode: "base" | "follow_up";
+  stepMissing?: readonly string[];
 }) {
   const representation = request.representation;
   const minor = request.minor;
@@ -687,7 +708,18 @@ export function RepresentationSection({
   // A person's form opens once the server has the answer that asks for it (it
   // then knows whom it holds for that place), and closes with the answer.
   const stored = shownSlots(minor, draftFromRepresentation(representation));
-  const shown = shownSlots(minor, draft).filter((slot) => stored.includes(slot));
+  const answered = shownSlots(minor, draft).filter((slot) => stored.includes(slot));
+  // What the step asks of each person: everything in block G; in the first step a
+  // minor's parents give names and contacts, an adult's persons nothing. A
+  // server that still lists more of a person as missing in the first step (an
+  // older one) gets the whole person there — from the visit's start on, so the
+  // form does not lose a field the moment it is saved.
+  const [missingAtStart] = useState(() => slotsBeyondBase(stepMissing));
+  const missingNow = slotsBeyondBase(stepMissing);
+  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || missingAtStart.has(slot) || missingNow.has(slot);
+  const fieldsOf = (slot: RepresentativeSlot): ReadonlySet<RepresentativeField> =>
+    new Set(whole(slot) ? REPRESENTATIVE_FIELDS : minor ? BASE_REPRESENTATIVE_FIELDS : []);
+  const shown = answered.filter((slot) => minor || whole(slot));
   const shownRef = useRef(shown);
   const entriesRef = useRef<Partial<Record<RepresentativeSlot, boolean>>>({});
 
@@ -790,6 +822,8 @@ export function RepresentationSection({
       slot={slot}
       person={representativeInSlot(representation, slot)}
       custody={minor ? draft.custody : null}
+      fields={fieldsOf(slot)}
+      uploads={whole(slot)}
       text={text}
       lang={lang}
       enqueue={enqueue}
@@ -806,6 +840,16 @@ export function RepresentationSection({
         {problem === "in_use" ? text.representativeInUse : text.notSaved}
       </p>
     );
+
+  if (mode === "follow_up") {
+    // Block G: the persons the answers of the first step name, with the rest of their data and the uploads.
+    return (
+      <div className="space-y-4" data-testid="lead-request-representation-follow-up">
+        {problems}
+        {shown.map(block)}
+      </div>
+    );
+  }
 
   if (minor) {
     return (

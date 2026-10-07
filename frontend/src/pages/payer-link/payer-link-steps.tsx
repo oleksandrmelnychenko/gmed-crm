@@ -169,12 +169,18 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
 
   if (organisation) {
     return (
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="payer-link-step-details">
-        <Field context={context} field="organisation_name" className="sm:col-span-2">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="payer-link-step-details">
+        <Field context={context} field="organisation_name" className={context.organisationExtras ? "sm:col-span-2" : "sm:col-span-2 lg:col-span-3"}>
           <TextInput context={context} field="organisation_name" maxLength={200} autoComplete="organization" />
         </Field>
+        {/* Block E (trigger flow): the legal form, asked of a server that knows it. */}
+        {context.organisationExtras ? (
+          <Field context={context} field="legal_form">
+            <TextInput context={context} field="legal_form" maxLength={100} />
+          </Field>
+        ) : null}
         <SubHeading>{text.seat}</SubHeading>
-        <Field context={context} field="street" className="sm:col-span-2">
+        <Field context={context} field="street" className="sm:col-span-2 lg:col-span-3">
           <TextInput context={context} field="street" maxLength={200} />
         </Field>
         <Field context={context} field="zip">
@@ -193,6 +199,11 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
         <Field context={context} field="register_number">
           <TextInput context={context} field="register_number" maxLength={60} />
         </Field>
+        {context.organisationExtras ? (
+          <Field context={context} field="vat_id">
+            <TextInput context={context} field="vat_id" maxLength={20} />
+          </Field>
+        ) : null}
         <SubHeading>{text.representative}</SubHeading>
         <Field context={context} field="representative_first_name">
           <TextInput context={context} field="representative_first_name" maxLength={100} />
@@ -213,7 +224,7 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
   }
 
   return (
-    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2" data-testid="payer-link-step-details">
+    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="payer-link-step-details">
       <Field context={context} field="salutation">
         <ChoiceInput context={context} field="salutation" options={SALUTATIONS} labels={text.salutations} />
       </Field>
@@ -224,7 +235,7 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
       <Field context={context} field="last_name">
         <TextInput context={context} field="last_name" maxLength={100} autoComplete="family-name" />
       </Field>
-      <Field context={context} field="former_names" className="sm:col-span-2">
+      <Field context={context} field="former_names" className="sm:col-span-2 lg:col-span-3">
         <TextInput context={context} field="former_names" maxLength={200} />
       </Field>
       <Field context={context} field="date_of_birth">
@@ -246,7 +257,7 @@ export function DetailsStep({ context, email }: { context: StepContext; email: s
           onChange={(next) => form.set("citizenships", next)}
         />
       </Field>
-      <Field context={context} field="street" className="sm:col-span-2">
+      <Field context={context} field="street" className="sm:col-span-2 lg:col-span-3">
         <TextInput context={context} field="street" maxLength={200} autoComplete="street-address" />
       </Field>
       <Field context={context} field="zip">
@@ -280,7 +291,7 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
   return (
     <div className="space-y-5" data-testid="payer-link-step-identity">
       <p className="text-sm leading-6 text-muted-foreground">{organisation ? text.identityIntroOrganisation : text.identityIntro}</p>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">
           <ChoiceInput context={context} field="id_document_type" options={ID_DOCUMENT_TYPES} labels={text.idDocumentTypes} />
         </Field>

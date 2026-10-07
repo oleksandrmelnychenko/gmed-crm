@@ -1,10 +1,27 @@
 import type { Lang } from "@/lib/i18n";
 
-import type { Custody, InvoiceTo, PaymentMethod, PaymentRouteBy, PayerType, RepresentativeSlot } from "./lead-request-api";
-import { BILLING_SUBMIT_FIELDS, INVOICE_FIELDS, type BillingField } from "./lead-request-billing-model";
+import type {
+  Custody,
+  FollowUpBlock,
+  InvoiceTo,
+  PaymentMethod,
+  PaymentRouteBy,
+  PayerType,
+  RepresentativeSlot,
+} from "./lead-request-api";
+import {
+  BILLING_SUBMIT_FIELDS,
+  INVOICE_FIELDS,
+  type BillingExtrasField,
+  type BillingField,
+  type VIA_THIRD_PARTY_KINDS,
+} from "./lead-request-billing-model";
+import { blockAKey, type StatedFundsSource } from "./lead-request-follow-up-model";
 import {
   SUBMIT_FIELDS,
   organisationPayerType,
+  type SANCTIONS_LINK_KINDS,
+  type STAY_REASONS,
   type ContactChannel,
   type IdentificationField,
   type LegalQuestion,
@@ -14,7 +31,8 @@ import {
   type RelationshipKind,
   type SubmitField,
 } from "./lead-request-model";
-import type { FundsSource } from "./lead-request-payer-questionnaire-model";
+import type { FundsSource, PAYER_LEGAL_DETAILS, PayerLegalQuestion } from "./lead-request-payer-questionnaire-model";
+import type { StepId } from "./lead-request-steps";
 import {
   authorityProofOf,
   representativeSubmitPart,
@@ -35,9 +53,16 @@ export type LeadRequestText = {
   introGuardian: string;
   deadline: (date: string) => string;
   deadlineNote: string;
-  stepData: string;
-  stepDocuments: string;
-  stepSend: string;
+  /**
+   * The cabinet as a stepper of short tabs (trigger flow 2026-10-07): the
+   * name of each step, the badge of what it still misses, and the list of
+   * those keys in the step.
+   */
+  steps: Record<StepId, string>;
+  stepsLabel: string;
+  stepMissingBadge: (count: number) => string;
+  stepComplete: string;
+  stepMissingTitle: string;
   fields: Record<PersonalField, string>;
   legalSexOptions: Record<"female" | "male" | "diverse" | "no_entry", string>;
   choose: string;
@@ -148,21 +173,70 @@ export type LeadRequestText = {
   /** The same two when a parent fills in the request of a child. */
   ownAccountQuestionGuardian: string;
   beneficialOwnerGuardian: string;
+  /** The payer's messenger number, the box that copies the phone, and the heading of the residence. */
+  payerMessenger: string;
+  payerMessengerSameAsPhone: string;
+  payerResidence: string;
   /**
-   * Where the money comes from when the patient pays himself (owner request
-   * 2026-10-05), part of "who pays". The sources and the description carry
-   * the labels of the paying person's questions (`payerQuestionnaireFields`,
-   * `fundsSourceOptions`); "required" / "optional" and the upload button are
-   * the payer's too.
+   * "Ergänzende Angaben" (trigger flow, contract 3.1 and 6): the neutral
+   * heading, the intro, the title of each block, and sending the answers.
+   * Never why the blocks are asked (no points, level or reason).
    */
-  selfFundsTitle: string;
-  selfFundsIntro: string;
-  selfFundsProofTitle: string;
+  followUpTitle: string;
+  followUpIntro: string;
+  followUpBlocks: Record<FollowUpBlock, string>;
+  followUpSubmit: string;
+  followUpSending: string;
+  followUpIncomplete: string;
+  followUpAnsweredAt: (dateTime: string) => string;
+  /** In step "send" while blocks are open: a pointer to the step. */
+  followUpOpen: string;
+  followUpGo: string;
+  /** The neutral notice after sending, for every request alike (contract 3.1). */
+  reviewNotice: string;
+  /** Block A: the source of funds (one source chosen from a list, then the words). */
+  extraFields: Record<
+    | "payer_funds_source"
+    | "payer_funds_description"
+    | "funds_source"
+    | "funds_description"
+    | "occupation"
+    | "sector"
+    | "funds_proof",
+    string
+  >;
+  extraPayerStatesFunds: string;
+  /** The paying parent states the profession in the own payer section. */
+  extraOccupationElsewhere: string;
   selfFundsProofHint: string;
-  /** The statements for the GwG identification (owner spec 2026-10-05). */
+  /** Block B: the proof of the relationship to the payer. */
+  relationshipProofTitle: string;
+  relationshipProofHint: string;
+  noRelationshipProof: string;
+  /** Block F: why the patient lives in the country; block J: the kind of link. */
+  stayReasonOptions: Record<(typeof STAY_REASONS)[number], string>;
+  sanctionsLinkKindOptions: Record<(typeof SANCTIONS_LINK_KINDS)[number], string>;
+  /** Block C: through whom the payment goes and the expected total. */
+  billingExtrasFields: Record<BillingExtrasField, string>;
+  viaThirdPartyKindOptions: Record<(typeof VIA_THIRD_PARTY_KINDS)[number], string>;
+  expectedTotalHint: string;
+  /** Block I: a new copy of the identity document. */
+  identityRenewIntro: string;
+  /** Step "Ausweis": the copy only, GMED enters the data from it. */
+  identityIntro: string;
+  /** Step "Anliegen & Unterlagen" (13.1): the reason of the request. */
+  sectionRequest: string;
+  requestReasonHint: string;
+  /** The organisation mask of "who pays". */
+  payerLegalForm: string;
+  payerRegisterNumber: string;
+  payerContactName: string;
+  payerEmailOrPhone: string;
+  payerEmailOrPhoneHint: string;
+  /** The statements for the GwG identification (owner spec 2026-10-05) and the follow-up blocks. */
   identificationFields: Record<IdentificationField, string>;
   /** Questions that say "you", for a parent who fills in the request of a child. */
-  identificationFieldsGuardian: Record<"pep_self" | "pep_related" | "high_risk_country", string>;
+  identificationFieldsGuardian: Partial<Record<IdentificationField, string>>;
   /** Short names of the legal questions for the list of what is still missing. */
   legalTopics: Record<LegalQuestion, string>;
   yesNo: { yes: string; no: string };
@@ -269,7 +343,13 @@ export type LeadRequestText = {
   payerNoticeFirst: string;
   payerContactChannels: string;
   payerQuestionnaireFields: Record<"language" | "occupation" | "funds_sources" | "funds_description", string>;
+  /** The paying parent's own legal questions with their details (phase 3a, unchanged by the trigger flow). */
+  payerLegalFields: Record<PayerLegalQuestion | (typeof PAYER_LEGAL_DETAILS)[PayerLegalQuestion], string>;
+  /** The high-risk question of the paying parent in short, for the list of what is still missing. */
+  payerHighRiskTopic: string;
   fundsSourceOptions: Record<FundsSource, string>;
+  /** Block A's single choice of the source of funds. */
+  statedFundsSourceOptions: Record<StatedFundsSource, string>;
   payerFundsProofTitle: string;
   payerFundsProofRequired: string;
   payerFundsProofOptional: string;
@@ -325,6 +405,14 @@ export function payerQuestionnaireFieldLabel(text: LeadRequestText, field: strin
       return text.payerRelationship;
     case "relationship":
       return `${text.payerRelationship} – ${text.payerRelationshipOther}`;
+    // The paying parent's own legal questions keep their details (phase 3a).
+    case "high_risk_country":
+      return `${text.legalShort}: ${text.payerHighRiskTopic}`;
+    case "pep_self_details":
+    case "pep_related_details":
+    case "high_risk_country_code":
+    case "sanctions_links_details":
+      return `${text.legalShort}: ${text.payerLegalFields[field]}`;
     default:
       return (SUBMIT_FIELDS as readonly string[]).includes(field) ? submitFieldLabel(text, field as SubmitField) : field;
   }
@@ -349,6 +437,14 @@ export function payerFieldLabel(
       return text.payerTypeQuestion;
     case "payer_organisation_name":
       return text.payerOrganisationName[organisation ?? "organisation"];
+    case "payer_legal_form":
+      return text.payerLegalForm;
+    case "payer_register_number":
+      return text.payerRegisterNumber;
+    case "payer_contact_name":
+      return text.payerContactName;
+    case "payer_email_or_phone":
+      return text.payerEmailOrPhone;
     case "payer_first_name":
       return text.fields.first_name;
     case "payer_last_name":
@@ -372,6 +468,8 @@ export function payerFieldLabel(
       return text.fields.phone;
     case "payer_email":
       return text.payerEmail;
+    case "payer_messenger":
+      return text.payerMessenger;
     // The name passed on is the patient's: a parent reads it so.
     case "payer_contact_consent":
       return guardian ? text.payerConsentLabelGuardian : text.payerConsentLabel;
@@ -486,14 +584,29 @@ function billingSubmitLabel(text: LeadRequestText, field: BillingField): string 
 
 const LEGAL_TOPIC_OF: Partial<Record<SubmitField, LegalQuestion>> = {
   pep_self: "pep_self",
-  pep_self_details: "pep_self",
   pep_related: "pep_related",
-  pep_related_details: "pep_related",
-  high_risk_country: "high_risk_country",
-  high_risk_country_code: "high_risk_country",
   sanctions_links: "sanctions_links",
-  sanctions_links_details: "sanctions_links",
 };
+
+/**
+ * A key of a follow-up block in its list of what is still missing: block A's
+ * questions, block B's proof, block C's extras and the payment route, block
+ * G's persons, block I's copy, the statements of F, B, H and J. The block's
+ * own title is the heading of the list, so no prefix is added. An unknown key
+ * is shown as it is.
+ */
+export function followUpFieldLabel(text: LeadRequestText, key: string, guardian = false): string {
+  const blockA = blockAKey(key);
+  if (blockA === "funds_proof_upload") return text.extraFields.funds_proof;
+  if (blockA in text.extraFields) return text.extraFields[blockA as keyof LeadRequestText["extraFields"]];
+  if (key === "relationship_proof_upload") return text.relationshipProofTitle;
+  if (key === "via_third_party_kind" || key === "expected_total_eur") return text.billingExtrasFields[key];
+  if (key === "id_document_upload") return text.identityFiles;
+  if ((BILLING_SUBMIT_FIELDS as readonly string[]).includes(key)) return text.billingFields[key as BillingField];
+  if (key in text.identificationFields) return identificationFieldLabel(text, key as IdentificationField, guardian);
+  if ((SUBMIT_FIELDS as readonly string[]).includes(key)) return submitFieldLabel(text, key as SubmitField, guardian);
+  return key;
+}
 
 /**
  * A field in the list of what is still missing before sending. Fields of a
@@ -514,15 +627,11 @@ export function submitFieldLabel(
   if (field === "payer_contact_consent") return `${text.payerPerson}: ${text.payerConsentShort}`;
   if (field === "payer_cost_estimate_consent") return `${text.payerPerson}: ${text.payerCostEstimateConsentShort}`;
   if (field === "payer_relationship") return `${text.payerPerson}: ${text.payerRelationship} – ${text.payerRelationshipOther}`;
-  // The self-payer's source of funds: the labels speak for themselves.
-  if (field === "self_funds_sources") return text.selfFundsTitle;
-  if (field === "self_funds_description") return text.payerQuestionnaireFields.funds_description;
-  if (field === "self_funds_proof_upload") return text.selfFundsProofTitle;
   if (field.startsWith("payer_")) {
     return `${text.payerPerson}: ${payerFieldLabel(text, field as PayerField, guardian, payerType)}`;
   }
-  if (field === "payment_background") return `${text.payerPerson}: ${text.identificationFields.payment_background}`;
   if (field === "id_document_upload") return `${text.sectionIdentity}: ${text.identityFiles}`;
+  if (field === "request_reason") return text.identificationFields.request_reason;
   if (field === "has_representative") return text.hasRepresentativeQuestion;
   if (field === "under_guardianship") return text.underGuardianshipQuestion;
   if ((BILLING_SUBMIT_FIELDS as readonly string[]).includes(field)) return billingSubmitLabel(text, field as BillingField);
@@ -537,14 +646,11 @@ export function submitFieldLabel(
           : representativeFieldLabel(text, person.part);
     return `${text.representativeCaptions[person.slot]}: ${label}`;
   }
+  // A missing answer names the question in short.
   const topic = LEGAL_TOPIC_OF[field];
-  if (topic) {
-    // A missing answer names the question; missing details name what a "yes" asks for.
-    const label = field === topic ? text.legalTopics[topic] : `${text.legalTopics[topic]} – ${text.identificationFields[field as IdentificationField]}`;
-    return `${text.legalShort}: ${label}`;
-  }
-  const label = text.identificationFields[field as IdentificationField];
-  return field.startsWith("id_") ? `${text.sectionIdentity}: ${label}` : label;
+  if (topic) return `${text.legalShort}: ${text.legalTopics[topic]}`;
+  // A key of an older or newer server the cabinet has no words for is shown as it is.
+  return text.identificationFields[field as IdentificationField] ?? field;
 }
 
 const de: LeadRequestText = {
@@ -557,9 +663,21 @@ const de: LeadRequestText = {
   deadline: (date) => `Bitte bis ${date} ausfüllen.`,
   deadlineNote:
     "Aus Datenschutzgründen löschen wir Anfragen, die bis dahin nicht weiterbearbeitet werden, nach diesem Datum automatisch.",
-  stepData: "Daten",
-  stepDocuments: "Unterlagen",
-  stepSend: "Senden",
+  steps: {
+    person: "Einwilligung & Person",
+    contact: "Kontakt & Wohnsitz",
+    identity: "Ausweis",
+    payer: "Wer zahlt",
+    billing: "Versicherung & Rechnung",
+    declarations: "Erklärungen",
+    follow_up: "Ergänzende Angaben",
+    documents: "Anliegen & Unterlagen",
+    send: "Prüfen & Senden",
+  },
+  stepsLabel: "Schritte der Anfrage",
+  stepMissingBadge: (count) => (count === 1 ? "1 Angabe fehlt" : `${count} Angaben fehlen`),
+  stepComplete: "Vollständig",
+  stepMissingTitle: "In diesem Schritt fehlt noch:",
   fields: {
     first_name: "Vorname",
     middle_name: "Zweiter Vorname",
@@ -617,7 +735,7 @@ const de: LeadRequestText = {
   maxDocuments: (count) => `Höchstens ${count} Dateien pro Anfrage.`,
   sendTitle: "An Ihren Ansprechpartner senden",
   missingTitle: "Bitte noch ergänzen:",
-  inquiryConsentMissing: "Bitte stimmen Sie unter „Daten“ der Verarbeitung Ihrer Angaben zu.",
+  inquiryConsentMissing: "Bitte stimmen Sie unter „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zu.",
   sendButton: "An den Manager senden",
   sending: "Wird gesendet…",
   sentTitle: "Vielen Dank!",
@@ -679,7 +797,9 @@ const de: LeadRequestText = {
     spouse: "Ehepartner/in",
     parent: "Elternteil",
     child: "Kind",
-    relative: "Sonstige/r Verwandte/r",
+    sibling: "Bruder / Schwester",
+    grandparent: "Großmutter / Großvater",
+    relative: "anderer Verwandter",
     employer: "Arbeitgeber",
     friend: "Freund/in",
     business_partner: "Geschäftspartner/in",
@@ -706,10 +826,68 @@ const de: LeadRequestText = {
   ownAccountQuestionGuardian: "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?",
   beneficialOwnerGuardian:
     "In wessen Interesse handelt die Patientin / der Patient? (Name, Geburtsdatum, Geburtsort, Anschrift)",
-  selfFundsTitle: "Herkunft der Mittel",
-  selfFundsIntro: "Woher stammt das Geld für die Behandlung? Mehrere Antworten sind möglich.",
-  selfFundsProofTitle: "Nachweis der Mittelherkunft (z. B. Kontoauszug, Gehaltsnachweis)",
-  selfFundsProofHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
+  payerMessenger: "WhatsApp / Messenger",
+  payerMessengerSameAsPhone: "gleich wie Telefon",
+  payerResidence: "Wohnort",
+  followUpTitle: "Wir benötigen ergänzende Angaben",
+  followUpIntro:
+    "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
+  followUpBlocks: {
+    A: "Herkunft der Mittel",
+    B: "Beziehung zur zahlenden Person",
+    C: "Zahlungsweg",
+    F: "Wohnsitz und Staatsangehörigkeit",
+    G: "Vertretung",
+    H: "Angaben zum öffentlichen Amt",
+    I: "Ausweisdokument",
+    J: "Angaben zu den Verbindungen",
+  },
+  followUpSubmit: "Angaben senden",
+  followUpSending: "Wird gesendet…",
+  followUpIncomplete: "Bitte ergänzen Sie zuerst die noch offenen Angaben.",
+  followUpAnsweredAt: (dateTime) => `Ihre ergänzenden Angaben wurden am ${dateTime} gesendet. Ihre Angaben werden geprüft.`,
+  followUpOpen: "Bitte ergänzen Sie noch einige Angaben.",
+  followUpGo: "Zu den ergänzenden Angaben",
+  reviewNotice: "Vielen Dank. Ihre Angaben werden geprüft. Wir melden uns bei Ihnen.",
+  extraFields: {
+    payer_funds_source: "Woher stammen die Mittel der zahlenden Person? (soweit Ihnen bekannt)",
+    payer_funds_description: "Bitte beschreiben Sie die Herkunft der Mittel der zahlenden Person",
+    funds_source: "Herkunft der Mittel",
+    funds_description: "Bitte beschreiben Sie die Herkunft der Mittel",
+    occupation: "Beruf",
+    sector: "Branche / Sektor",
+    funds_proof: "Nachweise zur Herkunft der Mittel",
+  },
+  extraPayerStatesFunds:
+    "Angaben zur Herkunft der Mittel und die Nachweise macht die zahlende Person über ihren eigenen Link.",
+  extraOccupationElsewhere: "Ihren Beruf geben Sie im Abschnitt „Angaben als zahlende Person“ an.",
+  selfFundsProofHint: "Zum Beispiel Kontoauszug oder Gehaltsnachweis. PDF, JPG oder PNG, bis 25 MB pro Datei.",
+  relationshipProofTitle: "Nachweis der Beziehung",
+  relationshipProofHint: "Zum Beispiel Heirats- oder Geburtsurkunde. PDF, JPG oder PNG, bis 25 MB pro Datei.",
+  noRelationshipProof: "Noch kein Nachweis hochgeladen.",
+  stayReasonOptions: { work: "Arbeit", study: "Studium", family: "Familie", other: "Sonstiges" },
+  sanctionsLinkKindOptions: {
+    family: "Familiär",
+    business: "Geschäftlich",
+    ownership: "Beteiligung / Eigentum",
+    other: "Sonstiges",
+  },
+  billingExtrasFields: {
+    via_third_party_kind: "Über wen erfolgt die Zahlung?",
+    expected_total_eur: "Voraussichtlicher Gesamtbetrag (EUR)",
+  },
+  viaThirdPartyKindOptions: { person: "Über eine andere Person", psp: "Über einen Zahlungsdienstleister" },
+  expectedTotalHint: "Soweit bekannt, zum Beispiel aus dem Kostenvoranschlag.",
+  identityRenewIntro: "Bitte laden Sie ein aktuelles, gut lesbares Foto oder einen Scan Ihres Ausweisdokuments hoch.",
+  identityIntro:
+    "Bitte laden Sie ein Foto oder einen Scan Ihres Ausweisdokuments hoch (bei einem Personalausweis Vorder- und Rückseite). Die Angaben aus dem Dokument trägt GMED ein.",
+  sectionRequest: "Ihr Anliegen",
+  requestReasonHint: "Beschreiben Sie kurz, wobei wir Ihnen helfen sollen.",
+  payerLegalForm: "Rechtsform",
+  payerRegisterNumber: "Registernummer (falls vorhanden)",
+  payerContactName: "Ansprechperson",
+  payerEmailOrPhone: "E-Mail oder Telefon",
+  payerEmailOrPhoneHint: "Bitte geben Sie mindestens eine E-Mail-Adresse oder eine Telefonnummer an.",
   identificationFields: {
     salutation: "Anrede",
     former_names: "Frühere Namen (z. B. Geburtsname)",
@@ -717,35 +895,36 @@ const de: LeadRequestText = {
     birth_country: "Geburtsland",
     habitual_residence_country: "Land des gewöhnlichen Aufenthalts (falls abweichend)",
     contact_channels: "Wie dürfen wir Sie kontaktieren?",
-    id_document_type: "Art des Dokuments",
-    id_document_number: "Dokumentnummer",
-    id_issuing_authority: "Ausstellende Behörde",
-    id_issuing_country: "Ausstellungsland",
-    id_issued_on: "Ausgestellt am",
-    id_valid_until: "Gültig bis",
-    payment_background: "Warum zahlt diese Person?",
     pep_self: "Üben Sie ein hochrangiges öffentliches Amt aus oder haben Sie es in den letzten 12 Monaten ausgeübt?",
-    pep_self_details: "Amt, Land und Zeitraum",
     pep_related: "Ist ein unmittelbares Familienmitglied oder eine Ihnen nahestehende Person politisch exponiert?",
-    pep_related_details: "Name der Person, Beziehung, Amt und Land",
-    high_risk_country:
-      "Haben Sie oder eine beteiligte Person Wohnsitz oder Sitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
-    high_risk_country_code: "Welches Land?",
     sanctions_links: "Bestehen Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
-    sanctions_links_details: "Zu wem besteht die Verbindung und welcher Art ist sie?",
+    payment_background: "Warum übernimmt diese Person bzw. Organisation die Kosten?",
+    relationship_since: "Seit wann besteht die Beziehung?",
+    residence_since: "Seit wann wohnen Sie in Ihrem Wohnsitzland?",
+    other_residences: "Weitere Wohnsitze in den letzten fünf Jahren",
+    former_citizenships: "Frühere Staatsangehörigkeiten",
+    stay_reason: "Grund des Aufenthalts im Wohnsitzland",
+    stay_reason_details: "Bitte beschreiben",
+    pep_office: "Amt bzw. Funktion",
+    pep_country: "Land",
+    pep_period: "Zeitraum",
+    pep_relationship: "Beziehung zur Person mit dem Amt (falls nicht Sie selbst)",
+    pep_wealth_origin: "Herkunft des Vermögens",
+    sanctions_link_name: "Name der Person bzw. des Unternehmens",
+    sanctions_link_kind: "Art der Verbindung",
+    sanctions_link_since_extent: "Seit wann und in welchem Umfang?",
+    request_reason: "Grund der Anfrage",
   },
   identificationFieldsGuardian: {
     pep_self:
       "Übt die Patientin / der Patient ein hochrangiges öffentliches Amt aus oder hat sie / er es in den letzten 12 Monaten ausgeübt?",
     pep_related:
       "Ist ein unmittelbares Familienmitglied der Patientin / des Patienten oder eine ihr / ihm nahestehende Person politisch exponiert?",
-    high_risk_country:
-      "Hat die Patientin / der Patient oder eine beteiligte Person Wohnsitz oder Sitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
+    residence_since: "Seit wann wohnt die Patientin / der Patient im Wohnsitzland?",
   },
   legalTopics: {
     pep_self: "Öffentliches Amt",
     pep_related: "Politisch exponierte nahestehende Person",
-    high_risk_country: "Land mit hohem Risiko",
     sanctions_links: "Sanktionen",
   },
   yesNo: { yes: "Ja", no: "Nein" },
@@ -755,7 +934,8 @@ const de: LeadRequestText = {
   sectionIdentity: "Ausweisdokument",
   identityUploadButton: "Foto oder Scan des Ausweises hochladen",
   identityUploadHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
-  identityUploadNeedsConsent: "Zum Hochladen bitte zuerst oben der Verarbeitung Ihrer Angaben zustimmen.",
+  identityUploadNeedsConsent:
+    "Zum Hochladen bitte zuerst im Schritt „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zustimmen.",
   identityNote:
     "Eine Kopie allein reicht möglicherweise nicht aus, wenn die Person nicht persönlich anwesend ist. Wir melden uns bei Ihnen wegen der Identifizierung.",
   noIdentityDocuments: "Noch kein Ausweis hochgeladen.",
@@ -881,9 +1061,28 @@ const de: LeadRequestText = {
     funds_sources: "Herkunft der Mittel",
     funds_description: "Beschreibung der Herkunft der Mittel",
   },
+  payerLegalFields: {
+    pep_self: "Üben Sie ein hochrangiges öffentliches Amt aus oder haben Sie es in den letzten 12 Monaten ausgeübt?",
+    pep_self_details: "Amt, Land und Zeitraum",
+    pep_related: "Ist ein unmittelbares Familienmitglied oder eine Ihnen nahestehende Person politisch exponiert?",
+    pep_related_details: "Name der Person, Beziehung, Amt und Land",
+    high_risk_country:
+      "Haben Sie oder eine beteiligte Person Wohnsitz oder Sitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
+    high_risk_country_code: "Welches Land?",
+    sanctions_links: "Bestehen Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
+    sanctions_links_details: "Zu wem besteht die Verbindung und welcher Art ist sie?",
+  },
+  payerHighRiskTopic: "Land mit hohem Risiko",
   fundsSourceOptions: {
     employment: "Gehalt / nichtselbständige Arbeit",
     business_income: "Einkünfte aus Unternehmen / selbständiger Tätigkeit",
+    savings: "Ersparnisse",
+    asset_sale: "Verkauf von Vermögenswerten",
+    inheritance_gift: "Erbschaft / Schenkung",
+    other: "Sonstiges",
+  },
+  statedFundsSourceOptions: {
+    income: "Einkommen",
     savings: "Ersparnisse",
     asset_sale: "Verkauf von Vermögenswerten",
     inheritance_gift: "Erbschaft / Schenkung",
@@ -922,9 +1121,21 @@ const ru: LeadRequestText = {
   deadline: (date) => `Пожалуйста, заполните до ${date}.`,
   deadlineNote:
     "Из соображений защиты данных заявки, работа по которым к этой дате не продолжена, после неё удаляются автоматически.",
-  stepData: "Данные",
-  stepDocuments: "Документы",
-  stepSend: "Отправка",
+  steps: {
+    person: "Согласие и личные данные",
+    contact: "Контакты и проживание",
+    identity: "Документ",
+    payer: "Кто платит",
+    billing: "Страховка и счёт",
+    declarations: "Заявления",
+    follow_up: "Дополнительные сведения",
+    documents: "Обращение и документы",
+    send: "Проверка и отправка",
+  },
+  stepsLabel: "Шаги заявки",
+  stepMissingBadge: (count) => `Не хватает: ${count}`,
+  stepComplete: "Заполнено",
+  stepMissingTitle: "На этом шаге ещё не хватает:",
   fields: {
     first_name: "Имя",
     middle_name: "Отчество / второе имя",
@@ -981,7 +1192,7 @@ const ru: LeadRequestText = {
   maxDocuments: (count) => `Не более ${count} файлов на заявку.`,
   sendTitle: "Отправить вашему менеджеру",
   missingTitle: "Пожалуйста, дополните:",
-  inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных в разделе «Данные».",
+  inquiryConsentMissing: "Пожалуйста, дайте согласие на обработку данных на шаге «Согласие и личные данные».",
   sendButton: "Отправить менеджеру",
   sending: "Отправляется…",
   sentTitle: "Спасибо!",
@@ -1042,7 +1253,9 @@ const ru: LeadRequestText = {
     spouse: "Супруг / супруга",
     parent: "Мать / отец",
     child: "Сын / дочь",
-    relative: "Другой родственник",
+    sibling: "Брат / сестра",
+    grandparent: "Бабушка / дедушка",
+    relative: "другой родственник",
     employer: "Работодатель",
     friend: "Друг / подруга",
     business_partner: "Деловой партнёр",
@@ -1068,10 +1281,66 @@ const ru: LeadRequestText = {
   beneficialOwner: "В чьих интересах вы действуете? (имя, дата рождения, место рождения, адрес)",
   ownAccountQuestionGuardian: "Пациент действует в собственных экономических интересах?",
   beneficialOwnerGuardian: "В чьих интересах действует пациент? (имя, дата рождения, место рождения, адрес)",
-  selfFundsTitle: "Происхождение средств",
-  selfFundsIntro: "Откуда деньги на лечение? Можно выбрать несколько вариантов.",
-  selfFundsProofTitle: "Подтверждение происхождения средств (например, выписка со счёта, справка о зарплате)",
-  selfFundsProofHint: "PDF, JPG или PNG, до 25 МБ на файл.",
+  payerMessenger: "WhatsApp / мессенджер",
+  payerMessengerSameAsPhone: "как телефон",
+  payerResidence: "Место жительства",
+  followUpTitle: "Нам нужны дополнительные сведения",
+  followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
+  followUpBlocks: {
+    A: "Происхождение средств",
+    B: "Отношения с плательщиком",
+    C: "Способ оплаты",
+    F: "Проживание и гражданство",
+    G: "Представительство",
+    H: "Сведения о государственной должности",
+    I: "Документ, удостоверяющий личность",
+    J: "Сведения о связях",
+  },
+  followUpSubmit: "Отправить сведения",
+  followUpSending: "Отправляется…",
+  followUpIncomplete: "Пожалуйста, сначала дополните недостающие сведения.",
+  followUpAnsweredAt: (dateTime) => `Ваши дополнительные сведения отправлены ${dateTime}. Ваши данные проверяются.`,
+  followUpOpen: "Пожалуйста, дополните ещё некоторые сведения.",
+  followUpGo: "К дополнительным сведениям",
+  reviewNotice: "Спасибо. Ваши данные проверяются. Мы свяжемся с вами.",
+  extraFields: {
+    payer_funds_source: "Откуда средства у плательщика? (насколько вам известно)",
+    payer_funds_description: "Опишите, пожалуйста, происхождение средств плательщика",
+    funds_source: "Происхождение средств",
+    funds_description: "Опишите, пожалуйста, происхождение средств",
+    occupation: "Профессия",
+    sector: "Отрасль / сфера",
+    funds_proof: "Подтверждения происхождения средств",
+  },
+  extraPayerStatesFunds: "Сведения о происхождении средств и подтверждения плательщик даёт по своей собственной ссылке.",
+  extraOccupationElsewhere: "Профессию вы указываете в разделе «Сведения о плательщике».",
+  selfFundsProofHint: "Например, выписка со счёта или справка о зарплате. PDF, JPG или PNG, до 25 МБ на файл.",
+  relationshipProofTitle: "Подтверждение отношений",
+  relationshipProofHint: "Например, свидетельство о браке или о рождении. PDF, JPG или PNG, до 25 МБ на файл.",
+  noRelationshipProof: "Подтверждение ещё не загружено.",
+  stayReasonOptions: { work: "Работа", study: "Учёба", family: "Семья", other: "Другое" },
+  sanctionsLinkKindOptions: {
+    family: "Семейная",
+    business: "Деловая",
+    ownership: "Участие / собственность",
+    other: "Другое",
+  },
+  billingExtrasFields: {
+    via_third_party_kind: "Через кого проходит оплата?",
+    expected_total_eur: "Ожидаемая общая сумма (EUR)",
+  },
+  viaThirdPartyKindOptions: { person: "Через другого человека", psp: "Через платёжный сервис" },
+  expectedTotalHint: "Насколько известно, например из сметы расходов.",
+  identityRenewIntro: "Пожалуйста, загрузите актуальное, хорошо читаемое фото или скан вашего документа.",
+  identityIntro:
+    "Пожалуйста, загрузите фото или скан документа, удостоверяющего личность (для ID-карты — обе стороны). Данные из документа вносит GMED.",
+  sectionRequest: "Ваше обращение",
+  requestReasonHint: "Кратко опишите, с чем мы можем вам помочь.",
+  payerLegalForm: "Правовая форма",
+  payerRegisterNumber: "Регистрационный номер (если есть)",
+  payerContactName: "Контактное лицо",
+  payerEmailOrPhone: "E-mail или телефон",
+  payerEmailOrPhoneHint: "Пожалуйста, укажите хотя бы адрес e-mail или номер телефона.",
   identificationFields: {
     salutation: "Обращение",
     former_names: "Прежние имена и фамилии (например, фамилия при рождении)",
@@ -1079,35 +1348,36 @@ const ru: LeadRequestText = {
     birth_country: "Страна рождения",
     habitual_residence_country: "Страна постоянного пребывания (если другая)",
     contact_channels: "Как мы можем с вами связаться?",
-    id_document_type: "Вид документа",
-    id_document_number: "Номер документа",
-    id_issuing_authority: "Кем выдан",
-    id_issuing_country: "Страна выдачи",
-    id_issued_on: "Дата выдачи",
-    id_valid_until: "Действителен до",
-    payment_background: "Почему платит этот человек?",
     pep_self: "Занимаете ли вы высокую государственную должность или занимали её в последние 12 месяцев?",
-    pep_self_details: "Должность, страна и период",
     pep_related:
       "Является ли кто-то из ближайших членов вашей семьи или близкий вам человек политически значимым лицом?",
-    pep_related_details: "Имя человека, кем приходится, должность и страна",
-    high_risk_country:
-      "Проживаете ли вы или участвующее лицо в стране (или зарегистрированы в ней), которую Европейская комиссия относит к третьим странам высокого риска?",
-    high_risk_country_code: "Какая страна?",
     sanctions_links: "Есть ли связи с лицами или компаниями, на которые наложены санкции?",
-    sanctions_links_details: "С кем есть связь и какая именно?",
+    payment_background: "Почему этот человек или организация берёт на себя расходы?",
+    relationship_since: "С какого времени существуют отношения?",
+    residence_since: "С какого времени вы живёте в стране проживания?",
+    other_residences: "Другие места жительства за последние пять лет",
+    former_citizenships: "Прежние гражданства",
+    stay_reason: "Причина пребывания в стране проживания",
+    stay_reason_details: "Опишите, пожалуйста",
+    pep_office: "Должность или функция",
+    pep_country: "Страна",
+    pep_period: "Период",
+    pep_relationship: "Кем вам приходится человек с должностью (если не вы сами)",
+    pep_wealth_origin: "Происхождение имущества",
+    sanctions_link_name: "Имя человека или название компании",
+    sanctions_link_kind: "Вид связи",
+    sanctions_link_since_extent: "С какого времени и в каком объёме?",
+    request_reason: "Причина обращения",
   },
   identificationFieldsGuardian: {
     pep_self: "Занимает ли пациент высокую государственную должность или занимал её в последние 12 месяцев?",
     pep_related:
       "Является ли кто-то из ближайших членов семьи пациента или близкий ему человек политически значимым лицом?",
-    high_risk_country:
-      "Проживает ли пациент или участвующее лицо в стране (или зарегистрированы в ней), которую Европейская комиссия относит к третьим странам высокого риска?",
+    residence_since: "С какого времени пациент живёт в стране проживания?",
   },
   legalTopics: {
     pep_self: "Государственная должность",
     pep_related: "Политически значимое близкое лицо",
-    high_risk_country: "Страна высокого риска",
     sanctions_links: "Санкции",
   },
   yesNo: { yes: "Да", no: "Нет" },
@@ -1121,7 +1391,7 @@ const ru: LeadRequestText = {
   sectionIdentity: "Документ, удостоверяющий личность",
   identityUploadButton: "Загрузить фото или скан документа",
   identityUploadHint: "PDF, JPG или PNG, до 25 МБ на файл.",
-  identityUploadNeedsConsent: "Чтобы загрузить, сначала дайте вверху согласие на обработку данных.",
+  identityUploadNeedsConsent: "Чтобы загрузить, сначала дайте согласие на обработку данных на шаге «Согласие и личные данные».",
   identityNote:
     "Одной копии может быть недостаточно, если человек не присутствует лично. Мы свяжемся с вами по поводу идентификации.",
   noIdentityDocuments: "Документ ещё не загружен.",
@@ -1248,9 +1518,29 @@ const ru: LeadRequestText = {
     funds_sources: "Источник средств",
     funds_description: "Описание источника средств",
   },
+  payerLegalFields: {
+    pep_self: "Занимаете ли вы высокую государственную должность или занимали её в последние 12 месяцев?",
+    pep_self_details: "Должность, страна и период",
+    pep_related:
+      "Является ли кто-то из ближайших членов вашей семьи или близкий вам человек политически значимым лицом?",
+    pep_related_details: "Имя человека, кем приходится, должность и страна",
+    high_risk_country:
+      "Проживаете ли вы или участвующее лицо в стране (или зарегистрированы в ней), которую Европейская комиссия относит к третьим странам высокого риска?",
+    high_risk_country_code: "Какая страна?",
+    sanctions_links: "Есть ли связи с лицами или компаниями, на которые наложены санкции?",
+    sanctions_links_details: "С кем есть связь и какая именно?",
+  },
+  payerHighRiskTopic: "Страна высокого риска",
   fundsSourceOptions: {
     employment: "Заработная плата / работа по найму",
     business_income: "Доход от предпринимательской деятельности",
+    savings: "Сбережения",
+    asset_sale: "Продажа имущества",
+    inheritance_gift: "Наследство / дарение",
+    other: "Другое",
+  },
+  statedFundsSourceOptions: {
+    income: "Доход",
     savings: "Сбережения",
     asset_sale: "Продажа имущества",
     inheritance_gift: "Наследство / дарение",
@@ -1288,9 +1578,21 @@ const uk: LeadRequestText = {
   deadline: (date) => `Будь ласка, заповніть до ${date}.`,
   deadlineNote:
     "З міркувань захисту даних заявки, робота над якими до цієї дати не продовжена, після неї видаляються автоматично.",
-  stepData: "Дані",
-  stepDocuments: "Документи",
-  stepSend: "Надсилання",
+  steps: {
+    person: "Згода й особисті дані",
+    contact: "Контакти й проживання",
+    identity: "Документ",
+    payer: "Хто платить",
+    billing: "Страхування й рахунок",
+    declarations: "Заяви",
+    follow_up: "Додаткові відомості",
+    documents: "Звернення й документи",
+    send: "Перевірка й надсилання",
+  },
+  stepsLabel: "Кроки заявки",
+  stepMissingBadge: (count) => `Бракує: ${count}`,
+  stepComplete: "Заповнено",
+  stepMissingTitle: "На цьому кроці ще бракує:",
   fields: {
     first_name: "Ім'я",
     middle_name: "По батькові / друге ім'я",
@@ -1347,7 +1649,7 @@ const uk: LeadRequestText = {
   maxDocuments: (count) => `Не більше ${count} файлів на заявку.`,
   sendTitle: "Надіслати вашому менеджеру",
   missingTitle: "Будь ласка, доповніть:",
-  inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних у розділі «Дані».",
+  inquiryConsentMissing: "Будь ласка, надайте згоду на обробку даних на кроці «Згода й особисті дані».",
   sendButton: "Надіслати менеджеру",
   sending: "Надсилається…",
   sentTitle: "Дякуємо!",
@@ -1408,7 +1710,9 @@ const uk: LeadRequestText = {
     spouse: "Чоловік / дружина",
     parent: "Мати / батько",
     child: "Син / донька",
-    relative: "Інший родич",
+    sibling: "Брат / сестра",
+    grandparent: "Бабуся / дідусь",
+    relative: "інший родич",
     employer: "Роботодавець",
     friend: "Друг / подруга",
     business_partner: "Діловий партнер",
@@ -1434,10 +1738,66 @@ const uk: LeadRequestText = {
   beneficialOwner: "В чиїх інтересах ви дієте? (ім'я, дата народження, місце народження, адреса)",
   ownAccountQuestionGuardian: "Пацієнт діє у власних економічних інтересах?",
   beneficialOwnerGuardian: "В чиїх інтересах діє пацієнт? (ім'я, дата народження, місце народження, адреса)",
-  selfFundsTitle: "Походження коштів",
-  selfFundsIntro: "Звідки гроші на лікування? Можна вибрати кілька варіантів.",
-  selfFundsProofTitle: "Підтвердження походження коштів (наприклад, виписка з рахунку, довідка про зарплату)",
-  selfFundsProofHint: "PDF, JPG або PNG, до 25 МБ на файл.",
+  payerMessenger: "WhatsApp / месенджер",
+  payerMessengerSameAsPhone: "як телефон",
+  payerResidence: "Місце проживання",
+  followUpTitle: "Нам потрібні додаткові відомості",
+  followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
+  followUpBlocks: {
+    A: "Походження коштів",
+    B: "Стосунки з платником",
+    C: "Спосіб оплати",
+    F: "Проживання й громадянство",
+    G: "Представництво",
+    H: "Відомості про державну посаду",
+    I: "Документ, що посвідчує особу",
+    J: "Відомості про зв'язки",
+  },
+  followUpSubmit: "Надіслати відомості",
+  followUpSending: "Надсилається…",
+  followUpIncomplete: "Будь ласка, спершу доповніть відомості, яких бракує.",
+  followUpAnsweredAt: (dateTime) => `Ваші додаткові відомості надіслано ${dateTime}. Ваші дані перевіряються.`,
+  followUpOpen: "Будь ласка, доповніть ще деякі відомості.",
+  followUpGo: "До додаткових відомостей",
+  reviewNotice: "Дякуємо. Ваші дані перевіряються. Ми зв'яжемося з вами.",
+  extraFields: {
+    payer_funds_source: "Звідки кошти в платника? (наскільки вам відомо)",
+    payer_funds_description: "Опишіть, будь ласка, походження коштів платника",
+    funds_source: "Походження коштів",
+    funds_description: "Опишіть, будь ласка, походження коштів",
+    occupation: "Професія",
+    sector: "Галузь / сфера",
+    funds_proof: "Підтвердження походження коштів",
+  },
+  extraPayerStatesFunds: "Відомості про походження коштів і підтвердження платник надає за своїм власним посиланням.",
+  extraOccupationElsewhere: "Професію ви вказуєте в розділі «Відомості про платника».",
+  selfFundsProofHint: "Наприклад, виписка з рахунку або довідка про зарплату. PDF, JPG або PNG, до 25 МБ на файл.",
+  relationshipProofTitle: "Підтвердження стосунків",
+  relationshipProofHint: "Наприклад, свідоцтво про шлюб або про народження. PDF, JPG або PNG, до 25 МБ на файл.",
+  noRelationshipProof: "Підтвердження ще не завантажено.",
+  stayReasonOptions: { work: "Робота", study: "Навчання", family: "Сім'я", other: "Інше" },
+  sanctionsLinkKindOptions: {
+    family: "Родинний",
+    business: "Діловий",
+    ownership: "Участь / власність",
+    other: "Інше",
+  },
+  billingExtrasFields: {
+    via_third_party_kind: "Через кого проходить оплата?",
+    expected_total_eur: "Очікувана загальна сума (EUR)",
+  },
+  viaThirdPartyKindOptions: { person: "Через іншу особу", psp: "Через платіжний сервіс" },
+  expectedTotalHint: "Наскільки відомо, наприклад з кошторису.",
+  identityRenewIntro: "Будь ласка, завантажте актуальне, добре читабельне фото або скан вашого документа.",
+  identityIntro:
+    "Будь ласка, завантажте фото або скан документа, що посвідчує особу (для ID-картки — обидва боки). Дані з документа вносить GMED.",
+  sectionRequest: "Ваше звернення",
+  requestReasonHint: "Коротко опишіть, із чим ми можемо вам допомогти.",
+  payerLegalForm: "Правова форма",
+  payerRegisterNumber: "Реєстраційний номер (якщо є)",
+  payerContactName: "Контактна особа",
+  payerEmailOrPhone: "E-mail або телефон",
+  payerEmailOrPhoneHint: "Будь ласка, вкажіть принаймні адресу e-mail або номер телефону.",
   identificationFields: {
     salutation: "Звертання",
     former_names: "Попередні імена та прізвища (наприклад, прізвище при народженні)",
@@ -1445,35 +1805,36 @@ const uk: LeadRequestText = {
     birth_country: "Країна народження",
     habitual_residence_country: "Країна постійного перебування (якщо інша)",
     contact_channels: "Як ми можемо з вами зв'язатися?",
-    id_document_type: "Вид документа",
-    id_document_number: "Номер документа",
-    id_issuing_authority: "Ким виданий",
-    id_issuing_country: "Країна видачі",
-    id_issued_on: "Дата видачі",
-    id_valid_until: "Дійсний до",
-    payment_background: "Чому платить ця людина?",
     pep_self: "Чи обіймаєте ви високу державну посаду або обіймали її протягом останніх 12 місяців?",
-    pep_self_details: "Посада, країна і період",
     pep_related:
       "Чи є хтось із найближчих членів вашої родини або близька вам людина політично значущою особою?",
-    pep_related_details: "Ім'я людини, ким доводиться, посада і країна",
-    high_risk_country:
-      "Чи проживаєте ви або залучена особа в країні (або зареєстровані в ній), яку Європейська комісія відносить до третіх країн високого ризику?",
-    high_risk_country_code: "Яка країна?",
     sanctions_links: "Чи є зв'язки з особами або компаніями, на які накладено санкції?",
-    sanctions_links_details: "З ким є зв'язок і який саме?",
+    payment_background: "Чому ця особа або організація бере на себе витрати?",
+    relationship_since: "Відколи існують стосунки?",
+    residence_since: "Відколи ви живете в країні проживання?",
+    other_residences: "Інші місця проживання за останні п'ять років",
+    former_citizenships: "Попередні громадянства",
+    stay_reason: "Причина перебування в країні проживання",
+    stay_reason_details: "Опишіть, будь ласка",
+    pep_office: "Посада або функція",
+    pep_country: "Країна",
+    pep_period: "Період",
+    pep_relationship: "Ким вам доводиться людина з посадою (якщо не ви самі)",
+    pep_wealth_origin: "Походження майна",
+    sanctions_link_name: "Ім'я особи або назва компанії",
+    sanctions_link_kind: "Вид зв'язку",
+    sanctions_link_since_extent: "Відколи і в якому обсязі?",
+    request_reason: "Причина звернення",
   },
   identificationFieldsGuardian: {
     pep_self: "Чи обіймає пацієнт високу державну посаду або обіймав її протягом останніх 12 місяців?",
     pep_related:
       "Чи є хтось із найближчих членів родини пацієнта або близька йому людина політично значущою особою?",
-    high_risk_country:
-      "Чи проживає пацієнт або залучена особа в країні (або зареєстровані в ній), яку Європейська комісія відносить до третіх країн високого ризику?",
+    residence_since: "Відколи пацієнт живе в країні проживання?",
   },
   legalTopics: {
     pep_self: "Державна посада",
     pep_related: "Політично значуща близька особа",
-    high_risk_country: "Країна високого ризику",
     sanctions_links: "Санкції",
   },
   yesNo: { yes: "Так", no: "Ні" },
@@ -1487,7 +1848,7 @@ const uk: LeadRequestText = {
   sectionIdentity: "Документ, що посвідчує особу",
   identityUploadButton: "Завантажити фото або скан документа",
   identityUploadHint: "PDF, JPG або PNG, до 25 МБ на файл.",
-  identityUploadNeedsConsent: "Щоб завантажити, спершу надайте вгорі згоду на обробку даних.",
+  identityUploadNeedsConsent: "Щоб завантажити, спершу надайте згоду на обробку даних на кроці «Згода й особисті дані».",
   identityNote:
     "Самої копії може бути недостатньо, якщо людина не присутня особисто. Ми зв'яжемося з вами щодо ідентифікації.",
   noIdentityDocuments: "Документ ще не завантажено.",
@@ -1614,9 +1975,29 @@ const uk: LeadRequestText = {
     funds_sources: "Походження коштів",
     funds_description: "Опис походження коштів",
   },
+  payerLegalFields: {
+    pep_self: "Чи обіймаєте ви високу державну посаду або обіймали її протягом останніх 12 місяців?",
+    pep_self_details: "Посада, країна і період",
+    pep_related:
+      "Чи є хтось із найближчих членів вашої родини або близька вам людина політично значущою особою?",
+    pep_related_details: "Ім'я людини, ким доводиться, посада і країна",
+    high_risk_country:
+      "Чи проживаєте ви або залучена особа в країні (або зареєстровані в ній), яку Європейська комісія відносить до третіх країн високого ризику?",
+    high_risk_country_code: "Яка країна?",
+    sanctions_links: "Чи є зв'язки з особами або компаніями, на які накладено санкції?",
+    sanctions_links_details: "З ким є зв'язок і який саме?",
+  },
+  payerHighRiskTopic: "Країна високого ризику",
   fundsSourceOptions: {
     employment: "Заробітна плата / робота за наймом",
     business_income: "Доходи від підприємницької діяльності",
+    savings: "Заощадження",
+    asset_sale: "Продаж майна",
+    inheritance_gift: "Спадщина / дарування",
+    other: "Інше",
+  },
+  statedFundsSourceOptions: {
+    income: "Дохід",
     savings: "Заощадження",
     asset_sale: "Продаж майна",
     inheritance_gift: "Спадщина / дарування",
@@ -1654,9 +2035,21 @@ const en: LeadRequestText = {
   deadline: (date) => `Please complete by ${date}.`,
   deadlineNote:
     "For data protection reasons, requests that are not taken further by then are deleted automatically after this date.",
-  stepData: "Details",
-  stepDocuments: "Documents",
-  stepSend: "Send",
+  steps: {
+    person: "Consent & person",
+    contact: "Contact & residence",
+    identity: "ID document",
+    payer: "Who pays",
+    billing: "Insurance & invoice",
+    declarations: "Declarations",
+    follow_up: "Additional information",
+    documents: "Request & documents",
+    send: "Review & send",
+  },
+  stepsLabel: "Steps of the request",
+  stepMissingBadge: (count) => (count === 1 ? "1 item missing" : `${count} items missing`),
+  stepComplete: "Complete",
+  stepMissingTitle: "Still missing in this step:",
   fields: {
     first_name: "First name",
     middle_name: "Middle name",
@@ -1713,7 +2106,7 @@ const en: LeadRequestText = {
   maxDocuments: (count) => `At most ${count} files per request.`,
   sendTitle: "Send to your contact person",
   missingTitle: "Please add:",
-  inquiryConsentMissing: "Please agree to the processing of your details under \"Details\".",
+  inquiryConsentMissing: "Please agree to the processing of your details in the step “Consent & person”.",
   sendButton: "Send to the manager",
   sending: "Sending…",
   sentTitle: "Thank you!",
@@ -1774,7 +2167,9 @@ const en: LeadRequestText = {
     spouse: "Spouse",
     parent: "Parent",
     child: "Child",
-    relative: "Other relative",
+    sibling: "Brother / sister",
+    grandparent: "Grandparent",
+    relative: "other relative",
     employer: "Employer",
     friend: "Friend",
     business_partner: "Business partner",
@@ -1800,10 +2195,66 @@ const en: LeadRequestText = {
   beneficialOwner: "In whose interest are you acting? (name, date of birth, place of birth, address)",
   ownAccountQuestionGuardian: "Is the patient acting in their own economic interest?",
   beneficialOwnerGuardian: "In whose interest is the patient acting? (name, date of birth, place of birth, address)",
-  selfFundsTitle: "Source of funds",
-  selfFundsIntro: "Where does the money for the treatment come from? You can choose more than one answer.",
-  selfFundsProofTitle: "Proof of the source of funds (e.g. bank statement, payslip)",
-  selfFundsProofHint: "PDF, JPG or PNG, up to 25 MB per file.",
+  payerMessenger: "WhatsApp / messenger",
+  payerMessengerSameAsPhone: "same as phone",
+  payerResidence: "Place of residence",
+  followUpTitle: "We need some additional information",
+  followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
+  followUpBlocks: {
+    A: "Source of funds",
+    B: "Relationship to the paying person",
+    C: "Payment route",
+    F: "Residence and citizenship",
+    G: "Representation",
+    H: "Details of the public office",
+    I: "Identity document",
+    J: "Details of the links",
+  },
+  followUpSubmit: "Send details",
+  followUpSending: "Sending…",
+  followUpIncomplete: "Please first complete the details that are still open.",
+  followUpAnsweredAt: (dateTime) => `Your additional details were sent on ${dateTime}. Your details are being reviewed.`,
+  followUpOpen: "Please complete a few more details.",
+  followUpGo: "To the additional information",
+  reviewNotice: "Thank you. Your details are being reviewed. We will get in touch with you.",
+  extraFields: {
+    payer_funds_source: "Where do the paying person's funds come from? (as far as you know)",
+    payer_funds_description: "Please describe the origin of the paying person's funds",
+    funds_source: "Source of funds",
+    funds_description: "Please describe the source of the funds",
+    occupation: "Occupation",
+    sector: "Industry / sector",
+    funds_proof: "Proofs of the source of funds",
+  },
+  extraPayerStatesFunds: "The paying person states the source of funds and provides the proofs through their own link.",
+  extraOccupationElsewhere: "You state your occupation in the section “Details as the paying person”.",
+  selfFundsProofHint: "For example a bank statement or a payslip. PDF, JPG or PNG, up to 25 MB per file.",
+  relationshipProofTitle: "Proof of the relationship",
+  relationshipProofHint: "For example a marriage or birth certificate. PDF, JPG or PNG, up to 25 MB per file.",
+  noRelationshipProof: "No proof uploaded yet.",
+  stayReasonOptions: { work: "Work", study: "Studies", family: "Family", other: "Other" },
+  sanctionsLinkKindOptions: {
+    family: "Family",
+    business: "Business",
+    ownership: "Shareholding / ownership",
+    other: "Other",
+  },
+  billingExtrasFields: {
+    via_third_party_kind: "Through whom is the payment made?",
+    expected_total_eur: "Expected total amount (EUR)",
+  },
+  viaThirdPartyKindOptions: { person: "Through another person", psp: "Through a payment service provider" },
+  expectedTotalHint: "As far as known, for example from the cost estimate.",
+  identityRenewIntro: "Please upload a current, clearly readable photo or scan of your identity document.",
+  identityIntro:
+    "Please upload a photo or scan of your identity document (for an ID card both sides). GMED enters the details from the document.",
+  sectionRequest: "Your request",
+  requestReasonHint: "Briefly describe what we can help you with.",
+  payerLegalForm: "Legal form",
+  payerRegisterNumber: "Register number (if any)",
+  payerContactName: "Contact person",
+  payerEmailOrPhone: "E-mail or phone",
+  payerEmailOrPhoneHint: "Please give at least an e-mail address or a phone number.",
   identificationFields: {
     salutation: "Title",
     former_names: "Former names (e.g. name at birth)",
@@ -1811,33 +2262,34 @@ const en: LeadRequestText = {
     birth_country: "Country of birth",
     habitual_residence_country: "Country of habitual residence (if different)",
     contact_channels: "How may we contact you?",
-    id_document_type: "Type of document",
-    id_document_number: "Document number",
-    id_issuing_authority: "Issuing authority",
-    id_issuing_country: "Country of issue",
-    id_issued_on: "Date of issue",
-    id_valid_until: "Valid until",
-    payment_background: "Why is this person paying?",
     pep_self: "Do you hold a prominent public office, or have you held one in the last 12 months?",
-    pep_self_details: "Office, country and period",
     pep_related: "Is an immediate family member or a person close to you politically exposed?",
-    pep_related_details: "Name of the person, relationship, office and country",
-    high_risk_country:
-      "Do you or a person involved live or have a registered office in a country that the EU Commission lists as a high-risk third country?",
-    high_risk_country_code: "Which country?",
     sanctions_links: "Are there any links to persons or companies that are subject to sanctions?",
-    sanctions_links_details: "Who is the link to, and what kind of link is it?",
+    payment_background: "Why does this person or organisation cover the costs?",
+    relationship_since: "Since when has the relationship existed?",
+    residence_since: "Since when have you lived in your country of residence?",
+    other_residences: "Other residences in the last five years",
+    former_citizenships: "Former citizenships",
+    stay_reason: "Reason for living in the country of residence",
+    stay_reason_details: "Please describe",
+    pep_office: "Office or function",
+    pep_country: "Country",
+    pep_period: "Period",
+    pep_relationship: "Relationship to the office holder (if not yourself)",
+    pep_wealth_origin: "Origin of the wealth",
+    sanctions_link_name: "Name of the person or company",
+    sanctions_link_kind: "Kind of link",
+    sanctions_link_since_extent: "Since when and to what extent?",
+    request_reason: "Reason for your request",
   },
   identificationFieldsGuardian: {
     pep_self: "Does the patient hold a prominent public office, or have they held one in the last 12 months?",
     pep_related: "Is an immediate family member of the patient or a person close to the patient politically exposed?",
-    high_risk_country:
-      "Does the patient or a person involved live or have a registered office in a country that the EU Commission lists as a high-risk third country?",
+    residence_since: "Since when has the patient lived in the country of residence?",
   },
   legalTopics: {
     pep_self: "Public office",
     pep_related: "Politically exposed close person",
-    high_risk_country: "High-risk country",
     sanctions_links: "Sanctions",
   },
   yesNo: { yes: "Yes", no: "No" },
@@ -1847,7 +2299,7 @@ const en: LeadRequestText = {
   sectionIdentity: "Identity document",
   identityUploadButton: "Upload a photo or scan of the document",
   identityUploadHint: "PDF, JPG or PNG, up to 25 MB per file.",
-  identityUploadNeedsConsent: "To upload, first agree to the processing of your details at the top.",
+  identityUploadNeedsConsent: "To upload, first agree to the processing of your details in the step “Consent & person”.",
   identityNote:
     "A copy alone may not be enough if the person is not present in person. We will get in touch about the identification.",
   noIdentityDocuments: "No identity document uploaded yet.",
@@ -1971,9 +2423,28 @@ const en: LeadRequestText = {
     funds_sources: "Source of funds",
     funds_description: "Description of the source of funds",
   },
+  payerLegalFields: {
+    pep_self: "Do you hold a prominent public office, or have you held one in the last 12 months?",
+    pep_self_details: "Office, country and period",
+    pep_related: "Is an immediate family member or a person close to you politically exposed?",
+    pep_related_details: "Name of the person, relationship, office and country",
+    high_risk_country:
+      "Do you or a person involved live or have a registered office in a country that the EU Commission lists as a high-risk third country?",
+    high_risk_country_code: "Which country?",
+    sanctions_links: "Are there any links to persons or companies that are subject to sanctions?",
+    sanctions_links_details: "Who is the link to, and what kind of link is it?",
+  },
+  payerHighRiskTopic: "High-risk country",
   fundsSourceOptions: {
     employment: "Salary / employment",
     business_income: "Business or self-employed income",
+    savings: "Savings",
+    asset_sale: "Sale of assets",
+    inheritance_gift: "Inheritance / gift",
+    other: "Other",
+  },
+  statedFundsSourceOptions: {
+    income: "Income",
     savings: "Savings",
     asset_sale: "Sale of assets",
     inheritance_gift: "Inheritance / gift",

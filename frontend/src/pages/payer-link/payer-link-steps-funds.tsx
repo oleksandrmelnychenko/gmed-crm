@@ -98,7 +98,7 @@ function OwnerCard({
           {text.removeOwner}
         </Button>
       </div>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         {labeled("first_name", input("first_name", 100))}
         {labeled("last_name", input("last_name", 100))}
         {labeled(
@@ -116,7 +116,7 @@ function OwnerCard({
           />,
         )}
         {labeled("birth_place", input("birth_place", 200))}
-        {labeled("street", input("street", 200), "sm:col-span-2")}
+        {labeled("street", input("street", 200), "sm:col-span-2 lg:col-span-3")}
         {labeled("zip", input("zip", 20))}
         {labeled("city", input("city", 200))}
         {labeled(
@@ -225,7 +225,7 @@ export function FundsStep({
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-funds">
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="relationship_kind">
           <ChoiceInput
             context={context}
@@ -242,6 +242,12 @@ export function FundsStep({
         ) : (
           <div className="hidden sm:block" />
         )}
+        {/* Block E (trigger flow): why the organisation pays, asked of a server that knows it. */}
+        {organisation && context.organisationExtras ? (
+          <Field context={context} field="payment_reason" className="sm:col-span-2 lg:col-span-3">
+            <TextArea context={context} field="payment_reason" />
+          </Field>
+        ) : null}
         {organisation ? (
           <Field context={context} field="industry">
             <TextInput context={context} field="industry" maxLength={200} />
@@ -258,7 +264,7 @@ export function FundsStep({
           {text.fields.funds_sources}
           {context.required("funds_sources") ? <RequiredMark /> : null}
         </p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {/* The server's list for the payer type: a company does not earn a salary. */}
           {context.fundsSources.map((source) => (
             <label key={source} className="flex items-start gap-2 text-sm leading-snug">
@@ -322,7 +328,7 @@ export function PaymentStep({ context, suggestion }: { context: StepContext; sug
   const flagged = draft.payment_method === "cash" || draft.payment_method === "crypto";
   return (
     <div className="space-y-4" data-testid="payer-link-step-payment">
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="payment_method">
           <NativeComboboxSelect
             {...controlProps(form, "payment_method")}
@@ -356,7 +362,7 @@ export function PaymentStep({ context, suggestion }: { context: StepContext; sug
           </Field>
         ) : null}
         {flagged ? (
-          <div className="sm:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-3">
             <Notice tone="warning" role="note" testId="payer-link-payment-method-note">
               {text.cashCryptoNote}
             </Notice>

@@ -2019,6 +2019,15 @@ pub(crate) async fn upsert_my_representative(
     if let Err(response) = intake::require_patient(&auth) {
         return response;
     }
+    // The identity document data of a representative are staff's (trigger
+    // flow 2026-10-07): the cabinet uploads the document only.
+    if let Some(field) = body.as_object().and_then(|object| {
+        object
+            .keys()
+            .find(|key| crate::risk::cabinet::is_id_data_key(key))
+    }) {
+        return crate::risk::cabinet::staff_only(field);
+    }
     let patch = match parse_person_patch(&body) {
         Ok(patch) => patch,
         Err(response) => return response,

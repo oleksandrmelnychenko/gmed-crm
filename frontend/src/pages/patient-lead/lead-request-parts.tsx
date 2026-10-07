@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, CircleAlert, FileText, LoaderCircle, Trash2 } from "lucide-react";
+import { Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -15,11 +15,13 @@ import {
   type LeadRequestDocument,
 } from "./lead-request-api";
 import { consentGiven, formatFileSize, type PersonalField, type SaveState } from "./lead-request-model";
+import type { StepId } from "./lead-request-steps";
 import type { LeadRequestText } from "./lead-request-text";
 
 // Building blocks the steps and sections of the lead cabinet share.
 
-export type Step = "data" | "documents" | "send";
+/** The steps of the cabinet; "follow_up" ("Ergänzende Angaben") only while the server opened blocks. */
+export type Step = StepId;
 
 export function errorBody(error: unknown): Record<string, unknown> | null {
   return error instanceof ApiRequestError && error.body ? (error.body as Record<string, unknown>) : null;
@@ -67,16 +69,19 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => void
   useEffect(() => () => latest.current.save(latest.current.draft), []);
 }
 
-const STEP_COUNT = 3;
+const STEP_COUNT = 8;
 
 /** The bottom bar of a step, as in the staff lead wizard: progress and save state above the buttons. */
 export function StepFooter({
   index,
+  total = STEP_COUNT,
   text,
   status,
   children,
 }: {
   index: number;
+  /** Nine with the follow-up step. */
+  total?: number;
   text: LeadRequestText;
   status?: ReactNode;
   children: ReactNode;
@@ -85,7 +90,7 @@ export function StepFooter({
     // The page scrolls with a bottom padding; the `after` strip covers the form that would show through it.
     <div className="sticky bottom-0 z-10 -mx-4 mt-6 border-t border-border bg-card px-4 py-3 after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-5 after:bg-card sm:-mx-5 sm:px-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
-        <span>{text.stepOf(index, STEP_COUNT)}</span>
+        <span>{text.stepOf(index, total)}</span>
         {status}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">{children}</div>
@@ -303,6 +308,151 @@ export function ConsentCheckbox({
         </span>
       </label>
       {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * What a step (or a follow-up block) still misses, in words: shown at its
+ * top, so the person sees it without going to the summary. Nothing while
+ * nothing is missing.
+ */
+export function MissingList({
+  title,
+  labels,
+  testId,
+}: {
+  title: string;
+  labels: readonly string[];
+  testId: string;
+}) {
+  if (labels.length === 0) return null;
+  return (
+    <div
+      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+      data-testid={testId}
+    >
+      <p className="font-medium">{title}</p>
+      <ul className="mt-1 list-inside list-disc space-y-0.5 text-[13px] leading-5">
+        {Array.from(new Set(labels)).map((label) => (
+          <li key={label} className="break-words">
+            {label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Uploads of one kind with a button and the list (identity copy, proofs):
+ * files above 25 MB are refused here, the rest goes one after another through
+ * `upload`. The uploads need the request consent first.
+ */
+export function FileUploadField({
+  id,
+  label,
+  required = false,
+  hint,
+  emptyText,
+  buttonLabel,
+  documents,
+  consentReady,
+  text,
+  lang,
+  upload,
+  remove,
+  testId,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  hint: string;
+  emptyText: string;
+  buttonLabel: string;
+  documents: readonly LeadRequestDocument[];
+  consentReady: boolean;
+  text: LeadRequestText;
+  lang: string;
+  upload: (file: File) => Promise<void>;
+  remove: (documentId: string) => Promise<void>;
+  testId: string;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [errors, setErrors] = useState<string[]>([]);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+
+  async function uploadFiles(files: File[]) {
+    if (files.length === 0) return;
+    setUploading(true);
+    const nextErrors: string[] = [];
+    for (const file of files) {
+      if (file.size > 25 * 1024 * 1024) {
+        nextErrors.push(text.fileTooLarge(file.name));
+        continue;
+      }
+      try {
+        await upload(file);
+      } catch (cause) {
+        nextErrors.push(
+          errorBody(cause)?.code === "inquiry_consent_required"
+            ? text.identityUploadNeedsConsent
+            : `${file.name}: ${errorMessage(cause)}`,
+        );
+      }
+    }
+    setErrors(Array.from(new Set(nextErrors)));
+    setUploading(false);
+  }
+
+  return (
+    <div className="space-y-2" data-testid={testId}>
+      <p id={`${id}-label`} className={tokens.text.label}>
+        {label}
+        {required ? <RequiredMark /> : null}
+      </p>
+      <input
+        ref={fileInput}
+        id={`${id}-files`}
+        type="file"
+        multiple
+        accept=".pdf,.jpg,.jpeg,.png"
+        className="sr-only"
+        aria-labelledby={`${id}-label`}
+        disabled={!consentReady || uploading}
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? []);
+          event.currentTarget.value = "";
+          void uploadFiles(files);
+        }}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        className="h-auto min-h-8 w-full gap-2 whitespace-normal py-1.5 text-left sm:w-auto"
+        disabled={!consentReady || uploading}
+        onClick={() => fileInput.current?.click()}
+      >
+        {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
+        {uploading ? text.uploading : buttonLabel}
+      </Button>
+      <p className="text-xs leading-5 text-muted-foreground">{consentReady ? hint : text.identityUploadNeedsConsent}</p>
+      {errors.map((message) => (
+        <p key={message} role="alert" className="text-xs text-destructive">
+          {message}
+        </p>
+      ))}
+      <UploadedFileList
+        documents={documents}
+        text={text}
+        lang={lang}
+        emptyText={emptyText}
+        testId={`${testId}-list`}
+        onRemove={(documentId) => {
+          setErrors([]);
+          void remove(documentId).catch((cause: unknown) => setErrors([errorMessage(cause)]));
+        }}
+      />
     </div>
   );
 }

@@ -14,7 +14,7 @@ import type {
   LeadPortalBilling,
   LeadPortalIntake,
   LeadPortalPayerLink,
-  LeadPortalSelfFunds,
+  LeadPortalEnhancedDetails,
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
@@ -27,42 +27,57 @@ export const EMPTY_STATEMENT = "—";
 
 type GwgIntake = Pick<LeadPortalIntake, "identification" | "identification_updated_at" | "identity_documents">
   & Partial<
-    Pick<LeadPortalIntake, "representation" | "representation_updated_at" | "billing" | "billing_updated_at" | "self_funds">
+    Pick<LeadPortalIntake, "representation" | "representation_updated_at" | "billing" | "billing_updated_at" | "enhanced_details">
   >;
 
 /**
- * Whether the self-payer's source of funds is shown: while the patient pays
- * himself, and while files of it are on record (also after another payer was
- * named).
+ * Whether the lead answered anything of the extra step "Zusätzliche Angaben":
+ * a source of funds, words, what the patient knows of the payer's funds,
+ * profession, sector, or a proof file.
  */
-export function selfFundsShown(
-  selfFunds: LeadPortalSelfFunds | null | undefined,
-): selfFunds is LeadPortalSelfFunds {
-  return Boolean(selfFunds && (selfFunds.asked || selfFunds.proof_documents.length > 0));
-}
-
-/** Whether the lead stated anything of it: a source, a description or a file. */
-export function hasSelfFundsStatements(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
+export function hasEnhancedDetailsStatements(details: LeadPortalEnhancedDetails | null | undefined): boolean {
+  if (!details) return false;
+  const answers = details.answers;
   return Boolean(
-    selfFunds && (selfFunds.sources.length > 0 || selfFunds.description || selfFunds.proof_documents.length > 0),
+    details.updated_at
+      || answers.funds_sources.length > 0
+      || answers.funds_description
+      || answers.payer_funds_source
+      || answers.payer_funds_description
+      || answers.occupation
+      || answers.sector
+      || details.funds_proof_documents.length > 0,
   );
 }
 
 /**
- * The enhanced check is required (owner rule 2026-10-07) and the self-paying
- * patient has not uploaded the proof of funds yet: staff see an amber line.
+ * Whether the group "Дополнительные сведения" is shown: while the cabinet asks
+ * the extra step, and while answers or files of it are on record (also after
+ * the step is no longer asked).
  */
-export function selfFundsProofMissing(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
-  return Boolean(selfFunds?.proof_required && selfFundsProofOutstanding(selfFunds));
+export function enhancedDetailsShown(
+  details: LeadPortalEnhancedDetails | null | undefined,
+): details is LeadPortalEnhancedDetails {
+  return Boolean(details && (details.required || hasEnhancedDetailsStatements(details)));
 }
 
 /**
- * The patient pays himself and no proof of funds is on file — whether it is
- * required is the caller's to say (the enhanced-check panel of the wizard
- * decides with the black-list countries it shows).
+ * The extra step asks the self-payer's proof of funds (the enhanced check is
+ * required) and none is on file: staff see an amber line.
  */
-export function selfFundsProofOutstanding(selfFunds: LeadPortalSelfFunds | null | undefined): boolean {
-  return Boolean(selfFunds?.asked && selfFunds.proof_documents.length === 0);
+export function enhancedFundsProofMissing(details: LeadPortalEnhancedDetails | null | undefined): boolean {
+  return Boolean(details?.asks.funds_proof && details.funds_proof_documents.length === 0);
+}
+
+/**
+ * The patient pays himself (the step asks the own funds, or the lead stated
+ * them) and no proof of funds is on file — whether it is required is the
+ * caller's to say (the enhanced-check panel of the wizard decides with the
+ * black-list countries it shows).
+ */
+export function enhancedFundsProofOutstanding(details: LeadPortalEnhancedDetails | null | undefined): boolean {
+  if (!details || details.funds_proof_documents.length > 0) return false;
+  return details.asks.funds_proof || details.asks.funds || details.answers.funds_sources.length > 0;
 }
 
 /** The keys of sections 7–8 the lead answers in the cabinet (not the staff fields, not the derived flags). */
@@ -127,7 +142,7 @@ export function hasGwgStatements(intake: GwgIntake | null | undefined): boolean 
   if (!intake) return false;
   if (intake.identification_updated_at || intake.identity_documents.length > 0) return true;
   if (hasRepresentationStatements(intake) || hasBillingStatements(intake)) return true;
-  if (hasSelfFundsStatements(intake.self_funds)) return true;
+  if (hasEnhancedDetailsStatements(intake.enhanced_details)) return true;
   return Object.values(intake.identification ?? {}).some((value) =>
     Array.isArray(value) ? value.length > 0 : typeof value === "boolean" || Boolean(value),
   );
