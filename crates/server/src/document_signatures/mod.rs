@@ -277,6 +277,8 @@ fn signer_policy_for_parts(
     {
         return SignerPolicy::AgencyOnly;
     }
+    // Consents and the lead's patient form (a declaration of the client
+    // alone, owner request 2026-10-08): only the patient side signs.
     if matches!(
         generated_template_id,
         Some(
@@ -284,6 +286,7 @@ fn signer_policy_for_parts(
                 | "privacy_consents"
                 | "consent_data_release_child"
                 | "consent_data_release_single"
+                | "lead_self_disclosure"
         )
     ) || matches!(compliance_kind, Some("dsgvo" | "confidentiality_release"))
         || matches!(
@@ -292,6 +295,7 @@ fn signer_policy_for_parts(
                 | "privacy_consent"
                 | "privacy_consents"
                 | "consent_data_release"
+                | "lead_self_disclosure"
         )
     {
         return SignerPolicy::ClientOnly;

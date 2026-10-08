@@ -10174,3 +10174,192 @@ async fn the_payers_documents_are_lead_documents_of_a_third_party() {
     assert!(text.contains("Freund/in"), "{text}");
     assert!(!text.contains("Prüfstufe"), "{text}");
 }
+
+/// The lead's patient form (owner request 2026-10-08): an internal document
+/// of a lead, generated only after the lead sent the request and only from
+/// what the server stored; the reason of the request never goes into it.
+#[tokio::test]
+async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("lead-form");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, phone, date_of_birth, citizenships,
+                              street_address, zip_code, city, country, qualification_status,
+                              compliance_status, intake_source)
+           VALUES ('Anna', 'Muster', $1, '+49 30 100001', DATE '1988-04-12', ARRAY['UA', 'DE'],
+                   'Musterweg 1', '10115', 'Berlin', 'DE', 'qualified', 'pending',
+                   'staff_wizard')
+           RETURNING id"#,
+    )
+    .bind(format!("{tag}@example.com"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let generate = |context: Value| {
+        let mut body = json!({
+            "template_id": "lead_self_disclosure",
+            "language": "de",
+            "status": "active",
+        });
+        for (key, value) in context.as_object().unwrap() {
+            body[key.as_str()] = value.clone();
+        }
+        body
+    };
+
+    let (status, catalog) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/templates",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let listed = catalog["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == "lead_self_disclosure")
+        .expect("lead_self_disclosure missing");
+    assert_eq!(listed["default_visibility"], "internal");
+    assert_eq!(listed["category"], "compliance_aml");
+    assert_eq!(listed["is_medical"], false);
+    assert_eq!(listed["supported_languages"], json!(["de"]));
+
+    // Never for a patient, never with free-form text.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({ "patient_id": patient_id }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(
+            json!({ "lead_id": lead_id, "title_override": "Etwas anderes" }),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // The lead answered in the cabinet, including the reason of the request,
+    // but has not sent the request yet.
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (
+               lead_id, salutation, birth_place, birth_country, pep_self, pep_related,
+               sanctions_links, occupation, request_reason)
+           VALUES ($1, 'ms', 'Kyiv', 'UA', false, false, false, 'Lehrerin',
+                   'Zweitmeinung zur Knie-OP')"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, payer_kind, source_of_funds, self_funds_source, self_funds_description)
+           VALUES ($1, 'self', 'savings', 'savings', 'Ersparnisse aus dem Gehalt')"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({ "lead_id": lead_id }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "lead_request_not_sent", "{body}");
+
+    // Sent: the form is generated from the stored answers; what the client
+    // sends as bindings does not change it.
+    sqlx::query("UPDATE leads SET portal_submitted_at = now() WHERE id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, generated) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(generate(json!({
+            "lead_id": lead_id,
+            "bindings": { "party_city": "Fremdstadt" },
+        }))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let row = sqlx::query(
+        r#"SELECT art, category, visibility, is_medical, generated_template_id, lead_id,
+                  patient_id, generated_bindings
+           FROM documents WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("art"), "lead_self_disclosure");
+    assert_eq!(row.get::<String, _>("category"), "compliance_aml");
+    assert_eq!(row.get::<String, _>("visibility"), "internal");
+    assert!(!row.get::<bool, _>("is_medical"));
+    assert_eq!(
+        row.get::<Option<String>, _>("generated_template_id")
+            .as_deref(),
+        Some("lead_self_disclosure")
+    );
+    assert_eq!(row.get::<Option<Uuid>, _>("lead_id"), Some(lead_id));
+    assert_eq!(row.get::<Option<Uuid>, _>("patient_id"), None);
+    let roles = row.get::<Value, _>("generated_bindings")["_signature_anchors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|anchor| anchor["role"].as_str().unwrap().to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(roles, ["client"]);
+    let (status, bytes) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/download"),
+        &admin_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let text = extract_pdf_text(&bytes);
+    for expected in [
+        "Patientenformular",
+        "Anna Muster",
+        "Frau",
+        "Kyiv (Ukraine)",
+        "Ukraine, Deutschland",
+        "Musterweg 1, 10115 Berlin, Deutschland",
+        "wird von GMED erfasst",
+        "Ich zahle selbst.",
+        "Herkunft der Mittel Ersparnisse",
+        "Ersparnisse aus dem Gehalt",
+        "Beruf Lehrerin",
+        "Ich bin eine politisch exponierte Person (PEP) nein",
+        "Ich versichere, dass meine Angaben richtig und vollständig sind.",
+        "Unterschrift Patient/in",
+    ] {
+        assert!(text.contains(expected), "{expected} missing in {text}");
+    }
+    for absent in ["Zweitmeinung", "Knie", "Fremdstadt", "Prüfstufe", "Risiko"] {
+        assert!(!text.contains(absent), "{absent} in {text}");
+    }
+}

@@ -9,14 +9,32 @@ pub(super) fn companion(template: Option<&str>) -> Option<&'static str> {
 
 const MINOR_CONSENTS: &[&str] = &["consent_data_release_child", "consent_data_release_single"];
 
+/// The lead's patient form ("Patientenformular – Angaben und Erklärungen",
+/// owner request 2026-10-08): signed by the patient side inside the lead's
+/// package. It exists only once the lead sent the request, so its slot may
+/// stay empty: a package without it is complete.
+const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
+
+/// Preset slots a package may leave empty.
+const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[LEAD_SELF_DISCLOSURE];
+
+/// Whether a package may go without a document for this slot.
+fn optional_slot(slot: &[&str]) -> bool {
+    !slot.is_empty()
+        && slot
+            .iter()
+            .all(|template| OPTIONAL_SLOT_TEMPLATES.contains(template))
+}
+
 /// Documents suggested for signing together with the source, in bundle order
 /// (adult patient or lead). Each entry lists the templates that can fill it.
 ///
 /// During lead intake the framework contract carries the whole onboarding
-/// package: the client gets one invitation for the contract, the order and the
-/// consents, signs first, and the agency is invited afterwards. These presets
-/// are suggestions for the composer; any eligible documents of the same
-/// patient or lead can be combined through `POST /signature-packages`.
+/// package: the client gets one invitation for the contract, the order, the
+/// lead's patient form (once the lead sent the request) and the consents,
+/// signs first, and the agency is invited afterwards. These presets are
+/// suggestions for the composer; any eligible documents of the same patient
+/// or lead can be combined through `POST /signature-packages`.
 pub(super) fn signing_companions(
     template: Option<&str>,
     lead_intake: bool,
@@ -24,12 +42,18 @@ pub(super) fn signing_companions(
     match template {
         Some("framework_contract") if lead_intake => &[
             "single_order",
+            LEAD_SELF_DISCLOSURE,
             "confidentiality_release",
             "privacy_consents",
         ],
         // Without a new contract (a signed contract of the patient still
-        // applies, or none is generated yet) the order carries the consents.
-        Some("single_order") if lead_intake => &["confidentiality_release", "privacy_consents"],
+        // applies, or none is generated yet) the order carries the patient
+        // form and the consents.
+        Some("single_order") if lead_intake => &[
+            LEAD_SELF_DISCLOSURE,
+            "confidentiality_release",
+            "privacy_consents",
+        ],
         Some("confidentiality_release") => &["privacy_consents"],
         _ => &[],
     }
@@ -37,7 +61,7 @@ pub(super) fn signing_companions(
 
 /// The preset slots, with the minors' variant: the legal representatives sign
 /// one combined declaration (DSGVO release and Schweigepflichtsentbindung) for
-/// the child instead of the two adult consents.
+/// the child instead of the two adult consents, and the child's patient form.
 pub(super) fn signing_slots(
     template: Option<&str>,
     lead_intake: bool,
@@ -51,9 +75,15 @@ pub(super) fn signing_slots(
     }
     match template {
         Some("framework_contract") if lead_intake => {
-            vec![&["single_order"][..], MINOR_CONSENTS]
+            vec![
+                &["single_order"][..],
+                &[LEAD_SELF_DISCLOSURE][..],
+                MINOR_CONSENTS,
+            ]
         }
-        Some("single_order") if lead_intake => vec![MINOR_CONSENTS],
+        Some("single_order") if lead_intake => {
+            vec![&[LEAD_SELF_DISCLOSURE][..], MINOR_CONSENTS]
+        }
         _ => vec![],
     }
 }
@@ -236,8 +266,9 @@ pub(super) async fn preset_document_ids(
 }
 
 /// Legacy `POST /documents/{id}/signature-requests`: the selected companions
-/// must fill the source's preset slots, one document per slot. They are put
-/// into bundle order; the generic endpoint accepts any combination.
+/// must fill the source's preset slots, one document per slot; an optional
+/// slot (the lead's patient form) may stay empty. They are put into bundle
+/// order; the generic endpoint accepts any combination.
 pub(super) async fn legacy_signing_order(
     state: &AppState,
     auth: &AuthUser,
@@ -262,19 +293,19 @@ pub(super) async fn legacy_signing_order(
     }
     let mut ordered = Vec::with_capacity(slots.len());
     for slot in slots {
-        let position = rows
-            .iter()
-            .position(|row| {
-                template_of(row)
-                    .as_deref()
-                    .is_some_and(|template| slot.contains(&template))
-            })
-            .ok_or_else(|| {
-                error(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    "signing_document_required",
-                )
-            })?;
+        let Some(position) = rows.iter().position(|row| {
+            template_of(row)
+                .as_deref()
+                .is_some_and(|template| slot.contains(&template))
+        }) else {
+            if optional_slot(slot) {
+                continue;
+            }
+            return Err(error(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "signing_document_required",
+            ));
+        };
         let row = rows.swap_remove(position);
         if !same_scope(source, &row) {
             return Err(error(StatusCode::CONFLICT, "signing_document_changed"));
@@ -1132,36 +1163,55 @@ mod tests {
             ["privacy_consents"]
         );
         assert!(signing_companions(Some("privacy_consents"), true).is_empty());
-        // Lead intake sends the whole onboarding package from the contract; an
-        // existing patient's contract or order is still signed on its own.
+        // Lead intake sends the whole onboarding package from the contract,
+        // with the lead's patient form; an existing patient's contract or
+        // order is still signed on its own.
         assert_eq!(
             signing_companions(Some("framework_contract"), true),
             [
                 "single_order",
+                "lead_self_disclosure",
                 "confidentiality_release",
                 "privacy_consents"
             ]
         );
         assert!(signing_companions(Some("framework_contract"), false).is_empty());
-        // Without a new contract the order carries the consents of the lead.
+        // Without a new contract the order carries the patient form and the
+        // consents of the lead.
         assert_eq!(
             signing_companions(Some("single_order"), true),
-            ["confidentiality_release", "privacy_consents"]
+            [
+                "lead_self_disclosure",
+                "confidentiality_release",
+                "privacy_consents"
+            ]
         );
         assert!(signing_companions(Some("single_order"), false).is_empty());
+        assert!(signing_companions(Some("lead_self_disclosure"), true).is_empty());
         assert_eq!(
             signing_slots(Some("single_order"), true, true),
-            vec![MINOR_CONSENTS]
+            vec![&["lead_self_disclosure"][..], MINOR_CONSENTS]
         );
-        // A minor's onboarding package carries the guardians' declaration.
+        // A minor's onboarding package carries the child's patient form and
+        // the guardians' declaration.
         assert_eq!(
             signing_slots(Some("framework_contract"), true, true),
-            vec![&["single_order"][..], MINOR_CONSENTS]
+            vec![
+                &["single_order"][..],
+                &["lead_self_disclosure"][..],
+                MINOR_CONSENTS
+            ]
         );
         assert_eq!(
             signing_slots(Some("framework_contract"), true, false).len(),
-            3
+            4
         );
+        // The patient form exists only after the lead sent the request: its
+        // slot may stay empty, every other one may not.
+        assert!(optional_slot(&["lead_self_disclosure"]));
+        assert!(!optional_slot(&["single_order"]));
+        assert!(!optional_slot(MINOR_CONSENTS));
+        assert!(!optional_slot(&[]));
         let id = Uuid::new_v4();
         assert_eq!(
             attachment_id(

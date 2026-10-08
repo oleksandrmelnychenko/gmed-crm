@@ -384,7 +384,8 @@ describe("document template binding payloads", () => {
     expect(isFixedLegalDocumentTemplate("privacy_consents")).toBe(true);
     expect(isFixedLegalDocumentTemplate("enhanced_due_diligence")).toBe(true);
     // The payer's signature package (phase 3b).
-    for (const templateId of ["payer_self_disclosure", "patient_payer_statement", "payer_cost_estimate"]) {
+    // With the lead's patient form, filled by the server from the sent request.
+    for (const templateId of ["payer_self_disclosure", "patient_payer_statement", "payer_cost_estimate", "lead_self_disclosure"]) {
       expect(isFixedLegalDocumentTemplate(templateId)).toBe(true);
       expect(isDesignedAgencyDocumentTemplate(templateId)).toBe(true);
     }

@@ -105,6 +105,8 @@ describe("buildStandardDocumentName", () => {
     expect(name("payer_self_disclosure", "compliance_aml")).toContain("Selbstauskunft der zahlenden Person vom 06.10.2026");
     expect(name("patient_payer_statement", "compliance_aml")).toContain("Erklärung zur Kostenübernahme durch Dritte vom 06.10.2026");
     expect(name("payer_cost_estimate", "finance_payer_cost_estimate")).toContain("Kostenvoranschlag für die zahlende Person vom 06.10.2026");
+    // The lead's own patient form, signed in the lead's package.
+    expect(name("lead_self_disclosure", "compliance_aml")).toContain("Patientenformular – Angaben und Erklärungen vom 06.10.2026");
     // The payer's copy of the cost estimate belongs to an order.
     expect(documentTemplateRequiresOrder("payer_cost_estimate")).toBe(true);
     expect(documentTemplateSupportsOrderContext("payer_cost_estimate")).toBe(true);

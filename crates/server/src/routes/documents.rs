@@ -1484,6 +1484,23 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         languages: &["de"],
         text_block_keys: &[],
     },
+    // The lead's own answers of the cabinet (owner request 2026-10-08),
+    // signed by the patient side in the lead's signature package.
+    DocumentTemplateDefinition {
+        id: "lead_self_disclosure",
+        label: "Patientenformular – Angaben und Erklärungen",
+        description: "Angaben der Patientin / des Patienten aus dem gesendeten Patientenformular nach dem Geldwäschegesetz, ohne medizinische Angaben; unterschreibt die Patientenseite.",
+        art: "lead_self_disclosure",
+        category: "compliance_aml",
+        default_auto_name: "Patientenformular – Angaben und Erklärungen",
+        default_status: "active",
+        default_visibility: "internal",
+        mime_type: "application/pdf",
+        file_extension: "pdf",
+        is_medical: false,
+        languages: &["de"],
+        text_block_keys: &[],
+    },
     // The payer's signature package (phase 3b, owner decisions 2026-10-06):
     // three documents only the payer and GMED sign, generated for a lead.
     DocumentTemplateDefinition {
@@ -4918,6 +4935,7 @@ fn is_fixed_legal_document_template(template_id: &str) -> bool {
             | "privacy_information"
             | "enhanced_due_diligence"
             | "gwg_identification"
+            | "lead_self_disclosure"
             | "payer_self_disclosure"
             | "patient_payer_statement"
             | "payer_cost_estimate"
@@ -4944,6 +4962,7 @@ fn is_lead_allowed_document_template(template_id: &str) -> bool {
             | "consent_data_release_child"
             | "consent_data_release_single"
             | "cost_coverage_declaration"
+            | "lead_self_disclosure"
             | "payer_self_disclosure"
             | "patient_payer_statement"
             | "payer_cost_estimate"
@@ -7220,6 +7239,7 @@ fn default_generated_document_name(
         ("privacy_information", _) => "Informationsblatt zum Datenschutz",
         ("enhanced_due_diligence", _) => "Durchführung verstärkter Sorgfaltspflichten",
         ("gwg_identification", _) => "Dokumentationsbogen natürliche Personen",
+        ("lead_self_disclosure", _) => "Patientenformular – Angaben und Erklärungen",
         ("payer_self_disclosure", _) => "Selbstauskunft der zahlenden Person",
         ("patient_payer_statement", _) => "Erklärung zur Kostenübernahme durch Dritte",
         ("payer_cost_estimate", _) => "Kostenvoranschlag (Ausfertigung Kostenübernehmer/in)",
@@ -16598,6 +16618,52 @@ async fn generate_document(
             };
             (preview, pdf_bytes)
         }
+        "lead_self_disclosure" => {
+            let Some(lead_uuid) = lead_id else {
+                return gwg_sheet_refusal(
+                    "lead_document_only",
+                    "The patient form is generated for a lead",
+                );
+            };
+            // Only what the server stored of the sent request; nothing of the
+            // request body goes into the document.
+            let disclosure = match load_lead_self_disclosure(&state, lead_uuid).await {
+                Ok(disclosure) => disclosure,
+                Err(response) => return response,
+            };
+            let agency = match load_agency_contract_settings(&state).await {
+                Ok(value) => value,
+                Err(resp) => return resp,
+            };
+            let order_reference =
+                match lead_order_reference(&state, lead_uuid, order_number.as_deref()).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
+            let preview = admin_preview_html(
+                "Patientenformular – Angaben und Erklärungen",
+                std::slice::from_ref(&generated_doc_id),
+            );
+            let pdf_bytes = match build_lead_self_disclosure_pdf(
+                &disclosure,
+                &agency,
+                order_reference.as_deref(),
+                &generated_doc_id,
+            ) {
+                Ok(generated) => {
+                    record_signature_anchors(&mut generated_bindings_snapshot, generated)
+                }
+                Err(message) => {
+                    tracing::error!(
+                        template_id = template.id,
+                        ?lead_id,
+                        "build lead self-disclosure PDF"
+                    );
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, message);
+                }
+            };
+            (preview, pdf_bytes)
+        }
         "payer_self_disclosure" => {
             let Some(lead_uuid) = lead_id else {
                 return gwg_sheet_refusal(
@@ -22848,6 +22914,929 @@ fn build_patient_payer_statement_pdf(
             .as_deref()
             .filter(|_| statement.organisation),
     );
+    Ok(finalize_generated_pdf(document, layout))
+}
+
+/// One person who acts for the lead, as the patient form names it: the role
+/// in German and the name.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct LeadDisclosurePerson {
+    role: &'static str,
+    name: String,
+}
+
+/// "Wer zahlt?" as the lead stated it in the cabinet: the patient himself, a
+/// person or an organisation with its basic data.
+#[derive(Clone, Debug, Default)]
+struct LeadDisclosurePayer {
+    self_payer: bool,
+    organisation: bool,
+    /// `person`, `company`, `organisation` or `insurance`.
+    payer_type: String,
+    /// The person's name, or the organisation's.
+    name: Option<String>,
+    legal_form: Option<String>,
+    register_number: Option<String>,
+    contact_name: Option<String>,
+    relationship: Option<String>,
+    citizenships: Vec<String>,
+    country: Option<String>,
+    city: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+    messenger: Option<String>,
+}
+
+/// What the lead sent through the cabinet, for the "Patientenformular –
+/// Angaben und Erklärungen" (owner request 2026-10-08). Only the lead's own
+/// answers and staff's identity document data: never the reason of the
+/// request, an upload or anything medical (Art. 9 DSGVO), never a risk
+/// point, level, trigger, sanctions screening or staff decision (§ 47 GwG),
+/// never the cost estimate — none of it is read.
+#[derive(Clone, Debug, Default)]
+struct LeadSelfDisclosure {
+    submitted_at: chrono::DateTime<chrono::Utc>,
+    salutation: Option<String>,
+    first_name: String,
+    middle_name: Option<String>,
+    last_name: String,
+    former_names: Option<String>,
+    date_of_birth: Option<NaiveDate>,
+    birth_place: Option<String>,
+    birth_country: Option<String>,
+    citizenships: Vec<String>,
+    street: Option<String>,
+    zip: Option<String>,
+    city: Option<String>,
+    country: Option<String>,
+    habitual_residence_country: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+    /// The identity document as staff entered it.
+    id_document_type: Option<String>,
+    id_document_number: Option<String>,
+    id_issuing_authority: Option<String>,
+    id_issuing_country: Option<String>,
+    id_issued_on: Option<NaiveDate>,
+    id_valid_until: Option<NaiveDate>,
+    /// Under 18 today: the legal representatives answer and sign.
+    minor: bool,
+    /// A minor's custody as stated (`joint`, `sole_parent`, `guardian`).
+    custody: Option<String>,
+    /// An adult's answers: somebody acts for him; legal guardianship.
+    has_representative: Option<bool>,
+    under_guardianship: Option<bool>,
+    /// Who acts for the lead: an adult's representative and legal guardian,
+    /// or a minor's legal representatives (who sign).
+    acting_persons: Vec<LeadDisclosurePerson>,
+    payer: Option<LeadDisclosurePayer>,
+    /// `None` until the own-interest question was answered.
+    acts_on_own_account: Option<bool>,
+    beneficial_owner_name: Option<String>,
+    beneficial_owner_note: Option<String>,
+    pep_self: Option<bool>,
+    pep_self_details: Option<String>,
+    pep_related: Option<bool>,
+    pep_related_details: Option<String>,
+    sanctions_links: Option<bool>,
+    sanctions_links_details: Option<String>,
+    // The follow-up answers (blocks A, B, F, H, J), where given.
+    pep_office: Option<String>,
+    pep_country: Option<String>,
+    pep_period: Option<String>,
+    pep_relationship: Option<String>,
+    pep_wealth_origin: Option<String>,
+    sanctions_link_name: Option<String>,
+    sanctions_link_kind: Option<String>,
+    sanctions_link_since_extent: Option<String>,
+    /// The self-payer's source of funds (one code of the cabinet) and words.
+    funds_source: Option<String>,
+    funds_description: Option<String>,
+    /// What the patient knows of a third party's funds.
+    payer_funds_source: Option<String>,
+    payer_funds_description: Option<String>,
+    occupation: Option<String>,
+    sector: Option<String>,
+    payment_background: Option<String>,
+    relationship_since: Option<String>,
+    residence_since: Option<String>,
+    other_residences: Option<String>,
+    stay_reason: Option<String>,
+    stay_reason_details: Option<String>,
+    former_citizenships: Vec<String>,
+}
+
+impl LeadSelfDisclosure {
+    /// "First Middle Last".
+    fn full_name(&self) -> String {
+        [
+            Some(self.first_name.as_str()),
+            self.middle_name.as_deref(),
+            Some(self.last_name.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+    }
+}
+
+/// 409 `lead_request_not_sent`: the patient form exists only once the lead
+/// sent the request.
+fn lead_request_not_sent() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "lead_request_not_sent",
+            "code": "lead_request_not_sent",
+            "message": "The lead has not sent the request yet",
+        })),
+    )
+        .into_response()
+}
+
+/// Reads the lead's own answers for the patient form; 409
+/// `lead_request_not_sent` until the request was sent. The reason of the
+/// request on the same row is never copied.
+async fn load_lead_self_disclosure(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<LeadSelfDisclosure, axum::response::Response> {
+    let failed = |error: sqlx::Error, what: &'static str| {
+        tracing::error!(%error, %lead_id, what, "load the lead's self-disclosure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the lead's answers",
+        )
+    };
+    let mut conn = state
+        .db
+        .acquire()
+        .await
+        .map_err(|error| failed(error, "connection"))?;
+    let row = sqlx::query(
+        r#"SELECT first_name, middle_name, last_name, date_of_birth, citizenships,
+                  street_address, zip_code, city, country, email, phone, portal_submitted_at
+           FROM leads
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| failed(error, "lead"))?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Lead not found"))?;
+    let Some(submitted_at) = row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_submitted_at")
+        .ok()
+        .flatten()
+    else {
+        return Err(lead_request_not_sent());
+    };
+    let text = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let (statements, _) = super::lead_portal_intake::load_identification(&mut *conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "statements"))?;
+    let follow_up = crate::risk::cabinet::load_statements(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "follow-up statements"))?;
+    let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "payer declaration"))?;
+    let (organisation_mask, _) = crate::risk::cabinet::payer_extras(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "organisation mask"))?;
+    let represented = super::lead_representatives::load(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "representation"))?
+        .unwrap_or_default();
+    drop(conn);
+
+    let representation = &represented.representation;
+    let custody = representation.answers.custody();
+    let acting_persons = representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some())
+        .map(|person| LeadDisclosurePerson {
+            role: if representation.minor {
+                if person.is_guardian_of_minor(custody) {
+                    "Vormund"
+                } else {
+                    "Elternteil"
+                }
+            } else if person.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN {
+                "Rechtliche/r Betreuer/in"
+            } else {
+                "Bevollmächtigte/r Vertreter/in"
+            },
+            name: person.name(),
+        })
+        .filter(|person| !person.name.is_empty())
+        .collect();
+    let mask = |key: &str| {
+        organisation_mask[key]
+            .as_str()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let payer = declaration.as_ref().map(|declaration| {
+        let organisation = declaration.is_organisation();
+        LeadDisclosurePayer {
+            self_payer: !declaration.is_third_party(),
+            organisation,
+            payer_type: declaration
+                .payer_type
+                .clone()
+                .unwrap_or_else(|| super::lead_payer::PAYER_TYPE_PERSON.to_string()),
+            name: declaration.payer_name(),
+            legal_form: mask("organisation_legal_form").filter(|_| organisation),
+            register_number: mask("organisation_register_number").filter(|_| organisation),
+            contact_name: mask("organisation_contact_name").filter(|_| organisation),
+            relationship: payer_relationship_label(
+                declaration.relationship_kind.as_deref(),
+                declaration.relationship.as_deref(),
+            ),
+            citizenships: declaration.citizenships.clone(),
+            country: declaration.country.clone(),
+            city: declaration.city.clone(),
+            email: declaration.email.clone(),
+            phone: declaration.phone.clone(),
+            messenger: declaration.messenger.clone(),
+        }
+    });
+    let own_account = declaration
+        .as_ref()
+        .filter(|declaration| declaration.own_account_answered);
+    Ok(LeadSelfDisclosure {
+        submitted_at,
+        salutation: statements.salutation,
+        first_name: text("first_name").unwrap_or_default(),
+        middle_name: text("middle_name"),
+        last_name: text("last_name").unwrap_or_default(),
+        former_names: statements.former_names,
+        date_of_birth: row
+            .try_get::<Option<NaiveDate>, _>("date_of_birth")
+            .ok()
+            .flatten(),
+        birth_place: statements.birth_place,
+        birth_country: statements.birth_country,
+        citizenships: row
+            .try_get::<Vec<String>, _>("citizenships")
+            .unwrap_or_default(),
+        street: text("street_address"),
+        zip: text("zip_code"),
+        city: text("city"),
+        country: text("country"),
+        habitual_residence_country: statements.habitual_residence_country,
+        email: text("email"),
+        phone: text("phone"),
+        id_document_type: statements.id_document_type,
+        id_document_number: statements.id_document_number,
+        id_issuing_authority: statements.id_issuing_authority,
+        id_issuing_country: statements.id_issuing_country,
+        id_issued_on: statements.id_issued_on,
+        id_valid_until: statements.id_valid_until,
+        minor: representation.minor,
+        custody: representation.answers.custody.clone(),
+        has_representative: representation.answers.has_representative,
+        under_guardianship: representation.answers.under_guardianship,
+        acting_persons,
+        acts_on_own_account: own_account.map(|declaration| declaration.acts_on_own_account),
+        beneficial_owner_name: own_account
+            .and_then(|declaration| declaration.beneficial_owner_name.clone()),
+        beneficial_owner_note: own_account
+            .and_then(|declaration| declaration.beneficial_owner_note.clone()),
+        pep_self: statements.pep_self,
+        pep_self_details: statements.pep_self_details,
+        pep_related: statements.pep_related,
+        pep_related_details: statements.pep_related_details,
+        sanctions_links: statements.sanctions_links,
+        sanctions_links_details: statements.sanctions_links_details,
+        pep_office: follow_up.pep_office,
+        pep_country: follow_up.pep_country,
+        pep_period: follow_up.pep_period,
+        pep_relationship: follow_up.pep_relationship,
+        pep_wealth_origin: follow_up.pep_wealth_origin,
+        sanctions_link_name: follow_up.sanctions_link_name,
+        sanctions_link_kind: follow_up.sanctions_link_kind,
+        sanctions_link_since_extent: follow_up.sanctions_link_since_extent,
+        funds_source: declaration
+            .as_ref()
+            .and_then(|declaration| declaration.self_funds_source.clone()),
+        funds_description: declaration
+            .as_ref()
+            .and_then(|declaration| declaration.self_funds_description.clone()),
+        payer_funds_source: declaration
+            .as_ref()
+            .and_then(|declaration| declaration.payer_funds_source_stated.clone()),
+        payer_funds_description: declaration
+            .as_ref()
+            .and_then(|declaration| declaration.payer_funds_description_stated.clone()),
+        payer,
+        occupation: statements.occupation,
+        sector: statements.sector,
+        payment_background: statements.payment_background,
+        relationship_since: follow_up.relationship_since,
+        residence_since: follow_up.residence_since,
+        other_residences: follow_up.other_residences,
+        stay_reason: follow_up.stay_reason,
+        stay_reason_details: follow_up.stay_reason_details,
+        former_citizenships: follow_up.former_citizenships,
+    })
+}
+
+/// "Ukraine, Deutschland": the German names of ISO country codes; `None`
+/// without any.
+fn german_country_list(codes: &[String]) -> Option<String> {
+    Some(
+        codes
+            .iter()
+            .map(|code| german_document_country(code))
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+    .filter(|line| !line.is_empty())
+}
+
+/// The German label of a source of funds the cabinet asks (one choice).
+fn lead_funds_source_label(source: &str) -> &str {
+    match source {
+        "income" => "Einkommen",
+        "savings" => "Ersparnisse",
+        "asset_sale" => "Verkauf von Vermögenswerten",
+        "inheritance_gift" => "Erbschaft / Schenkung",
+        "other" => "Sonstiges",
+        other => other,
+    }
+}
+
+/// Prints one section of the patient form: the numbered heading and its
+/// rows, or nothing at all when no row has content.
+fn lead_disclosure_section(
+    layout: &mut TreatmentPlanPdfLayout,
+    section: &mut PayerSectionCounter,
+    title: &str,
+    rows: &[(&str, Option<String>)],
+) {
+    let rows = rows
+        .iter()
+        .filter_map(|(label, value)| {
+            value
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| (*label, value))
+        })
+        .collect::<Vec<_>>();
+    if rows.is_empty() {
+        return;
+    }
+    // A heading never ends a page, and a label never stands without the
+    // first line of its value.
+    layout.ensure_space(26.0);
+    section.heading(layout, title);
+    for (label, value) in rows {
+        layout.ensure_space(16.0);
+        aml_labeled_value(layout, label, Some(value));
+    }
+}
+
+/// "Patientenformular – Angaben und Erklärungen" (owner request
+/// 2026-10-08): what the lead sent through the cabinet, with the
+/// declaration of § 11 Abs. 6 GwG, signed by the patient — for a minor by
+/// the legal representatives — in the lead's signature package. Prints only
+/// sections with content and never anything medical, assessed or decided
+/// (see [`LeadSelfDisclosure`]).
+fn build_lead_self_disclosure_pdf(
+    data: &LeadSelfDisclosure,
+    agency: &AgencyContractSettings,
+    order_number: Option<&str>,
+    document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    let (document, regular, bold) = new_admin_pdf()?;
+    let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
+    let date = |value: Option<NaiveDate>| value.map(|date| date.format("%d.%m.%Y").to_string());
+    let country = |value: Option<&str>| value.map(german_document_country);
+    let yes_no =
+        |answer: Option<bool>, details: Option<&str>| answer.map(|_| payer_yes_no(answer, details));
+    let patient_name = data.full_name();
+    let (sent_on, sent_at) = payer_date_time(data.submitted_at);
+    let minor = data.minor;
+
+    layout.text_block_centered(
+        "Patientenformular",
+        16.0,
+        true,
+        TreatmentPlanPdfColor::Body,
+        0.0,
+        1.0,
+    );
+    layout.text_block_centered(
+        "Angaben und Erklärungen nach dem Geldwäschegesetz (GwG)",
+        10.0,
+        false,
+        TreatmentPlanPdfColor::Muted,
+        0.0,
+        3.0,
+    );
+    admin_block(
+        &mut layout,
+        &if minor {
+            format!(
+                "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal. Für die minderjährige Patientin / den minderjährigen Patienten machen die gesetzlichen Vertreter die Angaben und bestätigen sie."
+            )
+        } else {
+            format!(
+                "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal."
+            )
+        },
+        0.0,
+        3.0,
+    );
+    legal_meta_grid(
+        &mut layout,
+        &[
+            (
+                "Patient/in",
+                aml_binding_value(Some(patient_name.as_str())).to_string(),
+            ),
+            (
+                "Geburtsdatum",
+                date(data.date_of_birth).unwrap_or_else(|| "—".to_string()),
+            ),
+            ("Auftrags-Nr.", aml_binding_value(order_number).to_string()),
+            ("Anfrage gesendet", format!("{sent_on} {sent_at}")),
+        ],
+    );
+
+    let mut section = PayerSectionCounter(0);
+    // 1. The person.
+    let birth_place = match (
+        data.birth_place
+            .as_deref()
+            .map(str::trim)
+            .filter(|place| !place.is_empty()),
+        country(data.birth_country.as_deref()),
+    ) {
+        (Some(place), Some(country)) => Some(format!("{place} ({country})")),
+        (Some(place), None) => Some(place.to_string()),
+        (None, country) => country,
+    };
+    let given_names = [Some(data.first_name.as_str()), data.middle_name.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    let address = Some(gwg_address_line(
+        data.street.as_deref(),
+        data.zip.as_deref(),
+        data.city.as_deref(),
+        data.country.as_deref(),
+    ))
+    .filter(|line| !line.is_empty());
+    let residence = data
+        .habitual_residence_country
+        .as_deref()
+        .filter(|code| {
+            data.country
+                .as_deref()
+                .is_none_or(|own| !own.trim().eq_ignore_ascii_case(code.trim()))
+        })
+        .map(german_document_country);
+    lead_disclosure_section(
+        &mut layout,
+        &mut section,
+        "Angaben zur Person",
+        &[
+            (
+                "Anrede",
+                data.salutation
+                    .as_deref()
+                    .and_then(|salutation| match salutation {
+                        "mr" => Some("Herr"),
+                        "ms" => Some("Frau"),
+                        _ => None,
+                    })
+                    .map(str::to_string),
+            ),
+            ("Vorname(n)", Some(given_names)),
+            ("Nachname", Some(data.last_name.clone())),
+            ("Frühere Namen", data.former_names.clone()),
+            ("Geburtsdatum", date(data.date_of_birth)),
+            ("Geburtsort (Land)", birth_place),
+            (
+                "Staatsangehörigkeit(en)",
+                german_country_list(&data.citizenships),
+            ),
+            ("Anschrift", address),
+            ("Gewöhnlicher Aufenthalt (falls abweichend)", residence),
+            ("E-Mail", data.email.clone()),
+            ("Telefon", data.phone.clone()),
+        ],
+    );
+
+    // 2. The identity document: staff enter it from the uploaded copy.
+    let identity_known = [
+        data.id_document_type.as_deref(),
+        data.id_document_number.as_deref(),
+        data.id_issuing_authority.as_deref(),
+        data.id_issuing_country.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !value.trim().is_empty())
+        || data.id_issued_on.is_some()
+        || data.id_valid_until.is_some();
+    let identity_rows: Vec<(&str, Option<String>)> = if identity_known {
+        vec![
+            (
+                "Art",
+                data.id_document_type.as_deref().map(|kind| {
+                    match kind {
+                        "passport" => "Reisepass",
+                        "id_card" => "Personalausweis",
+                        "residence_permit" => "Aufenthaltstitel",
+                        other => other,
+                    }
+                    .to_string()
+                }),
+            ),
+            ("Nummer", data.id_document_number.clone()),
+            ("Ausstellende Behörde", data.id_issuing_authority.clone()),
+            (
+                "Ausstellungsstaat",
+                country(data.id_issuing_country.as_deref()),
+            ),
+            ("Ausgestellt am", date(data.id_issued_on)),
+            ("Gültig bis", date(data.id_valid_until)),
+        ]
+    } else {
+        vec![("Ausweisdokument", Some("wird von GMED erfasst".to_string()))]
+    };
+    lead_disclosure_section(&mut layout, &mut section, "Ausweisdokument", &identity_rows);
+
+    // 3. Who acts for the lead.
+    let names_with_roles = data
+        .acting_persons
+        .iter()
+        .map(|person| format!("{} ({})", person.name, person.role))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let acting = |role: &str| {
+        data.acting_persons
+            .iter()
+            .find(|person| person.role == role)
+            .map(|person| person.name.as_str())
+    };
+    if minor {
+        lead_disclosure_section(
+            &mut layout,
+            &mut section,
+            "Gesetzliche Vertretung",
+            &[
+                (
+                    "Gesetzliche Vertreter/innen",
+                    Some(names_with_roles).filter(|line| !line.is_empty()),
+                ),
+                (
+                    "Sorgerecht",
+                    data.custody.as_deref().and_then(|custody| match custody {
+                        "joint" => Some("gemeinsames Sorgerecht beider Elternteile".to_string()),
+                        "sole_parent" => {
+                            Some("alleiniges Sorgerecht eines Elternteils".to_string())
+                        }
+                        "guardian" => Some("Vormundschaft".to_string()),
+                        _ => None,
+                    }),
+                ),
+            ],
+        );
+    } else {
+        lead_disclosure_section(
+            &mut layout,
+            &mut section,
+            "Vertretung",
+            &[
+                (
+                    "Eine andere Person handelt für mich (Vertreter/in, Bote, Bevollmächtigte/r)",
+                    yes_no(
+                        data.has_representative,
+                        acting("Bevollmächtigte/r Vertreter/in"),
+                    ),
+                ),
+                (
+                    "Rechtliche Betreuung",
+                    yes_no(data.under_guardianship, acting("Rechtliche/r Betreuer/in")),
+                ),
+            ],
+        );
+    }
+
+    // 4. Who pays.
+    if let Some(payer) = data.payer.as_ref() {
+        let residence = [payer.city.clone(), country(payer.country.as_deref())]
+            .into_iter()
+            .flatten()
+            .map(|part| part.trim().to_string())
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let residence = Some(residence).filter(|line| !line.is_empty());
+        let mut rows: Vec<(&str, Option<String>)> = Vec::new();
+        if payer.self_payer {
+            rows.push((
+                "Wer zahlt?",
+                Some(if minor {
+                    "Die Patientin / der Patient zahlt selbst.".to_string()
+                } else {
+                    "Ich zahle selbst.".to_string()
+                }),
+            ));
+        } else if payer.organisation {
+            rows.extend([
+                (
+                    "Wer zahlt?",
+                    Some(format!(
+                        "Eine Organisation ({})",
+                        payer_type_label(&payer.payer_type)
+                    )),
+                ),
+                ("Name", payer.name.clone()),
+                ("Rechtsform", payer.legal_form.clone()),
+                ("Registernummer", payer.register_number.clone()),
+                ("Ansprechpartner/in", payer.contact_name.clone()),
+                ("Sitz", residence),
+                ("E-Mail", payer.email.clone()),
+                ("Telefon", payer.phone.clone()),
+            ]);
+        } else {
+            rows.extend([
+                ("Wer zahlt?", Some("Eine andere Person".to_string())),
+                ("Name", payer.name.clone()),
+                (
+                    "Beziehung zur Patientin / zum Patienten",
+                    payer.relationship.clone(),
+                ),
+                (
+                    "Staatsangehörigkeit(en)",
+                    german_country_list(&payer.citizenships),
+                ),
+                ("Wohnsitz", residence),
+                ("E-Mail", payer.email.clone()),
+                ("Telefon", payer.phone.clone()),
+                ("Messenger / WhatsApp", payer.messenger.clone()),
+            ]);
+        }
+        let own_account = data.acts_on_own_account.map(|own| {
+            if own {
+                "ja".to_string()
+            } else {
+                let owner = [
+                    data.beneficial_owner_name.as_deref(),
+                    data.beneficial_owner_note.as_deref(),
+                ]
+                .into_iter()
+                .flatten()
+                .map(str::trim)
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" – ");
+                if owner.is_empty() {
+                    "nein".to_string()
+                } else {
+                    format!("nein – wirtschaftlich berechtigt: {owner}")
+                }
+            }
+        });
+        rows.push(("Handeln im eigenen wirtschaftlichen Interesse", own_account));
+        lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
+    }
+
+    // 5. The declarations, with the follow-up details where given.
+    let (pep_self_label, pep_related_label, sanctions_label) = if minor {
+        (
+            "Die Patientin / der Patient ist eine politisch exponierte Person (PEP)",
+            "Die Patientin / der Patient ist Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend",
+            "Die Patientin / der Patient hat Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden",
+        )
+    } else {
+        (
+            "Ich bin eine politisch exponierte Person (PEP)",
+            "Ich bin Familienmitglied einer politisch exponierten Person oder ihr bekanntermaßen nahestehend",
+            "Ich habe Verbindungen zu Personen oder Organisationen, gegen die Sanktionen verhängt wurden",
+        )
+    };
+    let declared =
+        data.pep_self.is_some() || data.pep_related.is_some() || data.sanctions_links.is_some();
+    if declared {
+        lead_disclosure_section(
+            &mut layout,
+            &mut section,
+            "Erklärungen",
+            &[
+                (
+                    pep_self_label,
+                    Some(payer_yes_no(
+                        data.pep_self,
+                        data.pep_self_details.as_deref(),
+                    )),
+                ),
+                (
+                    pep_related_label,
+                    Some(payer_yes_no(
+                        data.pep_related,
+                        data.pep_related_details.as_deref(),
+                    )),
+                ),
+                (
+                    sanctions_label,
+                    Some(payer_yes_no(
+                        data.sanctions_links,
+                        data.sanctions_links_details.as_deref(),
+                    )),
+                ),
+                (
+                    "Amt / Funktion der politisch exponierten Person",
+                    data.pep_office.clone(),
+                ),
+                ("Staat des Amtes", country(data.pep_country.as_deref())),
+                ("Zeitraum des Amtes", data.pep_period.clone()),
+                (
+                    "Beziehung zur politisch exponierten Person",
+                    data.pep_relationship.clone(),
+                ),
+                ("Herkunft des Vermögens", data.pep_wealth_origin.clone()),
+                (
+                    "Name der Person / Organisation",
+                    data.sanctions_link_name.clone(),
+                ),
+                (
+                    "Art der Verbindung",
+                    data.sanctions_link_kind
+                        .as_deref()
+                        .map(|kind| match kind {
+                            "family" => "familiär",
+                            "business" => "geschäftlich",
+                            "ownership" => "Beteiligung / Eigentum",
+                            "other" => "sonstige",
+                            other => other,
+                        })
+                        .map(str::to_string),
+                ),
+                (
+                    "Seit wann / Umfang",
+                    data.sanctions_link_since_extent.clone(),
+                ),
+            ],
+        );
+    }
+
+    // 6. The follow-up answers that exist.
+    let stay_reason = data.stay_reason.as_deref().map(|reason| {
+        let label = match reason {
+            "work" => "Arbeit",
+            "study" => "Studium",
+            "family" => "Familie",
+            "other" => "Sonstiges",
+            other => other,
+        };
+        match data
+            .stay_reason_details
+            .as_deref()
+            .map(str::trim)
+            .filter(|details| !details.is_empty())
+        {
+            Some(details) => format!("{label} – {details}"),
+            None => label.to_string(),
+        }
+    });
+    // The self-payer's own funds, or what the patient knows of a third
+    // party's funds and why it pays — each only for the payer stated now.
+    let self_pays = data.payer.as_ref().is_some_and(|payer| payer.self_payer);
+    let third_party_pays = data.payer.as_ref().is_some_and(|payer| !payer.self_payer);
+    let funds_label =
+        |source: Option<&String>| source.map(|source| lead_funds_source_label(source).to_string());
+    lead_disclosure_section(
+        &mut layout,
+        &mut section,
+        "Ergänzende Angaben",
+        &[
+            (
+                "Herkunft der Mittel",
+                funds_label(data.funds_source.as_ref()).filter(|_| self_pays),
+            ),
+            (
+                "Beschreibung der Mittelherkunft",
+                data.funds_description.clone().filter(|_| self_pays),
+            ),
+            (
+                "Herkunft der Mittel der zahlenden Person (soweit bekannt)",
+                funds_label(data.payer_funds_source.as_ref()).filter(|_| third_party_pays),
+            ),
+            (
+                "Beschreibung der Mittel der zahlenden Person",
+                data.payer_funds_description
+                    .clone()
+                    .filter(|_| third_party_pays),
+            ),
+            ("Beruf", data.occupation.clone()),
+            ("Branche", data.sector.clone()),
+            (
+                "Warum zahlt eine andere Person?",
+                data.payment_background.clone().filter(|_| third_party_pays),
+            ),
+            (
+                "Beziehung zur zahlenden Person seit",
+                data.relationship_since.clone().filter(|_| third_party_pays),
+            ),
+            ("Wohnsitz seit", data.residence_since.clone()),
+            ("Weitere Wohnsitze", data.other_residences.clone()),
+            ("Grund des Aufenthalts", stay_reason),
+            (
+                "Frühere Staatsangehörigkeiten",
+                german_country_list(&data.former_citizenships),
+            ),
+        ],
+    );
+
+    // 7. The declaration of § 11 Abs. 6 GwG and the signature of the
+    // patient side: the patient, for a minor every legal representative
+    // (frames `guardian_1`, `guardian_2` like the minors' consent).
+    layout.ensure_space(30.0);
+    section.heading(&mut layout, "Versicherung");
+    let representatives = data
+        .acting_persons
+        .iter()
+        .map(|person| person.name.clone())
+        .collect::<Vec<_>>();
+    let signers: Vec<String> = if minor {
+        if representatives.is_empty() {
+            let count = if data
+                .custody
+                .as_deref()
+                .is_none_or(|custody| custody == "joint")
+            {
+                2
+            } else {
+                1
+            };
+            vec!["____________________".to_string(); count]
+        } else {
+            representatives
+        }
+    } else {
+        vec![
+            Some(patient_name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "____________________".to_string()),
+        ]
+    };
+    admin_block(
+        &mut layout,
+        if !minor {
+            "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        } else if signers.len() > 1 {
+            "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        } else {
+            "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+        },
+        0.0,
+        2.0,
+    );
+    let anchors = (0..signers.len())
+        .map(|index| format!("guardian_{}", index + 1))
+        .collect::<Vec<_>>();
+    let parties = signers
+        .iter()
+        .enumerate()
+        .map(|(index, name)| AdminSignatureParty {
+            place: None,
+            date: None,
+            name: name.as_str(),
+            role: if minor {
+                "gesetzl. Vertreter/in"
+            } else {
+                "Patient/in"
+            },
+            anchor: Some(if minor {
+                anchors[index].as_str()
+            } else {
+                "client"
+            }),
+        })
+        .collect::<Vec<_>>();
+    admin_signature_rows(&mut layout, parties);
     Ok(finalize_generated_pdf(document, layout))
 }
 
@@ -32720,6 +33709,324 @@ mod tests {
             assert!(!definition.is_medical);
             assert!(is_fixed_legal_document_template(template));
             assert!(is_lead_allowed_document_template(template));
+        }
+    }
+
+    /// What the lead's patient form never carries: nothing medical, no risk
+    /// assessment, no sanctions screening, no staff decision, no estimate.
+    fn assert_no_assessment_or_medical_data(text: &str) {
+        assert_nothing_medical_or_assessed(text);
+        for word in [
+            "Risiko",
+            "Punkte",
+            "Treffer",
+            "Sanktionsliste",
+            "Prüfung",
+            "Verdacht",
+            "Kostenvoranschlag",
+            "Kostenkalkulation",
+            "Zweitmeinung",
+            "Anfragegrund",
+        ] {
+            assert!(!text.contains(word), "{word} in {text}");
+        }
+    }
+
+    fn anna_lead_disclosure() -> super::LeadSelfDisclosure {
+        super::LeadSelfDisclosure {
+            submitted_at: Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap(),
+            salutation: Some("ms".to_string()),
+            first_name: "Anna".to_string(),
+            middle_name: Some("Maria".to_string()),
+            last_name: "Muster".to_string(),
+            former_names: Some("Anna Beispiel".to_string()),
+            date_of_birth: NaiveDate::from_ymd_opt(1988, 4, 12),
+            birth_place: Some("Kyiv".to_string()),
+            birth_country: Some("UA".to_string()),
+            citizenships: vec!["UA".to_string(), "DE".to_string()],
+            street: Some("Musterweg 1".to_string()),
+            zip: Some("10115".to_string()),
+            city: Some("Berlin".to_string()),
+            country: Some("DE".to_string()),
+            habitual_residence_country: Some("AT".to_string()),
+            email: Some("anna.muster@example.com".to_string()),
+            phone: Some("+49 30 100001".to_string()),
+            id_document_type: Some("passport".to_string()),
+            id_document_number: Some("FA7654321".to_string()),
+            id_issuing_authority: Some("Passamt 8031".to_string()),
+            id_issuing_country: Some("UA".to_string()),
+            id_issued_on: NaiveDate::from_ymd_opt(2021, 2, 1),
+            id_valid_until: NaiveDate::from_ymd_opt(2031, 1, 31),
+            has_representative: Some(true),
+            under_guardianship: Some(false),
+            acting_persons: vec![super::LeadDisclosurePerson {
+                role: "Bevollmächtigte/r Vertreter/in",
+                name: "Ben Muster".to_string(),
+            }],
+            payer: Some(super::LeadDisclosurePayer {
+                payer_type: "person".to_string(),
+                name: Some("Viktor Zahler".to_string()),
+                relationship: Some("Onkel".to_string()),
+                citizenships: vec!["AT".to_string()],
+                country: Some("AT".to_string()),
+                city: Some("Wien".to_string()),
+                email: Some("viktor.zahler@example.com".to_string()),
+                phone: Some("+43 1 234567".to_string()),
+                ..Default::default()
+            }),
+            acts_on_own_account: Some(true),
+            pep_self: Some(false),
+            pep_related: Some(true),
+            pep_related_details: Some("Bruder, Bürgermeister".to_string()),
+            sanctions_links: Some(false),
+            pep_office: Some("Bürgermeister".to_string()),
+            pep_country: Some("UA".to_string()),
+            pep_period: Some("2015 bis 2020".to_string()),
+            pep_relationship: Some("Bruder".to_string()),
+            payer_funds_source: Some("inheritance_gift".to_string()),
+            payer_funds_description: Some("Erbe der Eltern".to_string()),
+            occupation: Some("Lehrerin".to_string()),
+            sector: Some("Bildung".to_string()),
+            payment_background: Some("Der Onkel unterstützt die Familie.".to_string()),
+            relationship_since: Some("seit der Geburt".to_string()),
+            residence_since: Some("2019".to_string()),
+            stay_reason: Some("work".to_string()),
+            stay_reason_details: Some("Lehrerin an einer Schule".to_string()),
+            former_citizenships: vec!["SY".to_string()],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_lead_self_disclosure_is_a_fixed_internal_lead_document() {
+        let definition = document_template_by_id("lead_self_disclosure").unwrap();
+        assert_eq!(definition.art, "lead_self_disclosure");
+        assert_eq!(definition.category, "compliance_aml");
+        assert_eq!(definition.default_visibility, "internal");
+        assert_eq!(definition.default_status, "active");
+        assert_eq!(definition.languages, ["de"]);
+        assert_eq!(
+            definition.label,
+            "Patientenformular – Angaben und Erklärungen"
+        );
+        assert!(!definition.is_medical);
+        assert!(is_fixed_legal_document_template("lead_self_disclosure"));
+        assert!(is_lead_allowed_document_template("lead_self_disclosure"));
+        assert_eq!(super::lead_funds_source_label("income"), "Einkommen");
+        assert_eq!(
+            super::lead_funds_source_label("inheritance_gift"),
+            "Erbschaft / Schenkung"
+        );
+        assert_eq!(
+            super::lead_funds_source_label("asset_sale"),
+            "Verkauf von Vermögenswerten"
+        );
+    }
+
+    #[test]
+    fn the_lead_self_disclosure_prints_the_answers_and_one_patient_signature() {
+        let generated = super::build_lead_self_disclosure_pdf(
+            &anna_lead_disclosure(),
+            &legal_test_agency(),
+            Some("A-20261007-0001"),
+            "DOC-LEAD-SD-0001",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["client"]);
+        assert_signature_frames_detected(&generated);
+        let text = assert_legal_pdf_chrome(&generated, "DOC-LEAD-SD-0001");
+        assert_no_assessment_or_medical_data(&text);
+        for expected in [
+            "Patientenformular",
+            "Angaben und Erklärungen nach dem Geldwäschegesetz (GwG)",
+            "übermittelt am 07.10.2026 um 10:30 über das Patientenportal.",
+            "A-20261007-0001",
+            "1. Angaben zur Person",
+            "Anrede Frau",
+            "Vorname(n) Anna Maria",
+            "Nachname Muster",
+            "Frühere Namen Anna Beispiel",
+            "12.04.1988",
+            "Kyiv (Ukraine)",
+            "Ukraine, Deutschland",
+            "Musterweg 1, 10115 Berlin, Deutschland",
+            "Österreich",
+            "anna.muster@example.com",
+            "+49 30 100001",
+            "2. Ausweisdokument",
+            "Reisepass",
+            "FA7654321",
+            "Passamt 8031",
+            "31.01.2031",
+            "3. Vertretung",
+            "ja – Ben Muster",
+            "Rechtliche Betreuung nein",
+            "4. Wer zahlt?",
+            "Eine andere Person",
+            "Viktor Zahler",
+            "Onkel",
+            "Wien, Österreich",
+            "viktor.zahler@example.com",
+            "Handeln im eigenen wirtschaftlichen Interesse ja",
+            "5. Erklärungen",
+            "Ich bin eine politisch exponierte Person (PEP) nein",
+            "ja – Bruder, Bürgermeister",
+            "gegen die Sanktionen verhängt wurden nein",
+            "Staat des Amtes Ukraine",
+            "2015 bis 2020",
+            "6. Ergänzende Angaben",
+            "Erbschaft / Schenkung",
+            "Erbe der Eltern",
+            "Beruf Lehrerin",
+            "Branche Bildung",
+            "Der Onkel unterstützt die Familie.",
+            "seit der Geburt",
+            "Wohnsitz seit 2019",
+            "Arbeit – Lehrerin an einer Schule",
+            "Frühere Staatsangehörigkeiten Syrien",
+            "7. Versicherung",
+            "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG).",
+            "Anna Maria Muster",
+            "Unterschrift Patient/in",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        assert!(!text.contains("gesetzl. Vertreter/in"), "{text}");
+        assert!(!text.contains("wird von GMED erfasst"), "{text}");
+    }
+
+    #[test]
+    fn a_minors_self_disclosure_is_signed_by_the_legal_representatives() {
+        let parents = super::LeadSelfDisclosure {
+            first_name: "Mia".to_string(),
+            middle_name: None,
+            last_name: "Muster".to_string(),
+            date_of_birth: NaiveDate::from_ymd_opt(2015, 6, 1),
+            minor: true,
+            custody: Some("joint".to_string()),
+            has_representative: None,
+            under_guardianship: None,
+            acting_persons: vec![
+                super::LeadDisclosurePerson {
+                    role: "Elternteil",
+                    name: "Anna Muster".to_string(),
+                },
+                super::LeadDisclosurePerson {
+                    role: "Elternteil",
+                    name: "Ben Muster".to_string(),
+                },
+            ],
+            payer: Some(super::LeadDisclosurePayer {
+                self_payer: true,
+                ..Default::default()
+            }),
+            funds_source: Some("savings".to_string()),
+            funds_description: Some("Ersparnisse der Familie".to_string()),
+            payment_background: Some("bleibt unberücksichtigt".to_string()),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &parents,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0002",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+        assert_signature_frames_detected(&generated);
+        let text = assert_legal_pdf_chrome(&generated, "DOC-LEAD-SD-0002");
+        assert_no_assessment_or_medical_data(&text);
+        for expected in [
+            "machen die gesetzlichen Vertreter die Angaben",
+            "3. Gesetzliche Vertretung",
+            "Anna Muster (Elternteil), Ben Muster (Elternteil)",
+            "gemeinsames Sorgerecht beider Elternteile",
+            "Die Patientin / der Patient zahlt selbst.",
+            "Die Patientin / der Patient ist eine politisch exponierte Person (PEP) nein",
+            "Herkunft der Mittel Ersparnisse",
+            "Ersparnisse der Familie",
+            "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind.",
+            "Unterschrift gesetzl. Vertreter/in",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        assert!(!text.contains("Unterschrift Patient/in"), "{text}");
+        // Why a third party pays belongs to a third party only.
+        assert!(!text.contains("bleibt unberücksichtigt"), "{text}");
+
+        // One representative (sole custody) signs alone; nobody named yet
+        // leaves the lines of the custody.
+        let sole = super::LeadSelfDisclosure {
+            custody: Some("sole_parent".to_string()),
+            acting_persons: vec![super::LeadDisclosurePerson {
+                role: "Elternteil",
+                name: "Anna Muster".to_string(),
+            }],
+            ..parents.clone()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &sole,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0003",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["guardian_1"]);
+        assert_signature_frames_detected(&generated);
+        let text = normalized_pdf_text(&generated);
+        assert!(
+            text.contains("Ich versichere als gesetzliche/r Vertreter/in"),
+            "{text}"
+        );
+        let unnamed = super::LeadSelfDisclosure {
+            custody: None,
+            acting_persons: Vec::new(),
+            ..parents
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &unnamed,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0004",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["guardian_1", "guardian_2"]);
+    }
+
+    #[test]
+    fn the_lead_self_disclosure_prints_only_sections_with_content() {
+        let minimal = super::LeadSelfDisclosure {
+            submitted_at: Utc.with_ymd_and_hms(2026, 10, 7, 8, 30, 0).unwrap(),
+            first_name: "Anna".to_string(),
+            last_name: "Muster".to_string(),
+            ..Default::default()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &minimal,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0005",
+        )
+        .unwrap();
+        assert_eq!(recorded_roles(&generated), ["client"]);
+        let text = normalized_pdf_text(&generated);
+        for expected in [
+            "1. Angaben zur Person",
+            "2. Ausweisdokument",
+            "wird von GMED erfasst",
+            "3. Versicherung",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        for absent in [
+            "Vertretung",
+            "Wer zahlt?",
+            ". Erklärungen",
+            "Ergänzende Angaben",
+            "Frühere Namen",
+            "Anrede",
+        ] {
+            assert!(!text.contains(absent), "{absent} in {text}");
         }
     }
 

@@ -130,6 +130,7 @@ pub(super) fn invitation_label(
         "order_cost_estimate" | "payer_cost_estimate" => "Kostenvoranschlag",
         "cost_coverage_declaration" => "Kostenübernahmeerklärung",
         "payer_self_disclosure" => "Selbstauskunft der zahlenden Person",
+        "lead_self_disclosure" => "Patientenformular – Angaben und Erklärungen",
         "patient_payer_statement" => "Erklärung zur Kostenübernahme durch Dritte",
         "confidentiality_release" => "Schweigepflichtsentbindung",
         "privacy_consents" | "privacy_consent" | "consent" => "Einwilligungserklärung",
@@ -315,6 +316,20 @@ mod tests {
             invitation_label(Some("payer_cost_estimate"), "x", false),
             "Kostenvoranschlag"
         );
+    }
+
+    #[test]
+    fn the_leads_patient_form_identifies_a_person_and_needs_a_qes() {
+        assert_eq!(
+            minimum_level(Some("lead_self_disclosure"), "lead_self_disclosure"),
+            Level::Qes
+        );
+        assert_eq!(
+            invitation_label(Some("lead_self_disclosure"), "x", false),
+            "Patientenformular – Angaben und Erklärungen"
+        );
+        assert_eq!(companion(Some("lead_self_disclosure")), None);
+        assert!(!informational(Some("lead_self_disclosure")));
     }
 
     #[test]

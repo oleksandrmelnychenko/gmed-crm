@@ -222,6 +222,8 @@ const DOCUMENT_ART_LABELS: Record<string, string> = {
   cost_estimate: "Vorläufige Kostenkalkulation",
   enhanced_due_diligence: "Durchführung verstärkter Sorgfaltspflichten",
   framework_contract: "Rahmendienstleistungsvertrag",
+  // The lead's own answers of the cabinet, signed in the lead's package.
+  lead_self_disclosure: "Patientenformular – Angaben und Erklärungen",
   medication_summary: "Medikamentenübersicht",
   patient_sticker: "Patientenetikett",
   privacy_information: "Informationsblatt zum Datenschutz",

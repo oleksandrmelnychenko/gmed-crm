@@ -1944,7 +1944,38 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .collect();
     assert_eq!(guardians, ["anna@example.org", "bernd@example.org"]);
 
-    // The legacy endpoint accepts the minors' preset.
+    // Once the child's patient form exists (the request was sent) it joins
+    // the preset after the order; the guardians sign it like the consent.
+    let form = upload(
+        &env,
+        holder,
+        Doc::new("lead_self_disclosure", 1)
+            .visibility("internal")
+            .anchors(json!([anchor("guardian_1", 0), anchor("guardian_2", 0)])),
+    )
+    .await;
+    sqlx::query("UPDATE documents SET patient_id=NULL, lead_id=$2 WHERE id=$1")
+        .bind(form)
+        .bind(lead)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    let (status, candidates) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/signature-packages/candidates?document_id={contract}"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{candidates}");
+    assert_eq!(
+        candidates["preset_document_ids"],
+        json!([order, form, child])
+    );
+
+    // The legacy endpoint accepts the minors' preset; the patient form is
+    // optional in it.
     let signers = json!([
         signer("Anna", "anna@example.org", "client"),
         signer("Bernd", "bernd@example.org", "client"),

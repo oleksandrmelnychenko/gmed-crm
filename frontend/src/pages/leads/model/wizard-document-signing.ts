@@ -10,6 +10,9 @@ const SIGNABLE_DOCUMENT_TYPES = new Set([
   "enhanced_due_diligence",
   // The third-party payer's Kostenübernahmeerklärung (payer and GMED sign it).
   "cost_coverage_declaration",
+  // The lead's patient form ("Patientenformular – Angaben und Erklärungen"):
+  // only the patient side signs it.
+  "lead_self_disclosure",
 ]);
 
 type SigningDocument = Pick<DocumentItem,
@@ -17,8 +20,8 @@ type SigningDocument = Pick<DocumentItem,
 > & Partial<Pick<DocumentItem, "lead_id" | "patient_id">>;
 
 // During lead intake the framework contract sends the whole onboarding package:
-// the order and both consents are signed inside it, not one by one.
-const LEAD_INTAKE_PACKAGE_MEMBERS = new Set(["single_order", "confidentiality_release"]);
+// the order, the patient form and both consents are signed inside it, not one by one.
+const LEAD_INTAKE_PACKAGE_MEMBERS = new Set(["single_order", "confidentiality_release", "lead_self_disclosure"]);
 
 // A wizard action policy, not a replacement for the signing API's permissions.
 // Use document types, not translated titles or filenames (e.g. privacy notices).

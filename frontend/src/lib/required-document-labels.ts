@@ -129,6 +129,7 @@ const DOCUMENT_ART_LABEL_CODES = [
   "privacy_information",
   "enhanced_due_diligence",
   "gwg_identification",
+  "lead_self_disclosure",
   "payer_self_disclosure",
   "patient_payer_statement",
   "payer_cost_estimate",

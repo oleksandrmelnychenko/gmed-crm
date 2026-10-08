@@ -202,6 +202,8 @@ type Mock = {
   motherOnly?: boolean;
   /** The server refuses to make a sheet for a representative. */
   refuseSheet?: boolean;
+  /** When the lead (here: a parent) sent the request in the cabinet; not sent by default. */
+  requestSentAt?: string;
 };
 
 async function mount(page: Page, mock: Mock) {
@@ -257,9 +259,9 @@ async function mount(page: Page, mock: Mock) {
         fill_mode: "patient",
         patient_fields: {},
         patient_payer: null,
-        progress: { filled: 9, total: 12, documents: 0, submitted_at: null },
-        submitted_at: null,
-        submitted_by: null,
+        progress: { filled: 9, total: 12, documents: 0, submitted_at: mock.requestSentAt ?? null },
+        submitted_at: mock.requestSentAt ?? null,
+        submitted_by: mock.requestSentAt ? "guardian" : null,
         consents: [],
         uploads: [],
         uploads_hidden: false,
@@ -575,6 +577,39 @@ test("a refused sheet says why, in German too", async ({ page }) => {
     "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst.",
   );
   expect(calls.generated).toHaveLength(1);
+});
+
+test("the patient form waits until the request was sent", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "de" });
+
+  const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
+  await expect(section).toHaveAttribute("data-available", "false");
+  await expect(section.getByRole("heading", { name: "Patientenformular", exact: true })).toBeVisible();
+  await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveText(
+    "Das Dokument kann erstellt werden, sobald der Patient die Anfrage im Kabinett gesendet hat.",
+  );
+  await expect(section).toContainText("Dokument wurde noch nicht erstellt");
+  expect(calls.generated).toHaveLength(0);
+});
+
+test("after the request was sent staff create the patient form from the server's data", async ({ page }) => {
+  const { wizard, calls } = await mount(page, { lang: "ru", requestSentAt: "2026-10-07T08:30:00Z" });
+
+  const section = wizard.getByTestId("lead-wizard-self-disclosure-section");
+  await expect(section).toHaveAttribute("data-available", "true");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveCount(0);
+  await section.getByRole("button", { name: "Создать документ", exact: true }).click();
+  await expect.poll(() => calls.generated.length).toBe(1);
+  expect(calls.generated[0]).toMatchObject({
+    template_id: "lead_self_disclosure",
+    lead_id: leadId,
+    language: "de",
+    status: "active",
+  });
+  // The first form replaces nothing; the GwG sheets stay where they are.
+  expect(calls.generated[0]).not.toHaveProperty("replace_document_id");
+  await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
 });
 
 test("staff state who represents the child, and the block warns when it does not fit", async ({ page }, testInfo) => {

@@ -7,11 +7,12 @@ import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature
  * Where the onboarding package of a lead is sent for e-signature; the client
  * signs first, GMED second. The package source decides what the composer
  * preselects (backend `signing_companions`):
- * - a new framework contract: contract, order, Schweigepflichtsentbindung and
- *   DSGVO consents (the guardians' declaration for a minor);
+ * - a new framework contract: contract, order, the patient form once the
+ *   lead sent the request (`lead_self_disclosure`), Schweigepflichtsentbindung
+ *   and DSGVO consents (the guardians' declaration for a minor);
  * - no new contract (a signed contract of the patient still applies, or none
- *   is generated yet): the order with the Schweigepflichtsentbindung and the
- *   DSGVO consents;
+ *   is generated yet): the order with the patient form, the
+ *   Schweigepflichtsentbindung and the DSGVO consents;
  * - neither: the lead's package composer with a free choice.
  * The action renders only for roles that may send invitations (CEO, patient
  * manager).
@@ -43,18 +44,18 @@ export function LeadSigningPackagePanel({
 
   const description = contractDocument
     ? tx(
-        "Клиент получает одно приглашение: рамочный договор, заказ, освобождение от врачебной тайны и согласие DSGVO. Сначала подписывает клиент, затем GMED.",
-        "Der Kunde erhält eine Einladung: Rahmenvertrag, Auftrag, Schweigepflichtsentbindung und DSGVO-Einwilligung. Zuerst unterschreibt der Kunde, danach GMED.",
+        "Клиент получает одно приглашение: рамочный договор, заказ, анкета пациента (если создана), освобождение от врачебной тайны и согласие DSGVO. Сначала подписывает клиент, затем GMED.",
+        "Der Kunde erhält eine Einladung: Rahmenvertrag, Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung. Zuerst unterschreibt der Kunde, danach GMED.",
       )
     : orderDocument
       ? inheritedContract
         ? tx(
-            "Действует ранее подписанный рамочный договор. Клиент получает одно приглашение: заказ, освобождение от врачебной тайны и согласие DSGVO.",
-            "Es gilt ein bereits unterzeichneter Rahmenvertrag. Der Kunde erhält eine Einladung: Auftrag, Schweigepflichtsentbindung und DSGVO-Einwilligung.",
+            "Действует ранее подписанный рамочный договор. Клиент получает одно приглашение: заказ, анкета пациента (если создана), освобождение от врачебной тайны и согласие DSGVO.",
+            "Es gilt ein bereits unterzeichneter Rahmenvertrag. Der Kunde erhält eine Einladung: Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung.",
           )
         : tx(
-            "Рамочного договора ещё нет — пакет уйдёт с заказом, освобождением от врачебной тайны и согласием DSGVO. Лучше сначала создать договор ниже, тогда он войдёт в тот же пакет.",
-            "Noch kein Rahmenvertrag – das Paket geht mit Auftrag, Schweigepflichtsentbindung und DSGVO-Einwilligung. Besser zuerst unten den Vertrag erstellen, dann ist er im selben Paket.",
+            "Рамочного договора ещё нет — пакет уйдёт с заказом, анкетой пациента (если создана), освобождением от врачебной тайны и согласием DSGVO. Лучше сначала создать договор ниже, тогда он войдёт в тот же пакет.",
+            "Noch kein Rahmenvertrag – das Paket geht mit Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung. Besser zuerst unten den Vertrag erstellen, dann ist er im selben Paket.",
           )
       : tx(
           "Создайте рамочный договор и заказ ниже — они уходят на подпись одним пакетом вместе с освобождением от врачебной тайны и согласием DSGVO. Отдельные документы можно выбрать в окне подписи.",

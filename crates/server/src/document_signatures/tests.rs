@@ -40,6 +40,8 @@ fn consent_documents_require_only_the_patient_side_signature() {
         "privacy_consents",
         "consent_data_release_child",
         "consent_data_release_single",
+        // The lead's patient form: a declaration of the client alone.
+        "lead_self_disclosure",
     ] {
         assert_eq!(
             signer_policy_for_parts(Some(template), None, "document"),
@@ -47,6 +49,15 @@ fn consent_documents_require_only_the_patient_side_signature() {
             "unexpected signer policy for {template}"
         );
     }
+    assert_eq!(
+        signer_policy_for_parts(None, None, "lead_self_disclosure"),
+        SignerPolicy::ClientOnly
+    );
+    // Inside the lead's package the contract still needs GMED as well.
+    assert_eq!(
+        SignerPolicy::combine([SignerPolicy::BothParties, SignerPolicy::ClientOnly]),
+        Ok(SignerPolicy::BothParties)
+    );
     for compliance_kind in ["dsgvo", "confidentiality_release"] {
         assert_eq!(
             signer_policy_for_parts(None, Some(compliance_kind), "document"),

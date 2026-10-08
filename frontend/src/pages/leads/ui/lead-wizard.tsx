@@ -95,6 +95,11 @@ import {
   type GwgSheetButton,
 } from "../model/gwg-identification";
 import { identificationErrorText, payerSamePerson } from "../model/lead-identification";
+import {
+  LEAD_SELF_DISCLOSURE_TEMPLATE,
+  leadSelfDisclosureAvailable,
+  leadSelfDisclosureErrorText,
+} from "../model/lead-self-disclosure";
 import { representativeName } from "../model/lead-gwg-statements";
 import {
   TRUSTED_CONTACT_RELATIONS,
@@ -433,7 +438,8 @@ type WizardDocumentKind =
   | "privacy_information"
   | "privacy_consents"
   | "enhanced_due_diligence"
-  | "gwg_identification";
+  | "gwg_identification"
+  | "lead_self_disclosure";
 type CommercialDocumentKind =
   | "framework_contract"
   | "single_order"
@@ -2120,6 +2126,7 @@ function wizardDocumentKind(item: DocumentItem): WizardDocumentKind | null {
   if (templateId === "privacy_information") return "privacy_information";
   if (templateId === "enhanced_due_diligence") return "enhanced_due_diligence";
   if (templateId === GWG_IDENTIFICATION_TEMPLATE) return "gwg_identification";
+  if (templateId === LEAD_SELF_DISCLOSURE_TEMPLATE) return "lead_self_disclosure";
 
   const complianceKind = item.compliance_kind?.trim().toLowerCase();
   if (complianceKind === "identity" || complianceKind === "confidentiality_release") {
@@ -2164,8 +2171,8 @@ function wizardDocumentComplianceKind(document: DocumentItem): DocumentComplianc
   if (document.generated_template_id === "framework_contract") return "framework_contract";
   const kind = wizardDocumentKind(document);
   if (kind === "privacy_consents") return "dsgvo";
-  // An internal GwG record touches no compliance flag of the lead.
-  if (kind === "gwg_identification") return "other";
+  // An internal GwG record or the lead's patient form touches no compliance flag of the lead.
+  if (kind === "gwg_identification" || kind === "lead_self_disclosure") return "other";
   return kind === "privacy_information" ? null : kind;
 }
 
@@ -2182,7 +2189,9 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
 function errorText(error: unknown, tx: Tx): string {
   const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx);
   if (payerGate) return payerGate;
-  const representation = gwgSheetErrorText(error, tx) ?? identificationErrorText(error, tx);
+  const representation = gwgSheetErrorText(error, tx)
+    ?? identificationErrorText(error, tx)
+    ?? leadSelfDisclosureErrorText(error, tx);
   if (representation) return representation;
   if (error instanceof Error && error.message === "Generate the current order document before confirming its signatures") {
     return tx("Сначала создайте актуальную версию документа заказа, затем подтвердите подписи", "Erstellen Sie zuerst die aktuelle Auftragsversion und bestätigen Sie anschließend die Unterschriften");
@@ -3658,6 +3667,8 @@ export function LeadWizard({
   // Trigger flow 2026-10-07: points, level, blocks and staff decisions of the lead's risk assessment.
   const risk = useLeadRiskAssessment(open && step === "documents" ? leadId : null, enhancedCheckVersion);
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
+  // The patient form is filled from the sent request: nothing to generate before.
+  const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
   const patientUploadDocuments = useMemo(() => {
     const ids = new Set(step1Portal.intake?.uploads.map((upload) => upload.document_id) ?? []);
     return documents.filter((item) => ids.has(item.id) && !item.file_deleted_at && item.has_stored_file !== false);
@@ -4021,6 +4032,7 @@ export function LeadWizard({
       privacy_consents: [],
       enhanced_due_diligence: [],
       gwg_identification: [],
+      lead_self_disclosure: [],
     };
     const seenDocumentIds = new Set<string>();
     [...currentPatientEvidence, ...documents].forEach((item) => {
@@ -5341,7 +5353,9 @@ export function LeadWizard({
       | "confidentiality_release"
       | "privacy_information"
       | "privacy_consents"
-      | "enhanced_due_diligence",
+      | "enhanced_due_diligence"
+      // Filled by the server from the sent request only; the bindings below change nothing in it.
+      | typeof LEAD_SELF_DISCLOSURE_TEMPLATE,
   ): Promise<boolean> {
     if (!draft) return false;
     setBusy(`generate-${templateId}`);
@@ -7764,6 +7778,58 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Section>
               </div>
+              {/* The lead's own answers as a document, signed inside the lead's package (owner request 2026-10-08). */}
+              {leadId ? (
+                <div data-testid="lead-wizard-self-disclosure-section" data-available={leadRequestSent ? "true" : "false"}>
+                  <Section
+                    className={WIZARD_DOCUMENT_SECTION_CLASS}
+                    title={tx("Анкета пациента (Patientenformular)", "Patientenformular")}
+                    accessory={(
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        className="h-8 rounded-lg"
+                        disabled={isBusy || !leadRequestSent}
+                        title={leadRequestSent ? undefined : tx("Доступно после отправки заявки пациентом", "Verfügbar, nachdem der Patient die Anfrage gesendet hat")}
+                        onClick={() => void generateLeadComplianceDocument(LEAD_SELF_DISCLOSURE_TEMPLATE)}
+                      >
+                        {busy === `generate-${LEAD_SELF_DISCLOSURE_TEMPLATE}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+                        {wizardDocuments.lead_self_disclosure.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
+                      </Button>
+                    )}
+                  >
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {tx(
+                        "Ответы пациента из кабинета: личные данные, документ, представители, кто платит, заявления и дополнительные ответы — без причины обращения и медицинских данных. Подписывает пациент (за несовершеннолетнего — законные представители) в одном пакете с договором, заказом и согласиями.",
+                        "Angaben des Patienten aus dem Kabinett: Personalien, Ausweis, Vertretung, Kostenträger, Erklärungen und ergänzende Angaben – ohne Anliegen und medizinische Angaben. Es unterschreibt der Patient (bei Minderjährigen die gesetzlichen Vertreter) im selben Paket wie Vertrag, Auftrag und Einwilligungen.",
+                      )}
+                    </p>
+                    {!leadRequestSent ? (
+                      <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-self-disclosure-hint">
+                        {tx(
+                          "Документ можно создать после того, как пациент отправит заявку в кабинете.",
+                          "Das Dokument kann erstellt werden, sobald der Patient die Anfrage im Kabinett gesendet hat.",
+                        )}
+                      </p>
+                    ) : null}
+                    <WizardDocumentRows
+                      documents={wizardDocuments.lead_self_disclosure}
+                      complianceKind="other"
+                      emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                      lang={lang}
+                      busy={busy}
+                      disabled={isBusy}
+                      tx={tx}
+                      onOpen={(document) => void openOrDownloadDocument(document)}
+                      onDownload={(document) => void downloadDocument(document)}
+                      onSign={(document, kind) => void signDocument(document.id, kind)}
+                      onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                      onChanged={() => { void refreshDocumentsState(); }}
+                    />
+                  </Section>
+                </div>
+              ) : null}
               <div id={CONFIDENTIALITY_RELEASE_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}

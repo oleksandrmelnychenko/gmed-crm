@@ -26,6 +26,9 @@ describe("electronic signing in the lead wizard", () => {
     expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "framework_contract" })).toBe(true);
     expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "single_order" })).toBe(false);
     expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "confidentiality_release" })).toBe(false);
+    // The lead's patient form travels in the same invitation.
+    expect(canSignWizardDocument({ ...pdf, ...intake, generated_template_id: "lead_self_disclosure" })).toBe(false);
+    expect(canSignWizardDocument({ ...pdf, lead_id: "lead", patient_id: "patient", generated_template_id: "lead_self_disclosure" })).toBe(true);
     // An existing patient still signs a new order on its own.
     expect(canSignWizardDocument({ ...pdf, lead_id: "lead", patient_id: "patient", generated_template_id: "single_order" })).toBe(true);
   });

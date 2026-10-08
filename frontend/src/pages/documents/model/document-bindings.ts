@@ -91,6 +91,8 @@ const FIXED_LEGAL_TEMPLATE_IDS = new Set([
   "privacy_consents",
   "enhanced_due_diligence",
   "gwg_identification",
+  // The lead's patient form: filled by the server from the sent request.
+  "lead_self_disclosure",
   // The payer's signature package (phase 3b): no free-form overrides.
   "payer_self_disclosure",
   "patient_payer_statement",
