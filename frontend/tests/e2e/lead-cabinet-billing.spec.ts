@@ -452,7 +452,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect(billing.getByRole("radio", { name: "An mich", exact: true })).not.toBeChecked();
     await expect(billing.getByRole("radio", { name: "An eine andere Adresse" })).toBeVisible();
     await expect(billing.getByRole("textbox", { name: /E-Mail für Rechnungen/ })).toHaveCount(0);
-    await expect(billing).toContainText("USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.");
+    await expect(billing).not.toContainText("USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.");
     await expect(route).toContainText("Den voraussichtlichen Gesamtbetrag trägt GMED ein.");
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
 

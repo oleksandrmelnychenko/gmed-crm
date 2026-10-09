@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, CircleCheck, Info, LoaderCircle, Send } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle, Send } from "lucide-react";
 
 import { Banner, Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
@@ -100,6 +100,7 @@ export function FollowUpStep({
 }) {
   const guardian = request.access_kind === "guardian";
   const blocks = openFollowUpBlocks(request);
+  const [showMissing, setShowMissing] = useState(false);
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
     funds: "idle",
@@ -121,6 +122,8 @@ export function FollowUpStep({
   const answeredAt = request.follow_up?.answered_at ?? null;
 
   async function send() {
+    // A send also shows what is still missing.
+    setShowMissing(true);
     setSending(true);
     setError("");
     try {
@@ -183,8 +186,6 @@ export function FollowUpStep({
             lang={lang}
             enqueue={enqueue}
             onChange={onChange}
-            intro={text.identityRenewIntro}
-            showNote={false}
             bare
           />
         );
@@ -195,18 +196,6 @@ export function FollowUpStep({
 
   return (
     <section className="space-y-6" data-testid="lead-request-follow-up">
-      <div
-        role="note"
-        className="flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2.5 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
-        data-testid="lead-request-follow-up-notice"
-      >
-        <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-        <div className="space-y-0.5">
-          <h2 className="text-sm font-semibold">{text.followUpTitle}</h2>
-          <p className="text-sm leading-snug">{text.followUpIntro}</p>
-        </div>
-      </div>
-
       {answered && answeredAt ? (
         <p
           role="status"
@@ -221,11 +210,13 @@ export function FollowUpStep({
       {blocks.map((block) => (
         <div key={block} data-testid={`lead-request-follow-up-${block}`}>
           <Section title={text.followUpBlocks[block]}>
-            <MissingList
-              title={text.stepMissingTitle}
-              labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian))}
-              testId={`lead-request-follow-up-${block}-missing`}
-            />
+            {showMissing ? (
+              <MissingList
+                title={text.stepMissingTitle}
+                labels={followUpMissing(request, block).map((key) => followUpFieldLabel(text, key, guardian))}
+                testId={`lead-request-follow-up-${block}-missing`}
+              />
+            ) : null}
             {blockContent(block)}
           </Section>
         </div>
@@ -244,7 +235,19 @@ export function FollowUpStep({
           {text.back}
         </Button>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" className="h-9" onClick={onNext}>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9"
+            onClick={() => {
+              // What is missing shows only after "Next" (or "Send"): the first press shows it.
+              if (blocks.some((block) => followUpMissing(request, block).length > 0) && !showMissing) {
+                setShowMissing(true);
+                return;
+              }
+              onNext();
+            }}
+          >
             {text.next}
             <ArrowRight aria-hidden="true" className="size-3.5" />
           </Button>

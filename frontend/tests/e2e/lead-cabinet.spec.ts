@@ -1537,7 +1537,8 @@ test.describe("lead cabinet", () => {
     const list = page.getByTestId("lead-request-identity-list");
 
     // GMED enters the document's data: the step asks for the copy only.
-    await expect(page.getByTestId("lead-request-step-identity")).toContainText("Die Angaben aus dem Dokument trägt GMED ein.");
+    // No intro sentence above the upload (owner 2026-10-09): the button and its hint say what to do.
+    await expect(page.getByTestId("lead-request-step-identity")).not.toContainText("Bitte laden Sie ein Foto oder einen Scan");
     await expect(page.locator("#lead-request-id_document_type")).toHaveCount(0);
     await expect(page.locator("#lead-request-id_valid_until")).toHaveCount(0);
     // Like the health consent before the medical documents: no consent, no upload.
@@ -1546,8 +1547,9 @@ test.describe("lead cabinet", () => {
     await expect(upload).toContainText(
       "Zum Hochladen bitte zuerst im Schritt „Einwilligung & Person“ der Verarbeitung Ihrer Angaben zustimmen.",
     );
-    await expect(list).toContainText("Noch kein Ausweis hochgeladen.");
-    await expect(upload).toContainText("Eine Kopie allein reicht möglicherweise nicht aus");
+    await expect(list).toHaveText("");
+    // No note about a copy not being enough (owner 2026-10-09).
+    await expect(upload).not.toContainText("Eine Kopie allein reicht möglicherweise nicht aus");
 
     await step(page, "person");
     await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
@@ -1565,7 +1567,7 @@ test.describe("lead cabinet", () => {
     expect(calls.identityUploads).toBe(1);
     expect(calls.uploads).toBe(0);
     await step(page, "documents");
-    await expect(page.getByTestId("lead-request-document-list")).toContainText("Noch keine Unterlagen hochgeladen.");
+    await expect(page.getByTestId("lead-request-document-list")).toHaveText("");
     await step(page, "send");
     await expect(page.getByTestId("lead-request-summary-identity")).toContainText("reisepass.jpg");
     await expect(page.getByTestId("lead-request-missing")).not.toContainText("Foto oder Scan des Ausweises");
@@ -1573,7 +1575,7 @@ test.describe("lead cabinet", () => {
     // The own upload can be taken back.
     await step(page, "identity");
     await list.getByRole("button", { name: "Entfernen" }).click();
-    await expect(list).toContainText("Noch kein Ausweis hochgeladen.");
+    await expect(list).toHaveText("");
   });
 
   test("acting for somebody else asks who that is", async ({ page }) => {
@@ -1625,7 +1627,7 @@ test.describe("lead cabinet", () => {
     const declarations = page.getByTestId("lead-request-step-declarations");
     const pepAnswer = page.getByTestId("lead-request-legal-pep_self").getByRole("combobox", { name: /Üben Sie ein hochrangiges öffentliches Amt aus/ });
 
-    await expect(declarations).toContainText("Diese Fragen schreibt das Geldwäschegesetz vor.");
+    await expect(declarations).not.toContainText("Diese Fragen schreibt das Geldwäschegesetz vor.");
     // Three questions; the high-risk country is no question of the lead any more.
     await expect(page.getByTestId("lead-request-legal").getByRole("combobox")).toHaveCount(3);
     await expect(page.getByTestId("lead-request-legal-high_risk_country")).toHaveCount(0);

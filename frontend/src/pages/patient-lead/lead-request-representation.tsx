@@ -27,6 +27,7 @@ import {
 } from "./lead-request-api";
 import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
+  ConsentNeededNote,
   LabeledField,
   RequiredMark,
   UploadedFileList,
@@ -363,13 +364,11 @@ function RepresentativeUpload({
         {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
         {uploading ? text.uploading : text.uploadButton}
       </Button>
-      <p className="text-xs text-muted-foreground">
-        {!consentReady
-          ? text.identityUploadNeedsConsent
-          : person
-            ? text.identityUploadHint
-            : text.representativeUploadNeedsPerson}
-      </p>
+      {!consentReady ? (
+        <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
+      ) : (
+        <p className="text-xs text-muted-foreground">{person ? text.identityUploadHint : text.representativeUploadNeedsPerson}</p>
+      )}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}

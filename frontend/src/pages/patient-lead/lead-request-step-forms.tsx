@@ -47,6 +47,7 @@ import {
   type SubmitField,
 } from "./lead-request-model";
 import {
+  ConsentNeededNote,
   ConsentCheckbox,
   FormField,
   MissingList,
@@ -135,9 +136,19 @@ function StepFrame({
     ...extraMissing,
     ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type)),
   ];
+  // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
+  // press with something missing shows it and stays, the next press goes on.
+  const [showMissing, setShowMissing] = useState(false);
+  const next = () => {
+    if (labels.length > 0 && !showMissing) {
+      setShowMissing(true);
+      return;
+    }
+    nav.onNext?.();
+  };
   return (
     <section className="space-y-6" data-testid={testId}>
-      <MissingList title={text.stepMissingTitle} labels={labels} testId="lead-request-step-missing" />
+      {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} testId="lead-request-step-missing" /> : null}
       {children}
       <StepFooter
         index={nav.index}
@@ -150,7 +161,7 @@ function StepFrame({
           {text.back}
         </Button>
         {nav.onNext ? (
-          <Button type="button" className="h-9" onClick={() => nav.onNext?.()}>
+          <Button type="button" className="h-9" onClick={next}>
             {text.next}
             <ArrowRight aria-hidden="true" className="size-3.5" />
           </Button>
@@ -465,11 +476,6 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
               onChange={(code) => set("country", code ?? "")}
             />
           </FormField>
-          {withIdentification ? (
-            <IdentificationFormField form={identification} field="habitual_residence_country" text={text}>
-              <IdentificationCountrySelect form={identification} field="habitual_residence_country" text={text} lang={lang} />
-            </IdentificationFormField>
-          ) : null}
         </div>
       </Section>
       <Section title={text.sectionContact}>
@@ -518,7 +524,6 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
             lang={lang}
             enqueue={enqueue}
             onChange={onChange}
-            intro={text.identityIntro}
           />
         </div>
       ) : null}
@@ -741,7 +746,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             <IdentificationFormField form={identification} field="request_reason" text={text} required>
               <IdentificationTextArea form={identification} field="request_reason" maxLength={4000} rows={5} />
             </IdentificationFormField>
-            <p className="mt-1 text-xs leading-5 text-muted-foreground">{text.requestReasonHint}</p>
           </div>
         </Section>
       ) : null}
@@ -789,7 +793,7 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
             {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
             {uploading ? text.uploading : text.uploadButton}
           </Button>
-          {!consentReady ? <p className="text-xs text-muted-foreground">{text.uploadNeedsConsent}</p> : null}
+          {!consentReady ? <ConsentNeededNote>{text.uploadNeedsConsent}</ConsentNeededNote> : null}
           {full ? <p className="text-xs text-muted-foreground">{text.maxDocuments(request.max_documents)}</p> : null}
           {errors.map((message) => (
             <p key={message} role="alert" className="text-xs text-destructive">
@@ -805,7 +809,6 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
           testId="lead-request-document-list"
           onRemove={(documentId) => void remove(documentId)}
         />
-        <p className="text-xs text-muted-foreground">{text.documentsOptional}</p>
       </Section>
     </StepFrame>
   );

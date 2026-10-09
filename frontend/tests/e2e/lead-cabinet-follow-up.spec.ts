@@ -418,7 +418,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await tab(page, "identity").click();
     const identity = page.getByTestId("lead-request-step-identity");
     await expect(identity.getByTestId("lead-request-step-missing")).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
-    await expect(identity).toContainText("Die Angaben aus dem Dokument trägt GMED ein.");
+    // No intro sentence above the upload (owner 2026-10-09).
+    await expect(identity).not.toContainText("Bitte laden Sie ein Foto oder einen Scan");
     // Upload only: the document's data are staff's.
     await expect(page.getByRole("combobox", { name: "Art des Dokuments" })).toHaveCount(0);
     await expect(page.getByRole("textbox", { name: "Dokumentnummer" })).toHaveCount(0);

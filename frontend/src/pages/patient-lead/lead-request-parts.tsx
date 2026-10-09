@@ -71,6 +71,33 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => void
 
 const STEP_COUNT = 8;
 
+/** "Consent given on …" as a green chip (owner 2026-10-09). */
+export function ConsentGivenChip({ children }: { children: ReactNode }) {
+  return (
+    <span className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+      <Check aria-hidden="true" className="size-3 shrink-0" />
+      {children}
+    </span>
+  );
+}
+
+/**
+ * "Give the consent first" next to an uploader: an amber note with a sign, so
+ * the reason why the button is disabled is seen at once (owner 2026-10-09).
+ */
+export function ConsentNeededNote({ children }: { children: ReactNode }) {
+  return (
+    <p
+      role="note"
+      className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs font-medium leading-5 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200"
+      data-testid="lead-request-consent-needed"
+    >
+      <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+      <span>{children}</span>
+    </p>
+  );
+}
+
 /** The bottom bar of a step, as in the staff lead wizard: progress and save state above the buttons. */
 export function StepFooter({
   index,
@@ -149,6 +176,7 @@ export function LabeledField({
   required = false,
   question = false,
   className,
+  aside,
   children,
 }: {
   id: string;
@@ -157,14 +185,26 @@ export function LabeledField({
   required?: boolean;
   question?: boolean;
   className?: string;
+  /** A small control on the label's line, at its right end (e.g. "same as phone"); the field keeps its height. */
+  aside?: ReactNode;
   children: ReactNode;
 }) {
+  const labelElement = (
+    <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
+      {label}
+      {required ? <RequiredMark /> : null}
+    </label>
+  );
   return (
     <div className={cn("min-w-0 space-y-1.5", className)}>
-      <label htmlFor={id} className={cn(question ? "text-sm leading-snug text-foreground" : tokens.text.label, "block")}>
-        {label}
-        {required ? <RequiredMark /> : null}
-      </label>
+      {aside ? (
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-1">
+          {labelElement}
+          {aside}
+        </div>
+      ) : (
+        labelElement
+      )}
       {children}
       {error ? (
         <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
@@ -303,7 +343,9 @@ export function ConsentCheckbox({
             </a>
           ) : null}
           {given && consent?.given_at ? (
-            <span className="block text-xs text-muted-foreground">{text.consentGivenAt(formatAppDateTime(consent.given_at))}</span>
+            <span className="block pt-0.5">
+              <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consent.given_at))}</ConsentGivenChip>
+            </span>
           ) : null}
         </span>
       </label>
@@ -436,7 +478,11 @@ export function FileUploadField({
         {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
         {uploading ? text.uploading : buttonLabel}
       </Button>
-      <p className="text-xs leading-5 text-muted-foreground">{consentReady ? hint : text.identityUploadNeedsConsent}</p>
+      {consentReady ? (
+        <p className="text-xs leading-5 text-muted-foreground">{hint}</p>
+      ) : (
+        <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
+      )}
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">
           {message}
@@ -473,17 +519,18 @@ export function UploadedFileList({
   testId: string;
   onRemove: (documentId: string) => void;
 }) {
+  // Nothing uploaded yet: no empty frame (owner 2026-10-09); the list stays for its test id.
+  if (documents.length === 0) return <ul hidden data-testid={testId} aria-label={emptyText} />;
   return (
     <ul className="divide-y divide-border rounded-lg border border-border" data-testid={testId}>
-      {documents.length === 0 ? (
-        <li className="px-3 py-3 text-sm text-muted-foreground">{emptyText}</li>
-      ) : (
+      {documents.length === 0 ? null : (
         documents.map((document) => (
           <li key={document.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
             <FileText aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1">
               <span className="block truncate">{document.file_name ?? "—"}</span>
-              <span className="block text-xs text-muted-foreground">
+              {/* Date and size as a violet chip (owner 2026-10-09). */}
+              <span className="mt-0.5 inline-flex w-fit items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-800 dark:border-violet-900/50 dark:bg-violet-950/30 dark:text-violet-200">
                 {[formatAppDateTime(document.uploaded_at), formatFileSize(document.size_bytes, lang)].filter(Boolean).join(" · ")}
                 {document.reviewed ? ` · ${text.documentTakenOver}` : ""}
               </span>

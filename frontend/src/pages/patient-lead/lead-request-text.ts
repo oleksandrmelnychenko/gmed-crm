@@ -892,7 +892,7 @@ const de: LeadRequestText = {
   payerEmailOrPhoneHint: "Bitte geben Sie mindestens eine E-Mail-Adresse oder eine Telefonnummer an.",
   identificationFields: {
     salutation: "Anrede",
-    former_names: "Frühere Namen (z. B. Geburtsname)",
+    former_names: "Frühere Namen",
     birth_place: "Geburtsort",
     birth_country: "Geburtsland",
     habitual_residence_country: "Land des gewöhnlichen Aufenthalts (falls abweichend)",
@@ -1346,7 +1346,7 @@ const ru: LeadRequestText = {
   payerEmailOrPhoneHint: "Пожалуйста, укажите хотя бы адрес e-mail или номер телефона.",
   identificationFields: {
     salutation: "Обращение",
-    former_names: "Прежние имена и фамилии (например, фамилия при рождении)",
+    former_names: "Прежние имена и фамилии",
     birth_place: "Место рождения",
     birth_country: "Страна рождения",
     habitual_residence_country: "Страна постоянного пребывания (если другая)",
@@ -1804,7 +1804,7 @@ const uk: LeadRequestText = {
   payerEmailOrPhoneHint: "Будь ласка, вкажіть принаймні адресу e-mail або номер телефону.",
   identificationFields: {
     salutation: "Звертання",
-    former_names: "Попередні імена та прізвища (наприклад, прізвище при народженні)",
+    former_names: "Попередні імена та прізвища",
     birth_place: "Місце народження",
     birth_country: "Країна народження",
     habitual_residence_country: "Країна постійного перебування (якщо інша)",
@@ -2262,7 +2262,7 @@ const en: LeadRequestText = {
   payerEmailOrPhoneHint: "Please give at least an e-mail address or a phone number.",
   identificationFields: {
     salutation: "Title",
-    former_names: "Former names (e.g. name at birth)",
+    former_names: "Former names",
     birth_place: "Place of birth",
     birth_country: "Country of birth",
     habitual_residence_country: "Country of habitual residence (if different)",

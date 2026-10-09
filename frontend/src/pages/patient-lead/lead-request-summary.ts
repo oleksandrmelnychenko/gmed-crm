@@ -174,7 +174,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     [text.fields.zip_code, data.zip_code],
     [text.fields.city, data.city],
     [text.fields.country, country(data.country)],
-    [identificationLabel("habitual_residence_country"), country(identification?.habitual_residence_country)],
   ]);
 
   group("contact", text.sectionContact, [

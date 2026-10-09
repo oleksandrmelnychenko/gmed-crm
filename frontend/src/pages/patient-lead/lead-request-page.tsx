@@ -198,7 +198,7 @@ function LeadCabinetFrame({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-5 pb-16" data-testid="lead-cabinet">
+    <div className="mx-auto w-full max-w-[96rem] space-y-5 pb-16" data-testid="lead-cabinet">
       <div className="flex justify-end">
         <div
           role="radiogroup"
@@ -275,29 +275,26 @@ function LeadRequestView({
 
   return (
     // `overflow-clip`, not `hidden`: a hidden box would be the scroll container of the sticky step footer.
-    <article ref={topRef} className="overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
-      <header className="space-y-2 border-b border-border px-4 py-4 sm:px-5">
+    <article ref={topRef} className="flex min-h-[calc(100dvh-9rem)] flex-col overflow-clip rounded-xl border border-border bg-card shadow-sm" data-testid="lead-request">
+      {/* The title and the deadline share one line (wrapping on a phone). */}
+      <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-border px-4 py-4 sm:px-5">
         <h1 className="text-lg font-semibold leading-tight">
           {guardian
             ? `${text.titleGuardian}: ${[request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ")}`
             : text.title}
         </h1>
-        <p className="text-sm text-muted-foreground">{guardian ? text.introGuardian : text.intro}</p>
         {deadline && !request.submitted_at ? (
           <div
-            className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+            className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
             data-testid="lead-request-deadline"
           >
-            <Clock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <div>
-              <p className="font-medium">{text.deadline(deadline)}</p>
-              <p className="mt-0.5 text-xs opacity-80">{text.deadlineNote}</p>
-            </div>
+            <Clock aria-hidden="true" className="size-4 shrink-0" />
+            <p className="font-medium">{text.deadline(deadline)}</p>
           </div>
         ) : null}
       </header>
 
-      <div className="lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
         <StepNavBar
           request={request}
           text={text}
@@ -404,7 +401,9 @@ function StepNavBar({
               className={cn(
                 "relative flex shrink-0 items-center gap-2 rounded-lg px-1 py-1.5 text-left text-xs font-medium",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:px-2.5 lg:w-full lg:py-2",
-                selected ? "bg-[var(--brand)] text-white shadow-sm" : "text-foreground hover:bg-muted/60",
+                selected
+                  ? "bg-muted font-semibold text-foreground lg:before:absolute lg:before:left-0 lg:before:top-1.5 lg:before:bottom-1.5 lg:before:w-[3px] lg:before:rounded-r-full lg:before:bg-[var(--brand)]"
+                  : "text-foreground hover:bg-muted/60",
               )}
               onClick={() => onSelect(id)}
             >
@@ -413,7 +412,7 @@ function StepNavBar({
                 className={cn(
                   "inline-flex size-6 shrink-0 items-center justify-center rounded-full font-mono text-[11px] leading-none",
                   selected
-                    ? "bg-white/20 text-white"
+                    ? "bg-[var(--brand)] text-white"
                     : done
                       ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300"
                       : "bg-muted text-muted-foreground",
@@ -432,7 +431,7 @@ function StepNavBar({
                     className={cn(
                       "inline-flex min-w-4 items-center justify-center rounded-full px-1 py-0.5 font-mono text-[10px] leading-none",
                       "max-sm:absolute max-sm:-right-0.5 max-sm:-top-0.5",
-                      selected ? "bg-white text-[var(--brand)]" : "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
+                      "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100",
                     )}
                   >
                     {count}

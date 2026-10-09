@@ -330,7 +330,7 @@ function NavGroup({
                 "relative flex items-center rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sidebar-ring motion-reduce:transition-none",
                 collapsed ? "justify-center size-10 mx-auto" : "gap-3 px-3 h-9",
                 isActive
-                  ? "bg-[var(--brand)]/10 text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
+                  ? "bg-muted text-foreground font-semibold before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-r-full before:bg-[var(--brand)]"
                   : "text-sidebar-foreground/90 hover:text-sidebar-foreground hover:bg-sidebar-accent/60",
               )
             }
@@ -343,7 +343,7 @@ function NavGroup({
                   className={cn(
                     "shrink-0",
                     collapsed ? "size-5" : "size-[18px]",
-                    isActive && "text-[var(--brand)]",
+                    isActive && "text-foreground",
                   )}
                 />
                 {!collapsed && (

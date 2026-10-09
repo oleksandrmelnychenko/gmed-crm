@@ -630,7 +630,7 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(identity.getByRole("button", { name: "Foto oder Scan des Ausweises: Dateien auswählen" })).toBeEnabled();
     await page.locator("#lead-request-agent-identity-files").setInputFiles(scan);
     await expect(page.getByTestId("lead-request-agent-identity-list")).toContainText("ausweis.jpg");
-    await expect(page.getByTestId("lead-request-agent-authority-list")).toContainText("Noch kein Nachweis hochgeladen.");
+    await expect(page.getByTestId("lead-request-agent-authority-list")).toHaveText("");
     await page.locator("#lead-request-agent-authority-files").setInputFiles(proof);
     await expect(page.getByTestId("lead-request-agent-authority-list")).toContainText("nachweis.pdf");
     expect(calls.uploads).toEqual([
@@ -663,7 +663,7 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(agent.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
     await expect(page.locator("#lead-request-agent_date_of_birth")).toHaveValue("15.01.1980");
     await page.getByTestId("lead-request-agent-authority-list").getByRole("button", { name: "Entfernen" }).click();
-    await expect(page.getByTestId("lead-request-agent-authority-list")).toContainText("Noch kein Nachweis hochgeladen.");
+    await expect(page.getByTestId("lead-request-agent-authority-list")).toHaveText("");
 
     // From yes to no the form asks first: the person entered would be removed.
     const asked: string[] = [];
@@ -975,7 +975,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     expect(calls.removed).toEqual([BEN]);
     expect(request.representation.representatives.map((item) => item.id)).toEqual([ANNA]);
     await expect(second.getByRole("textbox", { name: "Nachname" })).toHaveValue("");
-    await expect(page.getByTestId("lead-request-rep2-identity-list")).toContainText("Noch kein Ausweis hochgeladen.");
+    await expect(page.getByTestId("lead-request-rep2-identity-list")).toHaveText("");
     await expect(second.getByRole("button", { name: "Entfernen" })).toHaveCount(0);
 
     // Somebody else can be named in the same place: a new person with a new id.

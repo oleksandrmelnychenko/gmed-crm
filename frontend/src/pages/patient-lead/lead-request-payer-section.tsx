@@ -47,6 +47,7 @@ import {
   type SaveState,
 } from "./lead-request-model";
 import {
+  ConsentGivenChip,
   LabeledField,
   RequiredMark,
   YesNoSelect,
@@ -250,7 +251,11 @@ export function PayerSection({
         {/* A third party's data exist only when a third party pays. */}
         {thirdParty ? (
           <>
-            <p className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3">{text.payerIntro}</p>
+            <p className="sm:col-span-2 lg:col-span-3">
+              <span className="inline-flex max-w-full items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs leading-5 text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200">
+                {text.payerIntro}
+              </span>
+            </p>
             {/* "I pay (as a parent)" has said both: a person, the patient's parent. */}
             {typed && !draft.guardian_pays ? (
               <LabeledField {...field("payer_type", true, "sm:col-span-2 lg:col-span-3")}>
@@ -450,7 +455,26 @@ export function PayerSection({
               />
             </LabeledField>
             {typed ? (
-              <LabeledField {...field("payer_messenger")}>
+              <LabeledField
+                {...field("payer_messenger")}
+                // "Same as phone" sits on the label's line, so the field is as tall as its neighbours.
+                aside={
+                  <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className={checkboxClass}
+                      checked={messengerSameAsPhone}
+                      data-testid="lead-request-payer-messenger-same"
+                      onChange={(event) => {
+                        const same = event.target.checked;
+                        setMessengerSameAsPhone(same);
+                        if (same) setDraft((current) => ({ ...current, messenger: current.phone }));
+                      }}
+                    />
+                    {text.payerMessengerSameAsPhone}
+                  </label>
+                }
+              >
                 <Input
                   {...fieldProps("payer_messenger")}
                   className={inputClass}
@@ -461,20 +485,6 @@ export function PayerSection({
                   value={draft.messenger}
                   onChange={(event) => set("messenger", event.target.value)}
                 />
-                <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    className={checkboxClass}
-                    checked={messengerSameAsPhone}
-                    data-testid="lead-request-payer-messenger-same"
-                    onChange={(event) => {
-                      const same = event.target.checked;
-                      setMessengerSameAsPhone(same);
-                      if (same) setDraft((current) => ({ ...current, messenger: current.phone }));
-                    }}
-                  />
-                  {text.payerMessengerSameAsPhone}
-                </label>
               </LabeledField>
             ) : null}
             {/* Residence: country and city are required of a person; street and ZIP may be unknown. */}
@@ -518,10 +528,6 @@ export function PayerSection({
                 onChange={(event) => set("zip", event.target.value)}
               />
             </LabeledField>
-            {/* Another natural person has to be told; a parent who pays is the one typing. */}
-            {!organisation && !draft.guardian_pays ? (
-              <p className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3">{text.payerInformHint}</p>
-            ) : null}
             {consentAsked ? (
               // The consent is part of the answer: it is saved with it, and it is needed to send.
               <div
@@ -549,7 +555,11 @@ export function PayerSection({
                 </label>
                 {/* Indented to the text of the label: the checkbox and its gap. */}
                 <div className="space-y-1 pl-7 text-xs text-muted-foreground">
-                  {draft.contact_consent && consentAt ? <p>{text.consentGivenAt(formatAppDateTime(consentAt))}</p> : null}
+                  {draft.contact_consent && consentAt ? (
+                    <p>
+                      <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consentAt))}</ConsentGivenChip>
+                    </p>
+                  ) : null}
                   <p id="lead-request-payer_contact_consent-hint" className="leading-5">
                     {text.payerConsentHint}
                   </p>
@@ -684,7 +694,11 @@ function CostEstimateConsent({
       </label>
       {/* Indented to the text of the label: the checkbox and its gap. */}
       <div className="space-y-1 pl-7 text-xs text-muted-foreground">
-        {checked && givenAt ? <p>{text.consentGivenAt(formatAppDateTime(givenAt))}</p> : null}
+        {checked && givenAt ? (
+          <p>
+            <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(givenAt))}</ConsentGivenChip>
+          </p>
+        ) : null}
         <p id={`${id}-hint`} className="leading-5">
           {text.payerCostEstimateConsentHint}
         </p>

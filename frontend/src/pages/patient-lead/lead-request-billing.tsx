@@ -338,7 +338,6 @@ export function BillingSections({
               </p>
             </LabeledField>
           ) : null}
-          <p className="text-xs leading-5 text-muted-foreground">{text.vatHint}</p>
         </div>
       </Section>
       ) : null}

@@ -612,7 +612,6 @@ function PayerQuestionnaireForm({
           </div>
 
           <div className="space-y-5" data-testid="lead-request-payer-legal">
-            <p className="text-xs leading-5 text-muted-foreground">{text.legalIntro}</p>
             {PAYER_LEGAL_QUESTIONS.map((question) => {
               const details = PAYER_LEGAL_DETAILS[question];
               return (

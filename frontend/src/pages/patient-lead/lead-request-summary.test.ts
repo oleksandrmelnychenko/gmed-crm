@@ -122,7 +122,7 @@ describe("lead request summary", () => {
       Anrede: "Frau",
       Vorname: "Anna",
       Nachname: "Muster",
-      "Frühere Namen (z. B. Geburtsname)": "Beispiel",
+      "Frühere Namen": "Beispiel",
       Geburtsdatum: "01.05.1988",
       Geburtsort: "Kyiv",
       Geburtsland: "Ukraine",

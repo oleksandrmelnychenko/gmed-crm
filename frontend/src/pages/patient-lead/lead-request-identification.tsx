@@ -42,6 +42,7 @@ import {
   type SaveState,
 } from "./lead-request-model";
 import {
+  ConsentNeededNote,
   LabeledField,
   RequiredMark,
   UploadedFileList,
@@ -332,7 +333,6 @@ export function IdentityDocumentSection({
   onChange,
   title,
   intro,
-  showNote = true,
   bare = false,
 }: {
   request: LeadRequest;
@@ -342,7 +342,6 @@ export function IdentityDocumentSection({
   onChange: (request: LeadRequest) => void;
   title?: string;
   intro?: string;
-  showNote?: boolean;
   bare?: boolean;
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
@@ -415,9 +414,11 @@ export function IdentityDocumentSection({
           {uploading ? <LoaderCircle aria-hidden="true" className="size-4 animate-spin" /> : <Upload aria-hidden="true" className="size-4" />}
           {uploading ? text.uploading : text.identityUploadButton}
         </Button>
-        <p className="text-xs text-muted-foreground">
-          {consentReady ? text.identityUploadHint : text.identityUploadNeedsConsent}
-        </p>
+        {consentReady ? (
+          <p className="text-xs text-muted-foreground">{text.identityUploadHint}</p>
+        ) : (
+          <ConsentNeededNote>{text.identityUploadNeedsConsent}</ConsentNeededNote>
+        )}
         {errors.map((message) => (
           <p key={message} role="alert" className="text-xs text-destructive">
             {message}
@@ -431,7 +432,6 @@ export function IdentityDocumentSection({
           testId="lead-request-identity-list"
           onRemove={(documentId) => void remove(documentId)}
         />
-        {showNote ? <p className="text-xs leading-5 text-muted-foreground">{text.identityNote}</p> : null}
       </div>
     </>
   );
@@ -455,7 +455,6 @@ export function LegalQuestionsSection({
 }) {
   return (
     <Section title={text.sectionLegal}>
-      <p className="text-xs leading-5 text-muted-foreground">{text.legalIntro}</p>
       <div className="space-y-5" data-testid="lead-request-legal">
         {LEGAL_QUESTIONS.map((question) => (
           <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
