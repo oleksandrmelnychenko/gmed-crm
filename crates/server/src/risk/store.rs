@@ -190,6 +190,9 @@ pub struct BlockAnswers {
     pub sanctions_link_since_extent: Option<String>,
     pub birth_place: Option<String>,
     pub birth_country: Option<String>,
+    pub pep_self_answer: Option<bool>,
+    pub pep_related_answer: Option<bool>,
+    pub sanctions_links_answer: Option<bool>,
     pub funds_proof_uploaded: bool,
     pub relationship_proof_uploaded: bool,
     pub identity_issue: bool,
@@ -241,7 +244,7 @@ pub async fn load_block_answers(
                   g.pep_office, g.pep_country, g.pep_period, g.pep_relationship,
                   g.pep_wealth_origin, g.sanctions_link_name, g.sanctions_link_kind,
                   g.sanctions_link_since_extent, g.id_data_entered_at, g.birth_place,
-                  g.birth_country,
+                  g.birth_country, g.pep_self, g.sanctions_links,
                   d.expected_total_eur::float8 AS expected_total_eur, d.via_third_party_kind,
                   s.submitted_at AS statement_submitted_at, s.legal_form AS statement_legal_form,
                   s.payment_reason AS statement_payment_reason,
@@ -302,6 +305,9 @@ pub async fn load_block_answers(
         pep_wealth_origin: text("pep_wealth_origin"),
         birth_place: text("birth_place"),
         birth_country: text("birth_country"),
+        pep_self_answer: row.try_get::<Option<bool>, _>("pep_self").ok().flatten(),
+        pep_related_answer: row.try_get::<Option<bool>, _>("pep_related").ok().flatten(),
+        sanctions_links_answer: row.try_get::<Option<bool>, _>("sanctions_links").ok().flatten(),
         sanctions_link_name: text("sanctions_link_name"),
         sanctions_link_kind: text("sanctions_link_kind"),
         sanctions_link_since_extent: text("sanctions_link_since_extent"),
@@ -483,6 +489,18 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             }
             PARTY_CABINET
         }
+        "L" => {
+            for (key, answer) in [
+                ("pep_self", answers.pep_self_answer),
+                ("pep_related", answers.pep_related_answer),
+                ("sanctions_links", answers.sanctions_links_answer),
+            ] {
+                if answer.is_none() {
+                    missing.push(key);
+                }
+            }
+            PARTY_CABINET
+        }
         "K" => {
             if blank(&answers.birth_place) {
                 missing.push("birth_place");
@@ -531,7 +549,7 @@ pub fn block_states(
             "G" => requested || (sticky("T13") && !missing.is_empty()),
             "I" => requested || (sticky("T12") && !missing.is_empty()),
             // The enhanced check (level 2 or 3) asks the birth data; the base form does not.
-            "K" => requested || level >= 2,
+            "K" | "L" => requested || level >= 2,
             _ => requested || automatic.contains(&block),
         };
         states.insert(

@@ -448,13 +448,15 @@ export function LegalQuestionsSection({
   form,
   text,
   guardian,
+  bare = false,
 }: {
   form: IdentificationForm;
   text: LeadRequestText;
   guardian: boolean;
+  /** Without its own card (inside follow-up block L). */
+  bare?: boolean;
 }) {
-  return (
-    <Section title={text.sectionLegal}>
+  const questions = (
       <div className="space-y-5" data-testid="lead-request-legal">
         {LEGAL_QUESTIONS.map((question) => (
           <div key={question} className="space-y-3" data-testid={`lead-request-legal-${question}`}>
@@ -471,8 +473,8 @@ export function LegalQuestionsSection({
           </div>
         ))}
       </div>
-    </Section>
   );
+  return bare ? questions : <Section title={text.sectionLegal}>{questions}</Section>;
 }
 
 /** A list of countries as a statement (block F's former citizenships). */

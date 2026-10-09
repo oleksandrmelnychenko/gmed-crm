@@ -40,7 +40,7 @@ export const RISK_KNOCKOUT_TRIGGERS: readonly string[] = ["T14", "T15", "T16"];
 export const RISK_LIST_TRIGGERS: readonly string[] = ["T1", "T2", "T6"];
 
 /** The follow-up blocks staff may request (A–J). */
-export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"] as const;
+export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"] as const;
 
 export type RiskBlockKey = (typeof RISK_BLOCK_KEYS)[number];
 
@@ -511,6 +511,8 @@ export function riskBlockLabel(key: string, tx: Tx): string {
       return tx("Связи с санкциями: подробности", "Sanktionsbezug: Einzelheiten");
     case "K":
       return tx("Данные о рождении", "Geburtsangaben");
+    case "L":
+      return tx("Вопросы по закону (PEP, санкции)", "Fragen nach GwG (PEP, Sanktionen)");
     default:
       return key;
   }
@@ -553,6 +555,9 @@ const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
   sanctions_link_kind: ["вид связи", "Art der Verbindung"],
   sanctions_link_since_extent: ["с какого времени и объём связи", "Seit wann und Umfang"],
   birth_place: ["место рождения", "Geburtsort"],
+  pep_self: ["PEP: сам клиент", "PEP: selbst"],
+  pep_related: ["PEP: близкие", "PEP: Angehörige"],
+  sanctions_links: ["связи с санкционными лицами", "Sanktionsbezug"],
   birth_country: ["страна рождения", "Geburtsland"],
 };
 

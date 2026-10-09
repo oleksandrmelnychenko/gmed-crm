@@ -49,6 +49,7 @@ import {
   IdentificationTextArea,
   IdentificationTextInput,
   IdentityDocumentSection,
+  LegalQuestionsSection,
   useIdentificationForm,
   type IdentificationForm,
 } from "./lead-request-identification";
@@ -194,6 +195,8 @@ export function FollowUpStep({
         return <SanctionsLinkBlock form={identification} text={text} />;
       case "K":
         return <BirthBlock form={identification} text={text} lang={lang} guardian={guardian} />;
+      case "L":
+        return <LegalQuestionsSection form={identification} text={text} guardian={guardian} bare />;
     }
   };
 

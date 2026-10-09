@@ -455,7 +455,7 @@ export type PayerQuestionnairePatch = Partial<Record<keyof LeadPayerAnswers, str
  * citizenships, G representation, H public office, I identity document, J
  * links to sanctioned persons. D and E belong to the payer's own link.
  */
-export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K";
+export type FollowUpBlock = "A" | "B" | "C" | "F" | "G" | "H" | "I" | "J" | "K" | "L";
 
 /**
  * "Wir benötigen ergänzende Angaben" (contract 3.1): which blocks are open,

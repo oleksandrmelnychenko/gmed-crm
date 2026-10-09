@@ -350,6 +350,8 @@ type AmlEnhancedDueDiligenceDraft = {
   assetOriginEvidence: AssetOriginEvidence[];
   pepContractPartner: boolean;
   pepBeneficialOwner: boolean;
+  /** Staff checked the PEP status (owner 2026-10-09: the lead is asked only with the enhanced check). */
+  pepStatusChecked: boolean;
   pepOfficeFunction: string;
   pepAssetOrigin: string;
   highRiskCountryTransaction: boolean;
@@ -613,6 +615,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     assetOriginEvidence: [],
     pepContractPartner: false,
     pepBeneficialOwner: false,
+    pepStatusChecked: false,
     pepOfficeFunction: "",
     pepAssetOrigin: "",
     highRiskCountryTransaction: false,
@@ -1112,6 +1115,7 @@ function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDilige
     assetOriginEvidence: parseAssetOriginEvidence(stored["assetOriginEvidence"]),
     pepContractPartner: stored["pepContractPartner"] === true,
     pepBeneficialOwner: stored["pepBeneficialOwner"] === true,
+    pepStatusChecked: stored["pepStatusChecked"] === true,
     pepOfficeFunction: inputString(stored["pepOfficeFunction"]),
     pepAssetOrigin: inputString(stored["pepAssetOrigin"]),
     highRiskCountryTransaction: stored["highRiskCountryTransaction"] === true,
@@ -4837,7 +4841,7 @@ export function LeadWizard({
    * fills its reason — staff decide and open the check themselves.
    */
   function handleAmlPepChange(
-    key: "pepContractPartner" | "pepBeneficialOwner",
+    key: "pepContractPartner" | "pepBeneficialOwner" | "pepStatusChecked",
     checked: boolean,
   ) {
     setError("");
@@ -7101,6 +7105,14 @@ ${serviceCommentLines.join("\n")}`
                       label={tx("Бенефициар является политически значимым лицом", "Wirtschaftlich Berechtigter ist eine politisch exponierte Person")}
                     />
                   </div>
+                </div>
+                <div className="border-b border-border/70" data-testid="lead-aml-pep-status-checked">
+                  <ToggleRow
+                    checked={draft.amlEnhancedDueDiligence.pepStatusChecked}
+                    disabled={isBusy}
+                    onChange={(checked) => handleAmlPepChange("pepStatusChecked", checked)}
+                    label={tx("PEP-статус проверен (по базам или со слов клиента)", "PeP-Status geprüft (Datenbank oder Angabe des Kunden)")}
+                  />
                 </div>
               </div>
               {amlRequired || amlHints.length > 0 || wizardDocuments.enhanced_due_diligence.length > 0 ? (

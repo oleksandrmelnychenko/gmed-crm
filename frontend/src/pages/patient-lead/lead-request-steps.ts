@@ -91,7 +91,10 @@ export function stepOfField(field: string): FormStep {
 /** The steps shown for this request, in their order. */
 export function visibleSteps(request: Pick<LeadRequest, "follow_up">): StepId[] {
   // "contact" is part of the first step (owner 2026-10-09): one tab with the consent and the person.
-  return STEP_IDS.filter((step) => step !== "contact" && (step !== "follow_up" || followUpShown(request)));
+  // "declarations" moved to follow-up block L (owner 2026-10-09): only with the enhanced check.
+  return STEP_IDS.filter(
+    (step) => step !== "contact" && step !== "declarations" && (step !== "follow_up" || followUpShown(request)),
+  );
 }
 
 const FORM_ORDER = new Map<string, number>((SUBMIT_FIELDS as readonly string[]).map((field, index) => [field, index]));

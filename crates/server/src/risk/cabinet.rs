@@ -39,7 +39,7 @@ pub const MIN_REASON_CHARS: usize = 10;
 pub const MAX_REASON_CHARS: usize = 2000;
 
 /// The blocks the cabinet answers (D and E belong to the payer's link).
-pub const CABINET_BLOCKS: [&str; 9] = ["A", "B", "C", "F", "G", "H", "I", "J", "K"];
+pub const CABINET_BLOCKS: [&str; 10] = ["A", "B", "C", "F", "G", "H", "I", "J", "K", "L"];
 
 /// Longest reason of the request (13.1).
 pub const REQUEST_REASON_MAX: usize = 4000;
@@ -89,7 +89,11 @@ pub fn is_adult_representative_key(key: &str) -> bool {
 
 /// Keys the base form no longer asks (contract 3.1): they belong to the
 /// follow-up blocks or to staff.
-const DROPPED_KEYS: [&str; 20] = [
+const DROPPED_KEYS: [&str; 23] = [
+    // Block L (owner 2026-10-09): the legal questions only with the enhanced check.
+    "pep_self",
+    "pep_related",
+    "sanctions_links",
     // The legal-guardianship question is switched off in the cabinet (owner 2026-10-09).
     "under_guardianship",
     // Block K (owner 2026-10-09): asked only with the enhanced check.
@@ -1222,8 +1226,6 @@ mod tests {
                 "has_representative",
                 "payer_own_account",
                 "invoice_to",
-                "pep_self",
-                "sanctions_links",
                 "request_reason",
             ])
         );
