@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { LoaderCircle, Upload } from "lucide-react";
 
-import { Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -42,6 +41,7 @@ import {
   type SaveState,
 } from "./lead-request-model";
 import {
+  CabinetSection as Section,
   ConsentNeededNote,
   LabeledField,
   RequiredMark,

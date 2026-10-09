@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Check, Clock, LoaderCircle } from "lucide-react";
 
 import { Banner } from "@/components/ui-shell";
@@ -197,37 +197,63 @@ function LeadCabinetFrame({
   onLang: (lang: LeadCabinetLang) => void;
   children: ReactNode;
 }) {
+  // A request card shows the switch in its header (owner 2026-10-09); without one it stays on top.
+  const [claimed, setClaimed] = useState(0);
+  const claim = useCallback(() => {
+    setClaimed((count) => count + 1);
+    return () => setClaimed((count) => count - 1);
+  }, []);
+  const switchContext = useMemo(() => ({ lang, onLang, claim }), [lang, onLang, claim]);
   return (
-    <div className="mx-auto w-full max-w-[96rem] space-y-5 pb-16" data-testid="lead-cabinet">
-      <div className="flex justify-end">
-        <div
-          role="radiogroup"
-          aria-label={leadRequestText(lang).language}
-          className="inline-flex rounded-lg border border-border bg-card p-0.5"
-          data-testid="lead-cabinet-language"
-        >
-          {LEAD_CABINET_LANGS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              role="radio"
-              aria-checked={lang === option.value}
-              title={option.name}
-              lang={option.value}
-              className={cn(
-                "min-w-10 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
-                lang === option.value
-                  ? "bg-[var(--brand)] text-white"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-              )}
-              onClick={() => onLang(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
+    <CabinetLanguageContext.Provider value={switchContext}>
+      <div className="mx-auto w-full max-w-[96rem] space-y-5 pb-16" data-testid="lead-cabinet">
+        {claimed === 0 ? (
+          <div className="flex justify-end">
+            <CabinetLanguageSwitch lang={lang} onLang={onLang} />
+          </div>
+        ) : null}
+        {children}
       </div>
-      {children}
+    </CabinetLanguageContext.Provider>
+  );
+}
+
+type CabinetLanguageSwitchContext = {
+  lang: LeadCabinetLang;
+  onLang: (lang: LeadCabinetLang) => void;
+  claim: () => () => void;
+};
+
+const CabinetLanguageContext = createContext<CabinetLanguageSwitchContext | null>(null);
+
+/** DE / EN / UA / RU of the cabinet. */
+function CabinetLanguageSwitch({ lang, onLang }: { lang: LeadCabinetLang; onLang: (lang: LeadCabinetLang) => void }) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label={leadRequestText(lang).language}
+      className="inline-flex rounded-lg border border-border bg-card p-0.5"
+      data-testid="lead-cabinet-language"
+    >
+      {LEAD_CABINET_LANGS.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="radio"
+          aria-checked={lang === option.value}
+          title={option.name}
+          lang={option.value}
+          className={cn(
+            "min-w-10 rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+            lang === option.value
+              ? "bg-[var(--brand)] text-white"
+              : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+          )}
+          onClick={() => onLang(option.value)}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -254,6 +280,8 @@ function LeadRequestView({
   const missing = missingByStep(request);
   const position = steps.indexOf(step);
   const topRef = useRef<HTMLElement | null>(null);
+  const languageSwitch = useContext(CabinetLanguageContext);
+  useEffect(() => languageSwitch?.claim(), [languageSwitch?.claim]);
 
   const go = useCallback((next: StepId) => {
     setChosenStep(next);
@@ -283,15 +311,18 @@ function LeadRequestView({
             ? `${text.titleGuardian}: ${[request.personal_data.first_name, request.personal_data.last_name].filter(Boolean).join(" ")}`
             : text.title}
         </h1>
-        {deadline && !request.submitted_at ? (
-          <div
-            className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-            data-testid="lead-request-deadline"
-          >
-            <Clock aria-hidden="true" className="size-4 shrink-0" />
-            <p className="font-medium">{text.deadline(deadline)}</p>
-          </div>
-        ) : null}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+          {deadline && !request.submitted_at ? (
+            <div
+              className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+              data-testid="lead-request-deadline"
+            >
+              <Clock aria-hidden="true" className="size-4 shrink-0" />
+              <p className="font-medium">{text.deadline(deadline)}</p>
+            </div>
+          ) : null}
+          {languageSwitch ? <CabinetLanguageSwitch lang={languageSwitch.lang} onLang={languageSwitch.onLang} /> : null}
+        </div>
       </header>
 
       <div className="flex-1 lg:grid lg:grid-cols-[15rem_minmax(0,1fr)]">
@@ -306,7 +337,7 @@ function LeadRequestView({
         {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
         <div
           key={step}
-          className="min-w-0 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
+          className="min-w-0 bg-muted/40 px-4 pt-5 sm:px-5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200 lg:flex lg:flex-col lg:[&>section]:flex lg:[&>section]:flex-1 lg:[&>section]:flex-col"
           data-testid="lead-request-step"
           data-current-step={step}
         >

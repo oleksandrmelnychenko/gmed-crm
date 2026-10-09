@@ -177,6 +177,10 @@ export type LeadRequestText = {
   payerMessenger: string;
   payerMessengerSameAsPhone: string;
   payerResidence: string;
+  /** The cards of the payer step (owner 2026-10-09). */
+  payerBlockPerson: string;
+  payerBlockContact: string;
+  payerBlockConsent: string;
   /**
    * "Ergänzende Angaben" (trigger flow, contract 3.1 and 6): the neutral
    * heading, the intro, the title of each block, and sending the answers.
@@ -831,6 +835,9 @@ const de: LeadRequestText = {
   payerMessenger: "WhatsApp / Messenger",
   payerMessengerSameAsPhone: "gleich wie Telefon",
   payerResidence: "Wohnort",
+  payerBlockPerson: "Angaben zur zahlenden Person",
+  payerBlockContact: "Kontakt",
+  payerBlockConsent: "Einwilligungen",
   followUpTitle: "Wir benötigen ergänzende Angaben",
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
@@ -839,10 +846,11 @@ const de: LeadRequestText = {
     B: "Beziehung zur zahlenden Person",
     C: "Zahlungsweg",
     F: "Wohnsitz und Staatsangehörigkeit",
-    G: "Vertretung",
+    G: "Wer für Sie handelt",
     H: "Angaben zum öffentlichen Amt",
     I: "Ausweisdokument",
     J: "Angaben zu den Verbindungen",
+    K: "Angaben zur Person",
   },
   followUpSubmit: "Angaben senden",
   followUpSending: "Wird gesendet…",
@@ -892,7 +900,7 @@ const de: LeadRequestText = {
   payerEmailOrPhoneHint: "Bitte geben Sie mindestens eine E-Mail-Adresse oder eine Telefonnummer an.",
   identificationFields: {
     salutation: "Anrede",
-    former_names: "Frühere Namen",
+    former_names: "Geburtsname (falls abweichend)",
     birth_place: "Geburtsort",
     birth_country: "Geburtsland",
     habitual_residence_country: "Land des gewöhnlichen Aufenthalts (falls abweichend)",
@@ -962,7 +970,7 @@ const de: LeadRequestText = {
   representativeCaptions: {
     rep1: "1. Vertreter/in",
     rep2: "2. Vertreter/in",
-    agent: "Vertretende Person",
+    agent: "Angaben zur vertretenden Person",
     guardian: "Betreuer/in",
   },
   representativeYou: "Sie",
@@ -1287,6 +1295,9 @@ const ru: LeadRequestText = {
   payerMessenger: "WhatsApp / мессенджер",
   payerMessengerSameAsPhone: "как телефон",
   payerResidence: "Место жительства",
+  payerBlockPerson: "Данные плательщика",
+  payerBlockContact: "Контакты",
+  payerBlockConsent: "Согласия",
   followUpTitle: "Нам нужны дополнительные сведения",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
@@ -1294,10 +1305,11 @@ const ru: LeadRequestText = {
     B: "Отношения с плательщиком",
     C: "Способ оплаты",
     F: "Проживание и гражданство",
-    G: "Представительство",
+    G: "Кто действует за вас",
     H: "Сведения о государственной должности",
     I: "Документ, удостоверяющий личность",
     J: "Сведения о связях",
+    K: "Личные данные",
   },
   followUpSubmit: "Отправить сведения",
   followUpSending: "Отправляется…",
@@ -1346,7 +1358,7 @@ const ru: LeadRequestText = {
   payerEmailOrPhoneHint: "Пожалуйста, укажите хотя бы адрес e-mail или номер телефона.",
   identificationFields: {
     salutation: "Обращение",
-    former_names: "Прежние имена и фамилии",
+    former_names: "Фамилия при рождении (если другая)",
     birth_place: "Место рождения",
     birth_country: "Страна рождения",
     habitual_residence_country: "Страна постоянного пребывания (если другая)",
@@ -1419,7 +1431,7 @@ const ru: LeadRequestText = {
   representativeCaptions: {
     rep1: "1-й представитель",
     rep2: "2-й представитель",
-    agent: "Представитель",
+    agent: "Данные представителя",
     guardian: "Опекун",
   },
   representativeYou: "вы",
@@ -1745,6 +1757,9 @@ const uk: LeadRequestText = {
   payerMessenger: "WhatsApp / месенджер",
   payerMessengerSameAsPhone: "як телефон",
   payerResidence: "Місце проживання",
+  payerBlockPerson: "Дані платника",
+  payerBlockContact: "Контакти",
+  payerBlockConsent: "Згоди",
   followUpTitle: "Нам потрібні додаткові відомості",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
@@ -1752,10 +1767,11 @@ const uk: LeadRequestText = {
     B: "Стосунки з платником",
     C: "Спосіб оплати",
     F: "Проживання й громадянство",
-    G: "Представництво",
+    G: "Хто діє за вас",
     H: "Відомості про державну посаду",
     I: "Документ, що посвідчує особу",
     J: "Відомості про зв'язки",
+    K: "Особисті дані",
   },
   followUpSubmit: "Надіслати відомості",
   followUpSending: "Надсилається…",
@@ -1804,7 +1820,7 @@ const uk: LeadRequestText = {
   payerEmailOrPhoneHint: "Будь ласка, вкажіть принаймні адресу e-mail або номер телефону.",
   identificationFields: {
     salutation: "Звертання",
-    former_names: "Попередні імена та прізвища",
+    former_names: "Прізвище при народженні (якщо інше)",
     birth_place: "Місце народження",
     birth_country: "Країна народження",
     habitual_residence_country: "Країна постійного перебування (якщо інша)",
@@ -1877,7 +1893,7 @@ const uk: LeadRequestText = {
   representativeCaptions: {
     rep1: "1-й представник",
     rep2: "2-й представник",
-    agent: "Представник",
+    agent: "Дані представника",
     guardian: "Опікун",
   },
   representativeYou: "ви",
@@ -2203,6 +2219,9 @@ const en: LeadRequestText = {
   payerMessenger: "WhatsApp / messenger",
   payerMessengerSameAsPhone: "same as phone",
   payerResidence: "Place of residence",
+  payerBlockPerson: "Payer's details",
+  payerBlockContact: "Contact",
+  payerBlockConsent: "Consents",
   followUpTitle: "We need some additional information",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
@@ -2210,10 +2229,11 @@ const en: LeadRequestText = {
     B: "Relationship to the paying person",
     C: "Payment route",
     F: "Residence and citizenship",
-    G: "Representation",
+    G: "Who acts for you",
     H: "Details of the public office",
     I: "Identity document",
     J: "Details of the links",
+    K: "Personal details",
   },
   followUpSubmit: "Send details",
   followUpSending: "Sending…",
@@ -2262,7 +2282,7 @@ const en: LeadRequestText = {
   payerEmailOrPhoneHint: "Please give at least an e-mail address or a phone number.",
   identificationFields: {
     salutation: "Title",
-    former_names: "Former names",
+    former_names: "Name at birth (if different)",
     birth_place: "Place of birth",
     birth_country: "Country of birth",
     habitual_residence_country: "Country of habitual residence (if different)",
@@ -2329,7 +2349,7 @@ const en: LeadRequestText = {
   representativeCaptions: {
     rep1: "1st representative",
     rep2: "2nd representative",
-    agent: "Representative",
+    agent: "Representative's details",
     guardian: "Legal guardian",
   },
   representativeYou: "you",

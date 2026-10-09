@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle, Send } from "lucide-react";
 
-import { Banner, Section } from "@/components/ui-shell";
+import { Banner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, textareaClass } from "@/components/record-workspace/primitives/design-tokens";
@@ -54,6 +54,7 @@ import {
 } from "./lead-request-identification";
 import { SANCTIONS_LINK_KINDS, STAY_REASONS, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
+  CabinetSection as Section,
   FileUploadField,
   LabeledField,
   MissingList,
@@ -191,6 +192,8 @@ export function FollowUpStep({
         );
       case "J":
         return <SanctionsLinkBlock form={identification} text={text} />;
+      case "K":
+        return <BirthBlock form={identification} text={text} lang={lang} guardian={guardian} />;
     }
   };
 
@@ -513,6 +516,33 @@ function RelationshipBlock({
 }
 
 /** Block F: since when the patient lives in the country, other residences, former citizenships, why there. */
+/** Block K: birth name, place and country of birth (only with the enhanced check). */
+function BirthBlock({
+  form,
+  text,
+  lang,
+  guardian,
+}: {
+  form: IdentificationForm;
+  text: LeadRequestText;
+  lang: string;
+  guardian: boolean;
+}) {
+  return (
+    <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+      <IdentificationFormField form={form} field="former_names" text={text} guardian={guardian}>
+        <IdentificationTextInput form={form} field="former_names" maxLength={200} />
+      </IdentificationFormField>
+      <IdentificationFormField form={form} field="birth_place" text={text} guardian={guardian} required>
+        <IdentificationTextInput form={form} field="birth_place" maxLength={200} />
+      </IdentificationFormField>
+      <IdentificationFormField form={form} field="birth_country" text={text} guardian={guardian} required>
+        <IdentificationCountrySelect form={form} field="birth_country" text={text} lang={lang} guardian={guardian} />
+      </IdentificationFormField>
+    </div>
+  );
+}
+
 function ResidenceBlock({
   form,
   text,

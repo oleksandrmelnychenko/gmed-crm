@@ -794,7 +794,7 @@ export function LeadGwgStatements({
 
       <StatementGroup title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
         <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
-        <Statement label={tx("Прежние имена", "Frühere Namen")}>{identification.former_names}</Statement>
+        <Statement label={tx("Фамилия при рождении", "Geburtsname")}>{identification.former_names}</Statement>
         <Statement label={tx("Место рождения", "Geburtsort")}>{identification.birth_place}</Statement>
         <Statement label={tx("Страна рождения", "Geburtsland")}>{country(identification.birth_country)}</Statement>
         <Statement label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}>

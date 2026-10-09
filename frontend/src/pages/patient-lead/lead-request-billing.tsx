@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Section } from "@/components/ui-shell";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
@@ -51,7 +50,7 @@ import {
   type RejectedBilling,
 } from "./lead-request-billing-model";
 import type { SaveState } from "./lead-request-model";
-import { LabeledField, RequiredMark, YesNoSelect, errorBody, useAutosave, type RequestQueue } from "./lead-request-parts";
+import { CabinetSection as Section, LabeledField, RequiredMark, YesNoSelect, errorBody, useAutosave, type RequestQueue } from "./lead-request-parts";
 import { invoiceToLabel, type LeadRequestText } from "./lead-request-text";
 
 // Invoice recipient and payment route (owner spec "Patientenformular",

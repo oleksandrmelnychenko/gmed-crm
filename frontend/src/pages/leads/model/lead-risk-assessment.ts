@@ -40,7 +40,7 @@ export const RISK_KNOCKOUT_TRIGGERS: readonly string[] = ["T14", "T15", "T16"];
 export const RISK_LIST_TRIGGERS: readonly string[] = ["T1", "T2", "T6"];
 
 /** The follow-up blocks staff may request (A–J). */
-export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"] as const;
+export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"] as const;
 
 export type RiskBlockKey = (typeof RISK_BLOCK_KEYS)[number];
 
@@ -509,6 +509,8 @@ export function riskBlockLabel(key: string, tx: Tx): string {
       return tx("Документ личности", "Ausweisdokument");
     case "J":
       return tx("Связи с санкциями: подробности", "Sanktionsbezug: Einzelheiten");
+    case "K":
+      return tx("Данные о рождении", "Geburtsangaben");
     default:
       return key;
   }
@@ -550,6 +552,8 @@ const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
   sanctions_link_name: ["имя связанного лица", "Name der Person"],
   sanctions_link_kind: ["вид связи", "Art der Verbindung"],
   sanctions_link_since_extent: ["с какого времени и объём связи", "Seit wann und Umfang"],
+  birth_place: ["место рождения", "Geburtsort"],
+  birth_country: ["страна рождения", "Geburtsland"],
 };
 
 export function riskMissingLabel(key: string, tx: Tx): string {

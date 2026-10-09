@@ -45,7 +45,9 @@ pub const TRIGGER_KEYS: [&str; 16] = [
 ];
 
 /// The follow-up blocks, in letter order.
-pub const BLOCKS: [&str; 10] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
+/// K (owner 2026-10-09): birth name, place and country of birth, asked only
+/// with the enhanced check (level 2 or 3), not in the base form.
+pub const BLOCKS: [&str; 11] = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"];
 
 /// Relationship kinds that count as the close family for T5 (PDF): a payer
 /// of any other kind — sibling, grandparent, relative, friend … — fires.

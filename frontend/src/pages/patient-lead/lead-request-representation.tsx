@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LoaderCircle, Trash2, Upload } from "lucide-react";
 
-import { Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -27,6 +26,7 @@ import {
 } from "./lead-request-api";
 import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
+  CabinetSection as Section,
   ConsentNeededNote,
   LabeledField,
   RequiredMark,
@@ -544,11 +544,12 @@ function RepresentativeBlock({
     <div
       role="group"
       aria-labelledby={`lead-request-representative-${slot}-title`}
-      className="space-y-3 rounded-lg border border-border bg-muted/10 px-3 py-3"
+      className="space-y-3 rounded-xl border border-border bg-card px-4 py-4 shadow-xs"
       data-testid={`lead-request-representative-${slot}`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h4 id={`lead-request-representative-${slot}-title`} className="min-w-0 break-words text-sm font-semibold">
+        <h4 id={`lead-request-representative-${slot}-title`} className="flex min-w-0 items-center gap-2 break-words text-sm font-semibold">
+          <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
           {heading}
         </h4>
         {person?.can_remove ? (
@@ -905,9 +906,10 @@ export function RepresentationSection({
     );
   }
 
+  // The question in its card, the person's details as a card of their own below it (owner 2026-10-09).
   return (
-    <Section title={text.sectionRepresentation}>
-      <div className="space-y-5" data-testid="lead-request-representation">
+    <div className="space-y-4" data-testid="lead-request-representation">
+      <Section title={text.sectionRepresentation}>
         <div className="space-y-3">
           <LabeledField id="lead-request-has_representative" label={text.hasRepresentativeQuestion} required question>
             <YesNoSelect
@@ -920,8 +922,11 @@ export function RepresentationSection({
               }}
             />
           </LabeledField>
-          {shown.includes("agent") ? block("agent") : null}
+          {problems}
         </div>
+      </Section>
+      {shown.includes("agent") ? block("agent") : null}
+        {/* The legal-guardianship question (rechtliche Betreuung) is switched off for now (owner 2026-10-09).
         <div className="space-y-3">
           <LabeledField id="lead-request-under_guardianship" label={text.underGuardianshipQuestion} required question>
             <YesNoSelect
@@ -936,8 +941,7 @@ export function RepresentationSection({
           </LabeledField>
           {shown.includes("guardian") ? block("guardian") : null}
         </div>
-        {problems}
-      </div>
-    </Section>
+        */}
+    </div>
   );
 }

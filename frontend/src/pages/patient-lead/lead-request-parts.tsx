@@ -71,6 +71,35 @@ export function useAutosave<Draft>(draft: Draft, save: (snapshot: Draft) => void
 
 const STEP_COUNT = 8;
 
+/**
+ * A section of the cabinet as a card (owner 2026-10-09): a header line with the
+ * marker and the title, the fields below, on the grey background of the step.
+ */
+export function CabinetSection({
+  title,
+  accessory,
+  children,
+  className,
+}: {
+  title: ReactNode;
+  accessory?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={cn("overflow-hidden rounded-xl border border-border bg-card shadow-xs", className)}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <div aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
+          <h3 className={cn(tokens.text.sectionTitle, "min-w-0 max-w-full break-words")}>{title}</h3>
+        </div>
+        {accessory ? <div className="min-w-0 max-w-full">{accessory}</div> : null}
+      </div>
+      <div className="space-y-2.5 p-4">{children}</div>
+    </section>
+  );
+}
+
 /** "Consent given on …" as a green chip (owner 2026-10-09). */
 export function ConsentGivenChip({ children }: { children: ReactNode }) {
   return (

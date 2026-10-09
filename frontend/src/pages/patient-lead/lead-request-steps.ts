@@ -90,7 +90,8 @@ export function stepOfField(field: string): FormStep {
 
 /** The steps shown for this request, in their order. */
 export function visibleSteps(request: Pick<LeadRequest, "follow_up">): StepId[] {
-  return STEP_IDS.filter((step) => step !== "follow_up" || followUpShown(request));
+  // "contact" is part of the first step (owner 2026-10-09): one tab with the consent and the person.
+  return STEP_IDS.filter((step) => step !== "contact" && (step !== "follow_up" || followUpShown(request)));
 }
 
 const FORM_ORDER = new Map<string, number>((SUBMIT_FIELDS as readonly string[]).map((field, index) => [field, index]));
@@ -125,6 +126,9 @@ export function missingByStep(
     placed.add(key);
     result[stepOfField(key)].push(key);
   }
+  // The contact keys are answered in the first step.
+  result.person = [...result.person, ...result.contact];
+  result.contact = [];
   for (const step of STEP_IDS) result[step] = byFormOrder(result[step]);
   result.follow_up = followUpMissingAll(request).map(({ block, key }) => `${block}:${key}`);
   return result;

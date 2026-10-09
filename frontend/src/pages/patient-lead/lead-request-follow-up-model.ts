@@ -14,7 +14,7 @@ import type {
 // the texts can use it.
 
 /** The blocks the cabinet asks, in letter order (D and E are the payer link's). */
-export const FOLLOW_UP_BLOCKS = ["A", "B", "C", "F", "G", "H", "I", "J"] as const satisfies readonly FollowUpBlock[];
+export const FOLLOW_UP_BLOCKS = ["A", "B", "C", "F", "G", "H", "I", "J", "K"] as const satisfies readonly FollowUpBlock[];
 
 function isFollowUpBlock(value: string): value is FollowUpBlock {
   return (FOLLOW_UP_BLOCKS as readonly string[]).includes(value);

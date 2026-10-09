@@ -188,6 +188,8 @@ pub struct BlockAnswers {
     pub sanctions_link_name: Option<String>,
     pub sanctions_link_kind: Option<String>,
     pub sanctions_link_since_extent: Option<String>,
+    pub birth_place: Option<String>,
+    pub birth_country: Option<String>,
     pub funds_proof_uploaded: bool,
     pub relationship_proof_uploaded: bool,
     pub identity_issue: bool,
@@ -238,7 +240,8 @@ pub async fn load_block_answers(
                   g.residence_since, g.stay_reason, g.stay_reason_details, g.pep_related,
                   g.pep_office, g.pep_country, g.pep_period, g.pep_relationship,
                   g.pep_wealth_origin, g.sanctions_link_name, g.sanctions_link_kind,
-                  g.sanctions_link_since_extent, g.id_data_entered_at,
+                  g.sanctions_link_since_extent, g.id_data_entered_at, g.birth_place,
+                  g.birth_country,
                   d.expected_total_eur::float8 AS expected_total_eur, d.via_third_party_kind,
                   s.submitted_at AS statement_submitted_at, s.legal_form AS statement_legal_form,
                   s.payment_reason AS statement_payment_reason,
@@ -297,6 +300,8 @@ pub async fn load_block_answers(
         pep_period: text("pep_period"),
         pep_relationship: text("pep_relationship"),
         pep_wealth_origin: text("pep_wealth_origin"),
+        birth_place: text("birth_place"),
+        birth_country: text("birth_country"),
         sanctions_link_name: text("sanctions_link_name"),
         sanctions_link_kind: text("sanctions_link_kind"),
         sanctions_link_since_extent: text("sanctions_link_since_extent"),
@@ -478,6 +483,15 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             }
             PARTY_CABINET
         }
+        "K" => {
+            if blank(&answers.birth_place) {
+                missing.push("birth_place");
+            }
+            if blank(&answers.birth_country) {
+                missing.push("birth_country");
+            }
+            PARTY_CABINET
+        }
         _ => PARTY_CABINET,
     };
     (party, missing.into_iter().map(str::to_string).collect())
@@ -516,6 +530,8 @@ pub fn block_states(
         let open = match block {
             "G" => requested || (sticky("T13") && !missing.is_empty()),
             "I" => requested || (sticky("T12") && !missing.is_empty()),
+            // The enhanced check (level 2 or 3) asks the birth data; the base form does not.
+            "K" => requested || level >= 2,
             _ => requested || automatic.contains(&block),
         };
         states.insert(

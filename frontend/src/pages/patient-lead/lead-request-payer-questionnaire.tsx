@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { LoaderCircle, Send, Upload } from "lucide-react";
 
-import { Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -55,6 +54,7 @@ import {
   type RejectedPayerFields,
 } from "./lead-request-payer-questionnaire-model";
 import {
+  CabinetSection as Section,
   LabeledField,
   RequiredMark,
   UploadedFileList,

@@ -1,6 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 
-import { Section } from "@/components/ui-shell";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -47,6 +46,7 @@ import {
   type SaveState,
 } from "./lead-request-model";
 import {
+  CabinetSection as Section,
   ConsentGivenChip,
   LabeledField,
   RequiredMark,
@@ -232,9 +232,11 @@ export function PayerSection({
     className,
   });
 
+  // Several cards (owner 2026-10-09): who pays, the payer, contact, residence and the consents.
   return (
-    <Section title={text.sectionPayer}>
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-payer">
+    <div className="space-y-4" data-testid="lead-request-payer">
+      <Section title={text.sectionPayer}>
+        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <LabeledField {...field("payer_kind", true, "sm:col-span-2 lg:col-span-3")}>
           <NativeComboboxSelect
             {...fieldProps("payer_kind")}
@@ -248,7 +250,6 @@ export function PayerSection({
             <option value="third_party">{options.third_party}</option>
           </NativeComboboxSelect>
         </LabeledField>
-        {/* A third party's data exist only when a third party pays. */}
         {thirdParty ? (
           <>
             <p className="sm:col-span-2 lg:col-span-3">
@@ -273,6 +274,49 @@ export function PayerSection({
                 </NativeComboboxSelect>
               </LabeledField>
             ) : null}
+          </>
+        ) : null}
+        {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
+        {identification && draft.payer_kind ? (
+          <>
+            <LabeledField {...field("payer_own_account", true, "sm:col-span-2 lg:col-span-3")}>
+              <YesNoSelect
+                id="lead-request-payer_own_account"
+                className="sm:max-w-[calc(50%-0.5rem)]"
+                value={draft.acts_on_own_account}
+                text={text}
+                // The server keeps an answer once given; it can be changed, not taken back.
+                keepAnswer
+                invalid={Boolean(errorFor("payer_own_account"))}
+                onChange={(ownAccount) => set("acts_on_own_account", ownAccount)}
+              />
+            </LabeledField>
+            {draft.acts_on_own_account === "no" ? (
+              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2 lg:col-span-3")}>
+                <textarea
+                  {...fieldProps("payer_beneficial_owner")}
+                  className={cn(textareaClass, "text-base md:text-sm")}
+                  rows={3}
+                  maxLength={2000}
+                  autoComplete="off"
+                  value={draft.beneficial_owner}
+                  onChange={(event) => set("beneficial_owner", event.target.value)}
+                />
+              </LabeledField>
+            ) : null}
+          </>
+        ) : null}
+        {fieldError === "payer" ? (
+          <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3">
+            {text.notSaved}
+          </p>
+        ) : null}
+        </div>
+      </Section>
+      {thirdParty ? (
+        <>
+          <Section title={text.payerBlockPerson}>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {organisation ? (
               // The organisation mask: a company, organisation or insurer has a name, a legal form,
               // a register number and a contact person; no date of birth and no citizenship.
@@ -413,6 +457,10 @@ export function PayerSection({
                 ) : null}
               </>
             )}
+            </div>
+          </Section>
+          <Section title={text.payerBlockContact}>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {/* Contact (owner request 2026-10-07): e-mail and phone are required of a third person, the
                 messenger is not; an organisation needs one of the two. */}
             {organisation && orgMask ? (
@@ -487,10 +535,10 @@ export function PayerSection({
                 />
               </LabeledField>
             ) : null}
-            {/* Residence: country and city are required of a person; street and ZIP may be unknown. */}
-            {organisation ? null : (
-              <p className="pt-1 text-sm font-medium sm:col-span-2 lg:col-span-3">{text.payerResidence}</p>
-            )}
+            </div>
+          </Section>
+          <Section title={text.payerResidence}>
+            <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {/* The country of the seat is what the screening of an organisation works with. */}
             <LabeledField {...field("payer_country", organisation || contactRequired("payer_country"))}>
               <CountrySelect
@@ -528,6 +576,11 @@ export function PayerSection({
                 onChange={(event) => set("zip", event.target.value)}
               />
             </LabeledField>
+            </div>
+          </Section>
+          {consentAsked || costEstimateConsentAsked(request, draft.guardian_pays) ? (
+            <Section title={text.payerBlockConsent}>
+              <div className="space-y-3">
             {consentAsked ? (
               // The consent is part of the answer: it is saved with it, and it is needed to send.
               <div
@@ -575,45 +628,12 @@ export function PayerSection({
             {costEstimateConsentAsked(request, draft.guardian_pays) ? (
               <CostEstimateConsent {...costConsent} className="sm:col-span-2 lg:col-span-3" />
             ) : null}
-          </>
-        ) : null}
-        {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
-        {identification && draft.payer_kind ? (
-          <>
-            <LabeledField {...field("payer_own_account", true, "sm:col-span-2 lg:col-span-3")}>
-              <YesNoSelect
-                id="lead-request-payer_own_account"
-                className="sm:max-w-[calc(50%-0.5rem)]"
-                value={draft.acts_on_own_account}
-                text={text}
-                // The server keeps an answer once given; it can be changed, not taken back.
-                keepAnswer
-                invalid={Boolean(errorFor("payer_own_account"))}
-                onChange={(ownAccount) => set("acts_on_own_account", ownAccount)}
-              />
-            </LabeledField>
-            {draft.acts_on_own_account === "no" ? (
-              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2 lg:col-span-3")}>
-                <textarea
-                  {...fieldProps("payer_beneficial_owner")}
-                  className={cn(textareaClass, "text-base md:text-sm")}
-                  rows={3}
-                  maxLength={2000}
-                  autoComplete="off"
-                  value={draft.beneficial_owner}
-                  onChange={(event) => set("beneficial_owner", event.target.value)}
-                />
-              </LabeledField>
-            ) : null}
-          </>
-        ) : null}
-        {fieldError === "payer" ? (
-          <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3">
-            {text.notSaved}
-          </p>
-        ) : null}
-      </div>
-    </Section>
+              </div>
+            </Section>
+          ) : null}
+        </>
+      ) : null}
+    </div>
   );
 }
 

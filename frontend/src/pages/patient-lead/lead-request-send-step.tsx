@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, CircleAlert, Info, LoaderCircle, Pencil, Send, Upload } from "lucide-react";
 
-import { Banner, Section, SuccessBanner } from "@/components/ui-shell";
+import { Banner, SuccessBanner } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { checkboxClass } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDateTime } from "@/lib/app-time-zone";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { INQUIRY_CONSENT, submitLeadRequest, type LeadRequest } from "./lead-request-api";
 import { followUpAnswered, followUpShown } from "./lead-request-follow-up-model";
 import { canSubmit, changedSinceSubmit, consentGiven, type SubmitField } from "./lead-request-model";
-import { RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
+import { CabinetSection as Section, RequiredMark, StepFooter, errorBody, errorMessage, type RequestQueue, type Step } from "./lead-request-parts";
 import { firstIncompleteStep, missingByStep, visibleSteps, type StepId } from "./lead-request-steps";
 import { requestSummary, type SummaryGroup, type SummaryRow } from "./lead-request-summary";
 import { submitFieldLabel, type LeadRequestText } from "./lead-request-text";

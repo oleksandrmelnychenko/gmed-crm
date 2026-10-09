@@ -1,7 +1,6 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight, LoaderCircle, Upload } from "lucide-react";
 
-import { Section } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -22,10 +21,8 @@ import {
 import { BillingSections } from "./lead-request-billing";
 import {
   ContactChannelsField,
-  IdentificationCountrySelect,
   IdentificationFormField,
   IdentificationTextArea,
-  IdentificationTextInput,
   IdentityDocumentSection,
   LegalQuestionsSection,
   useIdentificationForm,
@@ -47,6 +44,7 @@ import {
   type SubmitField,
 } from "./lead-request-model";
 import {
+  CabinetSection as Section,
   ConsentNeededNote,
   ConsentCheckbox,
   FormField,
@@ -349,11 +347,6 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               onChange={(event) => set("middle_name", event.target.value)}
             />
           </FormField>
-          {withIdentification ? (
-            <IdentificationFormField form={identification} field="former_names" text={text}>
-              <IdentificationTextInput form={identification} field="former_names" maxLength={200} />
-            </IdentificationFormField>
-          ) : null}
           <FormField field="date_of_birth" text={text} error={errorFor("date_of_birth")} required>
             <Input
               key={`date_of_birth-${lang}`}
@@ -367,16 +360,6 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               onChange={(event) => set("date_of_birth", event.target.value)}
             />
           </FormField>
-          {withIdentification ? (
-            <>
-              <IdentificationFormField form={identification} field="birth_place" text={text} required>
-                <IdentificationTextInput form={identification} field="birth_place" maxLength={200} />
-              </IdentificationFormField>
-              <IdentificationFormField form={identification} field="birth_country" text={text} required>
-                <IdentificationCountrySelect form={identification} field="birth_country" text={text} lang={lang} />
-              </IdentificationFormField>
-            </>
-          ) : null}
           <FormField field="legal_sex" text={text} error={errorFor("legal_sex")} required>
             <NativeComboboxSelect
               {...fieldProps("legal_sex")}
@@ -403,6 +386,78 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
             />
           </FormField>
         </div>
+      </Section>
+
+      {/* Address and contact (owner 2026-10-09: one tab with the consent and the person). */}
+      <Section title={text.sectionAddress}>
+        <div className={GRID}>
+          <FormField field="street_address" text={text} error={errorFor("street_address")} required className="sm:col-span-2">
+            <Input
+              {...fieldProps("street_address")}
+              className={inputClass}
+              autoComplete="street-address"
+              value={draft.street_address}
+              onChange={(event) => set("street_address", event.target.value)}
+            />
+          </FormField>
+          <FormField field="zip_code" text={text} error={errorFor("zip_code")} required>
+            <Input
+              {...fieldProps("zip_code")}
+              className={inputClass}
+              autoComplete="postal-code"
+              value={draft.zip_code}
+              onChange={(event) => set("zip_code", event.target.value)}
+            />
+          </FormField>
+          <FormField field="city" text={text} error={errorFor("city")} required>
+            <Input
+              {...fieldProps("city")}
+              className={inputClass}
+              autoComplete="address-level2"
+              value={draft.city}
+              onChange={(event) => set("city", event.target.value)}
+            />
+          </FormField>
+          <FormField field="country" text={text} error={errorFor("country")} required>
+            <CountrySelect
+              value={draft.country || null}
+              lang={lang}
+              className={selectClass}
+              aria-label={text.fields.country}
+              onChange={(code) => set("country", code ?? "")}
+            />
+          </FormField>
+        </div>
+      </Section>
+      <Section title={text.sectionContact}>
+        <div className={GRID}>
+          <FormField field="phone" text={text} error={errorFor("phone")}>
+            <Input
+              {...fieldProps("phone")}
+              className={inputClass}
+              type="tel"
+              autoComplete="tel"
+              value={draft.phone}
+              onChange={(event) => set("phone", event.target.value)}
+            />
+          </FormField>
+          <FormField field="primary_language" text={text} error={errorFor("primary_language")}>
+            <NativeComboboxSelect
+              {...fieldProps("primary_language")}
+              className={selectClass}
+              value={draft.primary_language}
+              onChange={(event) => set("primary_language", event.target.value)}
+            >
+              <option value="">{text.choose}</option>
+              {cabinetLanguageOptions(lang).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {languageName(option.value, lang)}
+                </option>
+              ))}
+            </NativeComboboxSelect>
+          </FormField>
+        </div>
+        {withIdentification ? <ContactChannelsField form={identification} text={text} /> : null}
       </Section>
 
       {/* An older server does not know who acts for the lead. Adult or minor: the block starts anew with the other questions. */}
@@ -498,7 +553,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
               onChange={(event) => set("primary_language", event.target.value)}
             >
               <option value="">{text.choose}</option>
-              {LANGUAGE_OPTIONS.map((option) => (
+              {cabinetLanguageOptions(lang).map((option) => (
                 <option key={option.value} value={option.value}>
                   {languageName(option.value, lang)}
                 </option>
@@ -811,5 +866,15 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
         />
       </Section>
     </StepFrame>
+  );
+}
+
+/**
+ * The languages the cabinet offers: only those the browser can name in the
+ * cabinet language (no raw codes such as "Aa"), sorted by that name.
+ */
+function cabinetLanguageOptions(lang: string) {
+  return LANGUAGE_OPTIONS.filter((option) => languageName(option.value, lang).toLowerCase() !== option.value.toLowerCase()).sort((left, right) =>
+    languageName(left.value, lang).localeCompare(languageName(right.value, lang), lang),
   );
 }

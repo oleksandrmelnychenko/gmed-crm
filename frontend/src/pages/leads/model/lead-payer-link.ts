@@ -542,7 +542,7 @@ export function payerQuestionnaireGroups(
     : [
         row("salutation", tx("Обращение", "Anrede"), salutationLabel(answers.salutation, tx)),
         row("name", tx("Имя и фамилия", "Name"), [answers.first_name, answers.last_name].filter(Boolean).join(" ")),
-        row("former_names", tx("Прежние имена", "Frühere Namen"), answers.former_names),
+        row("former_names", tx("Фамилия при рождении", "Geburtsname"), answers.former_names),
         row("date_of_birth", tx("Дата рождения", "Geburtsdatum"), formatAppDate(answers.date_of_birth)),
         row("birth_place", tx("Место рождения", "Geburtsort"), joined(answers.birth_place, country(answers.birth_country))),
         row("citizenships", tx("Гражданство", "Staatsangehörigkeit"), joined(...answers.citizenships.map((code) => country(code)))),
