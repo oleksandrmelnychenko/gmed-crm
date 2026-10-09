@@ -17,6 +17,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
+import { useRealtimeSubscription } from "@/lib/realtime";
 import { isLeadPortalUser } from "@/lib/staff-route-access";
 import { TwoFactorSection } from "@/pages/two-factor";
 
@@ -58,7 +59,7 @@ export function AccountPage() {
 
 function ProfileSection() {
   const { l, lang, setLangFromProfile } = useProfileLanguage();
-  const { refreshUser } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [profile, setProfile] = useState<AccountProfile | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -85,6 +86,18 @@ function ProfileSection() {
     };
     // The saved language seeds the select once; later toggles come from the select itself.
   }, []);
+
+  // The name can change behind the user's back (a lead renamed by staff): the
+  // page follows it unless the field is being edited.
+  useRealtimeSubscription(["user.updated"], (event) => {
+    if (!user || event.entity_id !== user.id || profile === null) return;
+    apiFetch<AccountProfile>("/me/profile", { cache: "no-store", forceFresh: true })
+      .then((fresh) => {
+        setProfile(fresh);
+        setName((current) => (current === (profile.name ?? "") ? (fresh.name ?? "") : current));
+      })
+      .catch(() => undefined);
+  });
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();

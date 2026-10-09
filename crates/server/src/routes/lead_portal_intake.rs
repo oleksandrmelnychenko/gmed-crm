@@ -2668,12 +2668,14 @@ async fn update_my_personal_data(
     }
     // The login carries the lead's name: a rename in the cabinet reaches the
     // account page and Users & Roles in the same step.
-    if (changed.contains(&"first_name") || changed.contains(&"last_name"))
-        && let Err(error) =
-            crate::routes::lead_portal_account::sync_name_in_tx(&mut tx, lead_id).await
-    {
-        return internal(error, "sync login name");
-    }
+    let renamed_login = if changed.contains(&"first_name") || changed.contains(&"last_name") {
+        match crate::routes::lead_portal_account::sync_name_in_tx(&mut tx, lead_id).await {
+            Ok(synced) => synced,
+            Err(error) => return internal(error, "sync login name"),
+        }
+    } else {
+        None
+    };
     if let Err(error) = audit::write_in_transaction(
         &mut tx,
         &audit::domain_event(
@@ -2690,6 +2692,15 @@ async fn update_my_personal_data(
     }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit personal data");
+    }
+    if let Some(user_id) = renamed_login {
+        crate::realtime::publish_user_profile_event(
+            &state,
+            Some(auth.user_id),
+            user_id,
+            json!({ "change": "name", "source": "lead", "lead_id": lead_id }),
+        )
+        .await;
     }
     crate::realtime::publish_lead_event(
         &state,

@@ -515,6 +515,17 @@ async fn login_name(pool: &PgPool, user_id: Uuid) -> String {
         .unwrap()
 }
 
+/// How often open pages were told that the login's profile changed.
+async fn login_events(pool: &PgPool, user_id: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM realtime_events WHERE event_type = 'user.updated' AND entity_id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
 #[tokio::test]
 async fn a_renamed_lead_is_renamed_in_its_login() {
     let Some(app) = test_app().await else { return };
@@ -570,6 +581,28 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
     .await
     .unwrap();
     assert_eq!(context["portal_name_synced"], true, "{context}");
+    // Open pages follow at once: the event goes to the roles that list users
+    // and to the login's own sessions, and it does not carry the name.
+    let (actor, targets, roles, payload): (Option<Uuid>, Vec<Uuid>, Vec<String>, Value) =
+        sqlx::query_as(
+            r#"SELECT actor_user_id, target_user_ids, role_names, payload FROM realtime_events
+               WHERE event_type = 'user.updated' AND entity_id = $1
+               ORDER BY seq DESC LIMIT 1"#,
+        )
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(actor, Some(app.patient_manager_id));
+    assert!(targets.contains(&user_id), "{targets:?}");
+    assert!(
+        roles.contains(&"ceo".to_string()) && roles.contains(&"it_admin".to_string()),
+        "{roles:?}"
+    );
+    assert_eq!(payload["change"], "name");
+    assert_eq!(payload["lead_id"], json!(lead_id));
+    assert!(!payload.to_string().contains("Renata"), "{payload}");
+    assert_eq!(login_events(pool, user_id).await, 1);
 
     // Saving other data leaves the login's name alone; saving the name again
     // brings a login that drifted earlier into line.
@@ -588,6 +621,7 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(login_name(pool, user_id).await, "Drifted");
+    assert_eq!(login_events(pool, user_id).await, 1);
     let (status, body) = json_request(
         router,
         "POST",
@@ -598,6 +632,7 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(login_name(pool, user_id).await, "Renata Portal-Meyer");
+    assert_eq!(login_events(pool, user_id).await, 2);
 
     // The lead renames itself in the cabinet.
     let (status, saved) = json_request(
@@ -610,6 +645,18 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(login_name(pool, user_id).await, "Rita Portal-Meyer");
+    let (actor, targets): (Option<Uuid>, Vec<Uuid>) = sqlx::query_as(
+        r#"SELECT actor_user_id, target_user_ids FROM realtime_events
+           WHERE event_type = 'user.updated' AND entity_id = $1
+           ORDER BY seq DESC LIMIT 1"#,
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(actor, Some(user_id));
+    assert_eq!(targets, vec![user_id]);
+    assert_eq!(login_events(pool, user_id).await, 3);
 
     // A converted lead's login is the patient's account: its name stays.
     let patient_id: Uuid = sqlx::query_scalar(
@@ -640,6 +687,7 @@ async fn a_renamed_lead_is_renamed_in_its_login() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(login_name(pool, user_id).await, "Rita Portal-Meyer");
+    assert_eq!(login_events(pool, user_id).await, 3);
 }
 
 #[tokio::test]

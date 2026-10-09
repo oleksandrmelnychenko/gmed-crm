@@ -4098,16 +4098,16 @@ async fn update_lead(
     // The login carries the lead's name: a renamed lead is renamed in the
     // cabinet's account page and in Users & Roles in the same step. Saving the
     // name again also brings a login that drifted earlier into line.
-    let portal_name_synced = if name_supplied {
+    let renamed_login = if name_supplied {
         match crate::routes::lead_portal_account::sync_name_in_tx(&mut tx, lead_id).await {
-            Ok(synced) => synced.is_some(),
+            Ok(synced) => synced,
             Err(error) => {
                 tracing::error!(%error, lead_id = %lead_id, "sync lead portal name");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
             }
         }
     } else {
-        false
+        None
     };
     // The audit row commits with the change (a compliance change is a status
     // change of the lead).
@@ -4124,7 +4124,7 @@ async fn update_lead(
     if compliance_changed {
         audit_context["previous_compliance_status"] = json!(current_compliance_status);
     }
-    if portal_name_synced {
+    if renamed_login.is_some() {
         audit_context["portal_name_synced"] = json!(true);
     }
     if let Some(previous) = previous_citizenships
@@ -4151,6 +4151,17 @@ async fn update_lead(
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, lead_id = %lead_id, "commit lead update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    // Open pages show the new name at once: Users & Roles reloads its list and
+    // the lead's cabinet reloads the profile.
+    if let Some(user_id) = renamed_login {
+        crate::realtime::publish_user_profile_event(
+            &state,
+            Some(auth.user_id),
+            user_id,
+            json!({ "change": "name", "source": "lead", "lead_id": lead_id }),
+        )
+        .await;
     }
 
     let readiness = match load_lead_conversion_readiness(&state, lead_id).await {

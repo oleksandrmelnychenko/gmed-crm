@@ -206,8 +206,16 @@ function readEventSeq(event: RealtimeEvent) {
 }
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const userId = user?.id ?? "";
+
+  // The signed-in user's own profile changed behind their back (a lead renamed
+  // by staff): reload it, so the menu shows the new name without a new sign-in.
+  useRealtimeSubscription(["user.updated"], (event) => {
+    if (userId && event.entity_id === userId) {
+      void refreshUser().catch(() => null);
+    }
+  });
 
   useEffect(() => {
     if (loading) return;

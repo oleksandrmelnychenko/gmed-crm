@@ -1015,6 +1015,27 @@ pub async fn publish_admin_event(
     .await;
 }
 
+/// The profile of `user_id` changed behind the user's back (a lead's login
+/// follows the lead's name). Users & Roles lists it, so the roles that see
+/// users get the event, and so do the user's own sessions: an open page
+/// reloads the profile instead of showing the old name until the next sign-in.
+pub async fn publish_user_profile_event(
+    state: &AppState,
+    actor_user_id: Option<Uuid>,
+    user_id: Uuid,
+    payload: Value,
+) {
+    publish_event(
+        state,
+        RealtimeEvent::new("user.updated", "user", user_id)
+            .actor(actor_user_id)
+            .target_users(actor_user_id.into_iter().chain([user_id]).collect())
+            .roles(&["ceo", "it_admin"])
+            .payload(payload),
+    )
+    .await;
+}
+
 pub async fn publish_announcement_event(
     state: &AppState,
     actor_user_id: Option<Uuid>,
