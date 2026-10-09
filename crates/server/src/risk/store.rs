@@ -307,7 +307,10 @@ pub async fn load_block_answers(
         birth_country: text("birth_country"),
         pep_self_answer: row.try_get::<Option<bool>, _>("pep_self").ok().flatten(),
         pep_related_answer: row.try_get::<Option<bool>, _>("pep_related").ok().flatten(),
-        sanctions_links_answer: row.try_get::<Option<bool>, _>("sanctions_links").ok().flatten(),
+        sanctions_links_answer: row
+            .try_get::<Option<bool>, _>("sanctions_links")
+            .ok()
+            .flatten(),
         sanctions_link_name: text("sanctions_link_name"),
         sanctions_link_kind: text("sanctions_link_kind"),
         sanctions_link_since_extent: text("sanctions_link_since_extent"),
@@ -500,7 +503,9 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                 }
             }
             // The own economic interest is asked here too (owner 2026-10-09).
-            missing.extend(lead_payer::portal_missing_own_account(answers.payer.as_ref()));
+            missing.extend(lead_payer::portal_missing_own_account(
+                answers.payer.as_ref(),
+            ));
             PARTY_CABINET
         }
         "K" => {
