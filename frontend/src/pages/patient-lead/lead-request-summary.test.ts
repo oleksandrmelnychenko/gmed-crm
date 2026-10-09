@@ -495,7 +495,7 @@ describe("lead request summary", () => {
       "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?": "Ja",
       "Stehen Sie unter rechtlicher Betreuung?": "Nein",
     });
-    expect(group?.parts?.map((part) => [part.id, part.title])).toEqual([["agent", "Vertretende Person"]]);
+    expect(group?.parts?.map((part) => [part.id, part.title])).toEqual([["agent", "Angaben zur vertretenden Person"]]);
     expect(Object.fromEntries((group?.parts?.[0].rows ?? []).map((row) => [row.label, row.value]))).toEqual({
       Vorname: "Ben",
       Nachname: "Muster",

@@ -16,5 +16,6 @@ describe("check-staff-spa-navigation.mjs", () => {
         encoding: "utf8",
       });
     }).not.toThrow();
-  });
+    // The script scans the whole source tree in a child process; under a full parallel run it can take longer than 5 s.
+  }, 30_000);
 });

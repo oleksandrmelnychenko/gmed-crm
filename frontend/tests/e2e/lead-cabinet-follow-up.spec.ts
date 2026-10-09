@@ -155,7 +155,7 @@ function recompute(request: LeadRequestMock) {
     identity: request.identity_documents.length > 0 ? [] : ["id_document_upload"],
     payer: [] as string[],
     billing: request.billing.invoice_to ? [] : ["invoice_to"],
-    declarations: ["pep_self", "pep_related", "sanctions_links"].filter((key) => id[key] === null),
+    // The legal questions and the own economic interest are follow-up block L (owner 2026-10-09): not in the base form.
   };
   const payer = request.payer;
   if (!payer) byStep.payer.push("payer_kind");
@@ -166,7 +166,6 @@ function recompute(request: LeadRequestMock) {
     if (!payer.organisation_contact_name) byStep.payer.push("payer_contact_name");
     if (!payer.email && !payer.phone) byStep.payer.push("payer_email_or_phone");
   }
-  if (payer && payer.acts_on_own_account == null) byStep.payer.push("payer_own_account");
   const reason = id.request_reason ? [] : ["request_reason"];
   request.progress.missing_by_step = byStep;
   request.progress.missing_for_submit = [...Object.values(byStep).flat(), ...reason];
@@ -195,6 +194,13 @@ function recompute(request: LeadRequestMock) {
       ];
     }
     if (block === "I") missing.I = request.identity_documents.length > 1 ? [] : ["id_document_upload"];
+    // K: the birth data; L: the legal questions and the own economic interest (owner 2026-10-09).
+    if (block === "K") missing.K = ["birth_place", "birth_country"].filter((key) => !filled(id[key]));
+    if (block === "L") {
+      missing.L = ["pep_self", "pep_related", "sanctions_links"].filter((key) => id[key] === null);
+      if (payer && payer.acts_on_own_account == null) missing.L.push("payer_own_account");
+      else if (payer?.acts_on_own_account === false && !payer.beneficial_owner) missing.L.push("payer_beneficial_owner");
+    }
   }
   request.follow_up.missing = missing;
 }
@@ -402,21 +408,27 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const { calls } = await setup(page);
     await page.goto("/");
 
-    // Eight steps without open blocks: no "Ergänzende Angaben".
+    // Six steps without open blocks: no "Ergänzende Angaben"; the contact is part of the first step and the
+    // declarations are follow-up block L (owner 2026-10-09).
     const tabs = page.getByTestId("lead-request-steps").getByRole("tab");
-    await expect(tabs).toHaveCount(8);
+    await expect(tabs).toHaveCount(6);
     await expect(tab(page, "follow_up")).toHaveCount(0);
+    await expect(tab(page, "contact")).toHaveCount(0);
+    await expect(tab(page, "declarations")).toHaveCount(0);
     await expect(tab(page, "person")).toHaveAttribute("aria-selected", "true");
-    // The badges count what each step misses (the server's `missing_by_step`).
-    await expect(tab(page, "contact").getByTestId("lead-request-step-badge")).toHaveText("4");
+    // The badges count what each step misses (the server's `missing_by_step`, the contact keys in the first step).
+    await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("4");
     await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
-    await expect(tab(page, "declarations").getByTestId("lead-request-step-badge")).toHaveText("3");
     await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveText("1");
-    await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
 
     // Free navigation: straight to the identity document, then back with the step bar.
     await tab(page, "identity").click();
     const identity = page.getByTestId("lead-request-step-identity");
+    // The yellow list shows only after "Weiter"; the first press stays on the step (owner 2026-10-09).
+    await expect(identity.getByTestId("lead-request-step-missing")).toHaveCount(0);
+    await identity.getByRole("button", { name: "Weiter" }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "identity");
     await expect(identity.getByTestId("lead-request-step-missing")).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
     // No intro sentence above the upload (owner 2026-10-09).
     await expect(identity).not.toContainText("Bitte laden Sie ein Foto oder einen Scan");
@@ -433,18 +445,10 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveCount(0);
     await expect(identity.getByTestId("lead-request-step-missing")).toHaveCount(0);
     await page.getByRole("button", { name: "Zurück" }).click();
-    await expect(page.getByTestId("lead-request-step-contact")).toBeVisible();
+    await expect(page.getByTestId("lead-request-step-person")).toBeVisible();
     await page.locator("#lead-request-city").fill("Berlin");
     await expect.poll(() => calls.personalData.at(-1)).toEqual({ city: "Berlin" });
-    await expect(tab(page, "contact").getByTestId("lead-request-step-badge")).toHaveText("3");
-
-    // The declarations are yes or no only: no details, no high-risk question.
-    await tab(page, "declarations").click();
-    const legal = page.getByTestId("lead-request-legal");
-    await expect(legal.getByRole("combobox")).toHaveCount(3);
-    await choose(page, page.getByTestId("lead-request-legal-pep_self").getByRole("combobox"), "Ja");
-    await expect.poll(() => calls.identification.at(-1)).toEqual({ pep_self: true });
-    await expect(legal.getByRole("textbox")).toHaveCount(0);
+    await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("3");
 
     // "Anliegen & Unterlagen": the reason of the request, required, in the lead's own words.
     await tab(page, "documents").click();
@@ -486,6 +490,9 @@ test.describe("lead cabinet stepper and follow-up", () => {
       organisation_contact_name: "Ben Muster",
     });
     const stepMissing = page.getByTestId("lead-request-step-payer").getByTestId("lead-request-step-missing");
+    // What is missing shows after "Weiter" (owner 2026-10-09).
+    await expect(stepMissing).toHaveCount(0);
+    await page.getByTestId("lead-request-step-payer").getByRole("button", { name: "Weiter" }).click();
     await expect(stepMissing).toContainText("Zahler: E-Mail oder Telefon");
     await expect(stepMissing).toContainText("Zahler: Land des Sitzes");
     await payer.getByRole("textbox", { name: "Telefon" }).fill("+49 30 1234567");
@@ -507,10 +514,12 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(followUp).toBeVisible();
     await expect(tab(page, "follow_up")).toHaveAttribute("aria-selected", "true");
     await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveText("7");
-    await expect(page.getByTestId("lead-request-follow-up-notice")).toContainText("Wir benötigen ergänzende Angaben");
+    // No notice above the blocks (owner 2026-10-09): the step's name says it.
+    await expect(page.getByTestId("lead-request-follow-up-notice")).toHaveCount(0);
+    await expect(followUp).not.toContainText("Wir benötigen ergänzende Angaben");
     await expect(page.getByTestId("lead-request-follow-up-A")).toContainText("Herkunft der Mittel");
     await expect(page.getByTestId("lead-request-follow-up-B")).toContainText("Beziehung zur zahlenden Person");
-    for (const block of ["C", "F", "G", "H", "I", "J"]) {
+    for (const block of ["C", "F", "G", "H", "I", "J", "K", "L"]) {
       await expect(page.getByTestId(`lead-request-follow-up-${block}`)).toHaveCount(0);
     }
     // Nothing of an assessment is in the page: no points, level, trigger or reason.
@@ -599,7 +608,9 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(blockC.getByText("Bitte prüfen Sie diese Angabe.")).toBeVisible();
 
     const blockI = page.getByTestId("lead-request-follow-up-I");
-    await expect(blockI).toContainText("Bitte laden Sie ein aktuelles, gut lesbares Foto");
+    // No intro sentence above the upload (owner 2026-10-09): the button says what to do.
+    await expect(blockI).not.toContainText("Bitte laden Sie ein aktuelles, gut lesbares Foto");
+    await expect(blockI.getByRole("button", { name: "Foto oder Scan des Ausweises hochladen" })).toBeEnabled();
     await blockI.locator("#lead-request-identity-files").setInputFiles({
       name: "reisepass-neu.pdf",
       mimeType: "application/pdf",
@@ -607,6 +618,55 @@ test.describe("lead cabinet stepper and follow-up", () => {
     });
     await expect.poll(() => calls.identityUploads).toBe(1);
     await expect(page.getByTestId("lead-request-follow-up-I-missing")).toHaveCount(0);
+    expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
+  });
+
+  test("blocks K and L first: the birth data, the legal questions and the own economic interest", async ({ page }) => {
+    const { calls } = await setup(page, (request) => {
+      sentWithBlocks(["A", "L", "K"])(request);
+      Object.assign(request.identification, { birth_place: null, birth_country: null, pep_self: null, pep_related: null, sanctions_links: null });
+      request.payer = { ...request.payer, acts_on_own_account: null };
+    });
+    await page.goto("/");
+    const followUp = page.getByTestId("lead-request-follow-up");
+    await expect(followUp).toBeVisible();
+    // The personal details and the legal questions come first (owner 2026-10-09).
+    const order = await followUp
+      .locator(':scope > div[data-testid^="lead-request-follow-up-"]')
+      .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
+    expect(order).toEqual(["lead-request-follow-up-K", "lead-request-follow-up-L", "lead-request-follow-up-A"]);
+
+    // Block K: birth name, place and country of birth (no longer in the first step).
+    const blockK = page.getByTestId("lead-request-follow-up-K");
+    await expect(blockK).toContainText("Angaben zur Person");
+    await expect(blockK.getByRole("textbox", { name: "Geburtsname (falls abweichend)" })).toBeVisible();
+    await blockK.getByRole("textbox", { name: "Geburtsort" }).fill("Kyiv");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ birth_place: "Kyiv" });
+
+    // Block L: the three legal questions, yes or no, and the own economic interest (no longer in the payer step).
+    const blockL = page.getByTestId("lead-request-follow-up-L");
+    await expect(blockL).toContainText("Fragen nach dem Geldwäschegesetz");
+    await expect(blockL.getByTestId("lead-request-legal").getByRole("combobox")).toHaveCount(3);
+    await choose(page, blockL.getByTestId("lead-request-legal-pep_self").getByRole("combobox"), "Nein");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ pep_self: false });
+    await choose(page, blockL.getByRole("combobox", { name: "Handeln Sie im eigenen wirtschaftlichen Interesse?" }), "Nein");
+    await blockL.getByRole("textbox", { name: /In wessen Interesse handeln Sie/ }).fill("Ben Muster, 01.01.1960, Berlin");
+    await expect
+      .poll(() => calls.payer.at(-1))
+      .toMatchObject({ payer_kind: "self", acts_on_own_account: false, beneficial_owner: "Ben Muster, 01.01.1960, Berlin" });
+
+    // "Weiter" shows what each block still misses and stays.
+    await followUp.getByRole("button", { name: "Weiter" }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "follow_up");
+    await expect(page.getByTestId("lead-request-follow-up-K-missing")).toContainText("Geburtsland");
+    await expect(page.getByTestId("lead-request-follow-up-L-missing")).toBeVisible();
+    await expect(page.getByTestId("lead-request-follow-up-L-missing")).not.toContainText("wirtschaftlichen Interesse");
+
+    // The first step asks none of it.
+    await tab(page, "person").click();
+    await expect(page.locator("#lead-request-birth_place")).toHaveCount(0);
+    await expect(page.locator("#lead-request-former_names")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });
 
@@ -641,7 +701,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // A phone: the dots side by side, the current step named below, no horizontal scrolling.
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByTestId("lead-request-step-title")).toContainText("Ergänzende Angaben");
-    for (const step of ["person", "contact", "identity", "payer", "billing", "declarations", "follow_up", "documents", "send"]) {
+    for (const step of ["person", "identity", "payer", "billing", "follow_up", "documents", "send"]) {
       await tab(page, step).click();
       await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", step);
       const overflow = await page.evaluate(() => {

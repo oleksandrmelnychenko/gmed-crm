@@ -52,7 +52,8 @@ describe("lead cabinet steps", () => {
       "documents",
       "send",
     ]);
-    expect(visibleSteps(request())).not.toContain("follow_up");
+    // "contact" is part of the first tab, the declarations are follow-up block L (owner 2026-10-09).
+    expect(visibleSteps(request())).toEqual(["person", "identity", "payer", "billing", "documents", "send"]);
     expect(visibleSteps(request({ follow_up: undefined }))).not.toContain("follow_up");
     expect(visibleSteps(request({ follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");
     // D and E are the payer link's; "not required" shows nothing either.
@@ -72,8 +73,9 @@ describe("lead cabinet steps", () => {
       }),
     );
     expect(missing).toMatchObject({
-      person: [],
-      contact: ["city"],
+      // The contact keys are answered in the first step (owner 2026-10-09).
+      person: ["city"],
+      contact: [],
       identity: ["id_document_upload"],
       payer: ["payer_kind"],
       // Not in the server's map: placed by the cabinet.

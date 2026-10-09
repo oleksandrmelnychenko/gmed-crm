@@ -891,18 +891,13 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // Since the trigger flow (2026-10-07) staff enter the identity data, the
     // payment route is a follow-up block and the lead states the reason of
     // the request.
+    // Birth data, the guardianship question, the own economic interest and the
+    // legal questions are no longer asked in the base form (owner 2026-10-09).
     let still_missing = json!([
         "payer_kind",
-        "birth_place",
-        "birth_country",
         "id_document_upload",
         "has_representative",
-        "under_guardianship",
-        "payer_own_account",
         "invoice_to",
-        "pep_self",
-        "pep_related",
-        "sanctions_links",
         "request_reason"
     ]);
     assert_eq!(
@@ -926,7 +921,8 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     let missing = body["progress"]["missing_for_submit"].as_array().unwrap();
     assert!(!missing.contains(&json!("payer_kind")), "{body}");
-    assert!(missing.contains(&json!("payer_own_account")), "{body}");
+    // The own economic interest is follow-up block L now, not the base form.
+    assert!(!missing.contains(&json!("payer_own_account")), "{body}");
     let (status, body) = json_request(
         router,
         "POST",
@@ -949,12 +945,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // about the source of funds (owner request 2026-10-07).
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!([
-            "id_document_upload",
-            "has_representative",
-            "under_guardianship",
-            "invoice_to"
-        ]),
+        json!(["id_document_upload", "has_representative", "invoice_to"]),
         "{body}"
     );
     // Nothing is scored before the send: no follow-up blocks.
@@ -1627,6 +1618,8 @@ async fn the_cabinet_answers_the_own_economic_interest() {
     let pool = &app.suite.pool;
     let (lead_id, _, patient) = lead_with_login(&app, "Greta", "greta.interest@example.com").await;
     let payer = format!("/api/v1/me/lead-requests/{lead_id}/payer");
+    // Owner 2026-10-09: the base form no longer asks it (follow-up block L does);
+    // the answers are stored the same way.
     let missing = |body: &Value, key: &str| {
         body["progress"]["missing_for_submit"]
             .as_array()
@@ -1645,7 +1638,7 @@ async fn the_cabinet_answers_the_own_economic_interest() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["payer"]["acts_on_own_account"].is_null(), "{body}");
-    assert!(missing(&body, "payer_own_account"), "{body}");
+    assert!(!missing(&body, "payer_own_account"), "{body}");
 
     // "No" needs the person in whose interest the patient acts.
     let (status, body) = json_request(
@@ -1659,7 +1652,7 @@ async fn the_cabinet_answers_the_own_economic_interest() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["payer"]["acts_on_own_account"], false, "{body}");
     assert!(!missing(&body, "payer_own_account"), "{body}");
-    assert!(missing(&body, "payer_beneficial_owner"), "{body}");
+    assert!(!missing(&body, "payer_beneficial_owner"), "{body}");
     let (status, body) = json_request(
         router,
         "POST",
@@ -4389,10 +4382,15 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["follow_up"]["required"], true, "{body}");
-    assert_eq!(body["follow_up"]["blocks"], json!(["F"]), "{body}");
+    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09.
+    assert_eq!(
+        body["follow_up"]["blocks"],
+        json!(["F", "K", "L"]),
+        "{body}"
+    );
     assert_eq!(
         follow_up_missing(&body),
-        json!({ "F": ["residence_since", "stay_reason"] }),
+        json!({ "F": ["residence_since", "stay_reason"], "K": [], "L": [] }),
         "{body}"
     );
     let whole = body.to_string();
@@ -4426,7 +4424,11 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     assert_eq!(status, StatusCode::CREATED, "{decided}");
     let (status, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["follow_up"]["blocks"], json!(["A", "F"]), "{body}");
+    assert_eq!(
+        body["follow_up"]["blocks"],
+        json!(["A", "F", "K", "L"]),
+        "{body}"
+    );
     assert_eq!(
         follow_up_missing(&body)["A"],
         json!([

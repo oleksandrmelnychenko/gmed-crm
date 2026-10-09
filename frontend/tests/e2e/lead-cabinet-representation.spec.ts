@@ -252,9 +252,9 @@ function missingForSubmit(request: Request): string[] {
       ...(answers.custody === "joint" ? personKeys("rep2", MINOR_REQUIRED, false) : []),
     ];
   }
+  // The legal-guardianship question is switched off in the cabinet (owner 2026-10-09): not needed to send.
   return [
     ...(answers.has_representative == null ? ["has_representative"] : []),
-    ...(answers.under_guardianship == null ? ["under_guardianship"] : []),
     ...(answers.has_representative ? personKeys("agent", ADULT_REQUIRED, true) : []),
     ...(answers.under_guardianship ? personKeys("guardian", ADULT_REQUIRED, true) : []),
   ];
@@ -512,27 +512,27 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
 }
 
 test.describe("lead cabinet: who acts for an adult", () => {
-  test("nobody acts for the patient: two answers, and the request can be sent", async ({ page }) => {
+  test("nobody acts for the patient: one answer, and the request can be sent", async ({ page }) => {
     const { calls } = await setup(page, { minor: false });
     await page.goto("/");
     const block = page.getByTestId("lead-request-representation");
     const acts = block.getByRole("combobox", { name: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?" });
-    const guardianship = block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" });
+    // The legal-guardianship question is switched off (owner 2026-10-09).
+    await expect(block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" })).toHaveCount(0);
 
-    // The block closes the first step, after the person (trigger flow).
+    // The block closes the first step, after the person, the address and the contact (owner 2026-10-09: one tab).
     await expect(page.getByRole("heading", { name: "Vertretung", exact: true })).toBeVisible();
     const order = await page
       .getByTestId("lead-request-step-person")
       .locator("h3")
       .evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order).toEqual(["Datenschutz und Einwilligung", "Persönliche Daten", "Vertretung"]);
+    expect(order).toEqual(["Datenschutz und Einwilligung", "Persönliche Daten", "Adresse", "Kontakt", "Vertretung"]);
 
-    // Until both questions are answered the request cannot be sent.
+    // Until the question is answered the request cannot be sent.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing.getByRole("listitem")).toHaveText([
       "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
-      "Stehen Sie unter rechtlicher Betreuung?",
     ]);
     await expect(page.getByTestId("lead-request-summary-representation")).toContainText("Noch keine Angaben");
     await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
@@ -540,16 +540,14 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await step(page, "person");
     await choose(page, acts, "Nein");
     await expect.poll(() => calls.answers).toEqual([{ has_representative: false }]);
-    await choose(page, guardianship, "Nein");
-    await expect.poll(() => calls.answers).toEqual([{ has_representative: false }, { under_guardianship: false }]);
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
     // "No" names nobody.
-    await expect(block.getByRole("group")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-representative-agent")).toHaveCount(0);
 
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     const summary = page.getByTestId("lead-request-summary-representation");
-    await expect(summary.locator("dd")).toHaveText(["Nein", "Nein"]);
+    await expect(summary.locator("dd")).toHaveText(["Nein"]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
@@ -576,7 +574,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await choose(page, acts, "Ja");
     await expect(agent).toBeVisible();
     expect(calls.answers).toEqual([{ has_representative: true }]);
-    await expect(agent.getByRole("heading", { name: "Vertretende Person" })).toBeVisible();
+    // The person's details are a card of their own (owner 2026-10-09).
+    await expect(agent.getByRole("heading", { name: "Angaben zur vertretenden Person" })).toBeVisible();
     await expect(page.getByTestId("lead-request-representative-guardian")).toHaveCount(0);
     // An adult's representative is asked for the place of birth and the citizenship, not for the country of birth.
     await expect(agent.getByRole("textbox", { name: "Geburtsort" })).toBeVisible();
@@ -645,14 +644,13 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing.getByRole("listitem")).toHaveText([
-      "Vertretende Person: Postleitzahl",
-      "Vertretende Person: Ort",
-      "Stehen Sie unter rechtlicher Betreuung?",
+      "Angaben zur vertretenden Person: Postleitzahl",
+      "Angaben zur vertretenden Person: Ort",
     ]);
     const summary = page.getByTestId("lead-request-summary-representation");
     await expect(summary).toContainText("Handelt jemand für Sie");
     const summarized = page.getByTestId("lead-request-summary-representation-agent");
-    await expect(summarized).toContainText("Vertretende Person");
+    await expect(summarized).toContainText("Angaben zur vertretenden Person");
     await expect(summarized).toContainText("Ben");
     await expect(summarized).toContainText("15.01.1980");
     await expect(summarized).toContainText("ausweis.jpg");
@@ -684,39 +682,29 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await page.waitForTimeout(1000);
     expect(calls.persons).toHaveLength(savedPersons);
     await page.locator('[data-step="send"]').click();
-    await expect(missing.getByRole("listitem")).toHaveText(["Stehen Sie unter rechtlicher Betreuung?"]);
+    // Nothing else is missing: the legal-guardianship question is switched off (owner 2026-10-09).
+    await expect(missing).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-representation-agent")).toHaveCount(0);
   });
 
-  test("a legal guardian is named with the appointment and the guardian's identity document", async ({ page }) => {
+  test("the legal-guardianship question is switched off: no question and no guardian's form", async ({ page }) => {
     const { calls } = await setup(page, { minor: false });
     await page.goto("/");
     const block = page.getByTestId("lead-request-representation");
-    const guardian = page.getByTestId("lead-request-representative-guardian");
 
-    await choose(page, block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" }), "Ja");
-    await expect(guardian.getByRole("heading", { name: "Betreuer/in" })).toBeVisible();
-    await expect(page.getByTestId("lead-request-representative-agent")).toHaveCount(0);
-    await expect(page.getByTestId("lead-request-guardian-identity-upload")).toContainText("Ausweis der Betreuerin / des Betreuers");
-    await expect(page.getByTestId("lead-request-guardian-authority-upload")).toContainText("Bestellungsurkunde oder Betreuerausweis");
-    // Nobody to upload for yet.
-    await expect(page.getByTestId("lead-request-guardian-identity-upload")).toContainText(
-      "Zum Hochladen bitte zuerst den Nachnamen dieser Person eintragen.",
-    );
-    await expect(page.locator("#lead-request-guardian-identity-files")).toBeDisabled();
+    // Owner 2026-10-09: the cabinet does not ask about a legal guardianship (rechtliche Betreuung) for now.
+    await expect(block.getByRole("combobox", { name: /Handelt jemand für Sie/ })).toBeVisible();
+    await expect(block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" })).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-representative-guardian")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-guardian-identity-upload")).toHaveCount(0);
 
-    await guardian.getByRole("textbox", { name: "Nachname" }).fill("Muster");
-    await expect.poll(() => calls.persons.at(-1)).toMatchObject({ status: 201, body: { role: "legal_guardian", last_name: "Muster" } });
-    await expect(page.locator("#lead-request-guardian-identity-files")).toBeEnabled();
-
+    // Nor is it missing to send the request.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing).toContainText("Handelt jemand für Sie");
-    await expect(missing).toContainText("Betreuer/in: Vorname");
-    await expect(missing).toContainText("Betreuer/in: Ausweis der Betreuerin / des Betreuers");
-    await expect(missing).toContainText("Betreuer/in: Bestellungsurkunde oder Betreuerausweis");
-    await expect(missing).not.toContainText("Betreuer/in: Nachname");
-    await expect(missing).not.toContainText("Betreuer/in: Geburtsort");
+    await expect(missing).not.toContainText("Stehen Sie unter rechtlicher Betreuung?");
+    await expect(missing).not.toContainText("Betreuer/in");
+    expect(calls.answers).toEqual([]);
   });
 
   test("a person the cabinet may not remove stays, and the answer goes back", async ({ page }) => {

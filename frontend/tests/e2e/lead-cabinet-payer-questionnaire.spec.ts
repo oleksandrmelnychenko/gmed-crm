@@ -408,10 +408,10 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await step(page, "payer");
     const section = page.getByTestId("lead-request-payer-questionnaire");
 
-    // In step "Wer zahlt", after the answer who pays.
+    // In step "Wer zahlt", after the answer who pays and the payer's cards (owner 2026-10-09).
     await expect(page.getByRole("heading", { name: TITLE, exact: true })).toBeVisible();
     const order = await page.getByTestId("lead-request-step-payer").locator("h3").evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order).toEqual(["Wer zahlt", TITLE]);
+    expect(order).toEqual(["Wer zahlt", "Angaben zur zahlenden Person", "Kontakt", "Wohnort", TITLE]);
     await expect(section).toContainText("Name, Anschrift und Ausweis geben Sie im Abschnitt „Gesetzliche Vertreter“ an.");
 
     // The notice comes first: nothing else is asked before it.

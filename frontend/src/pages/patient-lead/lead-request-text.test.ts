@@ -106,28 +106,28 @@ describe("lead cabinet languages", () => {
       "Zahler: Name des Unternehmens",
       "Zahler: Land des Sitzes",
       "Zahler: Beziehung zur Patientin / zum Patienten",
-      "Zahler: Beziehung zur Patientin / zum Patienten – Bitte angeben",
+      "Zahler: Beziehung zur Patientin / zum Patienten – In welcher Beziehung genau?",
       "Zahler: Einverständnis zur Kontaktaufnahme",
     ]);
     expect(missing("en", "insurance")).toEqual([
       "Payer: Name of the insurer",
       "Payer: Country of the registered office",
       "Payer: Relationship to the patient",
-      "Payer: Relationship to the patient – Please specify",
+      "Payer: Relationship to the patient – How exactly related to the patient",
       "Payer: Consent to contact",
     ]);
     expect(missing("uk", "organisation")).toEqual([
       "Платник: Назва організації",
       "Платник: Країна місцезнаходження",
       "Платник: Ким доводиться пацієнту",
-      "Платник: Ким доводиться пацієнту – Вкажіть, будь ласка",
+      "Платник: Ким доводиться пацієнту – Ким саме доводиться пацієнту",
       "Платник: Згода на контакт",
     ]);
     expect(missing("ru", "company")).toEqual([
       "Плательщик: Название компании",
       "Плательщик: Страна местонахождения",
       "Плательщик: Кем приходится пациенту",
-      "Плательщик: Кем приходится пациенту – Укажите, пожалуйста",
+      "Плательщик: Кем приходится пациенту – Кем именно приходится пациенту",
       "Плательщик: Согласие на контакт",
     ]);
     // A person as payer keeps the labels of a person, also for a parent's login.
@@ -245,7 +245,7 @@ describe("lead cabinet languages", () => {
     expect(followUpFieldLabel(de, "pep_wealth_origin")).toBe("Herkunft des Vermögens");
     expect(followUpFieldLabel(de, "sanctions_link_kind")).toBe("Art der Verbindung");
     expect(followUpFieldLabel(de, "id_document_upload")).toBe("Foto oder Scan des Ausweises");
-    expect(followUpFieldLabel(de, "agent_last_name")).toBe("Vertretende Person: Nachname");
+    expect(followUpFieldLabel(de, "agent_last_name")).toBe("Angaben zur vertretenden Person: Nachname");
     expect(followUpFieldLabel(de, "residence_since", true)).toBe("Seit wann wohnt die Patientin / der Patient im Wohnsitzland?");
     expect(followUpFieldLabel(de, "unknown_key")).toBe("unknown_key");
   });

@@ -5729,17 +5729,13 @@ mod tests {
             ),
             // Staff enter the identity data, the payment route is block C and
             // the high-risk question is gone (trigger flow 2026-10-07).
+            // Birth data, the own interest and the legal questions are follow-up
+            // blocks K and L now (owner 2026-10-09).
             vec![
                 "payer_kind",
-                "birth_place",
-                "birth_country",
                 "id_document_upload",
                 "has_representative",
-                "payer_own_account",
-                "invoice_to",
-                "pep_self",
-                "pep_related",
-                "sanctions_links"
+                "invoice_to"
             ]
         );
 
@@ -5793,7 +5789,6 @@ mod tests {
                 "payer_phone",
                 "payer_country",
                 "payer_city",
-                "payer_beneficial_owner",
                 "invoice_to"
             ]
         );

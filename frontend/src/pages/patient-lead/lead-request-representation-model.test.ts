@@ -118,13 +118,13 @@ describe("who the form asks for", () => {
     expect(de.representativeCaptions).toEqual({
       rep1: "1. Vertreter/in",
       rep2: "2. Vertreter/in",
-      agent: "Vertretende Person",
+      agent: "Angaben zur vertretenden Person",
       guardian: "Betreuer/in",
     });
     expect(representativeHeading(de, "rep1", true)).toBe("1. Vertreter/in – Sie");
     expect(representativeHeading(de, "rep1")).toBe("1. Vertreter/in");
     expect(representativeHeading(de, "rep2")).toBe("2. Vertreter/in – anderer Elternteil");
-    expect(representativeHeading(de, "agent")).toBe("Vertretende Person");
+    expect(representativeHeading(de, "agent")).toBe("Angaben zur vertretenden Person");
     expect(representativeHeading(de, "guardian")).toBe("Betreuer/in");
     expect(representativeHeading(leadRequestText("en"), "rep1", true)).toBe("1st representative – you");
     for (const option of LEAD_CABINET_LANGS) {
@@ -466,13 +466,13 @@ describe("what is missing about the representation", () => {
     });
     expect(missing.map((field) => submitFieldLabel(de, field))).toEqual([
       "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
-      "Vertretende Person: Straße und Hausnummer",
-      "Vertretende Person: Nachweis der Vertretungsmacht (z. B. Vollmacht)",
+      "Angaben zur vertretenden Person: Straße und Hausnummer",
+      "Angaben zur vertretenden Person: Nachweis der Vertretungsmacht (z. B. Vollmacht)",
       "Stehen Sie unter rechtlicher Betreuung?",
       "Betreuer/in: Ausweis der Betreuerin / des Betreuers",
       "Betreuer/in: Bestellungsurkunde oder Betreuerausweis",
     ]);
-    expect(submitFieldLabel(leadRequestText("en"), "agent_last_name")).toBe("Representative: Last name");
+    expect(submitFieldLabel(leadRequestText("en"), "agent_last_name")).toBe("Representative's details: Last name");
     expect(submitFieldLabel(leadRequestText("uk"), "rep2_phone")).toBe("2-й представник: Телефон");
     expect(submitFieldLabel(leadRequestText("ru"), "guardian_zip")).toBe("Опекун: Почтовый индекс");
   });

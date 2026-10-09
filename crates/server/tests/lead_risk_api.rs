@@ -646,7 +646,8 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(status, StatusCode::OK);
     let follow_up = &request_object["follow_up"];
     assert_eq!(follow_up["required"], true, "{follow_up}");
-    assert_eq!(follow_up["blocks"], json!(["F", "I"]));
+    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09.
+    assert_eq!(follow_up["blocks"], json!(["F", "I", "K", "L"]));
     assert_eq!(
         follow_up["missing"]["F"],
         json!(["residence_since", "stay_reason"])
@@ -687,7 +688,25 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
         "POST",
         &format!("{path}/identification"),
         &patient,
-        Some(json!({ "residence_since": "2019", "stay_reason": "work" })),
+        Some(json!({
+            "residence_since": "2019",
+            "stay_reason": "work",
+            "birth_place": "Kyiv",
+            "birth_country": "UA",
+            "pep_self": false,
+            "pep_related": false,
+            "sanctions_links": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Block L also asks the own economic interest (with who pays).
+    let (status, _) = request(
+        &app,
+        "POST",
+        &format!("{path}/payer"),
+        &patient,
+        Some(json!({ "payer_kind": "self", "acts_on_own_account": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -701,6 +720,7 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "follow_up_incomplete");
+    // K and L were answered above; only I is still open.
     assert_eq!(body["missing"], json!({ "I": ["id_document_upload"] }));
 
     let (status, _) = request(

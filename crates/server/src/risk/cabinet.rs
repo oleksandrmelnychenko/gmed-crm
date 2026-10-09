@@ -1263,7 +1263,6 @@ mod tests {
                 "payer_legal_form",
                 "payer_contact_name",
                 "payer_email_or_phone",
-                "birth_place",
             ])
         );
     }
