@@ -3913,6 +3913,8 @@ async fn update_lead(
         }
         _ => None,
     };
+    // The bindings below take the names by value.
+    let name_supplied = first_name.is_some() || last_name.is_some();
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -4093,6 +4095,20 @@ async fn update_lead(
             }
         }
     }
+    // The login carries the lead's name: a renamed lead is renamed in the
+    // cabinet's account page and in Users & Roles in the same step. Saving the
+    // name again also brings a login that drifted earlier into line.
+    let portal_name_synced = if name_supplied {
+        match crate::routes::lead_portal_account::sync_name_in_tx(&mut tx, lead_id).await {
+            Ok(synced) => synced.is_some(),
+            Err(error) => {
+                tracing::error!(%error, lead_id = %lead_id, "sync lead portal name");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        false
+    };
     // The audit row commits with the change (a compliance change is a status
     // change of the lead).
     let mut audit_context = json!({
@@ -4107,6 +4123,9 @@ async fn update_lead(
     });
     if compliance_changed {
         audit_context["previous_compliance_status"] = json!(current_compliance_status);
+    }
+    if portal_name_synced {
+        audit_context["portal_name_synced"] = json!(true);
     }
     if let Some(previous) = previous_citizenships
         && citizenships.as_ref() != Some(&previous)

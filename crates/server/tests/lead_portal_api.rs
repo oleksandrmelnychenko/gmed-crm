@@ -506,6 +506,142 @@ async fn a_patient_edits_only_the_own_step_one_fields() {
     let _ = user_a;
 }
 
+/// The name the login carries (what the account page and Users & Roles show).
+async fn login_name(pool: &PgPool, user_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT name FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_renamed_lead_is_renamed_in_its_login() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let email = "rena.rename@example.com";
+    let (lead_id, user_id, patient) = lead_with_login(&app, "Rena", email).await;
+    let (_, other_user_id, _) = lead_with_login(&app, "Olga", "olga.rename@example.com").await;
+    let pm = app.staff("patient_manager");
+    let update = format!("/api/v1/leads/{lead_id}/update");
+    // The login is issued with the lead's name.
+    assert_eq!(login_name(pool, user_id).await, "Rena Portal");
+
+    // Staff rename the lead: the account page of the cabinet and Users & Roles
+    // show the new name; another lead's login is not touched.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &update,
+        &pm,
+        Some(json!({ "first_name": " Renata ", "last_name": "Portal-Meyer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(login_name(pool, user_id).await, "Renata Portal-Meyer");
+    assert_eq!(login_name(pool, other_user_id).await, "Olga Portal");
+    let (status, profile) = json_request(router, "GET", "/api/v1/me/profile", &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{profile}");
+    assert_eq!(profile["name"], "Renata Portal-Meyer");
+    let (status, users) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/users?search={email}"),
+        &bearer(app.suite.admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{users}");
+    let listed = users
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == json!(user_id))
+        .unwrap_or_else(|| panic!("the login is listed: {users}"));
+    assert_eq!(listed["name"], "Renata Portal-Meyer");
+    let context: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'update_lead' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(context["portal_name_synced"], true, "{context}");
+
+    // Saving other data leaves the login's name alone; saving the name again
+    // brings a login that drifted earlier into line.
+    sqlx::query("UPDATE users SET name = 'Drifted' WHERE id = $1")
+        .bind(user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &update,
+        &pm,
+        Some(json!({ "city": "Lviv" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(login_name(pool, user_id).await, "Drifted");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &update,
+        &pm,
+        Some(json!({ "first_name": "Renata", "last_name": "Portal-Meyer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(login_name(pool, user_id).await, "Renata Portal-Meyer");
+
+    // The lead renames itself in the cabinet.
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/personal-data"),
+        &patient,
+        Some(json!({ "first_name": "Rita" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(login_name(pool, user_id).await, "Rita Portal-Meyer");
+
+    // A converted lead's login is the patient's account: its name stays.
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, created_by)
+           VALUES ($1, 'Rita', 'Portal-Meyer', DATE '1985-02-03', 'female', $2) RETURNING id"#,
+    )
+    .bind(format!("P-RENAME-{}", Uuid::new_v4().simple()))
+    .bind(app.suite.admin_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE leads SET qualification_status = 'converted', converted_patient_id = $2,
+                          status_changed_at = now() WHERE id = $1",
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &update,
+        &pm,
+        Some(json!({ "first_name": "Zara", "last_name": "Portal-Meyer" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(login_name(pool, user_id).await, "Rita Portal-Meyer");
+}
+
 #[tokio::test]
 async fn uploads_need_the_health_consent_and_can_be_withdrawn_until_review() {
     let Some(app) = test_app().await else { return };

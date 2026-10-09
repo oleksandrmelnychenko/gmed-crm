@@ -2666,6 +2666,14 @@ async fn update_my_personal_data(
     {
         return internal(error, "update personal data");
     }
+    // The login carries the lead's name: a rename in the cabinet reaches the
+    // account page and Users & Roles in the same step.
+    if (changed.contains(&"first_name") || changed.contains(&"last_name"))
+        && let Err(error) =
+            crate::routes::lead_portal_account::sync_name_in_tx(&mut tx, lead_id).await
+    {
+        return internal(error, "sync login name");
+    }
     if let Err(error) = audit::write_in_transaction(
         &mut tx,
         &audit::domain_event(

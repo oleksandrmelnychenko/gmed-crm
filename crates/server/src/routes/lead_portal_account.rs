@@ -214,6 +214,43 @@ pub(crate) async fn sync_email_in_tx(
     .await
 }
 
+/// Keeps the login's name in step with the lead's name: first and last name,
+/// as the login was issued with (owner request 2026-10-09). The cabinet's
+/// account page and Users & Roles read the login's name, so a renamed lead is
+/// renamed there too. It reads the lead row, so the caller runs it after the
+/// name was written, in the same transaction. Returns the login when its name
+/// changed.
+///
+/// A converted lead is left alone: its login is the patient's account now and
+/// the patient record owns the name. A deleted lead holds placeholders only.
+pub(crate) async fn sync_name_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"WITH lead_name AS (
+               SELECT portal_user_id AS user_id,
+                      NULLIF(btrim(concat_ws(' ', btrim(first_name), btrim(last_name))), '')
+                          AS name
+               FROM leads
+               WHERE id = $1
+                 AND converted_patient_id IS NULL
+                 AND qualification_status <> 'deleted'
+           )
+           UPDATE users u
+           SET name = lead_name.name, updated_at = now()
+           FROM lead_name
+           WHERE u.id = lead_name.user_id
+             AND u.role = 'patient'
+             AND lead_name.name IS NOT NULL
+             AND u.name IS DISTINCT FROM lead_name.name
+           RETURNING u.id"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut **tx)
+    .await
+}
+
 /// The portal account of `lead_id`, if any.
 pub(crate) async fn portal_user_of_lead<'e, E>(
     executor: E,
