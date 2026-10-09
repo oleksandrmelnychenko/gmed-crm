@@ -542,7 +542,9 @@ pub fn block_states(
     config: &RiskConfig,
     answers: &BlockAnswers,
 ) -> BTreeMap<&'static str, BlockState> {
-    let automatic = if level == 2 && config.level_2_blocks_automatic {
+    // Level 3 too (owner 2026-10-10): staff decide on level 3 with the details the
+    // triggers ask for; the halt and the four-eyes decision stay.
+    let automatic = if level >= 2 && config.level_2_blocks_automatic {
         blocks_of(triggers)
     } else {
         Vec::new()
