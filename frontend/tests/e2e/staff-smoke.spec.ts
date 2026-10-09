@@ -2338,7 +2338,7 @@ test.describe("lead wizard UX", () => {
       await page.goto(`/leads?lead=${leadId}&view=wizard`);
       const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
       await wizard.locator('[data-step="commercial"]').click();
-      const field = wizard.getByText("Vorauszahlung fällig bis", { exact: true }).locator("..");
+      const field = wizard.getByText("Vorauszahlung fällig bis", { exact: true }).locator("xpath=ancestor::label[1]");
       const input = wizard.locator("#lead-wizard-prepayment-deadline");
       await expect(field).toBeVisible();
       await field.getByRole("spinbutton", { name: pickerSection.day }).fill("12");

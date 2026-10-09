@@ -177,7 +177,7 @@ export function Step1PortalSummary({ intake, mode, tx }: { intake: LeadPortalInt
   }
   const parts = portalProgressText(intake.progress, tx, formatAppDateTime);
   return (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground" data-testid="step1-portal-summary">
+    <p className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-right text-xs text-muted-foreground" data-testid="step1-portal-summary">
       {intake.submitted_at ? <CheckCheck aria-hidden="true" className="size-3.5 text-emerald-600" /> : <Clock3 aria-hidden="true" className="size-3.5" />}
       <span>{tx("Портал пациента:", "Patientenportal:")}</span>
       {parts.map((part) => (

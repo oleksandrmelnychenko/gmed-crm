@@ -2649,13 +2649,18 @@ function Field({
 }) {
   // In "the patient fills it in" mode the field is optional and says so.
   const { patientFills } = useStep1PortalField(errorId, portalField);
+  // The patient's marker and hint sit on the label's line, at its right end (wrapping only when narrow).
   return (
     <label className={cn("min-w-0 space-y-1.5", className)}>
-      <span className={cn(tokens.text.label, "block")}>
-        {label}
-        {required && !patientFills ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span className={cn(tokens.text.label, "block")}>
+          {label}
+          {required && !patientFills ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+        </span>
+        <span className="ml-auto flex min-w-0 justify-end">
+          <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
+        </span>
       </span>
-      <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
       {children}
       {error ? (
         <span id={errorId} role="alert" className="block text-xs leading-4 text-destructive">
@@ -6456,7 +6461,7 @@ ${serviceCommentLines.join("\n")}`
       <DialogContent
         showOverlay={!documentPreview}
         showCloseButton={!saveInProgress}
-        className="flex h-[90vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
+        className="flex h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(96vh,68rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
