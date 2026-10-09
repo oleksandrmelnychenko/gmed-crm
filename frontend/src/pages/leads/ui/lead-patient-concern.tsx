@@ -63,7 +63,7 @@ export function LeadPatientConcern({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-violet-200 bg-violet-50/40 p-3 dark:border-violet-500/30 dark:bg-violet-500/10" data-testid="lead-patient-concern">
+    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-patient-concern">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex flex-wrap items-baseline gap-x-2">
           <span className="text-xs font-semibold text-foreground">
@@ -115,7 +115,7 @@ export function LeadPatientConcern({
       ) : null}
       {documents.length > 0 ? (
         <div className="space-y-1" data-testid="lead-patient-concern-files">
-          <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+          <div className="text-xs font-medium text-muted-foreground">
             {tx("Файлы пациента", "Dateien der Patientin / des Patienten")}
           </div>
           <ul className="divide-y divide-border/60 rounded-md border border-border/60 bg-background/60">
