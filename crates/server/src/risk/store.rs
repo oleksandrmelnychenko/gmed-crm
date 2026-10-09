@@ -499,6 +499,8 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                     missing.push(key);
                 }
             }
+            // The own economic interest is asked here too (owner 2026-10-09).
+            missing.extend(lead_payer::portal_missing_own_account(answers.payer.as_ref()));
             PARTY_CABINET
         }
         "K" => {

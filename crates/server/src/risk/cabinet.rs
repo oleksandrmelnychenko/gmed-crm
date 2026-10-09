@@ -89,7 +89,10 @@ pub fn is_adult_representative_key(key: &str) -> bool {
 
 /// Keys the base form no longer asks (contract 3.1): they belong to the
 /// follow-up blocks or to staff.
-const DROPPED_KEYS: [&str; 23] = [
+const DROPPED_KEYS: [&str; 25] = [
+    // The own economic interest: block L, only with the enhanced check (owner 2026-10-09).
+    "payer_own_account",
+    "payer_beneficial_owner",
     // Block L (owner 2026-10-09): the legal questions only with the enhanced check.
     "pep_self",
     "pep_related",
@@ -1224,7 +1227,6 @@ mod tests {
                 "agent_first_name",
                 "guardian_id_upload",
                 "has_representative",
-                "payer_own_account",
                 "invoice_to",
                 "request_reason",
             ])

@@ -80,6 +80,7 @@ export function PayerSection({
   enqueue,
   onChange,
   onSaveState,
+  ownAccountOnly = false,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -89,6 +90,11 @@ export function PayerSection({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
+  /**
+   * Only the own economic interest (follow-up block L, owner 2026-10-09): asked with the
+   * enhanced check, saved with the answer "who pays" as before.
+   */
+  ownAccountOnly?: boolean;
 }) {
   const guardian = request.access_kind === "guardian";
   // An older server knows only a person as payer, with the relationship in words.
@@ -179,6 +185,7 @@ export function PayerSection({
 
   const costConsent = { request, text, enqueue, onChange, onSaveState };
 
+  if (answered && ownAccountOnly) return null;
   if (answered) {
     // The paying parent answers as the payer: no consent to send oneself the cost estimate.
     const parentPays = payerAnswer(request.payer, template) === "guardian";
@@ -232,6 +239,47 @@ export function PayerSection({
     className,
   });
 
+  if (ownAccountOnly) {
+    return (
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-request-payer-own-account">
+        {identification && draft.payer_kind ? (
+          <>
+            <LabeledField {...field("payer_own_account", true, "sm:col-span-2 lg:col-span-3")}>
+              <YesNoSelect
+                id="lead-request-payer_own_account"
+                className="sm:max-w-[calc(50%-0.5rem)]"
+                value={draft.acts_on_own_account}
+                text={text}
+                // The server keeps an answer once given; it can be changed, not taken back.
+                keepAnswer
+                invalid={Boolean(errorFor("payer_own_account"))}
+                onChange={(ownAccount) => set("acts_on_own_account", ownAccount)}
+              />
+            </LabeledField>
+            {draft.acts_on_own_account === "no" ? (
+              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2 lg:col-span-3")}>
+                <textarea
+                  {...fieldProps("payer_beneficial_owner")}
+                  className={cn(textareaClass, "text-base md:text-sm")}
+                  rows={3}
+                  maxLength={2000}
+                  autoComplete="off"
+                  value={draft.beneficial_owner}
+                  onChange={(event) => set("beneficial_owner", event.target.value)}
+                />
+              </LabeledField>
+            ) : null}
+          </>
+        ) : null}
+        {fieldError === "payer" ? (
+          <p role="alert" className="text-xs text-destructive sm:col-span-2 lg:col-span-3">
+            {text.notSaved}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
   // Several cards (owner 2026-10-09): who pays, the payer, contact, residence and the consents.
   return (
     <div className="space-y-4" data-testid="lead-request-payer">
@@ -272,36 +320,6 @@ export function PayerSection({
                     </option>
                   ))}
                 </NativeComboboxSelect>
-              </LabeledField>
-            ) : null}
-          </>
-        ) : null}
-        {/* The own economic interest is part of the answer "who pays": it is saved with it. */}
-        {identification && draft.payer_kind ? (
-          <>
-            <LabeledField {...field("payer_own_account", true, "sm:col-span-2 lg:col-span-3")}>
-              <YesNoSelect
-                id="lead-request-payer_own_account"
-                className="sm:max-w-[calc(50%-0.5rem)]"
-                value={draft.acts_on_own_account}
-                text={text}
-                // The server keeps an answer once given; it can be changed, not taken back.
-                keepAnswer
-                invalid={Boolean(errorFor("payer_own_account"))}
-                onChange={(ownAccount) => set("acts_on_own_account", ownAccount)}
-              />
-            </LabeledField>
-            {draft.acts_on_own_account === "no" ? (
-              <LabeledField {...field("payer_beneficial_owner", true, "sm:col-span-2 lg:col-span-3")}>
-                <textarea
-                  {...fieldProps("payer_beneficial_owner")}
-                  className={cn(textareaClass, "text-base md:text-sm")}
-                  rows={3}
-                  maxLength={2000}
-                  autoComplete="off"
-                  value={draft.beneficial_owner}
-                  onChange={(event) => set("beneficial_owner", event.target.value)}
-                />
               </LabeledField>
             ) : null}
           </>

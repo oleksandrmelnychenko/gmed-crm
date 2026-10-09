@@ -66,6 +66,7 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
+import { PayerSection } from "./lead-request-payer-section";
 import { RepresentationSection } from "./lead-request-representation";
 import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -75,7 +76,7 @@ import { followUpFieldLabel, type LeadRequestText } from "./lead-request-text";
 // never says so (P2). The answers autosave like the rest of the form; "send"
 // tells GMED they are complete.
 
-type Part = "identification" | "funds" | "billing" | "representation";
+type Part = "identification" | "funds" | "billing" | "representation" | "payer";
 
 const FULL_ROW = "sm:col-span-2 lg:col-span-3";
 
@@ -108,6 +109,7 @@ export function FollowUpStep({
     funds: "idle",
     billing: "idle",
     representation: "idle",
+    payer: "idle",
   });
   const setPart = useCallback((part: Part, state: SaveState) => {
     setStates((current) => (current[part] === state ? current : { ...current, [part]: state }));
@@ -116,6 +118,7 @@ export function FollowUpStep({
   const onFundsState = useCallback((state: SaveState) => setPart("funds", state), [setPart]);
   const onBillingState = useCallback((state: SaveState) => setPart("billing", state), [setPart]);
   const onRepresentationState = useCallback((state: SaveState) => setPart("representation", state), [setPart]);
+  const onPayerState = useCallback((state: SaveState) => setPart("payer", state), [setPart]);
   // F, B, H and J are statements of the identification: one record, one autosave.
   const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: onIdentificationState });
   const [sending, setSending] = useState(false);
@@ -196,7 +199,23 @@ export function FollowUpStep({
       case "K":
         return <BirthBlock form={identification} text={text} lang={lang} guardian={guardian} />;
       case "L":
-        return <LegalQuestionsSection form={identification} text={text} guardian={guardian} bare />;
+        return (
+          <div className="space-y-5">
+            <LegalQuestionsSection form={identification} text={text} guardian={guardian} bare />
+            {request.payer ? (
+              <PayerSection
+                request={request}
+                text={text}
+                lang={lang}
+                identification={identification}
+                enqueue={enqueue}
+                onChange={onChange}
+                onSaveState={onPayerState}
+                ownAccountOnly
+              />
+            ) : null}
+          </div>
+        );
     }
   };
 
