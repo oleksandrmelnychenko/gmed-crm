@@ -6466,15 +6466,35 @@ ${serviceCommentLines.join("\n")}`
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
         <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-foreground">
-              {lead
-                ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
-                : existingPatient
-                  ? [existingPatient.first_name, existingPatient.last_name].filter(Boolean).join(" ")
-                : createMode
-                  ? tx("Новый лид", "Neuer Lead")
-                  : tx("Оформление обращения", "Lead-Aufnahme")}
-            </h2>
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <h2 className="truncate text-base font-semibold text-foreground">
+                {lead
+                  ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
+                  : existingPatient
+                    ? [existingPatient.first_name, existingPatient.last_name].filter(Boolean).join(" ")
+                  : createMode
+                    ? tx("Новый лид", "Neuer Lead")
+                    : tx("Оформление обращения", "Lead-Aufnahme")}
+              </h2>
+              {/* The countdown sits after the name; what it means is in the tooltip, not in a banner. */}
+              {retentionDays != null ? (
+                <span
+                  role="status"
+                  data-lead-retention-countdown
+                  title={retentionCountdownHint(lang)}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
+                    retentionDays <= 3
+                      ? "border-destructive/30 bg-destructive/10 text-destructive"
+                      : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
+                  )}
+                >
+                  <CircleAlert aria-hidden="true" className="size-3.5" />
+                  {/* "Löschung in 14 T." already ends with a period. */}
+                  {withFinalPeriod(retentionCountdownLabel(retentionDays, lang))}
+                </span>
+              ) : null}
+            </div>
             {isRepeatIntake ? (
               <p className="mt-1 text-xs text-muted-foreground">
                 {tx("Повторное обращение", "Erneute Anfrage")}
@@ -6551,23 +6571,6 @@ ${serviceCommentLines.join("\n")}`
             ) : null}
           </div>
         </header>
-
-        {retentionDays != null ? (
-          <div
-            role="status"
-            data-lead-retention-countdown
-            className={cn(
-              "shrink-0 border-b px-4 py-2 text-xs sm:px-5",
-              retentionDays <= 3
-                ? "border-destructive/30 bg-destructive/10 text-destructive"
-                : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
-            )}
-          >
-            {/* "Löschung in 14 T." already ends with a period. */}
-            <span className="font-semibold">{withFinalPeriod(retentionCountdownLabel(retentionDays, lang))}</span>{" "}
-            {retentionCountdownHint(lang)}
-          </div>
-        ) : null}
 
         <nav
           ref={stepNavRef}

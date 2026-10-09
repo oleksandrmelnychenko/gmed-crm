@@ -524,5 +524,5 @@ test("a lead without consent shows when it will be deleted automatically", async
   );
   await wizard.getByRole("button", {name: "Обновить", exact: true}).click();
   await expect(countdown).toContainText("Удаление через 2 дн.");
-  await expect(countdown).toContainText("автоматически удаляется вместе со всеми документами");
+  await expect(countdown).toHaveAttribute("title", /автоматически удаляется вместе со всеми документами/);
 });
