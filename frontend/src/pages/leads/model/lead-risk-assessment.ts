@@ -630,10 +630,11 @@ export function riskEventLabel(event: RiskHistoryEvent, tx: Tx): string {
     case "follow_up_answered":
       return tx("Пациент отправил доп. сведения", "Ergänzende Angaben gesendet");
     case "trigger_withdrawn":
-      // T16 after a false-positive decision; T12 once a valid identity document is on file (owner 2026-10-10).
+      // T16 after a false-positive decision; T12 once a valid identity document is on file,
+      // T13 once nobody acts for the adult any more (owner 2026-10-10).
       return event.cause === "hit_decision"
         ? tx("Триггер снят (ложное совпадение)", "Auslöser zurückgenommen (falsch positiv)")
-        : tx("Триггер снят (действительный документ личности)", "Auslöser zurückgenommen (gültiges Ausweisdokument)");
+        : tx("Триггер снят (условие больше не выполняется)", "Auslöser zurückgenommen (Voraussetzung entfallen)");
     case "status":
       return event.status
         ? `${tx("Статус", "Status")}: ${riskStatusLabel(event.status as RiskStatus, tx)}`

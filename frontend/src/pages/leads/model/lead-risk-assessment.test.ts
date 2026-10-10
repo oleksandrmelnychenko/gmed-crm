@@ -195,8 +195,8 @@ describe("the risk assessment of a lead (staff)", () => {
       status: null,
     });
     expect(riskEventLabel(event("hit_decision"), de)).toBe("Auslöser zurückgenommen (falsch positiv)");
-    expect(riskEventLabel(event("cabinet"), de)).toBe("Auslöser zurückgenommen (gültiges Ausweisdokument)");
-    expect(riskEventLabel(event("staff"), ru)).toBe("Триггер снят (действительный документ личности)");
+    expect(riskEventLabel(event("cabinet"), de)).toBe("Auslöser zurückgenommen (Voraussetzung entfallen)");
+    expect(riskEventLabel(event("staff"), ru)).toBe("Триггер снят (условие больше не выполняется)");
   });
 
   it("explains the server's decision errors", () => {

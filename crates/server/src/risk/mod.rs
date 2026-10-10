@@ -554,13 +554,16 @@ pub struct Merged {
 /// validity not in the past — withdraws it, so a lead qualified before the
 /// upload does not keep it), T16 only with `withdraw_t16`.
 fn withdrawable(key: &str, withdraw_t16: bool) -> bool {
-    key == "T12" || (withdraw_t16 && key == "T16")
+    // T13 too (owner 2026-10-10): a "yes" to the representative or guardianship
+    // question taken back left a point for good.
+    matches!(key, "T12" | "T13") || (withdraw_t16 && key == "T16")
 }
 
 /// The ratchet (P3): every stored trigger stays at its highest points; the
 /// live evaluation adds new ones and raises points. A stored trigger that no
 /// longer fires stays, marked inactive. The only ways down: a stored T12 that
-/// no longer fires (the identity document is now valid) is removed, and with
+/// no longer fires (the identity document is now valid) is removed, so is a
+/// stored T13 once nobody acts for an adult lead any more, and with
 /// `withdraw_t16` — a false-positive decision left no open or confirmed hit —
 /// a stored T16 that no longer fires is removed.
 pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16: bool) -> Merged {
@@ -1134,6 +1137,43 @@ mod tests {
             true,
         );
         assert_eq!(still.triggers.len(), 1);
+    }
+
+    #[test]
+    fn a_representation_taken_back_withdraws_t13() {
+        let config = config();
+        let t0 = Utc::now();
+        let started = merge(
+            &[],
+            &evaluate(
+                &Inputs {
+                    under_guardianship: true,
+                    ..clean()
+                },
+                &config,
+            ),
+            t0,
+            false,
+        );
+        assert!(started.triggers.iter().any(|trigger| trigger.key == "T13"));
+        // The answer taken back: T13 goes without a decision.
+        let back = merge(&started.triggers, &evaluate(&clean(), &config), t0, false);
+        assert!(back.triggers.iter().all(|trigger| trigger.key != "T13"));
+        assert!(!back.withdrawn.is_empty());
+        // A minor keeps it.
+        let minor = merge(
+            &started.triggers,
+            &evaluate(
+                &Inputs {
+                    minor: true,
+                    ..clean()
+                },
+                &config,
+            ),
+            t0,
+            false,
+        );
+        assert!(minor.triggers.iter().any(|trigger| trigger.key == "T13"));
     }
 
     #[test]
