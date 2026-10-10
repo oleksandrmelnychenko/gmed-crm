@@ -382,6 +382,62 @@ fn acting_person_signature(
     )
 }
 
+/// The adult patient's own signature (owner decision 2026-10-10): a `client`
+/// signature counts only when it was made with one of the patient's own
+/// addresses (`own`: the lead's e-mail, the converted patient's e-mail). A
+/// representative or Betreuer signing as `client` does not identify the
+/// patient. Without a known own address, a signature made with an acting
+/// person's address still does not count, and one without an address counts
+/// only while nobody acts for the patient.
+fn patient_signature(
+    signatures: &[RoleSignature],
+    own: &[String],
+    acting: &[Representative],
+) -> Option<QualifiedSignature> {
+    let acting_addresses: Vec<String> = acting
+        .iter()
+        .filter_map(|person| address(person.email.as_deref()))
+        .collect();
+    standing(
+        signatures
+            .iter()
+            .filter(|candidate| candidate.role == SIGNER_ROLE_CLIENT)
+            .filter(|candidate| match &candidate.email {
+                Some(email) if !own.is_empty() => own.contains(email),
+                Some(email) => !acting_addresses.contains(email),
+                None => acting.is_empty(),
+            })
+            .map(|candidate| candidate.signature),
+    )
+}
+
+/// The patient's own addresses: the lead's e-mail and, after the conversion,
+/// the patient's.
+async fn own_addresses(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    patient_id: Option<Uuid>,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows: Vec<Option<String>> = sqlx::query_scalar(
+        r#"SELECT email FROM leads WHERE id = $1
+           UNION ALL
+           SELECT email FROM patients WHERE id = $2"#,
+    )
+    .bind(lead_id)
+    .bind(patient_id)
+    .fetch_all(conn)
+    .await?;
+    let mut own: Vec<String> = Vec::new();
+    for value in rows {
+        if let Some(email) = address(value.as_deref())
+            && !own.contains(&email)
+        {
+            own.push(email);
+        }
+    }
+    Ok(own)
+}
+
 /// When the lead's third-party payer was last named (`identity_changed_at` of
 /// the payer declaration); `None` without a third-party payer. What an earlier
 /// payer signed, or what staff confirmed for an earlier payer, does not count
@@ -510,6 +566,13 @@ pub(crate) async fn load_identification_status(
     };
 
     if !representation.minor {
+        let own = own_addresses(&mut *conn, lead_id, conversion.map(|(id, _)| id)).await?;
+        let acting: Vec<Representative> = representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .cloned()
+            .collect();
         // The representative and the legal guardian the adult named in the
         // cabinet (only while the answer is "yes"): persons of their own for
         // their sheets.
@@ -533,7 +596,7 @@ pub(crate) async fn load_identification_status(
         return Ok(IdentificationStatus {
             minor: false,
             contract_partner: PersonIdentification {
-                qes: signature_of(&signatures, SIGNER_ROLE_CLIENT, None),
+                qes: patient_signature(&signatures, &own, &acting),
                 own_account_payment: payment_of(SUBJECT_CONTRACT_PARTNER, None),
             },
             payer: payer_since.map(|since| PersonIdentification {
@@ -1075,6 +1138,77 @@ mod tests {
                 &parents,
                 Some((ben.id, at("2026-10-03T00:00:00Z")))
             ),
+            None
+        );
+    }
+
+    #[test]
+    fn the_patient_counts_only_the_signature_with_the_own_address() {
+        let agent = Representative {
+            slot: Some(lead_representatives::SLOT_AGENT),
+            role: lead_representatives::ROLE_AUTHORISED_REPRESENTATIVE,
+            relation: Some("representative".into()),
+            ..parent(5, "Ben", Some("ben.vertreter@example.com"))
+        };
+        let qes = |signed_at: &str| {
+            Some(QualifiedSignature {
+                signed_at: at(signed_at),
+                test_mode: false,
+            })
+        };
+        let by_agent = signed(
+            "client",
+            "ben.vertreter@example.com",
+            "Ben Muster",
+            "2026-10-05T09:00:00Z",
+        );
+        let by_patient = signed(
+            "client",
+            "Anna@Example.com",
+            "Anna Muster",
+            "2026-10-03T09:00:00Z",
+        );
+        let own = vec!["anna@example.com".to_string()];
+        // The representative signed later; only the patient's own signature counts
+        // (owner decision 2026-10-10).
+        assert_eq!(
+            patient_signature(
+                &[by_agent.clone(), by_patient.clone()],
+                &own,
+                std::slice::from_ref(&agent)
+            ),
+            qes("2026-10-03T09:00:00Z")
+        );
+        assert_eq!(
+            patient_signature(
+                std::slice::from_ref(&by_agent),
+                &own,
+                std::slice::from_ref(&agent)
+            ),
+            None
+        );
+        // Without a known own address: not the acting person's address.
+        assert_eq!(
+            patient_signature(
+                &[by_agent.clone(), by_patient.clone()],
+                &[],
+                std::slice::from_ref(&agent)
+            ),
+            qes("2026-10-03T09:00:00Z")
+        );
+        // A signature without an address only while nobody acts for the patient.
+        let mut unknown = by_patient.clone();
+        unknown.email = None;
+        assert_eq!(
+            patient_signature(std::slice::from_ref(&unknown), &own, &[]),
+            qes("2026-10-03T09:00:00Z")
+        );
+        assert_eq!(
+            patient_signature(std::slice::from_ref(&unknown), &[], &[]),
+            qes("2026-10-03T09:00:00Z")
+        );
+        assert_eq!(
+            patient_signature(std::slice::from_ref(&unknown), &[], &[agent]),
             None
         );
     }

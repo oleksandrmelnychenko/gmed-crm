@@ -106,10 +106,9 @@ async fn seed_lead(pool: &PgPool) -> Uuid {
                    'Teststr. 5', 'Berlin', '10115', 'DE', 'qualified', 'signed', 'staff_wizard')
            RETURNING id"#,
     )
-    .bind(format!(
-        "ident-lead-{}@example.com",
-        Uuid::new_v4().simple()
-    ))
+    // The patient signs with the own address (owner decision 2026-10-10): the
+    // address `signer("client", …)` uses.
+    .bind("client.signer@example.com")
     .fetch_one(pool)
     .await
     .unwrap()
@@ -1858,7 +1857,12 @@ async fn an_adults_representative_and_legal_guardian_each_have_an_identification
     );
 
     // The representative signs as `client` with the own address: it counts
-    // for him, the patient's own signature for the patient.
+    // for him, the patient's own signature (own address) for the patient.
+    sqlx::query("UPDATE leads SET email = 'Anna.Muster@example.com' WHERE id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let patient_signed_at = Utc::now() - Duration::hours(4);
     let agent_signed_at = Utc::now() - Duration::hours(2);
     let contract = seed_document(&app, Some(lead_id)).await;
@@ -1882,7 +1886,13 @@ async fn an_adults_representative_and_legal_guardian_each_have_an_identification
         acting_person_line(&signed, guardian)["qes"].is_null(),
         "{signed}"
     );
-    assert!(signed["contract_partner"]["qes"].is_object(), "{signed}");
+    // The representative signed later; the patient keeps the own signature
+    // (owner decision 2026-10-10).
+    assert_eq!(
+        instant(&signed["contract_partner"]["qes"]["signed_at"]).timestamp(),
+        patient_signed_at.timestamp(),
+        "{signed}"
+    );
 
     // Staff confirm the own-account payment of the legal guardian: only his
     // line carries it, and the mark is audited.
