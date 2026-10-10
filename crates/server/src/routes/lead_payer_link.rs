@@ -1916,13 +1916,17 @@ fn questionnaire(
         },
     );
     // A paying parent's identity document data are staff's (like the lead's own,
-    // contract 3.1): the cabinet section has no fields for them, so they never
-    // hold its sending (QA 2026-10-10, the parent could not send).
+    // contract 3.1), and the birth place and country are asked only with the
+    // enhanced check (block K, owner 2026-10-09): the cabinet section has no
+    // fields for them, so they never hold its sending (QA 2026-10-10, the
+    // parent could not send).
     if mode == Mode::Cabinet {
         missing.retain(|key| {
             !matches!(
                 *key,
-                "id_document_type"
+                "birth_place"
+                    | "birth_country"
+                    | "id_document_type"
                     | "id_document_number"
                     | "id_issuing_authority"
                     | "id_issuing_country"

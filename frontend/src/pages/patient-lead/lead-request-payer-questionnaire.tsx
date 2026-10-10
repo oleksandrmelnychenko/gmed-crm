@@ -360,6 +360,9 @@ function PayerQuestionnaireForm({
 
   async function submit() {
     setShowMissing(true);
+    // Something is still missing: the press shows what (QA 2026-10-10: a disabled
+    // button left the parent without a hint).
+    if (questionnaire.missing_for_submit.length > 0) return;
     setSubmitting(true);
     setErrors([]);
     try {
@@ -694,7 +697,7 @@ function PayerQuestionnaireForm({
           <Button
             type="button"
             className="h-auto min-h-9 w-full gap-2 whitespace-normal py-1.5 sm:w-auto"
-            disabled={submitting || !canSubmitPayerQuestionnaire(questionnaire, declared)}
+            disabled={submitting || !canSubmitPayerQuestionnaire({ ...questionnaire, missing_for_submit: [] }, declared)}
             data-testid="lead-request-payer-submit"
             onClick={() => void submit()}
           >

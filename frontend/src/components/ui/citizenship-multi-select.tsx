@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { COUNTRY_CODES, countryLabel } from "@/components/ui/country-select";
+import { COUNTRY_CODES, countryLabel, countrySearchText } from "@/components/ui/country-select";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -100,7 +100,7 @@ export function CitizenshipMultiSelect({
       >
         <option value="">{placeholder}</option>
         {options.map((option) => (
-          <option key={option.value} value={option.value}>
+          <option key={option.value} value={option.value} data-search-text={countrySearchText(option.value, option.label)}>
             {option.label}
           </option>
         ))}

@@ -100,7 +100,7 @@ const COUNTRY_SEARCH_ALIASES: Partial<Record<string, string>> = {
 };
 
 /** Search text so a manager can find a country by code, or by its German, Russian or English name. */
-function countrySearchText(code: string, label: string): string {
+export function countrySearchText(code: string, label: string): string {
   const names = [code, label, countryLabel(code, "de"), countryLabel(code, "ru"), COUNTRY_SEARCH_ALIASES[code] ?? ""];
   try {
     const english = new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase());
