@@ -590,8 +590,10 @@ async function signIn(page: Page) {
 async function acknowledge(page: Page, channels: string[] = ["E-Mail"]) {
   const step = page.getByTestId("payer-link-step-privacy");
   for (const channel of channels) await step.getByRole("checkbox", { name: channel, exact: true }).check();
-  await step.getByRole("checkbox", { name: /Ich habe die Datenschutzhinweise gelesen/ }).check();
-  await expect(page.getByTestId("payer-link-next")).toBeEnabled();
+  const ack = step.getByRole("checkbox", { name: /Ich habe die Datenschutzhinweise gelesen/ });
+  await ack.check();
+  // Stored: the box locks (before, "Weiter" would only say that the notice is still to be confirmed).
+  await expect(ack).toBeDisabled();
   await page.getByTestId("payer-link-next").click();
 }
 
@@ -647,9 +649,12 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-step-of")).toHaveText("Schritt 1 von 7");
     expect(await stored(page, "gmed-payer-session")).toBe(SESSION);
 
-    // Nothing else can be done before the acknowledgement.
-    await expect(page.getByTestId("payer-link-next")).toBeDisabled();
-    await expect(page.getByText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.")).toBeVisible();
+    // Nothing else can be done before the acknowledgement; "Weiter" says so when pressed,
+    // not beforehand (owner rule, QA 2026-10-10).
+    await expect(page.getByText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.")).toHaveCount(0);
+    await page.getByTestId("payer-link-next").click();
+    await expect(page.getByTestId("payer-link-notice")).toHaveText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.");
+    await expect(page.getByTestId("payer-link-step-privacy")).toBeVisible();
     await expect(page.getByTestId("payer-link-privacy-notice")).toContainText("§§ 10–12 GwG");
     await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal#privacy");
 
@@ -1052,8 +1057,10 @@ test.describe("payer link", () => {
     await expect(stepTitle(page)).toHaveText("Erklärungen");
     const declarations = page.getByTestId("payer-link-step-declarations");
     await expect(declarations).toContainText(
-      "Sie betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
+      "Die Fragen betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
     );
+    // No filler about the law or "yes or no" (QA 2026-10-10).
+    await expect(declarations).not.toContainText("Geldwäschegesetz");
     await expect(
       declarations.getByRole("combobox", {
         name: "Üben die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten ein hochrangiges öffentliches Amt aus",
@@ -1121,8 +1128,20 @@ test.describe("payer link", () => {
     // The proof is asked from the start: the form opens at the funds.
     await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
     await expect(page.getByTestId("payer-link-funds-upload-badge")).toHaveText("erforderlich");
-    for (let index = 0; index < 2; index += 1) await next(page);
+    // Nothing yellow before "Weiter"; the first press names what the step misses and stays,
+    // the second goes on (owner rule, QA 2026-10-10).
+    await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Beziehung und Herkunft der Mittel");
+    await expect(page.getByTestId("payer-link-step-missing")).toContainText("Bitte noch ergänzen:");
+    await expect(page.getByTestId("payer-link-step-missing")).toContainText("Nachweis der Herkunft der Mittel");
+    await next(page);
+    await expect(stepTitle(page)).toHaveText("Zahlungsweg");
+    await expect(page.getByTestId("payer-link-step-missing")).toHaveCount(0);
+    await next(page);
     await expect(stepTitle(page)).toHaveText("Erklärungen");
+    // A private person's questions come without an intro (no filler, QA 2026-10-10).
+    await expect(page.getByTestId("payer-link-step-declarations")).not.toContainText("Geldwäschegesetz");
     const declarations = page.getByTestId("payer-link-step-declarations");
     await choose(page, declarations.getByRole("combobox", { name: /hochrangiges öffentliches Amt/ }), "Nein");
     await expect.poll(() => merged(calls.patches)).toMatchObject({ pep_self: false });
@@ -1298,6 +1317,15 @@ test.describe("payer link", () => {
         if (width === 390) await page.screenshot({ path: test.info().outputPath(`payer-${width}-${guard}.png`), fullPage: true });
         if ((await page.getByTestId("payer-link-next").count()) === 0) break;
         await next(page);
+        // A step that misses something shows its list at the first "Weiter" and stays (owner rule):
+        // the list must fit too, then the second press goes on.
+        const stepMissing = page.getByTestId("payer-link-step-missing");
+        await expect(stepMissing.or(stepTitle(page).filter({ hasNotText: title }))).toBeVisible();
+        if ((await stepMissing.count()) > 0) {
+          expect(await overflow(page), `${width}px ${title} missing`).toBeLessThanOrEqual(1);
+          expect(await widestOverhang(page), `${width}px ${title} missing`).toBeLessThanOrEqual(1);
+          await next(page);
+        }
       }
       expect(titles).toEqual([
         "Datenschutz",

@@ -654,7 +654,8 @@ export const CONTACT_CHANNELS = ["email", "phone", "messenger"] as const;
 export type ContactChannel = (typeof CONTACT_CHANNELS)[number];
 
 /** Why the patient lives in the country of residence (block F), in form order. */
-export const STAY_REASONS = ["work", "study", "family", "other"] as const;
+// A citizen of the country or a person born there has an answer of its own (QA 2026-10-10).
+export const STAY_REASONS = ["citizenship_or_birth", "work", "study", "family", "other"] as const;
 
 /** What links the patient to a sanctioned person or company (block J), in form order. */
 export const SANCTIONS_LINK_KINDS = ["family", "business", "ownership", "other"] as const;
@@ -922,10 +923,12 @@ export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 export function formatFileSize(size: number | null | undefined, lang: string): string {
   if (!size || size <= 0) return "";
   const locale = cabinetLocale(lang);
+  // The units of the page's language, as in "bis 25 MB" / "до 25 МБ" (QA 2026-10-10).
+  const cyrillic = locale === "ru-RU" || locale === "uk-UA";
   if (size >= 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toLocaleString(locale, { maximumFractionDigits: 1 })} MB`;
+    return `${(size / (1024 * 1024)).toLocaleString(locale, { maximumFractionDigits: 1 })} ${cyrillic ? "МБ" : "MB"}`;
   }
-  return `${Math.max(1, Math.round(size / 1024)).toLocaleString(locale)} KB`;
+  return `${Math.max(1, Math.round(size / 1024)).toLocaleString(locale)} ${cyrillic ? "КБ" : "KB"}`;
 }
 
 /** Number and name locale of a cabinet language (DE, EN, UA, RU). */

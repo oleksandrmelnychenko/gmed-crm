@@ -33,10 +33,15 @@ export type RiskConfig = {
 
 export type RiskReviewerCandidate = { id: string; name: string; role: string };
 
+/** Who may decide now: active CEO accounts and named deputies, counted apart. */
+export type RiskReviewerCounts = { ceo: number; deputies: number };
+
 export type RiskConfigResponse = {
   config: RiskConfig;
   /** Staff the CEO may name; null when the server does not send them (the users list is used then). */
   candidates: RiskReviewerCandidate[] | null;
+  /** Null on an older server that sends only the total. */
+  reviewerCounts: RiskReviewerCounts | null;
 };
 
 /** The default of the contract (2.4); the server's constant wins. */
@@ -121,9 +126,14 @@ function normalizeCandidates(value: unknown): RiskReviewerCandidate[] | null {
 export function normalizeRiskConfigResponse(value: unknown): RiskConfigResponse {
   const raw = record(value) ?? {};
   const nested = record(raw.config);
+  const count = (value: unknown) =>
+    typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+  const ceo = count(raw.reviewers_ceo);
+  const deputies = count(raw.reviewers_deputies);
   return {
     config: normalizeRiskConfig(nested ?? raw),
     candidates: normalizeCandidates(raw.eligible_reviewers ?? raw.reviewer_candidates),
+    reviewerCounts: ceo !== null && deputies !== null ? { ceo, deputies } : null,
   };
 }
 

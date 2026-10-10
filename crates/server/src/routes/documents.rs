@@ -2837,11 +2837,24 @@ struct GwgPaymentRoute {
     via_third_party_details: Option<String>,
     /// `Declaration::payment_route_flags`.
     flags: Vec<&'static str>,
+    /// The third-party payer answered on the own link, not in the patient
+    /// form: the label of the line says so.
+    answered_by_payer: bool,
 }
 
 impl GwgPaymentRoute {
+    /// The label of the line: where the answers come from.
+    fn label(&self) -> &'static str {
+        if self.answered_by_payer {
+            "Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"
+        } else {
+            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)"
+        }
+    }
+
     fn from_declaration(declaration: &super::lead_payer::Declaration) -> Self {
         Self {
+            answered_by_payer: false,
             method: declaration.payment_method.clone(),
             details: declaration.payment_method_details.clone(),
             account_country: declaration.account_country.clone(),
@@ -2991,6 +3004,9 @@ struct GwgIdentificationSheet {
     acts_on_own_account: Option<bool>,
     beneficial_owner_name: Option<String>,
     beneficial_owner_note: Option<String>,
+    /// "Getroffene Maßnahmen zur Ermittlung des wB" when it is not the
+    /// questioning of the contract partner (the payer's own statement).
+    beneficial_owner_measures: Option<String>,
     /// Questions 5 a) to d) of the form.
     increased_risk: bool,
     politically_exposed: bool,
@@ -3314,6 +3330,16 @@ async fn load_gwg_identification_sheet(
                 .try_get::<bool, _>("identity_on_file")
                 .unwrap_or(false);
         }
+        // Section 3 from the payer's own statement (QA 2026-10-10).
+        if let Some(owner) = load_gwg_payer_beneficial_owner(&state.db, lead_id)
+            .await
+            .map_err(|error| failed(error, "payer statement beneficial owner"))?
+        {
+            sheet.acts_on_own_account = owner.acts_on_own_account;
+            sheet.beneficial_owner_name = owner.name;
+            sheet.beneficial_owner_note = owner.note;
+            sheet.beneficial_owner_measures = Some(owner.measures);
+        }
         risk_countries.extend(payer.country.clone());
         risk_countries.extend(payer.citizenships.iter().cloned());
     } else {
@@ -3527,7 +3553,11 @@ async fn load_gwg_identification_sheet(
         }
     };
     if pays && let Some(declaration) = declaration.as_ref() {
-        sheet.payment_route = Some(GwgPaymentRoute::from_declaration(declaration));
+        sheet.payment_route = Some(GwgPaymentRoute {
+            // A third-party payer answers section 8 on the own link.
+            answered_by_payer: subject == GwgSheetSubject::Payer,
+            ..GwgPaymentRoute::from_declaration(declaration)
+        });
     }
     sheet.high_risk_third_country = aml.high_risk_country_transaction
         || aml.high_risk_country_resident
@@ -3538,6 +3568,172 @@ async fn load_gwg_identification_sheet(
             .any(|country| super::leads::is_enhanced_due_diligence_country(country));
     sheet.increased_risk = gwg_increased_risk(&aml, enhanced_check_required);
     Ok(sheet)
+}
+
+/// Section 3 of the payer's sheet (wirtschaftlich Berechtigter), from the
+/// payer's own statement through the link.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GwgPayerBeneficialOwner {
+    acts_on_own_account: Option<bool>,
+    name: Option<String>,
+    note: Option<String>,
+    measures: String,
+}
+
+/// What the payer sent: a person who states the own sources of the funds
+/// pays from the own assets and is the beneficial owner; the beneficial
+/// owners the payer named (an organisation's) are the persons behind the
+/// payment. Without a sent statement the payer has not answered: `None`, and
+/// neither box is ticked (QA 2026-10-10: both stayed empty although the payer
+/// had answered).
+fn gwg_payer_beneficial_owner(
+    submitted_on: NaiveDate,
+    owners: &[Value],
+    funds_sources: &[String],
+    funds_description: Option<&str>,
+) -> Option<GwgPayerBeneficialOwner> {
+    let text = |owner: &Value, key: &str| {
+        owner
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    let submitted = submitted_on.format("%d.%m.%Y");
+    let named = owners
+        .iter()
+        .filter_map(|owner| {
+            let name = [text(owner, "first_name"), text(owner, "last_name")]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" ");
+            (!name.is_empty()).then_some((owner, name))
+        })
+        .collect::<Vec<_>>();
+    if !named.is_empty() {
+        let note = named
+            .iter()
+            .map(|&(owner, ref name)| {
+                let born = text(owner, "date_of_birth")
+                    .and_then(|day| NaiveDate::parse_from_str(&day, "%Y-%m-%d").ok())
+                    .map(|day| format!("geb. {}", day.format("%d.%m.%Y")));
+                let place = text(owner, "birth_place").map(|place| format!("in {place}"));
+                let address = gwg_address_line(
+                    text(owner, "street").as_deref(),
+                    text(owner, "zip").as_deref(),
+                    text(owner, "city").as_deref(),
+                    text(owner, "country").as_deref(),
+                );
+                let share = owner
+                    .get("share_percent")
+                    .and_then(|share| {
+                        share
+                            .as_str()
+                            .map(|share| share.trim().to_string())
+                            .or_else(|| share.as_f64().map(|share| share.to_string()))
+                    })
+                    .filter(|share| !share.is_empty())
+                    .map(|share| format!("Anteil {} %", share.replace('.', ",")));
+                let details = [
+                    born,
+                    place,
+                    Some(address).filter(|line| !line.is_empty()),
+                    share,
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(", ");
+                if details.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{name}: {details}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        return Some(GwgPayerBeneficialOwner {
+            acts_on_own_account: Some(false),
+            name: Some(
+                named
+                    .iter()
+                    .map(|(_, name)| name.as_str())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+            ),
+            note: Some(note),
+            measures: format!(
+                "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted})"
+            ),
+        });
+    }
+    let sources = funds_sources
+        .iter()
+        .map(|source| super::lead_payer_link::funds_source_label(source))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let description = funds_description
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let funds = match (sources.is_empty(), description) {
+        (false, Some(words)) => format!("{sources} – {words}"),
+        (false, None) => sources,
+        (true, Some(words)) => words.to_string(),
+        (true, None) => {
+            return Some(GwgPayerBeneficialOwner {
+                acts_on_own_account: None,
+                name: None,
+                note: None,
+                measures: format!(
+                    "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted}); keine Angabe zur Herkunft der Mittel"
+                ),
+            });
+        }
+    };
+    Some(GwgPayerBeneficialOwner {
+        acts_on_own_account: Some(true),
+        name: None,
+        note: None,
+        measures: format!(
+            "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted}): Zahlung aus eigenen Mitteln ({funds})"
+        ),
+    })
+}
+
+/// The payer's sent statement for section 3 of the payer's sheet; `None`
+/// while the payer has not sent it.
+async fn load_gwg_payer_beneficial_owner(
+    db: &gmed_db::DbPool,
+    lead_id: Uuid,
+) -> Result<Option<GwgPayerBeneficialOwner>, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT submitted_at, beneficial_owners, funds_sources, funds_description
+           FROM lead_payer_statements
+           WHERE lead_id = $1 AND submitted_at IS NOT NULL"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let submitted_at: chrono::DateTime<chrono::Utc> = row.try_get("submitted_at")?;
+    let owners = row
+        .try_get::<Option<Value>, _>("beneficial_owners")?
+        .and_then(|value| value.as_array().cloned())
+        .unwrap_or_default();
+    let funds_sources = row
+        .try_get::<Option<Vec<String>>, _>("funds_sources")?
+        .unwrap_or_default();
+    let funds_description: Option<String> = row.try_get("funds_description")?;
+    Ok(gwg_payer_beneficial_owner(
+        crate::app_time::date_of(submitted_at),
+        &owners,
+        &funds_sources,
+        funds_description.as_deref(),
+    ))
 }
 
 /// Question a) of the sheet: an increased risk. "Ja" when the owner's rule
@@ -3578,6 +3774,10 @@ struct AmlEnhancedDueDiligenceBindings {
     pep_beneficial_owner: bool,
     pep_office_function: Option<String>,
     pep_asset_origin: Option<String>,
+    /// What the lead (block J of the risk assessment) or the payer stated
+    /// about links to sanctioned persons (QA 2026-10-10).
+    #[serde(default)]
+    sanctions_links: Option<String>,
     high_risk_country_transaction: bool,
     high_risk_country_resident: bool,
     affected_third_country: Option<String>,
@@ -3614,11 +3814,22 @@ struct AmlAssetOriginEvidence {
 
 /// Document type of an uploaded proof of the origin of assets.
 const AML_ASSET_ORIGIN_EVIDENCE_ART: &str = "aml_asset_origin_evidence";
+/// Every document type that counts as a proof of the origin of the assets:
+/// staff's upload in the form, the self-payer's proof from the lead's cabinet
+/// and the third-party payer's proof from the payer's link (QA 2026-10-10:
+/// the lead's proofs are named as "Nachweise zur Herkunft" without a second
+/// upload).
+const AML_ASSET_ORIGIN_EVIDENCE_ARTS: [&str; 3] = [
+    AML_ASSET_ORIGIN_EVIDENCE_ART,
+    super::lead_portal_intake::SELF_FUNDS_PROOF_KIND,
+    super::lead_portal_intake::PAYER_UPLOAD_KINDS[1],
+];
 const MAX_AML_ASSET_ORIGIN_EVIDENCE: usize = 20;
 
 /// Checks the proofs named in the due-diligence form: each must be a stored,
-/// non-deleted proof of the same patient or lead. Replaces the caller's file
-/// names with the stored ones and adds the upload dates.
+/// non-deleted proof ([`AML_ASSET_ORIGIN_EVIDENCE_ARTS`]) of the same patient
+/// or lead. Replaces the caller's file names with the stored ones and adds the
+/// upload dates.
 async fn resolve_aml_asset_origin_evidence(
     state: &AppState,
     evidence: &mut Vec<AmlAssetOriginEvidence>,
@@ -3646,7 +3857,7 @@ async fn resolve_aml_asset_origin_evidence(
                   created_at
            FROM documents
            WHERE id = ANY($1)
-             AND art = $4
+             AND art = ANY($4)
              AND file_deleted_at IS NULL
              AND (($2::uuid IS NOT NULL AND patient_id = $2)
                OR ($3::uuid IS NOT NULL AND lead_id = $3))"#,
@@ -3654,7 +3865,7 @@ async fn resolve_aml_asset_origin_evidence(
     .bind(&ids)
     .bind(patient_id)
     .bind(lead_id)
-    .bind(AML_ASSET_ORIGIN_EVIDENCE_ART)
+    .bind(&AML_ASSET_ORIGIN_EVIDENCE_ARTS[..])
     .fetch_all(&state.db)
     .await
     .map_err(|error| {
@@ -20431,6 +20642,34 @@ const LEGAL_SIGNATURE_FRAME_X_MM: f32 = 147.0;
 const LEGAL_SIGNATURE_FRAME_WIDTH_MM: f32 = 45.0;
 const LEGAL_SIGNATURE_FRAME_HEIGHT_MM: f32 = 9.0;
 
+/// Bold glyphs run a little wider than [`approx_text_width_mm`] estimates.
+const BOLD_WIDTH_FACTOR: f32 = 1.1;
+
+/// The signer's name under a signature line within `width_mm`: one line at 9,
+/// 8 or 7 pt, else two lines at 7 pt, the second cut with "..." when even
+/// that is too long. Returns the size and the lines.
+fn legal_signature_caption_lines(caption: &str, width_mm: f32) -> (f32, Vec<String>) {
+    let caption = caption.split_whitespace().collect::<Vec<_>>().join(" ");
+    let fits =
+        |text: &str, size: f32| approx_text_width_mm(text, size) * BOLD_WIDTH_FACTOR <= width_mm;
+    for size in [9.0, 8.0, 7.0] {
+        if fits(&caption, size) {
+            return (size, vec![caption]);
+        }
+    }
+    let size = 7.0;
+    let mut lines = wrap_text_to_width_precise(&caption, size, width_mm / BOLD_WIDTH_FACTOR);
+    if lines.len() > 2 {
+        let mut rest = lines[1..].join(" ");
+        lines.truncate(1);
+        while !rest.is_empty() && !fits(&format!("{rest}..."), size) {
+            rest.pop();
+        }
+        lines.push(format!("{}...", rest.trim_end()));
+    }
+    (size, lines)
+}
+
 /// One "Ort, Datum … Unterschrift: ____" line with the signer's name below the
 /// underline and a signature frame reserved above it.
 fn legal_signature_line(
@@ -20460,15 +20699,23 @@ fn legal_signature_line(
         &layout.regular_font,
         TreatmentPlanPdfColor::Body,
     );
-    append_pdf_text_line(
-        &mut layout.page_ops,
+    // The name stays inside the right margin: a smaller size, then two lines
+    // (QA 2026-10-10: a long staff name ran off the page).
+    let (caption_size, caption_lines) = legal_signature_caption_lines(
         caption,
-        LEGAL_SIGNATURE_FRAME_X_MM,
-        signature_y - 6.0,
-        9.0,
-        &layout.bold_font,
-        TreatmentPlanPdfColor::Body,
+        PDF_PAGE_WIDTH_MM - PDF_RIGHT_MARGIN_MM - LEGAL_SIGNATURE_FRAME_X_MM,
     );
+    for (index, line) in caption_lines.iter().enumerate() {
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            line,
+            LEGAL_SIGNATURE_FRAME_X_MM,
+            signature_y - 6.0 - index as f32 * pdf_line_height_mm(caption_size, 1.2),
+            caption_size,
+            &layout.bold_font,
+            TreatmentPlanPdfColor::Body,
+        );
+    }
     layout.push_signature_anchor(
         role,
         LEGAL_SIGNATURE_FRAME_X_MM,
@@ -20927,6 +21174,13 @@ fn build_enhanced_due_diligence_pdf(
         aml.pep_asset_origin.as_deref(),
     );
 
+    fc_subhead(&mut layout, "Verbindungen zu sanktionierten Personen");
+    aml_labeled_value(
+        &mut layout,
+        "Angaben zu Verbindungen zu sanktionierten Personen",
+        aml.sanctions_links.as_deref(),
+    );
+
     fc_subhead(&mut layout, "Drittstaat mit hohem Risiko");
     aml_checkbox_line(
         &mut layout,
@@ -21243,11 +21497,7 @@ fn build_gwg_identification_pdf(
     // qualified signature. Cash, crypto, another method or a payment through
     // a third party ask staff for a separate check; nothing is blocked.
     if let Some(route) = &sheet.payment_route {
-        aml_labeled_value(
-            &mut layout,
-            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)",
-            Some(route.line().as_str()),
-        );
+        aml_labeled_value(&mut layout, route.label(), Some(route.line().as_str()));
         aml_labeled_value(
             &mut layout,
             "Zahlung über Dritte / Zahlungsdienstleister",
@@ -21378,9 +21628,11 @@ fn build_gwg_identification_pdf(
     aml_labeled_value(
         &mut layout,
         "Getroffene Maßnahmen zur Ermittlung des wB",
-        sheet
-            .acts_on_own_account
-            .map(|_| "Befragung des Vertragspartners (Erklärung zum Kostenträger in der Anfrage)"),
+        sheet.beneficial_owner_measures.as_deref().or_else(|| {
+            sheet.acts_on_own_account.map(
+                |_| "Befragung des Vertragspartners (Erklärung zum Kostenträger in der Anfrage)",
+            )
+        }),
     );
 
     admin_heading(&mut layout, "4. Hintergrund der Geschäftsbeziehung");
@@ -23835,6 +24087,7 @@ fn build_lead_self_disclosure_pdf(
     // 6. The follow-up answers that exist.
     let stay_reason = data.stay_reason.as_deref().map(|reason| {
         let label = match reason {
+            "citizenship_or_birth" => "Staatsangehörigkeit / dort geboren",
             "work" => "Arbeit",
             "study" => "Studium",
             "family" => "Familie",
@@ -33302,6 +33555,7 @@ mod tests {
             planned_asset_use: Some("Behandlungskosten".to_string()),
             manager_approval_name: Some("Leitung Beispiel".to_string()),
             continuous_monitoring: Some("Prüfung jeder Zahlung".to_string()),
+            sanctions_links: Some("Beispiel GmbH (geschäftlich) – seit 2019".to_string()),
             reviewer_name: Some("Bearbeiter Beispiel".to_string()),
             review_date: NaiveDate::from_ymd_opt(2026, 8, 1),
             ..Default::default()
@@ -33316,6 +33570,9 @@ mod tests {
         .unwrap();
         assert_signature_frames_detected(&bytes);
         let text = assert_legal_pdf_chrome(&bytes, "AML-20260801-UNITTEST0001");
+        // The lead's statement on links to sanctioned persons (QA 2026-10-10).
+        assert!(text.contains("Angaben zu Verbindungen zu sanktionierten Personen"));
+        assert!(text.contains("Beispiel GmbH (geschäftlich) – seit 2019"));
 
         assert!(text.contains("Durchführung verstärkter Sorgfaltspflichten"));
         assert!(text.contains("Blacklist / besonders hohes Risiko"));
@@ -34158,6 +34415,108 @@ mod tests {
         ] {
             assert!(!text.contains(absent), "{absent} in {text}");
         }
+    }
+
+    #[test]
+    fn payer_sheet_beneficial_owner_follows_the_payer_statement() {
+        let day = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        // A person who states the own funds is the beneficial owner.
+        let own = super::gwg_payer_beneficial_owner(
+            day,
+            &[],
+            &["employment".to_string(), "savings".to_string()],
+            Some("Gehalt als Lehrerin"),
+        )
+        .unwrap();
+        assert_eq!(own.acts_on_own_account, Some(true));
+        assert!(
+            own.measures.contains("abgesendet am 10.10.2026"),
+            "{}",
+            own.measures
+        );
+        assert!(
+            own.measures
+                .contains("Gehalt / nichtselbständige Arbeit, Ersparnisse – Gehalt als Lehrerin"),
+            "{}",
+            own.measures
+        );
+        // Named beneficial owners are the persons behind the payment.
+        let owners = [json!({
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "date_of_birth": "1970-02-03",
+            "city": "Berlin",
+            "country": "DE",
+            "share_percent": 50.5,
+        })];
+        let named = super::gwg_payer_beneficial_owner(day, &owners, &[], None).unwrap();
+        assert_eq!(named.acts_on_own_account, Some(false));
+        assert_eq!(named.name.as_deref(), Some("Viktor Zahler"));
+        let note = named.note.unwrap();
+        assert!(note.contains("geb. 03.02.1970"), "{note}");
+        assert!(note.contains("Anteil 50,5 %"), "{note}");
+        // Sent without any statement on the funds: no box is ticked.
+        let silent = super::gwg_payer_beneficial_owner(day, &[], &[], None).unwrap();
+        assert_eq!(silent.acts_on_own_account, None);
+
+        // The payer's sheet prints it, with the payment route of the payer.
+        let sheet = super::GwgIdentificationSheet {
+            role: "Kostenübernehmer (dritte Person)",
+            first_name: "Zora".to_string(),
+            last_name: "Muster".to_string(),
+            acts_on_own_account: own.acts_on_own_account,
+            beneficial_owner_measures: Some(own.measures.clone()),
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("bank_transfer".to_string()),
+                answered_by_payer: true,
+                ..Default::default()
+            }),
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: day,
+            ..Default::default()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &sheet,
+            &legal_test_agency(),
+            None,
+            "GWG-20261010-UNITTEST0002",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0002");
+        assert!(
+            text.contains("[X] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse")
+        );
+        assert!(text.contains("Zahlung aus eigenen Mitteln"));
+        assert!(text.contains("Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"));
+        assert!(!text.contains("Patientenformular, Abschnitt 8"));
+    }
+
+    #[test]
+    fn signature_caption_stays_inside_the_right_margin() {
+        let width = super::PDF_PAGE_WIDTH_MM
+            - super::PDF_RIGHT_MARGIN_MM
+            - super::LEGAL_SIGNATURE_FRAME_X_MM;
+        let within = |size: f32, lines: &[String]| {
+            lines.iter().all(|line| {
+                super::approx_text_width_mm(line, size) * super::BOLD_WIDTH_FACTOR <= width
+            })
+        };
+        // A short name keeps the regular size and one line.
+        let (size, lines) = super::legal_signature_caption_lines("Anna Muster", width);
+        assert_eq!(size, 9.0);
+        assert_eq!(lines, vec!["Anna Muster".to_string()]);
+        // A long name (QA 2026-10-10) shrinks and wraps, never past the margin.
+        let long = "CEO e2e-04d38df1176a4ca68fd89858490c1234 Bearbeiterin Beispiel";
+        let (size, lines) = super::legal_signature_caption_lines(long, width);
+        assert_eq!(size, 7.0);
+        assert!(!lines.is_empty() && lines.len() <= 2, "{lines:?}");
+        assert!(within(size, &lines), "{lines:?}");
+        assert!(lines[0].starts_with("CEO"));
+        // Far too long: two lines, the second cut.
+        let (size, lines) = super::legal_signature_caption_lines(&long.repeat(4), width);
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].ends_with("..."));
+        assert!(within(size, &lines), "{lines:?}");
     }
 
     #[test]

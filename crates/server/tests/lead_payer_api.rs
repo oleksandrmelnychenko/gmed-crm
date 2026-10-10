@@ -230,8 +230,26 @@ async fn payer_declaration_access_validation_and_audit() {
             "cost_assumption_missing"
         ])
     );
-    // The staff form always states the own-account answer, also the default.
+    // Without the key nobody answered the own-account question: the stored
+    // value is only the default (QA 2026-10-10: no pre-ticked "yes").
     assert_eq!(saved["declaration"]["acts_on_own_account"], true, "{saved}");
+    assert_eq!(
+        saved["declaration"]["own_account_answered"], false,
+        "{saved}"
+    );
+    // Staff answer it: the answer is recorded.
+    let (status, saved) = json_request(
+        &app,
+        "POST",
+        &path,
+        &sales,
+        Some(
+            json!({"payer_kind": "third_party", "first_name": "Erika", "source_of_funds": "savings",
+                    "acts_on_own_account": true}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
     assert_eq!(
         saved["declaration"]["own_account_answered"], true,
         "{saved}"
@@ -267,7 +285,7 @@ async fn payer_declaration_access_validation_and_audit() {
     .await
     .unwrap();
     assert_eq!(
-        audited, 2,
+        audited, 3,
         "every saved change is audited in its transaction"
     );
 }

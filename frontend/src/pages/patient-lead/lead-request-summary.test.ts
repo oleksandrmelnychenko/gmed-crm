@@ -437,8 +437,8 @@ describe("lead request summary", () => {
     expect(rows(groups, "follow_up")).toEqual({
       "Herkunft der Mittel": "Einkommen",
       "Bitte beschreiben Sie die Herkunft der Mittel": "Gehalt",
-      Beruf: "Ingenieurin",
-      "Branche / Sektor": "Maschinenbau",
+      "Ihr Beruf": "Ingenieurin",
+      "Branche / Sektor Ihrer Tätigkeit": "Maschinenbau",
       "Nachweise zur Herkunft der Mittel": "kontoauszug.pdf",
       "Seit wann wohnen Sie in Ihrem Wohnsitzland?": "2015",
       "Grund des Aufenthalts im Wohnsitzland": "Arbeit",
@@ -449,6 +449,11 @@ describe("lead request summary", () => {
     expect(rows(groups, "request")).toEqual({ "Grund der Anfrage": "Zweitmeinung zur Knie-OP" });
     // Without open blocks nothing of the follow-up is listed.
     expect(requestSummary(request(), de, "de").map((group) => group.id)).not.toContain("follow_up");
+    // Only K and L open (listed under the person and the declarations): no empty group.
+    const kAndL = request({
+      follow_up: { required: true, blocks: ["K", "L"], missing: {}, answered_at: null },
+    });
+    expect(requestSummary(kAndL, de, "de").map((group) => group.id)).not.toContain("follow_up");
   });
 
   it("shows who acts for an adult after the identity document: the answers, then each person with the files", () => {

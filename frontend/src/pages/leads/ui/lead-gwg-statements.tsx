@@ -381,6 +381,8 @@ function BillingGroup({
 
 function stayReasonLabel(value: string | null | undefined, tx: Tx): string {
   switch (value) {
+    case "citizenship_or_birth":
+      return tx("гражданство / рождение в этой стране", "Staatsangehörigkeit / dort geboren");
     case "work":
       return tx("работа", "Arbeit");
     case "study":

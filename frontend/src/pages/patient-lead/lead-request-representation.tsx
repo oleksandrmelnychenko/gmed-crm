@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
   CabinetSection as Section,
   ConsentNeededNote,
   LabeledField,
+  MissingShownContext,
   RequiredMark,
   UploadedFileList,
   YesNoSelect,
@@ -97,6 +98,24 @@ function slotsBeyondBase(missing: readonly string[]): Set<RepresentativeSlot> {
     if (part && !(BASE_REPRESENTATIVE_FIELDS as readonly string[]).includes(part.part)) slots.add(part.slot);
   }
   return slots;
+}
+
+/**
+ * Whether the stored person holds more than names and contacts (date and
+ * place of birth, citizenship, address, an uploaded scan): such a person's
+ * form stays whole after a reload, so the data stay visible and editable
+ * (QA 2026-10-10: a parent's card collapsed to name / e-mail / phone).
+ */
+function storedBeyondBase(person: LeadRequestRepresentative | null | undefined): boolean {
+  if (!person) return false;
+  const draft = draftFromRepresentative(person);
+  const beyond = REPRESENTATIVE_FIELDS.filter((field) => !(BASE_REPRESENTATIVE_FIELDS as readonly string[]).includes(field));
+  return beyond.some((field) => {
+    const value = draft[field];
+    return Array.isArray(value) ? value.length > 0 : String(value).trim() !== "";
+  })
+    || person.identity_documents.length > 0
+    || person.authority_documents.length > 0;
 }
 
 /** The form of one person as typed, with what the server refused. */
@@ -177,6 +196,7 @@ function useRepresentativeForm({
   const removedRef = useRef(false);
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
   const [problem, setProblem] = useState("");
+  const missingShown = useContext(MissingShownContext);
 
   useEffect(() => {
     lockedRef.current = Boolean(person?.email_locked);
@@ -259,8 +279,11 @@ function useRepresentativeForm({
         if (field === "date_of_birth" && draft.date_of_birth && draft.date_of_birth > adultBirthDateLimit()) return text.representativeMinor;
         return refusalText(text, refused.codes[field]);
       }
-      // Nothing about a person is saved before the last name is there.
-      if (field === "last_name" && !representativeValue(field, draft) && hasRepresentativeEntries(draft)) return text.required;
+      // Nothing about a person is saved before the last name is there: said once "next" (or
+      // "send") of the step was pressed, not while the person is still typing (QA 2026-10-10).
+      if (field === "last_name" && missingShown && !representativeValue(field, draft) && hasRepresentativeEntries(draft)) {
+        return text.required;
+      }
       return undefined;
     },
     problem: problemText(text, problem),
@@ -733,7 +756,9 @@ export function RepresentationSection({
   // is saved.
   const [missingAtStart] = useState(() => slotsBeyondBase(stepMissing));
   const missingNow = slotsBeyondBase(stepMissing);
-  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || !minor || missingAtStart.has(slot) || missingNow.has(slot);
+  // A parent who already gave more than names and contacts keeps the whole form.
+  const whole = (slot: RepresentativeSlot) => mode === "follow_up" || !minor || missingAtStart.has(slot) || missingNow.has(slot)
+    || storedBeyondBase(representativeInSlot(representation, slot));
   const fieldsOf = (slot: RepresentativeSlot): ReadonlySet<RepresentativeField> =>
     new Set(whole(slot) ? REPRESENTATIVE_FIELDS : minor ? BASE_REPRESENTATIVE_FIELDS : []);
   const shown = answered.filter((slot) => minor || whole(slot));

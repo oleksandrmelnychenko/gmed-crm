@@ -3535,6 +3535,32 @@ mod lead_service_grid_projection_tests {
     }
 }
 
+/// Whether the stored wizard state has «PEP-статус проверен» ticked
+/// (`aml_enhanced_due_diligence.pepStatusChecked`); `None` for an unknown lead.
+async fn lead_pep_status_checked(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lead_id: Uuid,
+) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT COALESCE(
+                  wizard_state #> '{aml_enhanced_due_diligence,pepStatusChecked}' = 'true'::jsonb,
+                  false)
+           FROM leads WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut **tx)
+    .await
+}
+
+/// The audit action of a changed «PEP-статус проверен»; `None` when it did not change.
+fn pep_status_audit_action(previous: bool, current: bool) -> Option<&'static str> {
+    match (previous, current) {
+        (false, true) => Some("lead_pep_status_checked"),
+        (true, false) => Some("lead_pep_status_unchecked"),
+        _ => None,
+    }
+}
+
 async fn update_lead(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -3944,6 +3970,20 @@ async fn update_lead(
         }
         None => None,
     };
+    // «PEP-статус проверен» lives in the wizard state: its change is audited
+    // as an action of its own (GwG traceability), so the stored value before
+    // the update is read in the same transaction.
+    let previous_pep_status_checked = if body.wizard_state.is_some() {
+        match lead_pep_status_checked(&mut tx, lead_id).await {
+            Ok(value) => value,
+            Err(e) => {
+                tracing::error!(error = %e, lead_id = %lead_id, "read lead PEP check");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        }
+    } else {
+        None
+    };
     let update_result = sqlx::query(
         r#"UPDATE leads
            SET email = COALESCE($2, email),
@@ -4147,6 +4187,32 @@ async fn update_lead(
     {
         tracing::error!(error = %e, lead_id = %lead_id, "audit lead update");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+    }
+    if let Some(previous) = previous_pep_status_checked {
+        let current = match lead_pep_status_checked(&mut tx, lead_id).await {
+            Ok(value) => value.unwrap_or(false),
+            Err(e) => {
+                tracing::error!(error = %e, lead_id = %lead_id, "read lead PEP check");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if let Some(action) = pep_status_audit_action(previous, current)
+            && let Err(e) = audit::write_in_transaction(
+                &mut tx,
+                &audit::domain_event(
+                    action,
+                    Some(auth.user_id),
+                    "lead",
+                    Some(lead_id),
+                    // Who and when are the row's own; no personal data.
+                    json!({ "lead_id": lead_id, "pep_status_checked": current }),
+                ),
+            )
+            .await
+        {
+            tracing::error!(error = %e, lead_id = %lead_id, "audit lead PEP check");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
     }
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, lead_id = %lead_id, "commit lead update");

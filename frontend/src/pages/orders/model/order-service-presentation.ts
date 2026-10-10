@@ -30,6 +30,29 @@ export function germanDateLabel(value: string | null | undefined) {
   return `${match[3]}.${match[2]}.${match[1]}`;
 }
 
+/**
+ * The name of a catalogue price version as shown beside its price and period:
+ * `null` for the automatic name "YYYY-MM-DD · 550.00 EUR" (the migration's
+ * default, which only repeats the start date and the price), otherwise the
+ * name with ISO dates written DD.MM.YYYY (owner rule: DD.MM.YYYY everywhere).
+ */
+export function priceVersionDisplayName(
+  price: { name?: string | null; valid_from?: string | null; unit_price?: unknown; currency?: string | null },
+): string | null {
+  const name = price.name?.trim() ?? "";
+  if (!name) return null;
+  const automatic = /^(\d{4}-\d{2}-\d{2}) · ([\d.,]+) ([A-Z]{3})$/u.exec(name);
+  if (
+    automatic
+    && automatic[1] === (price.valid_from ?? "").trim()
+    && money(automatic[2]) === money(price.unit_price)
+    && automatic[3] === (price.currency ?? "").trim().toUpperCase()
+  ) {
+    return null;
+  }
+  return name.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/gu, "$3.$2.$1");
+}
+
 function germanList(values: string[]) {
   const uniqueValues = [...new Set(values.map((value) => value.trim()).filter(Boolean))];
   if (uniqueValues.length === 0) return "noch festzulegende Fachrichtungen";

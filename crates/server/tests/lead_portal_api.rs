@@ -4127,6 +4127,7 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     // The birth data are block K and the identity data staff's (QA 2026-10-10):
     // they never hold the parent's section; the scan does.
     assert!(!missing.contains(&json!("birth_place")), "{body}");
+    assert!(!missing.contains(&json!("birth_country")), "{body}");
     assert!(!missing.contains(&json!("id_document_number")), "{body}");
     assert!(missing.contains(&json!("id_document_upload")), "{body}");
     assert!(!missing.contains(&json!("payment_method")), "{body}");
@@ -4665,30 +4666,43 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
         "{declaration}"
     );
 
-    // Block F answered: the follow-up goes to the manager.
+    // Block F answered: the follow-up goes to the manager. A citizen of the country has a
+    // reason of its own and no details to write (QA 2026-10-10).
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/identification"),
         &patient,
-        Some(json!({ "residence_since": "2015", "stay_reason": "family" })),
+        Some(json!({ "residence_since": "2015", "stay_reason": "citizenship_or_birth" })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["identification"]["stay_reason"], "citizenship_or_birth",
+        "{body}"
+    );
     let (status, body) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
     let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let counted: Value = sqlx::query_scalar(
-        r#"SELECT context FROM audit_log
-           WHERE action = 'lead_portal_submit' AND entity_id = $1
-           ORDER BY created_at DESC LIMIT 1"#,
-    )
-    .bind(lead_id)
-    .fetch_one(pool)
-    .await
-    .unwrap();
+    // The audit is written asynchronously: wait for the second send's row.
+    let mut counted = Value::Null;
+    for _ in 0..50 {
+        counted = sqlx::query_scalar(
+            r#"SELECT context FROM audit_log
+               WHERE action = 'lead_portal_submit' AND entity_id = $1
+               ORDER BY created_at DESC LIMIT 1"#,
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        if counted["self_funds_documents"] == 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
     assert_eq!(counted["self_funds_documents"], 2, "{counted}");
 
     // A third party pays after all: the own source goes.

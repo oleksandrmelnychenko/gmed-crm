@@ -462,7 +462,9 @@ pub const STATEMENT_KEYS: [&str; 15] = [
     "request_reason",
 ];
 
-const STAY_REASONS: [&str; 4] = ["work", "study", "family", "other"];
+/// Block F: why the lead lives in the country of residence; `citizenship_or_birth` for a
+/// citizen of that country or a person born there (QA 2026-10-10).
+const STAY_REASONS: [&str; 5] = ["citizenship_or_birth", "work", "study", "family", "other"];
 const SANCTIONS_LINK_KINDS: [&str; 4] = ["family", "business", "ownership", "other"];
 
 /// The new statements of a lead.
@@ -1362,6 +1364,13 @@ mod tests {
         );
         let cleared = apply_statements(&next, &body(json!({ "stay_reason": null }))).unwrap();
         assert_eq!(cleared.stay_reason, None);
+        // A citizen of the country or a person born there has an answer of its own (QA 2026-10-10).
+        let citizen = apply_statements(
+            &next,
+            &body(json!({ "stay_reason": "citizenship_or_birth" })),
+        )
+        .unwrap();
+        assert_eq!(citizen.stay_reason.as_deref(), Some("citizenship_or_birth"));
     }
 
     #[test]

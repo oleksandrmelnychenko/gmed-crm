@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  combinedSignerPolicy, isSignaturePending, signatureErrorText, signatureFrameCoverage, signerPolicyError, validSigners, type Signer,
+  combinedSignerPolicy, isSignaturePending, signatureErrorText, signatureFrameCoverage, signatureGateErrorText, signerPolicyError, validSigners, type Signer,
 } from "./document-signature-api";
+import { ApiRequestError } from "@/lib/api";
 
 const signer: Signer = { first_name: "Erika", last_name: "Mustermann", email: "erika@example.org", role: "client" };
 describe("document signing", () => {
@@ -49,5 +50,27 @@ describe("document signing", () => {
     expect(signatureErrorText("payer_package_signers_required", (_ru, de) => de)).toBe(
       "Die Unterlagen des Zahlers unterschreiben nur der Zahler und die GMED-Vertretung – ohne Patientenseite.",
     );
+  });
+
+  it("names the reason of a lead gate instead of the generic refusal (QA 2026-10-10)", () => {
+    const ru = (value: string) => value;
+    const de = (_ru: string, value: string) => value;
+    expect(signatureErrorText("blocked_country", ru, { countries_label: "Russland" })).toBe(
+      "Подпись недоступна: заблокированная страна (Russland). Снять блокировку для этого лида может только CEO.",
+    );
+    expect(signatureErrorText("sanctions_review_pending", de)).toBe(
+      "Unterschrift nicht möglich: Ein möglicher Treffer der EU-Sanktionsliste wartet auf die Entscheidung des CEO.",
+    );
+    expect(signatureErrorText("risk_review_required", ru)).toContain("решение по оценке риска");
+    expect(signatureErrorText("risk_review_required", ru, { rejected: true })).toBe("Подпись недоступна: оценка риска отклонила лида.");
+    expect(signatureErrorText("sanctions_confirmed", ru)).toContain("подтверждённое совпадение");
+    expect(signatureErrorText("something_else", ru)).toBe("Действие не выполнено. Проверьте статус перед повторной отправкой.");
+    const refused = new ApiRequestError("Gate", {
+      status: 409,
+      body: { error: "risk_review_required", code: "risk_review_required", message: "x", rejected: true },
+    });
+    expect(signatureGateErrorText(refused, de)).toBe("Unterschrift nicht möglich: Die Risikobewertung hat den Lead abgelehnt.");
+    expect(signatureGateErrorText(new ApiRequestError("x", { status: 409, body: { error: "document_already_signed" } }), de)).toBeNull();
+    expect(signatureGateErrorText(new Error("x"), de)).toBeNull();
   });
 });

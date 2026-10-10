@@ -321,6 +321,21 @@ test("the GwG identification sheet of the lead downloads from the row", async ({
   ]);
 });
 
+test("a minor without a login is offered no access of his own: the parents get theirs", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await setup(page, "ru", {}, leads[0].id);
+  // The child has no login yet (registered after setup, so it wins for the list).
+  await page.route((url) => url.pathname === "/api/v1/leads", (route) =>
+    route.fulfill({ json: leads.map((lead, index) => (index === 0 ? { ...lead, portal_account: null } : lead)) }));
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[0].id}`).first().click();
+  const minor = page.getByTestId("lead-portal-access").first();
+  await expect(minor.getByTestId("lead-guardian-access")).toContainText("Anna Muster");
+  await expect(minor).toContainText("У ребёнка нет своего доступа: доступ получают родители (ниже).");
+  await expect(minor.getByRole("button", { name: "Создать доступ" })).toHaveCount(0);
+  await expect(minor.getByTestId("lead-portal-send-email")).toHaveCount(0);
+});
+
 test("a minor lead has no quick sheet button: the sheets are made per parent in the wizard", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const calls = await setup(page, "ru", {}, leads[0].id);

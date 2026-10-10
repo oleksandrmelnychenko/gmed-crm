@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, CircleAlert, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,13 @@ import type { LeadRequestText } from "./lead-request-text";
 
 /** The steps of the cabinet; "follow_up" ("Ergänzende Angaben") only while the server opened blocks. */
 export type Step = StepId;
+
+/**
+ * Whether "Next" (or "send") of the step on screen was pressed: only then do
+ * the yellow lists and the "required" messages of empty fields show (owner
+ * 2026-10-09, QA 2026-10-10).
+ */
+export const MissingShownContext = createContext(false);
 
 export function errorBody(error: unknown): Record<string, unknown> | null {
   return error instanceof ApiRequestError && error.body ? (error.body as Record<string, unknown>) : null;

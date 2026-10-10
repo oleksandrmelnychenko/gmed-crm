@@ -115,7 +115,16 @@ export function LeadPortalAccessDetail({
 
   const lastLogin = lead.portal_account?.last_login_at;
   const intake = lead.portal_intake ?? null;
-  const canCreate = status === "none" && Boolean(lead.email);
+  // Whether the lead is a minor, from the portal state the parents' block
+  // loads: `undefined` while loading, `null` when it is not known.
+  const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
+  const onPortalIntake = useCallback((intake: LeadPortalIntake | null) => {
+    setMinor(intake ? intake.minor : null);
+  }, []);
+  // A minor gets no login of his own (the server refuses to create one): the
+  // parents get theirs in the block below, so no access is created for the
+  // child. A login made before that rule keeps its password reset.
+  const canCreate = minor !== true && status === "none" && Boolean(lead.email);
   const canReset = status !== "none" && status !== "disabled";
   const canOffer = canIssue && (canCreate || canReset);
 
@@ -144,12 +153,6 @@ export function LeadPortalAccessDetail({
   const [sheetBusy, setSheetBusy] = useState(false);
   // "Сформирован DD.MM.YYYY HH:mm" after the quick button made the sheet.
   const [sheetNotice, setSheetNotice] = useState("");
-  // Whether the lead is a minor, from the portal state the parents' block
-  // loads: `undefined` while loading, `null` when it is not known.
-  const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
-  const onPortalIntake = useCallback((intake: LeadPortalIntake | null) => {
-    setMinor(intake ? intake.minor : null);
-  }, []);
   // A minor has no sheet of his own: each legal representative gets one, in
   // the wizard. The quick button is for the patient's own sheet only.
   const canOfferSheet = canIssue && minor !== undefined && minor !== true;
@@ -340,7 +343,11 @@ export function LeadPortalAccessDetail({
         </dl>
       ) : (
         <p className="text-muted-foreground">
-          {lead.email
+          {minor === true
+            ? de
+              ? "Das Kind hat keinen eigenen Zugang: Die Eltern erhalten ihren Zugang unten."
+              : "У ребёнка нет своего доступа: доступ получают родители (ниже)."
+            : lead.email
             ? de
               ? "Für diesen Lead wurde noch kein Zugang angelegt."
               : "Для этого лида доступ ещё не создан."

@@ -37,6 +37,7 @@ import {
   type RiskConfigError,
   type RiskReviewRow,
   type RiskReviewerCandidate,
+  type RiskReviewerCounts,
 } from "./risk-config";
 
 function errorText(error: unknown, fallback: string): string {
@@ -151,6 +152,7 @@ export function RiskSettingsTab() {
   const [saved, setSaved] = useState<RiskConfig | null>(null);
   const [config, setConfig] = useState<RiskConfig | null>(null);
   const [candidates, setCandidates] = useState<RiskReviewerCandidate[]>([]);
+  const [reviewerCounts, setReviewerCounts] = useState<RiskReviewerCounts | null>(null);
   const [queue, setQueue] = useState<RiskReviewRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -165,6 +167,7 @@ export function RiskSettingsTab() {
       ]);
       setSaved(response.config);
       setConfig(response.config);
+      setReviewerCounts(response.reviewerCounts);
       setQueue(reviews);
       if (response.candidates) {
         setCandidates(response.candidates);
@@ -344,6 +347,16 @@ export function RiskSettingsTab() {
           <div className="space-y-2 border-t border-border/60 pt-3" data-testid="risk-reviewers">
             <AdminSectionTitle>{t.risk_reviewers}</AdminSectionTitle>
             <p className="text-xs leading-5 text-muted-foreground">{t.risk_reviewers_hint}</p>
+            {reviewerCounts ? (
+              <p className="text-xs leading-5 text-foreground" data-testid="risk-reviewers-count">
+                {formatUiText(t.risk_reviewers_count, { ceo: reviewerCounts.ceo, deputies: reviewerCounts.deputies })}
+              </p>
+            ) : null}
+            {reviewerCounts && reviewerCounts.ceo + reviewerCounts.deputies < 2 ? (
+              <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="risk-reviewers-second-missing">
+                {t.risk_reviewers_second_missing}
+              </p>
+            ) : null}
             {reviewerOptions.length === 0 ? (
               <p className="text-xs text-muted-foreground">{t.risk_reviewers_none}</p>
             ) : (

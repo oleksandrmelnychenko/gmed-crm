@@ -2529,11 +2529,11 @@ test.describe("lead wizard UX", () => {
     expect(documentPayload.bindings.service_lines.at(-1)).toMatchObject({
       description: "Voraussichtliche Auslagen",
       quantity: "1",
-      fee: "50.00 EUR",
-      line_total: "50.00 EUR",
+      fee: "50,00 EUR",
+      line_total: "50,00 EUR",
       vat_rate: "0",
     });
-    expect(documentPayload.bindings.estimate_total).toBe("169.00 EUR");
+    expect(documentPayload.bindings.estimate_total).toBe("169,00 EUR");
   });
 
   test("catalog placeholders follow lead selections through the generated order request", async ({ page }) => {

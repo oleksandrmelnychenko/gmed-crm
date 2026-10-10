@@ -759,7 +759,8 @@ test("a second parent added in the cabinet appears in the open wizard and surviv
     .filter({ hasText: "Ben Muster" })
     .getByRole("button", { name: "Редактировать представителя" })
     .click();
-  const editor = page.locator("form").filter({ hasText: "Редактировать доверенный контакт" });
+  // Opened from the parents' block: the editor is titled for a parent (QA 2026-10-10).
+  const editor = page.locator("form").filter({ hasText: "Редактировать родителя или законного представителя" });
   await editor.getByLabel("E-Mail").fill("ben.muster@example.com");
   await editor.getByRole("button", { name: "Сохранить", exact: true }).click();
   await expect.poll(() => calls.updates.length).toBeGreaterThan(savesBefore);

@@ -886,5 +886,9 @@ describe("lead request send step", () => {
     expect(formatFileSize(2048, "de")).toBe("2 KB");
     expect(formatFileSize(3 * 1024 * 1024, "de")).toBe("3 MB");
     expect(formatFileSize(null, "de")).toBe("");
+    // The units of the page's language, like "до 25 МБ" beside them (QA 2026-10-10).
+    expect(formatFileSize(1000, "ru")).toBe("1 КБ");
+    expect(formatFileSize(3 * 1024 * 1024, "uk")).toBe("3 МБ");
+    expect(formatFileSize(2048, "en")).toBe("2 KB");
   });
 });

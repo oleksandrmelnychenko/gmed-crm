@@ -82,13 +82,12 @@ export function SendStep({
         <>
           <SuccessBanner>
             <p className="font-semibold">{text.sentTitle}</p>
-            <p data-testid="lead-request-sent">{text.sentBody(formatAppDateTime(request.submitted_at))}</p>
-            {/* For every request alike until GMED sends documents for signature (contract 3.1). */}
-            {request.review_notice ? (
-              <p className="mt-1" data-testid="lead-request-review-notice">
-                {text.reviewNotice}
-              </p>
-            ) : null}
+            {/* One thank-you (QA 2026-10-10): the review notice continues the sentence of the sending,
+                for every request alike until GMED sends documents for signature (contract 3.1). */}
+            <p data-testid="lead-request-sent">
+              {text.sentBody(formatAppDateTime(request.submitted_at))}
+              {request.review_notice ? <span data-testid="lead-request-review-notice"> {text.reviewNotice}</span> : null}
+            </p>
           </SuccessBanner>
           {followUpOpen ? (
             <div

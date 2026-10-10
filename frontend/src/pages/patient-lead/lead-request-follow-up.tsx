@@ -59,6 +59,7 @@ import {
   FileUploadField,
   LabeledField,
   MissingList,
+  MissingShownContext,
   SaveIndicator,
   StepFooter,
   errorBody,
@@ -88,6 +89,8 @@ export function FollowUpStep({
   onChange,
   onBack,
   onNext,
+  missingShown: showMissing,
+  onShowMissing,
   index,
   total,
 }: {
@@ -98,6 +101,9 @@ export function FollowUpStep({
   onChange: (request: LeadRequest) => void;
   onBack: () => void;
   onNext: () => void;
+  /** Whether "next" or "send" of this step was pressed: the page keeps it for the step bar. */
+  missingShown: boolean;
+  onShowMissing: () => void;
   index: number;
   total: number;
 }) {
@@ -110,7 +116,6 @@ export function FollowUpStep({
       !(block === "H" && legal?.pep_self === false && legal?.pep_related === false) &&
       !(block === "J" && legal?.sanctions_links === false),
   );
-  const [showMissing, setShowMissing] = useState(false);
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
     funds: "idle",
@@ -135,7 +140,7 @@ export function FollowUpStep({
 
   async function send() {
     // A send also shows what is still missing.
-    setShowMissing(true);
+    onShowMissing();
     setSending(true);
     setError("");
     try {
@@ -250,7 +255,7 @@ export function FollowUpStep({
                 testId={`lead-request-follow-up-${block}-missing`}
               />
             ) : null}
-            {blockContent(block)}
+            <MissingShownContext.Provider value={showMissing}>{blockContent(block)}</MissingShownContext.Provider>
           </Section>
         </div>
       ))}
@@ -275,7 +280,7 @@ export function FollowUpStep({
             onClick={() => {
               // What is missing shows only after "Next" (or "Send"): the first press shows it.
               if (blocks.some((block) => followUpMissing(request, block).length > 0) && !showMissing) {
-                setShowMissing(true);
+                onShowMissing();
                 return;
               }
               onNext();
@@ -593,14 +598,15 @@ function ResidenceBlock({
       <IdentificationFormField form={form} field="stay_reason" text={text} required>
         <IdentificationChoiceSelect form={form} field="stay_reason" options={pick(text.stayReasonOptions, STAY_REASONS)} text={text} />
       </IdentificationFormField>
-      <IdentificationFormField form={form} field="former_citizenships" text={text}>
-        <IdentificationCountriesSelect form={form} field="former_citizenships" text={text} lang={lang} />
-      </IdentificationFormField>
-      {form.draft.stay_reason ? (
+      {/* The words right under the reason; a citizen or a person born there has nothing to describe (QA 2026-10-10). */}
+      {form.draft.stay_reason && form.draft.stay_reason !== "citizenship_or_birth" ? (
         <IdentificationFormField form={form} field="stay_reason_details" text={text} required={form.draft.stay_reason === "other"} className={FULL_ROW}>
           <IdentificationTextArea form={form} field="stay_reason_details" rows={2} />
         </IdentificationFormField>
       ) : null}
+      <IdentificationFormField form={form} field="former_citizenships" text={text}>
+        <IdentificationCountriesSelect form={form} field="former_citizenships" text={text} lang={lang} />
+      </IdentificationFormField>
       <IdentificationFormField form={form} field="other_residences" text={text} className={FULL_ROW}>
         <IdentificationTextArea form={form} field="other_residences" rows={2} />
       </IdentificationFormField>

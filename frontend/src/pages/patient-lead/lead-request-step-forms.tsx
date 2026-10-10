@@ -49,6 +49,7 @@ import {
   ConsentCheckbox,
   FormField,
   MissingList,
+  MissingShownContext,
   SaveIndicator,
   StepFooter,
   UploadedFileList,
@@ -73,6 +74,10 @@ export type StepNav = {
   total: number;
   onBack: (() => void) | null;
   onNext: (() => void) | null;
+  /** Whether "next" of this step was pressed with something missing (or a sending was tried). */
+  missingShown: boolean;
+  /** The first press of "next" with something missing: the list shows and the step stays. */
+  onShowMissing: () => void;
 };
 
 export type StepProps = {
@@ -135,11 +140,12 @@ function StepFrame({
     ...missing.map((key) => submitFieldLabel(text, key as SubmitField, guardian, request.payer?.payer_type)),
   ];
   // The yellow list of what is missing appears only after "Next" (owner 2026-10-09): the first
-  // press with something missing shows it and stays, the next press goes on.
-  const [showMissing, setShowMissing] = useState(false);
+  // press with something missing shows it and stays, the next press goes on. The page keeps
+  // which steps showed it, for the badges of the step bar.
+  const showMissing = nav.missingShown;
   const next = () => {
     if (labels.length > 0 && !showMissing) {
-      setShowMissing(true);
+      nav.onShowMissing();
       return;
     }
     nav.onNext?.();
@@ -147,7 +153,7 @@ function StepFrame({
   return (
     <section className="space-y-6" data-testid={testId}>
       {showMissing ? <MissingList title={text.stepMissingTitle} labels={labels} testId="lead-request-step-missing" /> : null}
-      {children}
+      <MissingShownContext.Provider value={showMissing}>{children}</MissingShownContext.Provider>
       <StepFooter
         index={nav.index}
         total={nav.total}

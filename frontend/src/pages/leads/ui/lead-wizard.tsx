@@ -6,7 +6,7 @@ import { PreviousRequestsPanel } from "./previous-requests-panel";
 import { orderPeriodWarnings } from "../model/order-period-warnings";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
-import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
+import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 export { resolveServiceDescriptionTemplate, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
 import { SelectedWorkTypesSummary, workTypeDurationLabel } from "@/pages/orders/ui/order-work-types-summary";
 import { costEstimateWorkTypeHint, costEstimateWorkTypeStatus } from "@/pages/orders/model/cost-estimate-work-types";
@@ -71,6 +71,8 @@ import {
 } from "../model/lead-payer";
 import { useLeadPayerDeclaration } from "../model/use-lead-payer-declaration";
 import { useLeadPayerLink } from "../model/use-lead-payer-link";
+import { amlPrefillFromLeadAnswers, applyAmlLeadPrefill } from "../model/enhanced-check-prefill";
+import { fetchLeadPortalIntake } from "../data/lead-portal-intake-api";
 import { useLeadEnhancedCheck } from "../model/use-lead-enhanced-check";
 import {
   ENHANCED_CHECK_BLACKLIST_COUNTRY_CODES,
@@ -182,6 +184,7 @@ import {
   uploadDocument,
   type DocumentComplianceKind,
 } from "@/pages/documents/data/document-api";
+import { signatureGateErrorText } from "@/pages/documents/data/document-signature-api";
 import {
   AML_ASSET_ORIGIN_EVIDENCE_ART,
   parseAssetOriginEvidence,
@@ -279,6 +282,7 @@ import {
   PORTAL_FIELD_BY_DRAFT_KEY,
   mergePatientUpdates,
   patientDataPending,
+  patientDataPendingFields,
   relaxMasterErrors,
 } from "../model/lead-portal-intake";
 import { LeadSigningPackagePanel } from "./lead-signing-package-panel";
@@ -355,6 +359,8 @@ type AmlEnhancedDueDiligenceDraft = {
   pepStatusChecked: boolean;
   pepOfficeFunction: string;
   pepAssetOrigin: string;
+  /** Links to sanctioned persons the lead (block J) or the payer stated. */
+  sanctionsLinks: string;
   highRiskCountryTransaction: boolean;
   highRiskCountryResident: boolean;
   affectedThirdCountry: string;
@@ -620,6 +626,7 @@ function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
     pepStatusChecked: false,
     pepOfficeFunction: "",
     pepAssetOrigin: "",
+    sanctionsLinks: "",
     highRiskCountryTransaction: false,
     highRiskCountryResident: false,
     affectedThirdCountry: "",
@@ -1120,6 +1127,7 @@ function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDilige
     pepStatusChecked: stored["pepStatusChecked"] === true,
     pepOfficeFunction: inputString(stored["pepOfficeFunction"]),
     pepAssetOrigin: inputString(stored["pepAssetOrigin"]),
+    sanctionsLinks: inputString(stored["sanctionsLinks"]),
     highRiskCountryTransaction: stored["highRiskCountryTransaction"] === true,
     highRiskCountryResident: stored["highRiskCountryResident"] === true,
     affectedThirdCountry: inputString(stored["affectedThirdCountry"]),
@@ -3010,6 +3018,8 @@ export function LeadWizard({
   const [deleteError, setDeleteError] = useState("");
   const [trustedContactEditor, setTrustedContactEditor] = useState<TrustedContactDraft | null>(null);
   const [trustedContactEditorError, setTrustedContactEditorError] = useState("");
+  // Whether the editor was opened from the minor's parent / legal representative block.
+  const [trustedContactEditorGuardian, setTrustedContactEditorGuardian] = useState(false);
   // The trusted contacts as the server stores them, as far as this wizard
   // knows. A save sends the contacts only when staff changed them: a parent
   // added in the lead cabinet meanwhile must not be overwritten by an older list.
@@ -4812,10 +4822,39 @@ export function LeadWizard({
         highRiskCountryResident: false,
       },
     } : current);
-    if (newBlacklistCountry) {
+    // Only for an existing lead: before the lead is created the form has no
+    // patient to attach the check to — the banner informs instead (QA 2026-10-10).
+    if (newBlacklistCountry && leadId) {
       setAmlSheetError("");
       setAmlSheetOpen(true);
+      void prefillAmlFromLeadAnswers();
     }
+  }
+
+  /**
+   * The lead's and the payer's answers fill the empty fields of the check
+   * (source of funds, PEP details, sanctions links, proofs of the funds;
+   * QA 2026-10-10). What staff typed stays; a failed load changes nothing.
+   */
+  async function prefillAmlFromLeadAnswers() {
+    const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
+    if (!targetLeadId) return;
+    let intake: Awaited<ReturnType<typeof fetchLeadPortalIntake>> = null;
+    try {
+      intake = await fetchLeadPortalIntake(targetLeadId);
+    } catch {
+      intake = null;
+    }
+    const prefill = amlPrefillFromLeadAnswers({
+      identification: intake?.identification_hidden ? null : intake?.identification,
+      enhancedDetails: intake?.enhanced_details,
+      payer: payerLink.data?.questionnaire,
+      countryName: (code) => countryLabel(code, "de"),
+    });
+    setDraft((current) => current ? {
+      ...current,
+      amlEnhancedDueDiligence: applyAmlLeadPrefill(current.amlEnhancedDueDiligence, prefill),
+    } : current);
   }
 
   /** Opens the enhanced check: required by the rule, or filled voluntarily. */
@@ -4835,6 +4874,7 @@ export function LeadWizard({
     } : current);
     setAmlSheetError("");
     setAmlSheetOpen(true);
+    void prefillAmlFromLeadAnswers();
   }
 
   /**
@@ -4913,15 +4953,19 @@ export function LeadWizard({
     });
   };
 
-  const openNewTrustedContact = () => {
+  // `guardian`: opened from the block "Родитель или законный представитель" of
+  // a minor — the editor is titled for a parent and offers only parent / guardian.
+  const openNewTrustedContact = (guardian = false) => {
     setTrustedContactEditorError("");
     setGuardianSearch("");
-    setTrustedContactEditor(emptyTrustedContact());
+    setTrustedContactEditorGuardian(guardian);
+    setTrustedContactEditor(guardian ? { ...emptyTrustedContact(), relation: "parent" } : emptyTrustedContact());
   };
 
-  const openTrustedContact = (contact: TrustedContactDraft) => {
+  const openTrustedContact = (contact: TrustedContactDraft, guardian = false) => {
     setTrustedContactEditorError("");
     setGuardianSearch("");
+    setTrustedContactEditorGuardian(guardian);
     setTrustedContactEditor({ ...contact });
   };
 
@@ -5197,7 +5241,8 @@ export function LeadWizard({
         form.set("lead_id", leadId);
         form.set("file", file);
         if (kind === "identity") {
-          form.set("auto_name", "Identity document");
+          // German like every document name of the lead (QA 2026-10-10).
+          form.set("auto_name", "Ausweisdokument");
           form.set("art", "identity");
           form.set("category", "identity");
         } else {
@@ -5317,8 +5362,13 @@ export function LeadWizard({
       await markDocumentSigned(id, kind);
       await refreshDocumentsState();
     } catch (nextError) {
-      if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
-      else showWizardError(nextError);
+      // A lead gate names its reason (risk assessment, sanctions, blocked country).
+      const gate = signatureGateErrorText(nextError, tx);
+      if (fromPreview) setDocumentPreviewError(gate ?? errorText(nextError, tx));
+      else if (gate) {
+        setValidationContext(null);
+        setError(gate);
+      } else showWizardError(nextError);
     } finally {
       setBusy(null);
     }
@@ -5658,10 +5708,11 @@ ${serviceCommentLines.join("\n")}`
       else await reload(false, true);
     } catch (nextError) {
       setValidationContext(null);
-      if (fromPreview) setDocumentPreviewError(errorText(nextError, tx));
+      const message = signatureGateErrorText(nextError, tx) ?? errorText(nextError, tx);
+      if (fromPreview) setDocumentPreviewError(message);
       else setCommercialDocumentErrors((current) => ({
         ...current,
-        framework_contract: errorText(nextError, tx),
+        framework_contract: message,
       }));
     } finally {
       setBusy(null);
@@ -5950,9 +6001,10 @@ ${serviceCommentLines.join("\n")}`
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
+          // German amounts, as the document is German (QA 2026-10-10: no "550.00 EUR").
           estimate_total: templateId === "cost_estimate"
             ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-            : `${documentEstimate.gross.toFixed(2)} EUR`,
+            : `${formatMoneyValue(documentEstimate.gross, "de")} EUR`,
           service_lines: templateId === "cost_estimate"
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
@@ -5962,7 +6014,7 @@ ${serviceCommentLines.join("\n")}`
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
-                line_total: `${roundCents(money(line.quantity) * money(line.price)).toFixed(2)} EUR`,
+                line_total: `${formatMoneyValue(roundCents(money(line.quantity) * money(line.price)), "de")} EUR`,
                 vat_rate: line.vat,
                 // A 0 % pass-through cost is a durchlaufender Posten, not tax-exempt medical care.
                 is_cost_passthrough: line.isCostPassthrough === true,
@@ -6135,7 +6187,7 @@ ${serviceCommentLines.join("\n")}`
     }`;
     return [
       `${formatMoneyValue(money(inputString(price.unit_price)), lang)} ${price.currency}`,
-      price.name?.trim(),
+      priceVersionDisplayName(price),
       period,
       price.is_effective ? tx("рекомендуемая", "empfohlen") : "",
     ].filter(Boolean).join(" · ");
@@ -6297,7 +6349,7 @@ ${serviceCommentLines.join("\n")}`
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
     const unit = line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim();
-    return `${money(line.price).toFixed(2)} ${line.currency || "EUR"}${unit ? `/${unit}` : ""}`;
+    return `${formatMoneyValue(money(line.price), "de")} ${line.currency || "EUR"}${unit ? `/${unit}` : ""}`;
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
@@ -7144,20 +7196,30 @@ ${serviceCommentLines.join("\n")}`
                             {hint}
                           </div>
                         ))}
+                        {!leadId ? (
+                          <div className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-after-create">
+                            {tx(
+                              "Проверку можно заполнить после создания обращения.",
+                              "Die Prüfung kann nach dem Anlegen des Leads ausgefüllt werden.",
+                            )}
+                          </div>
+                        ) : null}
                       </div>
-                      <Button
-                        type="button"
-                        variant={amlRequired ? "destructive" : "outline"}
-                        size="sm"
-                        className="shrink-0"
-                        disabled={isBusy}
-                        onClick={openAmlSheet}
-                      >
-                        <ShieldCheck aria-hidden="true" className="size-3.5" />
-                        {wizardDocuments.enhanced_due_diligence.length > 0
-                          ? tx("Обновить проверку", "Prüfung aktualisieren")
-                          : tx("Заполнить проверку", "Prüfung ausfüllen")}
-                      </Button>
+                      {leadId ? (
+                        <Button
+                          type="button"
+                          variant={amlRequired ? "destructive" : "outline"}
+                          size="sm"
+                          className="shrink-0"
+                          disabled={isBusy}
+                          onClick={openAmlSheet}
+                        >
+                          <ShieldCheck aria-hidden="true" className="size-3.5" />
+                          {wizardDocuments.enhanced_due_diligence.length > 0
+                            ? tx("Обновить проверку", "Prüfung aktualisieren")
+                            : tx("Заполнить проверку", "Prüfung ausfüllen")}
+                        </Button>
+                      ) : null}
                     </div>
                     {wizardDocuments.enhanced_due_diligence.length > 0 ? (
                       <div className="mt-3 border-t border-current/15 pt-3">
@@ -7186,7 +7248,7 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
                   accessory={(
-                    <Button type="button" size="sm" onClick={openNewTrustedContact}>
+                    <Button type="button" size="sm" onClick={() => openNewTrustedContact(true)}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить", "Hinzufügen")}
                     </Button>
@@ -7237,7 +7299,7 @@ ${serviceCommentLines.join("\n")}`
                                   {[contact.email, contact.phone].filter(Boolean).join(" · ")}
                                 </p>
                               </div>
-                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
+                              <Button type="button" variant="ghost" size="icon-sm" onClick={() => openTrustedContact(contact, true)} aria-label={tx("Редактировать представителя", "Vertreter bearbeiten")}>
                                 <Pencil aria-hidden="true" className="size-3.5" />
                               </Button>
                             </li>
@@ -7416,7 +7478,7 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 )}
               >
-                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice onOpenStep1={() => setStep("master_data")} tx={tx} /> : <LeadMedicalIntakeForm
+                {clinicalAccessDenied ? <Banner tone="warning">{tx("У вашей роли нет доступа к медицинской карте. Медицинскую часть заполняет уполномоченный сотрудник; остальные этапы обращения доступны.", "Ihre Rolle hat keinen Zugriff auf die Patientenakte. Den medizinischen Teil bearbeitet eine berechtigte Person; die übrigen Schritte bleiben verfügbar.")}</Banner> : waitingForPatientData ? <PatientDataPendingNotice onOpenStep1={() => setStep("master_data")} tx={tx} missing={patientDataPendingFields(draft)} /> : <LeadMedicalIntakeForm
                   lead={lead}
                   tx={tx}
                   lang={lang}
@@ -7934,7 +7996,7 @@ ${serviceCommentLines.join("\n")}`
                         <CountBadge>{draft.trustedContacts.length}</CountBadge>
                       </div>
                     </div>
-                    <Button type="button" size="sm" onClick={openNewTrustedContact}>
+                    <Button type="button" size="sm" onClick={() => openNewTrustedContact()}>
                       <Plus aria-hidden="true" className="size-3.5" />
                       {tx("Добавить контакт", "Kontakt hinzufügen")}
                     </Button>
@@ -8586,6 +8648,28 @@ ${serviceCommentLines.join("\n")}`
                     <span aria-hidden="true" className="size-2 rounded-full bg-orange-500" />
                     <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
                   </label>
+                  {draft.specialties.length === 0 ? (
+                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-800 dark:text-amber-300" data-testid="lead-order-service-needs-specialty">
+                      <span>
+                        {tx(
+                          "Сначала выберите специализацию: от неё зависят услуги и смета.",
+                          "Bitte zuerst eine Fachrichtung auswählen: Leistungen und Kostenvoranschlag hängen davon ab.",
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        className="font-medium underline underline-offset-2"
+                        onClick={() => openValidationIssue({
+                          key: "specialties",
+                          step: "order",
+                          message: tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
+                          fieldId: SERVICE_SPECIALTIES_ID,
+                        })}
+                      >
+                        {tx("К специализации", "Zur Fachrichtung")}
+                      </button>
+                    </p>
+                  ) : null}
                   <NativeComboboxSelect
                     id={ORDER_SERVICE_SELECT_ID}
                     aria-label={tx("Выбрать услугу из каталога", "Leistung aus dem Katalog auswählen")}
@@ -9415,6 +9499,21 @@ ${serviceCommentLines.join("\n")}`
 
                 <section className="space-y-4 border-t border-border pt-5">
                   <h3 className="text-sm font-semibold text-foreground">
+                    {tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}
+                  </h3>
+                  <Field label={tx("Сведения о связях с лицами под санкциями", "Angaben zu Verbindungen zu sanktionierten Personen")}>
+                    <textarea
+                      className={textareaClass}
+                      rows={2}
+                      data-testid="lead-aml-sanctions-links"
+                      value={draft.amlEnhancedDueDiligence.sanctionsLinks}
+                      onChange={(event) => patchAml("sanctionsLinks", event.target.value)}
+                    />
+                  </Field>
+                </section>
+
+                <section className="space-y-4 border-t border-border pt-5">
+                  <h3 className="text-sm font-semibold text-foreground">
                     {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
                   </h3>
                   <div className="border-y border-border/70">
@@ -9524,9 +9623,13 @@ ${serviceCommentLines.join("\n")}`
           {trustedContactEditor ? (
             <form className="flex min-h-0 flex-1 flex-col" onSubmit={saveTrustedContact}>
               <AdminSheetScaffold
-                title={editingTrustedContact
-                  ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
-                  : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
+                title={trustedContactEditorGuardian
+                  ? (editingTrustedContact
+                      ? tx("Редактировать родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter bearbeiten")
+                      : tx("Добавить родителя или законного представителя", "Elternteil oder gesetzlichen Vertreter hinzufügen"))
+                  : editingTrustedContact
+                    ? tx("Редактировать доверенный контакт", "Vertrauenskontakt bearbeiten")
+                    : tx("Добавить доверенный контакт", "Vertrauenskontakt hinzufügen")}
                 footer={(
                   <SheetFormFooter
                     cancelLabel={tx("Отмена", "Abbrechen")}
@@ -9536,10 +9639,15 @@ ${serviceCommentLines.join("\n")}`
                 )}
               >
                 <p className="text-xs leading-5 text-muted-foreground">
-                  {tx(
-                    "Контакт будет сохранён в обращении и перенесён в карточку пациента при конвертации.",
-                    "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
-                  )}
+                  {trustedContactEditorGuardian
+                    ? tx(
+                        "Мать, отец или законный представитель ребёнка: получает свой доступ к заявке и подписывает за ребёнка.",
+                        "Mutter, Vater oder gesetzliche Vertretung des Kindes: erhält einen eigenen Zugang zur Anfrage und unterschreibt für das Kind.",
+                      )
+                    : tx(
+                        "Контакт будет сохранён в обращении и перенесён в карточку пациента при конвертации.",
+                        "Der Kontakt wird im Lead gespeichert und bei der Konvertierung in die Patientenakte übernommen.",
+                      )}
                 </p>
                 <div className="grid gap-4 md:grid-cols-2">
                   <Field
@@ -9613,8 +9721,13 @@ ${serviceCommentLines.join("\n")}`
                       {trustedContactEditor.relation && !(TRUSTED_CONTACT_RELATIONS as readonly string[]).includes(trustedContactEditor.relation) ? (
                         <option value={trustedContactEditor.relation}>{trustedContactEditor.relation}</option>
                       ) : null}
-                      {/* The same labels as the list of contacts. */}
-                      {TRUSTED_CONTACT_RELATIONS.map((relation) => (
+                      {/* The same labels as the list of contacts; a parent block offers parent and guardian only. */}
+                      {TRUSTED_CONTACT_RELATIONS.filter((relation) => (
+                        !trustedContactEditorGuardian
+                        || relation === "parent"
+                        || relation === "guardian"
+                        || relation === trustedContactEditor.relation
+                      )).map((relation) => (
                         <option key={relation} value={relation}>
                           {trustedContactRelationLabel(relation, tx)}
                         </option>

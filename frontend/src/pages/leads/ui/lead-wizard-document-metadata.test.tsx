@@ -7,8 +7,19 @@ import {
   LeadWizardDocumentMetadata,
   leadWizardDocumentNumber,
   leadWizardDocumentTotal,
+  leadWizardDocumentTotalLabel,
   sortWizardDocumentsNewestFirst,
 } from "./lead-wizard-document-metadata";
+
+describe("leadWizardDocumentTotalLabel", () => {
+  it("shows an older dotted total with a decimal comma", () => {
+    expect(leadWizardDocumentTotalLabel("550.00 EUR")).toBe("550,00 EUR");
+    expect(leadWizardDocumentTotalLabel("2735.81 EUR")).toBe("2.735,81 EUR");
+    expect(leadWizardDocumentTotalLabel("2.735,81 EUR")).toBe("2.735,81 EUR");
+    expect(leadWizardDocumentTotalLabel("1.000,00 - 1.500,00 EUR")).toBe("1.000,00 - 1.500,00 EUR");
+    expect(leadWizardDocumentTotalLabel(null)).toBeNull();
+  });
+});
 
 const createdAt = "2026-07-21T10:35:00Z";
 

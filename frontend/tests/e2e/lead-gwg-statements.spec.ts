@@ -183,7 +183,8 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   await expect(pep).toHaveAttribute("data-warning", "true");
   await expect(pep).toContainText("Member of parliament, 2021–2024");
   await expect(block.getByTestId("lead-gwg-answer-pep_related")).not.toHaveAttribute("data-warning", "true");
-  await expect(block.getByTestId("lead-gwg-answer-high_risk_country")).toContainText("Не отвечено");
+  // The cabinet no longer asks the high-risk-country question: unanswered, it is not listed (QA 2026-10-10).
+  await expect(block.getByTestId("lead-gwg-answer-high_risk_country")).toHaveCount(0);
   await expect(block.getByTestId("lead-gwg-declared-correct")).toHaveText("Подтвердил правильность: 05.10.2026 11:30");
 
   // Read-only, inside the section of the sheet and above its explanation.

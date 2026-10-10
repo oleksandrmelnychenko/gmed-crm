@@ -339,11 +339,13 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
 
 export function DeclarationsStep({ context }: { context: StepContext }) {
   const { form, text } = context;
-  // An organisation answers for the persons who represent or own it.
-  const intro = isOrganisation(context.payerType) ? text.declarationsIntroOrganisation : text.declarationsIntro;
+  // An organisation answers for the persons who represent or own it: that is said; a
+  // private person's questions speak for themselves (no filler, QA 2026-10-10).
   return (
     <div className="space-y-5" data-testid="payer-link-step-declarations">
-      <p className="text-sm leading-6 text-muted-foreground">{intro}</p>
+      {isOrganisation(context.payerType) ? (
+        <p className="text-sm leading-6 text-muted-foreground">{text.declarationsIntroOrganisation}</p>
+      ) : null}
       {LEGAL_QUESTIONS.map((question) => {
         const details = LEGAL_DETAILS[question];
         return (

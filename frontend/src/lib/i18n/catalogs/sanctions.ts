@@ -124,6 +124,9 @@ export interface SanctionsTranslations {
   risk_level_2_blocks_automatic: string;
   risk_reviewers: string;
   risk_reviewers_hint: string;
+  /** "{ceo}" active CEO accounts and "{deputies}" named deputies who may decide. */
+  risk_reviewers_count: string;
+  risk_reviewers_second_missing: string;
   risk_reviewers_none: string;
   risk_config_saved: string;
   risk_config_error_codes: string;
@@ -270,7 +273,9 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_level_2_blocks_automatic: "На уровне 2 дополнительные вопросы задаются автоматически",
   risk_reviewers: "Проверяющие — заместители CEO",
   risk_reviewers_hint:
-    "CEO проверяет всегда. Уровень 3 решают два разных человека: пока нет заместителя, уровень 3 нельзя разрешить.",
+    "Каждый аккаунт CEO проверяет всегда, заместители — по назначению. Уровень 3 решают два разных человека: пока проверяющий один, уровень 3 нельзя разрешить.",
+  risk_reviewers_count: "Сейчас решают: аккаунты CEO — {ceo}, назначенные заместители — {deputies}.",
+  risk_reviewers_second_missing: "Второго проверяющего нет: уровень 3 сейчас разрешить нельзя. Назначьте заместителя.",
   risk_reviewers_none: "Нет подходящих сотрудников",
   risk_config_saved: "Настройки оценки риска сохранены",
   risk_config_error_codes: "Коды стран: две латинские буквы (ISO).",
@@ -417,7 +422,9 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_level_2_blocks_automatic: "Auf Stufe 2 werden ergänzende Angaben automatisch abgefragt",
   risk_reviewers: "Prüfende – Vertretung des CEO",
   risk_reviewers_hint:
-    "Der CEO prüft immer. Stufe 3 entscheiden zwei verschiedene Personen: Ohne Vertretung kann Stufe 3 nicht freigegeben werden.",
+    "Jedes CEO-Konto prüft immer, Vertretungen nach Benennung. Stufe 3 entscheiden zwei verschiedene Personen: Solange nur eine Person prüft, kann Stufe 3 nicht freigegeben werden.",
+  risk_reviewers_count: "Derzeit entscheiden: CEO-Konten – {ceo}, benannte Vertretungen – {deputies}.",
+  risk_reviewers_second_missing: "Keine zweite prüfende Person: Stufe 3 kann derzeit nicht freigegeben werden. Bitte eine Vertretung benennen.",
   risk_reviewers_none: "Keine geeigneten Mitarbeitenden",
   risk_config_saved: "Einstellungen der Risikobewertung gespeichert",
   risk_config_error_codes: "Ländercodes: zwei lateinische Buchstaben (ISO).",

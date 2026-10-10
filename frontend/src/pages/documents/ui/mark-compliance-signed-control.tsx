@@ -9,6 +9,7 @@ import {
   markDocumentSigned,
   type DocumentComplianceKind,
 } from "../data/document-api";
+import { signatureGateErrorText } from "../data/document-signature-api";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -72,9 +73,11 @@ export function MarkComplianceSignedControl({
       onDone?.();
     } catch (nextError) {
       setError(
-        nextError instanceof Error
-          ? nextError.message
-          : tx("Не удалось отметить", "Konnte nicht erfassen"),
+        // A lead gate names its reason (risk assessment, sanctions, blocked country).
+        signatureGateErrorText(nextError, tx)
+          ?? (nextError instanceof Error
+            ? nextError.message
+            : tx("Не удалось отметить", "Konnte nicht erfassen")),
       );
     } finally {
       setBusy(false);

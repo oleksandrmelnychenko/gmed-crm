@@ -283,8 +283,22 @@ function LeadRequestView({
   const languageSwitch = useContext(CabinetLanguageContext);
   useEffect(() => languageSwitch?.claim(), [languageSwitch?.claim]);
 
+  // The steps whose "next" showed what is missing, and whether the summary of step "send"
+  // was opened: only those carry the amber count badges (QA 2026-10-10: none before "next").
+  const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<StepId>>(() => new Set());
+  const [sendOpened, setSendOpened] = useState(() => initialStep(request) === "send");
+  const showMissingOf = useCallback((id: StepId) => {
+    setMissingShownSteps((current) => (current.has(id) ? current : new Set(current).add(id)));
+  }, []);
+  const badgesFor = useCallback(
+    // A request sent once was checked as a whole: its badges show.
+    (id: StepId) => sendOpened || Boolean(request.submitted_at) || missingShownSteps.has(id),
+    [missingShownSteps, request.submitted_at, sendOpened],
+  );
+
   const go = useCallback((next: StepId) => {
     setChosenStep(next);
+    if (next === "send") setSendOpened(true);
     // A long step was left at its bottom: the next one starts at its top.
     const top = topRef.current;
     if (top && top.getBoundingClientRect().top < 0) {
@@ -298,6 +312,8 @@ function LeadRequestView({
     total: steps.length,
     onBack: position > 0 ? () => go(steps[position - 1]) : null,
     onNext: position < steps.length - 1 ? () => go(steps[position + 1]) : null,
+    missingShown: missingShownSteps.has(step),
+    onShowMissing: () => showMissingOf(step),
   };
   const props: StepProps = { request, text, lang, enqueue, onChange, missing: missing[step], nav };
 
@@ -332,6 +348,7 @@ function LeadRequestView({
           steps={steps}
           current={step}
           missing={missing}
+          badgesFor={badgesFor}
           onSelect={go}
         />
         {/* A short step keeps its footer at the bottom of the column; a new step fades in instead of jumping. */}
@@ -356,6 +373,8 @@ function LeadRequestView({
               onChange={onChange}
               onBack={() => nav.onBack?.()}
               onNext={() => nav.onNext?.()}
+              missingShown={nav.missingShown}
+              onShowMissing={nav.onShowMissing}
               index={nav.index}
               total={nav.total}
             />
@@ -381,10 +400,11 @@ function LeadRequestView({
 
 /**
  * The step tabs (contract 6): on a computer a column beside the form, on a
- * tablet a row, on a phone a row of numbered dots with the current step's
- * name below — one step at a time, no horizontal scrolling of the page. Each
- * tab carries a badge with the count of what its step still misses, or a
- * check when it is complete; every step can be opened at any time.
+ * tablet a wrapping row, on a phone a row of numbered dots with the current step's
+ * name below — one step at a time, no horizontal scrolling of the page. A
+ * tab whose "next" showed what is missing (or every tab once the summary was
+ * opened) carries a badge with the count of what its step still misses; a
+ * complete step carries a check. Every step can be opened at any time.
  */
 function StepNavBar({
   request,
@@ -392,6 +412,7 @@ function StepNavBar({
   steps,
   current,
   missing,
+  badgesFor,
   onSelect,
 }: {
   request: LeadRequest;
@@ -399,6 +420,7 @@ function StepNavBar({
   steps: StepId[];
   current: StepId;
   missing: Record<StepId, string[]>;
+  badgesFor: (step: StepId) => boolean;
   onSelect: (step: StepId) => void;
 }) {
   const position = steps.indexOf(current);
@@ -413,13 +435,14 @@ function StepNavBar({
         aria-label={text.stepsLabel}
         className={cn(
           "flex items-center gap-0.5 sm:gap-1 lg:sticky lg:top-4 lg:flex-col lg:items-stretch lg:gap-0.5",
-          // A phone shows the dots side by side over the whole width; a tablet scrolls the row in itself.
-          "max-sm:justify-between sm:overflow-x-auto sm:overscroll-x-contain sm:[scrollbar-width:none] sm:[&::-webkit-scrollbar]:hidden lg:overflow-visible",
+          // A phone shows the dots side by side over the whole width; a tablet wraps the named tabs
+          // onto a second line instead of cutting or scrolling them (QA 2026-10-10).
+          "max-sm:justify-between sm:flex-wrap lg:flex-nowrap",
         )}
       >
         {steps.map((id, index) => {
           const selected = id === current;
-          const count = id === "send" ? 0 : stepMissingCount(request, id, missing);
+          const count = id === "send" || !badgesFor(id) ? 0 : stepMissingCount(request, id, missing);
           const done = stepDone(request, id, missing);
           return (
             <button

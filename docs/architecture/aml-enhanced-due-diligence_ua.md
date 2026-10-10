@@ -19,6 +19,30 @@ PDF будує `build_enhanced_due_diligence_pdf` у `routes/documents.rs`; да
 формуляра зберігаються у `documents.generated_bindings.aml_enhanced_due_diligence`.
 Документ підписує лише представник GMED (політика підписантів `agency_only`).
 
+### Відповіді ліда й платника у формулярі (QA 2026-10-10)
+
+Під час відкриття формуляра у візарді (кнопка «Заполнить проверку» або нова
+країна чорного списку) візард читає `GET /leads/{id}/portal-intake` і вже
+завантажені відповіді платника (`GET /leads/{id}/payer-link`,
+`questionnaire`, лише надіслані) і заповнює **лише порожні** поля
+(`frontend/src/pages/leads/model/enhanced-check-prefill.ts`); введене
+персоналом не змінюється, тексти німецькою, бо їх друкує документ:
+
+| Поле формуляра | Звідки |
+|---|---|
+| Herkunft der eingesetzten Vermögenswerte | блок A кабінету: джерело й опис коштів самоплатника («Angabe der Patientin/des Patienten: …»); що пацієнт знає про кошти платника («… zur zahlenden Person»); власні відповіді платника за посиланням — джерела, опис, професія, галузь («Angabe des Kostenübernehmers (ім'я): …») |
+| Zusätzliche Informationen zum Vertragspartner | професія й галузь із блоку A |
+| Vertragspartner ist eine PeP | «так» ліда на питання «PEP сам», поки персонал не позначив «PeP-Status geprüft» |
+| Amt / Funktion, Herkunft der Vermögenswerte der PeP | блок H: посада, країна (німецькою), період; для члена родини чи близької особи — «Familienmitglied / nahestehende Person einer PeP (стосунок)»; походження статків PEP |
+| Angaben zu Verbindungen zu sanktionierten Personen (нове поле, `sanctionsLinks`) | блок J: ім'я, вид зв'язку (familiär / geschäftlich / Beteiligung / sonstige), з якого часу й обсяг; «так» платника з його поясненням |
+| Nachweise zur Herkunft | завантажені лідом докази коштів (`self_funds_proof`) і докази платника (`payer_funds_proof`) — лише поки у формулярі немає жодного доказу |
+
+Поле зв'язків із санкційними особами є і в генерації документа на сторінці
+документів, у PDF воно стоїть окремим підрозділом «Verbindungen zu
+sanktionierten Personen» після PEP. Як і раніше, порожнє «Herkunft der
+eingesetzten Vermögenswerte» сервер при генерації заповнює відповіддю з
+декларації (`Declaration::stated_asset_origin`).
+
 ## Коли посилена перевірка обов'язкова (правило власника 2026-10-07)
 
 > З 2026-10-07 посилена перевірка також обов'язкова, поки збережена оцінка
@@ -70,8 +94,15 @@ PDF будує `build_enhanced_due_diligence_pdf` у `routes/documents.rs`; да
   Причини показуються як `tx(ru, de)` (`enhancedCheckReasonLabel`). Розділ
   «Усиленная AML-проверка» на кроці документів видно завжди: без тригера він
   каже «не обязательна» і пропонує добровільну перевірку. Нова країна
-  чорного списку відкриває формуляр і ставить причину ризику; PEP чи країна
+  чорного списку відкриває формуляр і ставить причину ризику — лише для вже
+  створеного ліда; у новому ліді (ще без запису) банер лише інформує, що
+  перевірку можна заповнити після створення (QA 2026-10-10). PEP чи країна
   довгого списку причину більше не ставлять і формуляр не відкривають.
+- Перемикач «PEP-статус проверен» (`wizard_state.aml_enhanced_due_diligence.pepStatusChecked`)
+  зберігається разом із лідом (`POST /leads/{id}/update`); зміна його значення пише в
+  тій самій транзакції окремий рядок аудиту `lead_pep_status_checked` /
+  `lead_pep_status_unchecked` (хто й коли; контекст — лише `lead_id`, без
+  персональних даних) поруч зі звичайним `update_lead`.
 - Рівень ризику в PDF (`riskTier`): `blacklist`, `sanctions` («Bestätigter
   Treffer auf einer Sanktionsliste»), `high_risk`, `pep` або `individual`
   («Einzelfallprüfung», добровільна перевірка без тригера).
@@ -93,9 +124,10 @@ Herkunft der Vermögenswerte» (`AssetOriginEvidenceField`).
 - У формулярі зберігаються лише посилання:
   `assetOriginEvidence: [{ documentId, filename, uploadedOn }]`.
 - Під час генерації сервер (`resolve_aml_asset_origin_evidence`) перевіряє, що
-  кожен документ існує, не видалений, має тип `aml_asset_origin_evidence` і
-  належить тому самому пацієнту або ліду; інакше — 422 «Asset origin evidence
-  document not found». Назву файла й дату завантаження сервер бере зі
+  кожен документ існує, не видалений, має тип `aml_asset_origin_evidence`,
+  `self_funds_proof` (доказ коштів із кабінету ліда) або `payer_funds_proof`
+  (доказ платника за його посиланням; з 2026-10-10) і належить тому самому
+  пацієнту або ліду; інакше — 422 «Asset origin evidence document not found». Назву файла й дату завантаження сервер бере зі
   збереженого документа, а не із запиту.
 - У PDF під «Herkunft der eingesetzten Vermögenswerte» друкується перелік
   «Nachweise zur Herkunft der Vermögenswerte (in der Akte abgelegt)»:

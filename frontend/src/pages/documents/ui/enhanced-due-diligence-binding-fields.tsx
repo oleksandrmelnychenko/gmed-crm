@@ -279,6 +279,24 @@ export function EnhancedDueDiligenceBindingFields({
 
       <section className="space-y-4 border-t border-border pt-5">
         <h3 className="text-sm font-semibold text-foreground">
+          {tx("Связи с лицами под санкциями", "Verbindungen zu sanktionierten Personen")}
+        </h3>
+        <AmlField
+          label={tx(
+            "Сведения о связях с лицами под санкциями",
+            "Angaben zu Verbindungen zu sanktionierten Personen",
+          )}
+        >
+          <textarea
+            value={bindings.sanctionsLinks ?? ""}
+            onChange={(event) => onChange("sanctionsLinks", event.target.value)}
+            className={textareaClassName}
+          />
+        </AmlField>
+      </section>
+
+      <section className="space-y-4 border-t border-border pt-5">
+        <h3 className="text-sm font-semibold text-foreground">
           {tx("Третья страна с высоким риском", "Drittstaat mit hohem Risiko")}
         </h3>
         <div className="border-y border-border/70">

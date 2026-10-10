@@ -117,6 +117,25 @@ describe("payer declaration form", () => {
     });
   });
 
+  it("shows the own-account question unanswered until someone answered it", () => {
+    // The stored default "true" of a third party nobody asked is no answer: nothing ticked, nothing sent.
+    const unanswered = payerDeclarationToForm({ ...thirdParty, acts_on_own_account: true, own_account_answered: false });
+    expect(unanswered.actsOnOwnAccount).toBeNull();
+    expect(payerDeclarationPayload(unanswered)).not.toHaveProperty("acts_on_own_account");
+    expect(payerDeclarationPayload(unanswered).beneficial_owner_name).toBeNull();
+    expect(payerFormMissing(unanswered)).toEqual([]);
+    expect(EMPTY_PAYER_DECLARATION_FORM.actsOnOwnAccount).toBeNull();
+    // Answered: the answer is shown and sent; "no" needs the beneficial owner.
+    const yes = payerDeclarationToForm({ ...thirdParty, own_account_answered: true });
+    expect(yes.actsOnOwnAccount).toBe(true);
+    expect(payerDeclarationPayload(yes).acts_on_own_account).toBe(true);
+    const no = { ...unanswered, actsOnOwnAccount: false, beneficialOwnerName: " Viktor Zahler " };
+    expect(payerDeclarationPayload(no)).toMatchObject({ acts_on_own_account: false, beneficial_owner_name: "Viktor Zahler" });
+    expect(payerFormMissing({ ...no, beneficialOwnerName: "" })).toEqual(["payer_beneficial_owner_missing"]);
+    // An older server without the flag keeps showing the stored value.
+    expect(payerDeclarationToForm(thirdParty).actsOnOwnAccount).toBe(true);
+  });
+
   it("sends no third-party data for a self-payer", () => {
     const form = { ...payerDeclarationToForm(thirdParty), kind: "self" as const };
     const payload = payerDeclarationPayload(form);

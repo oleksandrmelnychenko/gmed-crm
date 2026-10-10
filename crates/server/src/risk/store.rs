@@ -745,6 +745,50 @@ pub async fn reviewer_ids(
     .await
 }
 
+/// Who may decide, counted truthfully (QA 2026-10-10): the active CEO
+/// accounts and the named deputies who may act as such (active, of an
+/// eligible role, no CEO counted twice).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReviewerCounts {
+    pub ceo: usize,
+    pub deputies: usize,
+}
+
+impl ReviewerCounts {
+    pub fn total(self) -> usize {
+        self.ceo + self.deputies
+    }
+}
+
+pub async fn reviewer_counts(
+    conn: &mut PgConnection,
+    config: &RiskConfig,
+) -> Result<ReviewerCounts, sqlx::Error> {
+    let roles: Vec<String> = sqlx::query_scalar(
+        r#"SELECT role FROM users
+           WHERE is_active AND (role = 'ceo' OR id = ANY($1))"#,
+    )
+    .bind(&config.reviewers)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut counts = ReviewerCounts {
+        ceo: 0,
+        deputies: 0,
+    };
+    for role in roles {
+        let Ok(role) = serde_json::from_value::<gmed_domain::role::Role>(serde_json::json!(role))
+        else {
+            continue;
+        };
+        if role.can(gmed_domain::access::capabilities::Capability::RiskReview) {
+            counts.ceo += 1;
+        } else if reviewer_role_eligible(role) {
+            counts.deputies += 1;
+        }
+    }
+    Ok(counts)
+}
+
 pub fn is_reviewer(auth: &crate::auth::middleware::AuthUser, config: &RiskConfig) -> bool {
     auth.can(gmed_domain::access::capabilities::Capability::RiskReview)
         || (config.reviewers.contains(&auth.user_id)

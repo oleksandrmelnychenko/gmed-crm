@@ -963,6 +963,57 @@ async fn blocked_country_needs_the_ceo_to_lift_it_for_the_lead() {
     .await;
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "blocked_country");
+    // On paper: the agency's countersignature of the order document is held,
+    // the client's own signature of the patient form is not, although the
+    // form names the order (QA 2026-10-10).
+    let order_uuid = Uuid::parse_str(&order_id).unwrap();
+    let mut paper = Vec::new();
+    for (template, name) in [
+        ("single_order", "Einzelauftrag"),
+        ("lead_self_disclosure", "Patientenformular"),
+    ] {
+        let document_id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO documents (
+                   id, lead_id, order_id, auto_name, original_filename, art, category,
+                   status, visibility, is_medical, mime_type, generated_template_id,
+                   version_root_document_id, version_number, uploaded_by
+               ) VALUES (
+                   $1, $2, $3, $4, $5, $6, 'administrative',
+                   'active', 'internal', false, 'application/pdf', $6, $1, 1, $7
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(order_uuid)
+        .bind(name)
+        .bind(format!("{name}.pdf"))
+        .bind(template)
+        .bind(app.pm_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+        paper.push(document_id);
+    }
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{}/paper-signature", paper[0]),
+        &app.pm(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{}/paper-signature", paper[1]),
+        &app.pm(),
+        None,
+    )
+    .await;
+    assert!(not_a_gate_block(&body), "{body}");
 
     // The IT admin settings page cannot change the list; only the CEO can.
     let (code, _) = request(

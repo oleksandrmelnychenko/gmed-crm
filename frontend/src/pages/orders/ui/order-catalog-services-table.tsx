@@ -11,7 +11,7 @@ import type { Lang } from "@/lib/i18n";
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import type { ServiceLine } from "../model/order-service-line";
-import { money, germanDateLabel, formatMoneyValue, serviceBillingUnitLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
+import { money, germanDateLabel, formatMoneyValue, priceVersionDisplayName, serviceBillingUnitLabel, serviceBillingUnitBadgeClass } from "../model/order-service-presentation";
 type Tx = (ru: string, de: string) => string;
 const inputString = (value: unknown) => String(value ?? "");
 export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lang, tx, disabled, describe, selectedPriceId: resolvePriceId, onQuantityChange, onPriceChange, onDelete, totals }: {
@@ -24,7 +24,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
   totals: { net: number; vat: number; gross: number };
 }) {
   const servicePriceChoiceLabel = (price: ReturnType<typeof listAgencyServicePriceChoices>[number]) => [
-    `${formatMoneyValue(money(price.unit_price), lang)} ${price.currency}`, price.name?.trim(),
+    `${formatMoneyValue(money(price.unit_price), lang)} ${price.currency}`, priceVersionDisplayName(price),
     `${germanDateLabel(price.valid_from)} — ${price.valid_to ? germanDateLabel(price.valid_to) : tx("бессрочно", "unbefristet")}`,
     price.is_effective ? tx("рекомендуемая", "empfohlen") : "",
   ].filter(Boolean).join(" · ");
@@ -169,8 +169,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
               )}
             >
               {priceChoices.map((price) => {
-                const priceName = price.name?.trim();
-                const automaticName = `${price.valid_from} · ${money(inputString(price.unit_price))} ${price.currency}`;
+                const priceName = priceVersionDisplayName(price);
                 return (
                   <option
                     key={price.id || "catalog-price"}
@@ -193,7 +192,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                         {tx("С", "Ab")} {germanDateLabel(price.valid_from)}
                         {price.valid_to ? ` ${tx("по", "bis")} ${germanDateLabel(price.valid_to)}` : ` · ${tx("бессрочно", "unbefristet")}`}
                       </span>
-                      {priceName && priceName !== automaticName ? <span className="mt-1 block text-xs text-muted-foreground">{priceName}</span> : null}
+                      {priceName ? <span className="mt-1 block text-xs text-muted-foreground">{priceName}</span> : null}
                     </span>
                   </option>
                 );

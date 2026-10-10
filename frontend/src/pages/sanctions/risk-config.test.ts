@@ -41,6 +41,16 @@ describe("risk assessment configuration", () => {
     expect(wrapped.candidates).toEqual([{ id: "u-2", name: "Ben Muster", role: "patient_manager" }]);
   });
 
+  it("reads CEO accounts and named deputies apart; an older server sends neither", () => {
+    expect(normalizeRiskConfigResponse({ ...DEFAULT_RISK_CONFIG, reviewers_available: 5 }).reviewerCounts).toBeNull();
+    expect(normalizeRiskConfigResponse({
+      ...DEFAULT_RISK_CONFIG,
+      reviewers_available: 5,
+      reviewers_ceo: 5,
+      reviewers_deputies: 0,
+    }).reviewerCounts).toEqual({ ceo: 5, deputies: 0 });
+  });
+
   it("keeps a country in one list only: list 2 wins", () => {
     const moved = withListMove(DEFAULT_RISK_CONFIG, "list_2", [...DEFAULT_RISK_CONFIG.list_2, "ru"]);
     expect(moved.list_2).toContain("RU");

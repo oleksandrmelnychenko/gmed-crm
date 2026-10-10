@@ -210,8 +210,29 @@ export function PatientUpdatedBanner({ at, onClose, tx }: { at: string; onClose:
   );
 }
 
-/** Later steps that need the prospect patient wait for date of birth and legal sex. */
-export function PatientDataPendingNotice({ onOpenStep1, tx }: { onOpenStep1: () => void; tx: Tx }) {
+/**
+ * Later steps that need the prospect patient wait for date of birth and legal
+ * sex; the notice names only what is still empty (`missing`, both when absent).
+ */
+export function PatientDataPendingNotice({
+  onOpenStep1,
+  tx,
+  missing = ["birthDate", "legalSex"],
+}: {
+  onOpenStep1: () => void;
+  tx: Tx;
+  missing?: ReadonlyArray<"birthDate" | "legalSex">;
+}) {
+  const birthDate = missing.includes("birthDate");
+  const legalSex = missing.includes("legalSex");
+  const what = birthDate && legalSex
+    ? tx("дату рождения и пол по документам", "Geburtsdatum und Geschlecht")
+    : birthDate
+      ? tx("дату рождения", "das Geburtsdatum")
+      : tx("пол по документам", "das Geschlecht laut Dokument");
+  const fields = birthDate && legalSex
+    ? tx("эти поля", "diese Felder")
+    : tx("это поле", "dieses Feld");
   return (
     <div
       role="status"
@@ -221,8 +242,8 @@ export function PatientDataPendingNotice({ onOpenStep1, tx }: { onOpenStep1: () 
       <Clock3 aria-hidden="true" className="size-4 shrink-0" />
       <span className="min-w-0 flex-1">
         {tx(
-          "Ждём данные пациента: дату рождения и пол по документам пациент заполнит в портале. Медицинская часть станет доступна после этого — или заполните эти поля сами на шаге «Данные клиента».",
-          "Warten auf die Daten des Patienten: Geburtsdatum und Geschlecht trägt der Patient im Portal ein. Danach ist der medizinische Teil verfügbar – oder Sie füllen diese Felder selbst unter „Personendaten“ aus.",
+          `Ждём данные пациента: ${what} пациент заполнит в портале. Медицинская часть станет доступна после этого — или заполните ${fields} сами на шаге «Данные клиента».`,
+          `Warten auf die Daten des Patienten: ${what} trägt der Patient im Portal ein. Danach ist der medizinische Teil verfügbar – oder Sie füllen ${fields} selbst unter „Personendaten“ aus.`,
         )}
       </span>
       <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={onOpenStep1}>

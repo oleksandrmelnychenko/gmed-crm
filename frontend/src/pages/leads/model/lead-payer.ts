@@ -249,7 +249,12 @@ export function normalizePayerDeclarationResponse(value: unknown): PayerDeclarat
 
 export type PayerDeclarationForm = {
   kind: PayerKind | "";
-  actsOnOwnAccount: boolean;
+  /**
+   * The own-economic-interest answer; `null` while nobody (lead or staff)
+   * answered it — the stored `acts_on_own_account` is then only the column
+   * default and is neither shown as ticked nor sent back as an answer.
+   */
+  actsOnOwnAccount: boolean | null;
   beneficialOwnerName: string;
   beneficialOwnerNote: string;
   sourceOfFunds: SourceOfFunds | "";
@@ -304,7 +309,7 @@ export type PayerTypeSupport = "supported" | "unsupported" | "unknown";
 
 export const EMPTY_PAYER_DECLARATION_FORM: PayerDeclarationForm = {
   kind: "",
-  actsOnOwnAccount: true,
+  actsOnOwnAccount: null,
   beneficialOwnerName: "",
   beneficialOwnerNote: "",
   sourceOfFunds: "",
@@ -389,7 +394,9 @@ export function payerDeclarationToForm(
   if (!declaration) return { ...EMPTY_PAYER_DECLARATION_FORM };
   return {
     kind: declaration.payer_kind,
-    actsOnOwnAccount: declaration.acts_on_own_account,
+    // Unanswered (the stored value is only the default): nothing is ticked.
+    // An older server without the flag keeps showing the stored value.
+    actsOnOwnAccount: declaration.own_account_answered === false ? null : declaration.acts_on_own_account,
     beneficialOwnerName: declaration.beneficial_owner_name ?? "",
     beneficialOwnerNote: declaration.beneficial_owner_note ?? "",
     sourceOfFunds: isSourceOfFunds(declaration.source_of_funds) ? declaration.source_of_funds : "",
@@ -500,11 +507,17 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
   const messenger: { messenger?: string | null } = sendsMessenger
     ? { messenger: thirdParty ? text(form.messenger) : null }
     : {};
+  // Own economic interest: sent only once answered; a left-out key keeps the
+  // question unanswered on the server (it no longer counts as a "yes").
+  const ownAccount: { acts_on_own_account?: boolean } = form.actsOnOwnAccount === null
+    ? {}
+    : { acts_on_own_account: form.actsOnOwnAccount };
+  const namesOwner = form.actsOnOwnAccount === false;
   return {
     payer_kind: form.kind || "self",
-    acts_on_own_account: form.actsOnOwnAccount,
-    beneficial_owner_name: form.actsOnOwnAccount ? null : text(form.beneficialOwnerName),
-    beneficial_owner_note: form.actsOnOwnAccount ? null : text(form.beneficialOwnerNote),
+    ...ownAccount,
+    beneficial_owner_name: namesOwner ? text(form.beneficialOwnerName) : null,
+    beneficial_owner_note: namesOwner ? text(form.beneficialOwnerNote) : null,
     source_of_funds: form.sourceOfFunds || null,
     source_of_funds_description: text(form.sourceOfFundsDescription),
     source_of_funds_document_id: form.sourceOfFundsDocumentId || null,
@@ -828,7 +841,7 @@ export function payerSignatureSequence(status: PayerDeclarationStatus | null | u
 export function payerFormMissing(form: PayerDeclarationForm): string[] {
   const missing: string[] = [];
   if (!form.kind) return ["payer_declaration_missing"];
-  if (!form.actsOnOwnAccount && !form.beneficialOwnerName.trim()) {
+  if (form.actsOnOwnAccount === false && !form.beneficialOwnerName.trim()) {
     missing.push("payer_beneficial_owner_missing");
   }
   const staffStated = Boolean(form.sourceOfFunds)

@@ -584,10 +584,14 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(agent.getByRole("button", { name: "Adresse des Kindes übernehmen" })).toHaveCount(0);
 
     // Without a last name there is no person: nothing is saved, and the form says what it waits for.
+    // The message waits for "Weiter" (QA 2026-10-10); the first press stays on the step.
     await agent.getByRole("textbox", { name: "Vorname" }).fill("Ben");
-    await expect(page.locator("#lead-request-agent_last_name-error")).toHaveText("Pflichtfeld");
     await page.waitForTimeout(1000);
+    await expect(page.locator("#lead-request-agent_last_name-error")).toHaveCount(0);
     expect(calls.persons).toEqual([]);
+    await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
+    await expect(page.locator("#lead-request-agent_last_name-error")).toHaveText("Pflichtfeld");
 
     // The first save creates the person, with an id made in the browser and the role of the question.
     await agent.getByRole("textbox", { name: "Nachname" }).fill(" Muster ");

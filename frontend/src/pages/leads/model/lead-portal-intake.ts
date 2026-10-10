@@ -65,6 +65,17 @@ export function patientDataPending(
   return mode === "patient" && Boolean(draft) && (!draft?.birthDate || !draft?.legalSex);
 }
 
+/** Which of the two fields the later steps wait for are still empty in the draft. */
+export function patientDataPendingFields(
+  draft: { birthDate: string; legalSex: string } | null,
+): Array<"birthDate" | "legalSex"> {
+  if (!draft) return [];
+  return [
+    ...(!draft.birthDate ? ["birthDate" as const] : []),
+    ...(!draft.legalSex ? ["legalSex" as const] : []),
+  ];
+}
+
 function comparable(value: unknown): string {
   return Array.isArray(value) ? value.join(",") : String(value ?? "").trim();
 }

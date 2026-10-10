@@ -1597,6 +1597,72 @@ async fn staff_cannot_mark_lead_compliance_signed_by_hand() {
 }
 
 #[tokio::test]
+async fn the_pep_status_check_is_audited_as_its_own_action() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Anna",
+            "last_name": "Muster",
+            "email": format!("anna-pep-{tag}@example.com"),
+            "source": "Test",
+            "country": "DE"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id = created["id"].as_str().unwrap().to_string();
+    let lead_uuid = Uuid::parse_str(&lead_id).unwrap();
+    let path = format!("/api/v1/leads/{lead_id}/update");
+    let wizard = |checked: bool| json!({ "wizard_state": { "aml_enhanced_due_diligence": { "pepStatusChecked": checked, "isPep": false } } });
+    let actions = |pool: PgPool| async move {
+        sqlx::query_as::<_, (String, Option<Uuid>, Value)>(
+            r#"SELECT action, user_id, context FROM audit_log
+               WHERE entity_id = $1 AND action LIKE 'lead_pep_status_%'
+               ORDER BY created_at, id"#,
+        )
+        .bind(lead_uuid)
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+    };
+
+    // Ticked: one row of its own, with the user and without personal data.
+    let (status, body) = json_request(&app, "POST", &path, &pm, Some(wizard(true))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = actions(app.suite.pool.clone()).await;
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "lead_pep_status_checked");
+    assert_eq!(rows[0].1, Some(app.patient_manager_id));
+    assert_eq!(
+        rows[0].2,
+        json!({ "lead_id": lead_id, "pep_status_checked": true })
+    );
+
+    // Saved again unchanged, or another field: nothing new.
+    let (status, body) = json_request(&app, "POST", &path, &pm, Some(wizard(true))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) =
+        json_request(&app, "POST", &path, &pm, Some(json!({ "notes": "x" }))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(actions(app.suite.pool.clone()).await.len(), 1);
+
+    // Unticked: the second row.
+    let (status, body) = json_request(&app, "POST", &path, &pm, Some(wizard(false))).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = actions(app.suite.pool.clone()).await;
+    assert_eq!(
+        rows.iter().map(|row| row.0.as_str()).collect::<Vec<_>>(),
+        ["lead_pep_status_checked", "lead_pep_status_unchecked"]
+    );
+}
+
+#[tokio::test]
 async fn converted_lead_is_absent_from_registry_but_detail_remains_auditable() {
     let Some(app) = test_app().await else { return };
     let pm = app.auth_header("patient_manager");

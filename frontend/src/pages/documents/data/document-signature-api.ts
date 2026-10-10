@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchFile } from "@/lib/api";
+import { ApiRequestError, apiFetch, apiFetchFile } from "@/lib/api";
 
 // `minor`: a minor patient who co-signs next to the legal representatives
 // (optional, from about 14 years and capable of understanding; never required).
@@ -218,8 +218,75 @@ export function packageWarnings(selected: PackageCandidate[], limits: PackageCan
 
 export const blockingWarning = (warning: PackageWarning) => warning.kind !== "no_frames";
 
+/** Codes of the lead gates (risk assessment, sanctions, blocked country) that refuse a signature. */
+export const SIGNATURE_GATE_CODES: ReadonlySet<string> = new Set([
+  "risk_review_required",
+  "sanctions_review_pending",
+  "sanctions_confirmed",
+  "blocked_country",
+]);
+
+/**
+ * Why a lead gate refused a signature (paper signature, "Подтвердить подпись",
+ * a signature request), in RU/DE: the risk assessment waits or rejected the
+ * lead, a possible sanctions match waits for the CEO, a confirmed match, or a
+ * blocked country. `null` for any other code (QA 2026-10-10: the refusal said
+ * only "Действие не выполнено").
+ */
+export function signatureGateText(
+  code: string | null | undefined,
+  tx: (ru: string, de: string) => string,
+  details?: { rejected?: boolean; countries_label?: string },
+): string | null {
+  switch (code) {
+    case "risk_review_required":
+      return details?.rejected === true
+        ? tx("Подпись недоступна: оценка риска отклонила лида.", "Unterschrift nicht möglich: Die Risikobewertung hat den Lead abgelehnt.")
+        : tx(
+            "Подпись недоступна: сначала нужно решение по оценке риска (раздел «Оценка риска» в документах лида).",
+            "Unterschrift nicht möglich: Zuerst ist eine Entscheidung zur Risikobewertung nötig (Abschnitt „Risikobewertung“ in den Unterlagen des Leads).",
+          );
+    case "sanctions_review_pending":
+      return tx(
+        "Подпись недоступна: возможное совпадение с санкционным списком ЕС ждёт решения CEO.",
+        "Unterschrift nicht möglich: Ein möglicher Treffer der EU-Sanktionsliste wartet auf die Entscheidung des CEO.",
+      );
+    case "sanctions_confirmed":
+      return tx(
+        "Подпись недоступна: подтверждённое совпадение с санкционным списком ЕС, работа с этим лицом прекращена.",
+        "Unterschrift nicht möglich: Bestätigter Treffer der EU-Sanktionsliste, die Zusammenarbeit mit dieser Person ist beendet.",
+      );
+    case "blocked_country": {
+      const countries = details?.countries_label?.trim();
+      return tx(
+        `Подпись недоступна: заблокированная страна${countries ? ` (${countries})` : ""}. Снять блокировку для этого лида может только CEO.`,
+        `Unterschrift nicht möglich: gesperrtes Land${countries ? ` (${countries})` : ""}. Nur der CEO kann die Sperre für diesen Lead aufheben.`,
+      );
+    }
+    default:
+      return null;
+  }
+}
+
+/** The gate text of a refused request (an `ApiRequestError` with a gate code), else `null`. */
+export function signatureGateErrorText(error: unknown, tx: (ru: string, de: string) => string): string | null {
+  if (!(error instanceof ApiRequestError)) return null;
+  const body = error.body as { error?: unknown; code?: unknown; rejected?: unknown; countries_label?: unknown } | null | undefined;
+  const code = typeof body?.error === "string" ? body.error : typeof body?.code === "string" ? body.code : error.code;
+  return signatureGateText(code, tx, {
+    rejected: body?.rejected === true,
+    countries_label: typeof body?.countries_label === "string" ? body.countries_label : undefined,
+  });
+}
+
 /** RU/DE text for server error codes of the signing workflow. */
-export function signatureErrorText(code: string | null | undefined, tx: (ru: string, de: string) => string, details?: { statute?: string; minimum_level?: string }): string {
+export function signatureErrorText(
+  code: string | null | undefined,
+  tx: (ru: string, de: string) => string,
+  details?: { statute?: string; minimum_level?: string; rejected?: boolean; countries_label?: string },
+): string {
+  const gate = signatureGateText(code, tx, details);
+  if (gate) return gate;
   switch (code) {
     case "review_attachment_required":
     case "review_attachment_changed":

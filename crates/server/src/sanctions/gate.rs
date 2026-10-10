@@ -8,7 +8,9 @@
 //!
 //! The countersignature is `signed_agency` on the order, a framework contract
 //! set to `signed`, an e-signature package with an agency signer and a paper
-//! signature of an order or contract document.
+//! signature of an order or contract document. The client's own paper
+//! signature of a document only the patient side signs (consents, the lead's
+//! patient form) is other work, also when the document names an order.
 //!
 //! A false-positive decision unblocks. Winding down stays possible: cancelling
 //! an order or an order service, terminating a framework contract, rejecting
@@ -542,24 +544,57 @@ pub async fn resolve_scope(
 
 /// Whether a paper signature of the document is the agency's countersignature:
 /// order and contract documents (framework contract, single order, cost
-/// coverage declaration) and anything attached to an order. Consents and
-/// other patient-only documents are not.
+/// coverage declaration) and anything else attached to an order that the
+/// agency signs. Consents and the lead's patient form are signed by the
+/// patient side only ([`crate::document_signatures::signed_by_patient_side_only`]):
+/// their paper signature is the client's own, other work, also when the
+/// document names an order (QA 2026-10-10: the blocked-country rule held the
+/// client's signature of the patient form).
 async fn paper_signature_is_countersign(
     db: &gmed_db::DbPool,
     document_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let countersign: Option<bool> = sqlx::query_scalar(
-        r#"SELECT order_id IS NOT NULL
-                  OR COALESCE(generated_template_id, '') IN
-                     ('framework_contract', 'single_order', 'cost_coverage_declaration')
-                  OR COALESCE(art, '') IN
-                     ('framework_contract', 'single_order', 'cost_coverage_declaration')
+    let Some(row) = sqlx::query(
+        r#"SELECT order_id IS NOT NULL AS on_order,
+                  generated_template_id, compliance_kind, COALESCE(art, '') AS art
            FROM documents WHERE id = $1"#,
     )
     .bind(document_id)
     .fetch_optional(db)
-    .await?;
-    Ok(countersign.unwrap_or(false))
+    .await?
+    else {
+        return Ok(false);
+    };
+    let template: Option<String> = row.try_get("generated_template_id")?;
+    let compliance_kind: Option<String> = row.try_get("compliance_kind")?;
+    let art: String = row.try_get("art")?;
+    let on_order: bool = row.try_get("on_order")?;
+    Ok(paper_signature_countersigns(
+        on_order,
+        template.as_deref(),
+        compliance_kind.as_deref(),
+        &art,
+    ))
+}
+
+/// The rule of [`paper_signature_is_countersign`] on the document's columns.
+fn paper_signature_countersigns(
+    on_order: bool,
+    template: Option<&str>,
+    compliance_kind: Option<&str>,
+    art: &str,
+) -> bool {
+    const CONTRACT_DOCUMENTS: [&str; 3] = [
+        "framework_contract",
+        "single_order",
+        "cost_coverage_declaration",
+    ];
+    if crate::document_signatures::signed_by_patient_side_only(template, compliance_kind, art) {
+        return false;
+    }
+    on_order
+        || template.is_some_and(|template| CONTRACT_DOCUMENTS.contains(&template))
+        || CONTRACT_DOCUMENTS.contains(&art)
 }
 
 /// Middleware on the protected router: blocks guarded requests.
@@ -971,6 +1006,44 @@ mod tests {
             Rule::SignatureRequest.action(&json!({"signers": [{"role": "client"}]})),
             Some(GateAction::OrderContractWork)
         );
+    }
+
+    #[test]
+    fn paper_signature_of_a_patient_side_document_is_not_the_countersignature() {
+        // Contract documents and the agency's documents of an order are.
+        assert!(paper_signature_countersigns(
+            false,
+            Some("framework_contract"),
+            None,
+            "framework_contract"
+        ));
+        assert!(paper_signature_countersigns(
+            false,
+            None,
+            None,
+            "cost_coverage_declaration"
+        ));
+        assert!(paper_signature_countersigns(true, None, None, "other"));
+        // The client's own signature of the patient form or a consent is
+        // other work, also when the document names the lead's order.
+        assert!(!paper_signature_countersigns(
+            true,
+            Some("lead_self_disclosure"),
+            None,
+            "lead_self_disclosure"
+        ));
+        assert!(!paper_signature_countersigns(
+            true,
+            Some("privacy_consents"),
+            Some("dsgvo"),
+            "privacy_consents"
+        ));
+        assert!(!paper_signature_countersigns(
+            false,
+            Some("confidentiality_release"),
+            None,
+            "confidentiality_release"
+        ));
     }
 
     #[test]

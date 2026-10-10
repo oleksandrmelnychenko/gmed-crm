@@ -278,7 +278,7 @@ async fn assessment_json(
             })
         });
     let history = history_json(conn, lead_id).await?;
-    let reviewers = store::reviewer_ids(conn, &config).await?;
+    let reviewers = store::reviewer_counts(conn, &config).await?;
     let reviewer = store::is_reviewer(auth, &config);
     let review_notice = store::review_notice(conn, lead_id).await?;
     let can_confirm = reviewer
@@ -315,7 +315,10 @@ async fn assessment_json(
         "can_confirm": can_confirm,
         "can_restart": reviewer && !started,
         "four_eyes_required": started && score.level >= 3,
-        "reviewers_available": reviewers.len(),
+        // Everybody who may decide, split into CEO accounts and named deputies.
+        "reviewers_available": reviewers.total(),
+        "reviewers_ceo": reviewers.ceo,
+        "reviewers_deputies": reviewers.deputies,
     }))
 }
 
@@ -1037,7 +1040,12 @@ async fn config_json(conn: &mut PgConnection) -> Result<Value, sqlx::Error> {
     let config = store::load_config(conn).await?;
     let mut value = serde_json::to_value(&config).unwrap_or_else(|_| json!({}));
     value["eligible_reviewers"] = json!(eligible_reviewers(conn).await?);
-    value["reviewers_available"] = json!(store::reviewer_ids(conn, &config).await?.len());
+    // CEO accounts decide by role, deputies by name: both counted apart so the
+    // page does not present CEO accounts as deputies (QA 2026-10-10).
+    let reviewers = store::reviewer_counts(conn, &config).await?;
+    value["reviewers_available"] = json!(reviewers.total());
+    value["reviewers_ceo"] = json!(reviewers.ceo);
+    value["reviewers_deputies"] = json!(reviewers.deputies);
     Ok(value)
 }
 
@@ -1076,6 +1084,8 @@ async fn put_config(
     if let Some(object) = body.as_object_mut() {
         object.remove("eligible_reviewers");
         object.remove("reviewers_available");
+        object.remove("reviewers_ceo");
+        object.remove("reviewers_deputies");
         object.entry("version").or_insert(json!(1));
     }
     let config: RiskConfig = match serde_json::from_value(body) {

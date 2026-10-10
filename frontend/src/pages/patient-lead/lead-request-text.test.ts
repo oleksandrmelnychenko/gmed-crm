@@ -207,11 +207,17 @@ describe("lead cabinet languages", () => {
       "Нам потрібні додаткові відомості",
       "Нам нужны дополнительные сведения",
     ]);
-    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).reviewNotice)).toEqual([
-      "Vielen Dank. Ihre Angaben werden geprüft. Wir melden uns bei Ihnen.",
-      "Thank you. Your details are being reviewed. We will get in touch with you.",
-      "Дякуємо. Ваші дані перевіряються. Ми зв'яжемося з вами.",
-      "Спасибо. Ваши данные проверяются. Мы свяжемся с вами.",
+    // The review notice continues the sentence of the sending: one thank-you only (QA 2026-10-10).
+    expect(
+      LEAD_CABINET_LANGS.map((option) => {
+        const text = leadRequestText(option.value);
+        return `${text.sentTitle} ${text.sentBody("10.10.2026 13:09")} ${text.reviewNotice}`;
+      }),
+    ).toEqual([
+      "Vielen Dank! Ihre Angaben wurden am 10.10.2026 13:09 gesendet. Wir prüfen sie und melden uns bei Ihnen.",
+      "Thank you! Your details were sent on 10.10.2026 13:09. We are reviewing them and will get in touch with you.",
+      "Дякуємо! Ваші дані надіслано 10.10.2026 13:09. Ми перевіримо їх і зв'яжемося з вами.",
+      "Спасибо! Ваши данные отправлены 10.10.2026 13:09. Мы проверим их и свяжемся с вами.",
     ]);
     // No text of the follow-up speaks of points, levels, triggers, risk or a decision (P2).
     const risk = /risiko|risk|punkt|point|stufe|level|trigger|abgelehnt|reject|ризик|риск|бал/i;

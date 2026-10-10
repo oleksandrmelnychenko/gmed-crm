@@ -304,8 +304,14 @@ export function DocumentSignaturePanel({ documentId, onDone, onDirtyChange, onSt
     setBusy(true); setActionError(null);
     try { await action(); }
     catch (reason) {
-      const body = reason instanceof ApiRequestError ? reason.body as ({ error?: string; statute?: string; minimum_level?: string } | null | undefined) : null;
-      setActionError(signatureErrorText(body?.error, tx, { statute: body?.statute, minimum_level: body?.minimum_level }));
+      const body = reason instanceof ApiRequestError ? reason.body as ({ error?: string; code?: string; statute?: string; minimum_level?: string; rejected?: boolean; countries_label?: string } | null | undefined) : null;
+      // A lead gate (risk assessment, sanctions, blocked country) names its reason.
+      setActionError(signatureErrorText(body?.error ?? body?.code, tx, {
+        statute: body?.statute,
+        minimum_level: body?.minimum_level,
+        rejected: body?.rejected === true,
+        countries_label: body?.countries_label,
+      }));
     }
     finally {
       // A successful POST or an ambiguous timeout must be reconciled before

@@ -420,7 +420,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       rows.push([identificationLabel("sanctions_link_kind"), option(text.sanctionsLinkKindOptions, identification?.sanctions_link_kind)]);
       rows.push([identificationLabel("sanctions_link_since_extent"), identification?.sanctions_link_since_extent]);
     }
-    group("follow_up", text.steps.follow_up, rows);
+    // K and L are listed in their own groups: with nothing else answered there is no
+    // empty "follow-up" group (QA 2026-10-10).
+    if (entered(rows).length > 0) group("follow_up", text.steps.follow_up, rows);
   }
 
   // The reason of the request (13.1), from a server that knows it.

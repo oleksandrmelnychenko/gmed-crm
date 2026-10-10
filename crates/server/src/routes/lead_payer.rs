@@ -677,8 +677,11 @@ fn blank(value: &Option<String>) -> bool {
 #[serde(deny_unknown_fields)]
 struct DeclarationInput {
     payer_kind: String,
-    #[serde(default = "default_true")]
-    acts_on_own_account: bool,
+    /// The own-economic-interest answer. A key that is left out answers
+    /// nothing (QA 2026-10-10): the stored answer stays, and an unanswered
+    /// question stays unanswered instead of becoming a "yes".
+    #[serde(default)]
+    acts_on_own_account: Option<bool>,
     beneficial_owner_name: Option<String>,
     beneficial_owner_note: Option<String>,
     source_of_funds: Option<String>,
@@ -723,10 +726,6 @@ struct DeclarationInput {
     invoice_vat_id: Option<Option<String>>,
     #[serde(default, deserialize_with = "sent")]
     invoice_tax_number: Option<Option<String>>,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 /// A key that is present in the body, also with `null`; an absent key stays
@@ -780,7 +779,9 @@ fn declaration_from_input(
     }
     let mut declaration = Declaration {
         payer_kind: payer_kind.to_string(),
-        acts_on_own_account: input.acts_on_own_account,
+        acts_on_own_account: input
+            .acts_on_own_account
+            .unwrap_or_else(|| previous.is_none_or(|previous| previous.acts_on_own_account)),
         // The cabinet names the person in one text (name, date and place of
         // birth, address), so the name takes a long text.
         beneficial_owner_name: text(&input.beneficial_owner_name, LONG_TEXT_MAX)?,
@@ -1806,8 +1807,12 @@ async fn save_payer_declaration(
                 );
             }
         };
-    // The staff form always states the own-account answer.
-    declaration.own_account_answered = true;
+    // The staff form states the own-account answer once someone chose it; a
+    // left-out key keeps what is stored (an unanswered question included).
+    declaration.own_account_answered = body.acts_on_own_account.is_some()
+        || previous
+            .as_ref()
+            .is_some_and(|previous| previous.own_account_answered);
     // Only the lead gives or removes the consent to contact the payer and the
     // consent to pass the cost estimate on to the payer: staff keep both as
     // long as a third party pays.
@@ -2472,9 +2477,11 @@ fn declaration_from_portal(
     let own_account_sent = input.acts_on_own_account.is_some() || input.beneficial_owner.is_some();
     let staff = DeclarationInput {
         payer_kind: input.payer_kind.clone(),
-        acts_on_own_account: input
-            .acts_on_own_account
-            .unwrap_or_else(|| previous.is_none_or(|previous| previous.acts_on_own_account)),
+        acts_on_own_account: Some(
+            input
+                .acts_on_own_account
+                .unwrap_or_else(|| previous.is_none_or(|previous| previous.acts_on_own_account)),
+        ),
         beneficial_owner_name: if own_account_sent {
             input.beneficial_owner.clone()
         } else {
@@ -3731,7 +3738,7 @@ mod tests {
     fn input(kind: &str) -> DeclarationInput {
         DeclarationInput {
             payer_kind: kind.to_string(),
-            acts_on_own_account: true,
+            acts_on_own_account: Some(true),
             beneficial_owner_name: None,
             beneficial_owner_note: None,
             source_of_funds: Some("employment".into()),
@@ -3828,12 +3835,30 @@ mod tests {
     }
 
     #[test]
+    fn a_left_out_own_account_answer_keeps_the_stored_one() {
+        let mut no = input("self");
+        no.acts_on_own_account = Some(false);
+        no.beneficial_owner_name = Some("Viktor Zahler".into());
+        let stored = from_input(&no).unwrap();
+        let mut silent = input("self");
+        silent.acts_on_own_account = None;
+        silent.beneficial_owner_name = Some("Viktor Zahler".into());
+        let kept = declaration_from_input(&silent, Some(&stored), today()).unwrap();
+        assert!(!kept.acts_on_own_account);
+        assert_eq!(kept.beneficial_owner_name.as_deref(), Some("Viktor Zahler"));
+        // Nothing stored: only the column default, never an answer.
+        let fresh = from_input(&silent).unwrap();
+        assert!(fresh.acts_on_own_account);
+        assert!(!fresh.own_account_answered);
+    }
+
+    #[test]
     fn beneficial_owner_is_required_when_not_on_own_account() {
         let mut value = input("self");
-        value.acts_on_own_account = false;
+        value.acts_on_own_account = Some(false);
         let declaration = from_input(&value).unwrap();
         assert_eq!(declaration.missing(), [PayerReason::BeneficialOwnerMissing]);
-        value.acts_on_own_account = true;
+        value.acts_on_own_account = Some(true);
         value.beneficial_owner_name = Some("Someone".into());
         let declaration = from_input(&value).unwrap();
         assert!(declaration.beneficial_owner_name.is_none());

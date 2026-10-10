@@ -39,7 +39,7 @@ import {
   type UploadControl,
 } from "./payer-link-steps";
 import { SummaryStep, ThankYou } from "./payer-link-summary";
-import { stepTitle, type PayerLinkText } from "./payer-link-text";
+import { missingLabel, stepTitle, type PayerLinkText } from "./payer-link-text";
 
 // The questionnaire behind the code (contract phase 3a, 5.1 steps 1–8): one
 // draft for all steps, saved key by key as the payer types, the uploads, and
@@ -325,6 +325,7 @@ function DraftForm({
   const [consentError, setConsentError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [missingShownSteps, setMissingShownSteps] = useState<ReadonlySet<PayerStep>>(() => new Set());
   const enqueue = useRequestQueue();
   const topRef = useRef<HTMLDivElement | null>(null);
   const textRef = useRef(text);
@@ -490,6 +491,19 @@ function DraftForm({
   const previous = steps[position - 1];
   const following = steps[position + 1];
   const progress = Math.round(((position + 1) / steps.length) * 100);
+  // What this step still misses, as the server names it. Like the lead cabinet (owner
+  // 2026-10-09, QA 2026-10-10): the first "next" with something missing shows the list and
+  // stays, the next press goes on; nothing is shown before.
+  const stepMissing = missingByStep(questionnaire.missing_for_submit ?? [], payerType, steps).find((group) => group.step === step)?.keys ?? [];
+  const missingShown = missingShownSteps.has(step);
+  const next = () => {
+    if (!following) return;
+    if (consented && stepMissing.length > 0 && !missingShown) {
+      setMissingShownSteps((current) => new Set(current).add(step));
+      return;
+    }
+    goTo(following);
+  };
 
   let content;
   switch (step) {
@@ -550,6 +564,22 @@ function DraftForm({
         </Notice>
       ) : null}
 
+      {missingShown && stepMissing.length > 0 ? (
+        <div
+          className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200"
+          data-testid="payer-link-step-missing"
+        >
+          <p className="font-medium">{text.missingTitle}</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5">
+            {Array.from(new Set(stepMissing.map((key) => missingLabel(text, key, payerType)))).map((label) => (
+              <li key={label} className="break-words">
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       {content}
 
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -562,26 +592,14 @@ function DraftForm({
           <span />
         )}
         {following ? (
-          <Button
-            type="button"
-            className="h-9 gap-1.5"
-            disabled={!consented}
-            aria-describedby={!consented ? "payer-link-next-hint" : undefined}
-            onClick={() => goTo(following)}
-            data-testid="payer-link-next"
-          >
+          // Before the privacy notice is confirmed "next" says so when pressed, not beforehand.
+          <Button type="button" className="h-9 gap-1.5" onClick={next} data-testid="payer-link-next">
             {text.next}
             <ArrowRight aria-hidden="true" className="size-4" />
           </Button>
         ) : null}
       </div>
-      {!consented && step === "privacy" ? (
-        <p id="payer-link-next-hint" className="text-xs text-muted-foreground">
-          {text.privacyFirst}
-        </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">{text.autosaveNote}</p>
-      )}
+      <p className="text-xs text-muted-foreground">{text.autosaveNote}</p>
     </div>
   );
 }

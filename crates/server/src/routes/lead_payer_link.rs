@@ -2693,13 +2693,14 @@ async fn store_payer_file(
             json!({}),
         ));
     }
+    // German names, like every document of the lead (QA 2026-10-10).
     let (auto_name, category) = match kind {
         UploadKind::PayerIdentity => (
-            format!("Identity document – payer {payer_name}"),
+            format!("Ausweisdokument – Kostenübernehmer/in {payer_name}"),
             "identity",
         ),
         _ => (
-            format!("Proof of source of funds – {payer_name}"),
+            format!("Nachweis der Mittelherkunft – {payer_name}"),
             "administrative",
         ),
     };
@@ -2887,7 +2888,7 @@ fn declaration_source_of_funds(source: &str) -> Option<&'static str> {
 
 /// The German label of a source of funds, as the wizard and the payer page
 /// show it.
-fn funds_source_label(source: &str) -> &str {
+pub(crate) fn funds_source_label(source: &str) -> &str {
     match source {
         "employment" => "Gehalt / nichtselbständige Arbeit",
         "business_income" => "Einkünfte aus Unternehmen / selbständiger Tätigkeit",

@@ -881,6 +881,11 @@ describe("LeadGwgStatements: trigger flow additions", () => {
     expect(statement(html, "lead-gwg-sanctions-link-name")).toContain("Beispiel GmbH");
     expect(html).toContain("деловая");
     expect(render(portalState())).not.toContain("lead-gwg-follow-up-answers");
+    // A citizen of the country or a person born there (QA 2026-10-10).
+    const citizen = (lang?: "de") =>
+      render(portalState({ identification: { residence_since: "1990", stay_reason: "citizenship_or_birth" } }), undefined, lang);
+    expect(citizen()).toContain("гражданство / рождение в этой стране");
+    expect(citizen("de")).toContain("Staatsangehörigkeit / dort geboren");
   });
 });
 

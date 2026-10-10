@@ -4,6 +4,7 @@ import {
   isPatientPortalEvent,
   mergePatientUpdates,
   patientDataPending,
+  patientDataPendingFields,
   patientMarkerFor,
   portalProgressText,
   relaxMasterErrors,
@@ -35,6 +36,13 @@ describe("wizard step 1 in 'the patient fills it in' mode", () => {
     expect(patientDataPending("patient", { birthDate: "1990-01-01", legalSex: "female" })).toBe(false);
     expect(patientDataPending("staff", { birthDate: "", legalSex: "" })).toBe(false);
     expect(patientDataPending("patient", null)).toBe(false);
+  });
+
+  it("names only the fields still empty (QA 2026-10-10)", () => {
+    expect(patientDataPendingFields({ birthDate: "1985-05-12", legalSex: "" })).toEqual(["legalSex"]);
+    expect(patientDataPendingFields({ birthDate: "", legalSex: "female" })).toEqual(["birthDate"]);
+    expect(patientDataPendingFields({ birthDate: "", legalSex: "" })).toEqual(["birthDate", "legalSex"]);
+    expect(patientDataPendingFields(null)).toEqual([]);
   });
 });
 

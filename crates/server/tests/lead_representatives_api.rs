@@ -780,7 +780,7 @@ async fn an_adult_names_the_person_who_acts_for_him() {
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(auto_name, "Identity document – Ben Muster");
+    assert_eq!(auto_name, "Ausweisdokument – Ben Muster");
     assert!(!lead_identity_on_file);
     let (status, refused) = json_request(
         router,

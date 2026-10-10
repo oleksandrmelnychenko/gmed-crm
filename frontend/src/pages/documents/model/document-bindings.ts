@@ -170,6 +170,7 @@ export const ENHANCED_DUE_DILIGENCE_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "pepBeneficialOwner", label: "Wirtschaftlich Berechtigter ist eine PeP", labelRu: "Бенефициарный владелец является PEP", kind: "boolean" },
   { key: "pepOfficeFunction", label: "Amt / Funktion", labelRu: "Должность / функция", kind: "text" },
   { key: "pepAssetOrigin", label: "Herkunft der Vermögenswerte der PeP", labelRu: "Происхождение активов PEP", kind: "text" },
+  { key: "sanctionsLinks", label: "Angaben zu Verbindungen zu sanktionierten Personen", labelRu: "Сведения о связях с лицами под санкциями", kind: "textarea" },
   { key: "highRiskCountryTransaction", label: "Transaktion mit Bezug zu einem Drittstaat mit hohem Risiko", labelRu: "Операция связана с третьей страной высокого риска", kind: "boolean" },
   { key: "highRiskCountryResident", label: "Vertragspartner ist dort niedergelassen oder wohnhaft", labelRu: "Контрагент проживает или зарегистрирован в такой стране", kind: "boolean" },
   { key: "affectedThirdCountry", label: "Betroffener Drittstaat", labelRu: "Затронутая третья страна", kind: "text" },

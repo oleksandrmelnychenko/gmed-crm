@@ -160,7 +160,7 @@ export type PayerLinkText = {
   noFundsProof: string;
   paymentMethods: Record<PaymentMethod, string>;
   cashCryptoNote: string;
-  declarationsIntro: string;
+  /** Whom an organisation's declarations concern; a private person gets no intro (QA 2026-10-10). */
   declarationsIntroOrganisation: string;
   yesNo: { yes: string; no: string };
   summaryIntro: string;
@@ -448,9 +448,8 @@ const de: PayerLinkText = {
     other: "Sonstiges",
   },
   cashCryptoNote: "Barzahlungen und Zahlungen in Kryptowährung prüft GMED gesondert (Geldwäschegesetz).",
-  declarationsIntro: "Diese Fragen schreibt das Geldwäschegesetz vor. Bitte beantworten Sie jede mit Ja oder Nein.",
   declarationsIntroOrganisation:
-    "Diese Fragen schreibt das Geldwäschegesetz vor. Sie betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten. Bitte beantworten Sie jede mit Ja oder Nein.",
+    "Die Fragen betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
   yesNo: { yes: "Ja", no: "Nein" },
   summaryIntro: "Bitte prüfen Sie Ihre Angaben, bevor Sie sie senden.",
   missingTitle: "Bitte noch ergänzen:",
@@ -733,9 +732,8 @@ const en: PayerLinkText = {
     other: "Other",
   },
   cashCryptoNote: "GMED checks cash payments and payments in cryptocurrency separately (Money Laundering Act).",
-  declarationsIntro: "German anti-money laundering law requires these questions. Please answer each with yes or no.",
   declarationsIntroOrganisation:
-    "German anti-money laundering law requires these questions. They concern the organisation, the persons authorised to represent it and its beneficial owners. Please answer each with yes or no.",
+    "The questions concern the organisation, the persons authorised to represent it and its beneficial owners.",
   yesNo: { yes: "Yes", no: "No" },
   summaryIntro: "Please check your details before you send them.",
   missingTitle: "Please add:",
@@ -1021,10 +1019,7 @@ const uk: PayerLinkText = {
     other: "Інше",
   },
   cashCryptoNote: "Оплату готівкою та криптовалютою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
-  declarationsIntro:
-    "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
-  declarationsIntroOrganisation:
-    "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Вони стосуються організації, її уповноважених представників і кінцевих бенефіціарів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
+  declarationsIntroOrganisation: "Запитання стосуються організації, її уповноважених представників і кінцевих бенефіціарів.",
   yesNo: { yes: "Так", no: "Ні" },
   summaryIntro: "Будь ласка, перевірте дані перед надсиланням.",
   missingTitle: "Будь ласка, доповніть:",
@@ -1310,10 +1305,7 @@ const ru: PayerLinkText = {
     other: "Другое",
   },
   cashCryptoNote: "Оплату наличными и криптовалютой GMED проверяет отдельно (закон о противодействии отмыванию денег).",
-  declarationsIntro:
-    "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Пожалуйста, ответьте на каждый «да» или «нет».",
-  declarationsIntroOrganisation:
-    "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Они касаются организации, её уполномоченных представителей и конечных бенефициаров. Пожалуйста, ответьте на каждый «да» или «нет».",
+  declarationsIntroOrganisation: "Вопросы касаются организации, её уполномоченных представителей и конечных бенефициаров.",
   yesNo: { yes: "Да", no: "Нет" },
   summaryIntro: "Пожалуйста, проверьте данные перед отправкой.",
   missingTitle: "Пожалуйста, дополните:",

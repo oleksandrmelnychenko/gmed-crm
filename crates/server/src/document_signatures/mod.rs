@@ -303,6 +303,17 @@ fn signer_policy_for_parts(
     SignerPolicy::Flexible
 }
 
+/// Only the patient side signs the document (consents, the lead's patient
+/// form): a signature on it is never the agency's countersignature. The
+/// sanctions gate reads it for paper signatures.
+pub(crate) fn signed_by_patient_side_only(
+    generated_template_id: Option<&str>,
+    compliance_kind: Option<&str>,
+    art: &str,
+) -> bool {
+    signer_policy_for_parts(generated_template_id, compliance_kind, art) == SignerPolicy::ClientOnly
+}
+
 fn signer_policy(row: &PgRow) -> SignerPolicy {
     signer_policy_for_parts(
         row.get::<Option<String>, _>("generated_template_id")

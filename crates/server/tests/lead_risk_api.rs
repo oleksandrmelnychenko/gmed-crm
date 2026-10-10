@@ -362,6 +362,11 @@ async fn level_three_needs_two_different_reviewers() {
     let (status, config) = request(&app, "GET", "/compliance/risk-config", &app.ceo(), None).await;
     assert_eq!(status, StatusCode::OK, "{config}");
     assert_eq!(config["level_3_from"], 9);
+    // Without deputies only CEO accounts may decide: counted as such, not as deputies.
+    assert_eq!(config["reviewers_deputies"], 0, "{config}");
+    let ceo_accounts = config["reviewers_ceo"].as_u64().unwrap();
+    assert!(ceo_accounts >= 1, "{config}");
+    assert_eq!(config["reviewers_available"], ceo_accounts, "{config}");
     let mut wrong = config.clone();
     wrong["reviewers"] = json!([app.sales_id]);
     let (status, body) = request(
@@ -396,6 +401,12 @@ async fn level_three_needs_two_different_reviewers() {
     assert_eq!(stored["version"], config["version"].as_i64().unwrap() + 1);
     assert_eq!(stored["reviewers"], json!([app.pm_id]));
     assert!(stored["reviewers_available"].as_u64().unwrap() >= 2);
+    assert_eq!(stored["reviewers_deputies"], 1, "{stored}");
+    // Other tests of the suite may add CEO accounts meanwhile.
+    assert!(
+        stored["reviewers_ceo"].as_u64().unwrap() >= ceo_accounts,
+        "{stored}"
+    );
 
     // A PEP (the lead's own "yes") is a knock-out: level 3.
     let lead_id = insert_lead(&app, "Ben", &["DE"]).await;

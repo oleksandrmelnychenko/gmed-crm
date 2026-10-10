@@ -416,11 +416,16 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(tab(page, "contact")).toHaveCount(0);
     await expect(tab(page, "declarations")).toHaveCount(0);
     await expect(tab(page, "person")).toHaveAttribute("aria-selected", "true");
-    // The badges count what each step misses (the server's `missing_by_step`, the contact keys in the first step).
-    await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("4");
-    await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
-    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveText("1");
+    // No amber badge before "Weiter" (QA 2026-10-10).
+    await expect(page.getByTestId("lead-request-step-badge")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-legal")).toHaveCount(0);
+    // After "Weiter" the step's badge counts what it misses (the server's `missing_by_step`, the contact
+    // keys in the first step); the other steps stay without one.
+    await page.getByTestId("lead-request-step-person").getByRole("button", { name: "Weiter" }).click();
+    await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "person");
+    await expect(tab(page, "person").getByTestId("lead-request-step-badge")).toHaveText("4");
+    await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveCount(0);
+    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
 
     // Free navigation: straight to the identity document, then back with the step bar.
     await tab(page, "identity").click();
@@ -430,6 +435,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await identity.getByRole("button", { name: "Weiter" }).click();
     await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", "identity");
     await expect(identity.getByTestId("lead-request-step-missing")).toContainText("Ausweisdokument: Foto oder Scan des Ausweises");
+    await expect(tab(page, "identity").getByTestId("lead-request-step-badge")).toHaveText("1");
     // No intro sentence above the upload (owner 2026-10-09).
     await expect(identity).not.toContainText("Bitte laden Sie ein Foto oder einen Scan");
     // Upload only: the document's data are staff's.
@@ -456,12 +462,14 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(reason).toBeVisible();
     await reason.fill("Zweitmeinung zur Knie-OP");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ request_reason: "Zweitmeinung zur Knie-OP" });
-    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
     // Nothing of the identity document's data was ever sent.
     expect(calls.identification.some((patch) => Object.keys(patch).some((key) => key.startsWith("id_")))).toBe(false);
 
     // The summary lists what is missing by step, each with a way there.
     await tab(page, "send").click();
+    // Once the summary was opened, every step that misses something shows its badge.
+    await expect(tab(page, "payer").getByTestId("lead-request-step-badge")).toBeVisible();
+    await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing.getByTestId("lead-request-missing-payer")).toContainText("Wer übernimmt die Kosten der Behandlung?");
     await missing.getByTestId("lead-request-missing-payer").getByRole("button", { name: "Wer zahlt" }).click();
@@ -535,8 +543,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const blockA = page.getByTestId("lead-request-follow-up-A");
     await choose(page, blockA.getByRole("combobox", { name: "Herkunft der Mittel" }), "Einkommen");
     await blockA.getByRole("textbox", { name: "Bitte beschreiben Sie die Herkunft der Mittel" }).fill("Gehalt als Ingenieurin");
-    await blockA.getByRole("textbox", { name: "Beruf" }).fill("Ingenieurin");
-    await blockA.getByRole("textbox", { name: "Branche / Sektor" }).fill("Maschinenbau");
+    await blockA.getByRole("textbox", { name: "Ihr Beruf" }).fill("Ingenieurin");
+    await blockA.getByRole("textbox", { name: "Branche / Sektor Ihrer Tätigkeit" }).fill("Maschinenbau");
     await expect
       .poll(() => Object.assign({}, ...calls.enhanced))
       .toEqual({
@@ -574,9 +582,12 @@ test.describe("lead cabinet stepper and follow-up", () => {
 
     // The summary: the neutral notice for every request alike, and the answers.
     await tab(page, "send").click();
-    await expect(page.getByTestId("lead-request-review-notice")).toHaveText(
-      "Vielen Dank. Ihre Angaben werden geprüft. Wir melden uns bei Ihnen.",
+    // One thank-you: the notice continues the sentence of the sending (QA 2026-10-10).
+    await expect(page.getByTestId("lead-request-sent")).toHaveText(
+      /^Ihre Angaben wurden am \d\d\.\d\d\.\d{4} \d\d:\d\d gesendet\. Wir prüfen sie und melden uns bei Ihnen\.$/,
     );
+    await expect(page.getByTestId("lead-request-send")).toContainText("Vielen Dank!");
+    expect(await page.getByTestId("lead-request-send").innerText()).not.toMatch(/Vielen Dank\.|werden geprüft\. Wir melden/);
     await expect(page.getByTestId("lead-request-follow-up-open")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-follow_up")).toContainText("Einkommen");
     await expect(page.getByTestId("lead-request-summary-request")).toContainText("Zweitmeinung zur Knie-OP");
@@ -671,7 +682,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
   });
 
   test("wide multi-column layout at 1440 px, one step at a time without horizontal scrolling at 390 px", async ({ page }, testInfo) => {
-    await setup(page, sentWithBlocks(["A", "B", "C", "F", "H", "I", "J"]));
+    const { calls } = await setup(page, sentWithBlocks(["A", "B", "C", "F", "H", "I", "J"]));
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("/");
     await tab(page, "person").click();
@@ -696,6 +707,14 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await page.screenshot({ path: testInfo.outputPath("cabinet-1440-person.png"), fullPage: true });
     await tab(page, "follow_up").click();
     await expect(page.getByTestId("lead-request-follow-up")).toBeVisible();
+    // Block F: a citizen of the country or a person born there has an answer of its own and
+    // nothing to describe (QA 2026-10-10).
+    const residence = page.getByTestId("lead-request-follow-up-F");
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Staatsangehörigkeit / dort geboren");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ stay_reason: "citizenship_or_birth" });
+    await expect(residence.locator("#lead-request-stay_reason_details")).toHaveCount(0);
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Sonstiges");
+    await expect(residence.locator("#lead-request-stay_reason_details")).toBeVisible();
     await page.screenshot({ path: testInfo.outputPath("cabinet-1440-follow-up.png"), fullPage: true });
 
     // A phone: the dots side by side, the current step named below, no horizontal scrolling.
@@ -719,5 +738,21 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await page.screenshot({ path: testInfo.outputPath("cabinet-390-follow-up.png"), fullPage: true });
     await tab(page, "person").click();
     await page.screenshot({ path: testInfo.outputPath("cabinet-390-person.png"), fullPage: true });
+
+    // No visible step name is cut (QA 2026-10-10): on a phone the dots carry the names for screen
+    // readers only and the current step is named in full below; on a tablet the named tabs wrap.
+    for (const width of [390, 768]) {
+      await page.setViewportSize({ width, height: 900 });
+      const cut = await page.getByTestId("lead-request-steps").evaluate((nav) =>
+        // Each visible text (the screen-reader names are 1 px wide; a corner badge may stick out of its dot).
+        Array.from(nav.querySelectorAll<HTMLElement>("*"))
+          .filter((node) => node.childElementCount === 0 && node.textContent?.trim())
+          .filter((node) => node.getBoundingClientRect().width > 1 && node.scrollWidth > node.clientWidth + 1)
+          .map((node) => node.textContent ?? ""),
+      );
+      expect(cut, `${width}px`).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth), `${width}px`).toBe(0);
+      await page.screenshot({ path: testInfo.outputPath(`cabinet-${width}-steps.png`) });
+    }
   });
 });

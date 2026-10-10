@@ -374,18 +374,42 @@ export function LeadPayerDeclarationSection({
           ))}
         </div>
 
-        <div className="border-y border-border/70">
-          <PayerCheckbox
-            checked={form.actsOnOwnAccount}
-            disabled={readOnly}
-            onChange={(checked) => patch("actsOnOwnAccount", checked)}
-            label={tx(
+        {/* Own economic interest: Да / Нет, nothing chosen while nobody answered it. */}
+        <div
+          role="radiogroup"
+          aria-label={tx(
+            "Пациент действует в собственных экономических интересах",
+            "Der Patient handelt im eigenen wirtschaftlichen Interesse",
+          )}
+          className="flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-border/70 py-2"
+          data-testid="lead-payer-own-account"
+        >
+          <span className="text-sm text-foreground">
+            {tx(
               "Пациент действует в собственных экономических интересах",
               "Der Patient handelt im eigenen wirtschaftlichen Interesse",
             )}
-          />
+          </span>
+          {([
+            [true, tx("Да", "Ja")],
+            [false, tx("Нет", "Nein")],
+          ] as const).map(([value, label]) => (
+            <label key={String(value)} className="flex cursor-pointer items-center gap-1.5 text-sm">
+              <input
+                type="radio"
+                name={`lead-payer-own-account-${leadId}`}
+                checked={form.actsOnOwnAccount === value}
+                disabled={readOnly}
+                onChange={() => patch("actsOnOwnAccount", value)}
+              />
+              {label}
+            </label>
+          ))}
+          {form.actsOnOwnAccount === null ? (
+            <span className="text-xs text-muted-foreground">{tx("Не отвечено", "Nicht beantwortet")}</span>
+          ) : null}
         </div>
-        {!form.actsOnOwnAccount ? (
+        {form.actsOnOwnAccount === false ? (
           <div className="grid gap-4 sm:grid-cols-2">
             <PayerField label={tx("В чьих интересах (экономический бенефициар)", "Wirtschaftlich Berechtigter (GwG)")} required>
               <Input

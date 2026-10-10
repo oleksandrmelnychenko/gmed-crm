@@ -3906,20 +3906,22 @@ pub(crate) async fn store_my_upload(
             "medical",
             "medical",
         ),
+        // German names, like every document of the lead: the staff UI shows
+        // them in pickers and lists (QA 2026-10-10).
         UploadKind::Identity => (
-            "Identity document".to_string(),
+            "Ausweisdokument".to_string(),
             "identity",
             "identity",
             "internal",
         ),
         UploadKind::RepresentativeIdentity => (
-            format!("Identity document – {person}"),
+            format!("Ausweisdokument – {person}"),
             lead_representatives::UPLOAD_IDENTITY,
             "identity",
             "internal",
         ),
         UploadKind::RepresentativeAuthority => (
-            format!("Proof of authority – {person}"),
+            format!("Vertretungsnachweis – {person}"),
             lead_representatives::UPLOAD_AUTHORITY,
             "administrative",
             "internal",
@@ -3928,13 +3930,13 @@ pub(crate) async fn store_my_upload(
         // document nor an administrative one, so it never fulfils the
         // patient's required documents (passport, consent form).
         UploadKind::SelfFundsProof => (
-            "Proof of source of funds".to_string(),
+            "Nachweis der Mittelherkunft".to_string(),
             SELF_FUNDS_PROOF_KIND,
             "finance",
             "financial",
         ),
         UploadKind::RelationshipProof => (
-            "Proof of relationship to the payer".to_string(),
+            "Nachweis der Beziehung zum Kostenübernehmer".to_string(),
             RELATIONSHIP_PROOF_KIND,
             "administrative",
             "internal",

@@ -162,7 +162,8 @@ describe("payer page texts", () => {
       for (const [field, label] of Object.entries(text.organisationFields)) {
         expect(label, `${lang} ${field}`).not.toBe(text.fields[field as keyof typeof text.fields]);
       }
-      expect(text.declarationsIntroOrganisation).not.toBe(text.declarationsIntro);
+      // Whom the questions concern, no filler about the law or "yes or no" (QA 2026-10-10).
+      expect(text.declarationsIntroOrganisation).not.toMatch(/Geldwäsche|money laundering|відмиванню|отмыванию|Ja oder Nein|yes or no/i);
     }
   });
 });
