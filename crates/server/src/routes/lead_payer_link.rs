@@ -916,21 +916,69 @@ fn fill(target: &mut Option<String>, fallback: Option<&String>, max: usize) {
     }
 }
 
+/// What the lead entered in the cabinet's mask of a paying organisation
+/// (`lead_payer_declarations.organisation_*`): defaults of the payer link.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct OrganisationMask {
+    legal_form: Option<String>,
+    register_number: Option<String>,
+    contact_name: Option<String>,
+}
+
+async fn load_organisation_mask(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+) -> Result<OrganisationMask, sqlx::Error> {
+    let row = sqlx::query(
+        r#"SELECT organisation_legal_form, organisation_register_number, organisation_contact_name
+           FROM lead_payer_declarations WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let text = |column: &str| {
+        row.as_ref()
+            .and_then(|row| row.try_get::<Option<String>, _>(column).ok().flatten())
+            .filter(|value| !value.trim().is_empty())
+    };
+    Ok(OrganisationMask {
+        legal_form: text("organisation_legal_form"),
+        register_number: text("organisation_register_number"),
+        contact_name: text("organisation_contact_name"),
+    })
+}
+
+/// A contact person's name in one field, as first and last name: the last
+/// word is the last name.
+fn split_name(name: &str) -> (Option<String>, Option<String>) {
+    let name = name.split_whitespace().collect::<Vec<_>>();
+    match name.split_last() {
+        None => (None, None),
+        Some((last, [])) => (None, Some(last.to_string())),
+        Some((last, first)) => (Some(first.join(" ")), Some(last.to_string())),
+    }
+}
+
 /// The answers as the payer sees and submits them (D2): the statement's
-/// value, otherwise — through the link — only the name, the payer type and
-/// the relationship the lead entered in the declaration; for a paying parent
-/// the person and the identity document are the representative's (phase
-/// 1b-2), whatever the statement holds for them.
+/// value, otherwise — through the link — what the lead entered about the
+/// payer in the declaration as editable defaults; for a paying parent the
+/// person and the identity document are the representative's (phase 1b-2),
+/// whatever the statement holds for them.
 ///
-/// Data minimisation (QA 2026-10-06): the link never shows the payer what
-/// the lead entered about it beyond the name — no date or place of birth, no
-/// address, citizenship, phone or identity document. The payer states those
-/// itself; whoever opens the link learns nothing the lead said about the
-/// payer.
+/// Defaults (owner 2026-10-10, QA C4-f / A4-d, replacing the names-only rule
+/// of QA 2026-10-06): the name, the date of birth, the citizenships, the
+/// address and the phone of a person; the name, the legal form, the register
+/// number, the contact person, the seat and the phone of an organisation;
+/// the relationship. Never the patient's own data, nothing medical, no risk
+/// data, no identity document. A declaration whose identity a payer stated
+/// on an earlier link (`identity_adopted_at`) gives the name and the
+/// relationship only: whoever holds a new address never sees the previous
+/// payer's answers (QA 2026-10-06, S1). The e-mail is the link's own.
 fn effective_answers(
     stored: &Answers,
     declaration: &Declaration,
     parent: Option<&Representative>,
+    mask: &OrganisationMask,
 ) -> Answers {
     let mut answers = stored.clone();
     if let Some(parent) = parent {
@@ -1016,6 +1064,44 @@ fn effective_answers(
         ),
     ] {
         fill(target, fallback, max);
+    }
+    if declaration.identity_adopted_at.is_none() {
+        for (target, fallback, max) in [
+            (&mut answers.street, declaration.street.as_ref(), 200),
+            (&mut answers.zip, declaration.zip.as_ref(), 20),
+            (&mut answers.city, declaration.city.as_ref(), 200),
+            (&mut answers.country, declaration.country.as_ref(), 2),
+            (&mut answers.phone, declaration.phone.as_ref(), 200),
+        ] {
+            fill(target, fallback, max);
+        }
+        if declaration.is_organisation() {
+            let (first, last) = mask
+                .contact_name
+                .as_deref()
+                .map(split_name)
+                .unwrap_or_default();
+            for (target, fallback, max) in [
+                (&mut answers.legal_form, mask.legal_form.as_ref(), 100),
+                (
+                    &mut answers.register_number,
+                    mask.register_number.as_ref(),
+                    60,
+                ),
+                (&mut answers.representative_first_name, first.as_ref(), 100),
+                (&mut answers.representative_last_name, last.as_ref(), 100),
+            ] {
+                fill(target, fallback, max);
+            }
+        } else {
+            if answers.date_of_birth.is_none() {
+                answers.date_of_birth = declaration.date_of_birth;
+            }
+            if answers.citizenships.is_empty() {
+                answers.citizenships =
+                    normalize_citizenships(&declaration.citizenships).unwrap_or_default();
+            }
+        }
     }
     if answers.relationship_kind.is_none() {
         answers.relationship_kind = declaration.relationship_kind.clone();
@@ -1654,6 +1740,8 @@ struct LeadContext {
     open: bool,
     request_submitted: bool,
     declaration: Option<Declaration>,
+    /// The organisation mask the lead entered (defaults of the link).
+    organisation_mask: OrganisationMask,
     loaded: lead_representatives::Loaded,
     statement: Option<Statement>,
     uploads: Vec<PayerUpload>,
@@ -1683,6 +1771,7 @@ async fn load_context(
         .collect::<Vec<_>>()
         .join(" ");
     let declaration = lead_payer::load_declaration(conn, lead_id).await?;
+    let organisation_mask = load_organisation_mask(conn, lead_id).await?;
     let loaded = lead_representatives::load(conn, lead_id)
         .await?
         .unwrap_or_default();
@@ -1706,6 +1795,7 @@ async fn load_context(
             .flatten()
             .is_some(),
         declaration,
+        organisation_mask,
         loaded,
         statement,
         uploads,
@@ -1847,7 +1937,12 @@ fn questionnaire(
         .payer_type
         .clone()
         .unwrap_or_else(|| lead_payer::PAYER_TYPE_PERSON.to_string());
-    let answers = effective_answers(&statement.answers, &declaration, parent);
+    let answers = effective_answers(
+        &statement.answers,
+        &declaration,
+        parent,
+        &context.organisation_mask,
+    );
     let submitted = statement.submitted_at.is_some();
     let may_delete = |access_kind: &str, uploaded_by: Option<Uuid>, locked: bool| {
         !locked
@@ -2584,7 +2679,7 @@ async fn save_patch(
         .map_err(FieldError::into_response)?;
     // The rules that look at what the payer sees: the words describe the
     // kind `other`; a habitual residence is asked only when it differs.
-    let effective = effective_answers(&next, &declaration, parent);
+    let effective = effective_answers(&next, &declaration, parent, &context.organisation_mask);
     if effective.relationship_kind.as_deref() != Some("other") {
         next.relationship = None;
     }
@@ -4237,16 +4332,30 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         };
         let link = newest_link(&mut conn, lead_id).await?;
         let check = lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id).await?;
-        Ok::<_, sqlx::Error>(Some((context, link, check)))
+        // The stored assessment only (the send itself reassesses in the gate).
+        let risk = crate::risk::store::load(&mut conn, lead_id).await?;
+        Ok::<_, sqlx::Error>(Some((context, link, check, risk)))
     }
     .await;
-    let (context, link, check) = match loaded {
+    let (context, link, check, risk) = match loaded {
         Ok(Some(found)) => found,
         Ok(None) => return intake::err(StatusCode::NOT_FOUND, "Lead not found"),
         Err(error) => return intake::internal(error, "load payer link"),
     };
     let mail_available = mail_available(state).await;
     let blocked_reason = context.blocked_reason();
+    // The risk gate holds the link (QA 2026-10-10: the panel still said "can be
+    // sent now" at level 3): `rejected`, or `review` until a decision or block D.
+    let risk_hold = risk
+        .as_ref()
+        .filter(|assessment| assessment.holds_payer_link())
+        .map(|assessment| {
+            if assessment.status == crate::risk::store::STATUS_REJECTED {
+                "rejected"
+            } else {
+                "review"
+            }
+        });
     let now = Utc::now();
     let link_json = link.map(|(link, sent_by_name, last_email_status)| {
         json!({
@@ -4270,6 +4379,7 @@ async fn staff_payload(state: &AppState, auth: &AuthUser, lead_id: Uuid) -> Resp
         "mode": context.mode().map(Mode::as_str),
         "can_send": blocked_reason.is_none() && mail_available && auth.can(Capability::LeadsEdit),
         "blocked_reason": blocked_reason,
+        "risk_hold": risk_hold,
         "mail_available": mail_available,
         "link": link_json,
         // Information for staff only: the expected total never asks for
@@ -5540,7 +5650,7 @@ mod tests {
     }
 
     #[test]
-    fn the_link_takes_only_the_name_and_the_relationship_from_the_declaration() {
+    fn the_link_takes_what_the_lead_entered_about_the_payer_as_defaults() {
         // Everything the lead may have entered about the payer.
         let declaration = Declaration {
             place_of_birth: Some("Graz".into()),
@@ -5556,26 +5666,34 @@ mod tests {
             first_name: Some("Viktor Paul".into()),
             ..Answers::default()
         };
-        let answers = effective_answers(&stored, &declaration, None);
+        let none = OrganisationMask::default();
+        let answers = effective_answers(&stored, &declaration, None, &none);
         assert_eq!(answers.first_name.as_deref(), Some("Viktor Paul"));
         assert_eq!(answers.last_name.as_deref(), Some("Zahler"));
         assert_eq!(answers.relationship_kind.as_deref(), Some("other"));
         assert_eq!(answers.relationship.as_deref(), Some("Onkel"));
-        // Data minimisation (QA 2026-10-06): the payer states birth data,
-        // address, citizenships and phone itself.
-        assert_eq!(answers.date_of_birth, None);
-        assert_eq!(answers.birth_place, None);
-        assert!(answers.citizenships.is_empty());
+        // Editable defaults (owner 2026-10-10, QA C4-f): date of birth,
+        // citizenships, address and phone the lead entered.
+        assert_eq!(answers.date_of_birth, NaiveDate::from_ymd_opt(1970, 5, 1));
+        assert_eq!(answers.citizenships, ["AT"]);
         assert_eq!(
             (
-                &answers.street,
-                &answers.zip,
-                &answers.city,
-                &answers.country,
-                &answers.phone
+                answers.street.as_deref(),
+                answers.zip.as_deref(),
+                answers.city.as_deref(),
+                answers.country.as_deref(),
+                answers.phone.as_deref()
             ),
-            (&None, &None, &None, &None, &None)
+            (
+                Some("Ringstraße 9"),
+                Some("1010"),
+                Some("Wien"),
+                Some("AT"),
+                Some("+43 1 000000")
+            )
         );
+        // Not the birth place, never an identity document.
+        assert_eq!(answers.birth_place, None);
         assert_eq!(answers.id_document_number, None);
         // What the payer states is the effective value.
         let stated = Answers {
@@ -5584,20 +5702,63 @@ mod tests {
             street: Some("Zahlerstraße 5".into()),
             ..Answers::default()
         };
-        let answers = effective_answers(&stated, &declaration, None);
+        let answers = effective_answers(&stated, &declaration, None, &none);
         assert_eq!(answers.date_of_birth, NaiveDate::from_ymd_opt(1962, 4, 12));
         assert_eq!(answers.citizenships, ["DE"]);
         assert_eq!(answers.street.as_deref(), Some("Zahlerstraße 5"));
         assert_eq!(answers.first_name.as_deref(), Some("Viktor"));
+        // A declaration a payer already answered for (another address now):
+        // the name and the relationship only (QA 2026-10-06, S1).
+        let adopted = Declaration {
+            identity_adopted_at: Some(Utc::now()),
+            ..declaration.clone()
+        };
+        let answers = effective_answers(&Answers::default(), &adopted, None, &none);
+        assert_eq!(answers.first_name.as_deref(), Some("Viktor"));
+        assert_eq!(answers.date_of_birth, None);
+        assert!(answers.citizenships.is_empty());
+        assert_eq!((&answers.street, &answers.phone), (&None, &None));
+        // An organisation: the seat and the mask the lead entered.
+        let company = Declaration {
+            payer_type: Some("company".into()),
+            organisation_name: Some("Beispiel GmbH".into()),
+            first_name: None,
+            last_name: None,
+            ..declaration.clone()
+        };
+        let mask = OrganisationMask {
+            legal_form: Some("GmbH".into()),
+            register_number: Some("HRB 12345".into()),
+            contact_name: Some("Anna Maria Muster".into()),
+        };
+        let answers = effective_answers(&Answers::default(), &company, None, &mask);
+        assert_eq!(answers.organisation_name.as_deref(), Some("Beispiel GmbH"));
+        assert_eq!(answers.legal_form.as_deref(), Some("GmbH"));
+        assert_eq!(answers.register_number.as_deref(), Some("HRB 12345"));
+        assert_eq!(
+            answers.representative_first_name.as_deref(),
+            Some("Anna Maria")
+        );
+        assert_eq!(answers.representative_last_name.as_deref(), Some("Muster"));
+        assert_eq!(answers.street.as_deref(), Some("Ringstraße 9"));
+        assert_eq!(answers.date_of_birth, None, "a person's data only");
+        assert!(answers.citizenships.is_empty());
+        assert_eq!(split_name(" Muster "), (None, Some("Muster".into())));
+        assert_eq!(split_name("  "), (None, None));
         // A declaration name over the statement's limit is asked again.
         let long = Declaration {
             last_name: Some("Z".repeat(101)),
             ..person_payer()
         };
         assert!(
-            effective_answers(&Answers::default(), &long, None)
-                .last_name
-                .is_none()
+            effective_answers(
+                &Answers::default(),
+                &long,
+                None,
+                &OrganisationMask::default()
+            )
+            .last_name
+            .is_none()
         );
     }
 
@@ -5648,7 +5809,12 @@ mod tests {
             pep_self: Some(true),
             pep_related: Some(true),
             high_risk_country: Some(true),
-            ..effective_answers(&Answers::default(), &declaration, None)
+            ..effective_answers(
+                &Answers::default(),
+                &declaration,
+                None,
+                &OrganisationMask::default(),
+            )
         };
         let required = |level: u8| Requirements {
             privacy_acknowledged: true,
@@ -5668,8 +5834,19 @@ mod tests {
 
     #[test]
     fn the_missing_list_follows_the_form_order() {
-        let declaration = person_payer();
-        let answers = effective_answers(&Answers::default(), &declaration, None);
+        // Nothing the link could take over besides the name.
+        let declaration = Declaration {
+            date_of_birth: None,
+            citizenships: Vec::new(),
+            country: None,
+            ..person_payer()
+        };
+        let answers = effective_answers(
+            &Answers::default(),
+            &declaration,
+            None,
+            &OrganisationMask::default(),
+        );
         let required = Requirements {
             privacy_acknowledged: false,
             payer_type: "person",
@@ -5716,9 +5893,15 @@ mod tests {
             last_name: None,
             date_of_birth: None,
             citizenships: Vec::new(),
+            country: None,
             ..person_payer()
         };
-        let answers = effective_answers(&Answers::default(), &company, None);
+        let answers = effective_answers(
+            &Answers::default(),
+            &company,
+            None,
+            &OrganisationMask::default(),
+        );
         let required = Requirements {
             privacy_acknowledged: true,
             payer_type: "company",

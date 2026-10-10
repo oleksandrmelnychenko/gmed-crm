@@ -133,7 +133,7 @@ import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, clearApiCache } from "@/lib/api";
-import { appDateKey, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -565,6 +565,24 @@ function amlRiskForCountries(...values: Array<string | null | undefined>): {
 }
 
 /**
+ * The country boxes of the § 15 form (QA 2026-10-10 B4): "Vertragspartner ist
+ * dort niedergelassen oder wohnhaft" only when the patient lives there; a
+ * citizenship of the patient and every country of a third-party payer
+ * (residence, seat, citizenship) tick "Transaktion mit Bezug zu einem
+ * Drittstaat mit hohem Risiko" — the payer is not the contract partner.
+ */
+function amlCountryBoxes(
+  country: string | null | undefined,
+  citizenships: readonly string[],
+  payerCountries: readonly string[],
+): { resident: boolean; transaction: boolean } {
+  return {
+    resident: amlRiskForCountries(country) !== null,
+    transaction: amlRiskForCountries(...citizenships, ...payerCountries) !== null,
+  };
+}
+
+/**
  * Why the enhanced check is required (owner rule 2026-10-07): the server's
  * reasons with the black-list countries, or a black-list country the wizard
  * shows before it is saved; "" while nothing requires it.
@@ -589,6 +607,16 @@ function amlEnhancedCheckRequiredText(
 }
 
 /** Information next to the check, never a requirement: an open sanctions match, a high-risk country, a PEP. */
+/**
+ * Whether the server judged the enhanced check for good: loaded (the lead
+ * exists) and no possible sanctions match waits. Only then may the wizard say
+ * "not required" (QA 2026-10-10: before the lead existed it said so next to a
+ * flagged name).
+ */
+function amlCheckSettled(check: LeadEnhancedCheck | null): boolean {
+  return Boolean(check) && !check?.reasons.includes(SANCTIONS_REVIEW_PENDING);
+}
+
 function amlEnhancedCheckHints({
   check,
   highRiskCountries,
@@ -608,7 +636,9 @@ function amlEnhancedCheckHints({
   }
   // "Not required" would contradict a required check (level 2 and more, QA 2026-10-10).
   if (highRiskCountries.length > 0 && !check?.required) {
-    hints.push(highRiskCountryHint(highRiskCountries.map((code) => countryLabel(code, lang)).join(", "), tx));
+    hints.push(
+      highRiskCountryHint(highRiskCountries.map((code) => countryLabel(code, lang)).join(", "), tx, amlCheckSettled(check)),
+    );
   }
   if (pep) hints.push(pepEnhancedCheckHint(tx));
   return hints;
@@ -2200,6 +2230,27 @@ function wizardDocumentPreviewKind(document: DocumentItem): "image" | "pdf" | nu
   return null;
 }
 
+/** The id of a commercial document's error block (scrolled into view after a refused action). */
+function commercialDocumentErrorId(templateId: string): string {
+  return `lead-commercial-document-error-${templateId}`;
+}
+
+/**
+ * Confirming the framework contract's signature makes the contract signed,
+ * which GMED countersigns only after the client signed the order (409
+ * `payer_gate_blocked`, reason `client_order_signature_missing`): the next
+ * step in words. Other refusals keep their own text (`null`).
+ */
+function frameworkContractSignErrorText(error: unknown, tx: Tx): string | null {
+  if (!(error instanceof ApiRequestError) || error.body?.error !== "payer_gate_blocked") return null;
+  const reasons = Array.isArray(error.body.reasons) ? error.body.reasons : [];
+  if (reasons.length !== 1 || reasons[0] !== "client_order_signature_missing") return null;
+  return tx(
+    "Подпись рамочного договора подтверждается после подписи заказа: сначала отметьте «Клиент подписал заказ», затем подтвердите подпись договора.",
+    "Die Unterschrift des Rahmenvertrags wird nach der Unterschrift des Auftrags bestätigt: zuerst „Auftrag vom Kunden unterzeichnet“ markieren, dann die Vertragsunterschrift bestätigen.",
+  );
+}
+
 function errorText(error: unknown, tx: Tx): string {
   const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx);
   if (payerGate) return payerGate;
@@ -3687,6 +3738,20 @@ export function LeadWizard({
   );
   // Trigger flow 2026-10-07: points, level, blocks and staff decisions of the lead's risk assessment.
   const risk = useLeadRiskAssessment(open && step === "documents" ? leadId : null, enhancedCheckVersion);
+  // A decision or a request of block D lifts the risk hold of the payer link: its panel follows.
+  const riskPayerLinkKey = risk.assessment
+    ? [risk.assessment.level, risk.assessment.status, risk.assessment.requested_blocks.join("")].join("|")
+    : "";
+  // The follow-up blocks the lead is asked: "Данные от пациента" leaves out the unasked questions.
+  const riskAskedBlocks = useMemo(() => {
+    const assessment = risk.assessment;
+    if (!assessment) return [];
+    return [...new Set([...assessment.blocks.filter((block) => block.open).map((block) => block.key), ...assessment.requested_blocks])];
+  }, [risk.assessment]);
+  const reloadPayerLink = payerLink.reload;
+  useEffect(() => {
+    if (riskPayerLinkKey) void reloadPayerLink();
+  }, [riskPayerLinkKey, reloadPayerLink]);
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   // The patient form is filled from the sent request: nothing to generate before.
   const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
@@ -4010,6 +4075,17 @@ export function LeadWizard({
     () => draft ? amlRiskForCountries(draft.country, ...draft.citizenships, ...payerCountries) : null,
     [draft?.country, draft?.citizenships, payerCountries],
   );
+  // Step-1 fields that hold a value: no "the patient fills it in" hint over them.
+  const step1FilledDraftKeys = useMemo(() => {
+    if (!draft) return [];
+    const values = draft as unknown as Record<string, unknown>;
+    return Object.keys(PORTAL_FIELD_BY_DRAFT_KEY).filter((key) => {
+      const value = values[key];
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "string") return value.trim() !== "";
+      return value !== null && value !== undefined;
+    });
+  }, [draft]);
   const amlPepTriggered = Boolean(
     draft?.amlEnhancedDueDiligence.pepContractPartner
     || draft?.amlEnhancedDueDiligence.pepBeneficialOwner,
@@ -4093,17 +4169,27 @@ export function LeadWizard({
     [documents],
   );
   const hasMedicalRecords = lead?.has_medical_records === "yes" || medicalDocuments.length > 0;
+  // A representative's own uploads are listed under that person's ID card, not as "other documents".
+  const representativeDocumentIds = useMemo(
+    () => new Set(
+      (step1Portal.intake?.representation?.representatives ?? []).flatMap((person) =>
+        [...person.identity_documents, ...person.authority_documents].map((item) => item.id),
+      ),
+    ),
+    [step1Portal.intake],
+  );
   const supplementaryDocuments = useMemo(
     () => documents.filter((item) => (
       !item.file_deleted_at
       && item.has_stored_file !== false
+      && !representativeDocumentIds.has(item.id)
       && !wizardDocumentKind(item)
       && !(item.is_medical && !item.generated_template_id)
       && !["framework_contract", "single_order", "order_cost_estimate", "cost_estimate", "cost_coverage_declaration"].includes(item.generated_template_id ?? "")
       // The payer's signature package lists its own documents (phase 3b).
       && !(PAYER_PACKAGE_TEMPLATE_IDS as readonly string[]).includes(item.generated_template_id ?? "")
     )),
-    [documents],
+    [documents, representativeDocumentIds],
   );
   // The third-party payer's Kostenübernahmeerklärung (payer section).
   const costAssumptionDocuments = useMemo(
@@ -4198,6 +4284,7 @@ export function LeadWizard({
 
     return (
       <div
+        id={commercialDocumentErrorId(templateId)}
         role="alert"
         aria-live="polite"
         className="mt-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs text-destructive"
@@ -4788,11 +4875,13 @@ export function LeadWizard({
   }) {
     const country = change.country !== undefined ? change.country : draft?.country;
     const citizenships = change.citizenships ?? draft?.citizenships ?? [];
+    const nextPayerCountries = change.payerCountries ?? payerCountries;
     const nextRisk = amlRiskForCountries(
       country,
       ...citizenships,
-      ...(change.payerCountries ?? payerCountries),
+      ...nextPayerCountries,
     );
+    const boxes = amlCountryBoxes(country, citizenships, nextPayerCountries);
     const newBlacklistCountry = nextRisk?.countries.some((code) => (
       AML_BLACKLIST_COUNTRY_CODES.has(code) && !amlRisk?.countries.includes(code)
     )) ?? false;
@@ -4808,7 +4897,8 @@ export function LeadWizard({
       amlEnhancedDueDiligence: nextRisk ? {
         ...current.amlEnhancedDueDiligence,
         affectedThirdCountry,
-        highRiskCountryResident: true,
+        highRiskCountryResident: boxes.resident,
+        highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
         // A stated reason answers "erhöhtes Risiko" on the GwG sheet: only
         // the black list fills it by itself.
         riskReason: current.amlEnhancedDueDiligence.riskReason || (
@@ -4820,6 +4910,10 @@ export function LeadWizard({
         ...current.amlEnhancedDueDiligence,
         affectedThirdCountry: "",
         highRiskCountryResident: false,
+        // The country tick goes with the country it was set for.
+        highRiskCountryTransaction: current.amlEnhancedDueDiligence.affectedThirdCountry
+          ? false
+          : current.amlEnhancedDueDiligence.highRiskCountryTransaction,
       },
     } : current);
     // Only for an existing lead: before the lead is created the form has no
@@ -4862,16 +4956,22 @@ export function LeadWizard({
     const affectedThirdCountry = amlRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
-    setDraft((current) => current ? {
-      ...current,
-      amlEnhancedDueDiligence: {
-        ...current.amlEnhancedDueDiligence,
-        affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
-        highRiskCountryResident: amlRisk
-          ? true
-          : current.amlEnhancedDueDiligence.highRiskCountryResident,
-      },
-    } : current);
+    setDraft((current) => {
+      if (!current) return current;
+      // Residence only for the patient's own country (QA 2026-10-10 B4).
+      const boxes = amlCountryBoxes(current.country, current.citizenships, payerCountries);
+      return {
+        ...current,
+        amlEnhancedDueDiligence: {
+          ...current.amlEnhancedDueDiligence,
+          affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
+          ...(amlRisk ? {
+            highRiskCountryResident: boxes.resident,
+            highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
+          } : {}),
+        },
+      };
+    });
     setAmlSheetError("");
     setAmlSheetOpen(true);
     void prefillAmlFromLeadAnswers();
@@ -5708,12 +5808,21 @@ ${serviceCommentLines.join("\n")}`
       else await reload(false, true);
     } catch (nextError) {
       setValidationContext(null);
-      const message = signatureGateErrorText(nextError, tx) ?? errorText(nextError, tx);
+      // QA 2026-10-10: the refusal (the client signs the order first) went unnoticed.
+      const message = frameworkContractSignErrorText(nextError, tx)
+        ?? signatureGateErrorText(nextError, tx)
+        ?? errorText(nextError, tx);
       if (fromPreview) setDocumentPreviewError(message);
-      else setCommercialDocumentErrors((current) => ({
-        ...current,
-        framework_contract: message,
-      }));
+      else {
+        setCommercialDocumentErrors((current) => ({
+          ...current,
+          framework_contract: message,
+        }));
+        window.requestAnimationFrame(() => {
+          document.getElementById(commercialDocumentErrorId("framework_contract"))
+            ?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        });
+      }
     } finally {
       setBusy(null);
     }
@@ -6777,6 +6886,7 @@ ${serviceCommentLines.join("\n")}`
                 errorIdByDraftKey={STEP1_PORTAL_ERROR_IDS}
                 patientFilledKeys={PATIENT_FILLED_KEYS}
                 portalFieldByDraftKey={PORTAL_FIELD_BY_DRAFT_KEY}
+                filledDraftKeys={step1FilledDraftKeys}
                 tx={tx}
               >
               <Section
@@ -7183,7 +7293,9 @@ ${serviceCommentLines.join("\n")}`
                         <div className="font-semibold">
                           {amlRequired
                             ? tx("Требуется усиленная AML-проверка", "Verstärkte AML-Prüfung erforderlich")
-                            : tx("Усиленная AML-проверка не обязательна", "Verstärkte AML-Prüfung nicht vorgeschrieben")}
+                            : amlCheckSettled(enhancedCheck)
+                              ? tx("Усиленная AML-проверка не обязательна", "Verstärkte AML-Prüfung nicht vorgeschrieben")
+                              : tx("Усиленная AML-проверка", "Verstärkte AML-Prüfung")}
                         </div>
                         {amlRequiredText ? (
                           <div className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-reasons">
@@ -7776,6 +7888,7 @@ ${serviceCommentLines.join("\n")}`
                     intake={step1Portal.intake}
                     payer={payer.data?.declaration ?? null}
                     payerLink={payerLink.data}
+                    askedBlocks={riskAskedBlocks}
                     tx={tx}
                     lang={lang}
                   />
@@ -8154,34 +8267,60 @@ ${serviceCommentLines.join("\n")}`
                   {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
                 </p>
                 {/* Trigger flow 2026-10-07: staff enter the document data from the scan; the lead only uploads it. */}
-                {leadId ? (
-                  <LeadIdentityDocumentData
-                    leadId={leadId}
-                    intake={step1Portal.intake}
-                    fallbackValidUntil={draft.passportExpiry}
-                    tx={tx}
-                    lang={lang}
-                    disabled={isBusy}
-                    onSaved={() => {
-                      void reloadStep1PortalState();
-                      void risk.controller.reload();
-                    }}
-                  />
-                ) : null}
-                <WizardDocumentRows
-                  documents={wizardDocuments.identity}
-                  complianceKind="identity"
-                  emptyLabel={tx("Файл не загружен", "Keine Datei hochgeladen")}
-                  lang={lang}
-                  busy={busy}
-                  disabled={isBusy}
-                  tx={tx}
-                  onOpen={(document) => void openOrDownloadDocument(document)}
-                  onDownload={(document) => void downloadDocument(document)}
-                  onSign={(document, kind) => void signDocument(document.id, kind)}
-                  onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
-                  onChanged={() => { void refreshDocumentsState(); }}
-                />
+                {(() => {
+                  const patientScans = (
+                    <WizardDocumentRows
+                      documents={wizardDocuments.identity}
+                      complianceKind="identity"
+                      emptyLabel={tx("Файл не загружен", "Keine Datei hochgeladen")}
+                      lang={lang}
+                      busy={busy}
+                      disabled={isBusy}
+                      tx={tx}
+                      onOpen={(document) => void openOrDownloadDocument(document)}
+                      onDownload={(document) => void downloadDocument(document)}
+                      onSign={(document, kind) => void signDocument(document.id, kind)}
+                      onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                      onChanged={() => { void refreshDocumentsState(); }}
+                    />
+                  );
+                  if (!leadId) return patientScans;
+                  return (
+                    <LeadIdentityDocumentData
+                      leadId={leadId}
+                      intake={step1Portal.intake}
+                      fallbackValidUntil={draft.passportExpiry}
+                      tx={tx}
+                      lang={lang}
+                      disabled={isBusy}
+                      patientScans={patientScans}
+                      representativeFiles={(person) => {
+                        // QA 2026-10-10: a representative's own scan sat under "Другие документы".
+                        const ids = new Set([...person.identity_documents, ...person.authority_documents].map((item) => item.id));
+                        const files = documents.filter((item) => ids.has(item.id) && !item.file_deleted_at);
+                        if (files.length === 0) return null;
+                        return (
+                          <WizardDocumentRows
+                            documents={files}
+                            emptyLabel=""
+                            lang={lang}
+                            busy={busy}
+                            disabled={isBusy}
+                            tx={tx}
+                            onOpen={(document) => void openOrDownloadDocument(document)}
+                            onDownload={(document) => void downloadDocument(document)}
+                            onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
+                            onChanged={() => { void refreshDocumentsState(); }}
+                          />
+                        );
+                      }}
+                      onSaved={() => {
+                        void reloadStep1PortalState();
+                        void risk.controller.reload();
+                      }}
+                    />
+                  );
+                })()}
               </Section>
               {supplementaryDocuments.length > 0 ? (
                 <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Другие документы", "Weitere Dokumente")}>
@@ -10328,7 +10467,7 @@ ${serviceCommentLines.join("\n")}`
                     {candidate.first_name} {candidate.last_name}
                   </div>
                   <div className="truncate text-xs text-muted-foreground">
-                    {candidate.patient_id} · {candidate.birth_date}
+                    {candidate.patient_id} · {formatAppDate(candidate.birth_date) || candidate.birth_date}
                     {candidate.email ? ` · ${candidate.email}` : ""}
                   </div>
                 </div>

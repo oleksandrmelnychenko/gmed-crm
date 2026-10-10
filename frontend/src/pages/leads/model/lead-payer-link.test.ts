@@ -211,6 +211,23 @@ describe("payer link: what may be done", () => {
     });
   });
 
+  it("holds the send while the risk assessment waits at level 3, naming the real button", () => {
+    const held = payerLinkActions({ ...state(), risk_hold: "review" }, false, ru);
+    expect(held.sendEnabled).toBe(false);
+    expect(held.highlight).toBe(false);
+    expect(held.sendBlockedText).toContain("«Запросить сведения»");
+    expect(held.sendBlockedText).not.toContain("дополнительные");
+    const rejected = payerLinkActions({ ...state(), risk_hold: "rejected" }, false, de);
+    expect(rejected.sendBlockedText).toContain("abgelehnt");
+    // The server's refusal says the same.
+    const refusal = new ApiRequestError("risk_review_required", {
+      status: 409,
+      code: "risk_review_required",
+      body: { error: "risk_review_required", rejected: false },
+    });
+    expect(payerLinkErrorText(refusal, ru)).toBe(held.sendBlockedText);
+  });
+
   it("offers resend and revoke while a link is active", () => {
     const actions = payerLinkActions(state({ link: link({ status: "opened" }) }), false, de);
     expect(actions.sendKind).toBe("resend");
@@ -495,11 +512,14 @@ describe("payer link: the server's answer", () => {
       mode: "link",
       can_send: false,
       blocked_reason: "request_not_submitted",
+      risk_hold: null,
       mail_available: true,
       link: null,
       estimated_total_eur: "12000.00",
       questionnaire: null,
     });
+    expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "review" })?.risk_hold).toBe("review");
+    expect(normalizeLeadPayerLinkState({ can_send: true, risk_hold: "level3" })?.risk_hold).toBeNull();
     const q = normalizeStaffPayerQuestionnaire({ answers: { pep_self: "yes", citizenships: ["AT", 3] }, check_level: 3 });
     expect(q?.answers.pep_self).toBeNull();
     expect(q?.answers.citizenships).toEqual(["AT"]);

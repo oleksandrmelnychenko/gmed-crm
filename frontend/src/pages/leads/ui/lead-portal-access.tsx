@@ -789,7 +789,8 @@ export function LeadGuardianAccess({
   const [intake, setIntake] = useState<LeadPortalIntake | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string } | null>(null);
+  // `name`: the parent's own, for the greeting of the message (QA 2026-10-10: "Здравствуйте!" without a name).
+  const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string; name: string } | null>(null);
   const [notice, setNotice] = useState("");
   const onIntakeRef = useRef(onIntake);
   useEffect(() => {
@@ -811,7 +812,11 @@ export function LeadGuardianAccess({
     void load();
   }, [load]);
 
-  async function run(key: string, action: () => Promise<LeadGuardianAccessIssued | { login_deactivated: boolean }>) {
+  async function run(
+    key: string,
+    action: () => Promise<LeadGuardianAccessIssued | { login_deactivated: boolean }>,
+    name: string | null = null,
+  ) {
     setBusy(key);
     setError("");
     setNotice("");
@@ -824,6 +829,7 @@ export function LeadGuardianAccess({
             password: result.one_time_password,
             created: result.created,
             userId: result.user_id,
+            name: name?.trim() ?? "",
           });
         } else if (result.reused) {
           setNotice(tx(
@@ -867,7 +873,7 @@ export function LeadGuardianAccess({
                 size="sm"
                 className="h-7 gap-1.5 rounded-md text-xs"
                 disabled={busy !== null}
-                onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id))}
+                onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
               >
                 <KeyRound className="size-3.5" />
                 {tx("Новый пароль", "Neues Passwort")}
@@ -911,7 +917,7 @@ export function LeadGuardianAccess({
                 size="sm"
                 className="ml-auto h-7 gap-1.5 rounded-md text-xs"
                 disabled={busy !== null}
-                onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId))}
+                onClick={() => void run(`issue-${contactId}`, () => issueLeadGuardianAccess(lead.id, contactId), candidate.name)}
               >
                 {busy === `issue-${contactId}` ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
                 {tx("Выдать доступ", "Zugang anlegen")}
@@ -936,7 +942,7 @@ export function LeadGuardianAccess({
             ? {
                 email: issued.email,
                 password: issued.password,
-                firstName: "",
+                firstName: issued.name,
                 leadId: lead.id,
                 userId: issued.userId,
                 audience: "parent",

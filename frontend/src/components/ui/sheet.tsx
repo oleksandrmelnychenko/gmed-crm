@@ -7,6 +7,7 @@ import {
   createConfirmedDismissEventDetails,
   isOverlayDirty,
   isOwnOverlayEvent,
+  isAuxiliaryOverlayEscape,
   isCancelDismissControl,
   isInternalOverlayInteractionEvent,
   OverlayDirtyContext,
@@ -145,6 +146,12 @@ function Sheet({
         eventDetails.reason === "outside-press" &&
         isInternalOverlayInteractionEvent(eventDetails.event)
       ) {
+        eventDetails.cancel()
+        return
+      }
+
+      // Escape in a list or picker over the sheet closes that list only.
+      if (!open && isAuxiliaryOverlayEscape(eventDetails.reason, eventDetails.event)) {
         eventDetails.cancel()
         return
       }

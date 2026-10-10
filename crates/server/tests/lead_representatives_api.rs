@@ -394,8 +394,11 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         }),
         "{body}"
     );
-    // The guardianship question is switched off (owner 2026-10-09).
-    assert_eq!(missing_representation(&body), vec!["has_representative"]);
+    // The guardianship question is asked again (owner 2026-10-10).
+    assert_eq!(
+        missing_representation(&body),
+        vec!["has_representative", "under_guardianship"]
+    );
 
     // A key that does not fit an adult, an unknown key and a value of another
     // type are refused with the key.
@@ -833,10 +836,10 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         1,
         "{intake}"
     );
-    // The representative's files are neither the lead's identity document
-    // nor medical uploads.
+    // The representative's files are not the lead's identity document; "N
+    // documents" counts every file of the cabinet (QA 2026-10-10).
     assert_eq!(intake["identity_documents"], json!([]), "{intake}");
-    assert_eq!(intake["progress"]["documents"], 0, "{intake}");
+    assert_eq!(intake["progress"]["documents"], 2, "{intake}");
     let (status, intake) = json_request(
         router,
         "GET",
@@ -1061,8 +1064,12 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // The guardianship question is switched off (owner 2026-10-09): nothing is asked.
-    assert!(missing_representation(&body).is_empty(), "{body}");
+    // The guardianship question is asked again (owner 2026-10-10).
+    assert_eq!(
+        missing_representation(&body),
+        vec!["under_guardianship"],
+        "{body}"
+    );
 }
 
 #[tokio::test]
@@ -1702,7 +1709,11 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     // The person's details are asked in the first step again.
     assert_eq!(
         missing_representation(&body),
-        keys("agent", &ADULT_FIELDS),
+        [
+            keys("agent", &ADULT_FIELDS),
+            vec!["under_guardianship".to_string()]
+        ]
+        .concat(),
         "{body}"
     );
     let (status, error) = json_request(

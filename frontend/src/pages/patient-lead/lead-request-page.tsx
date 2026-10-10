@@ -291,8 +291,12 @@ function LeadRequestView({
     setMissingShownSteps((current) => (current.has(id) ? current : new Set(current).add(id)));
   }, []);
   const badgesFor = useCallback(
-    // A request sent once was checked as a whole: its badges show.
-    (id: StepId) => sendOpened || Boolean(request.submitted_at) || missingShownSteps.has(id),
+    // A request sent once was checked as a whole: its badges show. The follow-up
+    // step is sent on its own: its badge only after "next" or "send" on it (QA 2026-10-10).
+    (id: StepId) =>
+      id === "follow_up"
+        ? missingShownSteps.has(id)
+        : sendOpened || Boolean(request.submitted_at) || missingShownSteps.has(id),
     [missingShownSteps, request.submitted_at, sendOpened],
   );
 

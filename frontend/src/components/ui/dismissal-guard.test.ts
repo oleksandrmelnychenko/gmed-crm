@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   confirmDirtyDismiss,
+  isAuxiliaryOverlayEscape,
   isInternalOverlayInteractionEvent,
   isOverlayDirty,
   isOverlayDismissReason,
@@ -71,6 +72,28 @@ describe("dismissal guard", () => {
     const event = { target: new FakeElement() } as unknown as Event
 
     expect(isInternalOverlayInteractionEvent(event)).toBe(true)
+  })
+
+  it("keeps the dialog open on Escape inside a list over it, not on Escape in the dialog itself", () => {
+    class FakeElement {
+      inPopup: boolean
+      constructor(inPopup: boolean) {
+        this.inPopup = inPopup
+      }
+      closest(selector: string) {
+        if (this.inPopup) return selector.includes("[data-overlay-interaction-root]") ? this : null
+        return selector.includes("[data-slot='dialog-content']") ? this : null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    const inList = { target: new FakeElement(true) } as unknown as Event
+    const inDialog = { target: new FakeElement(false) } as unknown as Event
+
+    expect(isAuxiliaryOverlayEscape("escape-key", inList)).toBe(true)
+    expect(isAuxiliaryOverlayEscape("escape-key", inDialog)).toBe(false)
+    expect(isAuxiliaryOverlayEscape("outside-press", inList)).toBe(false)
+    expect(isAuxiliaryOverlayEscape("escape-key", undefined)).toBe(false)
   })
 
   it("uses controlled dirty as the source of truth when provided", () => {

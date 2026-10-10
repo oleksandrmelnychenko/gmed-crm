@@ -27,6 +27,9 @@ type Step1PortalState = {
   patientFilledErrorIds: ReadonlySet<string>;
   markerByErrorId: ReadonlyMap<string, PatientFieldMarker>;
   markerByPortalField: ReadonlyMap<string, PatientFieldMarker>;
+  /** Fields with a value already (by error id and portal column): no "the patient fills it in" hint. */
+  filledErrorIds: ReadonlySet<string>;
+  filledPortalFields: ReadonlySet<string>;
   tx: Tx;
 };
 
@@ -38,6 +41,7 @@ export function Step1PortalProvider({
   errorIdByDraftKey,
   patientFilledKeys,
   portalFieldByDraftKey,
+  filledDraftKeys = [],
   tx,
   children,
 }: {
@@ -46,9 +50,15 @@ export function Step1PortalProvider({
   errorIdByDraftKey: Readonly<Record<string, string>>;
   patientFilledKeys: readonly string[];
   portalFieldByDraftKey: Readonly<Record<string, string>>;
+  /**
+   * The draft keys that hold a value (entered by staff or the patient): the
+   * hint "заполнит пациент в портале" stays off them (QA 2026-10-10).
+   */
+  filledDraftKeys?: readonly string[];
   tx: Tx;
   children: ReactNode;
 }) {
+  const filledKey = filledDraftKeys.join("|");
   const value = useMemo<Step1PortalState>(() => {
     const markerByErrorId = new Map<string, PatientFieldMarker>();
     const markerByPortalField = new Map<string, PatientFieldMarker>();
@@ -59,6 +69,7 @@ export function Step1PortalProvider({
       const marker = markerByPortalField.get(portalFieldByDraftKey[draftKey] ?? "");
       if (marker) markerByErrorId.set(errorId, marker);
     }
+    const filled = filledKey ? filledKey.split("|") : [];
     return {
       mode,
       patientFilledErrorIds: new Set(
@@ -66,9 +77,11 @@ export function Step1PortalProvider({
       ),
       markerByErrorId,
       markerByPortalField,
+      filledErrorIds: new Set(filled.map((key) => errorIdByDraftKey[key]).filter((id): id is string => Boolean(id))),
+      filledPortalFields: new Set(filled.map((key) => portalFieldByDraftKey[key]).filter((id): id is string => Boolean(id))),
       tx,
     };
-  }, [errorIdByDraftKey, intake, mode, patientFilledKeys, portalFieldByDraftKey, tx]);
+  }, [errorIdByDraftKey, filledKey, intake, mode, patientFilledKeys, portalFieldByDraftKey, tx]);
   return <Step1PortalContext.Provider value={value}>{children}</Step1PortalContext.Provider>;
 }
 
@@ -78,25 +91,28 @@ export function Step1PortalProvider({
  */
 export function useStep1PortalField(errorId?: string, portalField?: string) {
   const state = useContext(Step1PortalContext);
-  if (!state) return { patientFills: false, marker: null as PatientFieldMarker | null, tx: null };
+  if (!state) return { patientFills: false, filled: false, marker: null as PatientFieldMarker | null, tx: null };
   const patientFills =
     state.mode === "patient"
     && ((errorId ? state.patientFilledErrorIds.has(errorId) : false) || Boolean(portalField && portalField !== "first_name" && portalField !== "last_name"));
+  const filled =
+    (errorId ? state.filledErrorIds.has(errorId) : false) || Boolean(portalField && state.filledPortalFields.has(portalField));
   const marker =
     (errorId ? state.markerByErrorId.get(errorId) : undefined)
     ?? (portalField ? state.markerByPortalField.get(portalField) : undefined)
     ?? null;
-  return { patientFills, marker, tx: state.tx };
+  return { patientFills, filled, marker, tx: state.tx };
 }
 
-/** Hint and badge under a wizard field label. */
+/** Hint and badge under a wizard field label; the hint only over an empty field. */
 export function Step1PortalFieldNote({ errorId, portalField }: { errorId?: string; portalField?: string }) {
-  const { patientFills, marker, tx } = useStep1PortalField(errorId, portalField);
-  if (!tx || (!patientFills && !marker)) return null;
+  const { patientFills, filled, marker, tx } = useStep1PortalField(errorId, portalField);
+  const hint = patientFills && !marker && !filled;
+  if (!tx || (!hint && !marker)) return null;
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
-      {patientFills && !marker ? (
+      {hint ? (
         <span className="text-[11px] text-muted-foreground" data-testid="patient-fills-hint">
           {tx("заполнит пациент в портале", "füllt der Patient im Portal aus")}
         </span>

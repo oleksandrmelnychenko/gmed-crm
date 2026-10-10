@@ -430,8 +430,8 @@ async fn patch(app: &PayerApp, token: &str, session: &str, body: Value) -> (Stat
 }
 
 /// Everything a person states for the submit except the files. The link
-/// prefills only the name and the relationship the lead entered; birth
-/// data, address and citizenships are the payer's own answers.
+/// prefills what the lead entered about the payer (owner 2026-10-10); what
+/// the payer states here replaces it.
 fn person_answers() -> Value {
     json!({
         "salutation": "mr",
@@ -1515,6 +1515,9 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     let (status, held) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
     assert_eq!(status, StatusCode::CONFLICT, "{held}");
     assert_eq!(held["code"], "risk_review_required", "{held}");
+    // The panel says so before staff press "send" (QA 2026-10-10).
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert_eq!(info["risk_hold"], "review", "{info}");
     let (status, requested) = with_login(
         &app,
         "POST",
@@ -1528,6 +1531,8 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{requested}");
+    let (_, info) = with_login(&app, "GET", &path, &app.manager(), None).await;
+    assert!(info["risk_hold"].is_null(), "block D requested: {info}");
     // A resend needs "reopen", which keeps the answers; the payer corrects
     // them, so the lead still sees nothing of them.
     let (status, refused) = with_login(&app, "POST", &path, &app.manager(), Some(json!({}))).await;
@@ -1951,8 +1956,9 @@ async fn staff_save(
 /// QA 2026-10-06 (S1): the payer's address changes after the payer sent the
 /// answers. Whoever holds the new address opens a new link: it shows none of
 /// the old answers, no payment route, no files and no acknowledgement — and
-/// a fresh link prefills only the name and the relationship the lead
-/// entered, never the lead's other data about the payer.
+/// a link to a payer nobody answered for yet prefills what the lead entered
+/// about the payer (owner 2026-10-10), while a link after a payer's answers
+/// shows the name and the relationship only.
 ///
 /// QA retest 2026-10-06 (R2-a): the declaration still holds the identity the
 /// old address's payer stated, so the lead's cabinet keeps hiding it and does
@@ -1981,7 +1987,8 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     .await;
     assert_eq!(status, StatusCode::OK, "{estimated}");
 
-    // A fresh link: the name and the relationship only.
+    // A fresh link: what the lead entered about the payer, as editable
+    // defaults (owner 2026-10-10, QA C4-f); never an identity document.
     let (token, _) = send_link(&app, lead_id, json!({})).await;
     let session = open_session(&app, &token).await;
     let headers = [
@@ -1994,14 +2001,19 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     assert_eq!(answers["first_name"], "Viktor", "{fresh}");
     assert_eq!(answers["last_name"], "Zahler");
     assert_eq!(answers["relationship_kind"], "friend");
+    for (key, value) in [
+        ("date_of_birth", json!("1970-05-01")),
+        ("citizenships", json!(["AT"])),
+        ("street", json!("Leadweg 3")),
+        ("zip", json!("10115")),
+        ("city", json!("Berlin")),
+        ("country", json!("DE")),
+        ("phone", json!("+49 30 5550100")),
+    ] {
+        assert_eq!(answers[key], value, "{key}: {fresh}");
+    }
     for key in [
-        "date_of_birth",
         "birth_place",
-        "street",
-        "zip",
-        "city",
-        "country",
-        "phone",
         "id_document_type",
         "id_document_number",
         "id_issuing_country",
@@ -2009,14 +2021,11 @@ async fn a_new_address_gets_a_link_without_the_previous_answers() {
     ] {
         assert!(answers[key].is_null(), "{key}: {fresh}");
     }
-    assert_eq!(answers["citizenships"], json!([]), "{fresh}");
-    for value in ["Leadweg", "1970-05-01", "+49 30 5550100"] {
-        assert!(!fresh.to_string().contains(value), "{value}: {fresh}");
-    }
     let missing = fresh["missing_for_submit"].as_array().unwrap();
     for key in ["date_of_birth", "citizenships", "street", "country"] {
-        assert!(missing.contains(&json!(key)), "{key}: {fresh}");
+        assert!(!missing.contains(&json!(key)), "{key}: {fresh}");
     }
+    assert!(missing.contains(&json!("birth_place")), "{fresh}");
 
     // The payer answers, uploads the identity document and sends.
     consent(&app, &token, &session).await;

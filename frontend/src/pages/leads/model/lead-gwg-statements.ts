@@ -590,26 +590,34 @@ export function billingStatements(
         warning: method !== null && FLAGGED_METHODS.includes(method),
       }),
     );
-    // The account is asked for a transfer or a card; for cash, crypto or
-    // another method the server clears it.
-    if (method === null || method === "bank_transfer" || method === "card") {
+    // The base cabinet asks the method only; the account and the payment
+    // through a third party are questions of the follow-up block C. A row the
+    // lead was never asked is left out instead of "not answered" (QA
+    // 2026-10-10): the account once the lead gave its country or bank (or
+    // answered the third-party question of the same block), the third-party
+    // row once answered. For cash, crypto or another method the server clears
+    // the account.
+    const blockAnswered = billing.via_third_party !== null || Boolean(billing.account_country) || Boolean(billing.bank_name);
+    if ((method === null || method === "bank_transfer" || method === "card") && blockAnswered) {
       payment.push(
         statement("account_country", tx("Страна счёта", "Land des Kontos"), country(billing.account_country)),
         statement("account_holder", tx("Владелец счёта", "Kontoinhaber/in"), billing.account_holder),
         statement("bank_name", tx("Банк", "Bank"), billing.bank_name),
       );
     }
-    payment.push(
-      statement(
-        "via_third_party",
-        tx("Платёж через третье лицо / платёжного провайдера", "Zahlung über Dritte / Zahlungsdienstleister"),
-        answerLabel(billing.via_third_party, tx),
-        {
-          details: billing.via_third_party === true ? billing.via_third_party_details : null,
-          warning: billing.via_third_party === true,
-        },
-      ),
-    );
+    if (billing.via_third_party !== null) {
+      payment.push(
+        statement(
+          "via_third_party",
+          tx("Платёж через третье лицо / платёжного провайдера", "Zahlung über Dritte / Zahlungsdienstleister"),
+          answerLabel(billing.via_third_party, tx),
+          {
+            details: billing.via_third_party === true ? billing.via_third_party_details : null,
+            warning: billing.via_third_party === true,
+          },
+        ),
+      );
+    }
   }
 
   return { invoice, payment, byPayer, complianceLine: complianceFlagsLine(billing.compliance_flags, tx) };

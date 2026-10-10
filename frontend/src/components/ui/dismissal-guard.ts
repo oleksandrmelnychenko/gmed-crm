@@ -64,6 +64,26 @@ export function isInternalOverlayInteractionEvent(event: Event | undefined) {
   )
 }
 
+/**
+ * An Escape pressed inside a list or picker that floats over the dialog (a
+ * combobox popup, a date picker): it closes that list only, never the dialog
+ * behind it (QA 2026-10-10: Escape in the citizenship list asked "close
+ * without saving?").
+ */
+export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefined) {
+  if (reason !== "escape-key" || !event) {
+    return false
+  }
+
+  const activeElement =
+    typeof document === "undefined" ? null : document.activeElement
+
+  return (
+    isElementInside(event.target, AUXILIARY_OVERLAY_SELECTOR) ||
+    isElementInside(activeElement, AUXILIARY_OVERLAY_SELECTOR)
+  )
+}
+
 export function shouldConfirmDirtyDismiss(
   open: boolean,
   reason: string,

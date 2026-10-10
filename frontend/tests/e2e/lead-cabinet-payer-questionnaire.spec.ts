@@ -420,9 +420,8 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect(notice).toContainText("Verantwortlich für die Verarbeitung ist GMED.");
     await expect(notice).toContainText("§ 8 Abs. 4 GwG");
     await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal#privacy");
-    await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveText(
-      "Bitte bestätigen Sie zuerst den Datenschutzhinweis. Danach können Sie Ihre Angaben als zahlende Person machen.",
-    );
+    // Why the fields wait only after a press (QA 2026-10-10: no hint before "Weiter").
+    await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveCount(0);
     await expect(section.getByTestId("lead-request-payer-fields")).toHaveCount(0);
     // The yellow lists only after a press on send (owner 2026-10-09, QA 2026-10-10).
     await expect(section.getByTestId("lead-request-payer-missing-own")).toHaveCount(0);

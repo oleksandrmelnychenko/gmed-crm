@@ -14,6 +14,7 @@ import {
   riskDecisionErrorText,
   riskDecisionNeedsSecondReviewer,
   riskDisplayedScore,
+  riskEventLabel,
   riskGateErrorText,
   riskLevelTone,
   riskPointsLine,
@@ -158,10 +159,11 @@ describe("the risk assessment of a lead (staff)", () => {
     expect(riskCanWithdraw(normalizeLeadRiskAssessment(levelTwo())!)).toBe(false);
   });
 
-  it("suggests the blocks of the triggers not requested yet", () => {
+  it("suggests the blocks of the triggers neither requested nor answered yet", () => {
     const assessment = normalizeLeadRiskAssessment(levelTwo({ requested_blocks: ["b"] }))!;
     expect(assessment.requested_blocks).toEqual(["B"]);
-    expect(riskSuggestedBlocks(assessment)).toEqual(["A", "C", "D", "F"]);
+    // F is answered already: not pre-ticked (asking it again re-opens it for the lead).
+    expect(riskSuggestedBlocks(assessment)).toEqual(["A", "C", "D"]);
   });
 
   it("requires a reason of at least 10 characters", () => {
@@ -179,6 +181,22 @@ describe("the risk assessment of a lead (staff)", () => {
     }
     expect(riskStatusLabel("proposed", de)).toBe("Wartet auf Zweitprüfung");
     expect(riskStatusLabel(null, ru)).toBe("Не начата");
+  });
+
+  it("says why a trigger was withdrawn: a false positive or a valid identity document", () => {
+    const event = (cause: string) => ({
+      id: "e1",
+      at: null,
+      kind: "trigger_withdrawn",
+      level: 1,
+      points: 2,
+      cause,
+      actor_name: null,
+      status: null,
+    });
+    expect(riskEventLabel(event("hit_decision"), de)).toBe("Auslöser zurückgenommen (falsch positiv)");
+    expect(riskEventLabel(event("cabinet"), de)).toBe("Auslöser zurückgenommen (gültiges Ausweisdokument)");
+    expect(riskEventLabel(event("staff"), ru)).toBe("Триггер снят (действительный документ личности)");
   });
 
   it("explains the server's decision errors", () => {

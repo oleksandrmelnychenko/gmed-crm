@@ -630,7 +630,10 @@ export function riskEventLabel(event: RiskHistoryEvent, tx: Tx): string {
     case "follow_up_answered":
       return tx("Пациент отправил доп. сведения", "Ergänzende Angaben gesendet");
     case "trigger_withdrawn":
-      return tx("Триггер снят (ложное совпадение)", "Auslöser zurückgenommen (falsch positiv)");
+      // T16 after a false-positive decision; T12 once a valid identity document is on file (owner 2026-10-10).
+      return event.cause === "hit_decision"
+        ? tx("Триггер снят (ложное совпадение)", "Auslöser zurückgenommen (falsch positiv)")
+        : tx("Триггер снят (действительный документ личности)", "Auslöser zurückgenommen (gültiges Ausweisdokument)");
     case "status":
       return event.status
         ? `${tx("Статус", "Status")}: ${riskStatusLabel(event.status as RiskStatus, tx)}`
@@ -673,12 +676,18 @@ export function riskOpenBlocks(assessment: LeadRiskAssessment): RiskBlockState[]
   return assessment.blocks.filter((block) => block.open);
 }
 
-/** The blocks pre-selected in the "request more" chooser: the open ones not yet requested, else none. */
+/**
+ * The blocks pre-selected in the "request more" chooser: the blocks of the
+ * triggers not yet requested and not answered yet, else none. An answered
+ * block stays selectable, but asking it again re-opens it for the lead (QA
+ * 2026-10-10: the dialog pre-ticked the answered A and B).
+ */
 export function riskSuggestedBlocks(assessment: LeadRiskAssessment): string[] {
   const requested = new Set(assessment.requested_blocks);
+  const answered = new Set(assessment.blocks.filter((block) => block.answered).map((block) => block.key));
   const suggested = new Set<string>();
   for (const trigger of riskDisplayedScore(assessment).triggers) {
-    for (const block of trigger.blocks) if (!requested.has(block)) suggested.add(block);
+    for (const block of trigger.blocks) if (!requested.has(block) && !answered.has(block)) suggested.add(block);
   }
   return RISK_BLOCK_KEYS.filter((key) => suggested.has(key));
 }

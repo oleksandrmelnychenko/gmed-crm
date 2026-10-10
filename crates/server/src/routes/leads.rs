@@ -1258,6 +1258,10 @@ struct LeadConversionReadinessInput {
     city: Option<String>,
     zip_code: Option<String>,
     primary_concern_text: Option<String>,
+    /// The reason the lead gave in the cabinet (`lead_gwg_declarations`): it
+    /// counts as the captured concern while staff have not written their own
+    /// (QA 2026-10-10: "Не указана причина обращения" despite the answer).
+    portal_request_reason: Option<String>,
     requested_specialties: Value,
     consent_privacy_practices: bool,
     consent_healthcare: bool,
@@ -1326,10 +1330,13 @@ fn evaluate_lead_conversion_readiness(
                 .is_some_and(|value| !value.trim().is_empty())
         });
     let address_ready = !input.consent_healthcare || address_present;
-    let primary_concern_present = input
-        .primary_concern_text
-        .as_deref()
-        .is_some_and(|value| !value.trim().is_empty());
+    let primary_concern_present = [&input.primary_concern_text, &input.portal_request_reason]
+        .into_iter()
+        .any(|value| {
+            value
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+        });
     let specialties_present = match &input.requested_specialties {
         Value::Array(items) => items.iter().any(|value| match value {
             Value::String(value) => !value.trim().is_empty(),
@@ -1720,6 +1727,7 @@ fn lead_conversion_readiness_input(row: &sqlx::postgres::PgRow) -> LeadConversio
         city: row.try_get("city").unwrap_or_default(),
         zip_code: row.try_get("zip_code").unwrap_or_default(),
         primary_concern_text: row.try_get("primary_concern_text").unwrap_or_default(),
+        portal_request_reason: row.try_get("portal_request_reason").unwrap_or_default(),
         requested_specialties: row
             .try_get("requested_specialties")
             .unwrap_or_else(|_| json!([])),
@@ -1785,6 +1793,8 @@ async fn load_lead_conversion_readiness(
                   city,
                   zip_code,
                   primary_concern_text,
+                  (SELECT g.request_reason FROM lead_gwg_declarations g
+                    WHERE g.lead_id = leads.id) AS portal_request_reason,
                   requested_specialties,
                   country,
                   wizard_state,
@@ -9202,6 +9212,7 @@ mod lead_conversion_readiness_tests {
             city: Some("Berlin".to_string()),
             zip_code: Some("10115".to_string()),
             primary_concern_text: Some("Knee pain".to_string()),
+            portal_request_reason: None,
             requested_specialties: json!(["orthopedics"]),
             consent_privacy_practices: true,
             consent_healthcare: true,
@@ -9231,6 +9242,41 @@ mod lead_conversion_readiness_tests {
             payer: crate::routes::lead_payer::PayerReadiness::ready(),
             risk_assessment_held: false,
         }
+    }
+
+    #[test]
+    fn the_reason_the_lead_gave_in_the_cabinet_counts_as_the_concern() {
+        let mut input = ready_input();
+        input.primary_concern_text = None;
+        let missing = evaluate_lead_conversion_readiness(&input);
+        assert!(!missing.conversion_ready);
+        assert!(
+            missing
+                .conversion_reasons
+                .contains(&"Primary concern is missing".to_string()),
+            "{:?}",
+            missing.conversion_reasons
+        );
+
+        // QA 2026-10-10: the lead's own answer in the cabinet is the concern.
+        input.portal_request_reason = Some("Kontrolluntersuchung (synthetisch)".to_string());
+        let readiness = evaluate_lead_conversion_readiness(&input);
+        assert!(
+            !readiness
+                .conversion_reasons
+                .contains(&"Primary concern is missing".to_string()),
+            "{:?}",
+            readiness.conversion_reasons
+        );
+        assert!(
+            readiness.conversion_ready,
+            "{:?}",
+            readiness.conversion_reasons
+        );
+
+        // Blank text counts as nothing.
+        input.portal_request_reason = Some("   ".to_string());
+        assert!(!evaluate_lead_conversion_readiness(&input).conversion_ready);
     }
 
     #[test]

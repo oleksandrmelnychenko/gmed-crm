@@ -13,9 +13,14 @@ import { DocumentSignaturePanel, type PackagePreviewSelection } from "./document
 import { SignatureDocumentPreview, type SignaturePreviewSource } from "./signature-document-preview";
 import { refreshSignatureSummaries, useSignatureSummary } from "../data/use-signature-summary";
 import type { SignatureRequest, SignatureState } from "../data/document-signature-api";
-import { isInformationalDocument, signaturePresentation } from "./signature-status";
+import { isClientSignableDocument, signaturePresentation } from "./signature-status";
 
 type DocumentScope = { patientId?: string | null; orderId?: string | null; leadId?: string | null };
+
+/** A document's name in the picker with its dates as DD.MM.YYYY (the stored name carries "2026-10-10"). */
+function signatureOptionName(name: string | null | undefined): string {
+  return (name ?? "").replace(/\b(\d{4})-(\d{2})-(\d{2})\b/g, "$3.$2.$1");
+}
 // Sending needs document access as CEO or Patient Manager on the server. IT
 // administrators configure the provider in the admin area instead.
 export const SIGNING_ROLES: string[] = ["ceo", "patient_manager"];
@@ -122,14 +127,9 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
         const pdfs = rows.filter(row => row.has_stored_file && row.mime_type?.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf");
         // An informational document is never the subject of a request: offering
         // it here led to a composer that could not send anything.
-        // Nor are medical uploads, identity scans, uploaded proofs and the staff's GwG sheet a document
-        // for the client's signature (QA 2026-10-10).
-        const signable = pdfs.filter(row =>
-          !isInformationalDocument(row)
-          && !row.is_medical
-          && row.category !== "identity"
-          && !/identity|passport|_proof$|authority/i.test(row.art ?? "")
-          && row.generated_template_id !== "gwg_identification");
+        // Nor are medical uploads, identity scans, uploaded proofs, the staff's GwG sheet and
+        // the internal § 15 form a document for the client's signature (QA 2026-10-10).
+        const signable = pdfs.filter(isClientSignableDocument);
         setDocuments(signable);
         setInformationalOnly(pdfs.length > 0 && signable.length === 0);
       })
@@ -173,7 +173,7 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
               if (!overlay || overlay.confirmDismiss(selectDocument)) selectDocument();
             }}>
               <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
-              {documents.map(row => <option key={row.id} value={row.id}>{row.auto_name || row.original_filename} · v{row.version_number}{row.is_latest_version ? "" : tx(" · предыдущая версия", " · frühere Version")}</option>)}
+              {documents.map(row => <option key={row.id} value={row.id}>{signatureOptionName(row.auto_name || row.original_filename)} · v{row.version_number}{row.is_latest_version ? "" : tx(" · предыдущая версия", " · frühere Version")}</option>)}
             </NativeComboboxSelect>
           </label> : null}
         </> : null}

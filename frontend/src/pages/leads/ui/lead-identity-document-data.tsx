@@ -233,42 +233,57 @@ export function LeadIdentityDocumentDataForm({
 function RepresentativeForm({
   leadId,
   person,
+  files,
   tx,
   lang,
   disabled,
+  today,
   onSaved,
 }: {
   leadId: string;
   person: LeadRepresentative;
+  /** The person's own uploads (identity scan, power of attorney), under the person's card. */
+  files?: ReactNode;
   tx: Tx;
   lang: string;
   disabled: boolean;
+  today: string;
   onSaved: () => void;
 }) {
   const filled = Boolean(person.id_document_number || person.id_valid_until || person.id_document_unreadable);
+  // A saved expired date stays in sight (QA 2026-10-10: no warning after the save).
+  const expired = Boolean(person.id_valid_until) && (person.id_valid_until ?? "") < today;
+  const fileCount = person.identity_documents.length + person.authority_documents.length;
   return (
-    <details className="rounded-md border border-border/60 bg-background/50 p-2.5" open={!filled}>
+    <details className="rounded-md border border-border/60 bg-background/50 p-2.5" open={!filled || expired}>
       <summary className="flex cursor-pointer flex-wrap items-baseline gap-x-2 text-sm">
         <span className="font-semibold text-foreground">{representativeName(person) || "—"}</span>
         <span className="text-xs text-muted-foreground">{representativeRoleLabel(person, tx)}</span>
-        {person.identity_documents.length > 0 ? (
+        {fileCount > 0 ? (
           <span className="text-xs text-muted-foreground">
-            · {tx("файлов", "Dateien")}: {person.identity_documents.length}
+            · {tx("файлов", "Dateien")}: {fileCount}
+          </span>
+        ) : null}
+        {expired ? (
+          <span className={cn("text-xs font-medium", WARNING_TEXT)} data-testid={`lead-representative-id-expired-${person.id}`}>
+            · {tx("срок действия документа истёк", "Ausweis abgelaufen")}
           </span>
         ) : null}
       </summary>
-      <div className="pt-2.5">
+      <div className="space-y-2.5 pt-2.5">
         <LeadIdentityDocumentDataForm
           source={person}
           tx={tx}
           lang={lang}
           disabled={disabled}
+          today={today}
           testId={`lead-representative-id-data-${person.id}`}
           save={async (input) => {
             await saveRepresentativeIdentityDocumentData(leadId, person.id, input);
             onSaved();
           }}
         />
+        {files}
       </div>
     </details>
   );
@@ -286,6 +301,9 @@ export function LeadIdentityDocumentData({
   tx,
   lang,
   disabled = false,
+  patientScans,
+  representativeFiles,
+  today = appDateKey(),
   onSaved,
 }: {
   leadId: string;
@@ -294,26 +312,40 @@ export function LeadIdentityDocumentData({
   tx: Tx;
   lang: string;
   disabled?: boolean;
+  /**
+   * The patient's own scans, right under the patient's form — never under a
+   * representative's card (QA 2026-10-10: the patient's pass.pdf looked like
+   * the representative's).
+   */
+  patientScans?: ReactNode;
+  /** A representative's own uploads, under that person's card. */
+  representativeFiles?: (person: LeadRepresentative) => ReactNode;
+  today?: string;
   /** After a save: reload the portal state and the risk assessment. */
   onSaved: () => void;
 }) {
-  // The role may not read the GwG data: nothing to edit here.
-  if (intake?.identification_hidden) return null;
+  // The role may not read the GwG data: only the scans.
+  if (intake?.identification_hidden) return patientScans ? <>{patientScans}</> : null;
   const representatives = intake?.representation?.representatives ?? [];
   return (
     <div className="space-y-3" data-testid="lead-identity-document-data">
+      {representatives.length > 0 ? (
+        <h4 className="text-xs font-semibold text-foreground">{tx("Документ пациента", "Ausweis des Patienten")}</h4>
+      ) : null}
       <LeadIdentityDocumentDataForm
         source={intake?.identification ?? null}
         fallbackValidUntil={fallbackValidUntil}
         tx={tx}
         lang={lang}
         disabled={disabled}
+        today={today}
         testId="lead-id-data"
         save={async (input) => {
           await saveLeadIdentityDocumentData(leadId, input);
           onSaved();
         }}
       />
+      {patientScans ? <div data-testid="lead-id-patient-scans">{patientScans}</div> : null}
       {representatives.length > 0 ? (
         <div className="space-y-2" data-testid="lead-representatives-id-data">
           <h4 className="text-xs font-semibold text-foreground">
@@ -324,9 +356,11 @@ export function LeadIdentityDocumentData({
               key={person.id}
               leadId={leadId}
               person={person}
+              files={representativeFiles?.(person)}
               tx={tx}
               lang={lang}
               disabled={disabled}
+              today={today}
               onSaved={onSaved}
             />
           ))}

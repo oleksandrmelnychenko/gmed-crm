@@ -64,6 +64,18 @@ export function missingOfRefusal(body: Record<string, unknown> | null): Record<s
   return result;
 }
 
+/** The relationships a marriage or birth certificate proves (block B). */
+const FAMILY_RELATIONSHIPS: ReadonlySet<string> = new Set(["spouse", "parent", "child", "sibling", "grandparent", "relative"]);
+
+/**
+ * Whether the payer is family of the patient: block B's example of a proof is
+ * a certificate then, otherwise any document or a short explanation (a friend
+ * or an employer has no certificate, QA 2026-10-10).
+ */
+export function familyPayer(request: Pick<LeadRequest, "payer">): boolean {
+  return FAMILY_RELATIONSHIPS.has(request.payer?.relationship_kind ?? "");
+}
+
 // ---------------------------------------------------------------------------
 // Block A: the source of funds (one choice with the words, profession, sector, proofs)
 // ---------------------------------------------------------------------------

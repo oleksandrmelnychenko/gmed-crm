@@ -4503,6 +4503,13 @@ async fn submit_my_lead_request(
     {
         return internal(error, "start risk assessment");
     }
+    // Follow-up blocks the lead completed before sending are sent with it
+    // (QA 2026-10-10, C2-c): no second "send the details".
+    if let Err(error) =
+        crate::risk::cabinet::answer_complete_follow_up(&mut tx, lead_id, auth.user_id).await
+    {
+        return internal(error, "record follow-up");
+    }
     if let Err(error) = tx.commit().await {
         return internal(error, "commit submit");
     }
@@ -4730,6 +4737,14 @@ async fn get_lead_portal_intake(
         uploads_of(UploadKind::Identity),
         uploads_of(UploadKind::Medical),
     );
+    let cabinet_upload_count = all_uploads
+        .iter()
+        .filter(|upload| {
+            upload
+                .try_get::<String, _>("kind")
+                .is_ok_and(|kind| !PAYER_UPLOAD_KINDS.contains(&kind.as_str()))
+        })
+        .count();
     // The lead's own GwG statements (PEP, identity document, …) are for the
     // roles that read the payer declaration; the concierge gets none of it.
     let statements_visible = lead_payer::may_view(&auth);
@@ -4955,7 +4970,11 @@ async fn get_lead_portal_intake(
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
-            "documents": uploads.len(),
+            // Every file the lead's cabinet uploaded — identity copy, proofs,
+            // a representative's files, medical documents (QA 2026-10-10: "0
+            // documents" after two uploads); the payer's own files are the
+            // payer's.
+            "documents": cabinet_upload_count,
             "submitted_at": time(&row, "portal_submitted_at"),
         },
         "submitted_at": time(&row, "portal_submitted_at"),
@@ -5723,7 +5742,13 @@ mod tests {
         // keys come from `lead_representatives::missing_for_submit`. Where
         // the invoice goes and the payment route come after the own-interest
         // question (phase 2).
-        let representation = || vec!["has_representative".to_string()];
+        // The legal-guardianship question is asked again (owner 2026-10-10).
+        let representation = || {
+            vec![
+                "has_representative".to_string(),
+                "under_guardianship".to_string(),
+            ]
+        };
         assert_eq!(
             missing_for_submit(
                 &data,
@@ -5745,6 +5770,7 @@ mod tests {
                 "payer_kind",
                 "id_document_upload",
                 "has_representative",
+                "under_guardianship",
                 "invoice_to",
                 "payment_method"
             ]

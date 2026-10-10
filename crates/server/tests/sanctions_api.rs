@@ -413,6 +413,21 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
     )
     .await;
     assert!(not_a_gate_block(&body), "{body}");
+    // The client's signature of the patient form waits too: on paper and when
+    // staff confirm it ("Подтвердить подпись", QA 2026-10-10 C3-e).
+    let patient_form = insert_patient_form(&app, lead_id).await;
+    for route in ["paper-signature", "mark-signed"] {
+        let (code, body) = request(
+            &app,
+            "POST",
+            &format!("/documents/{patient_form}/{route}"),
+            &app.pm(),
+            Some(json!({ "compliance_kind": "other" })),
+        )
+        .await;
+        assert_eq!(code, StatusCode::CONFLICT, "{route}: {body}");
+        assert_eq!(body["error"], "sanctions_review_pending", "{route}");
+    }
 
     // Only the CEO sees the hits; the comparison carries the list entry.
     let (code, _) = request(&app, "GET", "/sanctions/hits", &app.pm(), None).await;
@@ -474,6 +489,15 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
         &format!("/leads/{lead_id}/qualify"),
         &app.pm(),
         Some(json!({ "status": "qualified" })),
+    )
+    .await;
+    assert!(not_a_gate_block(&body), "{body}");
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{patient_form}/mark-signed"),
+        &app.pm(),
+        Some(json!({ "compliance_kind": "other" })),
     )
     .await;
     assert!(not_a_gate_block(&body), "{body}");
@@ -540,6 +564,25 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
     .await;
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "sanctions_confirmed");
+    // Also for a new version of the patient form confirmed as signed by staff.
+    let patient_form = insert_patient_form(&app, lead_id).await;
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{patient_form}/mark-signed"),
+        &app.pm(),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_confirmed");
+    let signed: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT signed_at FROM documents WHERE id = $1")
+            .bind(patient_form)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert!(signed.is_none());
     let status = lead_status(&app, lead_id).await;
     assert_eq!(status["screening"], "confirmed");
     // A confirmed match requires the enhanced check.
@@ -561,6 +604,29 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
             .await
             .unwrap();
     assert_eq!(decisions, 2);
+}
+
+/// A generated patient form (`lead_self_disclosure`) of the lead, not signed.
+async fn insert_patient_form(app: &TestApp, lead_id: Uuid) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, lead_id, auto_name, original_filename, art, category,
+               status, visibility, is_medical, mime_type, generated_template_id,
+               version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+               $1, $2, 'Patientenformular', 'Patientenformular.pdf', 'lead_self_disclosure',
+               'administrative', 'active', 'internal', false, 'application/pdf',
+               'lead_self_disclosure', $1, 1, $3
+           )"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .bind(app.pm_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    document_id
 }
 
 /// The gate's own error codes start with `sanctions_` or are `blocked_country`;
@@ -1011,6 +1077,26 @@ async fn blocked_country_needs_the_ceo_to_lift_it_for_the_lead() {
         &format!("/documents/{}/paper-signature", paper[1]),
         &app.pm(),
         None,
+    )
+    .await;
+    assert!(not_a_gate_block(&body), "{body}");
+    // A signature confirmed by staff follows the same rule (C3-e).
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{}/mark-signed", paper[0]),
+        &app.pm(),
+        Some(json!({ "compliance_kind": "other" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/documents/{}/mark-signed", paper[1]),
+        &app.pm(),
+        Some(json!({ "compliance_kind": "other" })),
     )
     .await;
     assert!(not_a_gate_block(&body), "{body}");

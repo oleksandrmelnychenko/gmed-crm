@@ -99,9 +99,15 @@ export type LeadRequestText = {
   sending: string;
   sentTitle: string;
   sentBody: (dateTime: string) => string;
-  /** After sending: what the person can expect, in order. */
+  /**
+   * After sending: what the person can expect, in order; then that nothing
+   * is needed meanwhile (not while follow-up blocks are open) and what to do
+   * after a change.
+   */
   nextTitle: string;
   nextSteps: readonly string[];
+  nextNothingRequired: string;
+  nextAfterChange: string;
   sentSummaryTitle: string;
   sendAgain: string;
   editData: string;
@@ -162,7 +168,6 @@ export type LeadRequestText = {
    * 3b, 11.7): saved at once and on its own, also once the payer answered.
    */
   payerCostEstimateConsentLabel: string;
-  payerCostEstimateConsentHint: string;
   /** The same consent in the summary and in the list of what is still missing. */
   payerCostEstimateConsentShort: string;
   /** The payer answered on the own link: "who pays" is read-only, only GMED changes it. */
@@ -173,20 +178,23 @@ export type LeadRequestText = {
   /** The same two when a parent fills in the request of a child. */
   ownAccountQuestionGuardian: string;
   beneficialOwnerGuardian: string;
-  /** The payer's messenger number, the box that copies the phone, and the heading of the residence. */
+  /**
+   * The payer's messenger number, the box that copies the phone, and the
+   * heading of the address: a person's residence, an organisation's seat.
+   */
   payerMessenger: string;
   payerMessengerSameAsPhone: string;
   payerResidence: string;
+  payerSeat: string;
   /** The cards of the payer step (owner 2026-10-09). */
   payerBlockPerson: string;
   payerBlockContact: string;
   payerBlockConsent: string;
   /**
-   * "Ergänzende Angaben" (trigger flow, contract 3.1 and 6): the neutral
-   * heading, the intro, the title of each block, and sending the answers.
-   * Never why the blocks are asked (no points, level or reason).
+   * "Ergänzende Angaben" (trigger flow, contract 3.1 and 6): the intro, the
+   * title of each block, and sending the answers. Never why the blocks are
+   * asked (no points, level or reason).
    */
-  followUpTitle: string;
   followUpIntro: string;
   followUpBlocks: Record<FollowUpBlock, string>;
   followUpSubmit: string;
@@ -213,9 +221,14 @@ export type LeadRequestText = {
   /** The paying parent states the profession in the own payer section. */
   extraOccupationElsewhere: string;
   selfFundsProofHint: string;
-  /** Block B: the proof of the relationship to the payer. */
+  /**
+   * Block B: the proof of the relationship to the payer; the example fits the
+   * relationship (a certificate for family, any document or an explanation
+   * otherwise).
+   */
   relationshipProofTitle: string;
   relationshipProofHint: string;
+  relationshipProofHintOther: string;
   noRelationshipProof: string;
   /** Block F: why the patient lives in the country; block J: the kind of link. */
   stayReasonOptions: Record<(typeof STAY_REASONS)[number], string>;
@@ -262,9 +275,6 @@ export type LeadRequestText = {
   underGuardianshipQuestion: string;
   /** The same block for a minor: the legal representatives. */
   sectionLegalRepresentatives: string;
-  legalRepresentativesIntro: string;
-  /** Who gives the consent and the signatures, by the custody chosen. */
-  custodySignatureNote: Record<Custody, string>;
   custodyQuestion: string;
   custodyOptions: Record<Custody, string>;
   /** A person of the block: the heading of the form, and the prefix in the list of what is still missing. */
@@ -279,14 +289,6 @@ export type LeadRequestText = {
   /** The same while a guardian represents the child: not "the other parent". */
   representativeOnFileGuardian: (name: string) => string;
   copyChildAddress: string;
-  /**
-   * Below an e-mail that is a sign-in address (the own one, or the other
-   * parent's), and below the one the invitation goes to.
-   */
-  representativeEmailIsLogin: string;
-  representativeEmailIsTheirLogin: string;
-  representativeInviteHint: string;
-  representativeInformHint: string;
   representativeRemove: string;
   /** `who` is the person's name, or the caption while there is none. */
   representativeRemoveConfirm: (who: string) => string;
@@ -750,8 +752,10 @@ const de: LeadRequestText = {
   nextSteps: [
     "Ihre Ansprechperson prüft Ihre Angaben und Unterlagen.",
     "Wir melden uns bei Ihnen und besprechen die nächsten Schritte.",
-    "Bis dahin müssen Sie nichts weiter tun. Hat sich etwas geändert oder haben Sie neue Unterlagen, ergänzen Sie Ihre Anfrage und senden Sie sie erneut.",
   ],
+  nextNothingRequired: "Bis dahin müssen Sie nichts weiter tun.",
+  nextAfterChange:
+    "Hat sich etwas geändert oder haben Sie neue Unterlagen, ergänzen Sie Ihre Anfrage und senden Sie sie erneut.",
   sentSummaryTitle: "Das haben wir erhalten",
   sendAgain: "Erneut senden",
   editData: "Angaben ändern",
@@ -782,7 +786,7 @@ const de: LeadRequestText = {
     guardian: "Ich zahle (als Elternteil)",
     third_party: "Eine andere Person oder Organisation",
   },
-  payerIntro: "Bitte nennen Sie, wer die Kosten übernimmt. Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.",
+  payerIntro: "Bitte nennen Sie, wer die Kosten übernimmt.",
   payerInformHint:
     "Bitte sagen Sie dieser Person, dass Sie uns ihre Daten für die Kostenübernahme mitgeteilt haben.",
   payerPerson: "Zahler",
@@ -823,8 +827,6 @@ const de: LeadRequestText = {
   payerConsentShort: "Einverständnis zur Kontaktaufnahme",
   payerCostEstimateConsentLabel:
     "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
-  payerCostEstimateConsentHint:
-    "Ohne diese Einwilligung können wir der zahlenden Person die Unterlagen zur Kostenübernahme nicht zur Unterschrift senden.",
   payerCostEstimateConsentShort: "Einwilligung zur Weitergabe des Kostenvoranschlags",
   payerAnsweredByPayer: "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
   ownAccountQuestion: "Handeln Sie im eigenen wirtschaftlichen Interesse?",
@@ -835,10 +837,10 @@ const de: LeadRequestText = {
   payerMessenger: "WhatsApp / Messenger",
   payerMessengerSameAsPhone: "gleich wie Telefon",
   payerResidence: "Wohnort",
+  payerSeat: "Sitz",
   payerBlockPerson: "Angaben zur zahlenden Person",
   payerBlockContact: "Kontakt",
   payerBlockConsent: "Einwilligungen",
-  followUpTitle: "Wir benötigen ergänzende Angaben",
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
@@ -876,6 +878,8 @@ const de: LeadRequestText = {
   selfFundsProofHint: "Zum Beispiel Kontoauszug oder Gehaltsnachweis. PDF, JPG oder PNG, bis 25 MB pro Datei.",
   relationshipProofTitle: "Nachweis der Beziehung",
   relationshipProofHint: "Zum Beispiel Heirats- oder Geburtsurkunde. PDF, JPG oder PNG, bis 25 MB pro Datei.",
+  relationshipProofHintOther:
+    "Zum Beispiel ein Dokument, aus dem die Beziehung hervorgeht, oder eine kurze schriftliche Erklärung. PDF, JPG oder PNG, bis 25 MB pro Datei.",
   noRelationshipProof: "Noch kein Nachweis hochgeladen.",
   stayReasonOptions: {
     citizenship_or_birth: "Staatsangehörigkeit / dort geboren",
@@ -963,12 +967,6 @@ const de: LeadRequestText = {
   hasRepresentativeQuestion: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
   underGuardianshipQuestion: "Stehen Sie unter rechtlicher Betreuung?",
   sectionLegalRepresentatives: "Gesetzliche Vertreter",
-  legalRepresentativesIntro: "Für Minderjährige handeln die gesetzlichen Vertreter.",
-  custodySignatureNote: {
-    joint: "Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
-    sole_parent: "Einwilligung und Unterschrift gibt der allein sorgeberechtigte Elternteil.",
-    guardian: "Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
-  },
   custodyQuestion: "Wer vertritt das Kind?",
   custodyOptions: {
     joint: "Beide Eltern gemeinsam",
@@ -989,10 +987,6 @@ const de: LeadRequestText = {
   representativeOnFileGuardian: (name) =>
     `Bei GMED ist eine weitere Person mit Sorgerecht hinterlegt: ${name}. Bitte sprechen Sie uns an.`,
   copyChildAddress: "Adresse des Kindes übernehmen",
-  representativeEmailIsLogin: "Ihre Anmeldeadresse",
-  representativeEmailIsTheirLogin: "Anmeldeadresse dieser Person",
-  representativeInviteHint: "An diese Adresse senden wir die Einladung zur Unterschrift.",
-  representativeInformHint: "Bitte informieren Sie diese Person darüber, dass Sie ihre Daten angeben.",
   representativeRemove: "Entfernen",
   representativeRemoveConfirm: (who) =>
     `${who}: Alle Angaben und hochgeladenen Dateien zu dieser Person werden entfernt. Fortfahren?`,
@@ -1220,8 +1214,9 @@ const ru: LeadRequestText = {
   nextSteps: [
     "Ваш менеджер проверит данные и документы.",
     "Мы свяжемся с вами и обсудим следующие шаги.",
-    "До этого от вас ничего не требуется. Если что-то изменилось или появились новые документы, дополните заявку и отправьте её ещё раз.",
   ],
+  nextNothingRequired: "До этого от вас ничего не требуется.",
+  nextAfterChange: "Если что-то изменилось или появились новые документы, дополните заявку и отправьте её ещё раз.",
   sentSummaryTitle: "Что мы получили",
   sendAgain: "Отправить ещё раз",
   editData: "Изменить данные",
@@ -1252,7 +1247,7 @@ const ru: LeadRequestText = {
     guardian: "Оплачиваю я (как один из родителей)",
     third_party: "Другой человек или организация",
   },
-  payerIntro: "Укажите, пожалуйста, кто оплачивает лечение. По закону мы обязаны знать, кто платит.",
+  payerIntro: "Укажите, пожалуйста, кто оплачивает лечение.",
   payerInformHint: "Пожалуйста, сообщите этому человеку, что вы передали нам его данные для оформления оплаты.",
   payerPerson: "Плательщик",
   payerTypeQuestion: "Кто является плательщиком?",
@@ -1292,8 +1287,6 @@ const ru: LeadRequestText = {
   payerConsentShort: "Согласие на контакт",
   payerCostEstimateConsentLabel:
     "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами – только виды услуг и суммы, без диагнозов и названий лечения.",
-  payerCostEstimateConsentHint:
-    "Без этого согласия мы не можем отправить плательщику документы об оплате расходов на подпись.",
   payerCostEstimateConsentShort: "Согласие на передачу сметы",
   payerAnsweredByPayer: "Плательщик сам указал свои данные. Изменения только через GMED.",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
@@ -1303,10 +1296,10 @@ const ru: LeadRequestText = {
   payerMessenger: "WhatsApp / мессенджер",
   payerMessengerSameAsPhone: "как телефон",
   payerResidence: "Место жительства",
+  payerSeat: "Местонахождение",
   payerBlockPerson: "Данные плательщика",
   payerBlockContact: "Контакты",
   payerBlockConsent: "Согласия",
-  followUpTitle: "Нам нужны дополнительные сведения",
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
     A: "Происхождение средств",
@@ -1341,6 +1334,8 @@ const ru: LeadRequestText = {
   selfFundsProofHint: "Например, выписка со счёта или справка о зарплате. PDF, JPG или PNG, до 25 МБ на файл.",
   relationshipProofTitle: "Подтверждение отношений",
   relationshipProofHint: "Например, свидетельство о браке или о рождении. PDF, JPG или PNG, до 25 МБ на файл.",
+  relationshipProofHintOther:
+    "Например, документ, из которого видны ваши отношения, или короткое письменное пояснение. PDF, JPG или PNG, до 25 МБ на файл.",
   noRelationshipProof: "Подтверждение ещё не загружено.",
   stayReasonOptions: {
     citizenship_or_birth: "Гражданство / рождение в этой стране",
@@ -1431,12 +1426,6 @@ const ru: LeadRequestText = {
   hasRepresentativeQuestion: "Действует ли кто-то от вашего имени (представитель, посредник, уполномоченное лицо)?",
   underGuardianshipQuestion: "Назначен ли вам опекун по решению суда (rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законные представители",
-  legalRepresentativesIntro: "За несовершеннолетних действуют законные представители.",
-  custodySignatureNote: {
-    joint: "Согласие и подписи нужны от обоих родителей.",
-    sole_parent: "Согласие и подпись даёт родитель, у которого единоличное право опеки.",
-    guardian: "Согласие и подпись даёт опекун или попечитель.",
-  },
   custodyQuestion: "Кто представляет ребёнка?",
   custodyOptions: {
     joint: "Оба родителя вместе",
@@ -1457,10 +1446,6 @@ const ru: LeadRequestText = {
   representativeOnFileGuardian: (name) =>
     `В GMED указан ещё один человек, у которого есть право опеки: ${name}. Пожалуйста, свяжитесь с нами.`,
   copyChildAddress: "Взять адрес ребёнка",
-  representativeEmailIsLogin: "Ваш адрес для входа",
-  representativeEmailIsTheirLogin: "Адрес для входа этого человека",
-  representativeInviteHint: "На этот адрес мы отправим приглашение на подпись.",
-  representativeInformHint: "Пожалуйста, сообщите этому человеку, что вы указываете его данные.",
   representativeRemove: "Удалить",
   representativeRemoveConfirm: (who) =>
     `${who}: все данные и загруженные файлы этого человека будут удалены. Продолжить?`,
@@ -1689,8 +1674,9 @@ const uk: LeadRequestText = {
   nextSteps: [
     "Ваш менеджер перевірить дані та документи.",
     "Ми зв'яжемося з вами й обговоримо наступні кроки.",
-    "До того від вас нічого не потрібно. Якщо щось змінилося або з'явилися нові документи, доповніть заявку й надішліть її ще раз.",
   ],
+  nextNothingRequired: "До того від вас нічого не потрібно.",
+  nextAfterChange: "Якщо щось змінилося або з'явилися нові документи, доповніть заявку й надішліть її ще раз.",
   sentSummaryTitle: "Що ми отримали",
   sendAgain: "Надіслати ще раз",
   editData: "Змінити дані",
@@ -1721,7 +1707,7 @@ const uk: LeadRequestText = {
     guardian: "Оплачую я (як один із батьків)",
     third_party: "Інша людина або організація",
   },
-  payerIntro: "Вкажіть, будь ласка, хто оплачує лікування. За законом ми зобов'язані знати, хто платить.",
+  payerIntro: "Вкажіть, будь ласка, хто оплачує лікування.",
   payerInformHint: "Будь ласка, повідомте цій людині, що ви передали нам її дані для оформлення оплати.",
   payerPerson: "Платник",
   payerTypeQuestion: "Хто є платником?",
@@ -1761,8 +1747,6 @@ const uk: LeadRequestText = {
   payerConsentShort: "Згода на контакт",
   payerCostEstimateConsentLabel:
     "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами – лише види послуг і суми, без діагнозів і назв лікування.",
-  payerCostEstimateConsentHint:
-    "Без цієї згоди ми не можемо надіслати платнику документи щодо оплати витрат на підпис.",
   payerCostEstimateConsentShort: "Згода на передачу кошторису",
   payerAnsweredByPayer: "Платник сам указав свої дані. Зміни лише через GMED.",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
@@ -1772,10 +1756,10 @@ const uk: LeadRequestText = {
   payerMessenger: "WhatsApp / месенджер",
   payerMessengerSameAsPhone: "як телефон",
   payerResidence: "Місце проживання",
+  payerSeat: "Місцезнаходження",
   payerBlockPerson: "Дані платника",
   payerBlockContact: "Контакти",
   payerBlockConsent: "Згоди",
-  followUpTitle: "Нам потрібні додаткові відомості",
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
     A: "Походження коштів",
@@ -1810,6 +1794,8 @@ const uk: LeadRequestText = {
   selfFundsProofHint: "Наприклад, виписка з рахунку або довідка про зарплату. PDF, JPG або PNG, до 25 МБ на файл.",
   relationshipProofTitle: "Підтвердження стосунків",
   relationshipProofHint: "Наприклад, свідоцтво про шлюб або про народження. PDF, JPG або PNG, до 25 МБ на файл.",
+  relationshipProofHintOther:
+    "Наприклад, документ, з якого видно ваші стосунки, або коротке письмове пояснення. PDF, JPG або PNG, до 25 МБ на файл.",
   noRelationshipProof: "Підтвердження ще не завантажено.",
   stayReasonOptions: {
     citizenship_or_birth: "Громадянство / народження в цій країні",
@@ -1900,12 +1886,6 @@ const uk: LeadRequestText = {
   hasRepresentativeQuestion: "Чи діє хтось від вашого імені (представник, посередник, уповноважена особа)?",
   underGuardianshipQuestion: "Чи призначено вам опікуна за рішенням суду (rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законні представники",
-  legalRepresentativesIntro: "За неповнолітніх діють законні представники.",
-  custodySignatureNote: {
-    joint: "Згода та підписи потрібні від обох батьків.",
-    sole_parent: "Згоду та підпис дає той із батьків, хто має одноосібне право опіки.",
-    guardian: "Згоду та підпис дає опікун або піклувальник.",
-  },
   custodyQuestion: "Хто представляє дитину?",
   custodyOptions: {
     joint: "Обоє батьків разом",
@@ -1926,10 +1906,6 @@ const uk: LeadRequestText = {
   representativeOnFileGuardian: (name) =>
     `У GMED зазначено ще одну людину, яка має право опіки: ${name}. Будь ласка, зв'яжіться з нами.`,
   copyChildAddress: "Взяти адресу дитини",
-  representativeEmailIsLogin: "Ваша адреса для входу",
-  representativeEmailIsTheirLogin: "Адреса для входу цієї людини",
-  representativeInviteHint: "На цю адресу ми надішлемо запрошення до підписання.",
-  representativeInformHint: "Будь ласка, повідомте цій людині, що ви вказуєте її дані.",
   representativeRemove: "Видалити",
   representativeRemoveConfirm: (who) =>
     `${who}: усі дані та завантажені файли цієї людини буде видалено. Продовжити?`,
@@ -2158,8 +2134,9 @@ const en: LeadRequestText = {
   nextSteps: [
     "Your contact person reviews your details and documents.",
     "We will get in touch and discuss the next steps.",
-    "Until then there is nothing more to do. If something has changed or you have new documents, add them to your request and send it again.",
   ],
+  nextNothingRequired: "Until then there is nothing more to do.",
+  nextAfterChange: "If something has changed or you have new documents, add them to your request and send it again.",
   sentSummaryTitle: "What we received",
   sendAgain: "Send again",
   editData: "Edit details",
@@ -2190,7 +2167,7 @@ const en: LeadRequestText = {
     guardian: "I pay (as a parent)",
     third_party: "Another person or organisation",
   },
-  payerIntro: "Please tell us who pays for the treatment. We are required by law to know who pays.",
+  payerIntro: "Please tell us who pays for the treatment.",
   payerInformHint: "Please let this person know that you gave us their details for the payment arrangements.",
   payerPerson: "Payer",
   payerTypeQuestion: "Who is the payer?",
@@ -2230,8 +2207,6 @@ const en: LeadRequestText = {
   payerConsentShort: "Consent to contact",
   payerCostEstimateConsentLabel:
     "I agree that GMED sends the paying person the cost estimate with the expected costs – only the types of services and the amounts, without diagnoses or names of treatments.",
-  payerCostEstimateConsentHint:
-    "Without this consent we cannot send the paying person the documents on covering the costs for signature.",
   payerCostEstimateConsentShort: "Consent to pass on the cost estimate",
   payerAnsweredByPayer: "The paying person has given their details themselves. Changes only through GMED.",
   ownAccountQuestion: "Are you acting in your own economic interest?",
@@ -2241,10 +2216,10 @@ const en: LeadRequestText = {
   payerMessenger: "WhatsApp / messenger",
   payerMessengerSameAsPhone: "same as phone",
   payerResidence: "Place of residence",
+  payerSeat: "Registered office",
   payerBlockPerson: "Payer's details",
   payerBlockContact: "Contact",
   payerBlockConsent: "Consents",
-  followUpTitle: "We need some additional information",
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
     A: "Source of funds",
@@ -2279,6 +2254,8 @@ const en: LeadRequestText = {
   selfFundsProofHint: "For example a bank statement or a payslip. PDF, JPG or PNG, up to 25 MB per file.",
   relationshipProofTitle: "Proof of the relationship",
   relationshipProofHint: "For example a marriage or birth certificate. PDF, JPG or PNG, up to 25 MB per file.",
+  relationshipProofHintOther:
+    "For example a document that shows the relationship, or a short written explanation. PDF, JPG or PNG, up to 25 MB per file.",
   noRelationshipProof: "No proof uploaded yet.",
   stayReasonOptions: {
     citizenship_or_birth: "Citizenship / born in this country",
@@ -2363,12 +2340,6 @@ const en: LeadRequestText = {
   hasRepresentativeQuestion: "Is somebody acting for you (representative, messenger, authorised person)?",
   underGuardianshipQuestion: "Are you under legal guardianship?",
   sectionLegalRepresentatives: "Legal representatives",
-  legalRepresentativesIntro: "For minors the legal representatives act.",
-  custodySignatureNote: {
-    joint: "Consent and signatures are needed from both parents.",
-    sole_parent: "Consent and signature are given by the parent with sole custody.",
-    guardian: "Consent and signature are given by the guardian or custodian.",
-  },
   custodyQuestion: "Who represents the child?",
   custodyOptions: {
     joint: "Both parents together",
@@ -2388,10 +2359,6 @@ const en: LeadRequestText = {
   representativeOnFileGuardian: (name) =>
     `GMED has a further person with parental responsibility on file: ${name}. Please contact us.`,
   copyChildAddress: "Use the child's address",
-  representativeEmailIsLogin: "Your sign-in address",
-  representativeEmailIsTheirLogin: "This person's sign-in address",
-  representativeInviteHint: "We send the invitation to sign to this address.",
-  representativeInformHint: "Please let this person know that you are giving us their details.",
   representativeRemove: "Remove",
   representativeRemoveConfirm: (who) =>
     `${who}: all details and uploaded files of this person will be removed. Continue?`,

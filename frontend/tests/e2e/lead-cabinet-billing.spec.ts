@@ -463,7 +463,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       METHOD_QUESTION,
       "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
     ]);
-    await expect(page.getByTestId("lead-request-summary-billing")).toContainText("Noch keine Angaben");
+    // Nothing answered yet: no group in the summary (QA 2026-10-10: no "nothing yet" filler).
+    await expect(page.getByTestId("lead-request-summary-billing")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
 
     // "To me" asks for an e-mail for invoices, which is optional.

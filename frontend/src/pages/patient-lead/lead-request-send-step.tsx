@@ -95,12 +95,10 @@ export function SendStep({
               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900 dark:border-sky-900/50 dark:bg-sky-950/30 dark:text-sky-200"
               data-testid="lead-request-follow-up-open"
             >
+              {/* One short neutral pointer (QA 2026-10-10): no title, never why. */}
               <span className="flex items-start gap-2">
                 <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-                <span>
-                  <span className="block font-medium">{text.followUpTitle}</span>
-                  <span className="block">{text.followUpOpen}</span>
-                </span>
+                <span>{text.followUpOpen}</span>
               </span>
               <Button type="button" size="sm" className="gap-1.5" onClick={() => onEdit("follow_up")}>
                 {text.followUpGo}
@@ -120,7 +118,11 @@ export function SendStep({
           ) : null}
           <Section title={text.nextTitle}>
             <ol className="space-y-2.5 text-sm" data-testid="lead-request-next-steps">
-              {text.nextSteps.map((item, index) => (
+              {/* "Nothing is needed meanwhile" only while no follow-up block is open (QA 2026-10-10). */}
+              {[
+                ...text.nextSteps,
+                followUpOpen ? text.nextAfterChange : `${text.nextNothingRequired} ${text.nextAfterChange}`,
+              ].map((item, index) => (
                 <li key={item} className="flex items-start gap-3">
                   <span
                     aria-hidden="true"

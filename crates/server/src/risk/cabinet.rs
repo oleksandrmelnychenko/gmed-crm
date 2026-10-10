@@ -89,7 +89,7 @@ pub fn is_adult_representative_key(key: &str) -> bool {
 
 /// Keys the base form no longer asks (contract 3.1): they belong to the
 /// follow-up blocks or to staff.
-const DROPPED_KEYS: [&str; 24] = [
+const DROPPED_KEYS: [&str; 23] = [
     // The own economic interest: block L, only with the enhanced check (owner 2026-10-09).
     "payer_own_account",
     "payer_beneficial_owner",
@@ -97,8 +97,8 @@ const DROPPED_KEYS: [&str; 24] = [
     "pep_self",
     "pep_related",
     "sanctions_links",
-    // The legal-guardianship question is switched off in the cabinet (owner 2026-10-09).
-    "under_guardianship",
+    // The legal-guardianship question (`under_guardianship`) is asked again
+    // since 2026-10-10 (owner): it was switched off on 2026-10-09.
     // Block K (owner 2026-10-09): asked only with the enhanced check.
     "birth_place",
     "birth_country",
@@ -335,6 +335,32 @@ async fn follow_up_missing(
                 .collect()
         })
         .unwrap_or_default())
+}
+
+/// "Send to the manager" while follow-up blocks are open and already complete
+/// (QA 2026-10-10, C2-c: the lead filled the extra step before sending): the
+/// send counts as the follow-up's answer too, so the lead is not asked to send
+/// twice. Records it like `follow-up/submit`; `true` when it did. Nothing while
+/// no block is open, a block still misses something or the answer is recorded.
+pub async fn answer_complete_follow_up(
+    conn: &mut PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let follow_up = follow_up_json(conn, lead_id, actor).await?;
+    if follow_up["required"] != json!(true) || !follow_up["answered_at"].is_null() {
+        return Ok(false);
+    }
+    let complete = follow_up["missing"].as_object().is_some_and(|missing| {
+        missing
+            .values()
+            .all(|keys| keys.as_array().is_some_and(|keys| keys.is_empty()))
+    });
+    if !complete {
+        return Ok(false);
+    }
+    store::follow_up_answered(conn, lead_id, actor).await?;
+    Ok(true)
 }
 
 /// Reassesses after a cabinet write (in its own transaction, right after the
@@ -1203,6 +1229,7 @@ mod tests {
             "agent_first_name",
             "guardian_id_upload",
             "has_representative",
+            "under_guardianship",
             "payer_own_account",
             "invoice_to",
             "payment_method",
@@ -1231,6 +1258,8 @@ mod tests {
                 "agent_first_name",
                 "guardian_id_upload",
                 "has_representative",
+                // Asked again since 2026-10-10 (owner).
+                "under_guardianship",
                 "invoice_to",
                 "payment_method",
                 "request_reason",
@@ -1278,6 +1307,7 @@ mod tests {
             "first_name",
             "birth_place",
             "has_representative",
+            "under_guardianship",
             "rep1_phone",
             "street_address",
             "id_document_upload",
@@ -1291,7 +1321,7 @@ mod tests {
         assert_eq!(
             by_step,
             json!({
-                "person": ["first_name", "birth_place", "has_representative", "rep1_phone"],
+                "person": ["first_name", "birth_place", "has_representative", "under_guardianship", "rep1_phone"],
                 "contact": ["street_address"],
                 "identity": ["id_document_upload"],
                 "payer": ["payer_kind", "payer_own_account"],

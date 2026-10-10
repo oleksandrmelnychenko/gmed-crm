@@ -122,14 +122,12 @@ export type PayerLinkText = {
   organisationFields: Record<OrganisationQuestionField, string>;
   missing: Record<MissingLabelKey, string>;
   legalTopics: Record<LegalQuestion, string>;
-  identityIntro: string;
   identityIntroOrganisation: string;
   idDocumentTypes: Record<IdDocumentType, string>;
   identityFiles: string;
   identityUploadButton: string;
   uploadHint: string;
   uploading: string;
-  noIdentityDocuments: string;
   removeDocument: string;
   documentReviewed: string;
   fileTooLarge: (name: string) => string;
@@ -157,7 +155,6 @@ export type PayerLinkText = {
   fundsProofOptional: string;
   fundsProofHint: string;
   fundsProofButton: string;
-  noFundsProof: string;
   paymentMethods: Record<PaymentMethod, string>;
   cashCryptoNote: string;
   /** Whom an organisation's declarations concern; a private person gets no intro (QA 2026-10-10). */
@@ -368,7 +365,6 @@ const de: PayerLinkText = {
     high_risk_country: "Land mit hohem Risiko",
     sanctions_links: "Sanktionen",
   },
-  identityIntro: "Bitte geben Sie die Daten Ihres Ausweisdokuments an und laden Sie ein Foto oder einen Scan hoch.",
   identityIntroOrganisation:
     "Bitte geben Sie die Daten des Ausweisdokuments der Person an, die die Organisation vertritt, und laden Sie ein Foto oder einen Scan hoch.",
   idDocumentTypes: { passport: "Reisepass", id_card: "Personalausweis", residence_permit: "Aufenthaltstitel" },
@@ -376,7 +372,6 @@ const de: PayerLinkText = {
   identityUploadButton: "Foto oder Scan hochladen",
   uploadHint: "PDF, JPG oder PNG, bis 25 MB pro Datei.",
   uploading: "Wird hochgeladen…",
-  noIdentityDocuments: "Noch kein Ausweis hochgeladen.",
   removeDocument: "Entfernen",
   documentReviewed: "Von GMED geprüft",
   fileTooLarge: (name) => `${name} ist größer als 25 MB.`,
@@ -439,7 +434,6 @@ const de: PayerLinkText = {
   fundsProofHint:
     "Zum Beispiel Kontoauszug, Gehaltsabrechnung, Kaufvertrag oder Erbschein. PDF, JPG oder PNG, bis 25 MB pro Datei.",
   fundsProofButton: "Nachweis hochladen",
-  noFundsProof: "Noch kein Nachweis hochgeladen.",
   paymentMethods: {
     bank_transfer: "Überweisung",
     card: "Karte",
@@ -652,7 +646,6 @@ const en: PayerLinkText = {
     high_risk_country: "High-risk country",
     sanctions_links: "Sanctions",
   },
-  identityIntro: "Please enter the details of your identity document and upload a photo or scan of it.",
   identityIntroOrganisation:
     "Please enter the details of the identity document of the person who represents the organisation, and upload a photo or scan of it.",
   idDocumentTypes: { passport: "Passport", id_card: "Identity card", residence_permit: "Residence permit" },
@@ -660,7 +653,6 @@ const en: PayerLinkText = {
   identityUploadButton: "Upload a photo or scan",
   uploadHint: "PDF, JPG or PNG, up to 25 MB per file.",
   uploading: "Uploading…",
-  noIdentityDocuments: "No identity document uploaded yet.",
   removeDocument: "Remove",
   documentReviewed: "Checked by GMED",
   fileTooLarge: (name) => `${name} is larger than 25 MB.`,
@@ -723,7 +715,6 @@ const en: PayerLinkText = {
   fundsProofHint:
     "For example a bank statement, a payslip, a sales contract or a certificate of inheritance. PDF, JPG or PNG, up to 25 MB per file.",
   fundsProofButton: "Upload proof",
-  noFundsProof: "No proof uploaded yet.",
   paymentMethods: {
     bank_transfer: "Bank transfer",
     card: "Card",
@@ -935,7 +926,6 @@ const uk: PayerLinkText = {
     high_risk_country: "Країна високого ризику",
     sanctions_links: "Санкції",
   },
-  identityIntro: "Будь ласка, вкажіть дані вашого документа, що посвідчує особу, і завантажте його фото або скан.",
   identityIntroOrganisation:
     "Будь ласка, вкажіть дані документа особи, яка представляє організацію, і завантажте його фото або скан.",
   idDocumentTypes: {
@@ -947,7 +937,6 @@ const uk: PayerLinkText = {
   identityUploadButton: "Завантажити фото або скан",
   uploadHint: "PDF, JPG або PNG, до 25 МБ на файл.",
   uploading: "Завантажується…",
-  noIdentityDocuments: "Документ ще не завантажено.",
   removeDocument: "Видалити",
   documentReviewed: "Перевірено GMED",
   fileTooLarge: (name) => `${name} більший за 25 МБ.`,
@@ -1010,7 +999,6 @@ const uk: PayerLinkText = {
   fundsProofHint:
     "Наприклад, банківська виписка, розрахунковий листок, договір купівлі-продажу або свідоцтво про спадщину. PDF, JPG або PNG, до 25 МБ на файл.",
   fundsProofButton: "Завантажити підтвердження",
-  noFundsProof: "Підтвердження ще не завантажено.",
   paymentMethods: {
     bank_transfer: "Банківський переказ",
     card: "Картка",
@@ -1221,7 +1209,6 @@ const ru: PayerLinkText = {
     high_risk_country: "Страна высокого риска",
     sanctions_links: "Санкции",
   },
-  identityIntro: "Пожалуйста, укажите данные вашего документа, удостоверяющего личность, и загрузите его фото или скан.",
   identityIntroOrganisation:
     "Пожалуйста, укажите данные документа лица, которое представляет организацию, и загрузите его фото или скан.",
   idDocumentTypes: {
@@ -1233,7 +1220,6 @@ const ru: PayerLinkText = {
   identityUploadButton: "Загрузить фото или скан",
   uploadHint: "PDF, JPG или PNG, до 25 МБ на файл.",
   uploading: "Загружается…",
-  noIdentityDocuments: "Документ ещё не загружен.",
   removeDocument: "Удалить",
   documentReviewed: "Проверено GMED",
   fileTooLarge: (name) => `${name} больше 25 МБ.`,
@@ -1296,7 +1282,6 @@ const ru: PayerLinkText = {
   fundsProofHint:
     "Например, банковская выписка, расчётный листок, договор купли-продажи или свидетельство о наследстве. PDF, JPG или PNG, до 25 МБ на файл.",
   fundsProofButton: "Загрузить подтверждение",
-  noFundsProof: "Подтверждение ещё не загружено.",
   paymentMethods: {
     bank_transfer: "Банковский перевод",
     card: "Карта",

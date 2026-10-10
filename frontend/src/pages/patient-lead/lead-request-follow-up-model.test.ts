@@ -9,6 +9,7 @@ import {
   draftFromExtra,
   extraFieldOf,
   extraPatch,
+  familyPayer,
   followUpAnswered,
   followUpMissing,
   fundsSourceOptions,
@@ -106,5 +107,16 @@ describe("follow-up blocks", () => {
     });
     // No amount: not sent, the field says so.
     expect(billingExtrasPatch(saved, { ...saved, expected_total_eur: "viel" })).toEqual({});
+  });
+
+  it("takes a certificate as the example of a relationship proof for family only", () => {
+    const related = (relationship_kind: string | null) => ({ payer: { ...payer("third_party"), relationship_kind } });
+    for (const kind of ["spouse", "parent", "child", "sibling", "grandparent", "relative"]) {
+      expect(familyPayer(related(kind)), kind).toBe(true);
+    }
+    for (const kind of ["friend", "employer", "business_partner", "other", null]) {
+      expect(familyPayer(related(kind)), String(kind)).toBe(false);
+    }
+    expect(familyPayer({ payer: null })).toBe(false);
   });
 });

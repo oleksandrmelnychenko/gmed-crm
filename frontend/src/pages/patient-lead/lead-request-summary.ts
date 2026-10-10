@@ -362,12 +362,8 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   }
 
   // The declarations: yes or no only (the details are follow-up blocks). Asked
-  // only in block L since 2026-10-09: no empty group in the base form (QA 2026-10-10).
-  if (
-    identification &&
-    (openFollowUpBlocks(request).includes("L") ||
-      LEGAL_QUESTIONS.some((question) => identification[question] !== null && identification[question] !== undefined))
-  ) {
+  // only in block L since 2026-10-09: listed once answered (QA 2026-10-10).
+  if (identification && LEGAL_QUESTIONS.some((question) => identification[question] !== null && identification[question] !== undefined)) {
     group(
       "legal",
       text.sectionLegal,
@@ -404,7 +400,10 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     if (blocks.includes("F")) {
       rows.push([identificationLabel("residence_since"), identification?.residence_since]);
       rows.push([identificationLabel("stay_reason"), option(text.stayReasonOptions, identification?.stay_reason)]);
-      rows.push([identificationLabel("stay_reason_details"), identification?.stay_reason_details]);
+      rows.push([
+        identificationLabel("stay_reason_details"),
+        identification?.stay_reason === "other" ? identification.stay_reason_details : "",
+      ]);
       rows.push([identificationLabel("former_citizenships"), countries(identification?.former_citizenships)]);
       rows.push([identificationLabel("other_residences"), identification?.other_residences]);
     }
@@ -434,8 +433,9 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     "documents",
     text.sectionUpload,
     request.documents.map((document) => ["", document.file_name ?? "—"]),
-    text.noDocuments,
   );
 
-  return groups;
+  // Only what was entered (QA 2026-10-10): a group without a statement, a
+  // person or a remark is left out instead of saying "nothing yet".
+  return groups.filter((item) => item.rows.length > 0 || Boolean(item.parts?.length) || Boolean(item.note));
 }

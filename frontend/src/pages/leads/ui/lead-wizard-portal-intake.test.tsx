@@ -38,7 +38,7 @@ const intake = normalizeLeadPortalIntake({
 
 const errorIds = { birthDate: "birth-error", city: "city-error", firstName: "first-error" };
 
-function note(mode: "staff" | "patient", props: { errorId?: string; portalField?: string }) {
+function note(mode: "staff" | "patient", props: { errorId?: string; portalField?: string }, filledDraftKeys: string[] = []) {
   return renderToStaticMarkup(
     <Step1PortalProvider
       mode={mode}
@@ -46,6 +46,7 @@ function note(mode: "staff" | "patient", props: { errorId?: string; portalField?
       errorIdByDraftKey={errorIds}
       patientFilledKeys={PATIENT_FILLED_KEYS}
       portalFieldByDraftKey={PORTAL_FIELD_BY_DRAFT_KEY}
+      filledDraftKeys={filledDraftKeys}
       tx={tx}
     >
       <Step1PortalFieldNote {...props} />
@@ -63,6 +64,14 @@ describe("wizard step 1 and the patient portal", () => {
     expect(note("staff", { errorId: "city-error" })).toBe("");
     // The marker shows in both modes.
     expect(note("staff", { errorId: "birth-error" })).toContain("от пациента");
+  });
+
+  it("hints only over empty fields (QA 2026-10-10)", () => {
+    expect(note("patient", { errorId: "city-error" }, ["city"])).toBe("");
+    expect(note("patient", { portalField: "country" }, ["country"])).toBe("");
+    expect(note("patient", { portalField: "citizenships" }, ["citizenships"])).toBe("");
+    // Another field filled: the empty one keeps the hint.
+    expect(note("patient", { portalField: "country" }, ["city"])).toContain("заполнит пациент в портале");
   });
 
   it("offers the two fill modes", () => {

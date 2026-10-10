@@ -259,17 +259,15 @@ function RepresentationGroup({
             >
               {answerLabel(statements.hasRepresentative, tx)}
             </Statement>
-            {/* The question is switched off in the cabinet (owner 2026-10-09): only an old answer shows. */}
-            {statements.underGuardianship !== null && statements.underGuardianship !== undefined ? (
-              <Statement
-                label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
-                sentence
-                warning={statements.underGuardianship === true}
-                testId="lead-gwg-under-guardianship"
-              >
-                {answerLabel(statements.underGuardianship, tx)}
-              </Statement>
-            ) : null}
+            {/* The cabinet asks it again (owner 2026-10-10): an open answer shows as "not answered". */}
+            <Statement
+              label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
+              sentence
+              warning={statements.underGuardianship === true}
+              testId="lead-gwg-under-guardianship"
+            >
+              {answerLabel(statements.underGuardianship, tx)}
+            </Statement>
           </>
         )}
       </dl>
@@ -735,6 +733,7 @@ export function LeadGwgStatements({
   intake,
   payer,
   payerLink,
+  askedBlocks = [],
   tx,
   lang,
   today = appDateKey(),
@@ -744,6 +743,12 @@ export function LeadGwgStatements({
   payer: GwgPayerStatement | null | undefined;
   /** The payer link with the payer's answers; absent on an older server (nothing of it is shown). */
   payerLink?: LeadPayerLinkState | null;
+  /**
+   * The follow-up blocks of the risk assessment the lead is asked (open or
+   * requested): K shows the birth data and L the legal questions also while
+   * unanswered; otherwise only answers are shown.
+   */
+  askedBlocks?: readonly string[];
   tx: Tx;
   lang: string;
   /** The Berlin date ("YYYY-MM-DD") the identity document must still be valid on. */
@@ -787,7 +792,18 @@ export function LeadGwgStatements({
   const country = (code: string | null) => countryNameForDisplay(code, lang);
   const validity = idDocumentValidity(identification.id_valid_until, today);
   const ownAccount = ownAccountStatement(payer);
-  const legalAnswers = gwgLegalAnswers(identification, tx, lang);
+  // Birth data (block K) and the legal questions (block L) are follow-up
+  // questions: a lead who was never asked them shows no "—" / "Не отвечено"
+  // rows (QA 2026-10-10); an answer is always shown.
+  const asked = (block: string) => askedBlocks.includes(block);
+  const legalAnswers = gwgLegalAnswers(identification, tx, lang).filter(
+    (item) => asked("L") || (item.answer !== null && item.answer !== undefined),
+  );
+  const birthRows = [
+    { key: "former_names", label: tx("Фамилия при рождении", "Geburtsname"), value: identification.former_names },
+    { key: "birth_place", label: tx("Место рождения", "Geburtsort"), value: identification.birth_place },
+    { key: "birth_country", label: tx("Страна рождения", "Geburtsland"), value: country(identification.birth_country) },
+  ].filter((item) => asked("K") || Boolean(item.value?.trim()));
 
   return (
     <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-gwg-statements">
@@ -799,9 +815,9 @@ export function LeadGwgStatements({
 
       <StatementGroup title={tx("Личность", "Person")} columns={STATEMENT_COLUMNS}>
         <Statement label={tx("Обращение", "Anrede")}>{salutationLabel(identification.salutation, tx)}</Statement>
-        <Statement label={tx("Фамилия при рождении", "Geburtsname")}>{identification.former_names}</Statement>
-        <Statement label={tx("Место рождения", "Geburtsort")}>{identification.birth_place}</Statement>
-        <Statement label={tx("Страна рождения", "Geburtsland")}>{country(identification.birth_country)}</Statement>
+        {birthRows.map((item) => (
+          <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
+        ))}
         <Statement label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}>
           {country(identification.habitual_residence_country)}
         </Statement>
@@ -882,6 +898,7 @@ export function LeadGwgStatements({
 
       {payerGroup}
 
+      {legalAnswers.length > 0 ? (
       <StatementGroup title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
         {legalAnswers.map((item) => (
           <Statement
@@ -896,6 +913,7 @@ export function LeadGwgStatements({
           </Statement>
         ))}
       </StatementGroup>
+      ) : null}
 
       <p className="text-xs text-muted-foreground" data-testid="lead-gwg-declared-correct">
         {identification.declared_correct_at

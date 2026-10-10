@@ -517,11 +517,12 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const { calls } = await setup(page, sentWithBlocks(["A", "B"]));
     await page.goto("/");
 
-    // A sent request with open blocks opens in "Ergänzende Angaben", with its badge.
+    // A sent request with open blocks opens in "Ergänzende Angaben"; its badge only after a
+    // press on the step (QA 2026-10-10: no amber count on load).
     const followUp = page.getByTestId("lead-request-follow-up");
     await expect(followUp).toBeVisible();
     await expect(tab(page, "follow_up")).toHaveAttribute("aria-selected", "true");
-    await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveText("7");
+    await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
     // No notice above the blocks (owner 2026-10-09): the step's name says it.
     await expect(page.getByTestId("lead-request-follow-up-notice")).toHaveCount(0);
     await expect(followUp).not.toContainText("Wir benötigen ergänzende Angaben");
@@ -533,11 +534,23 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // Nothing of an assessment is in the page: no points, level, trigger or reason.
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
 
+    // Step "send" points to the open blocks in one short line, and does not say that nothing
+    // more is needed meanwhile (QA 2026-10-10).
+    await tab(page, "send").click();
+    await expect(page.getByTestId("lead-request-follow-up-open")).toContainText("Bitte ergänzen Sie noch einige Angaben.");
+    await expect(page.getByTestId("lead-request-follow-up-open")).not.toContainText("Wir benötigen");
+    await expect(page.getByTestId("lead-request-next-steps")).toContainText("ergänzen Sie Ihre Anfrage und senden Sie sie erneut");
+    await expect(page.getByTestId("lead-request-next-steps")).not.toContainText("Bis dahin müssen Sie nichts weiter tun.");
+    await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toHaveCount(0);
+    await page.getByTestId("lead-request-follow-up-open").getByRole("button").click();
+    await expect(followUp).toBeVisible();
+
     // Sending too early names what is still open, block by block.
     await page.getByTestId("lead-request-follow-up-submit").click();
     await expect(followUp).toContainText("Bitte ergänzen Sie zuerst die noch offenen Angaben.");
     await expect(page.getByTestId("lead-request-follow-up-A-missing")).toContainText("Nachweise zur Herkunft der Mittel");
     await expect(page.getByTestId("lead-request-follow-up-B-missing")).toContainText("Seit wann besteht die Beziehung?");
+    await expect(tab(page, "follow_up").getByTestId("lead-request-step-badge")).toBeVisible();
 
     // Block A: one source from the list, the words, profession, sector and a proof.
     const blockA = page.getByTestId("lead-request-follow-up-A");
@@ -563,6 +576,9 @@ test.describe("lead cabinet stepper and follow-up", () => {
 
     // Block B: why the payer pays, since when, and a proof (optional).
     const blockB = page.getByTestId("lead-request-follow-up-B");
+    // No relationship of the family named: no certificate as the example (QA 2026-10-10).
+    await expect(blockB).toContainText("Zum Beispiel ein Dokument, aus dem die Beziehung hervorgeht");
+    await expect(blockB).not.toContainText("Heirats- oder Geburtsurkunde");
     await blockB.getByRole("textbox", { name: "Warum übernimmt diese Person bzw. Organisation die Kosten?" }).fill("Familie");
     await blockB.getByRole("textbox", { name: "Seit wann besteht die Beziehung?" }).fill("2010");
     await expect
@@ -712,6 +728,10 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const residence = page.getByTestId("lead-request-follow-up-F");
     await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Staatsangehörigkeit / dort geboren");
     await expect.poll(() => calls.identification.at(-1)).toEqual({ stay_reason: "citizenship_or_birth" });
+    await expect(residence.locator("#lead-request-stay_reason_details")).toHaveCount(0);
+    // A named reason says enough: the words only for "other" (QA 2026-10-10).
+    await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Arbeit");
+    await expect.poll(() => calls.identification.at(-1)).toEqual({ stay_reason: "work" });
     await expect(residence.locator("#lead-request-stay_reason_details")).toHaveCount(0);
     await choose(page, residence.getByRole("combobox", { name: "Grund des Aufenthalts im Wohnsitzland" }), "Sonstiges");
     await expect(residence.locator("#lead-request-stay_reason_details")).toBeVisible();

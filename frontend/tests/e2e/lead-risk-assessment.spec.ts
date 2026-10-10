@@ -290,7 +290,8 @@ test("level 2: staff see points and level, request more and release with a reaso
   await panel.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-risk-level-2.png"), animations: "disabled" });
 
-  // Request more: the blocks of the triggers are pre-selected; the reason is mandatory.
+  // Request more: the open, unanswered blocks of the triggers are pre-selected (F is
+  // answered: not pre-ticked, QA 2026-10-10); the reason is mandatory.
   await panel.getByTestId("lead-risk-decide-request_more").click();
   const ask = page.getByRole("dialog", { name: "Запросить дополнительные сведения" });
   await expect(ask.getByTestId("lead-risk-block-chooser")).toBeVisible();
@@ -304,7 +305,7 @@ test("level 2: staff see points and level, request more and release with a reaso
   expect(requestMore?.body).toEqual({
     decision: "request_more",
     reason: "Herkunft der Mittel und Beziehung zum Zahler klären",
-    blocks: ["A", "B", "C", "D", "F"],
+    blocks: ["A", "B", "C", "D"],
   });
 
   // Release at level 2: effective at once.

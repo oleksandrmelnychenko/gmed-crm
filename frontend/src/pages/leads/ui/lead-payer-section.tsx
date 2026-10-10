@@ -234,6 +234,20 @@ export function LeadPayerDeclarationSection({
     : null;
   // A source the lead stated is the declaration's: staff need not choose one.
   const sourceRequired = !(form.kind === "self" && form.leadSelfFundsStated);
+  // The proof is required while the enhanced check (block A) asks the lead for
+  // it; the lead's own upload counts (QA 2026-10-10: "(необязательно)" here,
+  // "обязательно" below).
+  const staffProofLabel = !leadSelfFunds?.proofRequired
+    ? tx("Подтверждение источника средств (необязательно)", "Nachweis der Herkunft der Mittel (optional)")
+    : (leadSelfFunds.proofDocuments?.length ?? 0) > 0
+      ? tx(
+        "Подтверждение источника средств обязательно (усиленная проверка): загружено пациентом, см. ниже",
+        "Nachweis der Herkunft der Mittel erforderlich (verstärkte Prüfung): vom Patienten hochgeladen, siehe unten",
+      )
+      : tx(
+        "Подтверждение источника средств обязательно (усиленная проверка): пациент ещё не загрузил",
+        "Nachweis der Herkunft der Mittel erforderlich (verstärkte Prüfung): vom Patienten noch nicht hochgeladen",
+      );
 
   async function save() {
     if (!form.kind) {
@@ -465,7 +479,7 @@ export function LeadPayerDeclarationSection({
           <span>
             {form.sourceOfFundsDocumentId
               ? `${tx("Подтверждение приложено", "Nachweis beigefügt")}${evidenceName ? `: ${evidenceName}` : ""}`
-              : tx("Подтверждение источника средств (необязательно)", "Nachweis der Herkunft der Mittel (optional)")}
+              : staffProofLabel}
           </span>
           {canEdit ? (
             <label className={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted/40", readOnly && "pointer-events-none opacity-50")}>

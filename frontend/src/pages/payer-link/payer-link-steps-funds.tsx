@@ -301,7 +301,6 @@ export function FundsStep({
         badge={proofRequired ? text.fundsProofRequired : text.fundsProofOptional}
         hint={text.fundsProofHint}
         buttonLabel={text.fundsProofButton}
-        emptyText={text.noFundsProof}
         documents={uploads.documents}
         busy={uploads.busy}
         errors={uploads.errors}

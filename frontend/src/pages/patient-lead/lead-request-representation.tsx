@@ -537,18 +537,8 @@ function RepresentativeBlock({
       onChange={(code) => form.set(field, code ?? "")}
     />
   );
-  // Below the e-mail: whose sign-in address it is, or what the address is used for.
-  const emailHint = locked
-    ? person?.mine
-      ? text.representativeEmailIsLogin
-      : text.representativeEmailIsTheirLogin
-    : slot === "rep2"
-      ? text.representativeInviteHint
-      : "";
-  const emailError = Boolean(form.errorFor("email"));
-  const emailDescribedBy =
-    [emailHint ? `${fieldId("email")}-hint` : "", emailError ? `${fieldId("email")}-error` : ""].filter(Boolean).join(" ") ||
-    undefined;
+  // No hint label under the e-mail (QA 2026-10-10: filler); a sign-in address is read-only.
+  const emailDescribedBy = form.errorFor("email") ? `${fieldId("email")}-error` : undefined;
 
   async function remove() {
     if (!person) return;
@@ -596,8 +586,6 @@ function RepresentativeBlock({
           </Button>
         ) : null}
       </div>
-      {/* The other parent has to be told that the data are given here. */}
-      {slot === "rep2" ? <p className="text-xs leading-5 text-muted-foreground">{text.representativeInformHint}</p> : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
@@ -655,11 +643,6 @@ function RepresentativeBlock({
               value={form.draft.email}
               onChange={(event) => form.set("email", event.target.value)}
             />
-            {emailHint ? (
-              <p id={`${fieldId("email")}-hint`} className="text-xs leading-5 text-muted-foreground">
-                {emailHint}
-              </p>
-            ) : null}
           </LabeledField>
         ) : null}
         {asked("phone") ? <LabeledField {...labeled("phone")}>{textInput("phone", 50, "tel")}</LabeledField> : null}
@@ -897,10 +880,6 @@ export function RepresentationSection({
     return (
       <Section title={text.sectionLegalRepresentatives}>
         <div className="space-y-4" data-testid="lead-request-representation">
-          {/* Who consents and signs follows the custody chosen below. */}
-          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-custody-note">
-            {`${text.legalRepresentativesIntro} ${text.custodySignatureNote[draft.custody]}`}
-          </p>
           <LabeledField id="lead-request-custody" label={text.custodyQuestion}>
             <NativeComboboxSelect
               id="lead-request-custody"
@@ -936,7 +915,8 @@ export function RepresentationSection({
     );
   }
 
-  // The question in its card, the person's details as a card of their own below it (owner 2026-10-09).
+  // The questions in their card, each person's details as a card of their own below it (owner 2026-10-09);
+  // the legal-guardianship question is asked again since 2026-10-10 (owner).
   return (
     <div className="space-y-4" data-testid="lead-request-representation">
       <Section title={text.sectionRepresentation}>
@@ -952,12 +932,6 @@ export function RepresentationSection({
               }}
             />
           </LabeledField>
-          {problems}
-        </div>
-      </Section>
-      {shown.includes("agent") ? block("agent") : null}
-        {/* The legal-guardianship question (rechtliche Betreuung) is switched off for now (owner 2026-10-09).
-        <div className="space-y-3">
           <LabeledField id="lead-request-under_guardianship" label={text.underGuardianshipQuestion} required question>
             <YesNoSelect
               id="lead-request-under_guardianship"
@@ -969,9 +943,11 @@ export function RepresentationSection({
               }}
             />
           </LabeledField>
-          {shown.includes("guardian") ? block("guardian") : null}
+          {problems}
         </div>
-        */}
+      </Section>
+      {shown.includes("agent") ? block("agent") : null}
+      {shown.includes("guardian") ? block("guardian") : null}
     </div>
   );
 }

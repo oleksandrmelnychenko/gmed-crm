@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { LoaderCircle, Send, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,7 @@ import {
 import {
   CabinetSection as Section,
   LabeledField,
+  MissingShownContext,
   RequiredMark,
   UploadedFileList,
   YesNoSelect,
@@ -357,6 +358,7 @@ function PayerQuestionnaireForm({
 
   // The yellow lists only after the first send (owner 2026-10-09: "only after Далее").
   const [showMissing, setShowMissing] = useState(false);
+  const stepMissingShown = useContext(MissingShownContext);
 
   async function submit() {
     setShowMissing(true);
@@ -442,9 +444,12 @@ function PayerQuestionnaireForm({
       </div>
 
       {!acknowledged ? (
-        <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-notice-first">
-          {text.payerNoticeFirst}
-        </p>
+        // Why the fields wait, only after "Next" or "send" was pressed (QA 2026-10-10).
+        stepMissingShown || showMissing ? (
+          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-request-payer-notice-first">
+            {text.payerNoticeFirst}
+          </p>
+        ) : null
       ) : (
         <fieldset disabled={readOnly} className="min-w-0 space-y-5" data-testid="lead-request-payer-fields">
           <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">

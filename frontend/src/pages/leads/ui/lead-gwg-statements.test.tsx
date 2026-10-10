@@ -114,9 +114,27 @@ describe("LeadGwgStatements", () => {
     const related = statement(html, "lead-gwg-answer-pep_related");
     expect(related).not.toContain('data-warning="true"');
     expect(related).toContain("Нет");
-    const sanctions = statement(html, "lead-gwg-answer-sanctions_links");
+    // An unanswered legal question is left out while block L was not asked (QA 2026-10-10) …
+    expect(html).not.toContain('data-testid="lead-gwg-answer-sanctions_links"');
+    // … and reads "not answered" once the lead is asked it.
+    const asked = renderToStaticMarkup(
+      <LeadGwgStatements intake={portalState()} payer={{ acts_on_own_account: true }} askedBlocks={["L"]} tx={ru} lang="ru" today={TODAY} />,
+    );
+    const sanctions = statement(asked, "lead-gwg-answer-sanctions_links");
     expect(sanctions).not.toContain('data-warning="true"');
     expect(sanctions).toContain("Не отвечено");
+  });
+
+  it("leaves out the birth data a lead was never asked (block K)", () => {
+    const base = portalState().identification!;
+    const intake = { ...portalState(), identification: { ...base, former_names: null, birth_place: null, birth_country: null } };
+    const html = render(intake);
+    expect(html).not.toContain('data-testid="lead-gwg-birth_place"');
+    expect(html).not.toContain("Фамилия при рождении");
+    const asked = renderToStaticMarkup(
+      <LeadGwgStatements intake={intake} payer={{ acts_on_own_account: true }} askedBlocks={["K"]} tx={ru} lang="ru" today={TODAY} />,
+    );
+    expect(asked).toContain('data-testid="lead-gwg-birth_place"');
   });
 
   it("warns about an expired or missing validity of the identity document", () => {
@@ -434,15 +452,15 @@ describe("LeadGwgStatements: who acts for the lead", () => {
     expect(html).not.toContain("есть доступ в кабинет");
   });
 
-  it("keeps an adult who answered nothing to the open question", () => {
+  it("keeps an adult who answered nothing to the two open questions", () => {
     const html = render(
       portalState({
         representation: { has_representative: null, under_guardianship: null, custody: null, custody_stated: false, representatives: [] },
       }),
     );
     expect(statement(html, "lead-gwg-has-representative")).toContain("Не отвечено");
-    // The guardianship question is switched off (owner 2026-10-09): no "not answered" row.
-    expect(html).not.toContain("lead-gwg-under-guardianship");
+    // The cabinet asks the guardianship question again (owner 2026-10-10): open is "not answered".
+    expect(statement(html, "lead-gwg-under-guardianship")).toContain("Не отвечено");
     expect(html).not.toContain("lead-gwg-representative-");
   });
 

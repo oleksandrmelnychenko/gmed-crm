@@ -181,6 +181,17 @@ async fn get_login_emails(
     login_email_info(&state, &auth, Subject::Lead(lead_id), primary_language).await
 }
 
+/// The name a login e-mail greets: the account's name, none when the account
+/// was created without one and holds the e-mail address instead.
+fn greeting_name(account_name: &str) -> String {
+    let name = account_name.trim();
+    if name.contains('@') {
+        String::new()
+    } else {
+        name.to_string()
+    }
+}
+
 /// The first language of a patient that has an e-mail template.
 fn patient_language(languages: &[String]) -> Option<String> {
     languages
@@ -348,7 +359,9 @@ async fn send_login_email(
             lead_name
         }
     } else {
-        row.try_get::<String, _>("name").unwrap_or_default()
+        // A parent's login: the parent's own name (QA 2026-10-10: the e-mail
+        // greeted without one); a login created without a name holds the e-mail.
+        greeting_name(&row.try_get::<String, _>("name").unwrap_or_default())
     };
     // The day the retention rule deletes an unqualified request, if it applies.
     let converted = row
@@ -652,6 +665,13 @@ mod tests {
         ] {
             assert_ne!(base, other);
         }
+    }
+
+    #[test]
+    fn a_parent_is_greeted_by_name_never_by_the_address() {
+        assert_eq!(greeting_name(" Sofia Muster "), "Sofia Muster");
+        assert_eq!(greeting_name("sofia.muster@example.com"), "");
+        assert_eq!(greeting_name(""), "");
     }
 
     #[test]

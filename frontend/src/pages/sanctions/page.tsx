@@ -56,15 +56,21 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function SubjectDetails({ subject, t, lang }: { subject: SubjectData; t: Translations; lang: "ru" | "de" }) {
+  // An organisation has no birth date and no citizenship (QA 2026-10-10): its country is the seat.
+  const organisation = subject.organisation;
   return (
     <dl className="space-y-2">
-      <Row label={subject.organisation ? t.sanctions_field_entity : t.sanctions_field_names}>
+      <Row label={organisation ? t.sanctions_field_entity : t.sanctions_field_names}>
         {fisalisSearchText(subject)}
       </Row>
-      <Row label={t.sanctions_field_dob}>{subject.date_of_birth ? formatAppDate(subject.date_of_birth) : ""}</Row>
-      <Row label={t.sanctions_field_citizenships}>{countryList(subject.citizenships, lang)}</Row>
+      {organisation ? null : (
+        <>
+          <Row label={t.sanctions_field_dob}>{subject.date_of_birth ? formatAppDate(subject.date_of_birth) : ""}</Row>
+          <Row label={t.sanctions_field_citizenships}>{countryList(subject.citizenships, lang)}</Row>
+        </>
+      )}
       {subject.residence && subject.residence.length > 0 ? (
-        <Row label={t.sanctions_field_residence}>{countryList(subject.residence, lang)}</Row>
+        <Row label={organisation ? t.sanctions_field_seat : t.sanctions_field_residence}>{countryList(subject.residence, lang)}</Row>
       ) : null}
       {subject.relation && subject.relation !== "payer" ? (
         <Row label={t.sanctions_field_relation}>{subject.relation}</Row>
@@ -160,6 +166,7 @@ function HitCard({
                 ))}
               </ul>
             </Row>
+            {entry.subject_type === "entity" ? null : (
             <Row label={t.sanctions_field_dob}>
               {entry.birth_dates.map((birth) => formatListBirthDate(birth, t)).filter(Boolean).join("; ")}
               {hit.match_details.dob ? (
@@ -175,7 +182,10 @@ function HitCard({
                 </span>
               ) : null}
             </Row>
-            <Row label={t.sanctions_field_citizenships}>{countryList(entry.citizenships, lang)}</Row>
+            )}
+            {entry.subject_type === "entity" ? null : (
+              <Row label={t.sanctions_field_citizenships}>{countryList(entry.citizenships, lang)}</Row>
+            )}
             <Row label={t.sanctions_field_regulation}>
               <ul className="space-y-0.5">
                 {entry.regulations.map((regulation, index) => {

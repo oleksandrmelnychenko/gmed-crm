@@ -290,7 +290,8 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
   const organisation = isOrganisation(context.payerType);
   return (
     <div className="space-y-5" data-testid="payer-link-step-identity">
-      <p className="text-sm leading-6 text-muted-foreground">{organisation ? text.identityIntroOrganisation : text.identityIntro}</p>
+      {/* Whose document an organisation gives; a person needs no filler line (QA 2026-10-10). */}
+      {organisation ? <p className="text-sm leading-6 text-muted-foreground">{text.identityIntroOrganisation}</p> : null}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
         <Field context={context} field="id_document_type">
           <ChoiceInput context={context} field="id_document_type" options={ID_DOCUMENT_TYPES} labels={text.idDocumentTypes} />
@@ -318,7 +319,6 @@ export function IdentityStep({ context, uploads }: { context: StepContext; uploa
         required
         hint={text.uploadHint}
         buttonLabel={text.identityUploadButton}
-        emptyText={text.noIdentityDocuments}
         documents={uploads.documents}
         busy={uploads.busy}
         errors={uploads.errors}

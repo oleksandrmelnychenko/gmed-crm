@@ -355,6 +355,119 @@ async fn staff_see_the_preview_then_the_assessment_decide_and_the_gate_follows()
     assert!(rewrite.is_err());
 }
 
+/// Owner 2026-10-10 (QA): staff qualified the lead before the passport was
+/// uploaded, so the assessment started with T12 — the upload withdraws it
+/// (the only exception to the ratchet besides T16), records
+/// `trigger_withdrawn` and recomputes points and level.
+#[tokio::test]
+async fn a_valid_identity_document_withdraws_t12() {
+    let Some(app) = test_app().await else { return };
+    let (status, created) = request(
+        &app,
+        "POST",
+        "/leads",
+        &app.pm(),
+        Some(json!({ "first_name": "Mia", "last_name": "Muster", "email": format!("mia-{}@example.com", Uuid::new_v4().simple()) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let user_id: Uuid = created["portal_account"]["user_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let patient = app.bearer(user_id, "patient");
+    let path = format!("/me/lead-requests/{lead_id}");
+    // A Russian citizen (list 1, 2 points) without a document (T12, 2): level 2.
+    sqlx::query("UPDATE leads SET citizenships = '{RU}' WHERE id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    // Staff start the assessment before the upload (as "Квалифицировать" does).
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let started = assessment(&app, lead_id).await;
+    assert!(trigger(&started, "T12", "patient").is_some(), "{started}");
+    assert_eq!(started["points"], 4);
+    assert_eq!(started["level"], 2);
+
+    // The lead uploads the passport.
+    let (status, _) = request(
+        &app,
+        "POST",
+        &format!("{path}/consent"),
+        &patient,
+        Some(json!({ "purpose": "lead_inquiry_processing", "version": CONSENT_VERSION, "language": "de" })),
+    )
+    .await;
+    assert!(status.is_success());
+    let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // T12 is gone (not merely inactive); T1 alone is level 1, nothing waits for a review.
+    let after = assessment(&app, lead_id).await;
+    assert!(trigger(&after, "T12", "patient").is_none(), "{after}");
+    assert!(trigger(&after, "T1", "patient").is_some());
+    assert_eq!(after["patient_points"], 2);
+    assert_eq!(after["points"], 2);
+    assert_eq!(after["level"], 1);
+    assert_eq!(after["status"], "clear", "{after}");
+    let withdrawn: Vec<&Value> = after["history"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|event| event["kind"] == "trigger_withdrawn")
+        .collect();
+    assert_eq!(withdrawn.len(), 1, "{after}");
+    assert_eq!(withdrawn[0]["level"], 1);
+    assert_eq!(withdrawn[0]["points"], 2);
+    assert!(!withdrawn[0]["triggers"].to_string().contains("T12"));
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'lead_risk_trigger_withdrawn' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // Staff enter an expired validity: T12 fires again.
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_type": "passport", "id_document_number": "AB123456", "id_valid_until": "2020-01-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let expired = assessment(&app, lead_id).await;
+    assert!(trigger(&expired, "T12", "patient").is_some(), "{expired}");
+    assert_eq!(expired["level"], 2);
+    // A validity in the future withdraws it again.
+    let (status, data) = request(
+        &app,
+        "PUT",
+        &format!("/leads/{lead_id}/identity-document-data"),
+        &app.pm(),
+        Some(json!({ "id_document_type": "passport", "id_document_number": "AB123456", "id_valid_until": "2099-01-31" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{data}");
+    let valid = assessment(&app, lead_id).await;
+    assert!(trigger(&valid, "T12", "patient").is_none(), "{valid}");
+    assert_eq!(valid["level"], 1);
+}
+
 #[tokio::test]
 async fn level_three_needs_two_different_reviewers() {
     let Some(app) = test_app().await else { return };

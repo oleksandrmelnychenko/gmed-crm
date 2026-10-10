@@ -102,6 +102,16 @@ impl Assessment {
         self.status == STATUS_REJECTED || (self.score.level >= 2 && self.status != STATUS_RELEASED)
     }
 
+    /// Whether the payer's link waits: a rejected lead, or level 3 that
+    /// nobody released and for which staff did not request block D.
+    pub fn holds_payer_link(&self) -> bool {
+        self.started()
+            && (self.status == STATUS_REJECTED
+                || (self.score.level >= 3
+                    && self.status != STATUS_RELEASED
+                    && !self.requested_blocks.iter().any(|block| block == "D")))
+    }
+
     fn from_row(row: &sqlx::postgres::PgRow) -> Self {
         let triggers: Vec<Sticky> = row
             .try_get::<Value, _>("triggers")

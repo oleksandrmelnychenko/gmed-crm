@@ -174,11 +174,19 @@ export type StaffPayerQuestionnaire = {
   adopted_at: string | null;
 };
 
+export type PayerLinkRiskHold = "review" | "rejected";
+
 /** `GET /leads/{id}/payer-link`. */
 export type LeadPayerLinkState = {
   mode: PayerLinkMode | null;
   can_send: boolean;
   blocked_reason: string | null;
+  /**
+   * The risk assessment holds the link: `review` at level 3 until a decision
+   * or a request of block D, `rejected` after a reject; null (or absent on an
+   * older server) while it may go out.
+   */
+  risk_hold?: PayerLinkRiskHold | null;
   /** E-mail sending (Mittaro) is set up. */
   mail_available: boolean;
   link: PayerLinkInfo | null;
@@ -419,6 +427,7 @@ export function normalizeLeadPayerLinkState(value: unknown): LeadPayerLinkState 
     mode: raw.mode === "link" || raw.mode === "cabinet" ? raw.mode : null,
     can_send: raw.can_send,
     blocked_reason: textOrNull(raw.blocked_reason),
+    risk_hold: raw.risk_hold === "review" || raw.risk_hold === "rejected" ? raw.risk_hold : null,
     mail_available: raw.mail_available !== false,
     link: normalizeLink(raw.link),
     estimated_total_eur: decimalOrNull(raw.estimated_total_eur),

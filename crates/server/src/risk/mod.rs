@@ -544,15 +544,25 @@ pub struct Merged {
     pub triggers: Vec<Sticky>,
     /// A new trigger or more points than stored.
     pub raised: bool,
-    /// Keys withdrawn (only T16, after a false-positive decision).
+    /// Keys withdrawn: T12 once a valid identity document is on file, T16
+    /// after a false-positive decision.
     pub withdrawn: Vec<String>,
+}
+
+/// A stored trigger the ratchet drops once it no longer fires: T12 always
+/// (owner 2026-10-10: a valid identity document on file — uploaded, readable,
+/// validity not in the past — withdraws it, so a lead qualified before the
+/// upload does not keep it), T16 only with `withdraw_t16`.
+fn withdrawable(key: &str, withdraw_t16: bool) -> bool {
+    key == "T12" || (withdraw_t16 && key == "T16")
 }
 
 /// The ratchet (P3): every stored trigger stays at its highest points; the
 /// live evaluation adds new ones and raises points. A stored trigger that no
-/// longer fires stays, marked inactive. `withdraw_t16`: the only way down —
-/// a false-positive decision left no open or confirmed hit, so a stored T16
-/// that no longer fires is removed.
+/// longer fires stays, marked inactive. The only ways down: a stored T12 that
+/// no longer fires (the identity document is now valid) is removed, and with
+/// `withdraw_t16` — a false-positive decision left no open or confirmed hit —
+/// a stored T16 that no longer fires is removed.
 pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16: bool) -> Merged {
     let mut merged = Merged::default();
     for entry in stored {
@@ -570,7 +580,7 @@ pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16
                     entry.variant = fired.variant.map(str::to_string);
                 }
             }
-            None if withdraw_t16 && entry.key == "T16" => {
+            None if withdrawable(&entry.key, withdraw_t16) => {
                 merged.withdrawn.push(entry.key.clone());
                 continue;
             }
@@ -1124,6 +1134,86 @@ mod tests {
             true,
         );
         assert_eq!(still.triggers.len(), 1);
+    }
+
+    #[test]
+    fn a_valid_identity_document_withdraws_t12() {
+        let config = config();
+        let t0 = Utc::now();
+        // Qualified before the upload: T12 (2) + T1 list 2 (4) = level 2.
+        let started = merge(
+            &[],
+            &evaluate(
+                &Inputs {
+                    identity_document_on_file: false,
+                    patient_citizenships: vec!["IR".into()],
+                    ..clean()
+                },
+                &config,
+            ),
+            t0,
+            false,
+        );
+        assert_eq!(score(&started.triggers, &config).points, 6);
+        // Still no document, or unreadable, or expired: T12 stays.
+        for inputs in [
+            Inputs {
+                identity_document_on_file: false,
+                ..clean()
+            },
+            Inputs {
+                id_document_unreadable: true,
+                ..clean()
+            },
+            Inputs {
+                id_valid_until: NaiveDate::from_ymd_opt(2026, 10, 6),
+                ..clean()
+            },
+        ] {
+            let kept = merge(&started.triggers, &evaluate(&inputs, &config), t0, false);
+            assert!(kept.withdrawn.is_empty());
+            assert!(kept.triggers.iter().any(|trigger| trigger.key == "T12"));
+        }
+        // The upload (validity today or later, or not entered yet) withdraws
+        // T12 without a decision; the other triggers keep the ratchet.
+        for valid_until in [None, Some(today())] {
+            let uploaded = merge(
+                &started.triggers,
+                &evaluate(
+                    &Inputs {
+                        id_valid_until: valid_until,
+                        ..clean()
+                    },
+                    &config,
+                ),
+                t0,
+                false,
+            );
+            assert_eq!(uploaded.withdrawn, vec!["T12".to_string()]);
+            assert!(!uploaded.raised);
+            assert_eq!(fingerprint(&uploaded.triggers), "T1:patient:4");
+            let after = score(&uploaded.triggers, &config);
+            assert_eq!((after.points, after.level), (4, 2));
+            // A release stays valid; an expiry later fires T12 again.
+            assert!(within_release(
+                &fingerprint(&uploaded.triggers),
+                &fingerprint(&started.triggers)
+            ));
+            let expired = merge(
+                &uploaded.triggers,
+                &evaluate(
+                    &Inputs {
+                        id_valid_until: NaiveDate::from_ymd_opt(2026, 10, 6),
+                        ..clean()
+                    },
+                    &config,
+                ),
+                t0,
+                false,
+            );
+            assert!(expired.raised);
+            assert!(expired.triggers.iter().any(|trigger| trigger.key == "T12"));
+        }
     }
 
     #[test]

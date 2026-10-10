@@ -2802,6 +2802,8 @@ struct GwgSheetActingPerson {
     address: Option<String>,
     /// Type, number, authority and validity in one line.
     identity_document: Option<String>,
+    /// The validity date staff entered for the person's identity document.
+    identity_document_valid_until: Option<NaiveDate>,
     /// A copy of the identity document is on file.
     identity_document_on_file: bool,
     /// The proof of authority (power of attorney, appointment deed) is on file.
@@ -2822,7 +2824,7 @@ fn gwg_adult_acting_role(legal_guardian: bool) -> &'static str {
 /// (owner spec "Patientenformular", phase 2): printed on the sheet of the
 /// person who pays, under the § 12 line. Cash, crypto, another method and a
 /// payment through a third party are flagged for a separate check.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 struct GwgPaymentRoute {
     /// `bank_transfer`, `card`, `cash`, `crypto` or `other`.
     method: Option<String>,
@@ -2843,12 +2845,15 @@ struct GwgPaymentRoute {
 }
 
 impl GwgPaymentRoute {
-    /// The label of the line: where the answers come from.
+    /// The label of the line: where the answers come from. The patient form
+    /// numbers only the sections it prints, so the line names the section
+    /// "Wer zahlt?" that carries the payment route (QA 2026-10-10 B5: it
+    /// pointed to a section 8 the form does not have).
     fn label(&self) -> &'static str {
         if self.answered_by_payer {
             "Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"
         } else {
-            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)"
+            "Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Wer zahlt?“)"
         }
     }
 
@@ -3055,6 +3060,18 @@ struct GwgIdentityDocument<'a> {
     country: Option<&'a str>,
     issued_on: Option<NaiveDate>,
     valid_until: Option<NaiveDate>,
+}
+
+/// "Die Kopie … ist beigefügt; das Dokument ist gültig" (sections 1 and 2):
+/// the person's own scan is on file and staff entered a validity date that
+/// has not passed (QA 2026-10-10: a scan alone, or an expired document, ticked
+/// it).
+fn gwg_identity_copy_valid(
+    on_file: bool,
+    valid_until: Option<NaiveDate>,
+    today: NaiveDate,
+) -> bool {
+    on_file && valid_until.is_some_and(|valid_until| valid_until >= today)
 }
 
 /// "Reisepass, Nr. AB123456, ausgestellt von Stadt Kyiv (Ukraine) am
@@ -3331,9 +3348,10 @@ async fn load_gwg_identification_sheet(
                 .unwrap_or(false);
         }
         // Section 3 from the payer's own statement (QA 2026-10-10).
-        if let Some(owner) = load_gwg_payer_beneficial_owner(&state.db, lead_id)
-            .await
-            .map_err(|error| failed(error, "payer statement beneficial owner"))?
+        if let Some(owner) =
+            load_gwg_payer_beneficial_owner(&state.db, lead_id, GWG_PAYER_STATEMENT_SOURCE)
+                .await
+                .map_err(|error| failed(error, "payer statement beneficial owner"))?
         {
             sheet.acts_on_own_account = owner.acts_on_own_account;
             sheet.beneficial_owner_name = owner.name;
@@ -3491,6 +3509,7 @@ async fn load_gwg_identification_sheet(
                     birth_date: person.date_of_birth,
                     address: Some(address).filter(|line| !line.is_empty()),
                     identity_document: Some(identity_document).filter(|line| !line.is_empty()),
+                    identity_document_valid_until: extras.id_valid_until,
                     identity_document_on_file: represented
                         .has_upload(person.id, super::lead_representatives::UPLOAD_IDENTITY),
                     authority_on_file: represented
@@ -3498,12 +3517,60 @@ async fn load_gwg_identification_sheet(
                 });
             }
         }
-        // Sections 3 to 5 are the lead's on both sheets. Neither box of the
-        // own interest is ticked until the lead or staff answered the question.
-        if let Some(declaration) = declaration
+        // Section 3 (wB). The patient's sheet: the lead's answer; neither box
+        // of the own interest is ticked until the lead or staff answered the
+        // question. Sections 4 and 5 are the lead's on every sheet.
+        let lead_beneficial_owner = declaration
             .as_ref()
-            .filter(|declaration| declaration.own_account_answered)
-        {
+            .filter(|declaration| declaration.own_account_answered);
+        if representative.is_some() {
+            // A person who acts for the lead (QA 2026-10-10 A5-b: section 3
+            // stayed empty). A parent who also pays answered the payer's
+            // questions in the own section of the portal: that statement, as
+            // on the third-party payer's sheet. Otherwise the person acts on
+            // behalf of the represented patient (federal form: "auf
+            // Veranlassung … der nachfolgend aufgeführten natürlichen
+            // Person"), who is named.
+            let paying_parent = if sheet.also_payer {
+                load_gwg_payer_beneficial_owner(
+                    &state.db,
+                    lead_id,
+                    GWG_PARENT_PAYER_STATEMENT_SOURCE,
+                )
+                .await
+                .map_err(|error| failed(error, "parent payer statement beneficial owner"))?
+                .filter(|owner| owner.acts_on_own_account.is_some())
+            } else {
+                None
+            };
+            if let Some(owner) = paying_parent {
+                sheet.acts_on_own_account = owner.acts_on_own_account;
+                sheet.beneficial_owner_name = owner.name;
+                sheet.beneficial_owner_note = owner.note;
+                sheet.beneficial_owner_measures = Some(owner.measures);
+            } else {
+                let address = gwg_address_line(
+                    text("street_address").as_deref(),
+                    text("zip_code").as_deref(),
+                    text("city").as_deref(),
+                    lead_country.as_deref(),
+                );
+                let (note, measures) = gwg_represented_beneficial_owner(
+                    lead_birth_date,
+                    &address,
+                    representation.minor,
+                    sheet.authority_on_file,
+                    lead_beneficial_owner
+                        .filter(|declaration| !declaration.acts_on_own_account)
+                        .and_then(|declaration| declaration.beneficial_owner_name.as_deref()),
+                );
+                sheet.acts_on_own_account = Some(false);
+                sheet.beneficial_owner_name =
+                    Some(lead_name.clone()).filter(|name| !name.is_empty());
+                sheet.beneficial_owner_note = note;
+                sheet.beneficial_owner_measures = Some(measures);
+            }
+        } else if let Some(declaration) = lead_beneficial_owner {
             sheet.acts_on_own_account = Some(declaration.acts_on_own_account);
             sheet.beneficial_owner_name = declaration.beneficial_owner_name.clone();
             sheet.beneficial_owner_note = declaration.beneficial_owner_note.clone();
@@ -3585,8 +3652,10 @@ struct GwgPayerBeneficialOwner {
 /// owners the payer named (an organisation's) are the persons behind the
 /// payment. Without a sent statement the payer has not answered: `None`, and
 /// neither box is ticked (QA 2026-10-10: both stayed empty although the payer
-/// had answered).
+/// had answered). `source` names where the statement comes from
+/// ([`GWG_PAYER_STATEMENT_SOURCE`], [`GWG_PARENT_PAYER_STATEMENT_SOURCE`]).
 fn gwg_payer_beneficial_owner(
+    source: &str,
     submitted_on: NaiveDate,
     owners: &[Value],
     funds_sources: &[String],
@@ -3664,14 +3733,12 @@ fn gwg_payer_beneficial_owner(
                     .join("; "),
             ),
             note: Some(note),
-            measures: format!(
-                "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted})"
-            ),
+            measures: format!("{source} (abgesendet am {submitted})"),
         });
     }
     let sources = funds_sources
         .iter()
-        .map(|source| super::lead_payer_link::funds_source_label(source))
+        .map(|code| super::lead_payer_link::funds_source_label(code))
         .collect::<Vec<_>>()
         .join(", ");
     let description = funds_description
@@ -3687,7 +3754,7 @@ fn gwg_payer_beneficial_owner(
                 name: None,
                 note: None,
                 measures: format!(
-                    "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted}); keine Angabe zur Herkunft der Mittel"
+                    "{source} (abgesendet am {submitted}); keine Angabe zur Herkunft der Mittel"
                 ),
             });
         }
@@ -3697,16 +3764,71 @@ fn gwg_payer_beneficial_owner(
         name: None,
         note: None,
         measures: format!(
-            "Angaben des Kostenübernehmers über den eigenen Zugang (abgesendet am {submitted}): Zahlung aus eigenen Mitteln ({funds})"
+            "{source} (abgesendet am {submitted}): Zahlung aus eigenen Mitteln ({funds})"
         ),
     })
 }
 
-/// The payer's sent statement for section 3 of the payer's sheet; `None`
-/// while the payer has not sent it.
+/// Section 3 of the sheet of a person who acts for the patient and does not
+/// pay (a minor's legal representative, an adult's representative or legal
+/// guardian): the person acts on behalf of the represented patient, who is
+/// the wB named on the sheet. Returns the further details (birth date,
+/// address, and a beneficial owner the patient named in the own declaration)
+/// and the measures taken.
+fn gwg_represented_beneficial_owner(
+    birth_date: Option<NaiveDate>,
+    address: &str,
+    minor: bool,
+    authority_on_file: bool,
+    patient_named_owner: Option<&str>,
+) -> (Option<String>, String) {
+    let note = [
+        birth_date.map(|day| format!("geb. {}", day.format("%d.%m.%Y"))),
+        Some(address.trim().to_string()).filter(|line| !line.is_empty()),
+        patient_named_owner
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| {
+                format!(
+                    "laut Erklärung der vertretenen Person im wirtschaftlichen Interesse von {name}"
+                )
+            }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join("; ");
+    let proof = if authority_on_file {
+        "liegt vor"
+    } else {
+        "steht aus"
+    };
+    let measures = if minor {
+        format!(
+            "Handeln als gesetzliche/r Vertreter/in für das minderjährige Kind (Angaben im Patientenformular); Nachweis der Vertretungsberechtigung {proof}"
+        )
+    } else {
+        format!(
+            "Handeln für die vertretene Person (Angaben im Patientenformular); Nachweis der Vertretungsberechtigung {proof}"
+        )
+    };
+    (Some(note).filter(|note| !note.is_empty()), measures)
+}
+
+/// Where the payer's statement of section 3 comes from: the third-party
+/// payer's own link.
+const GWG_PAYER_STATEMENT_SOURCE: &str = "Angaben des Kostenübernehmers über den eigenen Zugang";
+/// The same questions answered by a paying parent (or guardian) of a minor in
+/// the own section of the patient portal.
+const GWG_PARENT_PAYER_STATEMENT_SOURCE: &str =
+    "Angaben der gesetzlichen Vertretung als Kostenträger/in im Patientenportal";
+
+/// The payer's sent statement for section 3 of the payer's sheet — or of the
+/// sheet of the parent who pays —; `None` while it has not been sent.
 async fn load_gwg_payer_beneficial_owner(
     db: &gmed_db::DbPool,
     lead_id: Uuid,
+    source: &str,
 ) -> Result<Option<GwgPayerBeneficialOwner>, sqlx::Error> {
     let Some(row) = sqlx::query(
         r#"SELECT submitted_at, beneficial_owners, funds_sources, funds_description
@@ -3729,6 +3851,7 @@ async fn load_gwg_payer_beneficial_owner(
         .unwrap_or_default();
     let funds_description: Option<String> = row.try_get("funds_description")?;
     Ok(gwg_payer_beneficial_owner(
+        source,
         crate::app_time::date_of(submitted_at),
         &owners,
         &funds_sources,
@@ -20726,6 +20849,82 @@ fn legal_signature_line(
     layout.y_mm -= 14.0;
 }
 
+/// The reviewer's line of the GwG identification sheet: "Datum: …
+/// Bearbeiter/in: <name>" beside "Unterschrift: ____". The name follows its
+/// label in full, wrapped under it when it is long (QA 2026-10-10 C6-e: the
+/// label stayed empty and the name under the signature was cut off). The
+/// label stays on the line of the underline: the frames read from the PDF
+/// text take the underline after "Bearbeiter" for the agency's
+/// (`document_signatures::frames`), as the recorded frame says.
+fn gwg_reviewer_signature_line(
+    layout: &mut TreatmentPlanPdfLayout,
+    review_date: &str,
+    reviewer: &str,
+) {
+    const SIZE: f32 = 10.0;
+    let prefix = format!("Datum: {review_date}     Bearbeiter/in:");
+    let left_column = 122.0 - PDF_LEFT_MARGIN_MM - 3.0;
+    let indent = approx_text_width_mm(&format!("{prefix} "), SIZE);
+    let name_lines = gwg_reviewer_name_lines(reviewer, (left_column - indent).max(20.0));
+    let line_height = pdf_line_height_mm(SIZE, 1.2);
+    let extra = name_lines.len().saturating_sub(1) as f32 * line_height;
+    layout.spacer(LEGAL_SIGNATURE_FRAME_HEIGHT_MM);
+    layout.ensure_space(14.0 + extra);
+    let signature_y = layout.y_mm;
+    let first = match name_lines.first() {
+        Some(name) => format!("{prefix} {name}"),
+        None => prefix,
+    };
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        &first,
+        PDF_LEFT_MARGIN_MM,
+        signature_y,
+        SIZE,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    for (index, line) in name_lines.iter().enumerate().skip(1) {
+        append_pdf_text_line(
+            &mut layout.page_ops,
+            line,
+            PDF_LEFT_MARGIN_MM + indent,
+            signature_y - index as f32 * line_height,
+            SIZE,
+            &layout.regular_font,
+            TreatmentPlanPdfColor::Body,
+        );
+    }
+    append_pdf_text_line(
+        &mut layout.page_ops,
+        "Unterschrift: ____________________",
+        122.0,
+        signature_y,
+        SIZE,
+        &layout.regular_font,
+        TreatmentPlanPdfColor::Body,
+    );
+    layout.push_signature_anchor(
+        "agency",
+        LEGAL_SIGNATURE_FRAME_X_MM,
+        signature_y - 1.0,
+        LEGAL_SIGNATURE_FRAME_WIDTH_MM,
+        LEGAL_SIGNATURE_FRAME_HEIGHT_MM,
+    );
+    layout.y_mm -= 14.0 + extra;
+}
+
+/// The reviewer's name in lines of `width_mm`, nothing cut off; "—" without
+/// a name.
+fn gwg_reviewer_name_lines(reviewer: &str, width_mm: f32) -> Vec<String> {
+    let lines = wrap_text_to_width_precise(reviewer, 10.0, width_mm);
+    if lines.is_empty() {
+        vec!["—".to_string()]
+    } else {
+        lines
+    }
+}
+
 fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
     agency.data_controller_statement.trim()
 }
@@ -21385,14 +21584,14 @@ fn build_gwg_identification_pdf(
     legal_meta_grid(&mut layout, &meta);
 
     admin_heading(&mut layout, "1. Identifizierung des Vertragspartners");
-    // "Das Dokument ist gültig" needs a known, not expired validity date, not
-    // only an uploaded scan (QA 2026-10-10).
-    let identity_document_valid = sheet
-        .identity_document_valid_until
-        .is_some_and(|valid_until| valid_until >= crate::app_time::today());
+    let today = crate::app_time::today();
     aml_checkbox_line(
         &mut layout,
-        sheet.identity_document_on_file && identity_document_valid,
+        gwg_identity_copy_valid(
+            sheet.identity_document_on_file,
+            sheet.identity_document_valid_until,
+            today,
+        ),
         "Die erforderliche Kopie/Fotografie bzw. der Scan des Ausweisdokuments des Vertragspartners wurde erstellt und ist beigefügt; das Dokument ist gültig.",
     );
     aml_labeled_value(
@@ -21581,9 +21780,15 @@ fn build_gwg_identification_pdf(
             "Ausweisdokument (Art, Nummer, ausstellende Behörde)",
             person.identity_document.as_deref(),
         );
+        // The same rule as section 1: the person's own scan and a known,
+        // current validity date (QA 2026-10-10 A5-a).
         aml_checkbox_line(
             &mut layout,
-            person.identity_document_on_file,
+            gwg_identity_copy_valid(
+                person.identity_document_on_file,
+                person.identity_document_valid_until,
+                today,
+            ),
             "Die erforderliche Kopie/Fotografie bzw. der Scan des Ausweisdokuments der auftretenden Person wurde erstellt und ist beigefügt; das Dokument ist gültig.",
         );
         aml_labeled_value(
@@ -21714,17 +21919,7 @@ fn build_gwg_identification_pdf(
         1.0,
     );
 
-    legal_signature_line(
-        &mut layout,
-        // The name stands under the signature line; beside the date it would
-        // be cut off. The label stays beside the date: it tells the reader
-        // who signs, and the signature frames read from the PDF text take an
-        // underline after "Bearbeiter" for the agency's
-        // (`document_signatures::frames`), as the recorded frame says.
-        &format!("Datum: {review_date}     Bearbeiter/in:"),
-        reviewer,
-        "agency",
-    );
+    gwg_reviewer_signature_line(&mut layout, &review_date, reviewer);
 
     Ok(finalize_generated_pdf(document, layout))
 }
@@ -23313,6 +23508,9 @@ struct LeadDisclosurePerson {
 struct LeadDisclosurePayer {
     self_payer: bool,
     organisation: bool,
+    /// A minor's legal representative who pays ("Elternteil" or "Vormund"):
+    /// not a third party (owner decision 2026-10-10).
+    representative_role: Option<&'static str>,
     /// `person`, `company`, `organisation` or `insurance`.
     payer_type: String,
     /// The person's name, or the organisation's.
@@ -23372,6 +23570,12 @@ struct LeadSelfDisclosure {
     /// or a minor's legal representatives (who sign).
     acting_persons: Vec<LeadDisclosurePerson>,
     payer: Option<LeadDisclosurePayer>,
+    /// How the patient side pays (the base form asks it of a self-payer and
+    /// of a paying parent): `None` for a third party, who answers it on the
+    /// own link.
+    payment_route: Option<GwgPaymentRoute>,
+    /// The expected total in EUR the lead stated ("8.000,00 EUR").
+    expected_total: Option<String>,
     /// `None` until the own-interest question was answered.
     acts_on_own_account: Option<bool>,
     beneficial_owner_name: Option<String>,
@@ -23492,9 +23696,10 @@ async fn load_lead_self_disclosure(
     let declaration = super::lead_payer::load_declaration(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "payer declaration"))?;
-    let (organisation_mask, _) = crate::risk::cabinet::payer_extras(&mut conn, lead_id)
-        .await
-        .map_err(|error| failed(error, "organisation mask"))?;
+    let (organisation_mask, billing_extras) =
+        crate::risk::cabinet::payer_extras(&mut conn, lead_id)
+            .await
+            .map_err(|error| failed(error, "organisation mask"))?;
     let represented = super::lead_representatives::load(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "representation"))?
@@ -23530,11 +23735,24 @@ async fn load_lead_self_disclosure(
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     };
+    // A minor's parent or guardian who pays is no third party (owner decision
+    // 2026-10-10): the form says so instead of "eine andere Person".
+    let paying_representative =
+        super::lead_representatives::payer_same_person(representation, declaration.as_ref())
+            .and_then(|id| representation.find(id))
+            .map(|person| {
+                if person.is_guardian_of_minor(custody) {
+                    "Vormund"
+                } else {
+                    "Elternteil"
+                }
+            });
     let payer = declaration.as_ref().map(|declaration| {
         let organisation = declaration.is_organisation();
         LeadDisclosurePayer {
             self_payer: !declaration.is_third_party(),
             organisation,
+            representative_role: paying_representative,
             payer_type: declaration
                 .payer_type
                 .clone()
@@ -23558,8 +23776,25 @@ async fn load_lead_self_disclosure(
     let own_account = declaration
         .as_ref()
         .filter(|declaration| declaration.own_account_answered);
+    // The payment route and the expected total the patient side states in
+    // the base form and block C (QA 2026-10-10 B5: neither was printed); a
+    // third party answers them on the own link.
+    let patient_side_pays = declaration.as_ref().is_some_and(|declaration| {
+        !declaration.is_third_party() || paying_representative.is_some()
+    });
+    let payment_route = declaration
+        .as_ref()
+        .filter(|_| patient_side_pays)
+        .map(GwgPaymentRoute::from_declaration)
+        .filter(|route| route.method.is_some() || route.via_third_party.is_some());
+    let expected_total = billing_extras["expected_total_eur"]
+        .as_str()
+        .filter(|_| patient_side_pays)
+        .map(fmt_money_de);
     Ok(LeadSelfDisclosure {
         submitted_at,
+        payment_route,
+        expected_total,
         salutation: statements.salutation,
         first_name: text("first_name").unwrap_or_default(),
         middle_name: text("middle_name"),
@@ -23744,21 +23979,26 @@ fn build_lead_self_disclosure_pdf(
         0.0,
         3.0,
     );
-    legal_meta_grid(
-        &mut layout,
-        &[
-            (
-                "Patient/in",
-                aml_binding_value(Some(patient_name.as_str())).to_string(),
-            ),
-            (
-                "Geburtsdatum",
-                date(data.date_of_birth).unwrap_or_else(|| "—".to_string()),
-            ),
-            ("Auftrags-Nr.", aml_binding_value(order_number).to_string()),
-            ("Anfrage gesendet", format!("{sent_on} {sent_at}")),
-        ],
-    );
+    // "Auftrags-Nr." only once there is an order (QA 2026-10-10 B5: "—"
+    // before the order existed).
+    let mut meta = vec![
+        (
+            "Patient/in",
+            aml_binding_value(Some(patient_name.as_str())).to_string(),
+        ),
+        (
+            "Geburtsdatum",
+            date(data.date_of_birth).unwrap_or_else(|| "—".to_string()),
+        ),
+    ];
+    if let Some(order_number) = order_number
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        meta.push(("Auftrags-Nr.", order_number.to_string()));
+    }
+    meta.push(("Anfrage gesendet", format!("{sent_on} {sent_at}")));
+    legal_meta_grid(&mut layout, &meta);
 
     let mut section = PayerSectionCounter(0);
     // 1. The person.
@@ -23945,6 +24185,21 @@ fn build_lead_self_disclosure_pdf(
                     "Ich zahle selbst.".to_string()
                 }),
             ));
+        } else if let Some(role) = payer.representative_role {
+            // A parent (or the guardian) who pays is the child's legal
+            // representative, not "another person" (owner decision
+            // 2026-10-10).
+            rows.extend([
+                (
+                    "Wer zahlt?",
+                    Some(if role == "Vormund" {
+                        "Der Vormund (gesetzliche Vertretung)".to_string()
+                    } else {
+                        "Ein Elternteil (gesetzliche Vertretung)".to_string()
+                    }),
+                ),
+                ("Name", payer.name.clone()),
+            ]);
         } else if payer.organisation {
             rows.extend([
                 (
@@ -24002,6 +24257,20 @@ fn build_lead_self_disclosure_pdf(
             }
         });
         rows.push(("Handeln im eigenen wirtschaftlichen Interesse", own_account));
+        // How the patient side pays and the expected total (QA 2026-10-10
+        // B5); the GwG sheet refers to this section. Only the answers, never
+        // whether a method is checked separately.
+        if let Some(route) = data.payment_route.as_ref() {
+            rows.push(("Zahlungsweg", route.method.as_ref().map(|_| route.line())));
+            rows.push((
+                "Zahlung über Dritte / Zahlungsdienstleister",
+                route.via_third_party.map(|_| route.third_party_line()),
+            ));
+        }
+        rows.push((
+            "Voraussichtlicher Gesamtbetrag",
+            data.expected_total.clone(),
+        ));
         lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
     }
 
@@ -24108,6 +24377,13 @@ fn build_lead_self_disclosure_pdf(
     // party's funds and why it pays — each only for the payer stated now.
     let self_pays = data.payer.as_ref().is_some_and(|payer| payer.self_payer);
     let third_party_pays = data.payer.as_ref().is_some_and(|payer| !payer.self_payer);
+    // Why "another person" pays and since when the patient knows the payer
+    // do not apply to a paying parent.
+    let other_person_pays = third_party_pays
+        && data
+            .payer
+            .as_ref()
+            .is_some_and(|payer| payer.representative_role.is_none());
     let funds_label =
         |source: Option<&String>| source.map(|source| lead_funds_source_label(source).to_string());
     lead_disclosure_section(
@@ -24137,11 +24413,15 @@ fn build_lead_self_disclosure_pdf(
             ("Branche", data.sector.clone()),
             (
                 "Warum zahlt eine andere Person?",
-                data.payment_background.clone().filter(|_| third_party_pays),
+                data.payment_background
+                    .clone()
+                    .filter(|_| other_person_pays),
             ),
             (
                 "Beziehung zur zahlenden Person seit",
-                data.relationship_since.clone().filter(|_| third_party_pays),
+                data.relationship_since
+                    .clone()
+                    .filter(|_| other_person_pays),
             ),
             ("Wohnsitz seit", data.residence_since.clone()),
             ("Weitere Wohnsitze", data.other_residences.clone()),
@@ -34412,9 +34692,93 @@ mod tests {
             "Ergänzende Angaben",
             "Frühere Namen",
             "Anrede",
+            // No order yet: no "Auftrags-Nr. —" (QA 2026-10-10 B5).
+            "Auftrags-Nr.",
         ] {
             assert!(!text.contains(absent), "{absent} in {text}");
         }
+    }
+
+    #[test]
+    fn the_lead_self_disclosure_prints_the_payment_route_and_a_paying_parent() {
+        // A self-payer in cash with the expected total (QA 2026-10-10 B5).
+        let cash = super::LeadSelfDisclosure {
+            payer: Some(super::LeadDisclosurePayer {
+                self_payer: true,
+                ..Default::default()
+            }),
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("cash".to_string()),
+                via_third_party: Some(false),
+                flags: vec!["cash_payment"],
+                ..Default::default()
+            }),
+            expected_total: Some(super::fmt_money_de("8000.00")),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &cash,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0006",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        for expected in [
+            "4. Wer zahlt?",
+            "Ich zahle selbst.",
+            "Zahlungsweg Barzahlung",
+            "Zahlung über Dritte / Zahlungsdienstleister nein",
+            "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        // The lead never reads that a method is checked separately.
+        assert!(!text.contains("gesonderte Prüfung"), "{text}");
+        assert!(!text.contains("Auftrags-Nr."), "{text}");
+
+        // A mother who pays for her child is the legal representative, not
+        // "another person" (owner decision 2026-10-10).
+        let parent = super::LeadSelfDisclosure {
+            minor: true,
+            custody: Some("joint".to_string()),
+            acting_persons: vec![super::LeadDisclosurePerson {
+                role: "Elternteil",
+                name: "Sofia Muster".to_string(),
+            }],
+            payer: Some(super::LeadDisclosurePayer {
+                representative_role: Some("Elternteil"),
+                payer_type: "person".to_string(),
+                name: Some("Sofia Muster".to_string()),
+                relationship: Some("Elternteil".to_string()),
+                ..Default::default()
+            }),
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("bank_transfer".to_string()),
+                ..Default::default()
+            }),
+            payment_background: Some("bleibt unberücksichtigt".to_string()),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &parent,
+            &legal_test_agency(),
+            Some("A-20261010-0001"),
+            "DOC-LEAD-SD-0007",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated);
+        for expected in [
+            "Auftrags-Nr.",
+            "A-20261010-0001",
+            "Ein Elternteil (gesetzliche Vertretung)",
+            "Name Sofia Muster",
+            "Zahlungsweg Überweisung",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        assert!(!text.contains("Eine andere Person"), "{text}");
+        assert!(!text.contains("bleibt unberücksichtigt"), "{text}");
     }
 
     #[test]
@@ -34422,6 +34786,7 @@ mod tests {
         let day = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
         // A person who states the own funds is the beneficial owner.
         let own = super::gwg_payer_beneficial_owner(
+            super::GWG_PAYER_STATEMENT_SOURCE,
             day,
             &[],
             &["employment".to_string(), "savings".to_string()],
@@ -34449,14 +34814,28 @@ mod tests {
             "country": "DE",
             "share_percent": 50.5,
         })];
-        let named = super::gwg_payer_beneficial_owner(day, &owners, &[], None).unwrap();
+        let named = super::gwg_payer_beneficial_owner(
+            super::GWG_PAYER_STATEMENT_SOURCE,
+            day,
+            &owners,
+            &[],
+            None,
+        )
+        .unwrap();
         assert_eq!(named.acts_on_own_account, Some(false));
         assert_eq!(named.name.as_deref(), Some("Viktor Zahler"));
         let note = named.note.unwrap();
         assert!(note.contains("geb. 03.02.1970"), "{note}");
         assert!(note.contains("Anteil 50,5 %"), "{note}");
         // Sent without any statement on the funds: no box is ticked.
-        let silent = super::gwg_payer_beneficial_owner(day, &[], &[], None).unwrap();
+        let silent = super::gwg_payer_beneficial_owner(
+            super::GWG_PAYER_STATEMENT_SOURCE,
+            day,
+            &[],
+            &[],
+            None,
+        )
+        .unwrap();
         assert_eq!(silent.acts_on_own_account, None);
 
         // The payer's sheet prints it, with the payment route of the payer.
@@ -34488,7 +34867,7 @@ mod tests {
         );
         assert!(text.contains("Zahlung aus eigenen Mitteln"));
         assert!(text.contains("Angaben zum Zahlungsweg (Angaben des Kostenübernehmers)"));
-        assert!(!text.contains("Patientenformular, Abschnitt 8"));
+        assert!(!text.contains("(Patientenformular"));
     }
 
     #[test]
@@ -34517,6 +34896,45 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[1].ends_with("..."));
         assert!(within(size, &lines), "{lines:?}");
+    }
+
+    #[test]
+    fn gwg_sheet_names_the_reviewer_in_full_beside_the_label() {
+        // QA 2026-10-10 C6-e: "Bearbeiter/in:" stayed empty and the name under
+        // the signature was cut off.
+        let long = "CEO / e2e-02d9c944d40e488bb9ea60bb1234abcd Bearbeiterin Beispiel";
+        for (reviewer, reference) in [
+            ("Clara Chefin", "GWG-20261010-UNITTEST0010"),
+            (long, "GWG-20261010-UNITTEST0011"),
+        ] {
+            let sheet = super::GwgIdentificationSheet {
+                role: "Patient/in",
+                first_name: "Anna".to_string(),
+                last_name: "Muster".to_string(),
+                reviewer_name: reviewer.to_string(),
+                review_date: NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+                ..Default::default()
+            };
+            let bytes =
+                super::build_gwg_identification_pdf(&sheet, &legal_test_agency(), None, reference)
+                    .unwrap();
+            // The agency's frame is still found after "Bearbeiter".
+            assert_signature_frames_detected(&bytes);
+            assert_eq!(recorded_roles(&bytes), ["agency"]);
+            let text = normalized_pdf_text(&bytes);
+            let start = text
+                .find("Datum: 10.10.2026 Bearbeiter/in:")
+                .unwrap_or_else(|| panic!("no reviewer line in {text}"));
+            // The underline stands on the first line of the name; the rest
+            // of the name follows on the next lines.
+            let compact = |value: &str| value.split_whitespace().collect::<String>();
+            let tail = compact(&text[start..]).replace("Unterschrift:____________________", "");
+            assert!(
+                tail.contains(&compact(&format!("Bearbeiter/in: {reviewer}"))),
+                "{reviewer} not in full in {text}"
+            );
+            assert!(!tail.contains("..."), "{text}");
+        }
     }
 
     #[test]
@@ -34699,7 +35117,13 @@ mod tests {
         // The frame of the agency's signature is still found under the text.
         assert_signature_frames_detected(&bytes);
         let text = assert_legal_pdf_chrome(&bytes, "GWG-20261006-UNITTEST0007");
-        assert!(text.contains("Angaben zum Zahlungsweg (Patientenformular, Abschnitt 8)"));
+        // The patient form numbers only the sections it prints: the line names
+        // the section, not a number (QA 2026-10-10 B5).
+        assert!(
+            text.contains("Angaben zum Zahlungsweg (Patientenformular, Abschnitt „Wer zahlt?“)"),
+            "{text}"
+        );
+        assert!(!text.contains("Abschnitt 8"), "{text}");
         assert_eq!(
             transfer.payment_route.as_ref().unwrap().line(),
             "Überweisung · Konto in Deutschland · Kontoinhaber/in: Anna Muster · Bank: Musterbank"
@@ -34850,8 +35274,16 @@ mod tests {
 
         // An adult names a representative and a legal guardian in section 2;
         // the box for the guardian's documents is ticked with both on file.
+        // "Das Dokument ist gültig" of section 2 needs the person's scan and a
+        // current validity date, like section 1 (QA 2026-10-10 A5-a): the
+        // representative's passport is valid, the guardian's expired.
         let acting = |legal_guardian: bool, name: &str, authority_on_file: bool| {
             super::GwgSheetActingPerson {
+                identity_document_valid_until: if legal_guardian {
+                    NaiveDate::from_ymd_opt(2020, 1, 1)
+                } else {
+                    NaiveDate::from_ymd_opt(2099, 1, 1)
+                },
                 role: if legal_guardian {
                     "Rechtliche/r Betreuer/in"
                 } else {
@@ -34897,6 +35329,33 @@ mod tests {
         assert!(text.contains("liegt vor (Bestellungsurkunde bzw. Betreuerausweis)"));
         assert!(!text.contains("liegt vor (Vollmacht)"));
         assert!(text.contains("[X] Bei Betreuten"));
+        // Section 1 (no scan of the adult) and the guardian's expired
+        // document stay unticked; only the representative's valid one counts.
+        assert_eq!(
+            text.matches("[X] Die erforderliche Kopie/Fotografie")
+                .count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(
+            text.matches("[ ] Die erforderliche Kopie/Fotografie")
+                .count(),
+            2,
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn gwg_identity_copy_is_valid_only_with_the_scan_and_a_current_date() {
+        let today = NaiveDate::from_ymd_opt(2026, 10, 10).unwrap();
+        let future = NaiveDate::from_ymd_opt(2030, 1, 1);
+        let past = NaiveDate::from_ymd_opt(2020, 1, 1);
+        assert!(super::gwg_identity_copy_valid(true, future, today));
+        assert!(super::gwg_identity_copy_valid(true, Some(today), today));
+        // No validity date, an expired one, or no scan of the person.
+        assert!(!super::gwg_identity_copy_valid(true, None, today));
+        assert!(!super::gwg_identity_copy_valid(true, past, today));
+        assert!(!super::gwg_identity_copy_valid(false, future, today));
     }
 
     #[test]

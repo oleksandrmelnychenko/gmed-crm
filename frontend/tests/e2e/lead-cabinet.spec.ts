@@ -288,11 +288,12 @@ function recompute(request: ReturnType<typeof leadRequest>) {
     // The reason of the request (13.1), from a server that knows it.
     if ("request_reason" in identification && !identification.request_reason) missing.push("request_reason");
   }
-  // A server that knows the representation (contract phase 1b-2) needs the adult's answer; the
-  // legal-guardianship question is switched off in the cabinet (owner 2026-10-09).
+  // A server that knows the representation (contract phase 1b-2) needs the adult's two answers; the
+  // legal-guardianship question is asked again since 2026-10-10 (owner).
   const representation = request.representation;
   if (representation) {
     if (representation.has_representative == null) missing.push("has_representative");
+    if (representation.under_guardianship == null) missing.push("under_guardianship");
   }
   // A server that knows invoice and payment (contract phase 2): who answers
   // the payment route follows "who pays" — the patient, the paying parent
@@ -783,10 +784,10 @@ test.describe("lead cabinet", () => {
     await expect(missing.getByTestId("lead-request-missing-person")).toContainText(
       "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
     );
-    // The birth data (block K), the legal guardianship (switched off) and the legal questions (block L) are not
-    // asked by the base form (owner 2026-10-09).
+    // The legal-guardianship question is asked again (owner 2026-10-10).
+    await expect(missing.getByTestId("lead-request-missing-person")).toContainText("Stehen Sie unter rechtlicher Betreuung?");
+    // The birth data (block K) and the legal questions (block L) are not asked by the base form (owner 2026-10-09).
     await expect(missing).not.toContainText("Geburtsort");
-    await expect(missing).not.toContainText("Stehen Sie unter rechtlicher Betreuung?");
     await expect(missing.getByTestId("lead-request-missing-declarations")).toHaveCount(0);
     await expect(missing).not.toContainText("Gesetzliche Fragen");
     await expect(missing).not.toContainText("wirtschaftlichen Interesse");
@@ -814,12 +815,14 @@ test.describe("lead cabinet", () => {
     await expect(page.locator("#lead-request-birth_place")).toHaveCount(0);
     await expect(page.getByRole("combobox", { name: "Geburtsland" })).toHaveCount(0);
 
-    // Nobody acts for the patient: the question is answered with "no", and nobody is asked for.
-    // The legal-guardianship question is switched off (owner 2026-10-09).
+    // Nobody acts for the patient: both questions are answered with "no", and nobody is asked for
+    // (the legal-guardianship question is asked again, owner 2026-10-10).
     const representation = page.getByTestId("lead-request-representation");
     await choose(page, representation.getByRole("combobox", { name: /Handelt jemand für Sie/ }), "Nein");
-    await expect(representation.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" })).toHaveCount(0);
-    await expect.poll(() => Object.assign({}, ...calls.representation)).toEqual({ has_representative: false });
+    await choose(page, representation.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" }), "Nein");
+    await expect
+      .poll(() => Object.assign({}, ...calls.representation))
+      .toEqual({ has_representative: false, under_guardianship: false });
     await expect(representation.getByRole("group")).toHaveCount(0);
 
     // The country of residence sits in the same first step; there is no tab "Kontakt" any more.
@@ -922,7 +925,9 @@ test.describe("lead cabinet", () => {
     await expect
       .poll(() => calls.payer.at(-1))
       .toEqual({ payer_kind: "third_party", payer_type: "person", messenger: "", contact_consent: false });
-    await expect(payer).toContainText("Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.");
+    // The sky chip asks who pays, without the filler sentence about the law (QA 2026-10-10).
+    await expect(payer).toContainText("Bitte nennen Sie, wer die Kosten übernimmt.");
+    await expect(payer).not.toContainText("Wir sind gesetzlich verpflichtet zu wissen, wer zahlt.");
     // Why the person pays is no question of the base form (follow-up block B).
     await expect(payer.getByRole("textbox", { name: /Warum übernimmt/ })).toHaveCount(0);
 
@@ -1004,6 +1009,9 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("textbox", { name: "Registernummer (falls vorhanden)" })).toBeVisible();
     await expect(payer.getByRole("textbox", { name: "Ansprechperson" })).toBeVisible();
     await expect(payer.getByRole("textbox", { name: "Sitz (Straße und Hausnummer)" })).toHaveValue("Musterstraße 1");
+    // The address card of an organisation is its seat, not a residence (QA 2026-10-10).
+    await expect(payer.getByRole("heading", { name: "Sitz", exact: true })).toBeVisible();
+    await expect(payer.getByRole("heading", { name: "Wohnort", exact: true })).toHaveCount(0);
     await expect(payer).not.toContainText("Bitte sagen Sie dieser Person");
     await expect.poll(() => calls.payer.at(-1)).toEqual({
       payer_kind: "third_party",
@@ -1288,9 +1296,8 @@ test.describe("lead cabinet", () => {
     await expect(consent).toContainText(
       "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
     );
-    await expect(consent).toContainText(
-      "Ohne diese Einwilligung können wir der zahlenden Person die Unterlagen zur Kostenübernahme nicht zur Unterschrift senden.",
-    );
+    // Required, without the explanatory filler line (QA 2026-10-10).
+    await expect(consent).not.toContainText("Ohne diese Einwilligung");
     const order = await payer
       .locator('[data-testid="lead-request-payer-consent"], [data-testid="lead-request-payer-cost-estimate-consent"]')
       .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("data-testid")));
@@ -1684,7 +1691,8 @@ test.describe("lead cabinet", () => {
     const representation = page.getByTestId("lead-request-summary-representation");
     await expect(representation).toContainText("Handelt jemand für Sie");
     await expect(representation.locator("dd")).toHaveText(["Nein", "Nein"]);
-    await expect(page.getByTestId("lead-request-summary-insurance")).toContainText("Noch keine Angaben");
+    // A group without a statement is left out (QA 2026-10-10).
+    await expect(page.getByTestId("lead-request-summary-insurance")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Ich selbst");
     const billing = page.getByTestId("lead-request-summary-billing");
     await expect(billing).toContainText("Rechnung und Zahlung");
@@ -1693,7 +1701,8 @@ test.describe("lead cabinet", () => {
     await expect(legal).toContainText("Üben Sie ein hochrangiges öffentliches Amt aus");
     await expect(legal.locator("dd")).toHaveText(["Nein", "Ja", "Nein"]);
     await expect(page.getByTestId("lead-request-summary-request")).toContainText("Zweitmeinung zur Knie-OP");
-    await expect(page.getByTestId("lead-request-summary-documents")).toContainText("Noch keine Unterlagen hochgeladen.");
+    await expect(page.getByTestId("lead-request-summary-documents")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-summary")).not.toContainText("Noch keine Unterlagen hochgeladen.");
 
     // Nothing is missing, yet nothing is sent without the confirmation.
     await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);

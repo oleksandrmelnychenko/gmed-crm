@@ -25,6 +25,7 @@ export interface SanctionsTranslations {
   sanctions_field_dob: string;
   sanctions_field_citizenships: string;
   sanctions_field_residence: string;
+  sanctions_field_seat: string;
   sanctions_field_relation: string;
   sanctions_field_regulation: string;
   sanctions_field_eu_reference: string;
@@ -164,6 +165,7 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_field_dob: "Дата рождения",
   sanctions_field_citizenships: "Гражданство",
   sanctions_field_residence: "Страна проживания",
+  sanctions_field_seat: "Страна регистрации",
   sanctions_field_relation: "Отношение",
   sanctions_field_regulation: "Правовой акт / программа",
   sanctions_field_eu_reference: "Номер ЕС",
@@ -313,6 +315,7 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_field_dob: "Geburtsdatum",
   sanctions_field_citizenships: "Staatsangehörigkeit",
   sanctions_field_residence: "Wohnsitzland",
+  sanctions_field_seat: "Sitzland",
   sanctions_field_relation: "Beziehung",
   sanctions_field_regulation: "Rechtsakt / Programm",
   sanctions_field_eu_reference: "EU-Referenz",

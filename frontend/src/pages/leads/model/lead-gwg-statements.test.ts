@@ -752,7 +752,8 @@ describe("sections 7–8 as the group shows them", () => {
   it("warns about crypto and another method, with what the lead described", () => {
     const crypto = billingStatements(billing({ payment_method: "crypto", compliance_flags: ["crypto_payment"] }), de, "de");
     expect(rows(crypto.payment)[0]).toEqual(["payment_method", "Kryptowährung", "", true]);
-    expect(crypto.payment.map((row) => row.key)).toEqual(["payment_method", "via_third_party"]);
+    // The third-party question is block C's: not asked, not shown (QA 2026-10-10).
+    expect(crypto.payment.map((row) => row.key)).toEqual(["payment_method"]);
     expect(crypto.complianceLine).toBe("Compliance-Prüfung erforderlich: Kryptowährung");
 
     const other = billingStatements(
@@ -770,24 +771,21 @@ describe("sections 7–8 as the group shows them", () => {
       ["account_country", "Österreich", "", false],
       ["account_holder", "Anna Muster", "", false],
       ["bank_name", "", "", false],
-      ["via_third_party", "Nicht beantwortet", "", false],
     ]);
   });
 
-  it("shows a lead who has not answered yet every row, empty", () => {
+  it("shows a lead who has not answered yet the base form's rows only, empty", () => {
     const statements = billingStatements(billing(), ru, "ru");
     expect(rows(statements.invoice)).toEqual([
       ["invoice_to", "не указано", "", false],
       ["invoice_email", "", "", false],
     ]);
-    expect(rows(statements.payment)).toEqual([
-      ["payment_method", "", "", false],
-      ["account_country", "", "", false],
-      ["account_holder", "", "", false],
-      ["bank_name", "", "", false],
-      ["via_third_party", "Не отвечено", "", false],
-    ]);
+    // The account and the third-party question belong to block C, never asked here.
+    expect(rows(statements.payment)).toEqual([["payment_method", "", "", false]]);
     expect(statements.complianceLine).toBe("");
+    // A transfer chosen in the base form: still no account rows (derived holder or not).
+    const transfer = billingStatements(billing({ payment_method: "bank_transfer", account_holder: "Anna Muster" }), ru, "ru");
+    expect(transfer.payment.map((row) => row.key)).toEqual(["payment_method"]);
   });
 
   it("asks nothing of section 8 while the third-party payer answers it himself", () => {

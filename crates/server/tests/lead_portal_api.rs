@@ -891,12 +891,14 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // Since the trigger flow (2026-10-07) staff enter the identity data, the
     // payment route is a follow-up block and the lead states the reason of
     // the request.
-    // Birth data, the guardianship question, the own economic interest and the
-    // legal questions are no longer asked in the base form (owner 2026-10-09).
+    // Birth data, the own economic interest and the legal questions are no
+    // longer asked in the base form (owner 2026-10-09); the guardianship
+    // question is asked again (owner 2026-10-10).
     let still_missing = json!([
         "payer_kind",
         "id_document_upload",
         "has_representative",
+        "under_guardianship",
         "invoice_to",
         // The bare payment method (owner 2026-10-10).
         "payment_method",
@@ -950,6 +952,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         json!([
             "id_document_upload",
             "has_representative",
+            "under_guardianship",
             "invoice_to",
             "payment_method"
         ]),
@@ -2128,8 +2131,9 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     );
 
     // Staff: the copy of the identity document is listed with the lead's
-    // statements also for Sales (it is not medical); "N documents" still
-    // counts the medical ones.
+    // statements also for Sales (it is not medical); "N documents" counts
+    // every file of the cabinet (QA 2026-10-10: "0 documents" after two
+    // non-medical uploads).
     let (status, intake) = json_request(
         router,
         "GET",
@@ -2140,7 +2144,7 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     .await;
     assert_eq!(status, StatusCode::OK, "{intake}");
     assert_eq!(intake["uploads_hidden"], true, "{intake}");
-    assert_eq!(intake["progress"]["documents"], 1, "{intake}");
+    assert_eq!(intake["progress"]["documents"], 2, "{intake}");
     assert_eq!(
         intake["identity_documents"],
         json!([{
@@ -4825,4 +4829,113 @@ async fn a_sister_who_pays_alone_asks_nothing_more() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["follow_up"]["required"], false, "{body}");
     assert_eq!(body["review_notice"], true, "{body}");
+}
+
+/// QA 2026-10-10 (C2-c): follow-up blocks the lead completed before "send to
+/// the manager" are sent with it — no second "send the details". A send while
+/// a block still misses something leaves the follow-up open.
+#[tokio::test]
+async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, patient) = lead_with_login(&app, "Ben", "ben.followup@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let submit = format!("{request}/submit");
+    fill_in_complete_request(router, lead_id, &patient).await;
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["required"], false, "{body}");
+
+    // A black-list citizenship opens A and F (K and L are answered already).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/personal-data"),
+        &patient,
+        Some(json!({ "citizenships": ["DE", "KP"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["required"], true, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
+
+    // Sent again while A and F miss something: the follow-up stays open.
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
+    assert_ne!(follow_up_missing(&body)["A"], json!([]), "{body}");
+
+    // The lead completes the blocks without pressing "send the details".
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/enhanced-details"),
+        &patient,
+        Some(json!({
+            "funds_source": "income",
+            "funds_description": "Gehalt",
+            "occupation": "Ingenieur",
+            "sector": "Maschinenbau"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = upload_file(
+        router,
+        &format!("{request}/funds-proof"),
+        &patient,
+        "nachweis.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/identification"),
+        &patient,
+        Some(json!({ "residence_since": "2010", "stay_reason": "work" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for (block, keys) in follow_up_missing(&body).as_object().unwrap() {
+        assert_eq!(keys, &json!([]), "{block}: {body}");
+    }
+    assert!(body["follow_up"]["answered_at"].is_null(), "{body}");
+
+    // "Send to the manager" sends them too.
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(body["follow_up"]["answered_at"].is_string(), "{body}");
+    let (status, answered): (String, bool) = sqlx::query_as(
+        r#"SELECT status, follow_up_answered_at IS NOT NULL
+           FROM lead_risk_assessments WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!((status.as_str(), answered), ("review_required", true));
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id = $1 AND kind = 'follow_up_answered'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1);
+
+    // Sent once more: recorded already, nothing new.
+    let (status, body) = json_request(router, "POST", &submit, &patient, declared()).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id = $1 AND kind = 'follow_up_answered'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1);
 }

@@ -555,7 +555,8 @@ export function PayerSection({
             ) : null}
             </div>
           </Section>
-          <Section title={text.payerResidence}>
+          {/* A person lives somewhere, an organisation has its seat (QA 2026-10-10). */}
+          <Section title={organisation ? text.payerSeat : text.payerResidence}>
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
             {/* The country of the seat is what the screening of an organisation works with. */}
             <LabeledField {...field("payer_country", organisation || contactRequired("payer_country"))}>
@@ -717,7 +718,7 @@ function CostEstimateConsent({
           checked={checked}
           disabled={pending !== null}
           aria-invalid={failed || undefined}
-          aria-describedby={failed ? `${id}-hint ${id}-error` : `${id}-hint`}
+          aria-describedby={failed ? `${id}-error` : undefined}
           onChange={(event) => void change(event.target.checked)}
         />
         <span className="min-w-0 leading-snug">
@@ -725,17 +726,13 @@ function CostEstimateConsent({
           <RequiredMark />
         </span>
       </label>
-      {/* Indented to the text of the label: the checkbox and its gap. */}
-      <div className="space-y-1 pl-7 text-xs text-muted-foreground">
-        {checked && givenAt ? (
-          <p>
-            <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(givenAt))}</ConsentGivenChip>
-          </p>
-        ) : null}
-        <p id={`${id}-hint`} className="leading-5">
-          {text.payerCostEstimateConsentHint}
-        </p>
-      </div>
+      {/* Indented to the text of the label: the checkbox and its gap. The consent stays
+          required; its explanatory line went (QA 2026-10-10). */}
+      {checked && givenAt ? (
+        <div className="pl-7 text-xs text-muted-foreground">
+          <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(givenAt))}</ConsentGivenChip>
+        </div>
+      ) : null}
       {failed ? (
         <p id={`${id}-error`} role="alert" className="text-xs text-destructive">
           {text.notSaved}

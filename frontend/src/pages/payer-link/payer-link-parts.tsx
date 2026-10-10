@@ -180,7 +180,6 @@ export function UploadBlock({
   badge,
   hint,
   buttonLabel,
-  emptyText,
   documents,
   busy,
   errors,
@@ -197,7 +196,6 @@ export function UploadBlock({
   badge?: string;
   hint: string;
   buttonLabel: string;
-  emptyText: string;
   documents: readonly PayerDocument[];
   busy: boolean;
   errors: readonly string[];
@@ -260,7 +258,10 @@ export function UploadBlock({
           {message}
         </p>
       ))}
-      <DocumentList documents={documents} text={text} lang={lang} emptyText={emptyText} onRemove={onRemove} />
+      {/* Nothing uploaded yet: no "no file yet" line (QA 2026-10-10), as in the lead cabinet. */}
+      {documents.length > 0 ? (
+        <DocumentList documents={documents} text={text} lang={lang} emptyText="" onRemove={onRemove} />
+      ) : null}
     </div>
   );
 }

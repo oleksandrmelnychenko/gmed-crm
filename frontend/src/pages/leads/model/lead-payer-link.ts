@@ -12,6 +12,7 @@ import {
   type LeadPayerLinkState,
   type PayerBeneficialOwner,
   type PayerLinkInfo,
+  type PayerLinkRiskHold,
   type PayerQuestionnaireDocument,
   type StaffPayerQuestionnaire,
 } from "../data/lead-payer-link-api";
@@ -272,13 +273,31 @@ export function payerLinkErrorText(error: unknown, tx: Tx): string | null {
       return payerLinkMailMissingText(tx);
     // Level 3 holds the link until block D is requested (QA 2026-10-10: staff were not told the way out).
     case "risk_review_required":
-      return tx(
-        "Оценка риска на уровне 3: ссылку плательщику можно отправить после решения или после запроса блока D («Оценка риска» → «Запросить дополнительные сведения»).",
-        "Risikobewertung Stufe 3: Der Zahler-Link geht erst nach einer Entscheidung oder nach Anforderung von Block D („Risikobewertung“ → „Weitere Angaben anfordern“).",
+      return payerLinkRiskHoldText(
+        error instanceof ApiRequestError && error.body?.rejected === true ? "rejected" : "review",
+        tx,
       );
     default:
       return loginEmailErrorMessage(error, tx("ru", "de"));
   }
+}
+
+/**
+ * Why the risk assessment holds the link: level 3 until a decision or a
+ * request of block D (named with the button's own label, QA 2026-10-10), or
+ * the lead was rejected.
+ */
+export function payerLinkRiskHoldText(hold: PayerLinkRiskHold, tx: Tx): string {
+  if (hold === "rejected") {
+    return tx(
+      "Оценка риска отклонила лида: ссылку плательщику отправить нельзя.",
+      "Die Risikobewertung hat den Lead abgelehnt: Der Zahler-Link kann nicht gesendet werden.",
+    );
+  }
+  return tx(
+    "Оценка риска на уровне 3: ссылка плательщику ждёт решения или запроса блока D («Оценка риска» → «Запросить сведения»).",
+    "Risikobewertung Stufe 3: Der Zahler-Link wartet auf eine Entscheidung oder die Anforderung von Block D („Risikobewertung“ → „Weitere Angaben anfordern“).",
+  );
 }
 
 /** What the panel offers now, and why a button is disabled. */
@@ -298,17 +317,21 @@ export type PayerLinkActions = {
 };
 
 export function payerLinkActions(
-  state: Pick<LeadPayerLinkState, "mode" | "can_send" | "blocked_reason" | "mail_available" | "link" | "questionnaire">,
+  state: Pick<LeadPayerLinkState, "mode" | "can_send" | "blocked_reason" | "mail_available" | "link" | "questionnaire"> &
+    Partial<Pick<LeadPayerLinkState, "risk_hold">>,
   reopen: boolean,
   tx: Tx,
 ): PayerLinkActions {
   const cabinet = state.mode === "cabinet" || state.blocked_reason === "payer_has_cabinet_login";
   const active = payerLinkActive(state.link);
   const submitted = Boolean(state.questionnaire?.submitted_at) || state.link?.status === "submitted";
-  const reopenOffered = !cabinet && submitted && !state.blocked_reason;
+  const riskHold = state.risk_hold ?? null;
+  const reopenOffered = !cabinet && submitted && !state.blocked_reason && !riskHold;
   let sendBlockedText: string | null = null;
   // The server's `can_send` is false for a blocked reason, without e-mail sending, and without leads.edit.
   if (state.blocked_reason) sendBlockedText = payerLinkBlockedReasonText(state.blocked_reason, tx);
+  // The risk gate would refuse the send: say so instead of "can be sent now" (QA 2026-10-10).
+  else if (riskHold) sendBlockedText = payerLinkRiskHoldText(riskHold, tx);
   else if (!state.mail_available) sendBlockedText = payerLinkMailMissingText(tx);
   else if (!state.can_send) sendBlockedText = payerLinkBlockedReasonText(null, tx);
   else if (submitted && !reopen) {
@@ -324,7 +347,7 @@ export function payerLinkActions(
     sendBlockedText: cabinet ? null : sendBlockedText,
     reopenOffered,
     revokeEnabled: !cabinet && active,
-    highlight: !cabinet && state.can_send && !state.link,
+    highlight: !cabinet && state.can_send && !state.link && !riskHold,
   };
 }
 

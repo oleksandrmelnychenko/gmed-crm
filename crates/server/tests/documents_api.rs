@@ -6074,7 +6074,7 @@ async fn gwg_identification_sheet_prints_the_payment_route_on_the_payers_sheet()
 /// adult's sheet keeps naming them in section 2.
 #[tokio::test]
 async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian() {
-    let Some((app, pool, _admin_id, admin_bearer)) = test_context().await else {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
     let tag = unique_tag("gwg-adult-rep");
@@ -6116,7 +6116,7 @@ async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian
                    'Stadt München', 'DE', DATE '2031-02-01'),
                   ($1, $3, 'legal_guardian', 'portal', 'Carla', 'Betreuerin', NULL,
                    '{AT}', 'Ringstr. 9', '1010', 'Wien', 'AT', 'id_card', 'AT7654321',
-                   'Magistrat Wien', 'AT', DATE '2030-05-01')"#,
+                   'Magistrat Wien', 'AT', DATE '2020-05-01')"#,
     )
     .bind(lead_id)
     .bind(agent)
@@ -6124,6 +6124,39 @@ async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian
     .execute(&pool)
     .await
     .unwrap();
+    // Both uploaded a scan of the own identity document; the guardian's has
+    // expired (QA 2026-10-10 A5-a).
+    for person in [agent, guardian] {
+        let document_id = Uuid::new_v4();
+        sqlx::query(
+            r#"INSERT INTO documents (
+                   id, lead_id, auto_name, original_filename, art, category, status,
+                   visibility, is_medical, mime_type, version_root_document_id,
+                   version_number, uploaded_by
+               ) VALUES (
+                   $1, $2, 'Ausweis', 'ausweis.pdf', 'representative_identity', 'identity',
+                   'active', 'internal', false, 'application/pdf', $1, 1, $3
+               )"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO lead_portal_uploads
+                   (document_id, lead_id, uploaded_by, access_kind, kind, representative_id)
+               VALUES ($1, $2, $3, 'self', 'representative_identity', $4)"#,
+        )
+        .bind(document_id)
+        .bind(lead_id)
+        .bind(admin_id)
+        .bind(person)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
 
     let generate = |subject: Option<String>| {
         let mut body = json!({
@@ -6177,9 +6210,41 @@ async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian
         "{text:?}"
     );
     assert!(!text.contains("Behandelte Person"), "{text:?}");
+    // His own scan with a current validity date.
+    assert!(
+        text.contains("[X] Die erforderliche Kopie/Fotografie"),
+        "{text:?}"
+    );
+    // Section 3 (QA 2026-10-10 A5-b): he acts on behalf of the adult, who is
+    // named as the beneficial owner.
+    assert!(
+        text.contains("[X] Der Vertragspartner handelt auf Veranlassung"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("[ ] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Name, Vorname des wirtschaftlich Berechtigten Anna Muster"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("geb. 03.02.1985; Musterweg 1, 10115 Berlin, Deutschland"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Handeln für die vertretene Person (Angaben im Patientenformular)"),
+        "{text:?}"
+    );
 
-    // The legal guardian's own sheet.
+    // The legal guardian's own sheet: her document has expired, so the copy
+    // is not "gültig".
     let text = sheet_text(Some(format!("representative:{guardian}"))).await;
+    assert!(
+        text.contains("[ ] Die erforderliche Kopie/Fotografie"),
+        "{text:?}"
+    );
     assert!(text.contains("Betreuerin, Carla"), "{text:?}");
     assert!(text.contains("Rechtliche/r Betreuer/in"), "{text:?}");
     assert!(text.contains("Ringstr. 9, 1010 Wien"), "{text:?}");
@@ -6201,6 +6266,21 @@ async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian
         "{text:?}"
     );
     assert!(!text.contains("Vertretene Person"), "{text:?}");
+    // Section 2 ticks "gültig" by the rule of section 1 (QA 2026-10-10
+    // A5-a): only the representative's current document counts, not the
+    // guardian's expired one; the adult has no scan of her own.
+    assert_eq!(
+        text.matches("[X] Die erforderliche Kopie/Fotografie")
+            .count(),
+        1,
+        "{text:?}"
+    );
+    assert_eq!(
+        text.matches("[ ] Die erforderliche Kopie/Fotografie")
+            .count(),
+        2,
+        "{text:?}"
+    );
 
     // An unknown id, and a representative the lead no longer names ("nobody
     // acts for me"), have no sheet.
@@ -6234,6 +6314,121 @@ async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian
     // The legal guardian still has his.
     let text = sheet_text(Some(format!("representative:{guardian}"))).await;
     assert!(text.contains("Betreuerin, Carla"), "{text:?}");
+}
+
+/// Section 3 of a minor's parents' sheets (QA 2026-10-10 A5-b): the mother
+/// who pays states her own funds in the portal, so she acts in her own
+/// economic interest; the father acts for the child, who is named.
+#[tokio::test]
+async fn gwg_identification_sheets_of_a_minors_parents_name_the_beneficial_owner() {
+    let Some((app, pool, _admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("gwg-minor-wb");
+    let (sofia, jonas) = (Uuid::new_v4(), Uuid::new_v4());
+    let sofia_email = format!("sofia-{tag}@example.com");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              street_address, city, zip_code, country, citizenships,
+                              qualification_status, compliance_status, intake_source,
+                              trusted_contacts)
+           VALUES ('Mia', 'Muster', $1, DATE '2015-06-01', 'female', 'Musterweg 1', 'Berlin',
+                   '10115', 'DE', '{DE}', 'qualified', 'signed', 'staff_wizard', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("mia-{tag}@example.com"))
+    .bind(json!([
+        { "id": sofia, "name": "Sofia Muster", "relation": "mother",
+          "email": sofia_email, "birth_date": "1985-10-01" },
+        { "id": jonas, "name": "Jonas Muster", "relation": "father",
+          "birth_date": "1983-02-01" },
+    ]))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // The mother pays (same e-mail as her contact) and sent the payer's
+    // questions in her section of the portal.
+    sqlx::query(
+        r#"INSERT INTO lead_payer_declarations (
+               lead_id, payer_kind, payer_type, first_name, last_name, date_of_birth,
+               country, citizenships, relationship_kind, email, source_of_funds,
+               payer_informed_at, acts_on_own_account, own_account_answered, payment_method)
+           VALUES ($1, 'third_party', 'person', 'Sofia', 'Muster', DATE '1985-10-01', 'DE',
+                   '{DE}', 'parent', $2, 'employment', now(), true, false, 'bank_transfer')"#,
+    )
+    .bind(lead_id)
+    .bind(&sofia_email)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_payer_statements (lead_id, source, funds_sources, funds_description,
+                                              declared_correct_at, submitted_at)
+           VALUES ($1, 'cabinet', '{employment}', 'Gehalt als Lehrerin', now(), now())"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let sheet_text = |subject: String| {
+        let (app, bearer) = (app.clone(), admin_bearer.clone());
+        async move {
+            let (status, generated) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(json!({
+                    "template_id": "gwg_identification",
+                    "lead_id": lead_id,
+                    "language": "de",
+                    "status": "active",
+                    "bindings": { "gwg_identification": { "subject": subject } }
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{generated}");
+            let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+            let (status, bytes) = bytes_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}/download"),
+                &bearer,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            extract_pdf_text(&bytes)
+        }
+    };
+
+    let text = sheet_text(format!("representative:{sofia}")).await;
+    assert!(text.contains("Zugleich Kostenträger/in"), "{text:?}");
+    assert!(
+        text.contains("[X] Der Vertragspartner handelt im eigenen wirtschaftlichen Interesse"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Angaben der gesetzlichen Vertretung als Kostenträger/in im Patientenportal"),
+        "{text:?}"
+    );
+    assert!(text.contains("Zahlung aus eigenen Mitteln"), "{text:?}");
+    assert!(text.contains("Gehalt als Lehrerin"), "{text:?}");
+
+    let text = sheet_text(format!("representative:{jonas}")).await;
+    assert!(!text.contains("Zugleich Kostenträger/in"), "{text:?}");
+    assert!(
+        text.contains("[X] Der Vertragspartner handelt auf Veranlassung"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Name, Vorname des wirtschaftlich Berechtigten Mia Muster"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Handeln als gesetzliche/r Vertreter/in für das minderjährige Kind"),
+        "{text:?}"
+    );
 }
 
 #[tokio::test]
@@ -10434,8 +10629,10 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     .unwrap();
     sqlx::query(
         r#"INSERT INTO lead_payer_declarations (
-               lead_id, payer_kind, source_of_funds, self_funds_source, self_funds_description)
-           VALUES ($1, 'self', 'savings', 'savings', 'Ersparnisse aus dem Gehalt')"#,
+               lead_id, payer_kind, source_of_funds, self_funds_source, self_funds_description,
+               payment_method, expected_total_eur)
+           VALUES ($1, 'self', 'savings', 'savings', 'Ersparnisse aus dem Gehalt', 'cash',
+                   8000)"#,
     )
     .bind(lead_id)
     .execute(&pool)
@@ -10517,6 +10714,10 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         "Musterweg 1, 10115 Berlin, Deutschland",
         "wird von GMED erfasst",
         "Ich zahle selbst.",
+        // The payment route of the base form and the expected total (QA
+        // 2026-10-10 B5).
+        "Zahlungsweg Barzahlung",
+        "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
         "Herkunft der Mittel Ersparnisse",
         "Ersparnisse aus dem Gehalt",
         "Beruf Lehrerin",
@@ -10526,7 +10727,16 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
     ] {
         assert!(text.contains(expected), "{expected} missing in {text}");
     }
-    for absent in ["Zweitmeinung", "Knie", "Fremdstadt", "Prüfstufe", "Risiko"] {
+    // No order yet: no order number; no word of a separate check of cash.
+    for absent in [
+        "Zweitmeinung",
+        "Knie",
+        "Fremdstadt",
+        "Prüfstufe",
+        "Risiko",
+        "Auftrags-Nr.",
+        "gesonderte Prüfung",
+    ] {
         assert!(!text.contains(absent), "{absent} in {text}");
     }
 }

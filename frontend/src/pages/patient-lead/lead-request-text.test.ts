@@ -200,13 +200,19 @@ describe("lead cabinet languages", () => {
       documents: "Anliegen & Unterlagen",
       send: "Prüfen & Senden",
     });
-    // The neutral heading and notice of contract 3.1, word for word.
-    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpTitle)).toEqual([
-      "Wir benötigen ergänzende Angaben",
-      "We need some additional information",
-      "Нам потрібні додаткові відомості",
-      "Нам нужны дополнительные сведения",
+    // After sending, one short neutral pointer to the open blocks (QA 2026-10-10: no title).
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).followUpOpen)).toEqual([
+      "Bitte ergänzen Sie noch einige Angaben.",
+      "Please complete a few more details.",
+      "Будь ласка, доповніть ще деякі відомості.",
+      "Пожалуйста, дополните ещё некоторые сведения.",
     ]);
+    // "Nothing is needed meanwhile" stands apart: it is left out while blocks are open.
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      expect(text.nextSteps.join(" "), option.value).not.toContain(text.nextNothingRequired);
+      expect(text.nextAfterChange, option.value).not.toContain(text.nextNothingRequired);
+    }
     // The review notice continues the sentence of the sending: one thank-you only (QA 2026-10-10).
     expect(
       LEAD_CABINET_LANGS.map((option) => {
@@ -224,7 +230,6 @@ describe("lead cabinet languages", () => {
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       const words = [
-        text.followUpTitle,
         text.followUpIntro,
         text.followUpOpen,
         text.followUpIncomplete,
@@ -304,23 +309,20 @@ describe("lead cabinet languages", () => {
     }
   });
 
-  it("says who consents and signs for a minor by the custody chosen", () => {
-    const de = leadRequestText("de");
-    expect(de.legalRepresentativesIntro).toBe("Für Minderjährige handeln die gesetzlichen Vertreter.");
-    expect(de.custodySignatureNote).toEqual({
-      joint: "Einwilligung und Unterschriften werden von beiden Elternteilen benötigt.",
-      sole_parent: "Einwilligung und Unterschrift gibt der allein sorgeberechtigte Elternteil.",
-      guardian: "Einwilligung und Unterschrift gibt der Vormund / die Pflegerin.",
-    });
-    // Only joint custody speaks of both parents, in every language.
-    const bothParents = { de: /beiden Elternteilen/, en: /both parents/, uk: /обох батьків/, ru: /обоих родителей/ };
+  it("asks who pays without a filler sentence and names an organisation's seat", () => {
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).payerIntro)).toEqual([
+      "Bitte nennen Sie, wer die Kosten übernimmt.",
+      "Please tell us who pays for the treatment.",
+      "Вкажіть, будь ласка, хто оплачує лікування.",
+      "Укажите, пожалуйста, кто оплачивает лечение.",
+    ]);
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
-      expect(text.custodySignatureNote.joint, option.value).toMatch(bothParents[option.value]);
-      expect(text.custodySignatureNote.sole_parent, option.value).not.toMatch(bothParents[option.value]);
-      expect(text.custodySignatureNote.guardian, option.value).not.toMatch(bothParents[option.value]);
-      expect(new Set(Object.values(text.custodySignatureNote)).size, option.value).toBe(3);
+      expect(text.payerSeat, option.value).not.toBe(text.payerResidence);
+      // The example of a relationship proof fits family or anybody else.
+      expect(text.relationshipProofHintOther, option.value).not.toBe(text.relationshipProofHint);
     }
+    expect(leadRequestText("ru").payerSeat).toBe("Местонахождение");
   });
 
   it("asks for the consent to pass the cost estimate on in the owner's words and names it when missing", () => {
@@ -343,7 +345,6 @@ describe("lead cabinet languages", () => {
       // Its own sentence, not the one about contacting the payer.
       expect(text.payerCostEstimateConsentLabel).not.toBe(text.payerConsentLabel);
       expect(text.payerCostEstimateConsentShort).not.toBe(text.payerConsentShort);
-      expect(text.payerCostEstimateConsentHint).not.toBe(text.payerConsentHint);
     }
   });
 

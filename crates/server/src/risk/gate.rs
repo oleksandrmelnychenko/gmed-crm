@@ -62,7 +62,8 @@ pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
             return Uuid::parse_str(lead).ok().map(RiskRoute::PayerLink);
         }
         // A signature confirmed by staff is a paper signature too (QA 2026-10-10);
-        // only the risk gate holds it, the DSGVO consent stays open (`document_leads`).
+        // the DSGVO consent stays open here (`document_leads`). The sanctions
+        // gate maps the route itself (same rule as `paper-signature`).
         ["documents", document, "mark-signed"] => {
             return Uuid::parse_str(document)
                 .ok()
@@ -202,13 +203,7 @@ pub async fn holds(
         return Ok(false);
     };
     Ok(match route {
-        RiskRoute::PayerLink(_) => {
-            assessment.started()
-                && (assessment.status == store::STATUS_REJECTED
-                    || (assessment.score.level >= 3
-                        && assessment.status != store::STATUS_RELEASED
-                        && !assessment.requested_blocks.iter().any(|block| block == "D")))
-        }
+        RiskRoute::PayerLink(_) => assessment.holds_payer_link(),
         _ => assessment.holds(),
     })
 }

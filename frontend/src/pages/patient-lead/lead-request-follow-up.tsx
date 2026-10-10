@@ -32,6 +32,7 @@ import {
   extraFieldOf,
   extraPatch,
   extraValue,
+  familyPayer,
   followUpAnswered,
   followUpMissing,
   fundsSourceOptions,
@@ -535,7 +536,8 @@ function RelationshipBlock({
           id="lead-request-relationship-proof"
           label={text.relationshipProofTitle}
           required
-          hint={text.relationshipProofHint}
+          // A certificate fits family only; a friend or an employer shows the relationship otherwise (QA 2026-10-10).
+          hint={familyPayer(request) ? text.relationshipProofHint : text.relationshipProofHintOther}
           emptyText={text.noRelationshipProof}
           buttonLabel={text.uploadButton}
           documents={request.follow_up.relationship_proof_documents}
@@ -551,7 +553,6 @@ function RelationshipBlock({
   );
 }
 
-/** Block F: since when the patient lives in the country, other residences, former citizenships, why there. */
 /** Block K: birth name, place and country of birth (only with the enhanced check). */
 function BirthBlock({
   form,
@@ -579,6 +580,7 @@ function BirthBlock({
   );
 }
 
+/** Block F: since when the patient lives in the country, other residences, former citizenships, why there. */
 function ResidenceBlock({
   form,
   text,
@@ -598,9 +600,9 @@ function ResidenceBlock({
       <IdentificationFormField form={form} field="stay_reason" text={text} required>
         <IdentificationChoiceSelect form={form} field="stay_reason" options={pick(text.stayReasonOptions, STAY_REASONS)} text={text} />
       </IdentificationFormField>
-      {/* The words right under the reason; a citizen or a person born there has nothing to describe (QA 2026-10-10). */}
-      {form.draft.stay_reason && form.draft.stay_reason !== "citizenship_or_birth" ? (
-        <IdentificationFormField form={form} field="stay_reason_details" text={text} required={form.draft.stay_reason === "other"} className={FULL_ROW}>
+      {/* The words right under the reason, only for "other": a named reason says enough (QA 2026-10-10). */}
+      {form.draft.stay_reason === "other" ? (
+        <IdentificationFormField form={form} field="stay_reason_details" text={text} required className={FULL_ROW}>
           <IdentificationTextArea form={form} field="stay_reason_details" rows={2} />
         </IdentificationFormField>
       ) : null}

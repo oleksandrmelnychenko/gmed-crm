@@ -130,8 +130,19 @@ export function pepEnhancedCheckHint(tx: Tx): string {
   );
 }
 
-/** The hint for a country of the longer high-risk list: information, no requirement. */
-export function highRiskCountryHint(countries: string, tx: Tx): string {
+/**
+ * The hint for a country of the longer high-risk list: information, no
+ * requirement. Says "not required" only once the server judged the lead
+ * (`settled`): before the lead exists, or while a possible sanctions match
+ * waits, it would contradict the sanctions line next to it (QA 2026-10-10).
+ */
+export function highRiskCountryHint(countries: string, tx: Tx, settled = true): string {
+  if (!settled) {
+    return tx(
+      `Страна повышенного риска (${countries}): учитывается в оценке риска`,
+      `Drittstaat mit erhöhtem Risiko (${countries}): fließt in die Risikobewertung ein`,
+    );
+  }
   return tx(
     `Страна повышенного риска (${countries}): только для сведения, усиленная проверка не обязательна`,
     `Drittstaat mit erhöhtem Risiko (${countries}): nur zur Information, keine verstärkte Prüfung vorgeschrieben`,

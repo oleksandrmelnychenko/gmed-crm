@@ -432,7 +432,10 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
         ["documents", document, "signature-requests"] if *method == Method::POST => {
             Some((Target::Document(id(document)?), Rule::SignatureRequest))
         }
-        ["documents", document, "paper-signature"] if *method == Method::POST => {
+        // A signature confirmed by staff ("Подтвердить подпись") is a signature
+        // on paper too: the same rule, else it signs past an open or confirmed
+        // hit what the scan route refuses (QA 2026-10-10, C3-e).
+        ["documents", document, "paper-signature" | "mark-signed"] if *method == Method::POST => {
             Some((Target::Document(id(document)?), Rule::PaperSignature))
         }
         _ => None,
@@ -597,6 +600,30 @@ fn paper_signature_countersigns(
         || CONTRACT_DOCUMENTS.contains(&art)
 }
 
+/// The DSGVO consent and the identity document are never held by the
+/// sanctions rules (owner decision 2026-10-10): confirming them is no work
+/// with the person and no money, and the lead needs them while the CEO decides
+/// a match. Paper signature and "mark signed" alike.
+fn exempt_from_sanctions_hold(compliance_kind: Option<&str>, art: &str) -> bool {
+    matches!(compliance_kind, Some("dsgvo" | "identity"))
+        || matches!(
+            art.trim().to_lowercase().as_str(),
+            "identity" | "passport" | "passport_scan" | "reisepass"
+        )
+}
+
+async fn paper_signature_exempt(
+    db: &gmed_db::DbPool,
+    document_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let row: Option<(Option<String>, String)> =
+        sqlx::query_as("SELECT compliance_kind, COALESCE(art, '') FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_optional(db)
+            .await?;
+    Ok(row.is_some_and(|(kind, art)| exempt_from_sanctions_hold(kind.as_deref(), &art)))
+}
+
 /// Middleware on the protected router: blocks guarded requests.
 pub async fn middleware(State(state): State<AppState>, request: Request, next: Next) -> Response {
     let Some((target, rule)) = classify(request.method(), request.uri().path()) else {
@@ -624,6 +651,14 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
     let Some(action) = rule.action(&body) else {
         return next.run(request).await;
     };
+    if let (Rule::PaperSignature, Target::Document(document_id)) = (rule, target)
+        && matches!(
+            paper_signature_exempt(&state.db, document_id).await,
+            Ok(true)
+        )
+    {
+        return next.run(request).await;
+    }
     let outcome = async {
         let mut action = action;
         if let (Rule::PaperSignature, Target::Document(document_id)) = (rule, target)
@@ -904,7 +939,21 @@ mod tests {
             post("/documents/{id}/paper-signature"),
             Some((Target::Document(uuid()), Rule::PaperSignature))
         );
+        // A signature confirmed by staff follows the same rule.
+        assert_eq!(
+            post("/documents/{id}/mark-signed"),
+            Some((Target::Document(uuid()), Rule::PaperSignature))
+        );
         assert!(!Rule::PaperSignature.needs_body());
+        // The DSGVO consent and the identity document are never held (owner 2026-10-10).
+        assert!(exempt_from_sanctions_hold(Some("dsgvo"), "consent"));
+        assert!(exempt_from_sanctions_hold(Some("identity"), ""));
+        assert!(exempt_from_sanctions_hold(None, "Passport"));
+        assert!(!exempt_from_sanctions_hold(None, "framework_contract"));
+        assert!(!exempt_from_sanctions_hold(
+            Some("confidentiality_release"),
+            "consent"
+        ));
         assert_eq!(
             Rule::PaperSignature.action(&Value::Null),
             Some(GateAction::OrderContractWork)

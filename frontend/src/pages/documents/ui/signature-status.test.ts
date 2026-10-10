@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SignatureSummary } from "../data/use-signature-summary";
-import { isInformationalDocument, signaturePresentation, signatureStatusText } from "./signature-status";
+import { isClientSignableDocument, isInformationalDocument, signaturePresentation, signatureStatusText } from "./signature-status";
 
 describe("isInformationalDocument", () => {
   it("recognises the attachments that are never signed themselves", () => {
@@ -16,6 +16,24 @@ describe("isInformationalDocument", () => {
     const contractFiledAsPrivacyInformation = { generated_template_id: "framework_contract", art: "privacy_information" };
     expect(isInformationalDocument(uploadedCostEstimate)).toBe(false);
     expect(isInformationalDocument(contractFiledAsPrivacyInformation)).toBe(false);
+  });
+});
+
+describe("isClientSignableDocument", () => {
+  it("offers the patient form and contracts but never GMED's own GwG records (QA 2026-10-10 B-9)", () => {
+    expect(isClientSignableDocument({ generated_template_id: "lead_self_disclosure", art: "lead_self_disclosure" })).toBe(true);
+    expect(isClientSignableDocument({ generated_template_id: "framework_contract", art: "framework_contract" })).toBe(true);
+    expect(isClientSignableDocument({ generated_template_id: "enhanced_due_diligence", art: "enhanced_due_diligence" })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: null, compliance_kind: "enhanced_due_diligence", art: "document" })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: "gwg_identification", art: "gwg_identification" })).toBe(false);
+  });
+
+  it("leaves out attachments, medical files, identity scans and proofs", () => {
+    expect(isClientSignableDocument({ generated_template_id: "privacy_information" })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: null, art: "report", is_medical: true })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: null, art: "passport_scan" })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: null, art: "payer_funds_proof" })).toBe(false);
+    expect(isClientSignableDocument({ generated_template_id: null, art: "document", category: "identity" })).toBe(false);
   });
 });
 

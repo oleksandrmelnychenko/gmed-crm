@@ -171,7 +171,7 @@ describe("lead request summary", () => {
     expect(groups.at(-1)?.rows).toEqual([{ label: "", value: "befund.pdf" }]);
   });
 
-  it("says so when a group is still empty", () => {
+  it("leaves out a group that is still empty", () => {
     const empty = request({
       payer: null,
       documents: [],
@@ -184,12 +184,16 @@ describe("lead request summary", () => {
       },
     });
     const groups = requestSummary(empty, de, "de");
-    for (const id of ["identity", "payer", "documents"]) {
-      expect(groups.find((group) => group.id === id)?.rows, id).toEqual([]);
+    // A group without a statement is left out, no "nothing yet" filler (QA 2026-10-10).
+    for (const id of ["identity", "payer", "documents", "legal"]) {
+      expect(groups.find((group) => group.id === id), id).toBeUndefined();
     }
-    // The legal questions are block L only: no empty group in the base form (QA 2026-10-10).
-    expect(groups.find((group) => group.id === "legal")).toBeUndefined();
-    expect(groups.find((group) => group.id === "documents")?.empty).toBe("Noch keine Unterlagen hochgeladen.");
+    // Also while block L is open but not answered yet.
+    const openL = request({
+      ...empty,
+      follow_up: { required: true, blocks: ["L"], missing: { L: ["pep_self"] }, answered_at: null },
+    });
+    expect(requestSummary(openL, de, "de").find((group) => group.id === "legal")).toBeUndefined();
   });
 
   it("leaves out what does not apply", () => {
@@ -409,6 +413,8 @@ describe("lead request summary", () => {
         relationship_since: "2010",
         residence_since: "2015",
         stay_reason: "work",
+        // Words are asked for "other" only (QA 2026-10-10): a leftover is not listed.
+        stay_reason_details: "Projekt in Wien",
         former_citizenships: ["RU"],
         pep_office: "Bürgermeister",
         pep_country: "UA",
@@ -515,7 +521,7 @@ describe("lead request summary", () => {
       "Nachweis der Vertretungsmacht (z. B. Vollmacht)": "vollmacht.pdf",
     });
 
-    // Not answered yet: the group says so, and names nobody.
+    // Not answered yet: no group (QA 2026-10-10), and nobody named.
     const open = requestSummary(
       request({
         representation: {
@@ -529,9 +535,7 @@ describe("lead request summary", () => {
       de,
       "de",
     ).find((item) => item.id === "representation");
-    expect(open?.rows).toEqual([]);
-    expect(open?.parts).toEqual([]);
-    expect(open?.empty).toBe("Noch keine Angaben");
+    expect(open).toBeUndefined();
   });
 
   it("shows the custody and the legal representatives of a minor", () => {
@@ -687,7 +691,7 @@ describe("lead request summary", () => {
       "How will you pay?": "Bank transfer",
     });
 
-    // Nothing answered yet: the group says so.
+    // Nothing answered yet: no group (QA 2026-10-10).
     const open = requestSummary(
       request({
         billing: billing({
@@ -709,8 +713,7 @@ describe("lead request summary", () => {
       de,
       "de",
     ).find((group) => group.id === "billing");
-    expect(open?.rows).toEqual([]);
-    expect(open?.empty).toBe("Noch keine Angaben");
+    expect(open).toBeUndefined();
   });
 
   it("shows no identification on a server that does not know it", () => {
