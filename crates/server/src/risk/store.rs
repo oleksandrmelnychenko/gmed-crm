@@ -209,6 +209,9 @@ pub struct BlockAnswers {
     /// A copy of the identity document uploaded after staff entered the data
     /// (or marked it unreadable).
     pub identity_uploaded_since_entry: bool,
+    /// When staff entered the identity data (or marked it unreadable): a copy
+    /// uploaded before it does not answer block I.
+    pub identity_entered_at: Option<DateTime<Utc>>,
     /// The representatives' keys of block G (adult representation).
     pub representation_missing: Vec<String>,
     pub route_by: Option<PaymentRouteBy>,
@@ -332,6 +335,7 @@ pub async fn load_block_answers(
             (Some(_), None) => true,
             _ => false,
         },
+        identity_entered_at: entered_at,
         representation_missing,
         route_by: Some(route_by),
         answered_by_payer,
@@ -539,6 +543,17 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
         _ => PARTY_CABINET,
     };
     (party, missing.into_iter().map(str::to_string).collect())
+}
+
+/// Whether a "request more" of `blocks` asks the lead's cabinet for an
+/// answer: one of them is answered there and still misses something. The
+/// payer link's blocks and complete cabinet blocks leave the lead's sent
+/// follow-up as it is.
+fn requests_cabinet_answer(blocks: &[String], answers: &BlockAnswers) -> bool {
+    blocks.iter().any(|block| {
+        let (party, missing) = block_missing(block, answers);
+        party == PARTY_CABINET && !missing.is_empty()
+    })
 }
 
 /// One block for staff.
@@ -1227,14 +1242,25 @@ async fn apply_effect(
             .await?;
         }
         _ => {
-            // request_more: the blocks join the requested ones; the lead
-            // answers again. The status follows from the blocks.
+            // request_more: the blocks join the requested ones. The lead
+            // answers again only when a requested block is the cabinet's and
+            // still misses something (QA 2026-10-10, V2-a: requesting the
+            // payer link's blocks C/D/E un-sent the lead's answered follow-up).
+            // The status follows from the blocks.
+            let lead_answers_again = match super::inputs::load(conn, lead_id).await? {
+                Some(inputs) => {
+                    let answers = load_block_answers(conn, lead_id, &inputs, None).await?;
+                    requests_cabinet_answer(blocks, &answers)
+                }
+                None => true,
+            };
             sqlx::query(
                 r#"UPDATE lead_risk_assessments
                    SET requested_blocks = ARRAY(
                            SELECT DISTINCT unnest(requested_blocks || $2::text[]) ORDER BY 1
                        ),
-                       follow_up_answered_at = NULL,
+                       follow_up_answered_at = CASE WHEN $3 THEN NULL
+                                                    ELSE follow_up_answered_at END,
                        status = CASE WHEN status IN ('released', 'rejected', 'proposed')
                                      THEN 'review_required' ELSE status END,
                        released_fingerprint = NULL,
@@ -1243,6 +1269,7 @@ async fn apply_effect(
             )
             .bind(lead_id)
             .bind(blocks)
+            .bind(lead_answers_again)
             .execute(&mut *conn)
             .await?;
         }
@@ -1501,7 +1528,16 @@ pub async fn review_notice(conn: &mut PgConnection, lead_id: Uuid) -> Result<boo
                       SELECT 1 FROM document_signature_requests r
                       JOIN documents d ON d.id = r.source_document_id
                       WHERE d.lead_id = l.id
+                        -- The DSGVO consent, also while unsigned (compliance_kind
+                        -- is set only on signing): by its template or art, as
+                        -- `documents::document_satisfies_compliance_kind` (QA 2026-10-10).
                         AND COALESCE(d.compliance_kind, '') <> 'dsgvo'
+                        AND NOT (
+                            COALESCE(d.compliance_kind, '') = ''
+                            AND COALESCE(NULLIF(trim(d.generated_template_id), ''), trim(d.art))
+                                IN ('consent', 'privacy_consents', 'consent_data_release',
+                                    'consent_data_release_child', 'consent_data_release_single')
+                        )
                   )
            FROM leads l WHERE l.id = $1"#,
     )
@@ -1539,4 +1575,39 @@ pub async fn staff_id_valid_until(
     .fetch_optional(&mut *conn)
     .await?
     .flatten())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn blocks(keys: &[&str]) -> Vec<String> {
+        keys.iter().map(|key| key.to_string()).collect()
+    }
+
+    #[test]
+    fn only_an_open_cabinet_block_asks_the_lead_to_answer_again() {
+        // A company pays through its own link (QA 2026-10-10, V2-a): C, D and E
+        // are the payer link's, the lead's sent follow-up stays sent.
+        let answers = BlockAnswers {
+            route_by: Some(PaymentRouteBy::Payer),
+            birth_place: Some("Testgrad".to_string()),
+            birth_country: Some("DE".to_string()),
+            ..Default::default()
+        };
+        assert!(!requests_cabinet_answer(
+            &blocks(&["C", "D", "E"]),
+            &answers
+        ));
+        // A complete cabinet block asks nothing either.
+        assert!(!requests_cabinet_answer(&blocks(&["K"]), &answers));
+        // A cabinet block that still misses something does.
+        assert!(requests_cabinet_answer(&blocks(&["D", "F"]), &answers));
+        // The self-payer answers the payment route (C) in the cabinet.
+        let self_payer = BlockAnswers {
+            route_by: Some(PaymentRouteBy::Patient),
+            ..Default::default()
+        };
+        assert!(requests_cabinet_answer(&blocks(&["C"]), &self_payer));
+    }
 }

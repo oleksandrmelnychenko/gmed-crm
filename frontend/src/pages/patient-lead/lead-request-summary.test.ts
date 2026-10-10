@@ -657,6 +657,35 @@ describe("lead request summary", () => {
       "Wie werden Sie bezahlen?": "Bar",
       "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?": "Nein",
     });
+    // The base form asks only the method: the account holder offered from the
+    // name is no answer of block C, so no account rows (QA 2026-10-10).
+    const baseOnly = billing({
+      invoice_to: "self",
+      account_country: null,
+      bank_name: null,
+      via_third_party: null,
+      via_third_party_details: null,
+    });
+    expect(rows(requestSummary(request({ billing: baseOnly }), de, "de"), "billing")).toEqual({
+      "Wohin soll die Rechnung gehen?": "An mich",
+      "E-Mail für Rechnungen (optional)": "rechnung@example.com",
+      "Wie werden Sie bezahlen?": "Überweisung",
+    });
+    // While block C is open the account is its question.
+    expect(
+      rows(
+        requestSummary(
+          request({
+            billing: baseOnly,
+            submitted_at: "2026-10-10T16:45:00Z",
+            follow_up: { required: true, blocks: ["C"], missing: {}, answered_at: null },
+          }),
+          de,
+          "de",
+        ),
+        "billing",
+      ),
+    ).toMatchObject({ "Kontoinhaber/in": "Anna Muster" });
     // "Other" shows its details.
     expect(rows(requestSummary(request({ billing: billing({ payment_method: "other", payment_method_details: "Scheck" }) }), de, "de"), "billing")).toMatchObject({
       "Wie werden Sie bezahlen?": "Sonstiges",

@@ -685,6 +685,27 @@ describe("labels of sections 7–8", () => {
 });
 
 describe("sections 7–8 as the group shows them", () => {
+  it("shows the expected total of block C once the lead gave it (QA 2026-10-10)", () => {
+    const cash = billing({ payment_method: "cash", expected_total_eur: "6000.00", compliance_flags: ["cash_payment"] });
+    expect(rows(billingStatements(cash, ru, "ru").payment)).toContainEqual([
+      "expected_total",
+      expect.stringMatching(/^6\s000,00 EUR$/u),
+      "",
+      false,
+    ]);
+    const german = billingStatements(cash, de, "de").payment.find((row) => row.key === "expected_total");
+    expect(german?.label).toBe("Voraussichtlicher Gesamtbetrag");
+    expect(german?.value).toBe("6.000,00 EUR");
+    // Not given, or an older server: no row.
+    expect(billingStatements(billing({ payment_method: "cash", expected_total_eur: null }), ru, "ru").payment.map((row) => row.key))
+      .not.toContain("expected_total");
+    expect(billingStatements(billing({ payment_method: "cash" }), ru, "ru").payment.map((row) => row.key)).not.toContain("expected_total");
+    // The server's text and a number are both read.
+    expect(normalizeLeadPortalBilling({ expected_total_eur: "6000.00" })?.expected_total_eur).toBe("6000.00");
+    expect(normalizeLeadPortalBilling({ expected_total_eur: 6000 })?.expected_total_eur).toBe("6000.00");
+    expect(normalizeLeadPortalBilling({})?.expected_total_eur).toBeUndefined();
+  });
+
   it("lists a self-payer's transfer without a warning", () => {
     const statements = billingStatements(
       billing({

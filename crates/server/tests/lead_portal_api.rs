@@ -3396,6 +3396,20 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert!(seen["invoice_vat_id"].is_null(), "{staff}");
     assert!(seen.get("payer_declared").is_none(), "{staff}");
     assert!(seen.get("account_holder_suggestion").is_none(), "{staff}");
+    // Block C's expected total is shown to staff beside the payment route
+    // (QA 2026-10-10: it was only printed in the patient form).
+    assert!(seen["expected_total_eur"].is_null(), "{staff}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "expected_total_eur": 6000 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
+    assert_eq!(staff["billing"]["expected_total_eur"], "6000.00", "{staff}");
     let (status, concierge) =
         json_request(router, "GET", &intake, &app.staff("concierge"), None).await;
     assert_eq!(status, StatusCode::OK, "{concierge}");

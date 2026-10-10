@@ -1,7 +1,8 @@
 //! The risk gate (contract 5): a lead whose assessment is level ≥ 2 and not
 //! released — or that staff rejected — waits for the staff decision before
 //! qualification, conversion, the documents for signature (the DSGVO consent
-//! stays signable, else the 14-day retention purges held leads), the agency
+//! stays signable, else the 14-day retention purges held leads, and the
+//! identity document stays confirmable — owner decision 2026-10-10), the agency
 //! countersignature of a framework contract or an order and the payer's
 //! signature package. At level 3 the payer's link waits too, unless staff
 //! requested block D. Drafting (orders, quotes, prepare) stays open; nothing
@@ -62,7 +63,8 @@ pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
             return Uuid::parse_str(lead).ok().map(RiskRoute::PayerLink);
         }
         // A signature confirmed by staff is a paper signature too (QA 2026-10-10);
-        // the DSGVO consent stays open here (`document_leads`). The sanctions
+        // the DSGVO consent and the identity document stay open here
+        // (`document_leads`). The sanctions
         // gate maps the route itself (same rule as `paper-signature`).
         ["documents", document, "mark-signed"] => {
             return Uuid::parse_str(document)
@@ -109,23 +111,36 @@ impl RiskRoute {
     }
 }
 
-/// The leads of documents that are not the DSGVO consent.
+/// The leads of documents that are neither the DSGVO consent nor the identity
+/// document (owner decision 2026-10-10: both stay open while staff decide).
+/// Unsigned, a document has no compliance kind yet; its template or type
+/// tells ([`crate::routes::documents::is_dsgvo_consent_or_identity_document`]).
 async fn document_leads(db: &gmed_db::DbPool, document_ids: &[Uuid]) -> Result<Scope, sqlx::Error> {
     let mut scope = Scope::default();
     if document_ids.is_empty() {
         return Ok(scope);
     }
     let rows = sqlx::query(
-        r#"SELECT d.lead_id, o.source_lead_id, d.patient_id, o.patient_id AS order_patient_id
+        r#"SELECT d.lead_id, o.source_lead_id, d.patient_id, o.patient_id AS order_patient_id,
+                  d.compliance_kind, d.generated_template_id, COALESCE(d.art, '') AS art
            FROM documents d
            LEFT JOIN orders o ON o.id = d.order_id
-           WHERE d.id = ANY($1)
-             AND COALESCE(d.compliance_kind, '') <> 'dsgvo'"#,
+           WHERE d.id = ANY($1)"#,
     )
     .bind(document_ids)
     .fetch_all(db)
     .await?;
     for row in rows {
+        let compliance_kind: Option<String> = row.try_get("compliance_kind")?;
+        let template: Option<String> = row.try_get("generated_template_id")?;
+        let art: String = row.try_get("art")?;
+        if crate::routes::documents::is_dsgvo_consent_or_identity_document(
+            compliance_kind.as_deref(),
+            template.as_deref(),
+            &art,
+        ) {
+            continue;
+        }
         for column in ["lead_id", "source_lead_id"] {
             if let Some(id) = row.try_get::<Option<Uuid>, _>(column)?
                 && !scope.lead_ids.contains(&id)

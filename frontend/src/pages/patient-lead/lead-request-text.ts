@@ -330,7 +330,6 @@ export type LeadRequestText = {
   /** Prefix of a legal question in the list of what is still missing. */
   legalShort: string;
   /** Step "send": what will be sent, and the confirmation. */
-  summaryIntro: string;
   summaryEmpty: string;
   declarationTitle: string;
   declarationLabel: string;
@@ -1051,7 +1050,6 @@ const de: LeadRequestText = {
   sectionLegal: "Gesetzliche Fragen (Geldwäscheprävention)",
   legalIntro: "Diese Fragen schreibt das Geldwäschegesetz vor. Bitte beantworten Sie jede mit Ja oder Nein.",
   legalShort: "Gesetzliche Fragen",
-  summaryIntro: "Bitte prüfen Sie Ihre Angaben, bevor Sie sie senden.",
   summaryEmpty: "Noch keine Angaben",
   declarationTitle: "Bestätigung",
   declarationLabel:
@@ -1512,7 +1510,6 @@ const ru: LeadRequestText = {
   legalIntro:
     "Эти вопросы требует немецкий закон о противодействии отмыванию денег. Пожалуйста, ответьте на каждый «да» или «нет».",
   legalShort: "Вопросы по закону",
-  summaryIntro: "Пожалуйста, проверьте данные перед отправкой.",
   summaryEmpty: "Пока ничего не указано",
   declarationTitle: "Подтверждение",
   declarationLabel: "Я подтверждаю, что мои данные полные и достоверные и что я сообщу об изменениях.",
@@ -1972,7 +1969,6 @@ const uk: LeadRequestText = {
   legalIntro:
     "Ці запитання вимагає німецький закон про запобігання відмиванню коштів. Будь ласка, дайте на кожне відповідь «так» або «ні».",
   legalShort: "Запитання за законом",
-  summaryIntro: "Будь ласка, перевірте дані перед надсиланням.",
   summaryEmpty: "Ще нічого не вказано",
   declarationTitle: "Підтвердження",
   declarationLabel: "Я підтверджую, що мої дані повні й правдиві та що я повідомлю про зміни.",
@@ -2423,7 +2419,6 @@ const en: LeadRequestText = {
   sectionLegal: "Legal questions (anti-money laundering)",
   legalIntro: "German anti-money laundering law requires these questions. Please answer each with yes or no.",
   legalShort: "Legal questions",
-  summaryIntro: "Please check your details before you send them.",
   summaryEmpty: "Nothing entered yet",
   declarationTitle: "Confirmation",
   declarationLabel: "I confirm that my details are complete and true and that I will report any changes.",

@@ -428,6 +428,8 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
         assert_eq!(code, StatusCode::CONFLICT, "{route}: {body}");
         assert_eq!(body["error"], "sanctions_review_pending", "{route}");
     }
+    // The DSGVO consent and the identity document are never held.
+    assert_consent_and_identity_free(&app, lead_id).await;
 
     // Only the CEO sees the hits; the comparison carries the list entry.
     let (code, _) = request(&app, "GET", "/sanctions/hits", &app.pm(), None).await;
@@ -583,6 +585,8 @@ async fn possible_match_blocks_until_the_ceo_decides_and_confirmation_is_final()
             .await
             .unwrap();
     assert!(signed.is_none());
+    // Not even a confirmed match holds the DSGVO consent or the identity document.
+    assert_consent_and_identity_free(&app, lead_id).await;
     let status = lead_status(&app, lead_id).await;
     assert_eq!(status["screening"], "confirmed");
     // A confirmed match requires the enhanced check.
@@ -627,6 +631,59 @@ async fn insert_patient_form(app: &TestApp, lead_id: Uuid) -> Uuid {
     .await
     .unwrap();
     document_id
+}
+
+/// An unsigned document of the lead with the given type and template: the
+/// wizard's DSGVO consent (`privacy_consents`, no compliance kind until it is
+/// signed) or a scan of the identity document.
+async fn insert_lead_document(
+    app: &TestApp,
+    lead_id: Uuid,
+    art: &str,
+    template: Option<&str>,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, lead_id, auto_name, original_filename, art, category,
+               status, visibility, is_medical, mime_type, generated_template_id,
+               version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+               $1, $2, $3, $3 || '.pdf', $3, 'administrative', 'active', 'internal',
+               false, 'application/pdf', $4, $1, 1, $5
+           )"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .bind(art)
+    .bind(template)
+    .bind(app.pm_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    document_id
+}
+
+/// "Подтвердить подпись" of the DSGVO consent and "Подтвердить документ" of
+/// the identity document pass the sanctions and the risk gate (owner decision
+/// 2026-10-10), also before they carry a compliance kind (QA 2026-10-10 V1-a).
+async fn assert_consent_and_identity_free(app: &TestApp, lead_id: Uuid) {
+    let consent =
+        insert_lead_document(app, lead_id, "privacy_consents", Some("privacy_consents")).await;
+    let identity = insert_lead_document(app, lead_id, "passport", None).await;
+    for (document, kind) in [(consent, "dsgvo"), (identity, "identity")] {
+        let (code, body) = request(
+            app,
+            "POST",
+            &format!("/documents/{document}/mark-signed"),
+            &app.pm(),
+            Some(json!({ "compliance_kind": kind })),
+        )
+        .await;
+        assert!(not_a_gate_block(&body), "{kind}: {body}");
+        assert_ne!(body["error"], "risk_review_required", "{kind}: {body}");
+        assert_eq!(code, StatusCode::OK, "{kind}: {body}");
+    }
 }
 
 /// The gate's own error codes start with `sanctions_` or are `blocked_country`;

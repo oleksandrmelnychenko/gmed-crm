@@ -1833,6 +1833,29 @@ fn document_satisfies_compliance_kind(
     }
 }
 
+/// The DSGVO consent or the identity document of the lead or patient, by the
+/// recorded compliance kind or, before it is signed or confirmed (the kind is
+/// recorded only then), by its generated template or type. Neither the
+/// sanctions nor the risk gate hold them (owner decision 2026-10-10).
+pub(crate) fn is_dsgvo_consent_or_identity_document(
+    compliance_kind: Option<&str>,
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> bool {
+    // A recorded kind decides; only without one the type is looked at.
+    if let Some(kind) = compliance_kind
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+    {
+        return matches!(kind, "dsgvo" | "identity");
+    }
+    let template = generated_template_id.map(|template| template.trim().to_lowercase());
+    let art = art.trim().to_lowercase();
+    ["dsgvo", "identity"]
+        .into_iter()
+        .any(|kind| document_satisfies_compliance_kind(kind, template.as_deref(), &art))
+}
+
 fn consent_type_for_compliance_kind(compliance_kind: &str) -> Option<&'static str> {
     match compliance_kind {
         "dsgvo" => Some("dsgvo_data_transfer"),
@@ -21697,25 +21720,35 @@ fn build_gwg_identification_pdf(
     // a third party ask staff for a separate check; nothing is blocked.
     if let Some(route) = &sheet.payment_route {
         aml_labeled_value(&mut layout, route.label(), Some(route.line().as_str()));
-        aml_labeled_value(
-            &mut layout,
-            "Zahlung über Dritte / Zahlungsdienstleister",
-            Some(route.third_party_line().as_str()),
-        );
+        // Only an answer is printed: the cabinet asks it with some routes only
+        // (QA 2026-10-10, never "keine Angabe" for a question never asked).
+        if route.via_third_party.is_some() {
+            aml_labeled_value(
+                &mut layout,
+                "Zahlung über Dritte / Zahlungsdienstleister",
+                Some(route.third_party_line().as_str()),
+            );
+        }
         if let Some(hint) = route.hint() {
             aml_labeled_value(&mut layout, "Hinweis", Some(hint.as_str()));
         }
     }
     // Ticked when the legal guardian the lead named in the cabinet uploaded
-    // both the appointment deed and a copy of the own identity document: on
-    // the adult's sheet and on the guardian's own one.
-    aml_checkbox_line(
-        &mut layout,
-        sheet.acting_persons.iter().any(|person| {
-            person.legal_guardian && person.identity_document_on_file && person.authority_on_file
-        }) || (sheet.legal_guardian && sheet.identity_document_on_file && sheet.authority_on_file),
-        "Bei Betreuten: Kopie der Bestellungsurkunde des Betreuers sowie eine Kopie des Ausweisdokuments des Betreuers sind beigefügt.",
-    );
+    // both the appointment deed and a copy of the own identity document. The
+    // box concerns a contract partner under legal guardianship: only on the
+    // adult's sheet. The guardian's own sheet has the proof of authority in
+    // section 2 instead (QA 2026-10-10).
+    if sheet.treated_person.is_none() {
+        aml_checkbox_line(
+            &mut layout,
+            sheet.acting_persons.iter().any(|person| {
+                person.legal_guardian
+                    && person.identity_document_on_file
+                    && person.authority_on_file
+            }),
+            "Bei Betreuten: Kopie der Bestellungsurkunde des Betreuers sowie eine Kopie des Ausweisdokuments des Betreuers sind beigefügt.",
+        );
+    }
     aml_checkbox_line(
         &mut layout,
         false,
@@ -35202,6 +35235,27 @@ mod tests {
             crypto.hint().as_deref(),
             Some("Kryptowährung – gesonderte Prüfung")
         );
+
+        // A transfer the cabinet never asked about a third party (QA
+        // 2026-10-10): the row is left out, never "keine Angabe".
+        let not_asked = super::GwgIdentificationSheet {
+            payment_route: Some(super::GwgPaymentRoute {
+                method: Some("bank_transfer".to_string()),
+                account_holder: Some("Anna Muster".to_string()),
+                ..Default::default()
+            }),
+            ..transfer.clone()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &not_asked,
+            &legal_test_agency(),
+            None,
+            "GWG-20261010-UNITTEST0009",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0009");
+        assert!(text.contains("Kontoinhaber/in: Anna Muster"), "{text}");
+        assert!(!text.contains("Zahlungsdienstleister"), "{text}");
     }
 
     #[test]
@@ -35409,10 +35463,12 @@ mod tests {
             "[X] Der Nachweis der Vertretungsberechtigung für die vertretene Person (Vollmacht)"
         ));
         assert!(!text.contains("für das Kind"));
-        assert!(text.contains("[ ] Bei Betreuten"));
+        // The box about a contract partner under guardianship is the adult's.
+        assert!(!text.contains("Bei Betreuten"), "{text}");
 
         // The legal guardian with the appointment deed and the own identity
-        // document on file: the box for the guardian's documents is ticked.
+        // document on file: the proof of authority in section 2 is ticked; the
+        // "Bei Betreuten" box stays on the adult's sheet (QA 2026-10-10).
         let guardian = super::GwgIdentificationSheet {
             role: super::gwg_adult_acting_role(true),
             first_name: "Carla".to_string(),
@@ -35431,8 +35487,11 @@ mod tests {
         let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0002");
         assert!(text.contains("Rechtliche/r Betreuer/in"));
         assert!(!text.contains("eigener Bogen"));
+        assert!(
+            text.contains("[X] Der Nachweis der Vertretungsberechtigung für die vertretene Person")
+        );
         assert!(text.contains("(Bestellungsurkunde bzw. Betreuerausweis) liegt vor"));
-        assert!(text.contains("[X] Bei Betreuten"));
+        assert!(!text.contains("Bei Betreuten"), "{text}");
         // Without the deed the box stays empty.
         let without_deed = super::GwgIdentificationSheet {
             authority_on_file: false,
@@ -35446,7 +35505,7 @@ mod tests {
         )
         .unwrap();
         let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0003");
-        assert!(text.contains("[ ] Bei Betreuten"));
+        assert!(!text.contains("Bei Betreuten"), "{text}");
         assert!(
             text.contains("[ ] Der Nachweis der Vertretungsberechtigung für die vertretene Person")
         );

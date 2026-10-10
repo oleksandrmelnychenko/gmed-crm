@@ -29,9 +29,15 @@ export function openFollowUpBlocks(request: Pick<LeadRequest, "follow_up">): Fol
   return FOLLOW_UP_BLOCKS.filter((block) => open.has(block));
 }
 
-/** Whether the step "Ergänzende Angaben" is shown: the server opened at least one block of the cabinet. */
-export function followUpShown(request: Pick<LeadRequest, "follow_up">): boolean {
-  return openFollowUpBlocks(request).length > 0;
+/**
+ * Whether the step "Ergänzende Angaben" is shown: the request was sent once
+ * and the server opened at least one block of the cabinet. A staff action
+ * can start the assessment before the first send (a gate call): its blocks
+ * wait for the send instead of adding a step to the base form (QA
+ * 2026-10-10: block I duplicated the identity step).
+ */
+export function followUpShown(request: Pick<LeadRequest, "follow_up" | "submitted_at">): boolean {
+  return Boolean(request.submitted_at) && openFollowUpBlocks(request).length > 0;
 }
 
 /** What an open block still misses, as the server names it. */

@@ -92,7 +92,7 @@ describe("LeadWizardDocumentMetadata", () => {
     expect(html).toContain("Итого: 2.735,81 EUR");
     expect(html).toContain("border-amber-200");
     expect(html.indexOf("KV-20260913-0033")).toBeLessThan(html.indexOf("Итого: 2.735,81 EUR"));
-    expect(html.indexOf("Итого: 2.735,81 EUR")).toBeLessThan(html.indexOf("1,9 MB"));
+    expect(html.indexOf("Итого: 2.735,81 EUR")).toBeLessThan(html.indexOf("1,9 МБ"));
   });
 
   it("distinguishes document versions while retaining the business number", () => {
@@ -159,7 +159,9 @@ describe("LeadWizardDocumentMetadata", () => {
     );
 
     expect(html).toContain("DOC-UPLOAD-1");
-    expect(html).toContain("5 KB");
+    // The Russian UI writes the unit in Cyrillic (QA 2026-10-10).
+    expect(html).toContain("5 КБ");
+    expect(html).not.toContain("KB");
     expect(html).not.toContain("data-generated-document-date");
   });
 
@@ -182,5 +184,34 @@ describe("LeadWizardDocumentMetadata", () => {
     expect(render(312)).not.toContain("0 KB");
     expect(render(1023)).toContain("&lt;1 KB");
     expect(render(1024)).toContain(">1 KB<");
+    const russian = renderToStaticMarkup(
+      <LeadWizardDocumentMetadata
+        lang="ru"
+        document={{
+          id: "small-2",
+          document_number: undefined,
+          file_size: 312,
+          generated_bindings: null,
+          generated_template_id: null,
+          created_at: createdAt,
+        }}
+      />,
+    );
+    expect(russian).toContain("&lt;1 КБ");
+    expect(
+      renderToStaticMarkup(
+        <LeadWizardDocumentMetadata
+          lang="ru"
+          document={{
+            id: "big-1",
+            document_number: undefined,
+            file_size: 3 * 1024 * 1024,
+            generated_bindings: null,
+            generated_template_id: null,
+            created_at: createdAt,
+          }}
+        />,
+      ),
+    ).toContain(">3 МБ<");
   });
 });

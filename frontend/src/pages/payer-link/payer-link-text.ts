@@ -160,7 +160,6 @@ export type PayerLinkText = {
   /** Whom an organisation's declarations concern; a private person gets no intro (QA 2026-10-10). */
   declarationsIntroOrganisation: string;
   yesNo: { yes: string; no: string };
-  summaryIntro: string;
   missingTitle: string;
   complete: string;
   goToStep: string;
@@ -445,7 +444,6 @@ const de: PayerLinkText = {
   declarationsIntroOrganisation:
     "Die Fragen betreffen die Organisation, die vertretungsberechtigten Personen und die wirtschaftlich Berechtigten.",
   yesNo: { yes: "Ja", no: "Nein" },
-  summaryIntro: "Bitte prüfen Sie Ihre Angaben, bevor Sie sie senden.",
   missingTitle: "Bitte noch ergänzen:",
   complete: "Alle erforderlichen Angaben sind vorhanden.",
   goToStep: "Ergänzen",
@@ -726,7 +724,6 @@ const en: PayerLinkText = {
   declarationsIntroOrganisation:
     "The questions concern the organisation, the persons authorised to represent it and its beneficial owners.",
   yesNo: { yes: "Yes", no: "No" },
-  summaryIntro: "Please check your details before you send them.",
   missingTitle: "Please add:",
   complete: "All required details are there.",
   goToStep: "Complete",
@@ -1009,7 +1006,6 @@ const uk: PayerLinkText = {
   cashCryptoNote: "Оплату готівкою та криптовалютою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
   declarationsIntroOrganisation: "Запитання стосуються організації, її уповноважених представників і кінцевих бенефіціарів.",
   yesNo: { yes: "Так", no: "Ні" },
-  summaryIntro: "Будь ласка, перевірте дані перед надсиланням.",
   missingTitle: "Будь ласка, доповніть:",
   complete: "Усі обов'язкові дані вказано.",
   goToStep: "Доповнити",
@@ -1292,7 +1288,6 @@ const ru: PayerLinkText = {
   cashCryptoNote: "Оплату наличными и криптовалютой GMED проверяет отдельно (закон о противодействии отмыванию денег).",
   declarationsIntroOrganisation: "Вопросы касаются организации, её уполномоченных представителей и конечных бенефициаров.",
   yesNo: { yes: "Да", no: "Нет" },
-  summaryIntro: "Пожалуйста, проверьте данные перед отправкой.",
   missingTitle: "Пожалуйста, дополните:",
   complete: "Все обязательные данные указаны.",
   goToStep: "Дополнить",

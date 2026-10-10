@@ -89,7 +89,7 @@ export function stepOfField(field: string): FormStep {
 }
 
 /** The steps shown for this request, in their order. */
-export function visibleSteps(request: Pick<LeadRequest, "follow_up">): StepId[] {
+export function visibleSteps(request: Pick<LeadRequest, "follow_up" | "submitted_at">): StepId[] {
   // "contact" is part of the first step (owner 2026-10-09): one tab with the consent and the person.
   // "declarations" moved to follow-up block L (owner 2026-10-09): only with the enhanced check.
   return STEP_IDS.filter(
@@ -163,7 +163,7 @@ export function stepDone(
 
 /** The first step that still misses something (not "send"); null when everything is there. */
 export function firstIncompleteStep(
-  request: Pick<LeadRequest, "progress" | "follow_up" | "consents">,
+  request: Pick<LeadRequest, "progress" | "follow_up" | "consents" | "submitted_at">,
 ): StepId | null {
   const missing = missingByStep(request);
   return visibleSteps(request).find((step) => step !== "send" && stepMissingCount(request, step, missing) > 0) ?? null;

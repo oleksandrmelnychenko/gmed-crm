@@ -804,6 +804,13 @@ export function LeadGwgStatements({
     { key: "birth_place", label: tx("Место рождения", "Geburtsort"), value: identification.birth_place },
     { key: "birth_country", label: tx("Страна рождения", "Geburtsland"), value: country(identification.birth_country) },
   ].filter((item) => asked("K") || Boolean(item.value?.trim()));
+  // Likewise (QA 2026-10-10): the own economic interest is block L's, why a
+  // third party pays block B's (opened only for a third-party payer), and the
+  // habitual residence is shown only when the lead gave one.
+  const habitualResidence = country(identification.habitual_residence_country);
+  const ownAccountShown = asked("L") || ownAccount.answer !== null;
+  const paymentBackground = identification.payment_background?.trim() ?? "";
+  const paymentBackgroundShown = asked("B") || Boolean(paymentBackground);
 
   return (
     <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-gwg-statements">
@@ -818,9 +825,14 @@ export function LeadGwgStatements({
         {birthRows.map((item) => (
           <Statement key={item.key} label={item.label} testId={`lead-gwg-${item.key}`}>{item.value}</Statement>
         ))}
-        <Statement label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}>
-          {country(identification.habitual_residence_country)}
-        </Statement>
+        {habitualResidence ? (
+          <Statement
+            label={tx("Страна обычного пребывания (если другая)", "Gewöhnlicher Aufenthalt (falls abweichend)")}
+            testId="lead-gwg-habitual-residence"
+          >
+            {habitualResidence}
+          </Statement>
+        ) : null}
         <Statement label={tx("Каналы связи", "Kontaktwege")}>
           {contactChannelsLabel(identification.contact_channels, tx)}
         </Statement>
@@ -860,26 +872,36 @@ export function LeadGwgStatements({
 
       {representationGroup}
 
-      <StatementGroup
-        title={tx("Экономический интерес (раздел «Кто платит»)", "Wirtschaftliches Interesse (Abschnitt „Wer zahlt“)")}
-        columns="grid-cols-1 sm:grid-cols-3"
-      >
-        <Statement
-          label={tx("В собственных экономических интересах", "Im eigenen wirtschaftlichen Interesse")}
-          warning={ownAccount.answer === false}
-          testId="lead-gwg-own-account"
+      {ownAccountShown || paymentBackgroundShown ? (
+        <StatementGroup
+          title={tx("Экономический интерес (раздел «Кто платит»)", "Wirtschaftliches Interesse (Abschnitt „Wer zahlt“)")}
+          columns="grid-cols-1 sm:grid-cols-3"
         >
-          {answerLabel(ownAccount.answer, tx)}
-        </Statement>
-        {ownAccount.answer === false ? (
-          <Statement label={tx("В чьих интересах", "Wirtschaftlich Berechtigter")} className="sm:col-span-2">
-            {ownAccount.beneficialOwner}
-          </Statement>
-        ) : null}
-        <Statement label={tx("Почему платит третье лицо", "Hintergrund der Zahlung durch Dritte")} className="col-span-full">
-          {identification.payment_background}
-        </Statement>
-      </StatementGroup>
+          {ownAccountShown ? (
+            <Statement
+              label={tx("В собственных экономических интересах", "Im eigenen wirtschaftlichen Interesse")}
+              warning={ownAccount.answer === false}
+              testId="lead-gwg-own-account"
+            >
+              {answerLabel(ownAccount.answer, tx)}
+            </Statement>
+          ) : null}
+          {ownAccount.answer === false ? (
+            <Statement label={tx("В чьих интересах", "Wirtschaftlich Berechtigter")} className="sm:col-span-2">
+              {ownAccount.beneficialOwner}
+            </Statement>
+          ) : null}
+          {paymentBackgroundShown ? (
+            <Statement
+              label={tx("Почему платит третье лицо", "Hintergrund der Zahlung durch Dritte")}
+              className="col-span-full"
+              testId="lead-gwg-payment-background"
+            >
+              {paymentBackground}
+            </Statement>
+          ) : null}
+        </StatementGroup>
+      ) : null}
 
       {enhancedDetailsShown(intake.enhanced_details) ? <EnhancedDetailsGroup details={intake.enhanced_details} tx={tx} /> : null}
 

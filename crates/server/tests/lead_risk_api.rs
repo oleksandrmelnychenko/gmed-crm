@@ -468,6 +468,116 @@ async fn a_valid_identity_document_withdraws_t12() {
     assert_eq!(valid["level"], 1);
 }
 
+/// An unsigned document of the lead (no compliance kind until it is signed).
+async fn insert_lead_document(
+    app: &TestApp,
+    lead_id: Uuid,
+    art: &str,
+    template: Option<&str>,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, lead_id, auto_name, original_filename, art, category,
+               status, visibility, is_medical, mime_type, generated_template_id,
+               version_root_document_id, version_number, uploaded_by
+           ) VALUES (
+               $1, $2, $3, $3 || '.pdf', $3, 'administrative', 'active', 'internal',
+               false, 'application/pdf', $4, $1, 1, $5
+           )"#,
+    )
+    .bind(document_id)
+    .bind(lead_id)
+    .bind(art)
+    .bind(template)
+    .bind(app.pm_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    document_id
+}
+
+async fn mark_signed(app: &TestApp, document_id: Uuid, kind: &str) -> (StatusCode, Value) {
+    request(
+        app,
+        "POST",
+        &format!("/documents/{document_id}/mark-signed"),
+        &app.pm(),
+        Some(json!({ "compliance_kind": kind })),
+    )
+    .await
+}
+
+async fn follow_up_answered_at(
+    app: &TestApp,
+    lead_id: Uuid,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    sqlx::query_scalar("SELECT follow_up_answered_at FROM lead_risk_assessments WHERE lead_id = $1")
+        .bind(lead_id)
+        .fetch_one(app.pool())
+        .await
+        .unwrap()
+}
+
+/// QA 2026-10-10 (V1-a/b, owner decision): while staff decide, the gate holds
+/// the lead's documents but never the DSGVO consent — also unsigned, before it
+/// has a compliance kind — nor the identity document. And a "request more" of
+/// blocks the lead does not answer (V2-a) leaves the lead's sent follow-up sent.
+#[tokio::test]
+async fn the_gate_never_holds_the_consent_or_the_identity_document() {
+    let Some(app) = test_app().await else { return };
+    // An Iranian citizen without a document: level 2, held.
+    let lead_id = insert_lead(&app, "Ben", &["IR"]).await;
+    assert!(held(&qualify(&app, lead_id).await));
+    assert_eq!(assessment(&app, lead_id).await["level"], 2);
+
+    let patient_form = insert_lead_document(
+        &app,
+        lead_id,
+        "lead_self_disclosure",
+        Some("lead_self_disclosure"),
+    )
+    .await;
+    assert!(held(&mark_signed(&app, patient_form, "other").await));
+    let consent =
+        insert_lead_document(&app, lead_id, "privacy_consents", Some("privacy_consents")).await;
+    let response = mark_signed(&app, consent, "dsgvo").await;
+    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    let identity = insert_lead_document(&app, lead_id, "passport", None).await;
+    let response = mark_signed(&app, identity, "identity").await;
+    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    // The others stay held.
+    assert!(held(&qualify(&app, lead_id).await));
+
+    // The lead sent the follow-up; staff request blocks of the payer's link only.
+    sqlx::query(
+        "UPDATE lead_risk_assessments SET follow_up_answered_at = now() WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    let (status, body) = decide(
+        &app,
+        &app.ceo(),
+        lead_id,
+        json!({ "decision": "request_more", "reason": "The payer states the funds", "blocks": ["D", "E"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(follow_up_answered_at(&app, lead_id).await.is_some());
+    // A cabinet block that still misses something: the lead answers again.
+    let (status, body) = decide(
+        &app,
+        &app.ceo(),
+        lead_id,
+        json!({ "decision": "request_more", "reason": "Please state the payment route", "blocks": ["C"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(follow_up_answered_at(&app, lead_id).await.is_none());
+}
+
 #[tokio::test]
 async fn level_three_needs_two_different_reviewers() {
     let Some(app) = test_app().await else { return };
@@ -907,6 +1017,63 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert_eq!(status, StatusCode::OK, "{data}");
     assert_eq!(data["id_data_entered_by_name"], "Paula Manager");
+    // Block I asks a new copy: the old one is no answer and is not listed there
+    // (QA 2026-10-10), the step "document" keeps it.
+    let (_, request_object) = request(&app, "GET", &path, &patient, None).await;
+    let follow_up = &request_object["follow_up"];
+    assert!(
+        follow_up["blocks"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("I")),
+        "{follow_up}"
+    );
+    assert_eq!(follow_up["missing"]["I"], json!(["id_document_upload"]));
+    assert_eq!(follow_up["identity_documents"], json!([]), "{follow_up}");
+    assert!(follow_up.get("identity_since").is_none());
+    assert_eq!(
+        request_object["identity_documents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    // The new copy answers the block: it closes.
+    let (_, request_object) = request(&app, "GET", &path, &patient, None).await;
+    let follow_up = &request_object["follow_up"];
+    assert!(
+        !follow_up["blocks"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("I")),
+        "{follow_up}"
+    );
+    assert_eq!(
+        request_object["identity_documents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    // Requested by staff, the block stays open and lists the new copy only.
+    let (status, body) = decide(
+        &app,
+        &app.ceo(),
+        lead_id,
+        json!({ "decision": "request_more", "reason": "Please upload the new passport", "blocks": ["I"] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (_, request_object) = request(&app, "GET", &path, &patient, None).await;
+    let follow_up = &request_object["follow_up"];
+    assert_eq!(follow_up["missing"]["I"], json!([]), "{follow_up}");
+    assert_eq!(
+        follow_up["identity_documents"].as_array().unwrap().len(),
+        1,
+        "{follow_up}"
+    );
     // The reason of the request is medical: staff with medical access only.
     let (status, intake) = request(
         &app,

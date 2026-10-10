@@ -198,6 +198,10 @@ export function FollowUpStep({
       case "H":
         return <OfficeBlock form={identification} text={text} lang={lang} relatedAsked={request.identification?.pep_related === true} />;
       case "I":
+        // Only the copies uploaded since GMED took the document's data down
+        // answer the block: an older (e.g. expired) one is not listed here, the
+        // lead sees the empty upload under the block's title — without a
+        // reason (QA 2026-10-10).
         return (
           <IdentityDocumentSection
             request={request}
@@ -205,6 +209,7 @@ export function FollowUpStep({
             lang={lang}
             enqueue={enqueue}
             onChange={onChange}
+            documents={request.follow_up?.identity_documents}
             bare
           />
         );

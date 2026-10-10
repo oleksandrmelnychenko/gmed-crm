@@ -310,11 +310,19 @@ pub async fn follow_up_json(
             missing.insert(block.to_string(), json!(state.missing));
         }
     }
+    // Block I is answered by a copy uploaded after staff entered the identity
+    // data (`identity_uploaded_since_entry`): the cabinet lists only those
+    // (QA 2026-10-10, an expired passport's old scan looked like the answer).
+    let identity_since = blocks
+        .contains(&"I")
+        .then_some(answers.identity_entered_at)
+        .flatten();
     Ok(json!({
         "required": !blocks.is_empty(),
         "blocks": blocks,
         "missing": missing,
         "answered_at": answered_at,
+        "identity_since": identity_since,
     }))
 }
 

@@ -54,11 +54,16 @@ describe("lead cabinet steps", () => {
     ]);
     // "contact" is part of the first tab, the declarations are follow-up block L (owner 2026-10-09).
     expect(visibleSteps(request())).toEqual(["person", "identity", "payer", "billing", "documents", "send"]);
-    expect(visibleSteps(request({ follow_up: undefined }))).not.toContain("follow_up");
-    expect(visibleSteps(request({ follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");
+    const sent = "2026-10-07T09:00:00Z";
+    expect(visibleSteps(request({ submitted_at: sent, follow_up: undefined }))).not.toContain("follow_up");
+    expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");
     // D and E are the payer link's; "not required" shows nothing either.
-    expect(visibleSteps(request({ follow_up: followUp({ blocks: ["D", "E"] }) }))).not.toContain("follow_up");
-    expect(visibleSteps(request({ follow_up: followUp({ required: false, blocks: ["A"] }) }))).not.toContain("follow_up");
+    expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ blocks: ["D", "E"] }) }))).not.toContain("follow_up");
+    expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ required: false, blocks: ["A"] }) }))).not.toContain("follow_up");
+    // A staff action started the assessment before the first send (QA
+    // 2026-10-10): the blocks wait for the send, no extra step in the base form.
+    expect(visibleSteps(request({ follow_up: followUp({ blocks: ["I"] }) }))).not.toContain("follow_up");
+    expect(initialStep(request({ follow_up: followUp({ blocks: ["I"], missing: { I: ["id_document_upload"] } }) }))).toBe("person");
   });
 
   it("takes the server's map of missing keys by step and places the rest itself", () => {

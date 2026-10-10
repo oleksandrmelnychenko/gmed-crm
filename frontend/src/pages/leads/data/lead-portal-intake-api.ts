@@ -214,6 +214,11 @@ export type LeadPortalBilling = {
   /** Payment through a third person or a payment service provider; null while unanswered. */
   via_third_party: boolean | null;
   via_third_party_details: string | null;
+  /**
+   * Follow-up block C: the total the lead expects to pay, in EUR ("6000.00");
+   * null while not answered, absent on an older server.
+   */
+  expected_total_eur?: string | null;
   compliance_flags: LeadComplianceFlag[];
 };
 
@@ -574,6 +579,12 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
     bank_name: textOrNull(raw.bank_name),
     via_third_party: answerOrNull(raw.via_third_party),
     via_third_party_details: textOrNull(raw.via_third_party_details),
+    expected_total_eur:
+      raw.expected_total_eur === undefined
+        ? undefined
+        : typeof raw.expected_total_eur === "number" && Number.isFinite(raw.expected_total_eur)
+          ? raw.expected_total_eur.toFixed(2)
+          : textOrNull(raw.expected_total_eur),
     compliance_flags: LEAD_COMPLIANCE_FLAGS.filter((flag) => flags.includes(flag)),
   };
 }

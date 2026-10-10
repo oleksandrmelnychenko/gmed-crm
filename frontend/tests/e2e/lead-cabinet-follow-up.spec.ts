@@ -116,6 +116,8 @@ function leadRequest() {
       funds_source_options: ["income", "savings", "asset_sale", "inheritance_gift", "other"],
       funds_proof_documents: [] as Json[],
       relationship_proof_documents: [] as Json[],
+      // Block I: only the copies uploaded since staff took the document's data down.
+      identity_documents: [] as Json[],
     },
     review_notice: false,
     payer_questionnaire: null,
@@ -193,7 +195,7 @@ function recompute(request: LeadRequestMock) {
         ...(billing.via_third_party == null ? ["via_third_party"] : []),
       ];
     }
-    if (block === "I") missing.I = request.identity_documents.length > 1 ? [] : ["id_document_upload"];
+    if (block === "I") missing.I = request.follow_up.identity_documents.length > 0 ? [] : ["id_document_upload"];
     // K: the birth data; L: the legal questions and the own economic interest (owner 2026-10-09).
     if (block === "K") missing.K = ["birth_place", "birth_country"].filter((key) => !filled(id[key]));
     if (block === "L") {
@@ -336,6 +338,8 @@ async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
     if (method === "POST" && path === `${base}/identity-document`) {
       calls.identityUploads += 1;
       upload(request.identity_documents, "reisepass.pdf");
+      // A new copy answers block I too.
+      request.follow_up.identity_documents.push(request.identity_documents[request.identity_documents.length - 1]);
       return answer();
     }
     if (method === "POST" && path === `${base}/follow-up/submit`) {
@@ -638,12 +642,18 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // No intro sentence above the upload (owner 2026-10-09): the button says what to do.
     await expect(blockI).not.toContainText("Bitte laden Sie ein aktuelles, gut lesbares Foto");
     await expect(blockI.getByRole("button", { name: "Foto oder Scan des Ausweises hochladen" })).toBeEnabled();
+    // The copy uploaded before the block opened is no answer (QA 2026-10-10): the
+    // block shows the empty upload, without a reason.
+    await expect(blockI.getByTestId("lead-request-identity-list")).toBeHidden();
+    await expect(blockI).not.toContainText("reisepass.pdf");
     await blockI.locator("#lead-request-identity-files").setInputFiles({
       name: "reisepass-neu.pdf",
       mimeType: "application/pdf",
       buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
     });
     await expect.poll(() => calls.identityUploads).toBe(1);
+    await expect(blockI.getByTestId("lead-request-identity-list")).toContainText("reisepass.pdf");
+    await expect(blockI.getByTestId("lead-request-identity-list").getByRole("listitem")).toHaveCount(1);
     await expect(page.getByTestId("lead-request-follow-up-I-missing")).toHaveCount(0);
     expect(await page.locator("body").innerText()).not.toMatch(RISK_WORDS);
   });

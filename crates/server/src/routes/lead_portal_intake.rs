@@ -2382,6 +2382,20 @@ pub(crate) async fn request_payload(
     follow_up["funds_source_options"] = json!(lead_payer::STATED_FUNDS_SOURCES);
     follow_up["funds_proof_documents"] = json!(funds_proof_documents);
     follow_up["relationship_proof_documents"] = json!(uploads_of(UploadKind::RelationshipProof));
+    // Block I (a new identity document) lists only the copies uploaded since
+    // staff entered the identity data, as its `missing` counts them: an older
+    // copy is no answer, the lead sees the empty upload (QA 2026-10-10).
+    let identity_since = follow_up
+        .as_object_mut()
+        .and_then(|follow_up| follow_up.remove("identity_since"))
+        .and_then(|value| serde_json::from_value::<DateTime<Utc>>(value).ok());
+    follow_up["identity_documents"] = json!(
+        identity_documents
+            .iter()
+            .filter(|document| identity_since.is_none_or(|since| uploaded_after(document, since)))
+            .cloned()
+            .collect::<Vec<_>>()
+    );
     let mut payer_json = lead_payer::portal_payload(payer.as_ref(), answered_by_payer);
     if !payer_json.is_null() {
         crate::risk::cabinet::merge_into(&mut payer_json, payer_extras);
@@ -2459,6 +2473,15 @@ pub(crate) async fn request_payload(
             .unwrap_or(false),
         "retention_deadline_at": deadline,
     }))
+}
+
+/// Whether a listed upload (`uploaded_at`) is newer than `since`.
+fn uploaded_after(document: &Value, since: DateTime<Utc>) -> bool {
+    document
+        .get("uploaded_at")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<DateTime<Utc>>(value).ok())
+        .is_some_and(|uploaded_at| uploaded_at > since)
 }
 
 // ----------------------------------------------------------------------------
@@ -4781,7 +4804,7 @@ async fn get_lead_portal_intake(
                 Ok(mut conn) => match lead_representatives::load(&mut conn, lead_id).await {
                     Ok(loaded) => {
                         let loaded = loaded.unwrap_or_default();
-                        extra_state(
+                        match extra_state(
                             &mut conn,
                             lead_id,
                             declaration.as_ref(),
@@ -4789,14 +4812,21 @@ async fn get_lead_portal_intake(
                             None,
                         )
                         .await
-                        .map(|extra| (loaded, extra))
+                        {
+                            // Block C's answers (the expected total, through whom a
+                            // payment via a third party goes) beside section 8.
+                            Ok(extra) => crate::risk::cabinet::payer_extras(&mut conn, lead_id)
+                                .await
+                                .map(|(_, billing_extras)| (loaded, extra, billing_extras)),
+                            Err(error) => Err(error),
+                        }
                     }
                     Err(error) => Err(error),
                 },
                 Err(error) => Err(error),
             };
             match loaded {
-                Ok((loaded, extra)) => {
+                Ok((loaded, extra, billing_extras)) => {
                     let route_by =
                         payment_route_by(declaration.as_ref(), &loaded.representation, None);
                     let updated_at = updates.get(ENHANCED_DETAILS_MARKER).and_then(|update| {
@@ -4835,13 +4865,15 @@ async fn get_lead_portal_intake(
                             .map(staff_file)
                             .collect::<Vec<_>>()
                     );
+                    let mut billing = declaration
+                        .clone()
+                        .unwrap_or_default()
+                        .billing_staff_json(route_by);
+                    crate::risk::cabinet::merge_into(&mut billing, billing_extras);
                     (
                         lead_representatives::staff_payload(&loaded),
                         lead_representatives::updated_at(&loaded, &updates),
-                        declaration
-                            .clone()
-                            .unwrap_or_default()
-                            .billing_staff_json(route_by),
+                        billing,
                         billing_updated_at,
                         enhanced_details,
                     )
@@ -5249,6 +5281,16 @@ mod tests {
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 10, 3).unwrap()
+    }
+
+    #[test]
+    fn block_i_counts_only_copies_uploaded_after_the_identity_data() {
+        let since: DateTime<Utc> = "2026-10-10T12:00:00Z".parse().unwrap();
+        let old = json!({ "id": Uuid::nil(), "uploaded_at": "2026-10-10T11:59:59.5Z" });
+        let new = json!({ "id": Uuid::nil(), "uploaded_at": "2026-10-10T12:00:00.000001Z" });
+        assert!(!uploaded_after(&old, since));
+        assert!(uploaded_after(&new, since));
+        assert!(!uploaded_after(&json!({ "id": Uuid::nil() }), since));
     }
 
     fn anna() -> PersonalData {

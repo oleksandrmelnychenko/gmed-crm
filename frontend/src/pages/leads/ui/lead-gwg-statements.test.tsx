@@ -174,12 +174,41 @@ describe("LeadGwgStatements", () => {
     expect(html).toContain("В чьих интересах");
     expect(html).toContain("Viktor Zahler · 02.03.1970, Wien");
 
+    // Not answered: left out while block L was not asked (QA 2026-10-10) …
     const unanswered = render(portalState(), null);
-    expect(statement(unanswered, "lead-gwg-own-account")).toContain("Не отвечено");
+    expect(unanswered).not.toContain('data-testid="lead-gwg-own-account"');
     expect(unanswered).not.toContain("В чьих интересах");
+    // … and "not answered" once the lead is asked it.
+    const askedL = (payer: GwgPayerStatement | null) =>
+      renderToStaticMarkup(
+        <LeadGwgStatements intake={portalState()} payer={payer} askedBlocks={["L"]} tx={ru} lang="ru" today={TODAY} />,
+      );
+    expect(statement(askedL(null), "lead-gwg-own-account")).toContain("Не отвечено");
     // A declaration whose own-account value is only the stored default.
-    const byDefault = render(portalState(), { acts_on_own_account: true, own_account_answered: false });
+    const byDefault = askedL({ acts_on_own_account: true, own_account_answered: false });
     expect(statement(byDefault, "lead-gwg-own-account")).toContain("Не отвечено");
+    expect(render(portalState(), { acts_on_own_account: true, own_account_answered: false })).not.toContain(
+      'data-testid="lead-gwg-own-account"',
+    );
+  });
+
+  it("leaves out an empty habitual residence and an unasked reason why a third party pays", () => {
+    const base = portalState().identification!;
+    const intake = { ...portalState(), identification: { ...base, habitual_residence_country: null, payment_background: null } };
+    const html = render(intake, null);
+    expect(html).not.toContain("Страна обычного пребывания");
+    expect(html).not.toContain("Почему платит третье лицо");
+    // Neither the own interest nor the reason: no group of the economic interest.
+    expect(html).not.toContain("Экономический интерес");
+    // Block B asks the reason: shown, a dash while empty.
+    const asked = renderToStaticMarkup(
+      <LeadGwgStatements intake={intake} payer={null} askedBlocks={["B"]} tx={ru} lang="ru" today={TODAY} />,
+    );
+    expect(statement(asked, "lead-gwg-payment-background")).toContain("—");
+    // Given values are always shown.
+    const given = render(portalState(), null);
+    expect(statement(given, "lead-gwg-habitual-residence")).toContain("Австрия");
+    expect(statement(given, "lead-gwg-payment-background")).toContain("My brother pays for the treatment");
   });
 
   it("shows a dash for what the lead left empty", () => {
@@ -192,7 +221,8 @@ describe("LeadGwgStatements", () => {
     );
     expect(html).toContain("Kyiv");
     expect(statement(html, "lead-gwg-identity-documents")).toContain("—");
-    expect(html.match(/—/g)?.length).toBeGreaterThanOrEqual(10);
+    // The habitual residence and why a third party pays are left out while empty and unasked.
+    expect(html.match(/—/g)?.length).toBeGreaterThanOrEqual(8);
     expect(html).toContain("Подтвердил правильность: ещё нет");
   });
 

@@ -748,10 +748,12 @@ export function dashOrValue(
   return trimmed ? trimmed : runtimeTranslations(translations).common_not_set;
 }
 
-export function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+/** A file size with the unit in the language of the UI ("Б/КБ/МБ" in Russian, "B/KB/MB" in German). */
+export function formatSize(bytes: number, lang: "ru" | "de" = "ru") {
+  const [b, kb, mb] = lang === "de" ? ["B", "KB", "MB"] : ["Б", "КБ", "МБ"];
+  if (bytes < 1024) return `${bytes} ${b}`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} ${kb}`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} ${mb}`;
 }
 
 export function buildLeadsPath(filters: LeadFilters) {

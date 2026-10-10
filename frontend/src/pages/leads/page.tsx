@@ -1836,7 +1836,7 @@ function useLeadsPageContent() {
                           <div>
                             <div className="font-medium text-slate-800">{file.file_name}</div>
                             <div className="text-xs text-slate-500">
-                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
+                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
                           </div>
                           <Button
@@ -2813,7 +2813,7 @@ function useLeadsPageContent() {
                           <div>
                             <div className="font-medium text-slate-800">{file.file_name}</div>
                             <div className="text-xs text-slate-500">
-                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes)}
+                              {dashOrValue(file.content_type, t)} - {formatSize(file.size_bytes, lang)}
                             </div>
                           </div>
                           <Button

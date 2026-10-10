@@ -310,7 +310,6 @@ export function SummaryStep({
   const blockedReason = missing ? text.submitNeedsMissing : !confirmed ? text.submitNeedsConfirm : null;
   return (
     <div className="space-y-5" data-testid="payer-link-step-summary">
-      <p className="text-sm leading-6 text-muted-foreground">{text.summaryIntro}</p>
       <MissingList questionnaire={questionnaire} steps={steps} text={text} onGoTo={onGoTo} />
       <AnswersSummary questionnaire={questionnaire} steps={steps} text={text} lang={lang} onEdit={onGoTo} />
       <div className="space-y-3 rounded-lg border border-border bg-muted/10 px-3 py-3">

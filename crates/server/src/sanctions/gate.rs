@@ -603,25 +603,35 @@ fn paper_signature_countersigns(
 /// The DSGVO consent and the identity document are never held by the
 /// sanctions rules (owner decision 2026-10-10): confirming them is no work
 /// with the person and no money, and the lead needs them while the CEO decides
-/// a match. Paper signature and "mark signed" alike.
-fn exempt_from_sanctions_hold(compliance_kind: Option<&str>, art: &str) -> bool {
-    matches!(compliance_kind, Some("dsgvo" | "identity"))
-        || matches!(
-            art.trim().to_lowercase().as_str(),
-            "identity" | "passport" | "passport_scan" | "reisepass"
-        )
+/// a match. Paper signature and "mark signed" alike. The kind is recorded only
+/// when the document is signed, so an unsigned consent is known by its
+/// template or type (QA 2026-10-10: the unsigned "Einverständniserklärung zur
+/// Datenübermittlung" was held).
+fn exempt_from_sanctions_hold(
+    compliance_kind: Option<&str>,
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> bool {
+    crate::routes::documents::is_dsgvo_consent_or_identity_document(
+        compliance_kind,
+        generated_template_id,
+        art,
+    )
 }
 
 async fn paper_signature_exempt(
     db: &gmed_db::DbPool,
     document_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let row: Option<(Option<String>, String)> =
-        sqlx::query_as("SELECT compliance_kind, COALESCE(art, '') FROM documents WHERE id = $1")
-            .bind(document_id)
-            .fetch_optional(db)
-            .await?;
-    Ok(row.is_some_and(|(kind, art)| exempt_from_sanctions_hold(kind.as_deref(), &art)))
+    let row: Option<(Option<String>, Option<String>, String)> = sqlx::query_as(
+        "SELECT compliance_kind, generated_template_id, COALESCE(art, '') FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_optional(db)
+    .await?;
+    Ok(row.is_some_and(|(kind, template, art)| {
+        exempt_from_sanctions_hold(kind.as_deref(), template.as_deref(), &art)
+    }))
 }
 
 /// Middleware on the protected router: blocks guarded requests.
@@ -946,14 +956,45 @@ mod tests {
         );
         assert!(!Rule::PaperSignature.needs_body());
         // The DSGVO consent and the identity document are never held (owner 2026-10-10).
-        assert!(exempt_from_sanctions_hold(Some("dsgvo"), "consent"));
-        assert!(exempt_from_sanctions_hold(Some("identity"), ""));
-        assert!(exempt_from_sanctions_hold(None, "Passport"));
-        assert!(!exempt_from_sanctions_hold(None, "framework_contract"));
+        assert!(exempt_from_sanctions_hold(Some("dsgvo"), None, "consent"));
+        assert!(exempt_from_sanctions_hold(Some("identity"), None, ""));
+        assert!(exempt_from_sanctions_hold(None, None, "Passport"));
+        assert!(!exempt_from_sanctions_hold(
+            None,
+            None,
+            "framework_contract"
+        ));
         assert!(!exempt_from_sanctions_hold(
             Some("confidentiality_release"),
+            None,
             "consent"
         ));
+        // Unsigned, the consent has no kind yet: its template or type tells
+        // (QA 2026-10-10, the wizard's "Einverständniserklärung zur
+        // Datenübermittlung").
+        assert!(exempt_from_sanctions_hold(
+            None,
+            Some("privacy_consents"),
+            "privacy_consents"
+        ));
+        assert!(exempt_from_sanctions_hold(None, None, "privacy_consents"));
+        assert!(exempt_from_sanctions_hold(
+            Some(""),
+            Some("consent_data_release"),
+            ""
+        ));
+        assert!(!exempt_from_sanctions_hold(
+            None,
+            Some("patient_form"),
+            "privacy_consents"
+        ));
+        assert!(!exempt_from_sanctions_hold(
+            None,
+            Some("confidentiality_release"),
+            ""
+        ));
+        // Another person's identity document is not the lead's own.
+        assert!(!exempt_from_sanctions_hold(None, None, "payer_identity"));
         assert_eq!(
             Rule::PaperSignature.action(&Value::Null),
             Some(GateAction::OrderContractWork)

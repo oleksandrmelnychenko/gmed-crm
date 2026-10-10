@@ -138,7 +138,6 @@ export function SendStep({
         </>
       ) : null}
       <Section title={sendable ? text.sendTitle : text.sentSummaryTitle}>
-        {sendable ? <p className="text-sm text-muted-foreground">{text.summaryIntro}</p> : null}
         <RequestSummary groups={requestSummary(request, text, lang)} />
         {missingCount > 0 || !inquiryConsent ? (
           <div

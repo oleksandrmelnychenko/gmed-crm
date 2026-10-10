@@ -3,7 +3,14 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
 import { asksAccount, asksPaymentRoute, draftFromBillingExtras, type BillingField } from "./lead-request-billing-model";
-import { STATED_FUNDS_SOURCES, blockAAsks, draftFromExtra, openFollowUpBlocks, type StatedFundsSource } from "./lead-request-follow-up-model";
+import {
+  STATED_FUNDS_SOURCES,
+  blockAAsks,
+  draftFromExtra,
+  followUpShown,
+  openFollowUpBlocks,
+  type StatedFundsSource,
+} from "./lead-request-follow-up-model";
 import {
   LEGAL_QUESTIONS,
   answerFromBoolean,
@@ -328,7 +335,16 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     const label = (field: BillingField) => text.billingFields[field];
     const other = billing.invoice_to === "other";
     const routeAsked = asksPaymentRoute(billing.payment_route_by);
-    const account = asksAccount(billing.payment_method ?? "");
+    // The account is a question of follow-up block C, not of the base form
+    // (owner 2026-10-10): listed while block C is open or once the lead
+    // answered it — never only the account holder offered from the name (QA
+    // 2026-10-10).
+    const blockCAsked =
+      (followUpShown(request) && openFollowUpBlocks(request).includes("C"))
+      || Boolean(billing.account_country?.trim())
+      || Boolean(billing.bank_name?.trim())
+      || (billing.via_third_party !== null && billing.via_third_party !== undefined);
+    const account = asksAccount(billing.payment_method ?? "") && blockCAsked;
     group("billing", text.sectionBillingSummary, [
       [
         label("invoice_to"),

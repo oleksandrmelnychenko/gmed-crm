@@ -277,7 +277,9 @@ export function BillingSections({
         value={draft.payment_method}
         onChange={(event) => {
           const method = event.target.value;
-          const suggestion = offeredRef.current ? null : billing.account_holder_suggestion;
+          // The account holder is offered only where the account is asked (block C):
+          // the bare method of the base form stores no account data (QA 2026-10-10).
+          const suggestion = offeredRef.current || part !== "route" ? null : billing.account_holder_suggestion;
           if (suggestion?.trim() && asksAccount(method) && !draft.account_holder.trim()) offeredRef.current = true;
           form.update((current) => withPaymentMethod(current, method, suggestion));
         }}

@@ -200,9 +200,19 @@ export function qualifiedSignatureLabel(person: PersonIdentification, tx: Tx): I
     : { tone: "success", text: signed };
 }
 
-/** The payment from the person's own account: awaited, or confirmed with the day and who confirmed it. */
-export function ownAccountPaymentLabel(person: PersonIdentification, tx: Tx): IdentificationLabel {
+/**
+ * The payment from the person's own account: awaited, not to be expected (the
+ * stated route is cash, crypto or a payment through a third party:
+ * `expected` false), or confirmed with the day and who confirmed it.
+ */
+export function ownAccountPaymentLabel(person: PersonIdentification, tx: Tx, expected = true): IdentificationLabel {
   const payment = person.own_account_payment;
+  if (!payment && !expected) {
+    return {
+      tone: "neutral",
+      text: tx("Платёж с собственного счёта не ожидается", "Keine Zahlung vom eigenen Konto zu erwarten"),
+    };
+  }
   if (!payment) {
     return {
       tone: "warning",
@@ -357,8 +367,9 @@ export function declaresNoOwnAccountPayment(route: DeclaredPaymentRoute | null |
  * third-party payer when the payer states it, else the patient; for a minor
  * the paying parent, or every legal representative while it is not known
  * which of them pays. A payer who is one of the representatives is that
- * representative's line (the payer line only repeats it). The hint only
- * informs: the button stays.
+ * representative's line (the payer line only repeats it). Such a line says
+ * that no payment from the own account is to be expected and offers no
+ * confirmation (QA 2026-10-10); one confirmed before can still be taken back.
  */
 export function ownAccountHintSubjects(
   status: LeadIdentificationStatus,

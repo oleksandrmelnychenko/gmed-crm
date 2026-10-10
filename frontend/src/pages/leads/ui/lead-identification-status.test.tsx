@@ -225,7 +225,7 @@ describe("LeadIdentificationStatusView", () => {
       .toContain("Kostenträger — dieselbe Person wie Vertreter/in Anna Muster");
   });
 
-  it("says on the paying person's line when cash, crypto or a third party is declared; the button stays", () => {
+  it("says on the paying person's line when cash, crypto or a third party is declared, without a confirmation", () => {
     const HINT = "Оплата не с собственного счёта (наличные / через третье лицо) — подтверждение по § 12 GwG не ожидается";
     const route = (patch: Partial<DeclaredPaymentRoute>): DeclaredPaymentRoute => ({
       payment_route_by: "patient",
@@ -236,11 +236,18 @@ describe("LeadIdentificationStatusView", () => {
     for (const paymentRoute of [route({ payment_method: "cash" }), route({ payment_method: "crypto" }), route({ via_third_party: true })]) {
       const patient = line(render(AWAITING, { paymentRoute }), "contract_partner");
       expect(patient).toContain(HINT);
-      expect(patient).toContain("Подтвердить платёж — Пациент");
+      // QA 2026-10-10: the chip and the button agree with the hint.
+      expect(patient).toContain("Платёж с собственного счёта не ожидается");
+      expect(patient).not.toContain("Ожидается платёж с собственного счёта");
+      expect(patient).not.toMatch(/<button\b/);
     }
-    expect(render(AWAITING, { paymentRoute: route({ payment_method: "cash" }), lang: "de" })).toContain(
+    const german = render(AWAITING, { paymentRoute: route({ payment_method: "cash" }), lang: "de" });
+    expect(german).toContain(
       "Keine Zahlung vom eigenen Konto angegeben (bar / über Dritte) – Bestätigung nach § 12 GwG nicht zu erwarten",
     );
+    expect(german).toContain("Keine Zahlung vom eigenen Konto zu erwarten");
+    // Without the route the payment is awaited and can be confirmed.
+    expect(line(render(AWAITING), "contract_partner")).toContain("Подтвердить платёж — Пациент");
     // A bank transfer from the own account, or no answer yet: no hint.
     expect(render(AWAITING, { paymentRoute: route({}) })).not.toContain("lead-identification-own-account-hint");
     expect(render(AWAITING)).not.toContain("lead-identification-own-account-hint");
@@ -259,6 +266,9 @@ describe("LeadIdentificationStatusView", () => {
       { paymentRoute: route({ via_third_party: true }) },
     );
     expect(line(parent, ANNA)).toContain(HINT);
+    // A confirmation made before stays and can be taken back.
+    expect(line(parent, ANNA)).toContain("Платёж с собственного счёта подтверждён");
+    expect(line(parent, ANNA)).toContain("Отменить — Anna Muster");
     expect(line(parent, BEN)).not.toContain(HINT);
     expect(line(parent, "payer")).not.toContain(HINT);
   });

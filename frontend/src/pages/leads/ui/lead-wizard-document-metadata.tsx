@@ -39,13 +39,15 @@ export function sortWizardDocumentsNewestFirst<
 
 function formatFileSize(size: number | null, lang: Lang) {
   if (!size || size <= 0) return "";
+  // The unit in the language of the UI (QA 2026-10-10: "<1 KB" in Russian).
+  const [kb, mb] = lang === "de" ? ["KB", "MB"] : ["КБ", "МБ"];
   // A few hundred bytes are not "0 KB".
-  if (size < 1024) return "<1 KB";
+  if (size < 1024) return `<1 ${kb}`;
   const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
     maximumFractionDigits: size >= 1024 * 1024 ? 1 : 0,
   });
-  if (size >= 1024 * 1024) return `${formatter.format(size / (1024 * 1024))} MB`;
-  return `${formatter.format(size / 1024)} KB`;
+  if (size >= 1024 * 1024) return `${formatter.format(size / (1024 * 1024))} ${mb}`;
+  return `${formatter.format(size / 1024)} ${kb}`;
 }
 
 export function leadWizardDocumentNumber(

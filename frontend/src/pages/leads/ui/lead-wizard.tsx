@@ -2982,7 +2982,9 @@ export function LeadWizard({
   // sanctions matches). Loaded again after every lead refresh, every "Кто
   // платит" save and on `lead.portal_updated`.
   const enhancedCheckVersion = useMemo(() => [lead, payer.data], [lead, payer.data]);
-  const enhancedCheck = useLeadEnhancedCheck(open ? leadId : null, enhancedCheckVersion).check;
+  const enhancedCheckState = useLeadEnhancedCheck(open ? leadId : null, enhancedCheckVersion);
+  const enhancedCheck = enhancedCheckState.check;
+  const reloadEnhancedCheck = enhancedCheckState.reload;
   const retentionDays = daysUntilRetentionDeadline(lead?.retention_deadline_at);
   // A repeat intake (lead opened for an existing patient) keeps its patient
   // review even when reopened from the leads registry, so the patient's valid
@@ -3728,6 +3730,8 @@ export function LeadWizard({
     setLead(fresh);
   }, [leadId]);
   const step1Portal = useLeadStep1Portal({ leadId, open, onPatientDataChanged: mergePatientStep1 });
+  /** The reason the lead wrote in the cabinet (trigger flow 13.1); "" without one or without medical access. */
+  const patientRequestReason = step1Portal.intake?.request_reason?.text.trim() ?? "";
   // Who signs and pays (for a minor the legal representatives): shown in the
   // documents step and used by the buttons of the GwG identification sheet.
   const identification = useLeadIdentificationStatus(
@@ -3752,6 +3756,19 @@ export function LeadWizard({
   useEffect(() => {
     if (riskPayerLinkKey) void reloadPayerLink();
   }, [riskPayerLinkKey, reloadPayerLink]);
+  // A level of 2 or more requires the enhanced check: "Начать оценку", a
+  // restart or a decision changes it at once, not only after reopening the
+  // wizard (QA 2026-10-10).
+  const riskEnhancedCheckKey = risk.assessment
+    ? [risk.assessment.started_at ?? "", risk.assessment.level, risk.assessment.status ?? "", risk.assessment.decisions.length].join("|")
+    : "";
+  const riskEnhancedCheckKeyRef = useRef("");
+  useEffect(() => {
+    const previous = riskEnhancedCheckKeyRef.current;
+    riskEnhancedCheckKeyRef.current = riskEnhancedCheckKey;
+    // The first load of the assessment comes with the enhanced check's own load.
+    if (previous && riskEnhancedCheckKey && previous !== riskEnhancedCheckKey) void reloadEnhancedCheck();
+  }, [riskEnhancedCheckKey, reloadEnhancedCheck]);
   const canReviewPortalUploads = Boolean(step1Portal.intake?.can_review_uploads);
   // The patient form is filled from the sent request: nothing to generate before.
   const leadRequestSent = leadSelfDisclosureAvailable(step1Portal.intake);
@@ -5223,14 +5240,15 @@ export function LeadWizard({
     return false;
   };
 
-  async function save(target = step, trackBusy = true): Promise<boolean> {
-    if (!draft || (!leadId && !createMode)) return false;
+  async function save(target = step, trackBusy = true, draftOverride?: Draft): Promise<boolean> {
+    const source = draftOverride ?? draft;
+    if (!source || (!leadId && !createMode)) return false;
     if (trackBusy) setBusy("save");
     setError("");
     setValidationContext(null);
     try {
       const snapshot: AutosaveSnapshot = {
-        draft,
+        draft: source,
         lines,
         paidAmount,
         prepayment,
@@ -5248,7 +5266,8 @@ export function LeadWizard({
     }
   }
 
-  async function finishOrder(targetStep: StepId): Promise<boolean> {
+  /** `draftOverride`: the draft `finishIntake` saved just before, newer than this render's. */
+  async function finishOrder(targetStep: StepId, draftOverride?: Draft): Promise<boolean> {
     if (!leadId || !draft) return false;
     const issues = orderIssues;
     if (issues.length > 0) {
@@ -5258,26 +5277,21 @@ export function LeadWizard({
       openValidationIssue(issues[0]);
       return false;
     }
-    const saved = await save(targetStep);
+    const saved = await save(targetStep, true, draftOverride);
     if (saved) setOrderValidationAttempted(false);
     return saved;
   }
 
-  async function persistMedicalCase(): Promise<string> {
-    if (!draft) throw new Error("Lead is not selected");
-    return persistMedicalDraft(draft);
-  }
-
-  async function completeMedicalIntake() {
-    if (!draft) throw new Error("Lead is not selected");
-    const id = await persistMedicalCase();
+  async function completeMedicalIntake(source: Draft) {
+    const id = await persistMedicalDraft(source);
     await completeCaseIntake(id, true, {
-      hauptanfragegrund: draft.concern.trim(),
+      hauptanfragegrund: source.concern.trim(),
     });
   }
 
-  async function finishIntake(targetStep: StepId): Promise<boolean> {
-    if (!leadId || !draft) return false;
+  /** Completes the intake and saves; the draft it saved, or null when it stopped. */
+  async function finishIntake(targetStep: StepId): Promise<Draft | null> {
+    if (!leadId || !draft) return null;
     setError("");
     if (
       step1Portal.mode === "patient"
@@ -5290,38 +5304,47 @@ export function LeadWizard({
         "Warten auf die Daten des Patienten: Personendaten ausfüllen oder warten, bis der Patient sie im Portal einträgt.",
       ));
       setStep("master_data");
-      return false;
+      return null;
     }
-    if (!ensureMasterDataReady()) return false;
-    if (!draft.concern.trim()) {
+    if (!ensureMasterDataReady()) return null;
+    // The lead's own reason from the cabinet counts as the reason of the
+    // request, as in the server's readiness: it is taken into the empty
+    // staff field instead of sending staff back to the medical step (QA
+    // 2026-10-10).
+    let intakeDraft = draft;
+    if (!draft.concern.trim() && patientRequestReason) {
+      intakeDraft = { ...draft, concern: patientRequestReason };
+      setDraft((current) => current && !current.concern.trim() ? { ...current, concern: patientRequestReason } : current);
+    }
+    if (!intakeDraft.concern.trim()) {
       setValidationContext({ kind: "medical" });
       setMedicalValidationAttempted(true);
       setStep("medical");
       window.requestAnimationFrame(() => document.getElementById(SERVICE_CONCERN_ID)?.focus());
-      return false;
+      return null;
     }
-    const documentIssues = documentsValidationIssues(draft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
+    const documentIssues = documentsValidationIssues(intakeDraft, wizardDocuments, tx, isRepeatIntake ? readinessChecks : undefined, amlRequired);
     if (documentIssues.length > 0) {
       setValidationContext({ kind: "documents" });
       setStep("documents");
       window.requestAnimationFrame(() => {
         document.getElementById(documentIssues[0]?.fieldId ?? "")?.focus();
       });
-      return false;
+      return null;
     }
     setBusy("intake");
     setValidationContext(null);
     try {
-      await completeMedicalIntake();
-      const saved = await save(targetStep, false);
+      await completeMedicalIntake(intakeDraft);
+      const saved = await save(targetStep, false, intakeDraft);
       if (saved && lead?.qualification_status !== "qualified") {
         await updateLeadStatus(leadId, "qualified");
       }
       if (saved) await refreshLeadState();
-      return saved;
+      return saved ? intakeDraft : null;
     } catch (nextError) {
       showWizardError(nextError);
-      return false;
+      return null;
     } finally {
       setBusy(null);
     }
@@ -6182,8 +6205,9 @@ ${serviceCommentLines.join("\n")}`
       ));
       return;
     }
-    if (!(await finishIntake("release"))) return;
-    if (!(await finishOrder("release"))) return;
+    const intakeDraft = await finishIntake("release");
+    if (!intakeDraft) return;
+    if (!(await finishOrder("release", intakeDraft))) return;
     setBusy("convert");
     try {
       await ensureCommercial();
@@ -6571,7 +6595,8 @@ ${serviceCommentLines.join("\n")}`
     + (!quoteAndPrepaymentReady && !(lead?.readiness.blocking_reasons ?? []).some((reason) => ["Quote is not accepted", "Required prepayment is not complete"].includes(reason)) ? 1 : 0);
   const isStepReady = (id: string) => {
     if (id === "master_data") return Boolean(draft && Object.keys(masterErrors).length === 0);
-    if (id === "medical") return Boolean(draft?.concern.trim());
+    // The lead's own reason counts, as in the server's readiness; it is taken over on completion.
+    if (id === "medical") return Boolean(draft?.concern.trim() || patientRequestReason);
     if (id === "order") return Boolean(draft && orderIssues.length === 0);
     if (id === "commercial") return commercialReady;
     if (id === "release") return conversionReady;

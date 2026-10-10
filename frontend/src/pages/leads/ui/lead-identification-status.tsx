@@ -42,7 +42,8 @@ function Label({ label, testId }: { label: IdentificationLabel; testId: string }
  * each get a line of their own below the patient's. When the stated payment
  * route is cash, crypto or a
  * payment through a third party, the paying person's line says that no
- * payment from the own account is to be expected; the button stays.
+ * payment from the own account is to be expected and offers no confirmation
+ * (an earlier one can still be taken back).
  */
 export function LeadIdentificationStatusView({
   status,
@@ -92,6 +93,8 @@ export function LeadIdentificationStatusView({
       <ul className="space-y-2">
         {identificationPersons(status, tx).map(({ subject, role, detail, person, canConfirm, wide, note }) => {
           const confirmed = Boolean(person.own_account_payment);
+          // Cash, crypto or a payment through a third party: no own-account payment to confirm.
+          const expected = !hinted.has(subject);
           return (
             <li
               key={subject}
@@ -108,8 +111,8 @@ export function LeadIdentificationStatusView({
                 {detail ? <span className="font-normal text-muted-foreground">{` · ${detail}`}</span> : null}
               </span>
               <Label label={qualifiedSignatureLabel(person, tx)} testId={`lead-identification-qes-${subject}`} />
-              <Label label={ownAccountPaymentLabel(person, tx)} testId={`lead-identification-payment-${subject}`} />
-              {canEdit && canConfirm ? (
+              <Label label={ownAccountPaymentLabel(person, tx, expected)} testId={`lead-identification-payment-${subject}`} />
+              {canEdit && canConfirm && (confirmed || expected) ? (
                 <Button
                   type="button"
                   variant={confirmed ? "ghost" : "outline"}

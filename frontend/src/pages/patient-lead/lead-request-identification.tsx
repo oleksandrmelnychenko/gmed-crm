@@ -334,6 +334,7 @@ export function IdentityDocumentSection({
   title,
   intro,
   bare = false,
+  documents,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -343,6 +344,8 @@ export function IdentityDocumentSection({
   title?: string;
   intro?: string;
   bare?: boolean;
+  /** The copies to list; all of the lead's by default (block I lists only the new ones). */
+  documents?: LeadRequest["identity_documents"];
 }) {
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
   const [uploading, setUploading] = useState(false);
@@ -425,7 +428,7 @@ export function IdentityDocumentSection({
           </p>
         ))}
         <UploadedFileList
-          documents={request.identity_documents ?? []}
+          documents={documents ?? request.identity_documents ?? []}
           text={text}
           lang={lang}
           emptyText={text.noIdentityDocuments}

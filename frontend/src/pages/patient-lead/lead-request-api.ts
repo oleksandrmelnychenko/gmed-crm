@@ -476,6 +476,12 @@ export type LeadRequestFollowUp = {
   funds_proof_documents?: LeadRequestDocument[];
   /** Block B: proofs of the relationship to the payer. */
   relationship_proof_documents?: LeadRequestDocument[];
+  /**
+   * Block I: the copies of the identity document that answer it — those
+   * uploaded since GMED took the document's data down; an older copy is no
+   * answer (QA 2026-10-10). Absent on an older server.
+   */
+  identity_documents?: LeadRequestDocument[];
 };
 
 /** Which questions of block A this login is asked (from who pays and what the server misses). */
