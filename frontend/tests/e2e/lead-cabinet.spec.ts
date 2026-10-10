@@ -1097,7 +1097,7 @@ test.describe("lead cabinet", () => {
       "Kind",
       "Bruder / Schwester",
       "Großmutter / Großvater",
-      "anderer Verwandter",
+      "Anderer Verwandter",
       "Arbeitgeber",
       "Freund/in",
       "Geschäftspartner/in",
@@ -1154,7 +1154,7 @@ test.describe("lead cabinet", () => {
     await expect(consent).toContainText(
       "Ich bin einverstanden, dass GMED diese Person bzw. Organisation wegen der Kostenübernahme kontaktiert und ihr meinen Namen mitteilt.",
     );
-    await expect(consent).toContainText("Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.");
+    // No hint line under the consent any more (QA 2026-10-10).
     await expect(consent.getByRole("checkbox")).not.toBeChecked();
 
     // Everything else is there: the consent alone keeps the request from being sent.
@@ -2055,7 +2055,7 @@ test.describe("lead cabinet", () => {
     // The list of relationships opens inside the screen.
     await payer.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }).click();
     const optionEdge = await page
-      .getByRole("option", { name: "anderer Verwandter" })
+      .getByRole("option", { name: "Anderer Verwandter" })
       .evaluate((node) => node.getBoundingClientRect().right);
     expect(optionEdge).toBeLessThanOrEqual(390);
     await page.keyboard.press("Escape");

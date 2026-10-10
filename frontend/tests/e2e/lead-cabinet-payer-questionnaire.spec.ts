@@ -424,15 +424,8 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       "Bitte bestätigen Sie zuerst den Datenschutzhinweis. Danach können Sie Ihre Angaben als zahlende Person machen.",
     );
     await expect(section.getByTestId("lead-request-payer-fields")).toHaveCount(0);
-    await expect(section.getByTestId("lead-request-payer-missing-own").getByRole("listitem")).toHaveText([
-      "Datenschutzhinweis bestätigen",
-      "Beruf / Tätigkeit",
-      "Herkunft der Mittel",
-      "Gesetzliche Fragen: Öffentliches Amt",
-      "Gesetzliche Fragen: Politisch exponierte nahestehende Person",
-      "Gesetzliche Fragen: Land mit hohem Risiko",
-      "Gesetzliche Fragen: Sanktionen",
-    ]);
+    // The yellow lists only after a press on send (owner 2026-10-09, QA 2026-10-10).
+    await expect(section.getByTestId("lead-request-payer-missing-own")).toHaveCount(0);
     await expect(section.getByTestId("lead-request-payer-submit")).toBeDisabled();
     await page.screenshot({ path: testInfo.outputPath("lead-cabinet-payer-notice-de-desktop.png"), animations: "disabled", fullPage: true });
 
@@ -453,7 +446,6 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await fields.getByRole("checkbox", { name: "Gehalt / nichtselbständige Arbeit" }).check();
     await fields.getByRole("checkbox", { name: "Sonstiges" }).check();
     await expect.poll(() => calls.patches.at(-1)).toEqual({ funds_sources: ["employment", "other"] });
-    await expect(section.getByTestId("lead-request-payer-missing-own")).toContainText("Beschreibung der Herkunft der Mittel");
     await fields.getByRole("textbox", { name: /Beschreibung der Herkunft der Mittel/ }).fill("Gehalt und ein Bausparvertrag");
     await expect.poll(() => calls.patches.at(-1)).toEqual({ funds_description: "Gehalt und ein Bausparvertrag" });
     // Nothing else of the person is asked here.
@@ -483,7 +475,6 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect(proof).toHaveAttribute("data-required", "true");
     await expect(proof).toContainText("erforderlich");
     await expect(proof).toContainText("Für diese Zahlung schreibt das Geldwäschegesetz einen Nachweis der Herkunft der Mittel vor.");
-    await expect(section.getByTestId("lead-request-payer-missing-own").getByRole("listitem")).toHaveText(["Nachweis der Herkunft der Mittel"]);
 
     await page.locator("#lead-request-payer-funds-proof-files").setInputFiles({
       name: "kontoauszug.pdf",
@@ -528,6 +519,10 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       await section.getByTestId("lead-request-payer-notice").getByRole("checkbox", { name: "Ich habe die Datenschutzhinweise gelesen." }).check();
       await expect(section.getByTestId("lead-request-payer-fields")).toBeVisible();
       const elsewhere = section.getByTestId("lead-request-payer-missing-representatives");
+      // Shown after a press on send; the press sends nothing while something is missing.
+      await expect(elsewhere).toHaveCount(0);
+      await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+      await section.getByTestId("lead-request-payer-submit").click();
       await expect(elsewhere).toContainText("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");
       await expect(elsewhere.getByRole("listitem")).toHaveText([
         "Geburtsort",
@@ -538,8 +533,6 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
       await page.screenshot({ path: testInfo.outputPath(`lead-cabinet-payer-elsewhere-de-${width}.png`), animations: "disabled", fullPage: true });
     }
     // The answers here cannot send it while the person's data are missing.
-    await page.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
-    await expect(page.getByTestId("lead-request-payer-submit")).toBeDisabled();
     expect(calls.submits).toEqual([]);
   });
 
