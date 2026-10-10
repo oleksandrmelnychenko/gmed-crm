@@ -2735,8 +2735,8 @@ struct DocumentBindingOverrides {
 #[serde(rename_all = "camelCase")]
 struct GwgIdentificationBindings {
     /// `payer` for the third-party payer of the lead and
-    /// `representative:<id>` for a legal representative of a minor; otherwise
-    /// the patient.
+    /// `representative:<id>` for a legal representative of a minor or for an
+    /// adult's representative or legal guardian; otherwise the patient.
     subject: Option<String>,
 }
 
@@ -2748,7 +2748,9 @@ enum GwgSheetSubject {
     ContractPartner,
     /// The third-party payer of the lead (a natural person).
     Payer,
-    /// A legal representative of a minor: the id of the trusted contact.
+    /// A person who acts for the lead: a legal representative of a minor, or
+    /// the representative or legal guardian an adult named in the cabinet
+    /// (owner decision 2026-10-10). The id of the trusted contact.
     Representative(Uuid),
 }
 
@@ -2777,7 +2779,7 @@ impl GwgSheetSubject {
                 .ok_or_else(|| {
                     gwg_sheet_refusal(
                         "representative_sheet_not_available",
-                        "This sheet is generated for a legal representative of a minor lead",
+                        "This sheet is generated for a person who acts for the lead",
                     )
                 });
         }
@@ -2804,6 +2806,16 @@ struct GwgSheetActingPerson {
     identity_document_on_file: bool,
     /// The proof of authority (power of attorney, appointment deed) is on file.
     authority_on_file: bool,
+}
+
+/// The role of a person who acts for an adult, in section 2 of the adult's
+/// sheet and on the person's own sheet.
+fn gwg_adult_acting_role(legal_guardian: bool) -> &'static str {
+    if legal_guardian {
+        "Rechtliche/r Betreuer/in"
+    } else {
+        "Bevollmächtigte/r Vertreter/in"
+    }
 }
 
 /// How the payer will pay, as answered in section 8 of the lead's form
@@ -2917,7 +2929,8 @@ impl GwgPaymentRoute {
 /// owner and the answers that decide on enhanced due diligence.
 #[derive(Default, Clone)]
 struct GwgIdentificationSheet {
-    /// "Patient", the third-party payer or a legal representative of a minor.
+    /// "Patient", the third-party payer, a legal representative of a minor or
+    /// an adult's representative or legal guardian.
     role: &'static str,
     first_name: String,
     last_name: String,
@@ -2957,14 +2970,22 @@ struct GwgIdentificationSheet {
     payment_route: Option<GwgPaymentRoute>,
     /// An adult's representative and legal guardian, as named in the cabinet.
     acting_persons: Vec<GwgSheetActingPerson>,
-    /// The sheet of a legal representative of a minor: the child the person
-    /// acts for ("Mia Muster, geb. 05.04.2016").
+    /// The sheet of a person who acts for the lead: the child or the adult
+    /// the person acts for ("Mia Muster, geb. 05.04.2016").
     treated_person: Option<String>,
+    /// The sheet of an adult's representative or legal guardian (owner
+    /// decision 2026-10-10), not of a minor's legal representative.
+    acts_for_adult: bool,
+    /// The sheet of an adult's legal guardian (Betreuer).
+    legal_guardian: bool,
     /// The representative also pays (a parent who pays is one person).
     also_payer: bool,
-    /// The other legal representatives of the child; each has an own sheet.
+    /// The other persons who act for the lead (the child's other legal
+    /// representatives, or the adult's other representative or legal
+    /// guardian); each has an own sheet.
     other_representatives: Vec<String>,
-    /// The representative's proof of custody or appointment is on file.
+    /// The representative's proof of custody, appointment or power of
+    /// attorney is on file.
     authority_on_file: bool,
     /// `None` until the payer declaration says so.
     acts_on_own_account: Option<bool>,
@@ -3065,20 +3086,23 @@ fn gwg_identity_document_line(document: GwgIdentityDocument<'_>) -> String {
 }
 
 /// Reads the sheet of one person from the lead: the patient, the third-party
-/// payer or a legal representative of a minor. Personal data, the lead's own
-/// statements from the cabinet (place of birth, identity document, the legal
-/// questions), the payer declaration and the AML answers of the wizard. A
-/// "yes" of the lead to the PEP or the high-risk country question counts like
-/// staff's own answer in section 5.
+/// payer, a legal representative of a minor or an adult's representative or
+/// legal guardian. Personal data, the lead's own statements from the cabinet
+/// (place of birth, identity document, the legal questions), the payer
+/// declaration and the AML answers of the wizard. A "yes" of the lead to the
+/// PEP or the high-risk country question counts like staff's own answer in
+/// section 5.
 ///
 /// For a minor the parents or the guardian are the persons to identify: the
 /// child has no sheet (422 `minor_sheet_per_representative`), each legal
 /// representative has an own one with the data of the trusted contact and of
-/// its row. An id that is not a legal representative of a minor answers 422
-/// `representative_sheet_not_available`. An adult's representative or legal
-/// guardian has no sheet either: he is named in section 2 of the adult's. A
-/// payer that is a company, an organisation or an insurer has no such sheet:
-/// 422 `payer_is_not_a_natural_person`.
+/// its row. The representative (slot `agent`) and the legal guardian (slot
+/// `guardian`) an adult named in the cabinet each have an own sheet as well
+/// (owner decision 2026-10-10), built the same way; they also stay named in
+/// section 2 of the adult's own sheet. Any other id answers 422
+/// `representative_sheet_not_available`. A payer that is a company, an
+/// organisation or an insurer has no such sheet: 422
+/// `payer_is_not_a_natural_person`.
 async fn load_gwg_identification_sheet(
     state: &AppState,
     lead_id: Uuid,
@@ -3150,12 +3174,21 @@ async fn load_gwg_identification_sheet(
     // Whose sheet it is, before anything is read for it.
     let representative = match subject {
         GwgSheetSubject::Representative(id) => {
-            match representation.find(id).filter(|_| representation.minor) {
+            // Any legal representative of a minor on file; of an adult only the
+            // representative and the legal guardian the cabinet asks for.
+            let acts_for_lead = |person: &&super::lead_representatives::Representative| {
+                representation.minor
+                    || person.slot.is_some_and(|slot| {
+                        slot == super::lead_representatives::SLOT_AGENT
+                            || slot == super::lead_representatives::SLOT_GUARDIAN
+                    })
+            };
+            match representation.find(id).filter(acts_for_lead) {
                 Some(person) => Some(person),
                 None => {
                     return Err(gwg_sheet_refusal(
                         "representative_sheet_not_available",
-                        "This person is not a legal representative of a minor lead",
+                        "This person does not act for the lead",
                     ));
                 }
             }
@@ -3285,7 +3318,7 @@ async fn load_gwg_identification_sheet(
         risk_countries.extend(payer.citizenships.iter().cloned());
     } else {
         // The patient: the person of the sheet for an adult; for the sheet of
-        // a minor's representative the child the person acts for.
+        // a representative the child or the adult the person acts for.
         let lead_name = format!(
             "{} {}",
             text("first_name").unwrap_or_default(),
@@ -3304,7 +3337,14 @@ async fn load_gwg_identification_sheet(
         if let Some(person) = representative {
             // Section 1 from the trusted contact and its row.
             let extras = &person.extras;
-            sheet.role = if person.is_guardian_of_minor(representation.answers.custody()) {
+            let acts_for_adult = !representation.minor;
+            let legal_guardian =
+                acts_for_adult && person.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN;
+            sheet.acts_for_adult = acts_for_adult;
+            sheet.legal_guardian = legal_guardian;
+            sheet.role = if acts_for_adult {
+                gwg_adult_acting_role(legal_guardian)
+            } else if person.is_guardian_of_minor(representation.answers.custody()) {
                 "Gesetzliche/r Vertreter/in (Vormund)"
             } else {
                 "Gesetzliche/r Vertreter/in (Elternteil)"
@@ -3339,13 +3379,33 @@ async fn load_gwg_identification_sheet(
                 representation,
                 declaration.as_ref(),
             ) == Some(person.id);
-            sheet.other_representatives = representation
-                .representatives
-                .iter()
-                .filter(|other| other.id != person.id)
-                .map(|other| other.name())
-                .filter(|name| !name.is_empty())
-                .collect();
+            sheet.other_representatives = if acts_for_adult {
+                // The adult's other representative or legal guardian, with
+                // the role.
+                representation
+                    .representatives
+                    .iter()
+                    .filter(|other| other.id != person.id && other.slot.is_some())
+                    .filter(|other| !other.name().is_empty())
+                    .map(|other| {
+                        format!(
+                            "{} ({})",
+                            other.name(),
+                            gwg_adult_acting_role(
+                                other.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN
+                            )
+                        )
+                    })
+                    .collect()
+            } else {
+                representation
+                    .representatives
+                    .iter()
+                    .filter(|other| other.id != person.id)
+                    .map(|other| other.name())
+                    .filter(|name| !name.is_empty())
+                    .collect()
+            };
             risk_countries.extend(extras.country.clone());
             risk_countries.extend(extras.citizenships.iter().cloned());
         } else {
@@ -3399,11 +3459,7 @@ async fn load_gwg_identification_sheet(
                 let legal_guardian =
                     person.role == super::lead_representatives::ROLE_LEGAL_GUARDIAN;
                 sheet.acting_persons.push(GwgSheetActingPerson {
-                    role: if legal_guardian {
-                        "Rechtliche/r Betreuer/in"
-                    } else {
-                        "Bevollmächtigte/r Vertreter/in"
-                    },
+                    role: gwg_adult_acting_role(legal_guardian),
                     legal_guardian,
                     name: person.name(),
                     birth_date: person.date_of_birth,
@@ -3438,7 +3494,8 @@ async fn load_gwg_identification_sheet(
     }
     // Identification by qualified electronic signature and the payment from
     // the person's own account, on the days they happened in Germany. A
-    // minor's representative has both of its own.
+    // minor's representative and an adult's representative or legal guardian
+    // have both of their own.
     let person = match subject {
         GwgSheetSubject::Payer => identification.payer.clone().unwrap_or_default(),
         GwgSheetSubject::Representative(id) => identification
@@ -16617,8 +16674,9 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            // Whose sheet: the patient, the third-party payer or a legal
-            // representative of a minor.
+            // Whose sheet: the patient, the third-party payer, a legal
+            // representative of a minor or an adult's representative or legal
+            // guardian.
             let subject = match GwgSheetSubject::parse(
                 bindings
                     .gwg_identification
@@ -21057,9 +21115,15 @@ fn build_gwg_identification_pdf(
     ];
     // The sheet of a minor's legal representative names the child the person
     // acts for and, for a parent who also pays, that it is the payer's sheet
-    // as well.
+    // as well; the sheet of an adult's representative or legal guardian names
+    // the adult.
     if let Some(treated_person) = &sheet.treated_person {
-        meta.push(("Behandelte Person", treated_person.clone()));
+        let label = if sheet.acts_for_adult {
+            "Vertretene Person"
+        } else {
+            "Behandelte Person"
+        };
+        meta.push((label, treated_person.clone()));
         if sheet.also_payer {
             meta.push(("Zugleich Kostenträger/in", "ja".to_string()));
         }
@@ -21194,12 +21258,13 @@ fn build_gwg_identification_pdf(
         }
     }
     // Ticked when the legal guardian the lead named in the cabinet uploaded
-    // both the appointment deed and a copy of the own identity document.
+    // both the appointment deed and a copy of the own identity document: on
+    // the adult's sheet and on the guardian's own one.
     aml_checkbox_line(
         &mut layout,
         sheet.acting_persons.iter().any(|person| {
             person.legal_guardian && person.identity_document_on_file && person.authority_on_file
-        }),
+        }) || (sheet.legal_guardian && sheet.identity_document_on_file && sheet.authority_on_file),
         "Bei Betreuten: Kopie der Bestellungsurkunde des Betreuers sowie eine Kopie des Ausweisdokuments des Betreuers sind beigefügt.",
     );
     aml_checkbox_line(
@@ -21220,21 +21285,33 @@ fn build_gwg_identification_pdf(
         );
     }
     if sheet.treated_person.is_some() {
-        // The sheet of a minor's legal representative: the person acts
-        // himself, for the child. The other representative has an own sheet;
-        // the proof of custody or the appointment deed is on file or not.
+        // The sheet of a person who acts for the lead: the person acts
+        // himself, for the child or the adult. The other representative has
+        // an own sheet; the proof of custody, the appointment deed or the
+        // power of attorney is on file or not.
+        let (other_label, authority_line) = if sheet.acts_for_adult {
+            (
+                "Weitere für die vertretene Person auftretende Person",
+                if sheet.legal_guardian {
+                    "Der Nachweis der Vertretungsberechtigung für die vertretene Person (Bestellungsurkunde bzw. Betreuerausweis) liegt vor und ist beigefügt."
+                } else {
+                    "Der Nachweis der Vertretungsberechtigung für die vertretene Person (Vollmacht) liegt vor und ist beigefügt."
+                },
+            )
+        } else {
+            (
+                "Weitere/r gesetzliche/r Vertreter/in des Kindes",
+                "Der Nachweis der Vertretungsberechtigung für das Kind (Sorgerechtsnachweis bzw. Bestallungsurkunde) liegt vor und ist beigefügt.",
+            )
+        };
         for name in &sheet.other_representatives {
             aml_labeled_value(
                 &mut layout,
-                "Weitere/r gesetzliche/r Vertreter/in des Kindes",
+                other_label,
                 Some(format!("{name} (eigener Bogen)").as_str()),
             );
         }
-        aml_checkbox_line(
-            &mut layout,
-            sheet.authority_on_file,
-            "Der Nachweis der Vertretungsberechtigung für das Kind (Sorgerechtsnachweis bzw. Bestallungsurkunde) liegt vor und ist beigefügt.",
-        );
+        aml_checkbox_line(&mut layout, sheet.authority_on_file, authority_line);
     }
     // An adult's representative and legal guardian, as named in the cabinet.
     for person in &sheet.acting_persons {
@@ -34461,6 +34538,100 @@ mod tests {
         assert!(text.contains("liegt vor (Bestellungsurkunde bzw. Betreuerausweis)"));
         assert!(!text.contains("liegt vor (Vollmacht)"));
         assert!(text.contains("[X] Bei Betreuten"));
+    }
+
+    #[test]
+    fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian() {
+        // The adult's representative (owner decision 2026-10-10): an own
+        // sheet with the own data, the adult the person acts for, the other
+        // person who acts for the adult and the power of attorney.
+        let agent = super::GwgIdentificationSheet {
+            role: super::gwg_adult_acting_role(false),
+            first_name: "Ben".to_string(),
+            last_name: "Vertreter".to_string(),
+            birth_date: NaiveDate::from_ymd_opt(1984, 7, 9),
+            birth_place: Some("München".to_string()),
+            citizenships: vec!["DE".to_string()],
+            street: Some("Nebenweg 2".to_string()),
+            zip: Some("80331".to_string()),
+            city: Some("München".to_string()),
+            country: Some("DE".to_string()),
+            identity_document_type: Some("passport".to_string()),
+            identity_document_number: Some("C01X00T47".to_string()),
+            identity_document_valid_until: NaiveDate::from_ymd_opt(2031, 2, 1),
+            identity_document_on_file: true,
+            treated_person: Some("Anna Muster, geb. 03.02.1985".to_string()),
+            acts_for_adult: true,
+            other_representatives: vec!["Carla Muster (Rechtliche/r Betreuer/in)".to_string()],
+            authority_on_file: true,
+            acts_on_own_account: Some(true),
+            reviewer_name: "Bearbeiter Beispiel".to_string(),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 10).unwrap(),
+            ..Default::default()
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &agent,
+            &legal_test_agency(),
+            None,
+            "GWG-20261010-UNITTEST0001",
+        )
+        .unwrap();
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0001");
+        assert!(text.contains("Vertreter, Ben"));
+        assert!(text.contains("Bevollmächtigte/r Vertreter/in"));
+        assert!(text.contains("Vertretene Person"));
+        assert!(!text.contains("Behandelte Person"));
+        assert!(text.contains("Anna Muster, geb. 03.02.1985"));
+        assert!(text.contains("Reisepass, Nr. C01X00T47, gültig bis 01.02.2031"));
+        assert!(text.contains("09.07.1984, München"));
+        assert!(text.contains("Nebenweg 2, 80331 München"));
+        assert!(text.contains("Carla Muster (Rechtliche/r Betreuer/in) (eigener Bogen)"));
+        assert!(text.contains(
+            "[X] Der Nachweis der Vertretungsberechtigung für die vertretene Person (Vollmacht)"
+        ));
+        assert!(!text.contains("für das Kind"));
+        assert!(text.contains("[ ] Bei Betreuten"));
+
+        // The legal guardian with the appointment deed and the own identity
+        // document on file: the box for the guardian's documents is ticked.
+        let guardian = super::GwgIdentificationSheet {
+            role: super::gwg_adult_acting_role(true),
+            first_name: "Carla".to_string(),
+            last_name: "Muster".to_string(),
+            legal_guardian: true,
+            other_representatives: Vec::new(),
+            ..agent
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &guardian,
+            &legal_test_agency(),
+            None,
+            "GWG-20261010-UNITTEST0002",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0002");
+        assert!(text.contains("Rechtliche/r Betreuer/in"));
+        assert!(!text.contains("eigener Bogen"));
+        assert!(text.contains("(Bestellungsurkunde bzw. Betreuerausweis) liegt vor"));
+        assert!(text.contains("[X] Bei Betreuten"));
+        // Without the deed the box stays empty.
+        let without_deed = super::GwgIdentificationSheet {
+            authority_on_file: false,
+            ..guardian
+        };
+        let bytes = super::build_gwg_identification_pdf(
+            &without_deed,
+            &legal_test_agency(),
+            None,
+            "GWG-20261010-UNITTEST0003",
+        )
+        .unwrap();
+        let text = assert_legal_pdf_chrome(&bytes, "GWG-20261010-UNITTEST0003");
+        assert!(text.contains("[ ] Bei Betreuten"));
+        assert!(
+            text.contains("[ ] Der Nachweis der Vertretungsberechtigung für die vertretene Person")
+        );
     }
 
     fn gwg_staff_sheet() -> super::GwgStaffTrainingSheet {

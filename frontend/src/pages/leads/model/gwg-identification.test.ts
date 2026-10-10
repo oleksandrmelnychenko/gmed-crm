@@ -4,6 +4,7 @@ import { ApiRequestError } from "@/lib/api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
 import {
+  adultActingPersons,
   currentGwgSheet,
   gwgRepresentativeSubject,
   gwgSheetErrorText,
@@ -200,10 +201,39 @@ describe("which sheets the wizard offers", () => {
         { subject: "payer", personName: "" },
       ]);
     }
-    // An adult's representative or Betreuer is named on the lead's own sheet.
+    // A minor's list of representatives is not read for an adult.
     expect(gwgSheetPlan({ minor: false, representatives: parents, payer: null }).buttons).toEqual([
       { subject: "contract_partner", personName: "" },
     ]);
+  });
+
+  it("offers an adult's representative and legal guardian an own sheet beside the adult's", () => {
+    // Owner decision 2026-10-10: each person who acts for the adult gets one,
+    // next to the patient's own and before the payer's.
+    const plan = gwgSheetPlan({ minor: false, representatives: [], actingPersons: parents, payer: person });
+    expect(plan.buttons).toEqual([
+      { subject: "contract_partner", personName: "" },
+      { subject: ANNA, personName: "Anna Muster" },
+      { subject: BEN, personName: "Ben Muster" },
+      { subject: "payer", personName: "" },
+    ]);
+    expect(plan.lacksRepresentative).toBe(false);
+    // A minor's sheets are the legal representatives' only.
+    expect(gwgSheetPlan({ minor: true, representatives: [], actingPersons: parents, payer: null }).buttons).toEqual([]);
+  });
+
+  it("takes as an adult's acting persons only the representative and the legal guardian the cabinet asks for", () => {
+    const people = [
+      { id: "a", slot: "agent" },
+      { id: "g", slot: "guardian" },
+      { id: "r1", slot: "rep1" },
+      { id: "r2", slot: "rep2" },
+      // On file, but the lead answered "no" to the question.
+      { id: "x", slot: null },
+    ];
+    expect(adultActingPersons(people).map((item) => item.id)).toEqual(["a", "g"]);
+    expect(adultActingPersons(null)).toEqual([]);
+    expect(adultActingPersons(undefined)).toEqual([]);
   });
 
   it("makes no sheet for natural persons for an organisation", () => {

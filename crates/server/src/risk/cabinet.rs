@@ -89,7 +89,7 @@ pub fn is_adult_representative_key(key: &str) -> bool {
 
 /// Keys the base form no longer asks (contract 3.1): they belong to the
 /// follow-up blocks or to staff.
-const DROPPED_KEYS: [&str; 25] = [
+const DROPPED_KEYS: [&str; 24] = [
     // The own economic interest: block L, only with the enhanced check (owner 2026-10-09).
     "payer_own_account",
     "payer_beneficial_owner",
@@ -109,7 +109,8 @@ const DROPPED_KEYS: [&str; 25] = [
     "high_risk_country_code",
     "payment_background",
     "habitual_residence_country",
-    "payment_method",
+    // The bare payment method stays in the base form (owner 2026-10-10: cash or
+    // crypto fires T9 at once); its details and the account are block C.
     "payment_method_details",
     "account_country",
     "account_holder",
@@ -173,6 +174,7 @@ pub fn step_of(key: &str) -> &'static str {
         "id_document_upload" => "identity",
         "pep_self" | "pep_related" | "sanctions_links" => "declarations",
         "request_reason" => "documents",
+        "payment_method" => "billing",
         key if key.starts_with("payer_") => "payer",
         key if key.starts_with("invoice_")
             || key.starts_with("insurance_")
@@ -1228,6 +1230,7 @@ mod tests {
                 "guardian_id_upload",
                 "has_representative",
                 "invoice_to",
+                "payment_method",
                 "request_reason",
             ])
         );

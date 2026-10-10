@@ -102,6 +102,18 @@ describe("LeadGwgSheetActions", () => {
     expect(button(german, BEN)).toContain("Für Ben Muster aktualisieren");
   });
 
+  it("offers an adult's representative and legal guardian an own sheet next to the patient's", () => {
+    const plan = gwgSheetPlan({ minor: false, representatives: [], actingPersons: parents, payer: null });
+    const html = render(plan, { documents: [sheet(BEN, "doc-ben")] });
+    expect(button(html, "contract_partner")).toContain("Сформировать для пациента");
+    expect(button(html, ANNA)).toContain("Сформировать для Anna Muster");
+    expect(button(html, BEN)).toContain("Обновить для Ben Muster");
+    expect(buttonCount(html)).toBe(3);
+    expect(html).not.toContain("gwg-identification-no-representative");
+    const german = render(plan, { lang: "de" });
+    expect(button(german, ANNA)).toContain("Für Anna Muster erstellen");
+  });
+
   it("makes no second sheet for a parent who also pays, and says so", () => {
     const plan = gwgSheetPlan({
       minor: true,

@@ -6069,6 +6069,173 @@ async fn gwg_identification_sheet_prints_the_payment_route_on_the_payers_sheet()
     assert!(text.contains("gesonderte Prüfung"), "{text:?}");
 }
 
+/// Owner decision 2026-10-10: the representative and the legal guardian an
+/// adult named in the cabinet each get an own identification sheet; the
+/// adult's sheet keeps naming them in section 2.
+#[tokio::test]
+async fn gwg_identification_sheet_of_an_adults_representative_and_legal_guardian() {
+    let Some((app, pool, _admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("gwg-adult-rep");
+    let (agent, guardian) = (Uuid::new_v4(), Uuid::new_v4());
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, date_of_birth, legal_sex,
+                              street_address, city, zip_code, country, citizenships,
+                              qualification_status, compliance_status, intake_source,
+                              trusted_contacts)
+           VALUES ('Anna', 'Muster', $1, DATE '1985-02-03', 'female', 'Musterweg 1', 'Berlin',
+                   '10115', 'DE', '{DE}', 'qualified', 'signed', 'staff_wizard', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("anna-{tag}@example.com"))
+    .bind(json!([
+        { "id": agent, "name": "Ben Vertreter", "relation": "representative",
+          "birth_date": "1984-07-09", "email": format!("ben-{tag}@example.com") },
+        { "id": guardian, "name": "Carla Betreuerin", "relation": "legal_guardian",
+          "birth_date": "1979-01-15" },
+    ]))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (lead_id, has_representative, under_guardianship)
+           VALUES ($1, true, true)"#,
+    )
+    .bind(lead_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_representatives
+               (lead_id, contact_id, role, contact_origin, first_name, last_name, birth_place,
+                citizenships, street, zip, city, country, id_document_type, id_document_number,
+                id_issuing_authority, id_issuing_country, id_valid_until)
+           VALUES ($1, $2, 'authorised_representative', 'portal', 'Ben', 'Vertreter', 'München',
+                   '{DE}', 'Nebenweg 2', '80331', 'München', 'DE', 'passport', 'C01X00T47',
+                   'Stadt München', 'DE', DATE '2031-02-01'),
+                  ($1, $3, 'legal_guardian', 'portal', 'Carla', 'Betreuerin', NULL,
+                   '{AT}', 'Ringstr. 9', '1010', 'Wien', 'AT', 'id_card', 'AT7654321',
+                   'Magistrat Wien', 'AT', DATE '2030-05-01')"#,
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .bind(guardian)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let generate = |subject: Option<String>| {
+        let mut body = json!({
+            "template_id": "gwg_identification",
+            "lead_id": lead_id,
+            "language": "de",
+            "status": "active"
+        });
+        if let Some(subject) = subject {
+            body["bindings"] = json!({ "gwg_identification": { "subject": subject } });
+        }
+        body
+    };
+    let sheet_text = |subject: Option<String>| {
+        let (app, bearer, body) = (app.clone(), admin_bearer.clone(), generate(subject));
+        async move {
+            let (status, generated) = json_request(
+                &app,
+                "POST",
+                "/api/v1/documents/generate",
+                &bearer,
+                Some(body),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{generated}");
+            let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+            let (status, bytes) = bytes_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}/download"),
+                &bearer,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK);
+            extract_pdf_text(&bytes)
+        }
+    };
+
+    // The representative's own sheet: the own data in section 1, the adult
+    // he acts for, the legal guardian with an own sheet.
+    let text = sheet_text(Some(format!("representative:{agent}"))).await;
+    assert!(text.contains("Vertreter, Ben"), "{text:?}");
+    assert!(text.contains("Bevollmächtigte/r Vertreter/in"), "{text:?}");
+    assert!(text.contains("Vertretene Person"), "{text:?}");
+    assert!(text.contains("Anna Muster, geb. 03.02.1985"), "{text:?}");
+    assert!(text.contains("09.07.1984, München"), "{text:?}");
+    assert!(text.contains("Nebenweg 2, 80331 München"), "{text:?}");
+    assert!(text.contains("C01X00T47"), "{text:?}");
+    assert!(
+        text.contains("Carla Betreuerin (Rechtliche/r Betreuer/in) (eigener Bogen)"),
+        "{text:?}"
+    );
+    assert!(!text.contains("Behandelte Person"), "{text:?}");
+
+    // The legal guardian's own sheet.
+    let text = sheet_text(Some(format!("representative:{guardian}"))).await;
+    assert!(text.contains("Betreuerin, Carla"), "{text:?}");
+    assert!(text.contains("Rechtliche/r Betreuer/in"), "{text:?}");
+    assert!(text.contains("Ringstr. 9, 1010 Wien"), "{text:?}");
+    assert!(text.contains("AT7654321"), "{text:?}");
+    assert!(
+        text.contains("Ben Vertreter (Bevollmächtigte/r Vertreter/in) (eigener Bogen)"),
+        "{text:?}"
+    );
+
+    // The adult's own sheet names both in section 2, as before.
+    let text = sheet_text(None).await;
+    assert!(text.contains("Muster, Anna"), "{text:?}");
+    assert!(
+        text.contains("Ben Vertreter (Bevollmächtigte/r Vertreter/in)"),
+        "{text:?}"
+    );
+    assert!(
+        text.contains("Carla Betreuerin (Rechtliche/r Betreuer/in)"),
+        "{text:?}"
+    );
+    assert!(!text.contains("Vertretene Person"), "{text:?}");
+
+    // An unknown id, and a representative the lead no longer names ("nobody
+    // acts for me"), have no sheet.
+    sqlx::query("UPDATE lead_gwg_declarations SET has_representative = false WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    for subject in [
+        format!("representative:{}", Uuid::new_v4()),
+        format!("representative:{agent}"),
+    ] {
+        let (status, refused) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(generate(Some(subject.clone()))),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{subject}: {refused}"
+        );
+        assert_eq!(
+            refused["code"], "representative_sheet_not_available",
+            "{subject}: {refused}"
+        );
+    }
+    // The legal guardian still has his.
+    let text = sheet_text(Some(format!("representative:{guardian}"))).await;
+    assert!(text.contains("Betreuerin, Carla"), "{text:?}");
+}
+
 #[tokio::test]
 async fn appointment_confirmation_autofills_clinic_and_date_from_appointment() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {

@@ -37,8 +37,9 @@ function sheetButtonLabel(button: GwgSheetButton, exists: boolean, tx: Tx): stri
 
 /**
  * The buttons that make a GwG identification sheet, in the head of the
- * wizard's sheet section. Adult: the patient's sheet and, for a third-party
- * payer who is a natural person, the payer's. Minor: one sheet per legal
+ * wizard's sheet section. Adult: the patient's sheet, one for each
+ * representative or legal guardian the adult named in the cabinet and, for a
+ * third-party payer who is a natural person, the payer's. Minor: one sheet per legal
  * representative and none for the child; a payer who is one of the
  * representatives gets no second sheet. What cannot be made says why.
  */

@@ -437,8 +437,13 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
         fire("T3", SUBJECT_PATIENT, None);
     }
     if inputs.third_party {
-        // T4: a third party pays.
-        fire("T4", SUBJECT_PAYER, None);
+        // T4: a third party pays. A mother or father paying for the child is no
+        // third party (owner 2026-10-10); every other payer is.
+        let parent_pays =
+            inputs.payer_is_person() && inputs.relationship_kind.as_deref() == Some("parent");
+        if !parent_pays {
+            fire("T4", SUBJECT_PAYER, None);
+        }
         // T5: a person outside the close family.
         if inputs.payer_is_person()
             && inputs
@@ -792,8 +797,10 @@ mod tests {
             fire(third_party_person("friend")),
             vec![("T4", "payer", None, 1), ("T5", "payer", None, 2)]
         );
-        // The close family: T4 only; sibling and grandparent are no family.
-        for family in ["spouse", "parent", "child"] {
+        // A parent paying for the child: no trigger at all (owner 2026-10-10).
+        assert_eq!(fire(third_party_person("parent")), vec![]);
+        // The rest of the close family: T4 only; sibling and grandparent are no family.
+        for family in ["spouse", "child"] {
             assert_eq!(
                 fire(third_party_person(family)),
                 vec![("T4", "payer", None, 1)],

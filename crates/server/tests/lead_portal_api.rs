@@ -898,6 +898,8 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         "id_document_upload",
         "has_representative",
         "invoice_to",
+        // The bare payment method (owner 2026-10-10).
+        "payment_method",
         "request_reason"
     ]);
     assert_eq!(
@@ -945,7 +947,12 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // about the source of funds (owner request 2026-10-07).
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!(["id_document_upload", "has_representative", "invoice_to"]),
+        json!([
+            "id_document_upload",
+            "has_representative",
+            "invoice_to",
+            "payment_method"
+        ]),
         "{body}"
     );
     // Nothing is scored before the send: no follow-up blocks.
@@ -964,7 +971,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!(["id_document_upload", "invoice_to"]),
+        json!(["id_document_upload", "invoice_to", "payment_method"]),
         "{body}"
     );
     // Where the invoice goes and how the patient pays (phase 2).
@@ -3233,8 +3240,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07): the base form asks only where the invoice goes.
-        ["invoice_to"],
+        // flow (2026-10-07); the base form asks where the invoice goes and the
+        // bare payment method (owner 2026-10-10).
+        ["invoice_to", "payment_method"],
         "{body}"
     );
     let (status, body) = json_request(
@@ -3547,8 +3555,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07): the base form asks only where the invoice goes.
-        ["invoice_to"],
+        // flow (2026-10-07); the base form asks where the invoice goes and the
+        // bare payment method (owner 2026-10-10).
+        ["invoice_to", "payment_method"],
         "{body}"
     );
     let stored: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
@@ -3637,8 +3646,9 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07): the base form asks only where the invoice goes.
-        ["invoice_to"],
+        // flow (2026-10-07); the base form asks where the invoice goes and the
+        // bare payment method (owner 2026-10-10).
+        ["invoice_to", "payment_method"],
         "{body}"
     );
     // Why "another person" pays is asked only in the extra step (owner rule
@@ -4114,7 +4124,10 @@ async fn a_paying_parent_answers_the_payer_questions_in_the_own_cabinet() {
     assert_eq!(body["email"], "anna.questionnaire@example.com");
     let missing = body["missing_for_submit"].as_array().unwrap();
     assert_eq!(missing[0], "privacy_ack", "{body}");
-    assert!(missing.contains(&json!("birth_place")), "{body}");
+    // The birth data are block K and the identity data staff's (QA 2026-10-10):
+    // they never hold the parent's section; the scan does.
+    assert!(!missing.contains(&json!("birth_place")), "{body}");
+    assert!(!missing.contains(&json!("id_document_number")), "{body}");
     assert!(missing.contains(&json!("id_document_upload")), "{body}");
     assert!(!missing.contains(&json!("payment_method")), "{body}");
 

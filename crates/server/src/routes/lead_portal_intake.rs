@@ -5734,15 +5734,17 @@ mod tests {
                 today(),
                 &crate::risk::cabinet::BaseExtra::default(),
             ),
-            // Staff enter the identity data, the payment route is block C and
-            // the high-risk question is gone (trigger flow 2026-10-07).
-            // Birth data, the own interest and the legal questions are follow-up
-            // blocks K and L now (owner 2026-10-09).
+            // Staff enter the identity data, the account and the rest of the
+            // payment route are block C and the high-risk question is gone
+            // (trigger flow 2026-10-07); the bare payment method is asked
+            // (owner 2026-10-10). Birth data, the own interest and the legal
+            // questions are follow-up blocks K and L now (owner 2026-10-09).
             vec![
                 "payer_kind",
                 "id_document_upload",
                 "has_representative",
-                "invoice_to"
+                "invoice_to",
+                "payment_method"
             ]
         );
 
@@ -5855,8 +5857,9 @@ mod tests {
                 today(),
                 &crate::risk::cabinet::BaseExtra::default(),
             ),
-            // The payment route is block C of the follow-up now.
-            Vec::<String>::new()
+            // The account and the rest of the route are block C of the
+            // follow-up; the bare method is asked (owner 2026-10-10).
+            vec!["payment_method"]
         );
         // Known otherwise (a paying parent with a login, the payer answered
         // on the own link): not asked of the lead's login either.

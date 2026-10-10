@@ -87,6 +87,7 @@ import { PAYER_PACKAGE_TEMPLATE_IDS } from "../data/lead-payer-package-api";
 import { useCan } from "@/lib/permissions";
 import {
   GWG_IDENTIFICATION_TEMPLATE,
+  adultActingPersons,
   currentGwgSheet,
   gwgSheetErrorText,
   gwgSheetPlan,
@@ -6426,7 +6427,9 @@ ${serviceCommentLines.join("\n")}`
     && draft?.trustedContacts.some((contact) => contact.id === trustedContactEditor.id),
   );
   // Who represents the lead, as the server knows it: the sheets of a minor are
-  // made per legal representative, and a contact with GwG data keeps them.
+  // made per legal representative, an adult's representative and legal
+  // guardian get one each beside the adult's, and a contact with GwG data
+  // keeps them.
   const portalRepresentation = step1Portal.intake?.representation ?? null;
   const gwgDataContactIds = new Set(
     (portalRepresentation?.representatives ?? []).flatMap((person) => (person.has_data ? [person.id] : [])),
@@ -6441,6 +6444,10 @@ ${serviceCommentLines.join("\n")}`
           id: person.id,
           name: representativeName(person),
         })),
+    actingPersons: adultActingPersons(portalRepresentation?.representatives).map((person) => ({
+      id: person.id,
+      name: representativeName(person),
+    })),
     payer: payer.data?.declaration,
     payerSamePersonName: payerSamePerson(identification.status)?.name ?? null,
     payerSamePersonUnknown: !identification.loaded,

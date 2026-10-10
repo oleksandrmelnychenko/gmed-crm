@@ -14,7 +14,10 @@
 //! `client`, so nothing counts for the child: each legal representative
 //! (`representative:<id>`, see [`crate::routes::lead_representatives`]) is a
 //! person of its own, and a signature is attributed by the signer's e-mail
-//! address. A parent who also pays is one person, shown on both lines. The
+//! address. A parent who also pays is one person, shown on both lines. An
+//! adult's representative or legal guardian named in the cabinet is a person
+//! of its own for its identification sheet (owner decision 2026-10-10): a
+//! `client` signature made with that person's address counts for it. The
 //! status is information only — the lead wizard, the identification sheet
 //! and the payer block of the patient card show it, nothing is blocked by it.
 //!
@@ -135,12 +138,21 @@ pub(crate) struct IdentificationStatus {
     pub payer_same_person_as: Option<Uuid>,
     /// The legal representatives of a minor; empty for an adult.
     pub representatives: Vec<RepresentativeIdentification>,
+    /// An adult's representative and legal guardian the lead named in the
+    /// cabinet (owner decision 2026-10-10: each has an own identification
+    /// sheet); empty for a minor. Not part of the status JSON: the patient's
+    /// line stays the adult's own.
+    pub acting_persons: Vec<RepresentativeIdentification>,
 }
 
 impl IdentificationStatus {
-    /// The state of a minor's representative.
+    /// The state of a minor's representative or of an adult's representative
+    /// or legal guardian.
     pub(crate) fn representative(&self, id: Uuid) -> Option<&RepresentativeIdentification> {
-        self.representatives.iter().find(|person| person.id == id)
+        self.representatives
+            .iter()
+            .chain(&self.acting_persons)
+            .find(|person| person.id == id)
     }
 
     pub(crate) fn to_json(&self) -> Value {
@@ -313,6 +325,25 @@ fn signature_owner(
     }
 }
 
+/// The qualified signature of an adult's representative or legal guardian:
+/// a `client` signature made with the address of that person's trusted
+/// contact. Without an address nothing counts for the person (a name alone
+/// could be the patient's). The patient's own line is not changed by it.
+fn acting_person_signature(
+    signatures: &[RoleSignature],
+    person: &Representative,
+) -> Option<QualifiedSignature> {
+    let email = address(person.email.as_deref())?;
+    standing(
+        signatures
+            .iter()
+            .filter(|candidate| {
+                candidate.role == SIGNER_ROLE_CLIENT && candidate.email.as_ref() == Some(&email)
+            })
+            .map(|candidate| candidate.signature),
+    )
+}
+
 /// When the lead's third-party payer was last named (`identity_changed_at` of
 /// the payer declaration); `None` without a third-party payer. What an earlier
 /// payer signed, or what staff confirmed for an earlier payer, does not count
@@ -441,6 +472,27 @@ pub(crate) async fn load_identification_status(
     };
 
     if !representation.minor {
+        // The representative and the legal guardian the adult named in the
+        // cabinet (only while the answer is "yes"): persons of their own for
+        // their sheets.
+        let acting_persons = representation
+            .representatives
+            .iter()
+            .filter(|person| person.slot.is_some())
+            .map(|person| RepresentativeIdentification {
+                id: person.id,
+                name: person.name(),
+                relation: person.relation.clone(),
+                has_email: address(person.email.as_deref()).is_some(),
+                person: PersonIdentification {
+                    qes: acting_person_signature(&signatures, person),
+                    own_account_payment: payment_of(
+                        lead_representatives::subject_of(person.id).as_str(),
+                        None,
+                    ),
+                },
+            })
+            .collect();
         return Ok(IdentificationStatus {
             minor: false,
             contract_partner: PersonIdentification {
@@ -453,6 +505,7 @@ pub(crate) async fn load_identification_status(
             }),
             payer_same_person_as: None,
             representatives: Vec::new(),
+            acting_persons,
         });
     }
 
@@ -514,6 +567,7 @@ pub(crate) async fn load_identification_status(
         payer,
         payer_same_person_as: payer_is,
         representatives,
+        acting_persons: Vec::new(),
     })
 }
 
@@ -591,7 +645,9 @@ struct OwnAccountPaymentInput {
 /// account in the person's own name. The first confirmation keeps its time
 /// and author; a later one only adds or replaces the note. The person is the
 /// patient (`contract_partner`, not for a minor), the third-party payer
-/// (`payer`) or a legal representative of a minor (`representative:<id>`).
+/// (`payer`), a legal representative of a minor or an adult's representative
+/// or legal guardian (`representative:<id>`; the adult's person is not in the
+/// status JSON, its mark is printed on its identification sheet).
 /// The mark of a payer who is one of the parents is the mark of that parent.
 /// A converted lead stays open for this mark: the payment usually arrives
 /// after conversion (owner default 2026-10-06); a deleted lead does not.
@@ -669,7 +725,7 @@ async fn set_own_account_payment(
                 return error(
                     StatusCode::UNPROCESSABLE_ENTITY,
                     "identification_subject_invalid",
-                    "This person is not a legal representative of a minor lead",
+                    "This person does not act for the lead",
                 );
             }
         }
@@ -984,6 +1040,71 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn an_adults_representative_is_identified_only_by_a_signature_with_the_own_address() {
+        let agent = Representative {
+            slot: Some(lead_representatives::SLOT_AGENT),
+            role: lead_representatives::ROLE_AUTHORISED_REPRESENTATIVE,
+            relation: Some("representative".into()),
+            ..parent(5, "Ben", Some(" Ben.Vertreter@example.com "))
+        };
+        let signatures = vec![
+            signed(
+                "client",
+                "anna@example.com",
+                "Ben Muster",
+                "2026-10-03T09:00:00Z",
+            ),
+            signed(
+                "payer",
+                "ben.vertreter@example.com",
+                "",
+                "2026-10-04T09:00:00Z",
+            ),
+            signed(
+                "client",
+                "ben.vertreter@example.com",
+                "",
+                "2026-10-02T09:00:00Z",
+            ),
+        ];
+        // The client signature with the own address; neither the name nor a
+        // payer signature counts.
+        assert_eq!(
+            acting_person_signature(&signatures, &agent),
+            Some(QualifiedSignature {
+                signed_at: at("2026-10-02T09:00:00Z"),
+                test_mode: false,
+            })
+        );
+        // Without an address nothing counts for the person.
+        let without = Representative {
+            email: None,
+            ..agent.clone()
+        };
+        assert_eq!(acting_person_signature(&signatures, &without), None);
+
+        // The status finds the adult's person beside a minor's representatives.
+        let line = |person: &Representative| RepresentativeIdentification {
+            id: person.id,
+            name: person.name(),
+            relation: person.relation.clone(),
+            has_email: person.email.is_some(),
+            person: PersonIdentification::default(),
+        };
+        let status = IdentificationStatus {
+            acting_persons: vec![line(&agent)],
+            ..IdentificationStatus::default()
+        };
+        assert_eq!(
+            status.representative(agent.id).map(|person| person.id),
+            Some(agent.id)
+        );
+        assert!(status.representative(Uuid::from_bytes([9; 16])).is_none());
+        // The adult's person is not part of the status JSON.
+        assert_eq!(status.to_json()["representatives"], json!([]));
     }
 
     #[test]

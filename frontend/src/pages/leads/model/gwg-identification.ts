@@ -5,11 +5,16 @@ import type { DocumentItem } from "@/pages/documents/model/types";
  * The GwG identification sheet ("Dokumentationsbogen für natürliche
  * Personen") of a lead: one for the patient and one for a third-party payer.
  * A minor has no sheet of his own — each legal representative gets one. The
- * server fills the sheet from the lead; the only choice is whose sheet it is.
+ * representative and the legal guardian an adult named in the cabinet get one
+ * each beside the adult's own (owner decision 2026-10-10). The server fills
+ * the sheet from the lead; the only choice is whose sheet it is.
  */
 export const GWG_IDENTIFICATION_TEMPLATE = "gwg_identification";
 
-/** A legal representative of a minor: `representative:<id of the trusted contact>`. */
+/**
+ * A person who acts for the lead — a legal representative of a minor, or an
+ * adult's representative or legal guardian: `representative:<id of the trusted contact>`.
+ */
 export type GwgRepresentativeSubject = `representative:${string}`;
 
 export type GwgSheetSubject = "contract_partner" | "payer" | GwgRepresentativeSubject;
@@ -60,7 +65,7 @@ function gwgSheetAutoName(subject: GwgSheetSubject, personName: string | null | 
 export function gwgSheetRequest(input: {
   leadId: string;
   subject: GwgSheetSubject;
-  /** The name of the legal representative the sheet is for; it names the document. */
+  /** The name of the representative the sheet is for; it names the document. */
   personName?: string | null;
   orderId?: string | null;
   orderNumber?: string | null;
@@ -124,15 +129,29 @@ export function isOtherPersonUploadArt(art: string | null | undefined): boolean 
 
 export type GwgSheetButton = {
   subject: GwgSheetSubject;
-  /** The legal representative the sheet is for; "" for the patient and the payer. */
+  /** The representative the sheet is for; "" for the patient and the payer. */
   personName: string;
 };
 
 /**
- * Which sheets the wizard offers. Adult: the patient's and, for a third-party
- * payer who is a natural person, the payer's. Minor: one per legal
- * representative and none for the child; the payer's own sheet is left out
- * when the payer is one of the representatives (the same person gets one
+ * The representative (slot `agent`) and the legal guardian (slot `guardian`)
+ * an adult named in the cabinet: the cabinet gives these slots only while the
+ * lead answered "yes" to the question. Each gets an own sheet.
+ */
+const ADULT_ACTING_SLOTS = new Set(["agent", "guardian"]);
+
+export function adultActingPersons<T extends { slot: string | null }>(
+  representatives: readonly T[] | null | undefined,
+): T[] {
+  return (representatives ?? []).filter((person) => person.slot !== null && ADULT_ACTING_SLOTS.has(person.slot));
+}
+
+/**
+ * Which sheets the wizard offers. Adult: the patient's, one for each person
+ * who acts for the adult (representative, legal guardian) and, for a
+ * third-party payer who is a natural person, the payer's. Minor: one per
+ * legal representative and none for the child; the payer's own sheet is left
+ * out when the payer is one of the representatives (the same person gets one
  * sheet), with a note that says so.
  */
 export type GwgSheetPlan = {
@@ -147,7 +166,13 @@ export type GwgSheetPlan = {
 
 export function gwgSheetPlan(input: {
   minor: boolean;
+  /** The legal representatives of a minor; not read for an adult. */
   representatives: ReadonlyArray<{ id: string; name: string }>;
+  /**
+   * The representative and the legal guardian an adult named in the cabinet
+   * ({@link adultActingPersons}); not read for a minor.
+   */
+  actingPersons?: ReadonlyArray<{ id: string; name: string }>;
   /** The payer declaration: who pays and, for a third party, what the payer is. */
   payer: { payer_kind?: string | null; payer_type?: string | null } | null | undefined;
   /** The name of the representative the payer is the same person as (identification status). */
@@ -159,12 +184,16 @@ export function gwgSheetPlan(input: {
    */
   payerSamePersonUnknown?: boolean;
 }): GwgSheetPlan {
+  const representativeButton = (person: { id: string; name: string }): GwgSheetButton => ({
+    subject: gwgRepresentativeSubject(person.id),
+    personName: person.name.trim(),
+  });
   const buttons: GwgSheetButton[] = input.minor
-    ? input.representatives.map((person) => ({
-        subject: gwgRepresentativeSubject(person.id),
-        personName: person.name.trim(),
-      }))
-    : [{ subject: "contract_partner", personName: "" }];
+    ? input.representatives.map(representativeButton)
+    : [
+        { subject: "contract_partner", personName: "" },
+        ...(input.actingPersons ?? []).map(representativeButton),
+      ];
   const thirdParty = input.payer?.payer_kind === "third_party";
   // A declaration stored before the payer type existed is a private person.
   const payerIsOrganisation = thirdParty && (input.payer?.payer_type ?? "person") !== "person";
@@ -197,8 +226,8 @@ export function gwgSheetErrorText(error: unknown, tx: Tx): string | null {
   }
   if (codes.includes("representative_sheet_not_available")) {
     return tx(
-      "Для этого человека лист сформировать нельзя: он не числится законным представителем несовершеннолетнего. Проверьте раздел «Родитель или законный представитель»",
-      "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst. Bitte den Abschnitt „Elternteil oder gesetzlicher Vertreter“ prüfen",
+      "Для этого человека лист сформировать нельзя: он не числится законным представителем несовершеннолетнего. Представителем или опекуном (Betreuer) взрослого пациента в кабинете он тоже не указан. Обновите страницу и проверьте данные о представителях",
+      "Für diese Person kann kein Bogen erstellt werden: Sie ist nicht als gesetzliche Vertretung eines Minderjährigen erfasst. Als Vertreter/in oder Betreuer/in eines volljährigen Patienten ist sie im Kabinett ebenfalls nicht angegeben. Bitte die Seite aktualisieren und die Angaben zur Vertretung prüfen",
     );
   }
   if (codes.includes("payer_is_not_a_natural_person")) {

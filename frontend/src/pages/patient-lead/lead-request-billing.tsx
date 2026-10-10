@@ -269,6 +269,29 @@ export function BillingSections({
   const accountAsked = asksAccount(draft.payment_method);
   const flagged = draft.payment_method === "cash" || draft.payment_method === "crypto";
 
+  const paymentMethodField = (
+    <LabeledField {...labeled("payment_method")}>
+      <NativeComboboxSelect
+        {...control("payment_method")}
+        className={selectClass}
+        value={draft.payment_method}
+        onChange={(event) => {
+          const method = event.target.value;
+          const suggestion = offeredRef.current ? null : billing.account_holder_suggestion;
+          if (suggestion?.trim() && asksAccount(method) && !draft.account_holder.trim()) offeredRef.current = true;
+          form.update((current) => withPaymentMethod(current, method, suggestion));
+        }}
+      >
+        <option value="">{text.choose}</option>
+        {PAYMENT_METHODS.map((method) => (
+          <option key={method} value={method}>
+            {text.paymentMethodOptions[method]}
+          </option>
+        ))}
+      </NativeComboboxSelect>
+    </LabeledField>
+  );
+
   return (
     <>
       {part === "invoice" ? (
@@ -340,6 +363,13 @@ export function BillingSections({
               </p>
             </LabeledField>
           ) : null}
+          {/* How the patient will pay, without the account (owner 2026-10-10): cash or
+              crypto counts for the risk at once; the details are follow-up block C. */}
+          {asksPaymentRoute(context.routeBy) && request.follow_up !== undefined ? (
+            <div className="sm:max-w-[calc(50%-0.5rem)]" data-testid="lead-request-payment-method-base">
+              {paymentMethodField}
+            </div>
+          ) : null}
         </div>
       </Section>
       ) : null}
@@ -349,26 +379,7 @@ export function BillingSections({
         {asksPaymentRoute(context.routeBy) ? (
           <div className="space-y-4" data-testid="lead-request-payment-route">
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-              <LabeledField {...labeled("payment_method")}>
-                <NativeComboboxSelect
-                  {...control("payment_method")}
-                  className={selectClass}
-                  value={draft.payment_method}
-                  onChange={(event) => {
-                    const method = event.target.value;
-                    const suggestion = offeredRef.current ? null : billing.account_holder_suggestion;
-                    if (suggestion?.trim() && asksAccount(method) && !draft.account_holder.trim()) offeredRef.current = true;
-                    form.update((current) => withPaymentMethod(current, method, suggestion));
-                  }}
-                >
-                  <option value="">{text.choose}</option>
-                  {PAYMENT_METHODS.map((method) => (
-                    <option key={method} value={method}>
-                      {text.paymentMethodOptions[method]}
-                    </option>
-                  ))}
-                </NativeComboboxSelect>
-              </LabeledField>
+              {paymentMethodField}
               {/* "Other" says in words what the list does not offer. */}
               {asks("payment_method_details") ? (
                 <LabeledField {...labeled("payment_method_details")}>{textInput("payment_method_details", 200)}</LabeledField>
