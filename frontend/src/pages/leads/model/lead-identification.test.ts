@@ -40,7 +40,7 @@ function representative(patch: Partial<RepresentativeIdentification> & { id: str
 
 /** A lead as the server answers it: an adult unless the patch says otherwise. */
 function status(patch: Partial<LeadIdentificationStatus> = {}): LeadIdentificationStatus {
-  return { contract_partner: NOTHING, payer: null, minor: false, representatives: [], ...patch };
+  return { contract_partner: NOTHING, payer: null, minor: false, representatives: [], acting_persons: [], ...patch };
 }
 
 describe("normalizeLeadIdentificationStatus", () => {
@@ -79,7 +79,70 @@ describe("normalizeLeadIdentificationStatus", () => {
       },
       minor: false,
       representatives: [],
+      acting_persons: [],
     });
+  });
+
+  it("reads an adult's representative and Betreuer, and none for a minor", () => {
+    const raw = {
+      contract_partner: { qes: SIGNED, own_account_payment: null },
+      payer: null,
+      minor: false,
+      representatives: [],
+      acting_persons: [
+        {
+          id: BEN_ID,
+          subject: "payer",
+          slot: "agent",
+          role: "authorised_representative",
+          name: " Ben Vertreter ",
+          relation: "representative",
+          has_email: true,
+          qes: SIGNED,
+          own_account_payment: null,
+        },
+        {
+          id: ANNA_ID,
+          slot: "guardian",
+          role: "legal_guardian",
+          name: "Mia Betreuerin",
+          relation: "legal_guardian",
+          qes: null,
+          own_account_payment: CONFIRMED,
+        },
+        // Not an acting person: a minor's slot, no slot, no id.
+        { id: "33333333-3333-4333-8333-333333333333", slot: "rep1", name: "Tante Muster" },
+        { id: "44444444-4444-4444-8444-444444444444", name: "Onkel Muster" },
+        { slot: "agent", name: "Nobody" },
+      ],
+    };
+    const answer = normalizeLeadIdentificationStatus(raw);
+    expect(answer?.acting_persons).toEqual([
+      {
+        ...representative({ id: BEN_ID, name: "Ben Vertreter", relation: "representative", qes: SIGNED }),
+        slot: "agent",
+        role: "authorised_representative",
+      },
+      {
+        // Without the flag there is no e-mail.
+        ...representative({
+          id: ANNA_ID,
+          name: "Mia Betreuerin",
+          relation: "legal_guardian",
+          has_email: false,
+          own_account_payment: CONFIRMED,
+        }),
+        slot: "guardian",
+        role: "legal_guardian",
+      },
+    ]);
+    // The subject always follows the id.
+    expect(answer?.acting_persons[0].subject).toBe(`representative:${BEN_ID}`);
+    expect(answer?.representatives).toEqual([]);
+    // A minor is represented by the legal representatives only.
+    expect(normalizeLeadIdentificationStatus({ ...raw, minor: true })?.acting_persons).toEqual([]);
+    // An older server: no acting persons.
+    expect(normalizeLeadIdentificationStatus({ contract_partner: {} })?.acting_persons).toEqual([]);
   });
 
   it("reads a server that does not know minors yet as an adult lead", () => {
@@ -283,6 +346,49 @@ describe("identificationPersons", () => {
     expect(german.map((person) => person.detail)).toEqual(["Elternteil", "Vormund"]);
     expect(german[1].note).toBe("keine E-Mail – die Signatur wird nicht angerechnet");
     expect(identificationLacksRepresentative(minor)).toBe(false);
+  });
+
+  it("lists an adult's representative and Betreuer after the patient and before the payer", () => {
+    const payer = { ...NOTHING, same_person_as: null };
+    const adult = status({
+      payer,
+      acting_persons: [
+        {
+          ...representative({ id: BEN_ID, name: "Ben Vertreter", relation: "representative", qes: SIGNED }),
+          slot: "agent",
+          role: "authorised_representative",
+        },
+        {
+          ...representative({ id: ANNA_ID, name: "", relation: null, has_email: false, own_account_payment: CONFIRMED }),
+          slot: "guardian",
+          role: "legal_guardian",
+        },
+      ],
+    });
+    expect(identificationPersons(adult, ru)).toEqual([
+      { ...line, subject: "contract_partner", role: "Пациент", person: NOTHING },
+      {
+        ...line,
+        subject: `representative:${BEN_ID}`,
+        role: "Ben Vertreter",
+        detail: "уполномоченный представитель",
+        person: { qes: SIGNED, own_account_payment: null },
+      },
+      {
+        ...line,
+        subject: `representative:${ANNA_ID}`,
+        // Without a name the line is captioned by the role.
+        role: "Опекун (Betreuer)",
+        detail: "опекун (Betreuer)",
+        person: { qes: null, own_account_payment: CONFIRMED },
+        note: "нет e-mail — подпись не засчитается",
+      },
+      { ...line, subject: "payer", role: "Плательщик", person: NOTHING },
+    ]);
+    const german = identificationPersons(adult, de);
+    expect(german.map((person) => person.detail)).toEqual(["", "bevollmächtigte Person", "Betreuer/in", ""]);
+    expect(german[2].role).toBe("Betreuer/in");
+    expect(identificationLacksRepresentative(adult)).toBe(false);
   });
 
   it("captions a representative without a name or a known relation", () => {

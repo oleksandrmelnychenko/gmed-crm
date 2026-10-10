@@ -4,7 +4,8 @@
  * the person counts as the identification, and staff confirm by hand that the
  * payment arrived from an account in that person's own name. The labels only
  * inform — nothing is blocked by them. For a minor the legal representatives
- * sign and pay, so they are identified instead of the child.
+ * sign and pay, so they are identified instead of the child. An adult's
+ * representative and legal guardian are identified beside the adult.
  */
 import type { StatusTone } from "@/components/ui-shell";
 import { ApiRequestError } from "@/lib/api";
@@ -12,7 +13,10 @@ import { formatAppDate } from "@/lib/app-time-zone";
 
 export type Tx = (ru: string, de: string) => string;
 
-/** A legal representative of a minor: `representative:<id of the trusted contact>`. */
+/**
+ * A legal representative of a minor, or an adult's representative or legal
+ * guardian: `representative:<id of the trusted contact>`.
+ */
 export type RepresentativeSubject = `representative:${string}`;
 
 /**
@@ -66,6 +70,18 @@ export type RepresentativeIdentification = PersonIdentification & {
   has_email: boolean;
 };
 
+/**
+ * An adult's representative (slot `agent`) or legal guardian (slot
+ * `guardian`, the Betreuer) named in the cabinet: a person of its own with an
+ * own identification sheet (owner decision 2026-10-10). The patient keeps the
+ * own line beside it. The subject is `representative:<id>`, as for a minor.
+ */
+export type ActingPersonIdentification = RepresentativeIdentification & {
+  slot: "agent" | "guardian";
+  /** `authorised_representative` or `legal_guardian`. */
+  role: string | null;
+};
+
 export type LeadIdentificationStatus = {
   /** For a minor both values are null: the child neither signs nor pays. */
   contract_partner: PersonIdentification;
@@ -74,6 +90,8 @@ export type LeadIdentificationStatus = {
   minor: boolean;
   /** The legal representatives of a minor; empty for an adult. */
   representatives: RepresentativeIdentification[];
+  /** An adult's representative and legal guardian; empty for a minor. */
+  acting_persons: ActingPersonIdentification[];
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -101,23 +119,36 @@ function normalizePerson(value: Record<string, unknown>): PersonIdentification {
   };
 }
 
+/** One line of a person who acts for the lead; `null` without an id. */
+function normalizeRepresentative(item: unknown): RepresentativeIdentification | null {
+  const record = asRecord(item);
+  const id = text(record?.id)?.trim();
+  if (!record || !id) return null;
+  return {
+    ...normalizePerson(record),
+    id,
+    // The subject is built from the id, so a line can never post to another person.
+    subject: representativeSubject(id),
+    name: text(record.name)?.trim() ?? "",
+    relation: text(record.relation)?.trim() ?? null,
+    has_email: record.has_email === true,
+  };
+}
+
 function normalizeRepresentatives(value: unknown): RepresentativeIdentification[] {
   if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => normalizeRepresentative(item) ?? []);
+}
+
+/** An adult's acting persons: a line with an id and the slot `agent` or `guardian`. */
+function normalizeActingPersons(value: unknown): ActingPersonIdentification[] {
+  if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
+    const person = normalizeRepresentative(item);
     const record = asRecord(item);
-    const id = text(record?.id)?.trim();
-    if (!record || !id) return [];
-    return [
-      {
-        ...normalizePerson(record),
-        id,
-        // The subject is built from the id, so a line can never post to another person.
-        subject: representativeSubject(id),
-        name: text(record.name)?.trim() ?? "",
-        relation: text(record.relation)?.trim() ?? null,
-        has_email: record.has_email === true,
-      },
-    ];
+    const slot = text(record?.slot)?.trim();
+    if (!person || (slot !== "agent" && slot !== "guardian")) return [];
+    return [{ ...person, slot, role: text(record?.role)?.trim() ?? null }];
   });
 }
 
@@ -126,14 +157,18 @@ function normalizeRepresentatives(value: unknown): RepresentativeIdentification[
  * status (an older backend, an unexpected proxy reply), so nothing is claimed
  * about a state that is not known. A server that does not know minors yet
  * answers without `minor` and `representatives`: the lead is then shown as an
- * adult, as before.
+ * adult, as before. A server that does not know an adult's acting persons
+ * answers without `acting_persons`: the adult has only the own line, as
+ * before. A minor has no acting persons (the representatives act for him).
  */
 export function normalizeLeadIdentificationStatus(value: unknown): LeadIdentificationStatus | null {
   const record = asRecord(value);
   const contractPartner = asRecord(record?.contract_partner);
   if (!record || !contractPartner) return null;
   const payer = asRecord(record.payer);
+  const minor = record.minor === true;
   const representatives = normalizeRepresentatives(record.representatives);
+  const actingPersons = minor ? [] : normalizeActingPersons(record.acting_persons);
   // Only a representative of this very answer can be "the same person".
   const samePersonAs = payer?.same_person_as;
   const samePerson = isRepresentativeSubject(samePersonAs)
@@ -143,8 +178,9 @@ export function normalizeLeadIdentificationStatus(value: unknown): LeadIdentific
   return {
     contract_partner: normalizePerson(contractPartner),
     payer: payer ? { ...normalizePerson(payer), same_person_as: samePerson } : null,
-    minor: record.minor === true,
+    minor,
     representatives,
+    acting_persons: actingPersons,
   };
 }
 
@@ -211,11 +247,26 @@ function representativeRelationLabel(relation: string | null, tx: Tx): string {
   return tx("законный представитель", "gesetzliche/r Vertreter/in");
 }
 
+/** "уполномоченный представитель" / "опекун (Betreuer)" beside the name of an adult's acting person. */
+function actingPersonRoleLabel(person: ActingPersonIdentification, tx: Tx): string {
+  return person.slot === "guardian"
+    ? tx("опекун (Betreuer)", "Betreuer/in")
+    : tx("уполномоченный представитель", "bevollmächtigte Person");
+}
+
+/** Without an address a signature cannot be attributed to the person. */
+function missingEmailNote(person: RepresentativeIdentification, tx: Tx): string {
+  return person.has_email
+    ? ""
+    : tx("нет e-mail — подпись не засчитается", "keine E-Mail – die Signatur wird nicht angerechnet");
+}
+
 /**
- * The lines of the block. Adult: the patient, and the payer when a third
- * party pays. Minor: no line for the child — one per legal representative,
- * and the payer; a payer who is one of the representatives is the same person
- * and gets no second confirmation.
+ * The lines of the block. Adult: the patient, one line per representative or
+ * legal guardian named in the cabinet, and the payer when a third party pays.
+ * Minor: no line for the child — one per legal representative, and the payer;
+ * a payer who is one of the representatives is the same person and gets no
+ * second confirmation.
  */
 export function identificationPersons(status: LeadIdentificationStatus, tx: Tx): IdentificationPerson[] {
   const persons: IdentificationPerson[] = status.minor
@@ -226,9 +277,7 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
         person: { qes: representative.qes, own_account_payment: representative.own_account_payment },
         canConfirm: true,
         wide: false,
-        note: representative.has_email
-          ? ""
-          : tx("нет e-mail — подпись не засчитается", "keine E-Mail – die Signatur wird nicht angerechnet"),
+        note: missingEmailNote(representative, tx),
       }))
     : [
         {
@@ -240,6 +289,17 @@ export function identificationPersons(status: LeadIdentificationStatus, tx: Tx):
           wide: false,
           note: "",
         },
+        ...status.acting_persons.map((acting) => ({
+          subject: acting.subject,
+          role: acting.name || (acting.slot === "guardian"
+            ? tx("Опекун (Betreuer)", "Betreuer/in")
+            : tx("Уполномоченный представитель", "Bevollmächtigte Person")),
+          detail: actingPersonRoleLabel(acting, tx),
+          person: { qes: acting.qes, own_account_payment: acting.own_account_payment },
+          canConfirm: true,
+          wide: false,
+          note: missingEmailNote(acting, tx),
+        })),
       ];
   const payer = status.payer;
   if (!payer) return persons;

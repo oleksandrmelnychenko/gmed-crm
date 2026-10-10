@@ -20,6 +20,7 @@ const AWAITING: LeadIdentificationStatus = {
   payer: null,
   minor: false,
   representatives: [],
+  acting_persons: [],
 };
 
 const ANNA_ID = "11111111-1111-4111-8111-111111111111";
@@ -46,6 +47,20 @@ const MINOR: LeadIdentificationStatus = {
   representatives: [
     representative({ id: ANNA_ID, name: "Anna Muster", qes: SIGNED, own_account_payment: CONFIRMED }),
     representative({ id: BEN_ID, name: "Ben Muster", has_email: false }),
+  ],
+  acting_persons: [],
+};
+
+/** An adult with a representative who signed and a Betreuer without an e-mail. */
+const ADULT_REPRESENTED: LeadIdentificationStatus = {
+  ...AWAITING,
+  acting_persons: [
+    { ...representative({ id: BEN_ID, name: "Ben Vertreter", relation: "representative", qes: SIGNED }), slot: "agent", role: "authorised_representative" },
+    {
+      ...representative({ id: ANNA_ID, name: "Mia Betreuerin", relation: "legal_guardian", own_account_payment: CONFIRMED, has_email: false }),
+      slot: "guardian",
+      role: "legal_guardian",
+    },
   ],
 };
 
@@ -162,6 +177,39 @@ describe("LeadIdentificationStatusView", () => {
     // His signature could not be attributed to him.
     expect(ben).toContain("нет e-mail — подпись не засчитается");
     expect(html).not.toContain("lead-identification-no-representative");
+  });
+
+  it("gives an adult's representative and Betreuer a line each below the patient's", () => {
+    const html = render(ADULT_REPRESENTED);
+    // The adult keeps the own line; nothing about a minor.
+    expect(line(html, "contract_partner")).toContain("Подтвердить платёж — Пациент");
+    expect(html).not.toContain("lead-identification-minor");
+    expect(html).not.toContain("lead-identification-no-representative");
+
+    const agent = line(html, BEN);
+    expect(agent).toContain("Ben Vertreter");
+    expect(agent).toContain("уполномоченный представитель");
+    expect(agent).toContain("Квалифицированная подпись · 05.10.2026");
+    expect(agent).toContain("Ожидается платёж с собственного счёта");
+    expect(agent).toContain("Подтвердить платёж — Ben Vertreter");
+    expect(agent).not.toContain("нет e-mail");
+
+    const guardian = line(html, ANNA);
+    expect(guardian).toContain("Mia Betreuerin");
+    expect(guardian).toContain("опекун (Betreuer)");
+    expect(guardian).toContain("Платёж с собственного счёта подтверждён · 05.10.2026 · Petra Manager");
+    expect(guardian).toContain("Отменить — Mia Betreuerin");
+    expect(guardian).toContain("нет e-mail — подпись не засчитается");
+    // The lines are in this order: patient, representative, Betreuer.
+    expect(html.indexOf("lead-identification-contract_partner")).toBeLessThan(html.indexOf(`lead-identification-${BEN}`));
+    expect(html.indexOf(`lead-identification-${BEN}`)).toBeLessThan(html.indexOf(`lead-identification-${ANNA}`));
+
+    const german = render(ADULT_REPRESENTED, { lang: "de" });
+    expect(line(german, BEN)).toContain("bevollmächtigte Person");
+    expect(line(german, BEN)).toContain("Zahlung bestätigen — Ben Vertreter");
+    expect(line(german, ANNA)).toContain("Betreuer/in");
+    expect(line(german, ANNA)).toContain("Zurücknehmen — Mia Betreuerin");
+    expect(render(ADULT_REPRESENTED, { canEdit: false })).not.toMatch(/<button\b/);
   });
 
   it("identifies a paying parent once: the payer line has the same labels and no button", () => {

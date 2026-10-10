@@ -312,6 +312,7 @@ async fn the_status_reports_the_qualified_signature_of_the_patient() {
             "contract_partner": { "qes": null, "own_account_payment": null },
             "payer": null,
             "representatives": [],
+            "acting_persons": [],
         })
     );
 
@@ -1254,6 +1255,8 @@ async fn each_parent_of_a_minor_is_identified_by_the_own_signature() {
                   "relation": "father", "has_email": true, "qes": null,
                   "own_account_payment": null },
             ],
+            // Only an adult has acting persons of its own.
+            "acting_persons": [],
         })
     );
 
@@ -1770,4 +1773,208 @@ async fn a_minor_has_one_identification_sheet_per_legal_representative() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{generated}");
+}
+
+/// The line of one of an adult's acting persons in the identification status.
+fn acting_person_line(status: &Value, id: Uuid) -> Value {
+    status["acting_persons"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no acting persons: {status}"))
+        .iter()
+        .find(|line| line["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("no line of {id}: {status}"))
+}
+
+/// Owner decision 2026-10-10: an adult's representative (slot `agent`) and
+/// legal guardian (slot `guardian`) are persons of their own. The status lists
+/// them in `acting_persons` beside the patient's line, each with the own QES
+/// and the own-account payment staff confirm and take back.
+#[tokio::test]
+async fn an_adults_representative_and_legal_guardian_each_have_an_identification_line() {
+    let Some(app) = test_app().await else { return };
+    let pool = app.pool();
+    let pm = app.bearer("patient_manager");
+    let (agent, guardian, aunt) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let agent_email = format!("ben.vertreter-{}@example.com", agent.simple());
+    let lead_id = seed_lead(pool).await;
+    sqlx::query("UPDATE leads SET trusted_contacts = $2 WHERE id = $1")
+        .bind(lead_id)
+        .bind(json!([
+            { "id": aunt, "name": "Tante Muster", "relation": "aunt",
+              "email": "tante.muster@example.com" },
+            { "id": agent, "name": "Ben Vertreter", "relation": "representative",
+              "email": agent_email },
+            { "id": guardian, "name": "Mia Betreuerin", "relation": "legal_guardian" },
+        ]))
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_gwg_declarations (lead_id, has_representative, under_guardianship)
+           VALUES ($1, true, true)"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO lead_representatives (lead_id, contact_id, role, contact_origin,
+                                             first_name, last_name)
+           VALUES ($1, $2, 'authorised_representative', 'portal', 'Ben', 'Vertreter'),
+                  ($1, $3, 'legal_guardian', 'portal', 'Mia', 'Betreuerin')"#,
+    )
+    .bind(lead_id)
+    .bind(agent)
+    .bind(guardian)
+    .execute(pool)
+    .await
+    .unwrap();
+    let status_path = format!("/api/v1/leads/{lead_id}/identification-status");
+    let payment_path = |subject: &str| {
+        format!("/api/v1/leads/{lead_id}/identification-status/{subject}/own-account-payment")
+    };
+    let confirm = |confirmed: bool| Some(json!({ "confirmed": confirmed }));
+
+    // Nothing signed: the patient keeps the own line, and both acting persons
+    // have one of their own; the aunt is nobody to identify.
+    let (status, empty) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{empty}");
+    assert_eq!(empty["minor"], false, "{empty}");
+    assert_eq!(empty["representatives"], json!([]), "{empty}");
+    assert_eq!(
+        empty["acting_persons"],
+        json!([
+            { "id": agent, "subject": format!("representative:{agent}"), "slot": "agent",
+              "role": "authorised_representative", "name": "Ben Vertreter",
+              "relation": "representative", "has_email": true, "qes": null,
+              "own_account_payment": null },
+            { "id": guardian, "subject": format!("representative:{guardian}"),
+              "slot": "guardian", "role": "legal_guardian", "name": "Mia Betreuerin",
+              "relation": "legal_guardian", "has_email": false, "qes": null,
+              "own_account_payment": null },
+        ]),
+        "{empty}"
+    );
+
+    // The representative signs as `client` with the own address: it counts
+    // for him, the patient's own signature for the patient.
+    let patient_signed_at = Utc::now() - Duration::hours(4);
+    let agent_signed_at = Utc::now() - Duration::hours(2);
+    let contract = seed_document(&app, Some(lead_id)).await;
+    seed_named_signature_request(
+        &app,
+        contract,
+        vec![
+            signature_by("client", "anna.muster@example.com", patient_signed_at),
+            signature_by("client", &agent_email.to_uppercase(), agent_signed_at),
+        ],
+        json!([]),
+    )
+    .await;
+    let (_, signed) = json_request(&app, "GET", &status_path, &pm, None).await;
+    assert_eq!(
+        instant(&acting_person_line(&signed, agent)["qes"]["signed_at"]).timestamp(),
+        agent_signed_at.timestamp(),
+        "{signed}"
+    );
+    assert!(
+        acting_person_line(&signed, guardian)["qes"].is_null(),
+        "{signed}"
+    );
+    assert!(signed["contract_partner"]["qes"].is_object(), "{signed}");
+
+    // Staff confirm the own-account payment of the legal guardian: only his
+    // line carries it, and the mark is audited.
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        &payment_path(&format!("representative:{guardian}")),
+        &pm,
+        confirm(true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(
+        acting_person_line(&confirmed, guardian)["own_account_payment"]["confirmed_by_name"],
+        staff_name("patient_manager"),
+        "{confirmed}"
+    );
+    assert!(
+        acting_person_line(&confirmed, agent)["own_account_payment"].is_null(),
+        "{confirmed}"
+    );
+    assert!(
+        confirmed["contract_partner"]["own_account_payment"].is_null(),
+        "{confirmed}"
+    );
+    assert_eq!(
+        audit_count(pool, "confirm_lead_own_account_payment", lead_id).await,
+        1
+    );
+
+    // Unknown persons and the aunt are refused; nothing else is stored.
+    for stranger in [aunt, Uuid::new_v4()] {
+        let (status, error) = json_request(
+            &app,
+            "POST",
+            &payment_path(&format!("representative:{stranger}")),
+            &pm,
+            confirm(true),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["error"], "identification_subject_invalid", "{error}");
+    }
+    let subjects: Vec<String> =
+        sqlx::query_scalar("SELECT subject FROM lead_identification_payments WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(subjects, vec![format!("representative:{guardian}")]);
+
+    // Taken back: the line awaits the payment again.
+    let (status, revoked) = json_request(
+        &app,
+        "POST",
+        &payment_path(&format!("representative:{guardian}")),
+        &pm,
+        confirm(false),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{revoked}");
+    assert!(
+        acting_person_line(&revoked, guardian)["own_account_payment"].is_null(),
+        "{revoked}"
+    );
+    assert_eq!(
+        audit_count(pool, "revoke_lead_own_account_payment", lead_id).await,
+        1
+    );
+
+    // "Nobody acts for me": the representative has no line any more and his
+    // payment cannot be confirmed; the legal guardian keeps his.
+    sqlx::query("UPDATE lead_gwg_declarations SET has_representative = false WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let (_, without) = json_request(&app, "GET", &status_path, &pm, None).await;
+    let ids: Vec<&Value> = without["acting_persons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|line| &line["id"])
+        .collect();
+    assert_eq!(ids, vec![&json!(guardian)], "{without}");
+    let (status, error) = json_request(
+        &app,
+        "POST",
+        &payment_path(&format!("representative:{agent}")),
+        &pm,
+        confirm(true),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
 }

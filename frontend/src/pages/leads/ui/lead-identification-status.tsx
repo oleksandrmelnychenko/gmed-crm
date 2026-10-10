@@ -38,7 +38,9 @@ function Label({ label, testId }: { label: IdentificationLabel; testId: string }
  * payment is confirmed or taken back with one button, for roles that may edit.
  * A minor has no line of his own: the legal representatives sign and pay, each
  * on a line; a payer who is one of them repeats that person's labels without a
- * second confirmation. When the stated payment route is cash, crypto or a
+ * second confirmation. An adult's representative and legal guardian (Betreuer)
+ * each get a line of their own below the patient's. When the stated payment
+ * route is cash, crypto or a
  * payment through a third party, the paying person's line says that no
  * payment from the own account is to be expected; the button stays.
  */
@@ -64,6 +66,8 @@ export function LeadIdentificationStatusView({
   onSetOwnAccountPayment: (subject: IdentificationSubject, confirmed: boolean) => void;
 }) {
   const hinted = ownAccountHintSubjects(status, paymentRoute);
+  // A line captioned by a person's name needs more room than a role.
+  const namedLines = status.minor || status.acting_persons.length > 0;
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-identification-status">
       <div className="text-xs font-semibold text-foreground">
@@ -97,8 +101,7 @@ export function LeadIdentificationStatusView({
               <span
                 className={cn(
                   "w-full text-[13px] font-medium text-foreground",
-                  // A representative is captioned by the name, which needs more room than a role.
-                  wide ? "" : status.minor ? "sm:w-44 sm:shrink-0" : "sm:w-28 sm:shrink-0",
+                  wide ? "" : namedLines ? "sm:w-44 sm:shrink-0" : "sm:w-28 sm:shrink-0",
                 )}
               >
                 {role}

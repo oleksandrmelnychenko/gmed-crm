@@ -17,7 +17,9 @@
 //! address. A parent who also pays is one person, shown on both lines. An
 //! adult's representative or legal guardian named in the cabinet is a person
 //! of its own for its identification sheet (owner decision 2026-10-10): a
-//! `client` signature made with that person's address counts for it. The
+//! `client` signature made with that person's address counts for it; the
+//! status lists such persons in `acting_persons` (with `slot` and `role`),
+//! beside the patient's line, while `representatives` stays a minor's. The
 //! status is information only — the lead wizard, the identification sheet
 //! and the payer block of the patient card show it, nothing is blocked by it.
 //!
@@ -112,17 +114,54 @@ impl PersonIdentification {
     }
 }
 
-/// A legal representative of a minor as a person to identify.
+/// A legal representative of a minor, or an adult's representative or legal
+/// guardian, as a person to identify.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RepresentativeIdentification {
     /// The id of the trusted contact.
     pub id: Uuid,
+    /// The place in the cabinet form: `rep1`/`rep2` for a minor's
+    /// representative, `agent`/`guardian` for an adult's acting person.
+    pub slot: Option<&'static str>,
+    /// `legal_representative`, `authorised_representative` or `legal_guardian`.
+    pub role: &'static str,
     pub name: String,
     /// The relation of the trusted contact as entered.
     pub relation: Option<String>,
     /// Without an address a signature is attributed only by the name.
     pub has_email: bool,
     pub person: PersonIdentification,
+}
+
+impl RepresentativeIdentification {
+    fn from_person(person: &Representative, identification: PersonIdentification) -> Self {
+        Self {
+            id: person.id,
+            slot: person.slot,
+            role: person.role,
+            name: person.name(),
+            relation: person.relation.clone(),
+            has_email: address(person.email.as_deref()).is_some(),
+            person: identification,
+        }
+    }
+
+    /// The line of the status JSON. A minor's representative keeps the
+    /// fields it always had; an adult's acting person adds its `slot` and
+    /// `role`, so a client can tell the representative from the Betreuer.
+    fn to_json(&self, with_role: bool) -> Value {
+        let mut value = self.person.to_json();
+        value["id"] = json!(self.id);
+        value["subject"] = json!(lead_representatives::subject_of(self.id));
+        value["name"] = json!(self.name);
+        value["relation"] = json!(self.relation);
+        value["has_email"] = json!(self.has_email);
+        if with_role {
+            value["slot"] = json!(self.slot);
+            value["role"] = json!(self.role);
+        }
+        value
+    }
 }
 
 /// The identification state of a lead: the patient and, only when the payer
@@ -140,8 +179,10 @@ pub(crate) struct IdentificationStatus {
     pub representatives: Vec<RepresentativeIdentification>,
     /// An adult's representative and legal guardian the lead named in the
     /// cabinet (owner decision 2026-10-10: each has an own identification
-    /// sheet); empty for a minor. Not part of the status JSON: the patient's
-    /// line stays the adult's own.
+    /// sheet); empty for a minor. In the status JSON they are an array of
+    /// their own, `acting_persons`, beside the patient's line: the patient
+    /// stays identified as the adult, and `representatives` keeps meaning a
+    /// minor's legal representatives for every client.
     pub acting_persons: Vec<RepresentativeIdentification>,
 }
 
@@ -168,15 +209,12 @@ impl IdentificationStatus {
             "representatives": self
                 .representatives
                 .iter()
-                .map(|representative| {
-                    let mut value = representative.person.to_json();
-                    value["id"] = json!(representative.id);
-                    value["subject"] = json!(lead_representatives::subject_of(representative.id));
-                    value["name"] = json!(representative.name);
-                    value["relation"] = json!(representative.relation);
-                    value["has_email"] = json!(representative.has_email);
-                    value
-                })
+                .map(|representative| representative.to_json(false))
+                .collect::<Vec<_>>(),
+            "acting_persons": self
+                .acting_persons
+                .iter()
+                .map(|person| person.to_json(true))
                 .collect::<Vec<_>>(),
         })
     }
@@ -479,18 +517,17 @@ pub(crate) async fn load_identification_status(
             .representatives
             .iter()
             .filter(|person| person.slot.is_some())
-            .map(|person| RepresentativeIdentification {
-                id: person.id,
-                name: person.name(),
-                relation: person.relation.clone(),
-                has_email: address(person.email.as_deref()).is_some(),
-                person: PersonIdentification {
-                    qes: acting_person_signature(&signatures, person),
-                    own_account_payment: payment_of(
-                        lead_representatives::subject_of(person.id).as_str(),
-                        None,
-                    ),
-                },
+            .map(|person| {
+                RepresentativeIdentification::from_person(
+                    person,
+                    PersonIdentification {
+                        qes: acting_person_signature(&signatures, person),
+                        own_account_payment: payment_of(
+                            lead_representatives::subject_of(person.id).as_str(),
+                            None,
+                        ),
+                    },
+                )
             })
             .collect();
         return Ok(IdentificationStatus {
@@ -518,24 +555,23 @@ pub(crate) async fn load_identification_status(
         .collect::<Vec<_>>();
     let representatives = people
         .iter()
-        .map(|person| RepresentativeIdentification {
-            id: person.id,
-            name: person.name(),
-            relation: person.relation.clone(),
-            has_email: address(person.email.as_deref()).is_some(),
-            person: PersonIdentification {
-                qes: standing(
-                    signatures
-                        .iter()
-                        .zip(&owners)
-                        .filter(|(_, owner)| **owner == Some(person.id))
-                        .map(|(signature, _)| signature.signature),
-                ),
-                own_account_payment: payment_of(
-                    lead_representatives::subject_of(person.id).as_str(),
-                    None,
-                ),
-            },
+        .map(|person| {
+            RepresentativeIdentification::from_person(
+                person,
+                PersonIdentification {
+                    qes: standing(
+                        signatures
+                            .iter()
+                            .zip(&owners)
+                            .filter(|(_, owner)| **owner == Some(person.id))
+                            .map(|(signature, _)| signature.signature),
+                    ),
+                    own_account_payment: payment_of(
+                        lead_representatives::subject_of(person.id).as_str(),
+                        None,
+                    ),
+                },
+            )
         })
         .collect::<Vec<_>>();
     let payer = payer_since.map(|since| {
@@ -646,8 +682,9 @@ struct OwnAccountPaymentInput {
 /// and author; a later one only adds or replaces the note. The person is the
 /// patient (`contract_partner`, not for a minor), the third-party payer
 /// (`payer`), a legal representative of a minor or an adult's representative
-/// or legal guardian (`representative:<id>`; the adult's person is not in the
-/// status JSON, its mark is printed on its identification sheet).
+/// or legal guardian (`representative:<id>`; the adult's person is a line of
+/// `acting_persons` in the status JSON, and its mark is also printed on its
+/// identification sheet).
 /// The mark of a payer who is one of the parents is the mark of that parent.
 /// A converted lead stays open for this mark: the payment usually arrives
 /// after conversion (owner default 2026-10-06); a deleted lead does not.
@@ -1087,15 +1124,11 @@ mod tests {
         assert_eq!(acting_person_signature(&signatures, &without), None);
 
         // The status finds the adult's person beside a minor's representatives.
-        let line = |person: &Representative| RepresentativeIdentification {
-            id: person.id,
-            name: person.name(),
-            relation: person.relation.clone(),
-            has_email: person.email.is_some(),
-            person: PersonIdentification::default(),
-        };
         let status = IdentificationStatus {
-            acting_persons: vec![line(&agent)],
+            acting_persons: vec![RepresentativeIdentification::from_person(
+                &agent,
+                PersonIdentification::default(),
+            )],
             ..IdentificationStatus::default()
         };
         assert_eq!(
@@ -1103,8 +1136,110 @@ mod tests {
             Some(agent.id)
         );
         assert!(status.representative(Uuid::from_bytes([9; 16])).is_none());
-        // The adult's person is not part of the status JSON.
-        assert_eq!(status.to_json()["representatives"], json!([]));
+    }
+
+    #[test]
+    fn the_status_json_lists_an_adults_acting_persons_apart_from_a_minors_representatives() {
+        let paid = OwnAccountPayment {
+            confirmed_at: at("2026-10-05T10:00:00Z"),
+            confirmed_by: None,
+            confirmed_by_name: Some("Petra Manager".into()),
+            note: None,
+        };
+        let agent = Representative {
+            slot: Some(lead_representatives::SLOT_AGENT),
+            role: lead_representatives::ROLE_AUTHORISED_REPRESENTATIVE,
+            relation: Some("representative".into()),
+            ..parent(5, "Ben", Some("ben.vertreter@example.com"))
+        };
+        let guardian = Representative {
+            slot: Some(lead_representatives::SLOT_GUARDIAN),
+            role: lead_representatives::ROLE_LEGAL_GUARDIAN,
+            relation: Some("guardian".into()),
+            ..parent(6, "Mia", None)
+        };
+        let adult = IdentificationStatus {
+            acting_persons: vec![
+                RepresentativeIdentification::from_person(
+                    &agent,
+                    PersonIdentification {
+                        qes: Some(QualifiedSignature {
+                            signed_at: at("2026-10-02T09:00:00Z"),
+                            test_mode: false,
+                        }),
+                        own_account_payment: Some(paid),
+                    },
+                ),
+                RepresentativeIdentification::from_person(
+                    &guardian,
+                    PersonIdentification::default(),
+                ),
+            ],
+            ..IdentificationStatus::default()
+        };
+        let value = adult.to_json();
+        // The patient's line stays the adult's own; `representatives` stays a minor's.
+        assert_eq!(value["minor"], json!(false));
+        assert_eq!(value["representatives"], json!([]));
+        assert_eq!(
+            value["acting_persons"],
+            json!([
+                {
+                    "id": agent.id,
+                    "subject": lead_representatives::subject_of(agent.id),
+                    "slot": "agent",
+                    "role": "authorised_representative",
+                    "name": "Ben Muster",
+                    "relation": "representative",
+                    "has_email": true,
+                    "qes": { "signed_at": "2026-10-02T09:00:00+00:00", "test_mode": false },
+                    "own_account_payment": {
+                        "confirmed_at": "2026-10-05T10:00:00+00:00",
+                        "confirmed_by_name": "Petra Manager",
+                        "note": null,
+                    },
+                },
+                {
+                    "id": guardian.id,
+                    "subject": lead_representatives::subject_of(guardian.id),
+                    "slot": "guardian",
+                    "role": "legal_guardian",
+                    "name": "Mia Muster",
+                    "relation": "guardian",
+                    "has_email": false,
+                    "qes": null,
+                    "own_account_payment": null,
+                },
+            ])
+        );
+
+        // A minor's representative keeps the fields it always had.
+        let anna = parent(1, "Anna", Some("anna@example.com"));
+        let minor = IdentificationStatus {
+            minor: true,
+            representatives: vec![RepresentativeIdentification::from_person(
+                &anna,
+                PersonIdentification::default(),
+            )],
+            ..IdentificationStatus::default()
+        };
+        let value = minor.to_json();
+        assert_eq!(value["acting_persons"], json!([]));
+        let line = value["representatives"][0].as_object().unwrap();
+        let mut keys = line.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "has_email",
+                "id",
+                "name",
+                "own_account_payment",
+                "qes",
+                "relation",
+                "subject"
+            ]
+        );
     }
 
     #[test]

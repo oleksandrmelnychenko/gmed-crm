@@ -26,8 +26,19 @@ type Person = {
   own_account_payment: { confirmed_at: string; confirmed_by_name: string | null; note: string | null } | null;
 };
 type Representative = Person & { id: string; subject: string; name: string; relation: string; has_email: boolean };
-/** A server that knows minors also sends `minor` and `representatives`; an older one does not. */
-type Status = { contract_partner: Person; payer: Person | null; minor?: boolean; representatives?: Representative[] };
+/** An adult's representative (`agent`) or legal guardian (`guardian`). */
+type ActingPerson = Representative & { slot: "agent" | "guardian"; role: string };
+/**
+ * A server that knows minors also sends `minor` and `representatives`, one
+ * that knows an adult's acting persons also `acting_persons`; an older one does not.
+ */
+type Status = {
+  contract_partner: Person;
+  payer: Person | null;
+  minor?: boolean;
+  representatives?: Representative[];
+  acting_persons?: ActingPerson[];
+};
 type Subject = "contract_partner" | "payer";
 
 // 11:20 in Berlin.
@@ -152,12 +163,19 @@ async function mount(page: Page, mock: Mock) {
         });
         return;
       }
+      const payment = body.confirmed ? CONFIRMED : null;
       const person = state.status?.[subject];
-      if (state.status && person) {
+      if (state.status && subject.startsWith("representative:")) {
+        // The mark of a person who acts for the lead is kept on that person's line.
+        const mark = <T extends Representative>(lines: T[] | undefined) =>
+          lines?.map((line) => (line.subject === subject ? { ...line, own_account_payment: payment } : line));
         state.status = {
           ...state.status,
-          [subject]: { ...person, own_account_payment: body.confirmed ? CONFIRMED : null },
+          representatives: mark(state.status.representatives),
+          acting_persons: mark(state.status.acting_persons),
         };
+      } else if (state.status && person) {
+        state.status = { ...state.status, [subject]: { ...person, own_account_payment: payment } };
       }
       response = state.status ?? [];
     }
@@ -355,6 +373,62 @@ test("a parent of a minor is identified on the own line, with the payment sent f
   // The server of this mock refuses; what matters is whom the confirmation was sent for.
   await expect(block.getByTestId("lead-identification-error")).toBeVisible();
   expect(calls).toEqual([{ subject: mother, body: { confirmed: true } }]);
+});
+
+test("an adult's representative and Betreuer each get a line below the patient's, with the own confirmation", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const agentId = "22222222-2222-4222-8222-222222222222";
+  const guardianId = "33333333-3333-4333-8333-333333333333";
+  const agent = `representative:${agentId}`;
+  const guardian = `representative:${guardianId}`;
+  const { block, row, calls } = await mount(page, {
+    lang: "ru",
+    status: {
+      contract_partner: { qes: SIGNED, own_account_payment: null },
+      payer: null,
+      minor: false,
+      representatives: [],
+      acting_persons: [
+        { id: agentId, subject: agent, slot: "agent", role: "authorised_representative", name: "Ben Vertreter",
+          relation: "representative", has_email: true, qes: SIGNED, own_account_payment: null },
+        { id: guardianId, subject: guardian, slot: "guardian", role: "legal_guardian", name: "Mia Betreuerin",
+          relation: "legal_guardian", has_email: false, qes: null, own_account_payment: null },
+      ],
+    },
+  });
+  // The adult keeps the own line; nothing is said about a minor.
+  await expect(row("contract_partner").line).toContainText("Пациент");
+  await expect(block.getByTestId("lead-identification-minor")).toHaveCount(0);
+  await expect(block.getByRole("listitem")).toHaveCount(3);
+
+  const agentLine = block.getByTestId(`lead-identification-${agent}`);
+  await expect(agentLine).toContainText("Ben Vertreter");
+  await expect(agentLine).toContainText("уполномоченный представитель");
+  await expect(block.getByTestId(`lead-identification-qes-${agent}`)).toHaveText("Квалифицированная подпись · 05.10.2026");
+  await expect(block.getByTestId(`lead-identification-payment-${agent}`)).toHaveText("Ожидается платёж с собственного счёта");
+
+  const guardianLine = block.getByTestId(`lead-identification-${guardian}`);
+  await expect(guardianLine).toContainText("Mia Betreuerin");
+  await expect(guardianLine).toContainText("опекун (Betreuer)");
+  await expect(block.getByTestId(`lead-identification-qes-${guardian}`)).toHaveText("Квалифицированной подписи ещё нет");
+  await expect(block.getByTestId(`lead-identification-note-${guardian}`)).toHaveText("нет e-mail — подпись не засчитается");
+
+  // The Betreuer's payment is confirmed for the Betreuer and taken back.
+  await guardianLine.getByRole("button", { name: "Подтвердить платёж — Mia Betreuerin" }).click();
+  await expect(block.getByTestId(`lead-identification-payment-${guardian}`)).toHaveText(
+    "Платёж с собственного счёта подтверждён · 05.10.2026 · Intake QA",
+  );
+  await expect(block.getByTestId(`lead-identification-payment-${agent}`)).toHaveText("Ожидается платёж с собственного счёта");
+  await expect(row("contract_partner").payment).toHaveText("Ожидается платёж с собственного счёта");
+  await block.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath("lead-identification-adult-acting-ru-desktop.png"), animations: "disabled" });
+  await guardianLine.getByRole("button", { name: "Отменить — Mia Betreuerin" }).click();
+  await expect(block.getByTestId(`lead-identification-payment-${guardian}`)).toHaveText("Ожидается платёж с собственного счёта");
+  expect(calls).toEqual([
+    { subject: guardian, body: { confirmed: true } },
+    { subject: guardian, body: { confirmed: false } },
+  ]);
+  await expect(block.getByTestId("lead-identification-error")).toHaveCount(0);
 });
 
 test("a tab that still shows the child's line is told why the payment was refused", async ({ page }) => {
