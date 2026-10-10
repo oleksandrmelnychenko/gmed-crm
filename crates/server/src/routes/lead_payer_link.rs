@@ -1902,7 +1902,7 @@ fn questionnaire(
         .collect();
     let (level, reasons) = check_level(check);
     let asked = mode == Mode::Link;
-    let missing = missing_for_submit(
+    let mut missing = missing_for_submit(
         &answers,
         &Requirements {
             privacy_acknowledged: statement.privacy_ack_at.is_some(),
@@ -1915,6 +1915,22 @@ fn questionnaire(
             today,
         },
     );
+    // A paying parent's identity document data are staff's (like the lead's own,
+    // contract 3.1): the cabinet section has no fields for them, so they never
+    // hold its sending (QA 2026-10-10, the parent could not send).
+    if mode == Mode::Cabinet {
+        missing.retain(|key| {
+            !matches!(
+                *key,
+                "id_document_type"
+                    | "id_document_number"
+                    | "id_issuing_authority"
+                    | "id_issuing_country"
+                    | "id_issued_on"
+                    | "id_valid_until"
+            )
+        });
+    }
     let email = statement
         .confirmed_email
         .clone()

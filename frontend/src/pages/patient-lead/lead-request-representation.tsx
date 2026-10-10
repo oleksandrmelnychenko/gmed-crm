@@ -247,6 +247,11 @@ function useRepresentativeForm({
     set: (field, value) => setDraft((current) => ({ ...current, [field]: value })),
     update: (change) => setDraft(change),
     errorFor: (field) => {
+      // A representative born after the adult limit: said at once (QA 2026-10-10: the
+      // date picker's limit dropped the value without a word).
+      if (field === "date_of_birth" && draft.date_of_birth && draft.date_of_birth > adultBirthDateLimit()) {
+        return text.representativeMinor;
+      }
       // The message belongs to the refused value: it goes as soon as the value is changed.
       const value = refused.values[field];
       if (value !== undefined && value === representativeValue(field, draft)) {
@@ -574,7 +579,7 @@ function RepresentativeBlock({
         {asked("first_name") ? <LabeledField {...labeled("first_name")}>{textInput("first_name", 100)}</LabeledField> : null}
         {asked("last_name") ? <LabeledField {...labeled("last_name")}>{textInput("last_name", 100)}</LabeledField> : null}
         {asked("date_of_birth") ? (
-          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth", adultBirthDateLimit())}</LabeledField>
+          <LabeledField {...labeled("date_of_birth")}>{dateInput("date_of_birth")}</LabeledField>
         ) : null}
         {asked("birth_place") ? <LabeledField {...labeled("birth_place")}>{textInput("birth_place", 200)}</LabeledField> : null}
         {asked("birth_country") ? (

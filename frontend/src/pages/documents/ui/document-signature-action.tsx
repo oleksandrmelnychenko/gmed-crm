@@ -122,7 +122,14 @@ function SignatureWorkspace({ documentId, scope, title, onDone, onDirtyChange }:
         const pdfs = rows.filter(row => row.has_stored_file && row.mime_type?.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf");
         // An informational document is never the subject of a request: offering
         // it here led to a composer that could not send anything.
-        const signable = pdfs.filter(row => !isInformationalDocument(row));
+        // Nor are medical uploads, identity scans and the staff's GwG sheet a document
+        // for the client's signature (QA 2026-10-10).
+        const signable = pdfs.filter(row =>
+          !isInformationalDocument(row)
+          && !row.is_medical
+          && row.category !== "identity"
+          && !/identity|passport/i.test(row.art ?? "")
+          && row.generated_template_id !== "gwg_identification");
         setDocuments(signable);
         setInformationalOnly(pdfs.length > 0 && signable.length === 0);
       })

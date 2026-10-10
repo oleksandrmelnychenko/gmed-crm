@@ -355,7 +355,11 @@ function PayerQuestionnaireForm({
     }
   }
 
+  // The yellow lists only after the first send (owner 2026-10-09: "only after Далее").
+  const [showMissing, setShowMissing] = useState(false);
+
   async function submit() {
+    setShowMissing(true);
     setSubmitting(true);
     setErrors([]);
     try {
@@ -659,7 +663,7 @@ function PayerQuestionnaireForm({
         </fieldset>
       )}
 
-      <PayerMissingLists text={text} parts={missing} />
+      {showMissing ? <PayerMissingLists text={text} parts={missing} /> : null}
 
       {errors.map((message) => (
         <p key={message} role="alert" className="text-xs text-destructive">

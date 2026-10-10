@@ -3,6 +3,7 @@ import { LoaderCircle } from "lucide-react";
 
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { Button } from "@/components/ui/button";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { payerSignaturePackageOf } from "@/pages/patient-lead/lead-request-payer-questionnaire-model";
 import { LEAD_CABINET_LANGS, asLeadCabinetLang, type LeadCabinetLang } from "@/pages/patient-lead/lead-request-text";
@@ -102,6 +103,12 @@ export function PayerLinkPage() {
   const [fallbackLang] = useState(browserLang);
   const lang = chosenLang ?? linkLang ?? fallbackLang;
   const text = payerLinkText(lang);
+  // The shared controls (search in the select lists) speak the app language: DE or RU
+  // like the page (QA 2026-10-10: "Поиск..." on the German page).
+  const { setLang: setAppLang } = useLang();
+  useEffect(() => {
+    if (lang === "de" || lang === "ru") setAppLang(lang);
+  }, [lang, setAppLang]);
   // What answers late for a link this tab has left behind changes nothing.
   const generationRef = useRef(link.generation);
   generationRef.current = link.generation;
