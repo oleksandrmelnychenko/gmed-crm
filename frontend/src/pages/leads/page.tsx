@@ -430,6 +430,9 @@ function useLeadsPageContent() {
   const { staffGo } = useStaffNavigate();
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
   const [newLeadWizardOpen, setNewLeadWizardOpen] = useState(false);
+  // A fresh wizard per "Новый лид": an open lead's wizard state must never carry
+  // over into the new person (QA 2026-10-10, the new data overwrote the open lead).
+  const [newLeadWizardSession, setNewLeadWizardSession] = useState(0);
   const failedLoadMessage = t.common_failed_load;
   const [searchParams, setSearchParams] = useSearchParams();
   const permissions = useMemo(() => leadPermissions(user), [user]);
@@ -2882,6 +2885,7 @@ function useLeadsPageContent() {
                       preloadLeadWizard();
                       setDetailOpen(false);
                       setWizardLeadId(null);
+                      setNewLeadWizardSession((session) => session + 1);
                       setNewLeadWizardOpen(true);
                       syncLeadQuery(undefined, { replace: false });
                     } else {
@@ -3214,6 +3218,7 @@ function useLeadsPageContent() {
           )}
         >
           <LeadWizard
+            key={`lead-wizard-${newLeadWizardSession}`}
             entryPoint="lead"
             leadId={wizardLeadId}
             open

@@ -613,9 +613,7 @@ export function PayerSection({
                     checked={draft.contact_consent}
                     aria-invalid={Boolean(errorFor("payer_contact_consent")) || undefined}
                     aria-describedby={
-                      errorFor("payer_contact_consent")
-                        ? "lead-request-payer_contact_consent-hint lead-request-payer_contact_consent-error"
-                        : "lead-request-payer_contact_consent-hint"
+                      errorFor("payer_contact_consent") ? "lead-request-payer_contact_consent-error" : undefined
                     }
                     onChange={(event) => set("contact_consent", event.target.checked)}
                   />
@@ -631,9 +629,6 @@ export function PayerSection({
                       <ConsentGivenChip>{text.consentGivenAt(formatAppDateTime(consentAt))}</ConsentGivenChip>
                     </p>
                   ) : null}
-                  <p id="lead-request-payer_contact_consent-hint" className="leading-5">
-                    {text.payerConsentHint}
-                  </p>
                 </div>
                 {errorFor("payer_contact_consent") ? (
                   <p id="lead-request-payer_contact_consent-error" role="alert" className="text-xs text-destructive">

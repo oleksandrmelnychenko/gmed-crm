@@ -61,6 +61,13 @@ pub fn classify(method: &Method, path: &str) -> Option<RiskRoute> {
         ["leads", lead, "payer-link"] => {
             return Uuid::parse_str(lead).ok().map(RiskRoute::PayerLink);
         }
+        // A signature confirmed by staff is a paper signature too (QA 2026-10-10);
+        // only the risk gate holds it, the DSGVO consent stays open (`document_leads`).
+        ["documents", document, "mark-signed"] => {
+            return Uuid::parse_str(document)
+                .ok()
+                .map(|id| RiskRoute::Mapped(Target::Document(id), Rule::PaperSignature));
+        }
         _ => {}
     }
     let (target, rule) = sanctions_gate::classify(method, path)?;
@@ -206,13 +213,21 @@ pub async fn holds(
     })
 }
 
-fn blocked() -> Response {
+/// The refusal; after a reject it says so (QA 2026-10-10: it still read
+/// "waits for a staff decision").
+fn blocked(rejected: bool) -> Response {
+    let message = if rejected {
+        "The risk assessment of this lead was rejected"
+    } else {
+        "The risk assessment of this lead waits for a staff decision"
+    };
     (
         StatusCode::CONFLICT,
         Json(json!({
             "error": ERROR_CODE,
             "code": ERROR_CODE,
-            "message": "The risk assessment of this lead waits for a staff decision",
+            "message": message,
+            "rejected": rejected,
         })),
     )
         .into_response()
@@ -271,7 +286,15 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
                     "lead_ids": held,
                 }),
             ));
-            blocked()
+            let rejected = sqlx::query_scalar::<_, bool>(
+                "SELECT EXISTS (SELECT 1 FROM lead_risk_assessments WHERE lead_id = ANY($1) AND status = $2)",
+            )
+            .bind(&held)
+            .bind(store::STATUS_REJECTED)
+            .fetch_one(&state.db)
+            .await
+            .unwrap_or(false);
+            blocked(rejected)
         }
         Err(error) => {
             tracing::error!(error = %error, "Risk gate could not evaluate a request");
@@ -307,6 +330,7 @@ mod tests {
             "/signature-packages",
             "/documents/{id}/signature-requests",
             "/documents/{id}/paper-signature",
+            "/documents/{id}/mark-signed",
             "/framework-contracts/{id}/status",
             "/framework-contracts",
             "/orders/{id}/commercial-basis",

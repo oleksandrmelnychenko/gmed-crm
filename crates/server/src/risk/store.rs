@@ -456,6 +456,11 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             return (PARTY_CABINET, answers.representation_missing.clone());
         }
         "H" => {
+            // The lead corrected both answers to "no" (QA 2026-10-10): nothing to
+            // detail; the fired T14 stays for staff.
+            if answers.pep_self_answer == Some(false) && answers.pep_related_answer == Some(false) {
+                return (PARTY_CABINET, Vec::new());
+            }
             for (key, value) in [
                 ("pep_office", &answers.pep_office),
                 ("pep_country", &answers.pep_country),
@@ -478,6 +483,10 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
             PARTY_CABINET
         }
         "J" => {
+            // Corrected to "no" (QA 2026-10-10): nothing to detail; T15 stays for staff.
+            if answers.sanctions_links_answer == Some(false) {
+                return (PARTY_CABINET, Vec::new());
+            }
             for (key, value) in [
                 ("sanctions_link_name", &answers.sanctions_link_name),
                 ("sanctions_link_kind", &answers.sanctions_link_kind),
@@ -557,8 +566,11 @@ pub fn block_states(
         let open = match block {
             "G" => requested || (sticky("T13") && !missing.is_empty()),
             "I" => requested || (sticky("T12") && !missing.is_empty()),
-            // The enhanced check (level 2 or 3) asks the birth data; the base form does not.
-            "K" | "L" => requested || level >= 2,
+            // The enhanced check (level 2 or 3) asks the birth data and the legal
+            // questions; the base form does not. A (source of funds, occupation,
+            // sector, proof) too: the § 15 GwG check needs it whatever fired
+            // (QA 2026-10-10, two-stage form 2026-10-07).
+            "A" | "K" | "L" => requested || level >= 2,
             _ => requested || automatic.contains(&block),
         };
         states.insert(

@@ -270,6 +270,12 @@ export function payerLinkErrorText(error: unknown, tx: Tx): string | null {
       );
     case "mail_not_configured":
       return payerLinkMailMissingText(tx);
+    // Level 3 holds the link until block D is requested (QA 2026-10-10: staff were not told the way out).
+    case "risk_review_required":
+      return tx(
+        "Оценка риска на уровне 3: ссылку плательщику можно отправить после решения или после запроса блока D («Оценка риска» → «Запросить дополнительные сведения»).",
+        "Risikobewertung Stufe 3: Der Zahler-Link geht erst nach einer Entscheidung oder nach Anforderung von Block D („Risikobewertung“ → „Weitere Angaben anfordern“).",
+      );
     default:
       return loginEmailErrorMessage(error, tx("ru", "de"));
   }

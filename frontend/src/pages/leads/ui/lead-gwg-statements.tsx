@@ -259,14 +259,17 @@ function RepresentationGroup({
             >
               {answerLabel(statements.hasRepresentative, tx)}
             </Statement>
-            <Statement
-              label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
-              sentence
-              warning={statements.underGuardianship === true}
-              testId="lead-gwg-under-guardianship"
-            >
-              {answerLabel(statements.underGuardianship, tx)}
-            </Statement>
+            {/* The question is switched off in the cabinet (owner 2026-10-09): only an old answer shows. */}
+            {statements.underGuardianship !== null && statements.underGuardianship !== undefined ? (
+              <Statement
+                label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
+                sentence
+                warning={statements.underGuardianship === true}
+                testId="lead-gwg-under-guardianship"
+              >
+                {answerLabel(statements.underGuardianship, tx)}
+              </Statement>
+            ) : null}
           </>
         )}
       </dl>

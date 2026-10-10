@@ -603,6 +603,9 @@ const LEAD_READINESS_CHECK_LABEL_KEYS: Partial<Record<string, TranslationKey>> =
     "lead_readiness_check_cost_estimate_document_generated",
   debt_clear: "lead_readiness_check_debt_clear",
   prepayment_ready: "lead_readiness_check_prepayment_ready",
+  risk_assessment_released: "lead_readiness_check_risk_assessment_released",
+  payer_declaration_complete: "lead_readiness_check_payer_declaration_complete",
+  cost_assumption_signed: "lead_readiness_check_cost_assumption_signed",
 };
 
 /** Server readiness blocking reasons (crates/server/src/routes/leads.rs). */
@@ -652,6 +655,15 @@ const LEAD_READINESS_REASON_LABEL_KEYS: Partial<Record<string, TranslationKey>> 
   "Medical work types are not selected":
     "lead_readiness_reason_cost_calculation_work_types_missing",
   "Required prepayment is not complete": "lead_readiness_reason_prepayment_incomplete",
+  "Risk assessment waits for a staff decision": "lead_readiness_reason_risk_review_required",
+  "Payer declaration is missing": "lead_readiness_reason_payer_declaration_missing",
+  "Beneficial owner is not named": "lead_readiness_reason_payer_beneficial_owner_missing",
+  "Source of funds is missing": "lead_readiness_reason_payer_source_of_funds_missing",
+  "Third-party payer details are incomplete": "lead_readiness_reason_payer_identity_incomplete",
+  "Payer is not informed about the processing of their data": "lead_readiness_reason_payer_not_informed",
+  "Cost assumption declaration is missing": "lead_readiness_reason_cost_assumption_missing",
+  "Cost assumption declaration names another payer": "lead_readiness_reason_cost_assumption_outdated",
+  "Cost assumption declaration is not signed": "lead_readiness_reason_cost_assumption_unsigned",
 };
 
 function runtimeTranslations(translations?: Translations) {

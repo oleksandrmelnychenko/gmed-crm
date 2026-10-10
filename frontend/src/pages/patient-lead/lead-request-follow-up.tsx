@@ -102,7 +102,14 @@ export function FollowUpStep({
   total: number;
 }) {
   const guardian = request.access_kind === "guardian";
-  const blocks = openFollowUpBlocks(request);
+  // A lead who corrected "yes" to "no" has nothing to detail (QA 2026-10-10): the
+  // server stops asking H / J then, the details block goes too.
+  const legal = request.identification;
+  const blocks = openFollowUpBlocks(request).filter(
+    (block) =>
+      !(block === "H" && legal?.pep_self === false && legal?.pep_related === false) &&
+      !(block === "J" && legal?.sanctions_links === false),
+  );
   const [showMissing, setShowMissing] = useState(false);
   const [states, setStates] = useState<Record<Part, SaveState>>({
     identification: "idle",
@@ -165,6 +172,7 @@ export function FollowUpStep({
             onChange={onChange}
             onSaveState={onBillingState}
             part="route"
+            bare
           />
         ) : null;
       case "F":
@@ -521,6 +529,7 @@ function RelationshipBlock({
         <FileUploadField
           id="lead-request-relationship-proof"
           label={text.relationshipProofTitle}
+          required
           hint={text.relationshipProofHint}
           emptyText={text.noRelationshipProof}
           buttonLabel={text.uploadButton}

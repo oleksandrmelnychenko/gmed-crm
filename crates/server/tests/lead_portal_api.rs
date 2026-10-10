@@ -4382,15 +4382,27 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["follow_up"]["required"], true, "{body}");
-    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09.
+    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09,
+    // and the source of funds (A), QA 2026-10-10.
     assert_eq!(
         body["follow_up"]["blocks"],
-        json!(["F", "K", "L"]),
+        json!(["A", "F", "K", "L"]),
         "{body}"
     );
     assert_eq!(
         follow_up_missing(&body),
-        json!({ "F": ["residence_since", "stay_reason"], "K": [], "L": [] }),
+        json!({
+            "A": [
+                "funds_source",
+                "funds_description",
+                "occupation",
+                "sector",
+                "funds_proof_upload"
+            ],
+            "F": ["residence_since", "stay_reason"],
+            "K": [],
+            "L": []
+        }),
         "{body}"
     );
     let whole = body.to_string();

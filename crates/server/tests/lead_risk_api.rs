@@ -250,7 +250,8 @@ async fn staff_see_the_preview_then_the_assessment_decide_and_the_gate_follows()
     // for the identity document).
     assert_eq!(started["blocks"]["F"]["open"], true, "{started}");
     assert_eq!(started["blocks"]["I"]["open"], true);
-    assert_eq!(started["blocks"]["A"]["open"], false);
+    // The source of funds (A) too: the § 15 GwG check needs it (QA 2026-10-10).
+    assert_eq!(started["blocks"]["A"]["open"], true);
     assert_eq!(started["status"], "awaiting_answers");
     assert_eq!(started["four_eyes_required"], false);
     assert!(started["preview"].is_null());
@@ -646,8 +647,9 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     assert_eq!(status, StatusCode::OK);
     let follow_up = &request_object["follow_up"];
     assert_eq!(follow_up["required"], true, "{follow_up}");
-    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09.
-    assert_eq!(follow_up["blocks"], json!(["F", "I", "K", "L"]));
+    // Level 2 also opens the birth data (K) and the legal questions (L), owner 2026-10-09,
+    // and the source of funds (A), QA 2026-10-10.
+    assert_eq!(follow_up["blocks"], json!(["A", "F", "I", "K", "L"]));
     assert_eq!(
         follow_up["missing"]["F"],
         json!(["residence_since", "stay_reason"])
@@ -710,6 +712,21 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    // Block A: the source of funds (after who pays); the proof follows after the consent.
+    let (status, body) = request(
+        &app,
+        "POST",
+        &format!("{path}/enhanced-details"),
+        &patient,
+        Some(json!({
+            "funds_source": "income",
+            "funds_description": "Gehalt",
+            "occupation": "Lehrerin",
+            "sector": "Bildung"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     let (status, body) = request(
         &app,
         "POST",
@@ -720,8 +737,11 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["code"], "follow_up_incomplete");
-    // K and L were answered above; only I is still open.
-    assert_eq!(body["missing"], json!({ "I": ["id_document_upload"] }));
+    // K and L were answered above; the uploads of A and I are still open.
+    assert_eq!(
+        body["missing"],
+        json!({ "A": ["funds_proof_upload"], "I": ["id_document_upload"] })
+    );
 
     let (status, _) = request(
         &app,
@@ -733,6 +753,8 @@ async fn the_cabinet_sees_neutral_follow_up_blocks_only() {
     .await;
     assert!(status.is_success());
     let (status, body) = upload(&app, &format!("{path}/identity-document"), &patient).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let (status, body) = upload(&app, &format!("{path}/funds-proof"), &patient).await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let (status, sent) = request(
         &app,

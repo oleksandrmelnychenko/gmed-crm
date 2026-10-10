@@ -87,9 +87,21 @@ export function countryNameForGermanDocument(value: string | null | undefined) {
   return COUNTRY_CODE_SET.has(code) ? countryLabel(code, "de") : normalized;
 }
 
+/**
+ * Common names the official short names miss (QA 2026-10-10: "Корея" did not
+ * find "КНДР").
+ */
+const COUNTRY_SEARCH_ALIASES: Partial<Record<string, string>> = {
+  KP: "Северная Корея Корейская Народно-Демократическая Республика Nordkorea North Korea Північна Корея",
+  KR: "Южная Корея Республика Корея Südkorea South Korea Південна Корея",
+  US: "США Америка USA America",
+  GB: "Великобритания Англия UK England Großbritannien",
+  AE: "ОАЭ Эмираты UAE Emirate",
+};
+
 /** Search text so a manager can find a country by code, or by its German, Russian or English name. */
 function countrySearchText(code: string, label: string): string {
-  const names = [code, label, countryLabel(code, "de"), countryLabel(code, "ru")];
+  const names = [code, label, countryLabel(code, "de"), countryLabel(code, "ru"), COUNTRY_SEARCH_ALIASES[code] ?? ""];
   try {
     const english = new Intl.DisplayNames(["en"], { type: "region" }).of(code.toUpperCase());
     if (english) names.push(english);

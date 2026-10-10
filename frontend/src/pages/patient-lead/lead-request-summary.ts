@@ -361,8 +361,13 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
     ]);
   }
 
-  // The declarations: yes or no only (the details are follow-up blocks).
-  if (identification) {
+  // The declarations: yes or no only (the details are follow-up blocks). Asked
+  // only in block L since 2026-10-09: no empty group in the base form (QA 2026-10-10).
+  if (
+    identification &&
+    (openFollowUpBlocks(request).includes("L") ||
+      LEGAL_QUESTIONS.some((question) => identification[question] !== null && identification[question] !== undefined))
+  ) {
     group(
       "legal",
       text.sectionLegal,

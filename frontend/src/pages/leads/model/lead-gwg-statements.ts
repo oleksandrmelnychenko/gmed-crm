@@ -237,7 +237,7 @@ export type GwgLegalAnswerSource = Pick<
 /** The four legal questions of the cabinet with the answers of the lead (or of the payer). */
 export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, lang: string): GwgLegalAnswer[] {
   const details = (answer: boolean | null, text: string | null | undefined) => (answer === true ? (text ?? "").trim() : "");
-  return [
+  const rows: GwgLegalAnswer[] = [
     {
       key: "pep_self",
       question: tx(
@@ -277,7 +277,9 @@ export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, la
       answer: identification.sanctions_links,
       details: details(identification.sanctions_links, identification.sanctions_links_details),
     },
+    // The cabinet no longer asks the high-risk country (QA 2026-10-10): only an old answer shows.
   ];
+  return rows.filter((row) => row.key !== "high_risk_country" || (row.answer !== null && row.answer !== undefined));
 }
 
 /**

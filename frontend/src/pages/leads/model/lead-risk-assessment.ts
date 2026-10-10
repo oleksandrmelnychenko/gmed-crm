@@ -559,6 +559,8 @@ const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
   pep_related: ["PEP: близкие", "PEP: Angehörige"],
   sanctions_links: ["связи с санкционными лицами", "Sanktionsbezug"],
   birth_country: ["страна рождения", "Geburtsland"],
+  payer_own_account: ["действует в собственных интересах", "Handeln auf eigene Rechnung"],
+  payer_beneficial_owner: ["выгодоприобретатель", "wirtschaftlich Berechtigter"],
 };
 
 export function riskMissingLabel(key: string, tx: Tx): string {
@@ -727,6 +729,12 @@ export function riskDecisionErrorText(error: unknown, tx: Tx): string | null {
 /** 409 `risk_review_required` of the gated staff actions (qualify, convert, signatures …). */
 export function riskGateErrorText(error: unknown, tx: Tx): string | null {
   if (!(error instanceof ApiRequestError) || (error.body?.error ?? error.code) !== "risk_review_required") return null;
+  if (error.body?.rejected === true) {
+    return tx(
+      "Оценка риска отклонила лида: это действие недоступно.",
+      "Die Risikobewertung hat den Lead abgelehnt: diese Aktion ist nicht möglich.",
+    );
+  }
   return tx(
     "Сначала нужно решение по оценке риска (раздел «Оценка риска» в документах).",
     "Zuerst ist eine Entscheidung zur Risikobewertung nötig (Abschnitt „Risikobewertung“ in den Unterlagen).",

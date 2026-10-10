@@ -184,10 +184,11 @@ describe("lead request summary", () => {
       },
     });
     const groups = requestSummary(empty, de, "de");
-    for (const id of ["identity", "payer", "legal", "documents"]) {
+    for (const id of ["identity", "payer", "documents"]) {
       expect(groups.find((group) => group.id === id)?.rows, id).toEqual([]);
     }
-    expect(groups.find((group) => group.id === "legal")?.empty).toBe("Noch keine Angaben");
+    // The legal questions are block L only: no empty group in the base form (QA 2026-10-10).
+    expect(groups.find((group) => group.id === "legal")).toBeUndefined();
     expect(groups.find((group) => group.id === "documents")?.empty).toBe("Noch keine Unterlagen hochgeladen.");
   });
 

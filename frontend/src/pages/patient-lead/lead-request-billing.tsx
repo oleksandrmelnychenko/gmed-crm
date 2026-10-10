@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -206,6 +206,7 @@ export function BillingSections({
   onChange,
   onSaveState,
   part,
+  bare = false,
 }: {
   request: LeadRequest;
   billing: LeadRequestBilling;
@@ -215,6 +216,8 @@ export function BillingSections({
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
   part: "invoice" | "route";
+  /** Without the own heading: follow-up block C has the same title (QA 2026-10-10). */
+  bare?: boolean;
 }) {
   const guardian = request.access_kind === "guardian";
   const form = useBillingForm({ request, billing, text, enqueue, onChange, onSaveState });
@@ -342,7 +345,7 @@ export function BillingSections({
       ) : null}
 
       {part === "route" ? (
-      <Section title={text.sectionPaymentRoute}>
+      <RouteFrame bare={bare} title={text.sectionPaymentRoute}>
         {asksPaymentRoute(context.routeBy) ? (
           <div className="space-y-4" data-testid="lead-request-payment-route">
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -440,7 +443,7 @@ export function BillingSections({
             {text.paymentRouteByPayer}
           </p>
         )}
-      </Section>
+      </RouteFrame>
       ) : null}
     </>
   );
@@ -556,6 +559,7 @@ function BillingExtras({
         id="lead-request-expected_total_eur"
         label={text.billingExtrasFields.expected_total_eur}
         error={errorFor("expected_total_eur")}
+        required
         className="sm:col-start-1"
       >
         <Input
@@ -571,4 +575,9 @@ function BillingExtras({
       </LabeledField>
     </div>
   );
+}
+
+/** The payment route's section, or only its content inside follow-up block C. */
+function RouteFrame({ bare, title, children }: { bare: boolean; title: string; children: ReactNode }) {
+  return bare ? <div>{children}</div> : <Section title={title}>{children}</Section>;
 }

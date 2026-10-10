@@ -430,6 +430,18 @@ export interface OperationsTranslations {
   lead_readiness_reason_cost_calculation_missing: string;
   lead_readiness_reason_cost_calculation_work_types_missing: string;
   lead_readiness_reason_prepayment_incomplete: string;
+  lead_readiness_check_risk_assessment_released: string;
+  lead_readiness_check_payer_declaration_complete: string;
+  lead_readiness_check_cost_assumption_signed: string;
+  lead_readiness_reason_risk_review_required: string;
+  lead_readiness_reason_payer_declaration_missing: string;
+  lead_readiness_reason_payer_beneficial_owner_missing: string;
+  lead_readiness_reason_payer_source_of_funds_missing: string;
+  lead_readiness_reason_payer_identity_incomplete: string;
+  lead_readiness_reason_payer_not_informed: string;
+  lead_readiness_reason_cost_assumption_missing: string;
+  lead_readiness_reason_cost_assumption_outdated: string;
+  lead_readiness_reason_cost_assumption_unsigned: string;
   lead_section_lifecycle: string;
   lead_lifecycle_description: string;
   lead_current_stage: string;
@@ -1058,6 +1070,18 @@ export const operationsRu: OperationsTranslations = {
   lead_readiness_reason_cost_calculation_work_types_missing:
     "Не выбраны медицинские виды работ для предварительного расчёта",
   lead_readiness_reason_prepayment_incomplete: "Требуемая предоплата получена не полностью",
+  lead_readiness_check_risk_assessment_released: "Оценка риска: решение принято",
+  lead_readiness_check_payer_declaration_complete: "Данные плательщика полные",
+  lead_readiness_check_cost_assumption_signed: "Плательщик подписал заявление о принятии расходов",
+  lead_readiness_reason_risk_review_required: "Нужно решение по оценке риска",
+  lead_readiness_reason_payer_declaration_missing: "Нет данных о плательщике",
+  lead_readiness_reason_payer_beneficial_owner_missing: "Не указан фактический выгодоприобретатель",
+  lead_readiness_reason_payer_source_of_funds_missing: "Не указано происхождение средств",
+  lead_readiness_reason_payer_identity_incomplete: "Данные плательщика неполные",
+  lead_readiness_reason_payer_not_informed: "Плательщик не проинформирован об обработке его данных",
+  lead_readiness_reason_cost_assumption_missing: "Нет заявления о принятии расходов",
+  lead_readiness_reason_cost_assumption_outdated: "Заявление о принятии расходов на другого плательщика",
+  lead_readiness_reason_cost_assumption_unsigned: "Заявление о принятии расходов не подписано",
   lead_section_lifecycle: "Жизненный цикл лида",
   lead_lifecycle_description:
     "Последовательная история квалификации, обработки неуспешного лида и конверсии.",
@@ -1708,6 +1732,18 @@ export const operationsDe: OperationsTranslations = {
   lead_readiness_reason_cost_calculation_work_types_missing:
     "Medizinische Leistungsarten für die vorläufige Kostenkalkulation fehlen",
   lead_readiness_reason_prepayment_incomplete: "Erforderliche Vorauszahlung ist nicht vollständig",
+  lead_readiness_check_risk_assessment_released: "Risikobewertung entschieden",
+  lead_readiness_check_payer_declaration_complete: "Angaben zum Zahler vollständig",
+  lead_readiness_check_cost_assumption_signed: "Kostenübernahmeerklärung vom Zahler unterschrieben",
+  lead_readiness_reason_risk_review_required: "Entscheidung zur Risikobewertung nötig",
+  lead_readiness_reason_payer_declaration_missing: "Angaben zum Zahler fehlen",
+  lead_readiness_reason_payer_beneficial_owner_missing: "Wirtschaftlich Berechtigter nicht angegeben",
+  lead_readiness_reason_payer_source_of_funds_missing: "Herkunft der Mittel fehlt",
+  lead_readiness_reason_payer_identity_incomplete: "Angaben zum Zahler unvollständig",
+  lead_readiness_reason_payer_not_informed: "Zahler nicht über die Datenverarbeitung informiert",
+  lead_readiness_reason_cost_assumption_missing: "Kostenübernahmeerklärung fehlt",
+  lead_readiness_reason_cost_assumption_outdated: "Kostenübernahmeerklärung nennt einen anderen Zahler",
+  lead_readiness_reason_cost_assumption_unsigned: "Kostenübernahmeerklärung nicht unterschrieben",
   lead_section_lifecycle: "Lead-Lebenszyklus",
   lead_lifecycle_description:
     "Sequenzielle Historie für Qualifikation, Bearbeitung nicht erfolgreicher Leads und Konvertierung.",

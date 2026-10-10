@@ -3233,6 +3233,54 @@ async fn load_gwg_identification_sheet(
         sheet.zip = payer.zip.clone();
         sheet.city = payer.city.clone();
         sheet.country = payer.country.clone();
+        // The identity document the payer stated and uploaded on the own link
+        // (QA 2026-10-10: the sheet showed "—" although the payer had sent it).
+        let payer_identity = sqlx::query(
+            r#"SELECT s.birth_country, s.id_document_type, s.id_document_number,
+                      s.id_issuing_authority, s.id_issuing_country, s.id_issued_on,
+                      s.id_valid_until,
+                      EXISTS (
+                          SELECT 1 FROM documents d
+                          WHERE d.lead_id = s.lead_id
+                            AND d.file_deleted_at IS NULL
+                            AND d.status <> 'archived'
+                            AND d.art = 'payer_identity'
+                      ) AS identity_on_file
+               FROM lead_payer_statements s
+               WHERE s.lead_id = $1 AND s.submitted_at IS NOT NULL"#,
+        )
+        .bind(lead_id)
+        .fetch_optional(&state.db)
+        .await
+        .map_err(|error| failed(error, "payer statement identity"))?;
+        if let Some(statement) = payer_identity {
+            let text = |column: &str| {
+                statement
+                    .try_get::<Option<String>, _>(column)
+                    .ok()
+                    .flatten()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+            };
+            let date = |column: &str| {
+                statement
+                    .try_get::<Option<NaiveDate>, _>(column)
+                    .ok()
+                    .flatten()
+            };
+            if sheet.birth_country.is_none() {
+                sheet.birth_country = text("birth_country");
+            }
+            sheet.identity_document_type = text("id_document_type");
+            sheet.identity_document_number = text("id_document_number");
+            sheet.identity_document_authority = text("id_issuing_authority");
+            sheet.identity_document_country = text("id_issuing_country");
+            sheet.identity_document_issued_on = date("id_issued_on");
+            sheet.identity_document_valid_until = date("id_valid_until");
+            sheet.identity_document_on_file = statement
+                .try_get::<bool, _>("identity_on_file")
+                .unwrap_or(false);
+        }
         risk_countries.extend(payer.country.clone());
         risk_countries.extend(payer.citizenships.iter().cloned());
     } else {
@@ -21019,9 +21067,14 @@ fn build_gwg_identification_pdf(
     legal_meta_grid(&mut layout, &meta);
 
     admin_heading(&mut layout, "1. Identifizierung des Vertragspartners");
+    // "Das Dokument ist gültig" needs a known, not expired validity date, not
+    // only an uploaded scan (QA 2026-10-10).
+    let identity_document_valid = sheet
+        .identity_document_valid_until
+        .is_some_and(|valid_until| valid_until >= crate::app_time::today());
     aml_checkbox_line(
         &mut layout,
-        sheet.identity_document_on_file,
+        sheet.identity_document_on_file && identity_document_valid,
         "Die erforderliche Kopie/Fotografie bzw. der Scan des Ausweisdokuments des Vertragspartners wurde erstellt und ist beigefügt; das Dokument ist gültig.",
     );
     aml_labeled_value(

@@ -599,7 +599,8 @@ function amlEnhancedCheckHints({
   if (check?.reasons.includes(SANCTIONS_REVIEW_PENDING)) {
     hints.push(enhancedCheckReasonsText([SANCTIONS_REVIEW_PENDING], tx));
   }
-  if (highRiskCountries.length > 0) {
+  // "Not required" would contradict a required check (level 2 and more, QA 2026-10-10).
+  if (highRiskCountries.length > 0 && !check?.required) {
     hints.push(highRiskCountryHint(highRiskCountries.map((code) => countryLabel(code, lang)).join(", "), tx));
   }
   if (pep) hints.push(pepEnhancedCheckHint(tx));

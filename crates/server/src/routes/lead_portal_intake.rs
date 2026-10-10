@@ -2199,7 +2199,9 @@ where
 /// `changed_since_submit` of the lead `l`: the patient changed the data or
 /// the documents after sending and has not sent again — only then "send
 /// again" makes sense. The cabinet's request and the staff intake (QA
-/// 2026-10-06, A X2) read the same expression.
+/// 2026-10-06, A X2) read the same expression. Sending the answers of the
+/// follow-up blocks counts as sending too (QA 2026-10-10): what the lead
+/// answered there was sent with them.
 const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND (
     EXISTS (
         SELECT 1
@@ -2207,15 +2209,20 @@ const CHANGED_SINCE_SUBMIT_SQL: &str = r#"l.portal_submitted_at IS NOT NULL AND 
             CASE WHEN jsonb_typeof(l.portal_field_updates) = 'object'
                  THEN l.portal_field_updates ELSE '{}'::jsonb END
         ) AS field(name, entry)
-        WHERE (field.entry->>'at')::timestamptz > l.portal_submitted_at
+        WHERE (field.entry->>'at')::timestamptz > GREATEST(
+            l.portal_submitted_at,
+            (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
+        )
     )
     OR EXISTS (
         SELECT 1 FROM lead_portal_uploads pu
         WHERE pu.lead_id = l.id
           -- The payer's files are not part of the request.
           AND pu.kind NOT IN ('payer_identity', 'payer_funds_proof')
-          AND (pu.created_at > l.portal_submitted_at
-               OR pu.withdrawn_at > l.portal_submitted_at)
+          AND GREATEST(pu.created_at, pu.withdrawn_at) > GREATEST(
+            l.portal_submitted_at,
+            (SELECT ra.follow_up_answered_at FROM lead_risk_assessments ra WHERE ra.lead_id = l.id)
+          )
     )
 )"#;
 

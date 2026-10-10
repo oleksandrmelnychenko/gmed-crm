@@ -434,14 +434,15 @@ describe("LeadGwgStatements: who acts for the lead", () => {
     expect(html).not.toContain("есть доступ в кабинет");
   });
 
-  it("keeps an adult who answered nothing about it to the two open questions", () => {
+  it("keeps an adult who answered nothing to the open question", () => {
     const html = render(
       portalState({
         representation: { has_representative: null, under_guardianship: null, custody: null, custody_stated: false, representatives: [] },
       }),
     );
     expect(statement(html, "lead-gwg-has-representative")).toContain("Не отвечено");
-    expect(statement(html, "lead-gwg-under-guardianship")).toContain("Не отвечено");
+    // The guardianship question is switched off (owner 2026-10-09): no "not answered" row.
+    expect(html).not.toContain("lead-gwg-under-guardianship");
     expect(html).not.toContain("lead-gwg-representative-");
   });
 
