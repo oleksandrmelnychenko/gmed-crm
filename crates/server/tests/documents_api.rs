@@ -4579,16 +4579,20 @@ async fn required_consent_form_counts_only_a_signed_consent() {
     let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
     assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
 
-    // Signed, the consent fulfils the rule.
-    let (status, signed) = json_request(
+    // Signed on paper (the scan is the proof, owner decision 2026-10-11),
+    // the consent fulfils the rule.
+    let (status, signed) = multipart_upload(
         &app,
-        "POST",
-        &format!("/api/v1/documents/{consent_id}/mark-signed"),
+        &format!("/api/v1/documents/{consent_id}/paper-signature"),
         &admin_bearer,
-        Some(json!({ "compliance_kind": "dsgvo" })),
+        &[],
+        "signed-consent.pdf",
+        "application/pdf",
+        b"%PDF-1.4 signed consent scan",
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{signed}");
+    let signed_id = signed["document_id"].as_str().unwrap().to_string();
     let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
     assert!(rule_fulfilled(&alerts, "consent_form"), "{alerts}");
     let consent_rule = alerts["required_documents"]
@@ -4597,10 +4601,7 @@ async fn required_consent_form_counts_only_a_signed_consent() {
         .iter()
         .find(|rule| rule["key"] == "consent_form")
         .unwrap();
-    assert_eq!(
-        consent_rule["matching_documents"][0]["id"],
-        consent_id.to_string()
-    );
+    assert_eq!(consent_rule["matching_documents"][0]["id"], signed_id);
     assert_eq!(alerts["missing_count"], 1, "{alerts}");
 }
 
