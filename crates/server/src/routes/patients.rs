@@ -10683,6 +10683,10 @@ async fn assign_patient(
                 "You were assigned to patient {} ({}).",
                 patient_context.patient_name, patient_context.patient_code
             ),
+            json!({
+                "patient_name": patient_context.patient_name,
+                "patient_code": patient_context.patient_code,
+            }),
             patient_uuid,
         )
         .await?;
@@ -10942,17 +10946,20 @@ async fn load_patient_assignment_notification_context(
     })
 }
 
+/// `params` carries the facts the UI words the notice from in its language;
+/// `title`/`body` are the English fallback.
 async fn insert_patient_assignment_notification(
     state: &AppState,
     user_id: Uuid,
     kind: &str,
     title: String,
     body: String,
+    params: Value,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     let notification_id = sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           VALUES ($1, $2, $3, $4, 'patient', $5)
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           VALUES ($1, $2, $3, $4, 'patient', $5, $6)
            RETURNING id"#,
     )
     .bind(user_id)
@@ -10960,6 +10967,7 @@ async fn insert_patient_assignment_notification(
     .bind(title)
     .bind(body)
     .bind(patient_id)
+    .bind(params)
     .fetch_one(&state.db)
     .await
     .map_err(|e| {
@@ -12034,6 +12042,10 @@ async fn revoke_assignment(
                     "Your access to patient {} ({}) was revoked.",
                     patient_context.patient_name, patient_context.patient_code
                 ),
+                json!({
+                    "patient_name": patient_context.patient_name,
+                    "patient_code": patient_context.patient_code,
+                }),
                 patient_id,
             )
             .await

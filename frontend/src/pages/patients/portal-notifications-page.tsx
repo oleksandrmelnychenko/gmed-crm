@@ -3,6 +3,7 @@ import { Bell, CheckCheck, ExternalLink, LoaderCircle, RefreshCw } from "lucide-
 
 import {
   fetchUserNotifications,
+  localizedNotificationCopy,
   markAllNotificationsRead,
   markNotificationRead,
   notificationHrefForRole,
@@ -256,6 +257,8 @@ export function PatientNotificationsPage() {
           <div className="grid gap-3 xl:grid-cols-2">
             {visibleNotifications.map((item) => {
               const href = notificationHrefForRole(item, "patient");
+              // Server notifications are worded in the portal language.
+              const text = localizedNotificationCopy(item, portalLang);
               return (
                 <article
                   key={item.id}
@@ -273,7 +276,7 @@ export function PatientNotificationsPage() {
                     </span>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                        <p className="text-sm font-semibold text-foreground">{text.title}</p>
                         <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                           {notificationCategory(item, portalLang)}
                         </span>
@@ -284,7 +287,7 @@ export function PatientNotificationsPage() {
                           {item.is_read ? copy.read : copy.new}
                         </span>
                       </div>
-                      {item.body ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{item.body}</p> : null}
+                      {text.body ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{text.body}</p> : null}
                       <p className="mt-2 text-xs text-muted-foreground">{formatPortalDateTime(item.created_at)}</p>
                     </div>
                   </div>

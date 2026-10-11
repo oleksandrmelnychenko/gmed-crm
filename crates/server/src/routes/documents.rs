@@ -30365,10 +30365,16 @@ async fn upload_my_document(
         )
     };
 
+    // The staff UI words the notice in its language from these facts.
+    let notification_params = json!({
+        "patient_label": patient_label,
+        "document_name": auto_name.trim(),
+        "payment_proof": preset.kind == "payment_proof",
+    });
     let notification_rows = if preset.kind == "payment_proof" {
         sqlx::query(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT DISTINCT target.user_id, 'patient_upload', $2, $3, 'document', $1
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT DISTINCT target.user_id, 'patient_upload', $2, $3, 'document', $1, $5
                FROM (
                     SELECT pa.user_id
                     FROM patient_assignments pa
@@ -30389,12 +30395,13 @@ async fn upload_my_document(
         .bind("Patient payment proof uploaded")
         .bind(notification_body)
         .bind(patient_id)
+        .bind(notification_params)
         .fetch_all(&state.db)
         .await
     } else {
         sqlx::query(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT pa.user_id, 'patient_upload', $2, $3, 'document', $1
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT pa.user_id, 'patient_upload', $2, $3, 'document', $1, $5
                FROM patient_assignments pa
                JOIN users u ON u.id = pa.user_id
                WHERE pa.patient_id = $4
@@ -30407,6 +30414,7 @@ async fn upload_my_document(
         .bind("Patient portal upload received")
         .bind(notification_body)
         .bind(patient_id)
+        .bind(notification_params)
         .fetch_all(&state.db)
         .await
     };
@@ -31187,8 +31195,8 @@ async fn upload_document_with_mode(
         .unwrap_or_else(|| document_patient_id.to_string());
 
         if let Ok(notification_rows) = sqlx::query(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT pa.user_id, 'interpreter_upload', $2, $3, 'document', $1
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT pa.user_id, 'interpreter_upload', $2, $3, 'document', $1, $5
                FROM patient_assignments pa
                JOIN users u ON u.id = pa.user_id
                WHERE pa.patient_id = $4
@@ -31204,6 +31212,10 @@ async fn upload_document_with_mode(
             auto_name.trim()
         ))
         .bind(document_patient_id)
+        .bind(json!({
+            "patient_label": patient_label,
+            "document_name": auto_name.trim(),
+        }))
         .fetch_all(&state.db)
         .await
         {
@@ -32465,14 +32477,15 @@ async fn release_document_to_patient_portal_internal(
         created_share_ids.push(share_id);
 
         if let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               VALUES ($1, 'document_release', $2, $3, 'document', $4)
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               VALUES ($1, 'document_release', $2, $3, 'document', $4, $5)
                RETURNING id"#,
         )
         .bind(recipient_id)
         .bind(format!("New document released: {auto_name}"))
         .bind("A new document is available in your patient portal.")
         .bind(id)
+        .bind(json!({ "document_name": auto_name }))
         .fetch_one(&state.db)
         .await
         {

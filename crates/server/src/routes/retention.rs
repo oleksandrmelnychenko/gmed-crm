@@ -109,8 +109,8 @@ pub async fn flag_expired_patient_files(
 
     if let Some(first) = flagged.first() {
         sqlx::query(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               SELECT u.id, 'privacy_request', $1, $2, 'patient', $3
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT u.id, 'privacy_request', $1, $2, 'patient', $3, $4
                FROM users u
                WHERE u.role IN ('ceo', 'it_admin') AND u.is_active = true"#,
         )
@@ -122,6 +122,11 @@ pub async fn flag_expired_patient_files(
             "Files inactive for more than {retention_days} days were added to the DSGVO queue. Review holds, then approve and execute."
         ))
         .bind(first)
+        .bind(json!({
+            "origin": "retention_sweep",
+            "count": flagged.len(),
+            "retention_days": retention_days,
+        }))
         .execute(&state.db)
         .await?;
     }

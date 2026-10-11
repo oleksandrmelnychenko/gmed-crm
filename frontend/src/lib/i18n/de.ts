@@ -1,5 +1,6 @@
 import type { TranslationShape as Translations } from "./translations-shape";
 import { adminSystemDe } from "./catalogs/admin-system";
+import { auditActivityUiTextDe } from "./catalogs/audit-activity";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
 import { extractedUiDe } from "./catalogs/extracted-ui";
@@ -14,7 +15,8 @@ import { sharedCoreDe } from "./catalogs/shared";
 import { staffAccessDe } from "./catalogs/staff-access";
 
 export const de = {
-  uiText: extractedUiDe,
+  // Audit labels first: a label already in the extracted catalog wins.
+  uiText: { ...auditActivityUiTextDe, ...extractedUiDe },
   staffAccess: staffAccessDe,
   app_name: "GMED CONSOLE",
   app_subtitle: "Medizintourismus-Management",
@@ -781,6 +783,7 @@ export const de = {
   settings_logout_all_confirm: "Alle Benutzer werden abgemeldet!",
   settings_no_sessions: "Keine aktiven Sitzungen.",
   settings_last_active: "Letzte Aktivität",
+  settings_parameter: "Parameter",
   settings_updated: "Gespeichert",
   settings_no_changes: "Keine Änderungen zum Speichern.",
 
@@ -823,6 +826,7 @@ export const de = {
   activity_metric_users_24h: "Aktive Benutzer",
   activity_metric_changes_24h: "Datenänderungen",
   activity_metric_security_24h: "Sicherheitsereignisse",
+  activity_metric_window_24h: "letzte 24 Std.",
   activity_retention: "Automatische Bereinigung",
   activity_retention_technical: "technisch",
   activity_retention_meaningful: "relevant",
@@ -873,12 +877,12 @@ export const de = {
   security_maintenance_off: "Deaktivieren",
   security_audit_analytics: "Audit-Analytik",
   security_audit_recent: "Aktuelle verdächtige Ereignisse",
-  security_audit_top_readers: "Auffällige Leser 24h",
-  security_audit_failed_logins: "Fehlgeschlagene Logins 24h",
-  security_audit_blocked_logins: "Blockierte Logins 24h",
-  security_audit_token_theft: "Token-Diebstahl 30d",
-  security_audit_executive_access: "Executive-Sensitivzugriffe 7d",
-  security_audit_off_hours: "Zugriffe außerhalb der Zeiten 7d",
+  security_audit_top_readers: "Auffällige Leser (24 Std.)",
+  security_audit_failed_logins: "Fehlgeschlagene Anmeldungen (24 Std.)",
+  security_audit_blocked_logins: "Blockierte Anmeldungen (24 Std.)",
+  security_audit_token_theft: "Sitzungsdiebstahl (30 Tage)",
+  security_audit_executive_access: "Zugriffe der Geschäftsführung auf Vertrauliches (7 Tage)",
+  security_audit_off_hours: "Zugriffe außerhalb der Arbeitszeit (7 Tage)",
   security_audit_hint:
     "Fehlgeschlagene Anmeldungen, sensible Chef-Zugriffe und Lesezugriffe außerhalb der Geschäftszeiten aus dem append-only Audit-Trail.",
   security_col_reason: "Grund",
@@ -890,6 +894,15 @@ export const de = {
   security_no_suspicious: "Keine verdächtigen Audit-Muster erkannt.",
   security_no_outlier_readers:
     "Keine auffälligen Leser in den letzten 24 Stunden.",
+  security_maintenance_default_msg: "Wartungsarbeiten laufen",
+  security_audit_recent_scope: "die letzten Ereignisse (bis zu 25)",
+  security_login_history_scope: "die letzten Anmeldungen (bis zu 100)",
+  security_reason_token_theft: "Sitzungsdiebstahl erkannt",
+  security_reason_login_blocked: "Anmeldung blockiert",
+  security_reason_login_failure: "Fehlgeschlagene Anmeldung",
+  security_reason_revoked_session_refresh: "Versuch, eine widerrufene Sitzung fortzusetzen",
+  security_reason_executive_access: "Geschäftsführung hat vertrauliche Kommunikation geöffnet",
+  security_reason_off_hours_read: "Zugriff auf sensible Daten außerhalb der Arbeitszeit",
 
   health_title: "Systemstatus",
   health_subtitle: "Überwachung der Datenbank, Benutzer und Sitzungen",

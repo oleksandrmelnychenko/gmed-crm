@@ -253,7 +253,7 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                     <Badge className="bg-red-500/15 text-red-700">{l("incidents_deadline_missed")}</Badge>
                   ) : (
                     <Badge className="bg-amber-500/15 text-amber-800">
-                      {l("incidents_deadline_left")}: {left} h
+                      {l("incidents_deadline_left")}: {left} {l("incidents_hours_unit")}
                     </Badge>
                   )}
                 </button>

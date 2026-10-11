@@ -43,8 +43,23 @@ export function matchesNotificationSearch(
   return haystack.includes(search);
 }
 
+/**
+ * The editable text of a setting. The API sends the stored JSON value as
+ * text: a string arrives quoted and escaped (`"Straße 56\n81735 München"`),
+ * so it is decoded instead of only stripping the quotes (QA E-07: a literal
+ * "\n" was shown and would have been saved back).
+ */
 export function normalizeAdminSettingValue(value: string | undefined) {
-  return (value ?? "").replace(/^"|"$/g, "");
+  const raw = value ?? "";
+  if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+    try {
+      const decoded: unknown = JSON.parse(raw);
+      if (typeof decoded === "string") return decoded;
+    } catch {
+      // Not valid JSON: fall back to stripping the quotes.
+    }
+  }
+  return raw.replace(/^"|"$/g, "");
 }
 
 export function summarizeAdminSettingValue(fieldKey: string, value: string): string {
@@ -56,8 +71,10 @@ export function summarizeAdminSettingValue(fieldKey: string, value: string): str
     }, 0);
     return count > 0 ? `${count}` : "—";
   }
-  if (normalized.length > 56) return `${normalized.slice(0, 56)}…`;
-  return normalized;
+  // A multi-line value (an address) reads as one line in the table.
+  const oneLine = normalized.replace(/\s*\r?\n\s*/g, ", ");
+  if (oneLine.length > 56) return `${oneLine.slice(0, 56)}…`;
+  return oneLine;
 }
 
 export function shortAdminUserAgent(ua: string | null, max = 56): string {

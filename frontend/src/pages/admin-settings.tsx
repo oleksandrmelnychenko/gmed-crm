@@ -709,7 +709,7 @@ function useAdminSettingsPageContent() {
       },
       {
         id: "label",
-        label: tr.common_name ?? "Parameter",
+        label: t.settings_parameter,
         accessor: (row) => row.label,
         filterType: "text",
         sortable: true,

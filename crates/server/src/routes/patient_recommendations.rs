@@ -9,7 +9,7 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -298,6 +298,7 @@ async fn create_patient_recommendation(
             "recommendation",
             "New recommendation",
             &title,
+            &json!({ "title": title }),
         )
         .await;
     }
@@ -729,6 +730,7 @@ async fn create_my_recommendation_decision(
         "recommendation_decision",
         "Patient decision on recommendation",
         &format!("Patient selected {decision}."),
+        &json!({ "decision": decision }),
     )
     .await;
 
@@ -892,6 +894,7 @@ async fn create_my_recommendation_appointment_request(
         "recommendation_appointment_request",
         "Patient requested appointment",
         &format!("Appointment requested for recommendation: {title}"),
+        &json!({ "title": title }),
     )
     .await;
 
@@ -1413,6 +1416,8 @@ fn parse_due_at(value: Option<String>) -> Result<Option<DateTime<Utc>>, axum::re
     ))
 }
 
+/// The recommendation notices store their facts in `params` (the UI words
+/// them in the viewer's language); `title`/`body` are the English fallback.
 async fn notify_patient_users(
     state: &AppState,
     patient_id: Uuid,
@@ -1420,10 +1425,11 @@ async fn notify_patient_users(
     kind: &str,
     title: &str,
     body: &str,
+    params: &Value,
 ) {
     if let Ok(rows) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, $2, $3, $4, 'recommendation', $5
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT pa.user_id, $2, $3, $4, 'recommendation', $5, $6
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $1
@@ -1437,6 +1443,7 @@ async fn notify_patient_users(
     .bind(title)
     .bind(body)
     .bind(recommendation_id)
+    .bind(params.clone())
     .fetch_all(&state.db)
     .await
     {
@@ -1451,10 +1458,11 @@ async fn notify_assigned_staff(
     kind: &str,
     title: &str,
     body: &str,
+    params: &Value,
 ) {
     if let Ok(rows) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, $2, $3, $4, 'recommendation', $5
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT pa.user_id, $2, $3, $4, 'recommendation', $5, $6
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $1
@@ -1468,6 +1476,7 @@ async fn notify_assigned_staff(
     .bind(title)
     .bind(body)
     .bind(recommendation_id)
+    .bind(params.clone())
     .fetch_all(&state.db)
     .await
     {
@@ -1526,10 +1535,11 @@ async fn notify_staff_user(
     kind: &str,
     title: &str,
     body: &str,
+    params: &Value,
 ) {
     if let Ok(rows) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT u.id, $2, $3, $4, 'recommendation', $5
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, $2, $3, $4, 'recommendation', $5, $6
            FROM users u
            WHERE u.id = $1
              AND u.is_active = true
@@ -1541,6 +1551,7 @@ async fn notify_staff_user(
     .bind(title)
     .bind(body)
     .bind(recommendation_id)
+    .bind(params.clone())
     .fetch_all(&state.db)
     .await
     {
@@ -1611,6 +1622,7 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
 
         let reminder_title = "Erinnerung an Empfehlung";
         let reminder_body = format!("Erinnerung: {title}");
+        let reminder_params = json!({ "title": title });
 
         // (a) Patient side — the patient's linked portal users, only for a
         //     recommendation the portal shows.
@@ -1622,6 +1634,7 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
                 "recommendation_reminder",
                 reminder_title,
                 &reminder_body,
+                &reminder_params,
             )
             .await;
         }
@@ -1638,6 +1651,7 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
                 "recommendation_reminder",
                 reminder_title,
                 &reminder_body,
+                &reminder_params,
             )
             .await;
         }
@@ -1648,6 +1662,7 @@ async fn run_recommendation_reminder_scheduler_once(state: &AppState) -> i64 {
             "recommendation_reminder",
             reminder_title,
             &reminder_body,
+            &reminder_params,
         )
         .await;
         delivered += 1;

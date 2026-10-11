@@ -3887,17 +3887,27 @@ async fn revoke_consent(
     if let Err(error) = tx.commit().await {
         return internal(error, "commit consent revocation");
     }
-    let (title, body) = match purpose {
+    let (title, body, consent) = match purpose {
         ConsentPurpose::HealthData => (
             "Patient withdrew the consent to process health data",
             "The patient withdrew the consent in the portal (health data). Decide on the documents already uploaded.",
+            "health_data",
         ),
         ConsentPurpose::InquiryProcessing => (
             "Patient withdrew the consent to process the request data",
             "The patient withdrew the consent in the portal (request data). Decide how to continue with the request.",
+            "inquiry_processing",
         ),
     };
-    notify_lead_staff(&state, lead_id, "lead_portal_consent_revoked", title, body).await;
+    notify_lead_staff_with(
+        &state,
+        lead_id,
+        "lead_portal_consent_revoked",
+        title,
+        body,
+        Some(json!({ "consent": consent })),
+    )
+    .await;
     crate::realtime::publish_lead_event(
         &state,
         Some(auth.user_id),
@@ -4805,7 +4815,7 @@ async fn submit_my_lead_request(
                 false
             }
         };
-    notify_lead_staff(
+    notify_lead_staff_with(
         &state,
         lead_id,
         "lead_portal_submitted",
@@ -4821,6 +4831,12 @@ async fn submit_my_lead_request(
                 ""
             }
         ),
+        Some(json!({
+            "filled": data.filled_count(),
+            "total": PROGRESS_FIELDS.len(),
+            "documents": documents,
+            "payer_link_ready": payer_link_ready,
+        })),
     )
     .await;
     crate::realtime::publish_lead_event(
@@ -4846,6 +4862,19 @@ pub(crate) async fn notify_lead_staff(
     kind: &str,
     title: &str,
     body: &str,
+) {
+    notify_lead_staff_with(state, lead_id, kind, title, body, None).await;
+}
+
+/// [`notify_lead_staff`] with the facts the UI words the notice from
+/// (`user_notifications.params`); `title`/`body` stay the English fallback.
+pub(crate) async fn notify_lead_staff_with(
+    state: &AppState,
+    lead_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+    params: Option<Value>,
 ) {
     let recipients: Vec<Uuid> = match sqlx::query_scalar(
         r#"WITH owner AS (
@@ -4876,8 +4905,8 @@ pub(crate) async fn notify_lead_staff(
     };
     for recipient in recipients {
         let inserted: Result<Uuid, _> = sqlx::query_scalar(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               VALUES ($1, $2, $3, $4, 'lead', $5)
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               VALUES ($1, $2, $3, $4, 'lead', $5, $6)
                RETURNING id"#,
         )
         .bind(recipient)
@@ -4885,6 +4914,7 @@ pub(crate) async fn notify_lead_staff(
         .bind(title)
         .bind(body)
         .bind(lead_id)
+        .bind(params.clone())
         .fetch_one(&state.db)
         .await;
         match inserted {

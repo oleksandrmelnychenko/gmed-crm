@@ -36,7 +36,13 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
+import {
+  formatEnumLabelFromKeys,
+  useLang,
+  type TranslationKey,
+  type Translations,
+} from "@/lib/i18n";
+import { actionLabel, entityTypeLabel } from "@/pages/admin-activity";
 import {
   formatAdminDateTime,
   normalizeAdminSettingValue,
@@ -97,6 +103,8 @@ interface AuditAnalyticsEvent {
   user_role: string | null;
   action: string;
   entity_type: string;
+  /** Stable code of `reason`; older servers send only the English text. */
+  reason_code?: string | null;
   reason: string;
   route: string | null;
   status: number | null;
@@ -201,33 +209,42 @@ const ROLE_LABEL_KEYS = {
   patient: "role_patient",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-const SECURITY_ACTION_LABEL_KEYS = {
-  login: "activity_action_login",
-  create_lead: "activity_action_create_lead",
-  create_patient: "activity_action_create_patient",
-  convert_lead: "activity_action_convert_lead",
-  qualify_lead: "activity_action_qualify_lead",
-  update_setting: "activity_action_update_setting",
-  revoke_all_sessions: "activity_action_revoke_all_sessions",
-  admin_force_logout_user: "activity_action_admin_force_logout_user",
-  revoke_all_users_sessions: "activity_action_revoke_all_users_sessions",
-  token_theft_detected: "activity_action_token_theft_detected",
+const SECURITY_REASON_LABEL_KEYS = {
+  token_theft: "security_reason_token_theft",
+  login_blocked: "security_reason_login_blocked",
+  login_failure: "security_reason_login_failure",
+  revoked_session_refresh: "security_reason_revoked_session_refresh",
+  executive_access: "security_reason_executive_access",
+  off_hours_read: "security_reason_off_hours_read",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-const SECURITY_ENTITY_LABEL_KEYS = {
-  access_policy: "activity_entity_access_policy",
-  appointment: "activity_entity_appointment",
-  case: "activity_entity_case",
-  document: "activity_entity_document",
-  invoice: "activity_entity_invoice",
-  order: "activity_entity_order",
-  patient: "activity_entity_patient",
-  privacy_request: "activity_entity_privacy_request",
-  security: "activity_entity_security",
-  session: "activity_entity_session",
-  system_setting: "activity_entity_system_setting",
-  user: "activity_entity_user",
-} as const satisfies Partial<Record<string, TranslationKey>>;
+/** English reasons of servers that do not send `reason_code` yet. */
+const LEGACY_SECURITY_REASON_CODES: Record<string, keyof typeof SECURITY_REASON_LABEL_KEYS> = {
+  "Refresh token theft detected": "token_theft",
+  "Blocked login attempt": "login_blocked",
+  "Failed login attempt": "login_failure",
+  "Refresh attempted on revoked session family": "revoked_session_refresh",
+  "Executive access to sensitive communication surface": "executive_access",
+  "Off-hours sensitive read": "off_hours_read",
+};
+
+/** The seeded default of `maintenance_message`, shown in the UI language. */
+const DEFAULT_MAINTENANCE_MESSAGE = "System maintenance in progress";
+
+export function securityReasonLabel(
+  event: Pick<AuditAnalyticsEvent, "reason" | "reason_code">,
+  t: Translations,
+): string {
+  const code = event.reason_code ?? LEGACY_SECURITY_REASON_CODES[event.reason];
+  const key = code ? SECURITY_REASON_LABEL_KEYS[code as keyof typeof SECURITY_REASON_LABEL_KEYS] : undefined;
+  return key ? t[key] : event.reason;
+}
+
+/** The custom maintenance message, or "" while the seeded default is set. */
+export function customMaintenanceMessage(message: string): string {
+  const trimmed = message.trim();
+  return trimmed === DEFAULT_MAINTENANCE_MESSAGE ? "" : trimmed;
+}
 
 function useAdminSecurityPageContent() {
   const { t, lang } = useLang();
@@ -337,7 +354,9 @@ function useAdminSecurityPageContent() {
         (row) => row.key === "maintenance_message",
       );
       setMaintEnabled(normalizeAdminSettingValue(maintenanceMode?.value) === "true");
-      setMaintMsg(normalizeAdminSettingValue(maintenanceMessage?.value));
+      setMaintMsg(
+        customMaintenanceMessage(normalizeAdminSettingValue(maintenanceMessage?.value)),
+      );
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : t.common_error);
     } finally {
@@ -362,8 +381,6 @@ function useAdminSecurityPageContent() {
   const metrics = useMemo(
     () => ({
       suspicious: auditAnalytics?.recent_suspicious_events.length ?? 0,
-      blocked: auditAnalytics?.summary.blocked_logins_24h ?? 0,
-      theft: auditAnalytics?.summary.token_theft_30d ?? 0,
     }),
     [auditAnalytics],
   );
@@ -475,13 +492,11 @@ function useAdminSecurityPageContent() {
     [t],
   );
   const securityActionLabel = useCallback(
-    (value: string | null | undefined) =>
-      formatEnumLabelFromKeys(value, SECURITY_ACTION_LABEL_KEYS, t),
+    (value: string | null | undefined) => actionLabel(value ?? "", t),
     [t],
   );
   const securityEntityLabel = useCallback(
-    (value: string | null | undefined) =>
-      formatEnumLabelFromKeys(value, SECURITY_ENTITY_LABEL_KEYS, t),
+    (value: string | null | undefined) => entityTypeLabel(value ?? null, t),
     [t],
   );
 
@@ -518,14 +533,14 @@ function useAdminSecurityPageContent() {
     {
       id: "reason",
       label: t.security_col_reason,
-      accessor: (event) => event.reason,
+      accessor: (event) => securityReasonLabel(event, t),
       sortable: true,
       width: 260,
       render: (event) => (
         <div className="min-w-0">
-          <div className="truncate text-xs text-foreground">{event.reason}</div>
-          <div className="text-xs text-foreground">
-            {securityEntityLabel(event.entity_type)} - {securityActionLabel(event.action)}
+          <div className="truncate text-xs text-foreground">{securityReasonLabel(event, t)}</div>
+          <div className="text-xs text-muted-foreground">
+            {securityEntityLabel(event.entity_type)} · {securityActionLabel(event.action)}
           </div>
         </div>
       ),
@@ -556,12 +571,7 @@ function useAdminSecurityPageContent() {
     },
   ], [
     lang,
-    t.activity_time,
-    t.activity_user,
-    t.common_ip,
-    t.security_anonymous,
-    t.security_col_reason,
-    t.security_col_route,
+    t,
     roleLabel,
     securityActionLabel,
     securityEntityLabel,
@@ -802,7 +812,7 @@ function useAdminSecurityPageContent() {
                 tone={maintEnabled ? "rose" : "emerald"}
                 label={t.security_maintenance}
                 value={maintEnabled ? t.common_active : t.common_inactive}
-                description={maintMsg || t.security_subtitle}
+                description={maintMsg || t.security_maintenance_default_msg}
               />
               <AdminInlineMetric
                 icon={Waypoints}
@@ -811,19 +821,20 @@ function useAdminSecurityPageContent() {
                 value={ips.length}
                 description={t.common_registry}
               />
+              {/* Each counter is the row count of the list below it (QA E-06). */}
               <AdminInlineMetric
                 icon={ShieldX}
                 tone="amber"
-                label={t.security_audit_blocked_logins}
-                value={metrics.blocked}
-                description={t.security_audit_recent}
+                label={t.security_audit_recent}
+                value={metrics.suspicious}
+                description={t.security_audit_recent_scope}
               />
               <AdminInlineMetric
                 icon={Globe}
                 tone="slate"
                 label={t.security_login_history}
                 value={geo.length}
-                description={`${metrics.suspicious} ${t.security_audit_recent}`}
+                description={t.security_login_history_scope}
               />
             </div>
 
@@ -831,7 +842,7 @@ function useAdminSecurityPageContent() {
               <Banner tone="warning" withIcon>
                 <div className="space-y-1">
                   <div className="font-medium">{t.security_maintenance}</div>
-                  <div>{maintMsg || t.security_maintenance_hint}</div>
+                  <div>{maintMsg || t.security_maintenance_default_msg}</div>
                 </div>
               </Banner>
             ) : null}
@@ -864,7 +875,7 @@ function useAdminSecurityPageContent() {
                     {t.security_maintenance_msg}
                   </p>
                   <p className="mt-1 text-sm text-foreground">
-                    {maintMsg || "-"}
+                    {maintMsg || t.security_maintenance_default_msg}
                   </p>
                 </div>
               </div>
@@ -1096,6 +1107,7 @@ function useAdminSecurityPageContent() {
                 <textarea
                   id="maintenance-message"
                   rows={6}
+                  placeholder={t.security_maintenance_default_msg}
                   value={maintDraftMsg}
                   onChange={(event) => setMaintDraftMsg(event.target.value)}
                   className={textareaClass}

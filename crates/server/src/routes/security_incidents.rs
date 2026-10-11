@@ -246,10 +246,11 @@ async fn report_incident(
         }),
     ));
 
-    // The clock is already running: tell the people who have to decide.
+    // The clock is already running: tell the people who have to decide. The
+    // UI words the notice in its language from `params`.
     if let Err(e) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT u.id, 'security_incident', $1, $2, 'security_incident', $3
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, 'security_incident', $1, $2, 'security_incident', $3, $5
            FROM users u
            WHERE u.role IN ('ceo', 'it_admin') AND u.is_active = true AND u.id <> $4"#,
     )
@@ -260,6 +261,11 @@ async fn report_incident(
     ))
     .bind(incident_id)
     .bind(auth.user_id)
+    .bind(json!({
+        "reference": reference,
+        "title": title,
+        "authority_deadline": (became_aware_at + Duration::hours(AUTHORITY_DEADLINE_HOURS)).to_rfc3339(),
+    }))
     .execute(&state.db)
     .await
     {

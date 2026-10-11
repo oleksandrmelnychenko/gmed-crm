@@ -327,6 +327,22 @@ fn parse_activity_date_to_exclusive(
     Ok(Some(crate::app_time::from_local(naive)))
 }
 
+/// The audit rows the activity page counts as data changes (KPI
+/// "Datenänderungen 24 h", QA E-14): every meaningful row that writes. A row
+/// upgraded from an HTTP request keeps its method; a domain event
+/// (`update_lead`, `create_invoice`, ...) has none and counts unless it is a
+/// read, a view, an export, a download or a sign-in/session event. A SQL
+/// predicate over `action`, `entity_type` and `context` of `audit_log`.
+pub const ACTIVITY_DATA_CHANGE_FILTER: &str = r#"(
+    action NOT IN ('http_request', 'noop')
+    AND entity_type NOT IN ('auth', 'security', 'session', 'token_family')
+    AND CASE
+            WHEN context ? 'method'
+                THEN context->>'method' IN ('POST', 'PUT', 'PATCH', 'DELETE')
+            ELSE action !~ '^(read|view|download|export|preview|render|login|refresh|revoke_all|admin_force_logout|token_theft|sessions_expired|datev_read)(_|$)'
+        END
+)"#;
+
 async fn list_activity(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -490,7 +506,7 @@ async fn list_activity(
     .await
     {
         Ok(rows) => {
-            let summary = match sqlx::query(
+            let summary_sql = format!(
                 r#"SELECT
                        COUNT(*) FILTER (
                            WHERE created_at >= now() - interval '24 hours'
@@ -502,8 +518,7 @@ async fn list_activity(
                        )::BIGINT AS active_users_24h,
                        COUNT(*) FILTER (
                            WHERE created_at >= now() - interval '24 hours'
-                             AND action <> 'http_request'
-                             AND context->>'method' IN ('POST', 'PUT', 'PATCH', 'DELETE')
+                             AND {ACTIVITY_DATA_CHANGE_FILTER}
                        )::BIGINT AS changes_24h,
                        COUNT(*) FILTER (
                            WHERE created_at >= now() - interval '24 hours'
@@ -523,11 +538,9 @@ async fn list_activity(
                            WHERE created_at >= now() - interval '24 hours'
                              AND action = 'http_request'
                        )::BIGINT AS technical_24h
-                   FROM audit_log"#,
-            )
-            .fetch_one(&state.db)
-            .await
-            {
+                   FROM audit_log"#
+            );
+            let summary = match sqlx::query(&summary_sql).fetch_one(&state.db).await {
                 Ok(row) => serde_json::json!({
                     "activity_24h": row.try_get::<i64, _>("activity_24h").unwrap_or_default(),
                     "active_users_24h": row.try_get::<i64, _>("active_users_24h").unwrap_or_default(),

@@ -332,6 +332,30 @@ async fn audit_analytics_surfaces_summary_recent_events_and_top_readers() {
             .iter()
             .any(|item| item["reason"] == "Off-hours sensitive read")
     );
+    // The UI translates the stable reason code (QA E-06), not the English text.
+    for (action, code) in [
+        ("refresh_token_theft", "token_theft"),
+        ("login_failure", "login_failure"),
+        ("login_blocked", "login_blocked"),
+    ] {
+        assert!(
+            recent
+                .iter()
+                .filter(|item| item["action"] == action)
+                .all(|item| item["reason_code"] == code),
+            "{action} -> {code}"
+        );
+    }
+    assert!(
+        recent
+            .iter()
+            .any(|item| item["reason_code"] == "executive_access")
+    );
+    assert!(
+        recent
+            .iter()
+            .any(|item| item["reason_code"] == "off_hours_read")
+    );
 
     let top = body["top_sensitive_readers"]
         .as_array()
@@ -342,6 +366,53 @@ async fn audit_analytics_surfaces_summary_recent_events_and_top_readers() {
             .any(|item| item["user_id"] == patient_manager_id.to_string()
                 && item["event_count"] == 2)
     );
+}
+
+/// QA E-14: "Datenänderungen 24 h" counted only rows with an HTTP write
+/// method, so domain events (`update_lead`, `create_invoice`, ...) never
+/// counted. Reads, downloads, sign-ins and technical rows still do not.
+#[tokio::test]
+async fn activity_data_change_kpi_counts_domain_writes_but_not_reads() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let filter = gmed_server::routes::admin_settings::ACTIVITY_DATA_CHANGE_FILTER;
+    let rows = [
+        ("update_lead", "lead", json!({}), true),
+        ("create_invoice", "invoice", json!({}), true),
+        (
+            "security_incident_reported",
+            "security_incident",
+            json!({}),
+            true,
+        ),
+        (
+            "update_patient",
+            "patient",
+            json!({ "method": "PUT" }),
+            true,
+        ),
+        ("view_patient", "patient", json!({ "method": "GET" }), false),
+        ("view_patient", "patient", json!({}), false),
+        ("read_patient", "patient", json!({}), false),
+        ("download_document", "document", json!({}), false),
+        ("export_patient_clinical_pdf", "patient", json!({}), false),
+        ("login_success", "auth", json!({}), false),
+        ("revoke_all_sessions", "token_family", json!({}), false),
+        ("http_request", "http", json!({ "method": "POST" }), false),
+    ];
+    for (action, entity_type, context, expected) in rows {
+        let counted: bool = sqlx::query_scalar(&format!(
+            "SELECT {filter} FROM (SELECT $1::text AS action, $2::text AS entity_type, $3::jsonb AS context) AS audit_row"
+        ))
+        .bind(action)
+        .bind(entity_type)
+        .bind(context.clone())
+        .fetch_one(&app.suite.pool)
+        .await
+        .unwrap();
+        assert_eq!(counted, expected, "{action} {entity_type} {context}");
+    }
 }
 
 #[tokio::test]

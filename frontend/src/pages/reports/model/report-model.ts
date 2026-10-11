@@ -1,4 +1,5 @@
 import { formatAppDate } from "@/lib/app-time-zone";
+import type { Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
@@ -33,14 +34,23 @@ export function formatPercent(value?: number | null, emptyLabel = "-") {
   return `${value.toFixed(1)}%`;
 }
 
-export function formatHours(value?: number | null, emptyLabel = "-") {
-  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)} h`;
+function formatOneDecimal(value: number, lang: Lang) {
+  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
-export function formatDays(value?: number | null, emptyLabel = "-") {
+/** "3,4 ч" / "3,4 Std." (QA E-25: no English unit, decimal comma). */
+export function formatHours(value?: number | null, emptyLabel = "-", lang: Lang = "ru") {
   if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)} d`;
+  return `${formatOneDecimal(value, lang)} ${lang === "de" ? "Std." : "ч"}`;
+}
+
+/** "2,3 дн." / "2,3 Tage" (QA E-25: no English unit, decimal comma). */
+export function formatDays(value?: number | null, emptyLabel = "-", lang: Lang = "ru") {
+  if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
+  return `${formatOneDecimal(value, lang)} ${lang === "de" ? "Tage" : "дн."}`;
 }
 
 export function formatChange(value?: number | null, emptyLabel = "-") {

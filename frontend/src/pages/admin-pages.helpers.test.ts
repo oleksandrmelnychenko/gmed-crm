@@ -45,6 +45,15 @@ describe("admin pages helpers", () => {
     expect(normalizeAdminSettingValue(undefined)).toBe("");
   });
 
+  it("decodes escaped JSON strings instead of showing a literal \\n (QA E-07)", () => {
+    const stored = JSON.stringify("Albert-Schweitzer-Straße 56\n81735 München");
+    expect(normalizeAdminSettingValue(stored)).toBe("Albert-Schweitzer-Straße 56\n81735 München");
+    expect(normalizeAdminSettingValue('"Say \\"hi\\""')).toBe('Say "hi"');
+    expect(summarizeAdminSettingValue("agency_address", stored)).toBe(
+      "Albert-Schweitzer-Straße 56, 81735 München",
+    );
+  });
+
   it("summarizes document requirement settings by line count", () => {
     expect(
       summarizeAdminSettingValue(

@@ -385,6 +385,11 @@ async fn create_sop(
             "sop_review_request",
             format!("SOP review requested: {}", normalized.title),
             review_request_notification_body(auth.role, false),
+            json!({
+                "sop_title": normalized.title,
+                "submitter_role": auth.role,
+                "resubmitted": false,
+            }),
             "sop",
             sop_id,
         )
@@ -564,6 +569,11 @@ async fn update_sop(
             "sop_review_request",
             format!("SOP review updated: {}", normalized.title),
             review_request_notification_body(auth.role, true),
+            json!({
+                "sop_title": normalized.title,
+                "submitter_role": auth.role,
+                "resubmitted": true,
+            }),
             "sop",
             id,
         )
@@ -687,13 +697,14 @@ async fn review_sop(
     };
 
     if let Err(e) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           VALUES ($1, 'sop_review_update', $2, $3, 'sop', $4)"#,
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           VALUES ($1, 'sop_review_update', $2, $3, 'sop', $4, $5)"#,
     )
     .bind(current.created_by)
     .bind(notification_title)
     .bind(notification_body)
     .bind(id)
+    .bind(json!({ "decision": decision, "sop_title": current.title }))
     .execute(&mut *tx)
     .await
     {
@@ -813,13 +824,14 @@ async fn request_acknowledgement(
                 if outcome.rows_affected() > 0 {
                     created_rows += 1;
                     let _ = sqlx::query(
-                        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                           VALUES ($1, 'sop_ack_request', $2, $3, 'sop', $4)"#,
+                        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+                           VALUES ($1, 'sop_ack_request', $2, $3, 'sop', $4, $5)"#,
                     )
                     .bind(recipient_id)
                     .bind(format!("Acknowledge SOP: {}", current.title))
                     .bind("A new acknowledgement request is waiting in the SOP workspace.")
                     .bind(id)
+                    .bind(json!({ "sop_title": current.title }))
                     .execute(&mut *tx)
                     .await;
                 }
@@ -1443,12 +1455,16 @@ async fn replace_assignments(
     Ok(())
 }
 
+/// `params` carries the facts the UI words the notice from in the viewer's
+/// language; `title`/`body` are the English fallback.
+#[allow(clippy::too_many_arguments)]
 async fn notify_role_users_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     roles: &[&str],
     kind: &str,
     title: String,
     body: &str,
+    params: Value,
     entity_type: &str,
     entity_id: Uuid,
 ) -> Result<(), sqlx::Error> {
@@ -1469,8 +1485,8 @@ async fn notify_role_users_tx(
             continue;
         }
         sqlx::query(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-               VALUES ($1, $2, $3, $4, $5, $6)"#,
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)"#,
         )
         .bind(user_id)
         .bind(kind)
@@ -1478,6 +1494,7 @@ async fn notify_role_users_tx(
         .bind(body)
         .bind(entity_type)
         .bind(entity_id)
+        .bind(params.clone())
         .execute(&mut **tx)
         .await?;
     }

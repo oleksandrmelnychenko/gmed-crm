@@ -936,8 +936,8 @@ async fn create_my_appointment_request(
     .unwrap_or_else(|| "Patient".to_string());
 
     if let Ok(notification_rows) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, 'appointment_request', $2, $3, 'appointment_request', $1
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT pa.user_id, 'appointment_request', $2, $3, 'appointment_request', $1, $5
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $4
@@ -950,6 +950,7 @@ async fn create_my_appointment_request(
     .bind(format!("New appointment request: {patient_label}"))
     .bind("A patient requested appointment planning through the portal.")
     .bind(patient_id)
+    .bind(serde_json::json!({ "patient_label": patient_label }))
     .fetch_all(&state.db)
     .await
     {
@@ -1179,7 +1180,7 @@ async fn review_appointment_request(
 
     if requested_by != Uuid::nil()
         && let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
+            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4, $5) RETURNING id",
         )
         .bind(requested_by)
         .bind(format!("Appointment request {next_status}"))
@@ -1191,6 +1192,7 @@ async fn review_appointment_request(
             },
         )
         .bind(id)
+        .bind(serde_json::json!({ "status": next_status }))
         .fetch_one(&state.db)
         .await
     {
@@ -1412,9 +1414,9 @@ async fn cancel_open_appointment_request(
         .await
     } else if requested_by != Uuid::nil() {
         sqlx::query_as::<_, (Uuid, Uuid)>(
-            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
                VALUES ($1, 'appointment_request_update', 'Appointment request cancelled', $2,
-                       'appointment_request', $3)
+                       'appointment_request', $3, $4)
                RETURNING id, user_id"#,
         )
         .bind(requested_by)
@@ -1426,6 +1428,7 @@ async fn cancel_open_appointment_request(
                 .unwrap_or_default()
         ))
         .bind(id)
+        .bind(serde_json::json!({ "status": "cancelled", "reason": reason }))
         .fetch_all(&state.db)
         .await
     } else {
@@ -1857,12 +1860,13 @@ async fn convert_appointment_request(
 
     if requested_by != Uuid::nil()
         && let Ok(notification_id) = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4) RETURNING id",
+            "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params) VALUES ($1, 'appointment_request_update', $2, $3, 'appointment_request', $4, $5) RETURNING id",
         )
         .bind(requested_by)
         .bind("Appointment request scheduled")
         .bind("Your appointment request was converted into a scheduled appointment.")
         .bind(id)
+        .bind(serde_json::json!({ "status": "converted" }))
         .fetch_one(&state.db)
         .await
     {

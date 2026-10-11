@@ -761,22 +761,30 @@ async fn audit_analytics(
                     .try_get::<Option<serde_json::Value>, _>("context")
                     .unwrap_or_default()
                     .unwrap_or_else(|| serde_json::json!({}));
-                let reason = if action == "refresh_token_theft" {
-                    "Refresh token theft detected"
+                // `reason_code` is what the UI translates; `reason` stays the
+                // English fallback for older clients.
+                let (reason_code, reason) = if action == "refresh_token_theft" {
+                    ("token_theft", "Refresh token theft detected")
                 } else if action == "login_blocked" {
-                    "Blocked login attempt"
+                    ("login_blocked", "Blocked login attempt")
                 } else if action == "login_failure" {
-                    "Failed login attempt"
+                    ("login_failure", "Failed login attempt")
                 } else if action == "refresh_family_revoked" {
-                    "Refresh attempted on revoked session family"
+                    (
+                        "revoked_session_refresh",
+                        "Refresh attempted on revoked session family",
+                    )
                 } else if context
                     .get("is_ceo_access")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false)
                 {
-                    "Executive access to sensitive communication surface"
+                    (
+                        "executive_access",
+                        "Executive access to sensitive communication surface",
+                    )
                 } else {
-                    "Off-hours sensitive read"
+                    ("off_hours_read", "Off-hours sensitive read")
                 };
 
                 serde_json::json!({
@@ -787,6 +795,7 @@ async fn audit_analytics(
                     "action": action,
                     "entity_type": row.try_get::<String, _>("entity_type").unwrap_or_default(),
                     "entity_id": row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                    "reason_code": reason_code,
                     "reason": reason,
                     "route": context.get("route").and_then(serde_json::Value::as_str),
                     "status": context.get("status").and_then(serde_json::Value::as_i64),

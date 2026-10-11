@@ -4,13 +4,18 @@ import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { formatUiText, t as translationsFor, uiText } from "@/lib/i18n";
+import { notificationCopyFromFacts } from "@/lib/notification-copy";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
 export interface Notification {
   id: string;
+  /** Stable code of the notification; the UI words it from `kind` + `params`. */
   kind: string;
+  /** English fallback for rows written before `params` existed. */
   title: string;
   body: string | null;
+  /** Facts of the notification (names, dates, counts, status codes). */
+  params?: Record<string, unknown> | null;
   entity_type?: string | null;
   entity_id?: string | null;
   is_read: boolean;
@@ -92,6 +97,11 @@ export function localizedNotificationCopy(
   if (taskTitle) {
     return { title: taskTitle, body: item.body ? localizeTaskTitle(item.body, lang) : null };
   }
+  // Every other server notification (leads, risk review, incidents, DSGVO,
+  // appointments, signatures, documents, chat, SOP, ...): code + facts.
+  const factsCopy = notificationCopyFromFacts(item, lang);
+  if (factsCopy) return factsCopy;
+  // An unknown kind (or a text that matches no known template): as stored.
   return { title: item.title, body: item.body };
 }
 
@@ -116,16 +126,28 @@ export function leadRetentionNotificationCopy(
   }
   // Lead portal (crates/server/src/routes/lead_portal_intake.rs, 2026-10-03).
   if (item.kind === "lead_portal_submitted") {
-    const [filled, total, documents] = (item.body ?? "").match(/\d+/g) ?? [];
-    return lang === "de"
-      ? {
-          title: "Patient hat die Anfrage gesendet",
-          body: filled ? `Persönliche Daten: ${filled} von ${total} Angaben, Unterlagen: ${documents ?? 0}.` : null,
-        }
-      : {
-          title: "Пациент отправил данные заявки",
-          body: filled ? `Личные данные: заполнено ${filled} из ${total}, документов: ${documents ?? 0}.` : null,
-        };
+    const params = item.params ?? {};
+    const [legacyFilled, legacyTotal, legacyDocuments] = (item.body ?? "").match(/\d+/g) ?? [];
+    const filled = params.filled ?? legacyFilled;
+    const total = params.total ?? legacyTotal;
+    const documents = params.documents ?? legacyDocuments ?? 0;
+    const payerLinkReady = typeof params.payer_link_ready === "boolean"
+      ? params.payer_link_ready
+      : /payer link can be sent now/i.test(item.body ?? "");
+    const counts = filled !== undefined && filled !== null
+      ? lang === "de"
+        ? `Persönliche Daten: ${filled} von ${total} Angaben, Unterlagen: ${documents}.`
+        : `Личные данные: заполнено ${filled} из ${total}, документов: ${documents}.`
+      : null;
+    const payerLink = payerLinkReady
+      ? lang === "de"
+        ? "Der Link für den Zahler kann jetzt gesendet werden."
+        : "Ссылку для плательщика уже можно отправить."
+      : null;
+    return {
+      title: lang === "de" ? "Patient hat die Anfrage gesendet" : "Пациент отправил данные заявки",
+      body: [counts, payerLink].filter(Boolean).join(" ") || null,
+    };
   }
   if (item.kind === "lead_portal_minor") {
     return lang === "de"
@@ -139,7 +161,9 @@ export function leadRetentionNotificationCopy(
         };
   }
   if (item.kind === "lead_portal_consent_revoked") {
-    const health = /health data/i.test(item.body ?? "");
+    const health = item.params?.consent
+      ? item.params.consent === "health_data"
+      : /health data/i.test(item.body ?? "");
     return lang === "de"
       ? {
           title: health

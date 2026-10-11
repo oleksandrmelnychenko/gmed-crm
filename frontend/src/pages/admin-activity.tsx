@@ -40,11 +40,11 @@ import {
 import { clearApiCache } from "@/lib/api";
 import {
   formatEnumLabelFromKeys,
-  formatUnknownValue,
   useLang,
   type TranslationKey,
   type Translations,
 } from "@/lib/i18n";
+import { humanizeAuditCode } from "@/lib/i18n/catalogs/audit-activity";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
@@ -429,7 +429,13 @@ export function isAiActivityAction(action: string): boolean {
   return action.includes("medication_ai_analysis");
 }
 
+/**
+ * The label of an audit action code. Every code the server writes has a
+ * label (`catalogs/audit-activity.ts`, QA E-14); a code added later is shown
+ * humanised instead of "unknown value".
+ */
 export function actionLabel(action: string, translations: Translations): string {
+  if (!action) return translations.common_not_set;
   if (action === "http_request") return translations.activity_http_request;
 
   const exact = formatEnumLabelFromKeys(action, EXACT_ACTION_LABEL_KEYS, translations);
@@ -437,7 +443,8 @@ export function actionLabel(action: string, translations: Translations): string 
     return exact;
   }
   // Status changes of records and accounts (privacy, documents, signatures,
-  // imports, users, feedback, announcements, providers).
+  // imports, users, feedback, announcements, providers) and every other
+  // server audit action.
   const statusChange = translations.uiText?.[`activity_action_${action}`];
   if (statusChange) return statusChange;
 
@@ -457,7 +464,7 @@ export function actionLabel(action: string, translations: Translations): string 
     return `${entityLabel}: ${eventLabel}`;
   }
 
-  return formatUnknownValue(action, translations);
+  return humanizeAuditCode(action);
 }
 
 function ActivityActionBadge({
@@ -527,9 +534,13 @@ function entityTechnicalValue(entityType: string | null, entityId: unknown): str
   return entity ? `${entity} ${idStr}\u2026` : idStr;
 }
 
-function entityTypeLabel(entityType: string | null, translations: Translations): string {
+export function entityTypeLabel(entityType: string | null, translations: Translations): string {
   if (!entityType) return translations.common_not_set;
-  return formatEnumLabelFromKeys(entityType, ACTIVITY_ENTITY_LABEL_KEYS, translations);
+  const known = formatEnumLabelFromKeys(entityType, ACTIVITY_ENTITY_LABEL_KEYS, translations);
+  if (known !== translations.common_unknown_value && known !== translations.common_unknown) {
+    return known;
+  }
+  return translations.uiText?.[`activity_entity_${entityType}`] ?? humanizeAuditCode(entityType);
 }
 
 function entityDisplay(
@@ -584,28 +595,28 @@ function AdminActivityMetrics({
         tone="sky"
         label={t.activity_metric_events_24h}
         value={metrics.activity24h}
-        description="24h"
+        description={t.activity_metric_window_24h}
       />
       <AdminInlineMetric
         icon={UsersRound}
         tone="emerald"
         label={t.activity_metric_users_24h}
         value={metrics.activeUsers24h}
-        description="24h"
+        description={t.activity_metric_window_24h}
       />
       <AdminInlineMetric
         icon={Database}
         tone="amber"
         label={t.activity_metric_changes_24h}
         value={metrics.changes24h}
-        description="24h"
+        description={t.activity_metric_window_24h}
       />
       <AdminInlineMetric
         icon={ShieldAlert}
         tone="slate"
         label={t.activity_metric_security_24h}
         value={metrics.security24h}
-        description="24h"
+        description={t.activity_metric_window_24h}
       />
     </div>
   );

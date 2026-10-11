@@ -152,3 +152,64 @@ async fn patient_notifications_are_self_scoped_and_presence_is_staff_only() {
     assert!(online.contains(&staff_id.to_string()));
     assert!(!online.contains(&patient_id.to_string()));
 }
+
+/// QA 2026-10-11 (A-23/E-16/E-33): a notification carries its stable code
+/// (`kind`) and its facts (`params`), so the UI words it in the viewer's
+/// language; `title`/`body` remain the English fallback.
+#[tokio::test]
+async fn notifications_carry_their_code_and_facts_for_the_ui_language() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let manager_id = seed_user(&ctx.pool, "patient_manager").await;
+    let tag = Uuid::new_v4().simple();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, source, created_by)
+           VALUES ('Anna', $1, $2, 'manual', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("Muster{tag}"))
+    .bind(format!("notification-lead-{tag}@example.com"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, payload) = request_json(
+        &ctx.app,
+        "GET",
+        "/api/v1/notifications",
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let row = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["kind"] == "new_lead" && row["entity_id"] == lead_id.to_string())
+        .expect("new-lead notification for the patient manager");
+    assert_eq!(row["params"]["lead_name"], format!("Anna Muster{tag}"));
+    assert_eq!(row["params"]["source"], "manual");
+    // The English fallback is unchanged for rows read by older clients.
+    assert_eq!(row["title"], format!("New lead: Anna Muster{tag}"));
+    assert_eq!(row["body"], "manual");
+
+    // Rows written before `params` existed come back with `params: null`.
+    let own = seed_notification(&ctx.pool, manager_id, "Legacy update").await;
+    let (_, payload) = request_json(
+        &ctx.app,
+        "GET",
+        "/api/v1/notifications",
+        &auth_header_for(manager_id, "patient_manager"),
+    )
+    .await;
+    let legacy = payload
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == own.to_string())
+        .unwrap();
+    assert!(legacy["params"].is_null());
+    assert_eq!(legacy["kind"], "document_release");
+}

@@ -658,6 +658,7 @@ export interface Translations
   settings_logout_all_confirm: string;
   settings_no_sessions: string;
   settings_last_active: string;
+  settings_parameter: string;
   settings_updated: string;
   settings_no_changes: string;
 
@@ -700,6 +701,7 @@ export interface Translations
   activity_metric_users_24h: string;
   activity_metric_changes_24h: string;
   activity_metric_security_24h: string;
+  activity_metric_window_24h: string;
   activity_retention: string;
   activity_retention_technical: string;
   activity_retention_meaningful: string;
@@ -764,6 +766,15 @@ export interface Translations
   security_anonymous: string;
   security_no_suspicious: string;
   security_no_outlier_readers: string;
+  security_maintenance_default_msg: string;
+  security_audit_recent_scope: string;
+  security_login_history_scope: string;
+  security_reason_token_theft: string;
+  security_reason_login_blocked: string;
+  security_reason_login_failure: string;
+  security_reason_revoked_session_refresh: string;
+  security_reason_executive_access: string;
+  security_reason_off_hours_read: string;
 
   health_title: string;
   health_subtitle: string;

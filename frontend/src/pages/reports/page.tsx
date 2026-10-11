@@ -1451,7 +1451,7 @@ function useReportsPageContent() {
         sortable: true,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {formatHours(row.avg_response_hours, text.noResponses)}
+            {formatHours(row.avg_response_hours, text.noResponses, lang)}
           </span>
         ),
       },
@@ -1734,7 +1734,7 @@ function useReportsPageContent() {
                   )}
                   {metricCard(
                     text.billing.avgServiceToInvoice,
-                    formatDays(data.billing_kpis.avg_service_to_invoice_days, text.noBaseline),
+                    formatDays(data.billing_kpis.avg_service_to_invoice_days, text.noBaseline, lang),
                     CalendarDays,
                     { borderless: true, connector: true, hideIcon: true },
                   )}

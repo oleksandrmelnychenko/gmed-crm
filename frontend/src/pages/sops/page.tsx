@@ -192,20 +192,38 @@ function sopAccentClass(status: string | null | undefined) {
   return "bg-sky-500";
 }
 
+/**
+ * A labelled form field. `htmlFor` names the control the label belongs to;
+ * `groupId` turns the field into a named group of checkboxes (each checkbox
+ * keeps its own label). Labels are never nested (QA E-11: the controls had
+ * no accessible names).
+ */
 function Field({
   label,
   className,
+  htmlFor,
+  groupId,
   children,
 }: {
   label: string;
   className?: string;
+  htmlFor?: string;
+  groupId?: string;
   children: ReactNode;
 }) {
+  if (groupId) {
+    return (
+      <div role="group" aria-labelledby={groupId} className={cn("flex flex-col gap-1.5", className)}>
+        <span id={groupId} className={tokens.text.label}>{label}</span>
+        {children}
+      </div>
+    );
+  }
   return (
-    <label className={cn("flex flex-col gap-1.5", className)}>
-      <span className={tokens.text.label}>{label}</span>
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <label htmlFor={htmlFor} className={tokens.text.label}>{label}</label>
       {children}
-    </label>
+    </div>
   );
 }
 
@@ -1213,8 +1231,9 @@ function useSopsPageContent() {
               <div className="space-y-4 rounded-xl">
                 <DetailSection title={text.detailOverview}>
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <Field label={text.formTitle}>
+                    <Field label={text.formTitle} htmlFor="sop-form-title">
                       <Input
+                        id="sop-form-title"
                         value={form.title}
                         onChange={(event) =>
                           setForm((current) => ({ ...current, title: event.target.value }))
@@ -1223,8 +1242,10 @@ function useSopsPageContent() {
                         required
                       />
                     </Field>
-                    <Field label={text.formCategory}>
+                    <Field label={text.formCategory} htmlFor="sop-form-category">
                       <NativeComboboxSelect
+                        id="sop-form-category"
+                        aria-label={text.formCategory}
                         value={form.category}
                         onChange={(event) =>
                           setForm((current) => ({
@@ -1239,8 +1260,9 @@ function useSopsPageContent() {
                         <option value="training">{categoryLabel("training")}</option>
                       </NativeComboboxSelect>
                     </Field>
-                    <Field label={text.formSummary} className="sm:col-span-2">
+                    <Field label={text.formSummary} htmlFor="sop-form-summary" className="sm:col-span-2">
                       <Input
+                        id="sop-form-summary"
                         value={form.summary}
                         onChange={(event) =>
                           setForm((current) => ({ ...current, summary: event.target.value }))
@@ -1252,8 +1274,9 @@ function useSopsPageContent() {
                 </DetailSection>
 
                 <DetailSection title={text.detailBody}>
-                  <Field label={text.formBody}>
+                  <Field label={text.formBody} htmlFor="sop-form-body">
                     <textarea
+                      id="sop-form-body"
                       value={form.bodyMarkdown}
                       onChange={(event) =>
                         setForm((current) => ({ ...current, bodyMarkdown: event.target.value }))
@@ -1273,7 +1296,7 @@ function useSopsPageContent() {
                   }
                 >
                   <div className="grid gap-5 lg:grid-cols-2">
-                    <Field label={text.formTargetRoles}>
+                    <Field label={text.formTargetRoles} groupId="sop-form-target-roles">
                       <div
                         className={cn(
                           "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
@@ -1288,6 +1311,7 @@ function useSopsPageContent() {
                             >
                               <input
                                 type="checkbox"
+                                aria-label={roleLabel(role)}
                                 className={checkboxClass}
                                 checked={form.targetRoles.includes(role)}
                                 onChange={(event) =>
@@ -1308,7 +1332,7 @@ function useSopsPageContent() {
                       </div>
                     </Field>
 
-                    <Field label={text.formDirectUsers}>
+                    <Field label={text.formDirectUsers} groupId="sop-form-direct-users">
                       <div
                         className={cn(
                           "max-h-72 space-y-2 overflow-y-auto rounded-xl p-3",
@@ -1318,11 +1342,11 @@ function useSopsPageContent() {
                         {(filteredUsers.length > 0 ? filteredUsers : eligibleUsers).map((item) => (
                           <label
                             key={item.id}
-                            aria-label={item.name}
                             className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
                           >
                             <input
                               type="checkbox"
+                              aria-label={`${item.name} · ${roleLabel(item.role)}`}
                               className={checkboxClass}
                               checked={form.targetUserIds.includes(item.id)}
                               onChange={(event) =>
@@ -1345,7 +1369,6 @@ function useSopsPageContent() {
                   </div>
 
                   <label
-                    aria-label={text.formRequiresAck}
                     className={cn(
                       "mt-4 flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-foreground",
                       tokens.surface.mutedCard,
@@ -1353,6 +1376,7 @@ function useSopsPageContent() {
                   >
                     <input
                       type="checkbox"
+                      aria-label={text.formRequiresAck}
                       className={checkboxClass}
                       checked={form.requiresAck}
                       onChange={(event) =>
@@ -1400,8 +1424,10 @@ function useSopsPageContent() {
                   </div>
                 </AdminTableCard>
               ) : null}
-              <Field label={text.reviewDecision}>
+              <Field label={text.reviewDecision} htmlFor="sop-review-decision">
                 <NativeComboboxSelect
+                  id="sop-review-decision"
+                  aria-label={text.reviewDecision}
                   value={reviewDecision}
                   onChange={(event) => setReviewDecision(event.target.value)}
                   className={selectClassName}
@@ -1410,8 +1436,9 @@ function useSopsPageContent() {
                   <option value="reject">{text.reviewReject}</option>
                 </NativeComboboxSelect>
               </Field>
-              <Field label={text.reviewNote}>
+              <Field label={text.reviewNote} htmlFor="sop-review-note">
                 <textarea
+                  id="sop-review-note"
                   value={reviewNote}
                   onChange={(event) => setReviewNote(event.target.value)}
                   className={cn(textareaClassName, "min-h-[160px]")}

@@ -21,17 +21,21 @@ pub fn router() -> Router<AppState> {
         .route("/notifications/read-all", post(mark_all_read))
 }
 
+/// `kind` is the stable code of a notification and `params` its facts; the
+/// staff and patient UI word it in the viewer's language from both
+/// (`frontend/src/lib/notification-copy.ts`). `title`/`body` are the English
+/// fallback for rows written before `params` existed.
 async fn list_notifications(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    match sqlx::query!(
-        r#"SELECT id, kind, title, body, entity_type, entity_id, is_read, created_at
+    match sqlx::query(
+        r#"SELECT id, kind, title, body, params, entity_type, entity_id, is_read, created_at
            FROM user_notifications
            WHERE user_id = $1
            ORDER BY created_at DESC LIMIT 50"#,
-        auth.user_id
     )
+    .bind(auth.user_id)
     .fetch_all(&state.db)
     .await
     {
@@ -40,9 +44,21 @@ async fn list_notifications(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "id": r.id, "kind": r.kind, "title": r.title, "body": r.body,
-                        "entity_type": r.entity_type, "entity_id": r.entity_id,
-                        "is_read": r.is_read, "created_at": r.created_at,
+                        "id": r.try_get::<Uuid, _>("id").ok(),
+                        "kind": r.try_get::<String, _>("kind").unwrap_or_default(),
+                        "title": r.try_get::<String, _>("title").unwrap_or_default(),
+                        "body": r.try_get::<Option<String>, _>("body").unwrap_or_default(),
+                        "params": r
+                            .try_get::<Option<serde_json::Value>, _>("params")
+                            .unwrap_or_default(),
+                        "entity_type": r
+                            .try_get::<Option<String>, _>("entity_type")
+                            .unwrap_or_default(),
+                        "entity_id": r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                        "is_read": r.try_get::<bool, _>("is_read").unwrap_or_default(),
+                        "created_at": r
+                            .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")
+                            .ok(),
                     })
                 })
                 .collect();

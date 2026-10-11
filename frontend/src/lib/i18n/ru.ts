@@ -1,5 +1,6 @@
 import type { TranslationShape as Translations } from "./translations-shape";
 import { adminSystemRu } from "./catalogs/admin-system";
+import { auditActivityUiTextRu } from "./catalogs/audit-activity";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
 import { extractedUiRu } from "./catalogs/extracted-ui";
@@ -14,7 +15,8 @@ import { sharedCoreRu } from "./catalogs/shared";
 import { staffAccessRu } from "./catalogs/staff-access";
 
 export const ru = {
-  uiText: extractedUiRu,
+  // Audit labels first: a label already in the extracted catalog wins.
+  uiText: { ...auditActivityUiTextRu, ...extractedUiRu },
   staffAccess: staffAccessRu,
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",
@@ -778,6 +780,7 @@ export const ru = {
   settings_logout_all_confirm: "Все пользователи будут разлогинены!",
   settings_no_sessions: "Нет активных сессий.",
   settings_last_active: "Последняя активность",
+  settings_parameter: "Параметр",
   settings_updated: "Сохранено",
   settings_no_changes: "Нет изменений для сохранения.",
 
@@ -820,6 +823,7 @@ export const ru = {
   activity_metric_users_24h: "Активных пользователей",
   activity_metric_changes_24h: "Изменений данных",
   activity_metric_security_24h: "Событий безопасности",
+  activity_metric_window_24h: "за 24 ч",
   activity_retention: "Автоочистка",
   activity_retention_technical: "технические",
   activity_retention_meaningful: "основные",
@@ -870,12 +874,12 @@ export const ru = {
   security_maintenance_off: "Выключить",
   security_audit_analytics: "Аудит-аналитика",
   security_audit_recent: "Недавние подозрительные события",
-  security_audit_top_readers: "Аномальные читатели за 24ч",
-  security_audit_failed_logins: "Неудачные входы за 24ч",
-  security_audit_blocked_logins: "Заблокированные входы за 24ч",
-  security_audit_token_theft: "Кража refresh-токена за 30д",
-  security_audit_executive_access: "Чувствительный executive-доступ за 7д",
-  security_audit_off_hours: "Доступ вне часов за 7д",
+  security_audit_top_readers: "Аномальные читатели за 24 ч",
+  security_audit_failed_logins: "Неудачные входы за 24 ч",
+  security_audit_blocked_logins: "Заблокированные входы за 24 ч",
+  security_audit_token_theft: "Кража сессии за 30 дн.",
+  security_audit_executive_access: "Доступ руководства к конфиденциальному за 7 дн.",
+  security_audit_off_hours: "Доступ в нерабочее время за 7 дн.",
   security_audit_hint:
     "Неудачные входы, доступ руководителей к чувствительным данным и чтение вне рабочих часов из append-only аудит-лога.",
   security_col_reason: "Причина",
@@ -887,6 +891,15 @@ export const ru = {
   security_no_suspicious: "Подозрительных аудит-паттернов не обнаружено.",
   security_no_outlier_readers:
     "Нет выбросов среди читателей за последние 24 часа.",
+  security_maintenance_default_msg: "Идут технические работы",
+  security_audit_recent_scope: "последние события (до 25)",
+  security_login_history_scope: "последние входы (до 100)",
+  security_reason_token_theft: "Обнаружена кража сессии",
+  security_reason_login_blocked: "Вход заблокирован",
+  security_reason_login_failure: "Неудачная попытка входа",
+  security_reason_revoked_session_refresh: "Попытка продолжить отозванную сессию",
+  security_reason_executive_access: "Руководство открыло конфиденциальную переписку",
+  security_reason_off_hours_read: "Доступ к чувствительным данным в нерабочее время",
 
   health_title: "Состояние системы",
   health_subtitle: "Мониторинг базы данных, пользователей и сессий",
@@ -909,8 +922,8 @@ export const ru = {
 
   compliance_title: "DSGVO / Compliance",
   compliance_subtitle: "Экспорт данных, анонимизация и управление согласиями",
-  compliance_export: "Экспорт данных (Art. 15)",
-  compliance_anonymize: "Анонимизировать (Art. 17)",
+  compliance_export: "Экспорт данных (ст. 15)",
+  compliance_anonymize: "Анонимизировать (ст. 17)",
   compliance_anonymize_confirm:
     "Данные пациента будут безвозвратно анонимизированы!",
   compliance_consents: "Панель согласий",

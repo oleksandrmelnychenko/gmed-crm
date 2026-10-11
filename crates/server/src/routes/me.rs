@@ -305,8 +305,8 @@ async fn create_my_privacy_request(
     };
 
     if let Ok(notification_rows) = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT pa.user_id, 'privacy_request', $2, $3, 'patient', $1
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT pa.user_id, 'privacy_request', $2, $3, 'patient', $1, $4
            FROM patient_assignments pa
            JOIN users u ON u.id = pa.user_id
            WHERE pa.patient_id = $1
@@ -318,6 +318,12 @@ async fn create_my_privacy_request(
     .bind(patient_id)
     .bind(notification_title)
     .bind(notification_body)
+    .bind(serde_json::json!({
+        "origin": "patient_portal",
+        "request_type": request_type,
+        "patient_label": patient_label,
+        "due_date": crate::app_time::local(due_at).format("%Y-%m-%d").to_string(),
+    }))
     .fetch_all(&state.db)
     .await
     {

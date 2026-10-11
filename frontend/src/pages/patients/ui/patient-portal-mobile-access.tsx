@@ -7,7 +7,10 @@ import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
-import { fetchNotificationPanelWorkspace } from "@/components/topbar-data";
+import {
+  fetchNotificationPanelWorkspace,
+  localizedNotificationCopy,
+} from "@/components/topbar-data";
 
 const NOTIFICATION_PREFERENCE_KEY_PREFIX = "gmed:patient-portal:browser-notifications";
 const PORTAL_NOTIFICATION_EVENTS = ["notification.created"] as const;
@@ -137,9 +140,11 @@ export function PatientPortalMobileAccess() {
         const notification = workspace.notifications.find((item) => item.id === event.entity_id)
           ?? workspace.notifications[0];
         if (!notification) return;
+        // The device notification carries the same RU/DE wording as the portal.
+        const text = localizedNotificationCopy(notification, lang === "de" ? "de" : "ru");
         await showPortalNotification(
-          notification.title || "GMED",
-          notification.body || "",
+          text.title || "GMED",
+          text.body || "",
           `gmed-notification-${notification.id}`,
         );
       } catch {

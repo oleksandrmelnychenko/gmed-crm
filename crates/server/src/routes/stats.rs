@@ -2038,8 +2038,14 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 COUNT(*)::bigint AS tracked_invoice_count,
                 COUNT(*) FILTER (WHERE i.status = 'overdue')::bigint AS overdue_invoice_count,
                 ROUND(AVG(i.total_gross)::numeric, 2) AS avg_invoice_gross,
+                -- Time from the service to its invoice: an advance invoice
+                -- issued before the first service has no such delay and
+                -- would turn the average negative (QA E-25).
                 ROUND(
-                    AVG(EXTRACT(EPOCH FROM (i.issued_at - sa.first_service_at)) / 86400.0)::numeric,
+                    (
+                        AVG(EXTRACT(EPOCH FROM (i.issued_at - sa.first_service_at)) / 86400.0)
+                            FILTER (WHERE i.issued_at >= sa.first_service_at)
+                    )::numeric,
                     2
                 ) AS avg_service_to_invoice_days,
                 ROUND(

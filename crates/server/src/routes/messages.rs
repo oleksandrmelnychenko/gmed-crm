@@ -248,15 +248,16 @@ async fn create_message_notification(
     to_user: Uuid,
     is_attachment: bool,
 ) {
-    let sender_name = sqlx::query_scalar::<_, String>(
-        "SELECT COALESCE(NULLIF(name, ''), email, 'Care team') FROM users WHERE id = $1",
+    let known_sender = sqlx::query_scalar::<_, Option<String>>(
+        "SELECT COALESCE(NULLIF(name, ''), email) FROM users WHERE id = $1",
     )
     .bind(from_user)
     .fetch_optional(&state.db)
     .await
     .ok()
     .flatten()
-    .unwrap_or_else(|| "Care team".to_string());
+    .flatten();
+    let sender_name = known_sender.as_deref().unwrap_or("Care team");
 
     let kind = if is_attachment {
         "direct_message_attachment"
@@ -275,9 +276,9 @@ async fn create_message_notification(
 
     match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO user_notifications (
-               user_id, kind, title, body, entity_type, entity_id, source_message_id
+               user_id, kind, title, body, entity_type, entity_id, source_message_id, params
            )
-           VALUES ($1, $2, $3, $4, 'message_peer', $5, $6)
+           VALUES ($1, $2, $3, $4, 'message_peer', $5, $6, $7)
            RETURNING id"#,
     )
     .bind(to_user)
@@ -286,6 +287,8 @@ async fn create_message_notification(
     .bind(body)
     .bind(from_user)
     .bind(source_message_id)
+    // Only the sender's name: the UI words the notice in its language.
+    .bind(json!({ "sender_name": known_sender }))
     .fetch_one(&state.db)
     .await
     {

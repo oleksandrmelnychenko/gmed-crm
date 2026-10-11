@@ -3086,7 +3086,7 @@ async fn submit_in_tx(
 }
 
 async fn notify_submitted(state: &AppState, lead_id: Uuid, level: u8) {
-    intake::notify_lead_staff(
+    intake::notify_lead_staff_with(
         state,
         lead_id,
         "lead_payer_submitted",
@@ -3094,6 +3094,7 @@ async fn notify_submitted(state: &AppState, lead_id: Uuid, level: u8) {
         &format!(
             "The payer's details are in the lead wizard under \"Angaben des Zahlers\" (check level {level})."
         ),
+        Some(json!({ "level": level })),
     )
     .await;
 }

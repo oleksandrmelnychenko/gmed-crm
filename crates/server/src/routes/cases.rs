@@ -3117,8 +3117,8 @@ pub async fn run_medication_expiry_scheduler_once(
 
         for recipient_id in recipients {
             let notification_row = sqlx::query(
-                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-                   VALUES ($1, $2, $3, $4, 'patient', $5)
+                r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+                   VALUES ($1, $2, $3, $4, 'patient', $5, $6)
                    RETURNING id, user_id"#,
             )
             .bind(recipient_id)
@@ -3135,6 +3135,12 @@ pub async fn run_medication_expiry_scheduler_once(
                 candidate.patient_name
             ))
             .bind(candidate.patient_id)
+            .bind(serde_json::json!({
+                "medication_name": candidate.medication_name,
+                "patient_code": candidate.patient_code,
+                "patient_name": candidate.patient_name,
+                "expiry_date": candidate.expiry_date.to_string(),
+            }))
             .fetch_one(&state.db)
             .await?;
             let notification_id: Uuid = notification_row.try_get("id").unwrap_or_default();

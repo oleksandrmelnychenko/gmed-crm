@@ -51,7 +51,9 @@ async fn stuck_days(state: &AppState) -> i64 {
     )
 }
 
-/// Tells the staff member who sent the request and every active CEO.
+/// Tells the staff member who sent the request and every active CEO. The UI
+/// words the notice in its language from `kind` and `params` (`outcome` plus
+/// the facts of the outcome); `title`/`body` are the English fallback.
 pub(crate) async fn notify_staff(
     state: &AppState,
     requested_by: Uuid,
@@ -59,10 +61,11 @@ pub(crate) async fn notify_staff(
     kind: &str,
     title: &str,
     body: &str,
+    params: Value,
 ) {
     let rows = sqlx::query(
-        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
-           SELECT u.id, $2, $3, $4, 'document', $5
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+           SELECT u.id, $2, $3, $4, 'document', $5, $6
            FROM users u
            WHERE u.is_active = true
              AND u.role <> 'patient'
@@ -74,6 +77,7 @@ pub(crate) async fn notify_staff(
     .bind(title)
     .bind(body)
     .bind(source_document_id)
+    .bind(params)
     .fetch_all(&state.db)
     .await;
     match rows {
@@ -125,6 +129,7 @@ pub(crate) async fn notify_terminal(state: &AppState, row: &PgRow, status: &str)
         },
         title,
         body,
+        json!({ "outcome": status }),
     )
     .await;
 }
@@ -132,26 +137,38 @@ pub(crate) async fn notify_terminal(state: &AppState, row: &PgRow, status: &str)
 /// The signed PDF and the report were archived.
 pub(crate) async fn notify_archived(state: &AppState, row: &PgRow, status: &str, result_id: Uuid) {
     let test_mode: bool = row.get("test_mode");
-    let (kind, title, body) = if status == "needs_review" {
+    let (kind, title, body, outcome) = if status == "needs_review" {
         (
             "signature_review_required",
             "Signed document needs review",
             "The document was signed, but its source changed during signing. Accept or reject the signature in the document's signature panel.",
+            "needs_review",
         )
     } else if test_mode {
         (
             "signature_completed",
             "Test signature completed",
             "The test (DEMO) signature is archived as internal evidence. It has no legal effect.",
+            "test_completed",
         )
     } else {
         (
             "signature_completed",
             "Document signed",
             "All signers have signed. The signed PDF and the signature report are archived; give the signers their signed copy.",
+            "completed",
         )
     };
-    notify_staff(state, row.get("requested_by"), result_id, kind, title, body).await;
+    notify_staff(
+        state,
+        row.get("requested_by"),
+        result_id,
+        kind,
+        title,
+        body,
+        json!({ "outcome": outcome }),
+    )
+    .await;
 }
 
 /// Closes requests that stayed untrackable longer than
@@ -206,6 +223,7 @@ pub async fn close_stuck_requests(state: &AppState) -> Result<u64, sqlx::Error> 
             &format!(
                 "The signature request stayed unconfirmed at the provider for {days} days and was closed as failed. Check the document and send a new request if needed."
             ),
+            json!({ "outcome": "untrackable", "days": days }),
         )
         .await;
     }
@@ -381,6 +399,7 @@ pub(crate) async fn abandon(
             "signature_request_failed",
             "Signature request abandoned",
             &format!("The signature request was given up: {reason}"),
+            json!({ "outcome": "abandoned", "reason": reason }),
         )
         .await;
     }
