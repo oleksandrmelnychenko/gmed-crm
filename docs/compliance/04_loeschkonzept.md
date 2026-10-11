@@ -5,7 +5,7 @@ Umsetzung. Fristen in eckigen Klammern legt die Organisation mit dem DSB fest.
 
 | Datenart | Frist | Beginn | Umsetzung im System |
 |---|---|---|---|
-| Anfragen (Leads) ohne Qualifizierung und ohne unterschriebene Einwilligung | 14 Tage (`unqualified_lead_retention_days`) | Anlage der Anfrage, frühestens Start der Regel (`unqualified_lead_retention_effective_at`) | automatisch, täglich (`spawn_lead_purger`): Löschung aller Dokumente und Dateien, der Anhänge und des Interessenten-Datensatzes, Rücknahme des offenen Auftrags, Deaktivierung und Anonymisierung des mit der Anfrage angelegten Patientenzugangs, Widerruf der Elternzugänge (ein Elternzugang ohne weitere Anfrage oder Patientenakte wird ebenso deaktiviert und anonymisiert), Löschung der Portal-Angaben (Feldmarkierungen, Sendezeitpunkt, hochgeladene Unterlagen) und des Protokolls der Zugangs-E-Mails (`portal_login_emails`: Empfängeradresse, Zeitpunkt, Sprache; der Inhalt wird nie gespeichert); die Anfrage bleibt als leerer Zähldatensatz ohne Personenbezug. Die im Portal erteilte Einwilligung „Bearbeitung der Anfrage“ hält die Frist nicht an – nur die unterschriebene DSGVO-Einwilligung. Hinweis an die zuständige Person 3 Tage vorher. Nicht automatisch, wenn eine Rechnung existiert (§ 147 AO) – dann Meldung zur Entscheidung |
+| Anfragen (Leads) ohne Qualifizierung und ohne unterschriebene Einwilligung | 14 Tage (`unqualified_lead_retention_days`) | Anlage der Anfrage, frühestens Start der Regel (`unqualified_lead_retention_effective_at`) | automatisch, täglich (`spawn_lead_purger`): Löschung aller Dokumente und Dateien, der Anhänge und des Interessenten-Datensatzes, Rücknahme des offenen Auftrags, Deaktivierung und Anonymisierung des mit der Anfrage angelegten Patientenzugangs, Widerruf der Elternzugänge (ein Elternzugang ohne weitere Anfrage oder Patientenakte wird ebenso deaktiviert und anonymisiert), Löschung der Portal-Angaben (Feldmarkierungen, Sendezeitpunkt, hochgeladene Unterlagen) und des Protokolls der Zugangs-E-Mails (`portal_login_emails`: Empfängeradresse, Zeitpunkt, Sprache; der Inhalt wird nie gespeichert); die Anfrage bleibt als leerer Zähldatensatz ohne Personenbezug. Die im Portal erteilte Einwilligung „Bearbeitung der Anfrage“ hält die Frist nicht an – nur die unterschriebene DSGVO-Einwilligung. Ausgenommen ist eine Wiederholungsanfrage einer Patientin / eines Patienten, deren unterschriebene DSGVO-Einwilligung in der Akte vermerkt und nicht widerrufen ist (Entscheidung 2026-10-11); ohne solche Einwilligung gilt die Frist wie für jede Anfrage, die Patientenakte selbst wird nie berührt. Hinweis an die zuständige Person 3 Tage vorher. Nicht automatisch, wenn eine Rechnung existiert (§ 147 AO) – dann Meldung zur Entscheidung |
 | Im Patientenportal erteilte Einwilligungen einer Anfrage (`consent_records`: Gesundheitsdaten Art. 9, Bearbeitung der Anfrage) | **offen** (Vorschlag: 3 Jahre nach Widerruf bzw. Ende der Anfrage, Nachweis nach Art. 7 Abs. 1 DSGVO) | Widerruf bzw. Löschung der Anfrage | bleiben bei der Löschung der Anfrage als Nachweis erhalten (Zeitpunkt, Textversion, Text, verknüpfter – dann anonymisierter – Zugang); bei Umwandlung in eine Patientenakte dieser zugeordnet; Löschweg nach Ablauf **offen** |
 | Nicht zustande gekommene Anfragen (Leads), übrige Fälle | 180 Tage | Archivierung | automatisch, täglich (`spawn_lead_purger`, Einstellung `cleanup_archived_leads_days`); Anonymisierung der Identitätsfelder, Löschung der Dokumente, Dateien und Anhänge, Deaktivierung und Anonymisierung des Patientenzugangs der Anfrage |
 | Patientenakte, medizinische Unterlagen | 1095 Tage (`patient_file_retention_days`) | Akte auf „inaktiv“ gesetzt (`inactive_since`) | Bei der Anonymisierung werden auch die Protokolle der Zugangs-E-Mails (`portal_login_emails`) gelöscht; täglicher Lauf legt einen Löschantrag im Compliance-Register an; Prüfung auf Aufbewahrungspflichten und Ausführung durch CEO/IT. Nicht solange die ärztliche Dokumentation aufzubewahren ist (`clinical_retention_until`) und nicht erneut, wenn der Antrag für dieselbe Inaktivitätsphase begründet abgelehnt wurde |
@@ -31,15 +31,39 @@ Ablauf im Register: Antrag → Prüfung (Genehmigung, Ablehnung mit Begründung 
 Aufschub wegen Aufbewahrungspflicht mit Datum; die Begründung sieht die betroffene
 Person im Portal) → bei Antrag der betroffenen Person vermerkte Identitätsprüfung →
 Ausführung. Eine genehmigte Löschung können CEO und IT-Admin mit Begründung noch
-ablehnen oder zurückstellen. Die Ausführung
+ablehnen oder zurückstellen.
+
+Aufbewahrung der ärztlichen Dokumentation: Jeder Antrag übernimmt bei der Anlage
+das Datum, bis zu dem die medizinische Dokumentation des Patienten aufzubewahren
+ist (`clinical_retention_until`, § 630f Abs. 3 BGB). Solange diese Frist läuft,
+besteht kein Löschanspruch (Art. 17 Abs. 3 lit. b DSGVO): Die Löschung wird weder
+genehmigt noch ausgeführt, auch nicht über den alten direkten Löschweg; das System
+nennt Datum und Rechtsgrundlage. An die Stelle der Löschung tritt die Einschränkung
+der Verarbeitung (Art. 18 DSGVO, § 35 Abs. 3 BDSG): „Sperren“ stellt den Antrag bis
+zum Fristende zurück und schränkt die Verarbeitung der Akte ein; alternativ wird
+der Antrag mit dieser Begründung abgelehnt.
+
+Die Ausführung
 
 - anonymisiert die Stammdaten einschließlich Passnummer, Warnhinweisen,
   Intake-Profil und Lead-Kopie,
 - anonymisiert die zugehörige Anfrage (Lead),
-- löscht die gespeicherten Dateien des Patienten und redigiert Nachrichten samt
-  Anhängen,
+- löscht die gespeicherten Dateien des Patienten und alles, was aus ihnen abgeleitet
+  ist (extrahierter Text, Übersetzungen, Entwürfe des klinischen Imports,
+  Vorlagenbelegung), und entfernt Namen von den Dokumenten (Dokumentname wird zur
+  Dokumentart, Dateiname, Notizen, genannte Personen) – auch bei Dokumenten, deren
+  Datei schon früher gelöscht wurde,
+- löscht weitere Kontaktdaten, die Identitätsangaben importierter Medikationspläne
+  und die Benachrichtigungen, die den Patienten oder seine gelöschten Dokumente
+  nennen,
+- redigiert Nachrichten samt Anhängen und deaktiviert und anonymisiert den
+  Portalzugang des Patienten (und einen Elternzugang, der nur zu ihm führt),
 - widerruft Zuweisungen und Einwilligungen,
 - behält Rechnungen, Verträge und Aufträge (Art. 17 Abs. 3 lit. b DSGVO).
+
+Das Löschen einer einzelnen gespeicherten Datei („Datei endgültig löschen“) entfernt
+ebenso den extrahierten Text, die Übersetzungstexte, die Import-Entwürfe und das
+Ergebnis der automatischen Benennung; Metadaten und Versionsgeschichte bleiben.
 
 Verbleibende Lücke: strukturierte medizinische Einträge (Diagnosen, Medikation,
 Labor) bleiben ohne Personenbezug zum anonymisierten Datensatz bestehen. Ob das als

@@ -1473,3 +1473,448 @@ async fn incident_register_tracks_the_72_hour_decision() {
     assert_eq!(body["notification_decision_documented"], true);
     assert_eq!(body["authority_deadline_missed"], false);
 }
+
+/// QA B-23 a: requests take the snapshot of the patient's retention; an
+/// erasure is neither approved nor executed (nor run through the direct
+/// endpoint) while the medical documentation must be kept (§ 630f BGB,
+/// Art. 17 Abs. 3 lit. b DSGVO); holding it restricts processing instead.
+#[tokio::test]
+async fn erasure_waits_for_the_clinical_retention_and_restricts_processing_instead() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("privacy-retention");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &format!("{tag}-patient"), "patient").await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let it_admin_id = seed_user(&pool, &tag, "it_admin").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm = auth_header_for(pm_id, "patient_manager");
+    let it = auth_header_for(it_admin_id, "it_admin");
+    let ceo = auth_header_for(admin_id, "ceo");
+
+    // A clinical entry keeps the medical documentation for decades.
+    let retention_until: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        r#"UPDATE patients
+           SET clinical_retention_until = date_trunc('second', now()) + interval '30 years'
+           WHERE id = $1
+           RETURNING clinical_retention_until"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Filed in the portal and recorded by staff: both inherit the snapshot.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/privacy-requests",
+        &auth_header_for(patient_user_id, "patient"),
+        Some(json!({ "request_type": "erasure", "reason": "Please delete my data" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let erasure_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let snapshot: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT retention_until FROM patient_privacy_requests WHERE id = $1")
+            .bind(erasure_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot, Some(retention_until));
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &pm,
+        Some(json!({ "request_type": "access", "source": "patient_request" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body["retention_until"].is_string(), "{body}");
+    assert_eq!(body["created_via"], "admin_compliance_workspace");
+
+    // The patient's history lists both; the erasure is marked as blocked.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let history = body.as_array().expect("privacy request history");
+    assert_eq!(history.len(), 2, "{body}");
+    let erasure = history
+        .iter()
+        .find(|row| row["id"] == erasure_id.to_string())
+        .expect("erasure in history");
+    assert_eq!(erasure["erasure_blocked_by_retention"], true);
+    assert_eq!(erasure["created_via"], "patient_self_service");
+    assert!(erasure["patient_retention_until"].is_string());
+
+    // Approving is refused with the date and the legal basis.
+    let review = format!("/api/v1/admin/compliance/privacy-requests/{erasure_id}/review");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &review,
+        &it,
+        Some(json!({ "action": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "erasure_blocked_by_retention");
+    let display = body["retention_until_display"].as_str().unwrap();
+    assert_eq!(display.len(), 10, "{display}");
+    assert_eq!(&display[2..3], ".");
+    assert!(body["legal_basis"].as_str().unwrap().contains("630f"));
+
+    // The direct endpoint is held to the same rule and records nothing.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/anonymize"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "erasure_blocked_by_retention");
+    let erasure_requests: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM patient_privacy_requests WHERE patient_id = $1 AND request_type = 'erasure'",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(erasure_requests, 1);
+
+    // An erasure approved before the clinical entry is not executed either.
+    sqlx::query(
+        r#"UPDATE patient_privacy_requests
+           SET status = 'approved',
+               context = context || jsonb_build_object(
+                   'identity_verification',
+                   jsonb_build_object('method', 'callback', 'at', now()))
+           WHERE id = $1"#,
+    )
+    .bind(erasure_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{erasure_id}/execute"),
+        &it,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "erasure_blocked_by_retention");
+    let (first_name, anonymized, request_status): (String, bool, String) = sqlx::query_as(
+        r#"SELECT p.first_name, (p.legal_status->>'anonymized_at') IS NOT NULL, pr.status
+           FROM patients p
+           JOIN patient_privacy_requests pr ON pr.patient_id = p.id
+           WHERE pr.id = $1"#,
+    )
+    .bind(erasure_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(first_name, format!("First {tag}"));
+    assert!(!anonymized);
+    assert_eq!(request_status, "approved");
+
+    // Holding it until the retention ends restricts the processing instead.
+    let reason = "Medical documentation must be kept (§ 630f BGB); processing is restricted.";
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &review,
+        &it,
+        Some(json!({ "action": "hold", "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "retention_hold");
+    assert_eq!(body["is_overdue"], false);
+    assert_eq!(body["decision_reason"], reason);
+    let held_until: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT retention_until FROM patient_privacy_requests WHERE id = $1")
+            .bind(erasure_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(held_until, Some(retention_until));
+    let legal_status: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        legal_status["processing_restricted"], true,
+        "{legal_status}"
+    );
+    assert_eq!(
+        legal_status["processing_restriction_basis"],
+        "erasure_retention_hold"
+    );
+    assert_eq!(
+        legal_status["processing_restriction_request_id"],
+        erasure_id.to_string()
+    );
+
+    // A second request of the same type is refused with a code the UI translates.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &pm,
+        Some(json!({ "request_type": "erasure", "source": "admin_intake" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "privacy_request_open_exists");
+}
+
+/// QA B-23 addendum: the erasure leaves no name or content on the patient's
+/// documents (generated name, file name, people named on it, extracted text,
+/// template bindings, translations, import drafts), removes the extra
+/// contacts and the notifications that name the patient and switches the
+/// portal login off. Invoices keep their documents (§ 147 AO).
+#[tokio::test]
+async fn erasure_removes_names_and_content_from_the_patients_documents() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("privacy-erase-docs");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &format!("{tag}-patient"), "patient").await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let person = format!("First {tag} Last {tag}");
+
+    let insert_document = |art: &'static str, category: &'static str, with_file: bool| {
+        let person = person.clone();
+        let pool = pool.clone();
+        async move {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                r#"INSERT INTO documents (
+                        id, patient_id, auto_name, original_filename, art, category, status,
+                        visibility, is_medical, mime_type, file_size, storage_key,
+                        version_root_document_id, version_number, uploaded_by, notes,
+                        addressee_person, source_person, extracted_text, text_extraction_status,
+                        generated_bindings, generated_manual_text,
+                        file_deleted_at, file_delete_reason
+                   ) VALUES (
+                        $1, $2, $3, $4, $5, $6, 'active',
+                        'internal', false, 'application/pdf', 10, $7,
+                        $1, 1, $8, $9,
+                        $10, 'Dr. Beispiel', $11, 'completed',
+                        jsonb_build_object('patient_name', $10::text), $11,
+                        $12, $13
+                   )"#,
+            )
+            .bind(id)
+            .bind(patient_id)
+            .bind(format!("{art} {person}"))
+            .bind(format!("{art}-{person}.pdf"))
+            .bind(art)
+            .bind(category)
+            .bind(with_file.then(|| format!("{id}_synthetic.pdf")))
+            .bind(admin_id)
+            .bind(format!("Notes about {person}"))
+            .bind(&person)
+            .bind(format!("Name: {person}"))
+            .bind((!with_file).then(chrono::Utc::now))
+            .bind((!with_file).then_some("earlier deletion"))
+            .execute(&pool)
+            .await
+            .unwrap();
+            id
+        }
+    };
+    let sticker = insert_document("patient_sticker_compact", "administrative", true).await;
+    let earlier_deleted = insert_document("medical_report", "medical", false).await;
+    let invoice = insert_document("invoice_document", "invoice", true).await;
+
+    let translation_request: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, requested_by, status,
+                source_text, translated_text
+           ) VALUES ($1, $2, 'ru', $3, 'completed', $4, $4)
+           RETURNING id"#,
+    )
+    .bind(sticker)
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(format!("Name: {person}"))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, source_text, translated_text, created_by
+           ) VALUES ($1, 'ru', 'manual', $2, $2, $3)"#,
+    )
+    .bind(sticker)
+    .bind(format!("Name: {person}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO clinical_document_imports (patient_id, document_id, requested_by, status, draft)
+           VALUES ($1, $2, $3, 'applied', jsonb_build_object('candidates',
+                   jsonb_build_array(jsonb_build_object('text', $4::text)), 'warnings', '[]'::jsonb))"#,
+    )
+    .bind(patient_id)
+    .bind(earlier_deleted)
+    .bind(admin_id)
+    .bind(&person)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_contacts (patient_id, contact_kind, value) VALUES ($1, 'email', $2)",
+    )
+    .bind(patient_id)
+    .bind(format!("{tag}@example.com"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+           VALUES ($1, 'privacy_request', $2, 'Due soon', 'patient', $3)"#,
+    )
+    .bind(pm_id)
+    .bind(format!("Patient GDPR request: {person}"))
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/anonymize"),
+        &auth_header_for(admin_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["execution"]["erased_documents"], 2, "{body}");
+    assert_eq!(body["execution"]["disabled_portal_accounts"], 1, "{body}");
+
+    let scrubbed = sqlx::query(
+        r#"SELECT id, auto_name, original_filename, notes, addressee_person, source_person,
+                  extracted_text, generated_bindings, generated_manual_text, storage_key,
+                  file_deleted_at, file_delete_reason
+           FROM documents
+           WHERE id = ANY($1)"#,
+    )
+    .bind(vec![sticker, earlier_deleted])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(scrubbed.len(), 2);
+    for row in &scrubbed {
+        let id: Uuid = row.get("id");
+        let expected_name = if id == sticker {
+            "patient_sticker_compact"
+        } else {
+            "medical_report"
+        };
+        assert_eq!(row.get::<String, _>("auto_name"), expected_name);
+        for column in [
+            "original_filename",
+            "notes",
+            "addressee_person",
+            "source_person",
+            "extracted_text",
+            "generated_manual_text",
+            "storage_key",
+        ] {
+            assert_eq!(
+                row.get::<Option<String>, _>(column),
+                None,
+                "{column} of {expected_name}"
+            );
+        }
+        assert_eq!(row.get::<Option<Value>, _>("generated_bindings"), None);
+        assert!(
+            row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+                .is_some()
+        );
+    }
+    let sticker_reason = scrubbed
+        .iter()
+        .find(|row| row.get::<Uuid, _>("id") == sticker)
+        .map(|row| row.get::<Option<String>, _>("file_delete_reason"))
+        .unwrap();
+    assert_eq!(sticker_reason.as_deref(), Some("dsgvo_erasure"));
+
+    // The invoice keeps its document as it was (§ 147 AO).
+    let (invoice_name, invoice_key): (String, Option<String>) =
+        sqlx::query_as("SELECT auto_name, storage_key FROM documents WHERE id = $1")
+            .bind(invoice)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(invoice_name, format!("invoice_document {person}"));
+    assert!(invoice_key.is_some());
+
+    let (source_text, translated_text): (Option<String>, Option<String>) = sqlx::query_as(
+        "SELECT source_text, translated_text FROM document_translation_requests WHERE id = $1",
+    )
+    .bind(translation_request)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((source_text, translated_text), (None, None));
+    let stored_translation: String = sqlx::query_scalar(
+        "SELECT translated_text FROM document_translations WHERE document_id = $1",
+    )
+    .bind(sticker)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stored_translation, "");
+    let draft: Value =
+        sqlx::query_scalar("SELECT draft FROM clinical_document_imports WHERE document_id = $1")
+            .bind(earlier_deleted)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(draft, json!({ "candidates": [], "warnings": [] }));
+
+    let (contacts, notifications): (i64, i64) = sqlx::query_as(
+        r#"SELECT (SELECT count(*) FROM patient_contacts WHERE patient_id = $1),
+                  (SELECT count(*) FROM user_notifications
+                   WHERE entity_type = 'patient' AND entity_id = $1)"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((contacts, notifications), (0, 0));
+
+    let (email, name, active): (String, String, bool) =
+        sqlx::query_as("SELECT email, name, is_active FROM users WHERE id = $1")
+            .bind(patient_user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(email, format!("deleted-patient-{patient_user_id}@invalid"));
+    assert_eq!(name, "Deleted patient");
+    assert!(!active);
+}

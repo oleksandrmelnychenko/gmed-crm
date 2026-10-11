@@ -11,6 +11,8 @@ type DocumentPreviewColumnOptions<T> = {
   label: string;
   onPreview: (row: T) => void;
   onSigned?: () => void;
+  /** Whether the row can go out for signature; an archived or file-less document cannot. */
+  canSign?: (row: T) => boolean;
   /** Optional third action: open the document translation dialog. */
   onTranslate?: (row: T) => void;
   translateLabel?: string;
@@ -22,6 +24,7 @@ export function createDocumentPreviewColumn<T>({
   label,
   onPreview,
   onSigned,
+  canSign,
   onTranslate,
   translateLabel,
 }: DocumentPreviewColumnOptions<T>): ColumnDef<T> {
@@ -53,7 +56,9 @@ export function createDocumentPreviewColumn<T>({
         >
           <Eye className="size-4" />
         </Button>
-        <DocumentSignatureAction documentId={getId(row)} title={title} iconOnly onDone={onSigned} />
+        {canSign && !canSign(row) ? null : (
+          <DocumentSignatureAction documentId={getId(row)} title={title} iconOnly onDone={onSigned} />
+        )}
         {onTranslate ? (
           <Button
             type="button"

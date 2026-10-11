@@ -436,6 +436,8 @@ export function PatientDocumentsTab({
         label: t.documents_preview,
         onPreview: (doc) => void openPatientDocumentPreview(doc),
         onSigned: onDocumentGenerated,
+        // An archived version (also one whose file was deleted) is not signed.
+        canSign: (doc) => doc.status !== "archived",
         translateLabel: documentTranslationActionLabel(lang),
         onTranslate: canManageDocuments
           ? (doc) => {

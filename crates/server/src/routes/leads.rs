@@ -524,6 +524,24 @@ async fn list_leads(
     .await
     {
         Ok(rows) => {
+            let repeat_ids: Vec<Uuid> = rows
+                .iter()
+                .filter(|row| {
+                    row.try_get::<Option<Uuid>, _>("repeat_patient_id")
+                        .ok()
+                        .flatten()
+                        .is_some()
+                })
+                .filter_map(|row| row.try_get::<Uuid, _>("id").ok())
+                .collect();
+            let consented_repeat_intakes =
+                match repeat_intakes_with_patient_consent(&state.db, &repeat_ids).await {
+                    Ok(value) => value,
+                    Err(e) => {
+                        tracing::error!(error = %e, "list leads: repeat patient consent");
+                        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                    }
+                };
             let mut leads = Vec::with_capacity(rows.len());
             for r in rows {
                 // conversion_ready is surfaced on the list payload so the
@@ -577,7 +595,11 @@ async fn list_leads(
                         .map(|value| value.to_rfc3339()),
                     "compliance_status": r.try_get::<String, _>("compliance_status").unwrap_or_default(),
                     // When the unqualified-lead rule deletes this lead; null while it does not apply.
-                    "retention_deadline_at": lead_retention_deadline_json(retention.as_ref(), &r),
+                    "retention_deadline_at": lead_retention_deadline_json(
+                        retention.as_ref(),
+                        &r,
+                        consented_repeat_intakes.contains(&lead_id),
+                    ),
                     "qualification_ready": qualification_ready,
                     "conversion_ready": conversion_ready,
                     // Phase 1 classification: a brand-new lead or an existing customer.
@@ -3215,11 +3237,28 @@ async fn get_lead(
     obj.insert("readiness".into(), readiness.payload);
     obj.insert("failed_outcome".into(), failed_outcome_payload(&row));
     obj.insert("lifecycle".into(), lifecycle);
+    let is_repeat_intake = row
+        .try_get::<Option<Uuid>, _>("repeat_patient_id")
+        .ok()
+        .flatten()
+        .is_some();
+    let repeat_patient_consented = if is_repeat_intake {
+        match repeat_intakes_with_patient_consent(&state.db, &[lead_id]).await {
+            Ok(ids) => ids.contains(&lead_id),
+            Err(e) => {
+                tracing::error!(error = %e, lead_id = %lead_id, "load lead: repeat patient consent");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load lead");
+            }
+        }
+    } else {
+        false
+    };
     obj.insert(
         "retention_deadline_at".into(),
         lead_retention_deadline_json(
             load_unqualified_lead_retention(&state.db).await.as_ref(),
             &row,
+            repeat_patient_consented,
         ),
     );
 
@@ -8257,6 +8296,10 @@ async fn purge_lead_documents_in_tx(
                 .bind(document_id)
                 .execute(&mut **tx)
                 .await?;
+                // The kept row loses the texts derived from its file too
+                // (translations, import drafts), as with a deleted file.
+                crate::routes::documents::purge_document_derived_content_in_tx(tx, &[document_id])
+                    .await?;
             }
             Err(error) => return Err(error),
         }
@@ -8554,7 +8597,9 @@ pub struct UnqualifiedLeadRetention {
 impl UnqualifiedLeadRetention {
     /// When the lead is purged, or `None` while the rule does not apply to
     /// it. Mirrors [`UNQUALIFIED_LEAD_SUBJECT_SQL`] and the deadline
-    /// expression of the sweep; edit them together.
+    /// expression of the sweep; edit them together. The exception for a
+    /// repeat intake of a consented patient needs the patient record and is
+    /// applied by the callers (`repeat_intakes_with_patient_consent`).
     pub fn deadline(
         &self,
         qualification_status: &str,
@@ -8570,13 +8615,81 @@ impl UnqualifiedLeadRetention {
     }
 }
 
+/// A repeat intake (alias `l`) whose patient has a valid signed DSGVO
+/// consent: the card records the signed consent (`dsgvo_signed`), the record
+/// is not anonymised, and the latest DSGVO consent entry, if any, was not
+/// withdrawn. The consent's re-confirmation date does not end it: a signed
+/// consent stays the basis until it is withdrawn (Art. 7 Abs. 3 DSGVO).
+macro_rules! repeat_patient_consented_sql {
+    () => {
+        r#"(
+    l.repeat_patient_id IS NOT NULL
+    AND EXISTS (
+        SELECT 1 FROM patients rp
+        WHERE rp.id = l.repeat_patient_id
+          AND rp.lifecycle_status IN ('active', 'inactive')
+          AND (rp.legal_status->>'anonymized_at') IS NULL
+          AND rp.legal_status->>'dsgvo_signed' = 'true'
+          AND COALESCE((
+              SELECT c.granted AND c.revoked_at IS NULL
+              FROM consent_records c
+              WHERE c.patient_id = rp.id
+                AND c.consent_type = 'dsgvo_data_transfer'
+              ORDER BY c.created_at DESC, c.id DESC
+              LIMIT 1
+          ), true)
+    ))"#
+    };
+}
+
+/// The condition of `repeat_patient_consented_sql!` as a constant.
+const REPEAT_PATIENT_CONSENTED_SQL: &str = repeat_patient_consented_sql!();
+
 /// Which leads the rule covers (alias `l`; `$4` is the anonymisation sentinel).
-const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = r#"
+/// A repeat intake of a patient with a valid signed DSGVO consent is not
+/// covered: the consent is the basis to keep its data (decision 2026-10-11).
+const UNQUALIFIED_LEAD_SUBJECT_SQL: &str = concat!(
+    r#"
     l.qualification_status IN ('new', 'in_progress', 'not_qualified', 'archived')
     AND l.compliance_status <> 'signed'
     AND l.converted_patient_id IS NULL
     AND COALESCE(l.failed_outcome_status, 'none') <> 'delete_anonymized'
-    AND l.first_name <> $4"#;
+    AND l.first_name <> $4
+    AND NOT "#,
+    repeat_patient_consented_sql!()
+);
+
+/// The leads among `lead_ids` that are repeat intakes of a patient with a
+/// valid signed DSGVO consent: the unqualified-lead rule does not apply to
+/// them, so they carry no deletion deadline.
+async fn repeat_intakes_with_patient_consent(
+    pool: &gmed_db::DbPool,
+    lead_ids: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
+    if lead_ids.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let ids: Vec<Uuid> = sqlx::query_scalar(&format!(
+        "SELECT l.id FROM leads l WHERE l.id = ANY($1) AND {REPEAT_PATIENT_CONSENTED_SQL}"
+    ))
+    .bind(lead_ids)
+    .fetch_all(pool)
+    .await?;
+    Ok(ids.into_iter().collect())
+}
+
+/// Whether one lead is a repeat intake of a consented patient, for the
+/// cabinet and the sign-in e-mail that name the deletion date. A failed
+/// lookup counts as "no": the date is shown rather than hidden.
+pub(crate) async fn is_consented_repeat_intake(pool: &gmed_db::DbPool, lead_id: Uuid) -> bool {
+    match repeat_intakes_with_patient_consent(pool, &[lead_id]).await {
+        Ok(ids) => ids.contains(&lead_id),
+        Err(error) => {
+            tracing::warn!(lead_id = %lead_id, error = %error, "check repeat intake consent");
+            false
+        }
+    }
+}
 
 /// Deadline of a lead (`$1` days, `$2` start of the rule).
 const UNQUALIFIED_LEAD_DEADLINE_SQL: &str =
@@ -8613,11 +8726,17 @@ pub async fn load_unqualified_lead_retention(
 }
 
 /// The deadline of a lead row for the API (`retention_deadline_at`): RFC 3339,
-/// or null while the rule does not apply to the lead.
+/// or null while the rule does not apply to the lead. A repeat intake of a
+/// patient with a valid signed DSGVO consent
+/// ([`repeat_intakes_with_patient_consent`]) has none.
 fn lead_retention_deadline_json(
     policy: Option<&UnqualifiedLeadRetention>,
     row: &sqlx::postgres::PgRow,
+    repeat_patient_consented: bool,
 ) -> Value {
+    if repeat_patient_consented {
+        return Value::Null;
+    }
     let deadline = policy.and_then(|policy| {
         policy.deadline(
             &row.try_get::<String, _>("qualification_status").ok()?,

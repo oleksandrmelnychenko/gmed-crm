@@ -67,6 +67,27 @@ describe("API validation errors", () => {
       .rejects.toMatchObject({ message: detail, status: 422, code: "invalid_request" });
   });
 
+  it("shows a refused erasure in the user's language with the retention date", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "erasure_blocked_by_retention",
+      message: "The patient's medical documentation must be kept until 11.10.2056",
+      retention_until: "2056-10-11T10:00:00+00:00",
+      retention_until_display: "11.10.2056",
+    }), { status: 409, headers: { "Content-Type": "application/json" } })));
+    const { apiFetch } = await loadApiModule();
+    const failure = await apiFetch("/admin/compliance/privacy-requests/r/execute", {
+      method: "POST",
+      body: "{}",
+    }).catch((error: unknown) => error as Error & { code?: string });
+    expect(failure).toMatchObject({ status: 409, code: "erasure_blocked_by_retention" });
+    expect(failure.message).toContain("11.10.2056");
+    expect(failure.message).toContain("§ 630f");
+    expect(failure.message).not.toContain("{retention_until_display}");
+    expect(failure.message).not.toContain("The patient's medical documentation");
+  });
+
   it("does not display a gateway HTML page as a validation message", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage("test-token");

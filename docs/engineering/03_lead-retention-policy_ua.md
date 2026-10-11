@@ -16,6 +16,7 @@ Process map клінік-flow-у також чітко це фіксує: дві
 |---|---|---|
 | `new`, `in_progress`, `not_qualified`, `archived` **без підписаної згоди DSGVO** (`compliance_status <> 'signed'`) | `unqualified_lead_retention_days` (14 днів) від створення lead-а | **Автоматично видаляється разом з усіма документами** (розділ «Некваліфікований lead без згоди»). |
 | `qualified`, а також будь-який lead з підписаною згодою | unlimited | PII зберігається доки sales активно працює з lead-ом. |
+| Повторне звернення (`repeat_patient_id`) пацієнта з чинною підписаною згодою DSGVO | unlimited (до закриття) | 14-денне правило не діє: згода пацієнта — підстава зберігати дані звернення (рішення 2026-10-11, QA B-18 a). Після закриття — 180-денне правило. |
 | `not_qualified`, `archived` (без `failed_outcome_status = 'delete_anonymized'`) | до `cleanup_archived_leads_days` днів після `failed_processed_at` (або `updated_at`, якщо першого немає) | Lead активно існує. Sales може відкрити, переглянути, додати нотатку. |
 | `archived` + застарілий понад retention window | — | **Автоматично анонімізується** фоновим sweeper-ом; документи, вкладення і prospect-пацієнт видаляються так само, як у 14-денному правилі. |
 | `archived` + `failed_outcome_status = 'delete_anonymized'` | immutable | Lead у post-purge стані. Імʼя = `'Deleted Lead'`, всі PII поля NULL або sentinel values. |
@@ -31,7 +32,8 @@ Process map клінік-flow-у також чітко це фіксує: дві
 
 - `qualification_status` ∈ `new`, `in_progress`, `not_qualified`, `archived`;
 - `compliance_status <> 'signed'` — підписана згода зупиняє правило;
-- lead не конвертовано (`converted_patient_id IS NULL`) і ще не анонімізовано.
+- lead не конвертовано (`converted_patient_id IS NULL`) і ще не анонімізовано;
+- це не повторне звернення пацієнта з чинною підписаною згодою DSGVO (рішення 2026-10-11, QA B-18 a). Умова — макрос `repeat_patient_consented_sql!` / `REPEAT_PATIENT_CONSENTED_SQL` у `leads.rs`: `repeat_patient_id` вказує на активного чи неактивного, не анонімізованого пацієнта, на картці якого записано підписану згоду (`legal_status.dsgvo_signed = true`), а найновіший запис `consent_records` типу `dsgvo_data_transfer`, якщо він є, не є відкликанням. Строк повторного підтвердження згоди (`expires_at`, типово рік) правило не повертає: підписана згода діє, доки її не відкликали (Art. 7 Abs. 3 DSGVO). Повторне звернення пацієнта без підписаної або з відкликаною згодою підлягає правилу, як будь-який lead; сама картка пацієнта ніколи не чіпається (видаляється лише `prospective`-пацієнт). Для виключеного звернення API повертає `retention_deadline_at = null` — бейджа «Удаление через N дн.» немає.
 
 **Строк**: `GREATEST(created_at, unqualified_lead_retention_effective_at) + unqualified_lead_retention_days`. Момент `effective_at` записує міграція під час першого розгортання, тож lead-и, що існували до ввімкнення правила, отримують повні 14 днів, а не зникають першої ж ночі. `unqualified_lead_retention_days = 0` вимикає правило.
 
@@ -51,7 +53,7 @@ Process map клінік-flow-у також чітко це фіксує: дві
 
 **Audit**: подія `auto_purge_lead` з `reason = "unqualified_lead_retention"`, `retention_days`, `gdpr_article = "5(1)(e)"`, `failed_from_status`.
 
-**Тести**: модуль `unqualified_lead_retention_tests` (межі строку) і інтеграційний `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns` у [`crates/server/tests/leads_api.rs`](../../crates/server/tests/leads_api.rs).
+**Тести**: модуль `unqualified_lead_retention_tests` (межі строку) і інтеграційні `an_unqualified_lead_without_consent_is_purged_with_everything_it_owns` та `a_repeat_intake_of_a_consented_patient_is_kept_past_the_unqualified_window` у [`crates/server/tests/leads_api.rs`](../../crates/server/tests/leads_api.rs).
 
 ## Архітектура
 

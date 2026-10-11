@@ -8552,6 +8552,178 @@ async fn deleting_unshared_document_file_removes_stored_file() {
     assert!(!stored_path.exists());
 }
 
+/// QA B-16: deleting the stored file deletes what was derived from it (the
+/// extracted text, translation texts, clinical import drafts, the naming
+/// result) and keeps the metadata and history; the file-less, archived
+/// document is not released to the portal (localised refusal code).
+#[tokio::test]
+async fn deleting_a_document_file_removes_its_text_translations_and_drafts() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-delete-derived");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let (status, upload) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &admin_bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("auto_name", format!("Arztbrief {tag}")),
+            ("art", "arztbrief".to_string()),
+            ("category", "medical".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        "arztbrief-synthetic.pdf",
+        "application/pdf",
+        b"%PDF-derived-content%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    let document_id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
+
+    // What the system derived from the file: the extracted text, a
+    // translation request and a stored translation, a clinical import draft
+    // and the automatic naming result.
+    sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = 'Diagnosen: I10. Medikation: Ramipril 5 mg.',
+               text_extraction_status = 'completed',
+               text_extraction_method = 'pdf_text',
+               text_extracted_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(document_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let translation_request_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, requested_by, status,
+                source_text, translated_text
+           ) VALUES ($1, $2, 'ru', $3, 'in_progress', 'Diagnosen: I10', 'Диагнозы: I10')
+           RETURNING id"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, source_text, translated_text, created_by
+           ) VALUES ($1, 'ru', 'manual', 'Diagnosen: I10', 'Диагнозы: I10', $2)"#,
+    )
+    .bind(document_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let import_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO clinical_document_imports (patient_id, document_id, requested_by, status, draft)
+           VALUES ($1, $2, $3, 'review_required',
+                   '{"candidates":[{"text":"Ramipril 5 mg"}],"warnings":[]}'::jsonb)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(document_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_auto_naming_jobs (
+                document_id, provisional_auto_name, requested_by, status, result
+           ) VALUES ($1, 'Arztbrief', $2, 'completed', '{"person": "Anna Muster"}'::jsonb)
+           ON CONFLICT (document_id) DO UPDATE SET result = EXCLUDED.result, status = 'completed'"#,
+    )
+    .bind(document_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, deleted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/delete"),
+        &admin_bearer,
+        Some(json!({ "reason": "Synthetic file from a rejected import" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+
+    // The text is gone from the API and the database; the metadata stays.
+    let (status, extraction) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/text-extraction"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{extraction}");
+    assert!(extraction["extracted_text"].is_null(), "{extraction}");
+    let (auto_name, extracted_text): (String, Option<String>) =
+        sqlx::query_as("SELECT auto_name, extracted_text FROM documents WHERE id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(auto_name, format!("Arztbrief {tag}"));
+    assert_eq!(extracted_text, None);
+    let (request_status, source_text, translated_text): (String, Option<String>, Option<String>) =
+        sqlx::query_as(
+            "SELECT status, source_text, translated_text FROM document_translation_requests WHERE id = $1",
+        )
+        .bind(translation_request_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        (request_status.as_str(), source_text, translated_text),
+        ("cancelled", None, None)
+    );
+    let (stored_source, stored_translation): (Option<String>, String) = sqlx::query_as(
+        "SELECT source_text, translated_text FROM document_translations WHERE document_id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!((stored_source, stored_translation.as_str()), (None, ""));
+    let (import_status, draft): (String, Value) =
+        sqlx::query_as("SELECT status, draft FROM clinical_document_imports WHERE id = $1")
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(import_status, "failed");
+    assert_eq!(draft, json!({ "candidates": [], "warnings": [] }));
+    let naming_result: Value =
+        sqlx::query_scalar("SELECT result FROM document_auto_naming_jobs WHERE document_id = $1")
+            .bind(document_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(naming_result, json!({}));
+
+    // The archived, file-less document is not released to the portal.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/portal-release"),
+        &admin_bearer,
+        Some(json!({ "requires_confirmation": false })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "document_archived_not_releasable");
+}
+
 #[tokio::test]
 async fn sent_or_signed_document_file_cannot_be_deleted() {
     let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {

@@ -3213,6 +3213,143 @@ async fn an_unqualified_lead_without_consent_is_purged_with_everything_it_owns()
     assert!(detail["retention_deadline_at"].is_string(), "{detail}");
 }
 
+/// QA B-18 a (decision 2026-10-11): a repeat intake of an existing patient
+/// with a valid signed DSGVO consent is not purged after 14 days and shows no
+/// deadline; without such a consent (never signed, or withdrawn) the rule
+/// applies as to any lead. The patient record itself is never touched.
+#[tokio::test]
+async fn a_repeat_intake_of_a_consented_patient_is_kept_past_the_unqualified_window() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pool = &app.suite.pool;
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let policy = gmed_server::routes::leads::UnqualifiedLeadRetention {
+        days: 14,
+        effective_at: chrono::Utc::now() - chrono::Duration::days(90),
+    };
+
+    let pm_id = app.patient_manager_id;
+    let insert_patient = |suffix: &'static str, legal_status: Value| {
+        let tag = tag.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO patients (
+                        patient_id, first_name, last_name, birth_date, gender, created_by,
+                        lifecycle_status, legal_status
+                   ) VALUES ($1, 'Anna', $2, DATE '1980-05-05', 'female', $3, 'active', $4)
+                   RETURNING id"#,
+            )
+            .bind(format!("PT-REP-{suffix}-{tag}"))
+            .bind(format!("Muster {suffix}"))
+            .bind(pm_id)
+            .bind(legal_status)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+        }
+    };
+    let consented = insert_patient("consented", json!({ "dsgvo_signed": true })).await;
+    let withdrawn = insert_patient("withdrawn", json!({ "dsgvo_signed": true })).await;
+    let unconsented = insert_patient("unconsented", json!({})).await;
+    // The consent of one patient is on record and in force, the other's was
+    // withdrawn after it was given.
+    sqlx::query(
+        r#"INSERT INTO consent_records (
+                patient_id, user_id, consent_type, granted, granted_at, expires_at, context
+           ) VALUES ($1, $2, 'dsgvo_data_transfer', true, now() - interval '400 days',
+                     now() - interval '35 days', '{}'::jsonb)"#,
+    )
+    .bind(consented)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO consent_records (
+                patient_id, user_id, consent_type, granted, granted_at, revoked_at, context,
+                created_at
+           ) VALUES
+                ($1, $2, 'dsgvo_data_transfer', true, now() - interval '30 days',
+                 now() - interval '1 day', '{}'::jsonb, now() - interval '30 days'),
+                ($1, $2, 'dsgvo_data_transfer', false, NULL, now() - interval '1 day',
+                 '{"action": "revoke"}'::jsonb, now() - interval '1 day')"#,
+    )
+    .bind(withdrawn)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let repeat_intake = |patient: Uuid, suffix: &'static str| {
+        let tag = tag.clone();
+        let app = &app;
+        async move {
+            let lead = insert_unqualified_lead(app, &format!("{tag}-{suffix}"), 20).await;
+            sqlx::query(
+                "UPDATE leads SET repeat_patient_id = $2, prospect_patient_id = $2 WHERE id = $1",
+            )
+            .bind(lead)
+            .bind(patient)
+            .execute(pool)
+            .await
+            .unwrap();
+            lead
+        }
+    };
+    let kept = repeat_intake(consented, "kept").await;
+    let withdrawn_lead = repeat_intake(withdrawn, "withdrawn").await;
+    let unconsented_lead = repeat_intake(unconsented, "unconsented").await;
+
+    // No deadline and no badge for the consented patient's repeat intake.
+    let (status, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{kept}"), &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(detail["retention_deadline_at"].is_null(), "{detail}");
+    for lead in [withdrawn_lead, unconsented_lead] {
+        let (status, detail) =
+            json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        assert!(detail["retention_deadline_at"].is_string(), "{detail}");
+    }
+
+    let report = gmed_server::routes::leads::purge_unqualified_leads(
+        &app.suite.state,
+        policy,
+        chrono::Utc::now(),
+        Some(&[kept, withdrawn_lead, unconsented_lead]),
+    )
+    .await
+    .unwrap();
+    assert_eq!((report.purged, report.errors), (2, 0), "{report:?}");
+
+    let first_name = |lead: Uuid| async move {
+        sqlx::query_scalar::<_, String>("SELECT first_name FROM leads WHERE id = $1")
+            .bind(lead)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+    };
+    assert_ne!(
+        first_name(kept).await,
+        "Deleted",
+        "the consented repeat intake stays"
+    );
+    assert_eq!(first_name(withdrawn_lead).await, "Deleted");
+    assert_eq!(first_name(unconsented_lead).await, "Deleted");
+    // The existing patients keep their records.
+    let patients_intact: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM patients
+           WHERE id = ANY($1) AND first_name = 'Anna' AND lifecycle_status = 'active'"#,
+    )
+    .bind(vec![consented, withdrawn, unconsented])
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(patients_intact, 3);
+}
+
 #[tokio::test]
 async fn staff_can_record_whether_the_client_has_medical_documents() {
     let Some(app) = test_app().await else {

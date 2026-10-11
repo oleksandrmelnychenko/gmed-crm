@@ -123,6 +123,89 @@ struct PrivacyRequestMeta {
 const MIN_DECISION_REASON_CHARS: usize = 10;
 const MAX_DECISION_REASON_CHARS: usize = 2000;
 
+/// Why an erasure waits while the medical documentation must be kept: the
+/// retention duty (§ 630f Abs. 3 BGB) excludes the right to erasure (Art. 17
+/// Abs. 3 lit. b DSGVO), and the restriction of processing takes its place
+/// (Art. 18 DSGVO, § 35 Abs. 3 BDSG).
+const CLINICAL_RETENTION_LEGAL_BASIS: &str =
+    "§ 630f Abs. 3 BGB; Art. 17 Abs. 3 lit. b DSGVO; Art. 18 DSGVO, § 35 Abs. 3 BDSG";
+
+/// Columns of a privacy request as the register lists it (alias `pr`, the
+/// patient `p`, the users `rq`, `rv`, `ex`); [`map_privacy_request_row`]
+/// reads them.
+const PRIVACY_REQUEST_COLUMNS: &str = r#"pr.id, pr.patient_id, p.patient_id AS patient_pid,
+                  concat_ws(' ', p.first_name, p.last_name) AS patient_name,
+                  rq.name AS requested_by_name,
+                  rv.name AS reviewed_by_name,
+                  ex.name AS executed_by_name,
+                  pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
+                  pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
+                  pr.reviewed_at, pr.executed_at, pr.context,
+                  CASE WHEN p.clinical_retention_until > now()
+                       THEN p.clinical_retention_until END AS patient_retention_until"#;
+
+/// The snapshot a new request takes of the patient's retention (`$1` is the
+/// patient): the end of the medical documentation's retention while it runs.
+const PATIENT_RETENTION_SNAPSHOT_SQL: &str = "(SELECT CASE WHEN clinical_retention_until > now() \
+     THEN clinical_retention_until END FROM patients WHERE id = $1)";
+
+/// The end of the retention of the patient's medical documentation
+/// (`clinical_retention_until`) while it runs. Every clinical entry moves it
+/// further, so decisions read it live instead of the request's snapshot.
+async fn running_clinical_retention(
+    executor: impl sqlx::PgExecutor<'_>,
+    patient_id: Uuid,
+) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+        r#"SELECT CASE WHEN clinical_retention_until > now()
+                       THEN clinical_retention_until END
+           FROM patients
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(executor)
+    .await
+    .map(Option::flatten)
+}
+
+/// The refusal of an erasure while the medical documentation must be kept.
+/// The code carries the date and the legal basis; the staff UI shows it in
+/// RU/DE and offers the restriction of processing or a reasoned rejection.
+fn erasure_blocked_by_retention(retention_until: DateTime<Utc>) -> axum::response::Response {
+    let display = crate::app_time::local(retention_until)
+        .format("%d.%m.%Y")
+        .to_string();
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "erasure_blocked_by_retention",
+            "message": format!(
+                "The patient's medical documentation must be kept until {display} \
+                 (§ 630f Abs. 3 BGB); erasure is excluded until then (Art. 17 Abs. 3 \
+                 lit. b DSGVO). Restrict processing instead (Art. 18 DSGVO, § 35 Abs. 3 \
+                 BDSG) or reject the request with this reason."
+            ),
+            "retention_until": retention_until.to_rfc3339(),
+            "retention_until_display": display,
+            "legal_basis": CLINICAL_RETENTION_LEGAL_BASIS,
+        })),
+    )
+        .into_response()
+}
+
+/// A second open request of the same type for the patient (the register
+/// keeps one per type).
+fn open_privacy_request_exists() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "privacy_request_open_exists",
+            "message": "An open privacy request of this type already exists",
+        })),
+    )
+        .into_response()
+}
+
 /// Requests the data subject files themselves are executed only after a
 /// recorded identity check for the types that disclose or delete the record
 /// (Art. 12 Abs. 6 DSGVO): access, portability and erasure.
@@ -1007,6 +1090,20 @@ async fn anonymize_patient(
         return response;
     }
 
+    // The direct path is held to the same retention rule as the register:
+    // refused before it records a self-approved request.
+    match running_clinical_retention(&state.db, patient_id).await {
+        Ok(Some(retention_until)) => return erasure_blocked_by_retention(retention_until),
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!(error = %e, patient_id = %patient_id, "check retention before direct erasure");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to anonymize patient",
+            );
+        }
+    }
+
     let manual_request_id =
         match create_manual_erasure_request(&state, patient_id, auth.user_id).await {
             Ok(request_id) => request_id,
@@ -1583,20 +1680,20 @@ async fn create_patient_privacy_request(
         };
 
     if open_request_exists {
-        return err(
-            StatusCode::CONFLICT,
-            "An open privacy request of this type already exists",
-        );
+        return open_privacy_request_exists();
     }
 
-    let request_id = match sqlx::query_scalar::<_, Uuid>(
+    // The request takes a snapshot of the patient's retention, so the review
+    // shows from the start until when the medical documentation is kept.
+    let request_id = match sqlx::query_scalar::<_, Uuid>(&format!(
         r#"INSERT INTO patient_privacy_requests (
-                patient_id, requested_by, request_type, source, status, reason, due_at, context
+                patient_id, requested_by, request_type, source, status, reason, due_at, context,
+                retention_until
            ) VALUES (
-                $1, $2, $3, $4, 'requested', $5, $6, $7
+                $1, $2, $3, $4, 'requested', $5, $6, $7, {PATIENT_RETENTION_SNAPSHOT_SQL}
            )
-           RETURNING id"#,
-    )
+           RETURNING id"#
+    ))
     .bind(patient_id)
     .bind(auth.user_id)
     .bind(&request_type)
@@ -1612,10 +1709,7 @@ async fn create_patient_privacy_request(
     {
         Ok(request_id) => request_id,
         Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23505") => {
-            return err(
-                StatusCode::CONFLICT,
-                "An open privacy request of this type already exists",
-            );
+            return open_privacy_request_exists();
         }
         Err(e) => {
             tracing::error!(error = %e, patient_id = %patient_id, "create privacy request");
@@ -1676,23 +1770,16 @@ async fn list_patient_privacy_requests(
         return e;
     }
 
-    match sqlx::query(
-        r#"SELECT pr.id, pr.patient_id, p.patient_id AS patient_pid,
-                  concat_ws(' ', p.first_name, p.last_name) AS patient_name,
-                  rq.name AS requested_by_name,
-                  rv.name AS reviewed_by_name,
-                  ex.name AS executed_by_name,
-                  pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                  pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
-                  pr.reviewed_at, pr.executed_at, pr.context
+    match sqlx::query(&format!(
+        r#"SELECT {PRIVACY_REQUEST_COLUMNS}
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
            JOIN users rq ON rq.id = pr.requested_by
            LEFT JOIN users rv ON rv.id = pr.reviewed_by
            LEFT JOIN users ex ON ex.id = pr.executed_by
            WHERE pr.patient_id = $1
-           ORDER BY pr.created_at DESC"#,
-    )
+           ORDER BY pr.created_at DESC"#
+    ))
     .bind(patient_id)
     .fetch_all(&state.db)
     .await
@@ -1725,15 +1812,8 @@ async fn list_privacy_requests(
 
     let requires_assignment = access::requires_patient_assignment(auth.role);
     let rows = if requires_assignment {
-        sqlx::query(
-            r#"SELECT pr.id, pr.patient_id, p.patient_id AS patient_pid,
-                      concat_ws(' ', p.first_name, p.last_name) AS patient_name,
-                      rq.name AS requested_by_name,
-                      rv.name AS reviewed_by_name,
-                      ex.name AS executed_by_name,
-                      pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                      pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
-                      pr.reviewed_at, pr.executed_at, pr.context
+        sqlx::query(&format!(
+            r#"SELECT {PRIVACY_REQUEST_COLUMNS}
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
                JOIN users rq ON rq.id = pr.requested_by
@@ -1747,29 +1827,22 @@ async fn list_privacy_requests(
                        AND pa.revoked_at IS NULL
                )
                ORDER BY pr.created_at DESC
-               LIMIT 100"#,
-        )
+               LIMIT 100"#
+        ))
         .bind(auth.user_id)
         .fetch_all(&state.db)
         .await
     } else {
-        sqlx::query(
-            r#"SELECT pr.id, pr.patient_id, p.patient_id AS patient_pid,
-                      concat_ws(' ', p.first_name, p.last_name) AS patient_name,
-                      rq.name AS requested_by_name,
-                      rv.name AS reviewed_by_name,
-                      ex.name AS executed_by_name,
-                      pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                      pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
-                      pr.reviewed_at, pr.executed_at, pr.context
+        sqlx::query(&format!(
+            r#"SELECT {PRIVACY_REQUEST_COLUMNS}
                FROM patient_privacy_requests pr
                JOIN patients p ON p.id = pr.patient_id
                JOIN users rq ON rq.id = pr.requested_by
                LEFT JOIN users rv ON rv.id = pr.reviewed_by
                LEFT JOIN users ex ON ex.id = pr.executed_by
                ORDER BY pr.created_at DESC
-               LIMIT 100"#,
-        )
+               LIMIT 100"#
+        ))
         .fetch_all(&state.db)
         .await
     };
@@ -1865,20 +1938,53 @@ async fn review_privacy_request(
     {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "note too long");
     }
+
+    // The retention of the medical documentation, read live (every clinical
+    // entry moves it): an erasure is not approved while it runs (§ 630f
+    // Abs. 3 BGB, Art. 17 Abs. 3 lit. b DSGVO). Holding it restricts the
+    // processing until then instead (Art. 18 DSGVO, § 35 Abs. 3 BDSG), and a
+    // reasoned rejection stays possible.
+    let patient_retention = match running_clinical_retention(&state.db, request.patient_id).await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, request_id = %request_id, "load patient retention for review");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to review privacy request",
+            );
+        }
+    };
+    let is_erasure = request.request_type == "erasure";
+    if action == "approve"
+        && is_erasure
+        && let Some(retention_until) = patient_retention
+    {
+        return erasure_blocked_by_retention(retention_until);
+    }
+
+    // Approving or rejecting refreshes the retention snapshot (or keeps the
+    // old one); a hold lasts until the retention ends, an explicit number of
+    // days, or the configured default.
     let (next_status, retention_until) = match action.as_str() {
-        "approve" => ("approved", None),
-        "reject" => ("rejected", None),
+        "approve" => ("approved", patient_retention),
+        "reject" => ("rejected", patient_retention),
         "hold" => {
-            let retention_days = body
-                .retention_days
-                .unwrap_or(load_numeric_setting(&state, "patient_retention_hold_days", 3650).await);
-            (
-                "retention_hold",
-                Some(reviewed_at + Duration::days(retention_days.max(1))),
-            )
+            let until = match (body.retention_days, patient_retention) {
+                (Some(days), _) => reviewed_at + Duration::days(days.max(1)),
+                (None, Some(retention_until)) => retention_until,
+                (None, None) => {
+                    let days =
+                        load_numeric_setting(&state, "patient_retention_hold_days", 3650).await;
+                    reviewed_at + Duration::days(days.max(1))
+                }
+            };
+            ("retention_hold", Some(until))
         }
         _ => unreachable!(),
     };
+    // An erasure that waits for the retention to end is a restriction of
+    // processing in the meantime (§ 35 Abs. 3 BDSG with Art. 18 DSGVO).
+    let restrict_processing = is_erasure && next_status == "retention_hold";
     // Approving clears an earlier hold reason; it no longer applies.
     let next_decision_reason = if action == "approve" {
         None
@@ -1900,10 +2006,22 @@ async fn review_privacy_request(
         "retention_until": retention_until.map(|value| value.to_rfc3339()),
     });
 
+    let failed = |e: sqlx::Error| {
+        tracing::error!(error = %e, request_id = %request_id, "review privacy request");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to review privacy request",
+        )
+    };
+    // The decision and the restriction it brings are one change.
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(e) => return failed(e),
+    };
     let updated = sqlx::query(
         r#"UPDATE patient_privacy_requests
            SET status = $2,
-               retention_until = $3,
+               retention_until = COALESCE($3, retention_until),
                review_note = COALESCE($4, review_note),
                reviewed_by = $5,
                reviewed_at = $6,
@@ -1927,7 +2045,7 @@ async fn review_privacy_request(
     .bind(next_decision_reason.clone())
     .bind(&decision_entry)
     .bind(&request.status)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
 
     match updated {
@@ -1939,13 +2057,41 @@ async fn review_privacy_request(
             );
         }
         Ok(_) => {}
-        Err(e) => {
-            tracing::error!(error = %e, request_id = %request_id, "review privacy request");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to review privacy request",
-            );
+        Err(e) => return failed(e),
+    }
+
+    if restrict_processing {
+        // An earlier restriction keeps the day it started.
+        if let Err(e) = sqlx::query(
+            r#"UPDATE patients
+               SET legal_status = COALESCE(legal_status, '{}'::jsonb) || $2
+                       || CASE WHEN COALESCE((legal_status->>'processing_restricted')::boolean, false)
+                                    AND legal_status ? 'processing_restricted_at'
+                               THEN jsonb_build_object(
+                                        'processing_restricted_at',
+                                        legal_status->'processing_restricted_at')
+                               ELSE '{}'::jsonb END,
+                   updated_at = now()
+               WHERE id = $1
+                 AND (legal_status->>'anonymized_at') IS NULL"#,
+        )
+        .bind(request.patient_id)
+        .bind(json!({
+            "processing_restricted": true,
+            "processing_restricted_at": reviewed_at.to_rfc3339(),
+            "processing_restriction_request_id": request.id.to_string(),
+            "processing_restriction_by": auth.user_id.to_string(),
+            "processing_restriction_basis": "erasure_retention_hold",
+            "processing_restricted_until": retention_until.map(|value| value.to_rfc3339()),
+        }))
+        .execute(&mut *tx)
+        .await
+        {
+            return failed(e);
         }
+    }
+    if let Err(e) = tx.commit().await {
+        return failed(e);
     }
 
     state.audit_sender.try_send(audit::domain_event(
@@ -1968,6 +2114,7 @@ async fn review_privacy_request(
             "retention_until": retention_until.map(|value| value.to_rfc3339()),
             "review_note": review_note,
             "decision_reason": next_decision_reason,
+            "processing_restricted": restrict_processing,
         }),
     ));
 
@@ -2586,22 +2733,15 @@ async fn fetch_privacy_request_payload(
     state: &AppState,
     request_id: Uuid,
 ) -> Result<Value, axum::response::Response> {
-    match sqlx::query(
-        r#"SELECT pr.id, pr.patient_id, p.patient_id AS patient_pid,
-                  concat_ws(' ', p.first_name, p.last_name) AS patient_name,
-                  rq.name AS requested_by_name,
-                  rv.name AS reviewed_by_name,
-                  ex.name AS executed_by_name,
-                  pr.request_type, pr.source, pr.status, pr.reason, pr.due_at,
-                  pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
-                  pr.reviewed_at, pr.executed_at, pr.context
+    match sqlx::query(&format!(
+        r#"SELECT {PRIVACY_REQUEST_COLUMNS}
            FROM patient_privacy_requests pr
            JOIN patients p ON p.id = pr.patient_id
            JOIN users rq ON rq.id = pr.requested_by
            LEFT JOIN users rv ON rv.id = pr.reviewed_by
            LEFT JOIN users ex ON ex.id = pr.executed_by
-           WHERE pr.id = $1"#,
-    )
+           WHERE pr.id = $1"#
+    ))
     .bind(request_id)
     .fetch_optional(&state.db)
     .await
@@ -2701,24 +2841,21 @@ async fn create_manual_erasure_request(
     actor_id: Uuid,
 ) -> Result<Uuid, axum::response::Response> {
     if has_open_privacy_request(state, patient_id, "erasure").await? {
-        return Err(err(
-            StatusCode::CONFLICT,
-            "An open privacy request of this type already exists",
-        ));
+        return Err(open_privacy_request_exists());
     }
 
     let record_summary = load_patient_record_summary(state, patient_id).await?;
     let reviewed_at = Utc::now();
-    let request_id = sqlx::query_scalar::<_, Uuid>(
+    let request_id = sqlx::query_scalar::<_, Uuid>(&format!(
         r#"INSERT INTO patient_privacy_requests (
                 patient_id, requested_by, request_type, source, status, reason,
-                due_at, reviewed_by, reviewed_at, review_note, context
+                due_at, reviewed_by, reviewed_at, review_note, context, retention_until
            ) VALUES (
                 $1, $2, 'erasure', 'admin_intake', 'approved', $3,
-                $4, $2, $4, $5, $6
+                $4, $2, $4, $5, $6, {PATIENT_RETENTION_SNAPSHOT_SQL}
            )
-           RETURNING id"#,
-    )
+           RETURNING id"#
+    ))
     .bind(patient_id)
     .bind(actor_id)
     .bind("Legacy direct anonymize endpoint")
@@ -2732,10 +2869,9 @@ async fn create_manual_erasure_request(
     .fetch_one(&state.db)
     .await
     .map_err(|e| match e {
-        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505") => err(
-            StatusCode::CONFLICT,
-            "An open privacy request of this type already exists",
-        ),
+        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505") => {
+            open_privacy_request_exists()
+        }
         other => {
             tracing::error!(error = %other, patient_id = %patient_id, "create manual erasure request");
             err(
@@ -3027,6 +3163,13 @@ async fn anonymize_patient_record(
 ) -> Result<Value, axum::response::Response> {
     let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
     let anonymized_at = Utc::now();
+    let failed = |e: sqlx::Error, step: &'static str| {
+        tracing::error!(error = %e, patient_id = %patient_id, step, "patient erasure");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to anonymize patient",
+        )
+    };
     let mut tx = state.db.begin().await.map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "begin patient erasure transaction");
         err(
@@ -3034,6 +3177,25 @@ async fn anonymize_patient_record(
             "Failed to anonymize patient",
         )
     })?;
+
+    // Never while the medical documentation must be kept (§ 630f Abs. 3 BGB,
+    // Art. 17 Abs. 3 lit. b DSGVO). Checked on the locked row, so a clinical
+    // entry saved meanwhile cannot slip past an approval made before it.
+    let running_retention = sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+        r#"SELECT CASE WHEN clinical_retention_until > now()
+                       THEN clinical_retention_until END
+           FROM patients
+           WHERE id = $1
+           FOR UPDATE"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| failed(e, "lock patient"))?
+    .flatten();
+    if let Some(retention_until) = running_retention {
+        return Err(erasure_blocked_by_retention(retention_until));
+    }
 
     let update = anonymize_patient_identity(
         &mut *tx,
@@ -3136,64 +3298,113 @@ async fn anonymize_patient_record(
         })?;
     }
 
-    // Files go too, except what commercial and tax law oblige the agency to keep
-    // (invoices, contracts, orders: § 257 HGB, § 147 AO). Those stay restricted to
-    // that purpose; Art. 17 Abs. 3 lit. b DSGVO covers the exception.
-    let erased_file_keys: Vec<String> = sqlx::query_scalar(
+    // Documents go too, except what commercial and tax law oblige the agency
+    // to keep (invoices, contracts, orders: § 257 HGB, § 147 AO). Those stay
+    // restricted to that purpose; Art. 17 Abs. 3 lit. b DSGVO covers the
+    // exception. An erased document keeps an empty row for its history: no
+    // file, no name of the person (the generated name repeats it), no text.
+    let erased_documents: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        r#"SELECT id, storage_key
+           FROM documents
+           WHERE patient_id = $1
+             AND lower(concat_ws(' ', category, art)) !~
+                 '(invoice|rechnung|kosten|payment|financ|contract|vertrag|order|auftrag)'
+             -- Signed PDFs and signature evidence are the legal originals of
+             -- contracts and consents; they follow the retention of the
+             -- underlying contract (Art. 17 Abs. 3 lit. b, e DSGVO).
+             AND NOT (
+                 COALESCE(ursprung, '') IN ('electronic_signature', 'electronic_signature_package')
+                 AND NOT EXISTS (
+                     SELECT 1 FROM document_signature_requests signature_request
+                     WHERE signature_request.result_document_id = documents.id
+                       AND signature_request.test_mode
+                 )
+                 AND NOT EXISTS (
+                     SELECT 1 FROM document_signature_members signature_member
+                     JOIN document_signature_requests signature_request
+                       ON signature_request.id = signature_member.request_id
+                     WHERE signature_member.result_document_id = documents.id
+                       AND signature_request.test_mode
+                 )
+             )
+           FOR UPDATE"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(|e| failed(e, "load patient documents"))?;
+    let erased_document_ids: Vec<Uuid> = erased_documents.iter().map(|(id, _)| *id).collect();
+    let erased_file_keys: Vec<String> = erased_documents
+        .into_iter()
+        .filter_map(|(_, key)| key.filter(|key| !key.trim().is_empty()))
+        .collect();
+    // The SET expressions read the row before the update: only a document
+    // that still had its file gets the deletion stamp.
+    sqlx::query(
         r#"UPDATE documents
            SET status = 'archived',
                visibility = 'internal',
                storage_key = NULL,
+               auto_name = COALESCE(NULLIF(btrim(art), ''), 'document'),
                original_filename = NULL,
                notes = NULL,
-               file_deleted_at = now(),
-               file_deleted_by = $2,
-               file_delete_reason = 'dsgvo_erasure'
-           FROM (
-               SELECT id, storage_key AS old_key
-               FROM documents
-               WHERE patient_id = $1
-                 AND storage_key IS NOT NULL
-                 AND file_deleted_at IS NULL
-                 AND lower(concat_ws(' ', category, art)) !~
-                     '(invoice|rechnung|kosten|payment|financ|contract|vertrag|order|auftrag)'
-                 -- Signed PDFs and signature evidence are the legal originals
-                 -- of contracts and consents; they follow the retention of the
-                 -- underlying contract (Art. 17 Abs. 3 lit. b, e DSGVO).
-                 AND NOT (
-                     COALESCE(ursprung, '') IN ('electronic_signature', 'electronic_signature_package')
-                     AND NOT EXISTS (
-                         SELECT 1 FROM document_signature_requests signature_request
-                         WHERE signature_request.result_document_id = documents.id
-                           AND signature_request.test_mode
-                     )
-                     AND NOT EXISTS (
-                         SELECT 1 FROM document_signature_members signature_member
-                         JOIN document_signature_requests signature_request
-                           ON signature_request.id = signature_member.request_id
-                         WHERE signature_member.result_document_id = documents.id
-                           AND signature_request.test_mode
-                     )
-                 )
-               FOR UPDATE
-           ) doomed
-           WHERE documents.id = doomed.id
-           RETURNING doomed.old_key"#,
+               source_person = NULL,
+               addressee_person = NULL,
+               order_intake_context = NULL,
+               file_deleted_at = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                      THEN now() ELSE file_deleted_at END,
+               file_deleted_by = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                      THEN $2 ELSE file_deleted_by END,
+               file_delete_reason = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                         THEN 'dsgvo_erasure' ELSE file_delete_reason END
+           WHERE id = ANY($1)"#,
+    )
+    .bind(&erased_document_ids)
+    .bind(actor_id)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| failed(e, "erase patient documents"))?;
+    let derived_content =
+        super::documents::purge_document_derived_content_in_tx(&mut tx, &erased_document_ids)
+            .await
+            .map_err(|e| failed(e, "erase derived document content"))?;
+
+    // Further copies of the identity: the extra phone numbers and e-mail
+    // addresses, the identity block of imported medication plans, and
+    // notifications that name the patient or one of the erased documents.
+    let removed_contacts = sqlx::query("DELETE FROM patient_contacts WHERE patient_id = $1")
+        .bind(patient_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| failed(e, "remove patient contacts"))?
+        .rows_affected();
+    let removed_medication_plan_imports =
+        sqlx::query("DELETE FROM patient_bmp_imports WHERE patient_id = $1")
+            .bind(patient_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| failed(e, "remove medication plan imports"))?
+            .rows_affected();
+    let removed_notifications = sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE (entity_type = 'patient' AND entity_id = $1)
+              OR (entity_type = 'document' AND entity_id = ANY($2))"#,
     )
     .bind(patient_id)
-    .bind(actor_id)
-    .fetch_all(&mut *tx)
+    .bind(&erased_document_ids)
+    .execute(&mut *tx)
     .await
-    .map_err(|e| {
-        tracing::error!(error = %e, patient_id = %patient_id, "erase patient document files");
-        err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to anonymize patient",
-        )
-    })?;
+    .map_err(|e| failed(e, "remove patient notifications"))?
+    .rows_affected();
 
     let (redacted_messages, attachment_keys) =
         redact_patient_direct_messages(&mut tx, patient_id).await?;
+    // The patient's own login goes last: the message redaction above finds it
+    // through the (now revoked) assignments.
+    let disabled_portal_accounts =
+        disable_patient_portal_accounts_in_tx(&mut tx, patient_id, &source_lead_ids)
+            .await
+            .map_err(|e| failed(e, "disable patient portal accounts"))?;
     tx.commit().await.map_err(|e| {
         tracing::error!(error = %e, patient_id = %patient_id, "commit patient erasure transaction");
         err(
@@ -3223,6 +3434,12 @@ async fn anonymize_patient_record(
             "redacted_messages": redacted_messages,
             "removed_message_attachments": removed_attachments,
             "erased_document_files": erased_file_keys.len(),
+            "erased_documents": erased_document_ids.len(),
+            "erased_document_content": derived_content,
+            "removed_contacts": removed_contacts,
+            "removed_medication_plan_imports": removed_medication_plan_imports,
+            "removed_notifications": removed_notifications,
+            "disabled_portal_accounts": disabled_portal_accounts.len(),
             "anonymized_source_leads": source_lead_ids.len(),
         }),
     ));
@@ -3238,8 +3455,100 @@ async fn anonymize_patient_record(
         "redacted_messages": redacted_messages,
         "removed_message_attachments": removed_attachments,
         "erased_document_files": erased_file_keys.len(),
+        "erased_documents": erased_document_ids.len(),
+        "erased_document_content": derived_content,
+        "removed_contacts": removed_contacts,
+        "removed_medication_plan_imports": removed_medication_plan_imports,
+        "removed_notifications": removed_notifications,
+        "disabled_portal_accounts": disabled_portal_accounts.len(),
         "anonymized_source_leads": source_lead_ids.len(),
     }))
+}
+
+/// Switches off the patient's own portal login (and a guardian's login that
+/// served only this patient) in the erasure transaction: no name, no e-mail,
+/// an unusable password, revoked sessions and pending sign-ins. A login that
+/// still reaches another patient record or request is left alone. The rows
+/// stay because audit rows and documents refer to them. Returns the accounts.
+async fn disable_patient_portal_accounts_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    source_lead_ids: &[Uuid],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let accounts: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT DISTINCT u.id
+           FROM patient_assignments pa
+           JOIN users u ON u.id = pa.user_id
+           WHERE pa.patient_id = $1
+             AND u.role = 'patient'
+             AND NOT EXISTS (
+                 SELECT 1 FROM patient_assignments other
+                 WHERE other.user_id = u.id
+                   AND other.patient_id <> $1
+                   AND other.revoked_at IS NULL
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM leads l
+                 WHERE l.portal_user_id = u.id
+                   AND NOT (l.id = ANY($2))
+                   AND l.qualification_status <> 'deleted'
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM lead_portal_access access
+                 WHERE access.user_id = u.id
+                   AND NOT (access.lead_id = ANY($2))
+                   AND access.revoked_at IS NULL
+             )"#,
+    )
+    .bind(patient_id)
+    .bind(source_lead_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    if accounts.is_empty() {
+        return Ok(accounts);
+    }
+    let unusable_hash = crate::auth::password::hash_password(
+        &crate::auth::password_policy::generate_one_time_password(),
+    )
+    .map_err(|error| sqlx::Error::Protocol(format!("hash portal password: {error}")))?;
+    sqlx::query(
+        r#"UPDATE users
+           SET email = 'deleted-patient-' || id::text || '@invalid',
+               name = 'Deleted patient',
+               phone = NULL,
+               password_hash = $2,
+               password_history = '[]'::jsonb,
+               mfa_backup_codes = NULL,
+               is_active = false,
+               updated_at = now()
+           WHERE id = ANY($1)"#,
+    )
+    .bind(&accounts)
+    .bind(&unusable_hash)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE token_families SET is_revoked = true, revoked_reason = 'patient_erased'
+         WHERE user_id = ANY($1) AND NOT is_revoked",
+    )
+    .bind(&accounts)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE pending_logins SET status = 'rejected', resolved_at = now()
+         WHERE user_id = ANY($1) AND status IN ('pending', 'approved')",
+    )
+    .bind(&accounts)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE lead_portal_access SET revoked_at = now(), revoked_reason = 'patient_erased'
+         WHERE user_id = ANY($1) AND revoked_at IS NULL",
+    )
+    .bind(&accounts)
+    .execute(&mut **tx)
+    .await?;
+    Ok(accounts)
 }
 
 async fn redact_patient_direct_messages(
@@ -3569,8 +3878,19 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         .unwrap_or_default();
     let source = row.try_get::<String, _>("source").unwrap_or_default();
     let request_type = row.try_get::<String, _>("request_type").unwrap_or_default();
+    let status = row.try_get::<String, _>("status").unwrap_or_default();
     let identity_verification_required =
         privacy_request_requires_identity_verification(&source, &request_type);
+    // The live retention of the patient's medical documentation (the
+    // request's `retention_until` is the snapshot taken when it was filed).
+    let patient_retention_until = row
+        .try_get::<Option<DateTime<Utc>>, _>("patient_retention_until")
+        .unwrap_or_default();
+    let is_open = matches!(status.as_str(), "requested" | "retention_hold" | "approved");
+    // A decided hold has answered the data subject (Art. 12 Abs. 3 DSGVO);
+    // only a request still waiting for a decision or its execution is late.
+    let is_overdue = matches!(status.as_str(), "requested" | "approved")
+        && due_at.is_some_and(|value| value < Utc::now());
 
     json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -3580,12 +3900,23 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "requested_by_name": row.try_get::<String, _>("requested_by_name").unwrap_or_default(),
         "reviewed_by_name": row.try_get::<Option<String>, _>("reviewed_by_name").unwrap_or_default(),
         "executed_by_name": row.try_get::<Option<String>, _>("executed_by_name").unwrap_or_default(),
+        "erasure_blocked_by_retention": is_open
+            && request_type == "erasure"
+            && patient_retention_until.is_some(),
         "request_type": request_type,
         "source": source,
-        "status": row.try_get::<String, _>("status").unwrap_or_default(),
+        // How the request reached the register: the patient portal, the
+        // compliance workspace (staff recorded it), the retention sweep or the
+        // direct erasure endpoint.
+        "created_via": context
+            .get("created_via")
+            .and_then(Value::as_str)
+            .or_else(|| context.get("origin").and_then(Value::as_str)),
+        "status": status,
         "reason": row.try_get::<Option<String>, _>("reason").unwrap_or_default(),
         "due_at": due_at.map(|value| value.to_rfc3339()),
         "retention_until": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("retention_until").unwrap_or_default().map(|value| value.to_rfc3339()),
+        "patient_retention_until": patient_retention_until.map(|value| value.to_rfc3339()),
         "review_note": row.try_get::<Option<String>, _>("review_note").unwrap_or_default(),
         "decision_reason": row.try_get::<Option<String>, _>("decision_reason").unwrap_or_default(),
         "decision_history": context.get("decision_history").cloned().unwrap_or_else(|| json!([])),
@@ -3595,7 +3926,7 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "executed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("executed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "record_summary": context.get("record_summary").cloned(),
         "manual_override": context.get("manual_override").and_then(Value::as_bool).unwrap_or(false),
-        "is_overdue": due_at.map(|value| value < Utc::now()).unwrap_or(false),
+        "is_overdue": is_overdue,
         "identity_verification": context.get("identity_verification").cloned(),
         "deadline_extension": context.get("deadline_extension").cloned(),
         "subject_notification": context.get("subject_notification").cloned(),

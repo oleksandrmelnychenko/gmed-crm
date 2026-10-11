@@ -216,20 +216,23 @@ async fn create_my_privacy_request(
     .unwrap_or(false);
 
     if open_request_exists {
-        return err(
-            StatusCode::CONFLICT,
-            "An open privacy request of this type already exists",
-        );
+        return own_privacy_request_open_exists();
     }
 
     let due_days = load_numeric_setting(&state, "patient_erasure_due_days", 30).await;
     let due_at = Utc::now() + Duration::days(due_days.max(1));
 
+    // Like a request staff records, it takes a snapshot of the retention of
+    // the patient's medical documentation for the review.
     let request_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO patient_privacy_requests (
-                patient_id, requested_by, request_type, source, status, reason, due_at, context
+                patient_id, requested_by, request_type, source, status, reason, due_at, context,
+                retention_until
            ) VALUES (
-                $1, $2, $3, 'patient_request', 'requested', $4, $5, $6
+                $1, $2, $3, 'patient_request', 'requested', $4, $5, $6,
+                (SELECT CASE WHEN clinical_retention_until > now()
+                             THEN clinical_retention_until END
+                 FROM patients WHERE id = $1)
            )
            RETURNING id"#,
     )
@@ -246,10 +249,7 @@ async fn create_my_privacy_request(
     {
         Ok(id) => id,
         Err(sqlx::Error::Database(db_err)) if db_err.code().as_deref() == Some("23505") => {
-            return err(
-                StatusCode::CONFLICT,
-                "An open privacy request of this type already exists",
-            );
+            return own_privacy_request_open_exists();
         }
         Err(e) => {
             tracing::error!(error = %e, user_id = %auth.user_id, patient_id = %patient_id, "create self privacy request");
@@ -1024,6 +1024,19 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         Json(serde_json::json!({
             "error": status.canonical_reason().unwrap_or("error").to_lowercase(),
             "message": message,
+        })),
+    )
+        .into_response()
+}
+
+/// The patient already has an open request of this type; the portal says so
+/// in the patient's language.
+fn own_privacy_request_open_exists() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(serde_json::json!({
+            "error": "own_privacy_request_open_exists",
+            "message": "An open privacy request of this type already exists",
         })),
     )
         .into_response()

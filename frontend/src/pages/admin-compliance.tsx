@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   useMemo,
   useReducer,
@@ -65,6 +66,11 @@ import {
   PrivacyRequestSteps,
   type PrivacyRequestStepFacts,
 } from "@/pages/admin/ui/privacy-request-steps";
+import {
+  patientLabel as composePatientLabel,
+  privacySourceUiKey,
+  resolveActivePatientLabel,
+} from "@/pages/admin-compliance.helpers";
 
 interface RecordSummary {
   appointments?: number;
@@ -85,10 +91,17 @@ interface PrivacyRequestRecord {
   executed_by_name?: string | null;
   request_type: string;
   source: string;
+  /** How the request reached the register (portal, staff, retention sweep). */
+  created_via?: string | null;
   status: string;
   reason?: string | null;
   due_at: string | null;
+  /** Snapshot of the patient's retention taken when the request was filed. */
   retention_until: string | null;
+  /** The live end of the medical documentation's retention, while it runs. */
+  patient_retention_until?: string | null;
+  /** An open erasure that may not run before the retention ends. */
+  erasure_blocked_by_retention?: boolean;
   review_note?: string | null;
   decision_reason?: string | null;
   identity_verification_required?: boolean;
@@ -191,9 +204,17 @@ function privacyStatusLabel(status: string, t: Translations) {
   }
 }
 
-function privacySourceLabel(source: string, t: Translations): string {
-  return formatEnumLabelFromKeys(source, PRIVACY_SOURCE_LABEL_KEYS, t);
+function privacySourceLabel(
+  source: string,
+  t: Translations,
+  createdVia?: string | null,
+): string {
+  const uiKey = privacySourceUiKey(source, createdVia);
+  return uiKey ? uiText(uiKey) : formatEnumLabelFromKeys(source, PRIVACY_SOURCE_LABEL_KEYS, t);
 }
+
+/** Where a staff member records a request from: the person or GMED itself. */
+type PrivacyRequestSource = "patient_request" | "admin_intake";
 
 function privacyStatusBadgeClass(status: string) {
   switch (status) {
@@ -213,12 +234,7 @@ function privacyStatusBadgeClass(status: string) {
 }
 
 function patientLabel(patientPid?: string | null, patientName?: string | null) {
-  const normalizedName = patientName?.trim();
-  const normalizedPid = patientPid?.trim();
-  if (normalizedPid && normalizedName) {
-    return `${normalizedPid} - ${normalizedName}`;
-  }
-  return normalizedPid || normalizedName || "\u2014";
+  return composePatientLabel(patientPid, patientName) || "\u2014";
 }
 
 function recordSummaryLabel(summary: RecordSummary | null | undefined, t: Translations) {
@@ -271,7 +287,10 @@ type AdminComplianceState = {
   patientPrivacyRequests: PrivacyRequestRecord[];
   patientLoading: boolean;
   patientError: string;
-  privacyRequestType: PrivacyRequestType;
+  /** Empty until the staff member picks a type: a legal request is never pre-chosen. */
+  privacyRequestType: PrivacyRequestType | "";
+  /** Empty until chosen: the person asked, or GMED decided on its own. */
+  privacyRequestSource: PrivacyRequestSource | "";
   privacyReason: string;
   privacyCreateBusy: boolean;
   privacyActionBusy: string | null;
@@ -330,7 +349,8 @@ function useAdminCompliancePageContent() {
       patientPrivacyRequests: [],
       patientLoading: false,
       patientError: "",
-      privacyRequestType: "erasure",
+      privacyRequestType: "",
+      privacyRequestSource: "",
       privacyReason: "",
       privacyCreateBusy: false,
       privacyActionBusy: null,
@@ -353,6 +373,7 @@ function useAdminCompliancePageContent() {
     privacyQueue,
     privacyQueueLoading,
     privacyReason,
+    privacyRequestSource,
     privacyRequestType,
     privacySheetOpen,
     reviewSheetRecord,
@@ -379,8 +400,11 @@ function useAdminCompliancePageContent() {
   const setPatientError = (nextValue: SetStateAction<string>) =>
     setComplianceField("patientError", nextValue);
   const setPrivacyRequestType = (
-    nextValue: SetStateAction<PrivacyRequestType>,
+    nextValue: SetStateAction<PrivacyRequestType | "">,
   ) => setComplianceField("privacyRequestType", nextValue);
+  const setPrivacyRequestSource = (
+    nextValue: SetStateAction<PrivacyRequestSource | "">,
+  ) => setComplianceField("privacyRequestSource", nextValue);
   const setPrivacyReason = (nextValue: SetStateAction<string>) =>
     setComplianceField("privacyReason", nextValue);
   const setPrivacyCreateBusy = (nextValue: SetStateAction<boolean>) =>
@@ -397,18 +421,6 @@ function useAdminCompliancePageContent() {
   const setActionError = (nextValue: SetStateAction<string>) =>
     setComplianceField("actionError", nextValue);
 
-  const activePatientLabel = useMemo(() => {
-    const latestPrivacyRequest = patientPrivacyRequests[0];
-    if (latestPrivacyRequest) {
-      return patientLabel(
-        latestPrivacyRequest.patient_pid,
-        latestPrivacyRequest.patient_name,
-      );
-    }
-
-    return activePatientId || "\u2014";
-  }, [activePatientId, patientPrivacyRequests]);
-
   const privacyCounters = useMemo(() => {
     const requested = privacyQueue.filter(
       (record) => record.status === "requested",
@@ -419,12 +431,11 @@ function useAdminCompliancePageContent() {
     const approved = privacyQueue.filter(
       (record) => record.status === "approved",
     ).length;
+    // A held request was answered (Art. 12 Abs. 3 DSGVO); it is not late.
     const overdue = privacyQueue.filter(
       (record) =>
         record.is_overdue &&
-        (record.status === "requested" ||
-          record.status === "retention_hold" ||
-          record.status === "approved"),
+        (record.status === "requested" || record.status === "approved"),
     ).length;
 
     return {
@@ -467,7 +478,11 @@ function useAdminCompliancePageContent() {
     }
   }, []);
 
+  // The patient whose history was last requested: opening the page with
+  // ?patient=… loads it once (QA B-23 b: the history stayed empty).
+  const requestedPatientRef = useRef("");
   const loadPatientWorkspace = useCallback(async (patientId: string) => {
+    requestedPatientRef.current = patientId;
     setPatientLoading(true);
     setPatientError("");
 
@@ -488,6 +503,7 @@ function useAdminCompliancePageContent() {
   const [patientOptions, setPatientOptions] = useState<
     Array<{ id: string; label: string }>
   >([]);
+  const [patientOptionsLoaded, setPatientOptionsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void apiFetch<Array<{ id: string; patient_id: string; first_name: string | null; last_name: string | null }>>(
@@ -502,25 +518,73 @@ function useAdminCompliancePageContent() {
           })),
         );
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setPatientOptionsLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  // A patient missing from the picker (and without requests yet) is named
+  // from the patient record, so the page never shows the raw record id.
+  const [loadedPatient, setLoadedPatient] = useState<{
+    id: string;
+    patient_pid?: string | null;
+    patient_name?: string | null;
+  } | null>(null);
+  const knownPatientLabel = resolveActivePatientLabel(
+    activePatientId,
+    patientOptions,
+    patientPrivacyRequests,
+  );
+  const needsPatientLookup =
+    Boolean(activePatientId) && patientOptionsLoaded && !patientLoading && !knownPatientLabel;
+  useEffect(() => {
+    if (!needsPatientLookup || loadedPatient?.id === activePatientId) return;
+    let cancelled = false;
+    void apiFetch<{ patient_id?: string | null; first_name?: string | null; last_name?: string | null }>(
+      `/patients/${activePatientId}`,
+    )
+      .then((row) => {
+        if (cancelled) return;
+        setLoadedPatient({
+          id: activePatientId,
+          patient_pid: row?.patient_id,
+          patient_name: [row?.first_name, row?.last_name].filter(Boolean).join(" "),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setLoadedPatient({ id: activePatientId });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activePatientId, loadedPatient?.id, needsPatientLookup]);
+  const activePatientLabel =
+    knownPatientLabel ||
+    resolveActivePatientLabel(
+      activePatientId,
+      [],
+      [],
+      loadedPatient?.id === activePatientId ? loadedPatient : null,
+    ) ||
+    "—";
 
   useEffect(() => {
     void loadPrivacyQueue();
   }, [loadPrivacyQueue]);
 
   useEffect(() => {
-    if (!patientParam || patientParam === activePatientId) {
+    if (!patientParam || requestedPatientRef.current === patientParam) {
       return;
     }
 
     setPatientInput(patientParam);
     setActivePatientId(patientParam);
     void loadPatientWorkspace(patientParam);
-  }, [activePatientId, loadPatientWorkspace, patientParam]);
+  }, [loadPatientWorkspace, patientParam]);
 
   const refreshWorkspace = useCallback(async () => {
     await Promise.all([
@@ -545,6 +609,7 @@ function useAdminCompliancePageContent() {
     setActionError("");
 
     if (!targetPatientId) {
+      requestedPatientRef.current = "";
       setActivePatientId("");
       setPatientPrivacyRequests([]);
       setPatientError("");
@@ -564,18 +629,26 @@ function useAdminCompliancePageContent() {
       return;
     }
 
+    // Type and source are chosen explicitly; nothing legal is pre-selected.
+    if (!privacyRequestType || !privacyRequestSource) {
+      return;
+    }
+
     setPrivacyCreateBusy(true);
     setActionError("");
 
     try {
       await createPatientPrivacyRequest(targetPatientId, {
         request_type: privacyRequestType,
-        source: "patient_request",
+        source: privacyRequestSource,
         reason: privacyReason.trim() || undefined,
       });
 
       setActivePatientId(targetPatientId);
       setPrivacyReason("");
+      setPrivacyRequestType("");
+      setPrivacyRequestSource("");
+      setPrivacySheetOpen(false);
       syncPatientQuery(targetPatientId);
       await Promise.all([
         loadPrivacyQueue(),
@@ -676,23 +749,39 @@ function useAdminCompliancePageContent() {
     latestReviewRecord?.identity_verification_required &&
       !latestReviewRecord.identity_verification,
   );
+  // An erasure while the medical documentation must be kept (§ 630f BGB):
+  // neither approved nor executed; restricted or rejected instead.
+  const retentionBlocksErasure = Boolean(
+    latestReviewRecord?.erasure_blocked_by_retention &&
+      latestReviewRecord.patient_retention_until,
+  );
+  const retentionDate = compactDt(latestReviewRecord?.patient_retention_until);
+  // Holding an erasure restricts processing until the retention ends.
+  const holdLabel = retentionBlocksErasure
+    ? uiText("privacy_hold_restrict", undefined, { date: retentionDate })
+    : t.compliance_hold;
 
   const reviewSheetImpactSummary = useMemo(() => {
-    if (!reviewSheetRecord) {
+    if (!latestReviewRecord) {
       return [];
     }
     return [
-      `${t.compliance_col_due}: ${compactDt(reviewSheetRecord.due_at)}`,
+      `${t.compliance_col_due}: ${compactDt(latestReviewRecord.due_at)}`,
       `${t.compliance_col_retention_until}: ${compactDt(
-        reviewSheetRecord.retention_until,
+        latestReviewRecord.patient_retention_until ?? latestReviewRecord.retention_until,
+      )}`,
+      `${uiText("privacy_source_label")}: ${privacySourceLabel(
+        latestReviewRecord.source,
+        t,
+        latestReviewRecord.created_via,
       )}`,
       `${t.compliance_col_linked_records}: ${recordSummaryLabel(
-        reviewSheetRecord.record_summary,
+        latestReviewRecord.record_summary,
         t,
       )}`,
-      `${t.compliance_col_notes}: ${privacyNotesLabel(reviewSheetRecord)}`,
+      `${t.compliance_col_notes}: ${privacyNotesLabel(latestReviewRecord)}`,
     ];
-  }, [reviewSheetRecord, t]);
+  }, [latestReviewRecord, t]);
 
   const doExport = async () => {
     const targetPatientId = (activePatientId || patientInput).trim();
@@ -773,11 +862,12 @@ function useAdminCompliancePageContent() {
     {
       id: "retention_until",
       label: t.compliance_col_retention_until,
-      accessor: (record) => dateSortKey(record.retention_until),
+      accessor: (record) =>
+        dateSortKey(record.patient_retention_until ?? record.retention_until),
       width: 150,
       render: (record) => (
         <span className="font-mono text-xs text-slate-500">
-          {compactDt(record.retention_until)}
+          {compactDt(record.patient_retention_until ?? record.retention_until)}
         </span>
       ),
     },
@@ -830,7 +920,7 @@ function useAdminCompliancePageContent() {
             {privacyRequestTypeLabel(record.request_type, t)}
           </div>
           <div className="truncate text-xs text-slate-500">
-            {privacySourceLabel(record.source, t)}
+            {privacySourceLabel(record.source, t, record.created_via)}
           </div>
         </div>
       ),
@@ -846,9 +936,7 @@ function useAdminCompliancePageContent() {
             {privacyStatusLabel(record.status, t)}
           </Badge>
           {record.is_overdue &&
-          (record.status === "requested" ||
-            record.status === "retention_hold" ||
-            record.status === "approved") ? (
+          (record.status === "requested" || record.status === "approved") ? (
             <span className="truncate text-xs font-medium text-red-600">
               {t.compliance_stat_overdue}
             </span>
@@ -1011,10 +1099,14 @@ function useAdminCompliancePageContent() {
 
             <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
               <div className="space-y-1.5">
-                <div className="text-xs text-muted-foreground">{t.compliance_request_type_label}</div>
-                <Badge className="bg-amber-500/15 text-amber-700">
-                  {privacyRequestTypeLabel(privacyRequestType, t)}
-                </Badge>
+                {privacyRequestType ? (
+                  <>
+                    <div className="text-xs text-muted-foreground">{t.compliance_request_type_label}</div>
+                    <Badge className="bg-amber-500/15 text-amber-700">
+                      {privacyRequestTypeLabel(privacyRequestType, t)}
+                    </Badge>
+                  </>
+                ) : null}
                 <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
               </div>
               <Button
@@ -1028,7 +1120,11 @@ function useAdminCompliancePageContent() {
             </div>
 
             <AdminTableCard
-              title={`${t.compliance_privacy_history}${activePatientId ? ` - ${activePatientId}` : ""}`}
+              title={
+                activePatientId
+                  ? uiText("privacy_history_of", undefined, { patient: activePatientLabel })
+                  : t.compliance_privacy_history
+              }
               description={t.compliance_privacy_requests_hint}
               count={patientPrivacyRequests.length}
             >
@@ -1134,20 +1230,35 @@ function useAdminCompliancePageContent() {
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
-                  <Field label={t.compliance_request_type_label}>
+                  {actionError ? <Banner tone="error">{actionError}</Banner> : null}
+                  <Field label={t.compliance_request_type_label} required>
                     <NativeComboboxSelect
                       value={privacyRequestType}
-
-
-                      onChange={(event) => setPrivacyRequestType(
-                          (event.target.value ?? PRIVACY_REQUEST_TYPE_VALUES[0]) as PrivacyRequestType,
-                        )} className="h-9 w-full rounded-lg bg-field">
-                        {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
-                          <option key={value} value={value}>
-                            {privacyRequestTypeLabel(value, t)}
-                          </option>
-                        ))}
-                      </NativeComboboxSelect>
+                      onChange={(event) =>
+                        setPrivacyRequestType((event.target.value ?? "") as PrivacyRequestType | "")
+                      }
+                      className="h-9 w-full rounded-lg bg-field"
+                    >
+                      <option value="">{uiText("privacy_request_type_choose")}</option>
+                      {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
+                        <option key={value} value={value}>
+                          {privacyRequestTypeLabel(value, t)}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  </Field>
+                  <Field label={uiText("privacy_source_label")} required>
+                    <NativeComboboxSelect
+                      value={privacyRequestSource}
+                      onChange={(event) =>
+                        setPrivacyRequestSource((event.target.value ?? "") as PrivacyRequestSource | "")
+                      }
+                      className="h-9 w-full rounded-lg bg-field"
+                    >
+                      <option value="">{uiText("privacy_source_choose")}</option>
+                      <option value="patient_request">{uiText("privacy_source_option_patient")}</option>
+                      <option value="admin_intake">{uiText("privacy_source_option_agency")}</option>
+                    </NativeComboboxSelect>
                   </Field>
                   <Field label={t.compliance_request_reason} htmlFor="privacy-request-reason">
                     <textarea
@@ -1162,7 +1273,7 @@ function useAdminCompliancePageContent() {
                   <Button
                     type="button"
                     className="h-9 rounded-lg"
-                    disabled={privacyCreateBusy}
+                    disabled={privacyCreateBusy || !privacyRequestType || !privacyRequestSource}
                     onClick={() => void handleCreatePrivacyRequest()}
                   >
                     {privacyCreateBusy ? t.compliance_saving : t.compliance_create_request}
@@ -1219,7 +1330,20 @@ function useAdminCompliancePageContent() {
                       onRecorded={loadPrivacyQueue}
                     />
 
-                    {reviewSheetRecord.request_type === "erasure" ? (
+                    {actionError ? <Banner tone="error">{actionError}</Banner> : null}
+
+                    {retentionBlocksErasure ? (
+                      <Banner tone="warning" withIcon>
+                        <div className="space-y-1" data-testid="privacy-retention-block">
+                          <p>
+                            {uiText("privacy_erasure_blocked_by_retention", undefined, {
+                              date: retentionDate,
+                            })}
+                          </p>
+                          <p className="text-xs">{uiText("privacy_hold_restrict_hint")}</p>
+                        </div>
+                      </Banner>
+                    ) : reviewSheetRecord.request_type === "erasure" ? (
                       <Banner tone="warning" withIcon>
                         {t.compliance_anonymize_confirm}
                       </Banner>
@@ -1243,6 +1367,23 @@ function useAdminCompliancePageContent() {
                             className={textareaClass}
                           />
                         </Field>
+                        {retentionBlocksErasure ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 rounded-lg"
+                            onClick={() =>
+                              setDecisionReason(
+                                uiText("privacy_retention_reason_template", undefined, {
+                                  date: retentionDate,
+                                }),
+                              )
+                            }
+                          >
+                            {uiText("privacy_retention_reason_insert")}
+                          </Button>
+                        ) : null}
                         <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint")}</p>
                         <Field label={uiText("privacy_internal_note")} htmlFor="privacy-review-note">
                           <textarea
@@ -1280,7 +1421,7 @@ function useAdminCompliancePageContent() {
                             {privacyActionBusy === `${reviewSheetRecord.id}:${action}`
                               ? t.compliance_saving
                               : action === "hold"
-                                ? t.compliance_hold
+                                ? holdLabel
                                 : t.compliance_reject}
                           </Button>
                         ))}
@@ -1293,7 +1434,7 @@ function useAdminCompliancePageContent() {
                         <Button
                           type="button"
                           className="h-9 rounded-lg"
-                          disabled={privacyActionBusy !== null}
+                          disabled={privacyActionBusy !== null || retentionBlocksErasure}
                           onClick={async () => {
                             const ok = await handleReviewPrivacyRequest(
                               reviewSheetRecord.id,
@@ -1327,7 +1468,7 @@ function useAdminCompliancePageContent() {
                         >
                           {privacyActionBusy === `${reviewSheetRecord.id}:hold`
                             ? t.compliance_saving
-                            : t.compliance_hold}
+                            : holdLabel}
                         </Button>
                         <Button
                           type="button"
@@ -1369,7 +1510,9 @@ function useAdminCompliancePageContent() {
                             : "outline"
                         }
                         className="h-9 rounded-lg"
-                        disabled={privacyActionBusy !== null || identityMissing}
+                        disabled={
+                          privacyActionBusy !== null || identityMissing || retentionBlocksErasure
+                        }
                         onClick={async () => {
                           const ok = await handleExecutePrivacyRequest(
                             reviewSheetRecord.id,

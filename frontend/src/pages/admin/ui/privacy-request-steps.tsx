@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
-import type { Translations } from "@/lib/i18n";
+import { uiText, type Translations } from "@/lib/i18n";
 import { recordCompliancePrivacyRequestStep } from "@/pages/admin/data/admin-api";
 
 export type PrivacyRequestStepFacts = {
@@ -34,8 +34,11 @@ function day(value?: string) {
  */
 export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }: Props) {
   const [local, setLocal] = useState<PrivacyRequestStepFacts>({});
-  const [identityMethod, setIdentityMethod] = useState<string>(IDENTITY_METHODS[0]);
-  const [notifyChannel, setNotifyChannel] = useState<string>(NOTIFY_CHANNELS[0]);
+  // Recorded steps are evidence: the method and the channel are chosen, never
+  // pre-selected (QA B-23 e).
+  const [identityMethod, setIdentityMethod] = useState<string>("");
+  const [notifyChannel, setNotifyChannel] = useState<string>("");
+  const [recipientsChannel, setRecipientsChannel] = useState<string>("");
   const [extensionReason, setExtensionReason] = useState("");
   const [recipientsNote, setRecipientsNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -93,6 +96,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               value={identityMethod}
               onChange={(event) => setIdentityMethod(event.target.value)}
             >
+              <option value="">{uiText("privacy_steps_choose_method")}</option>
               {IDENTITY_METHODS.map((method) => (
                 <option key={method} value={method}>
                   {t[`compliance_steps_method_${method}`]}
@@ -103,7 +107,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               type="button"
               variant="outline"
               className="h-9 rounded-lg"
-              disabled={busy}
+              disabled={busy || !identityMethod}
               onClick={() => void record("verify_identity", identityMethod)}
             >
               {t.compliance_steps_identity_confirm}
@@ -157,6 +161,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               value={notifyChannel}
               onChange={(event) => setNotifyChannel(event.target.value)}
             >
+              <option value="">{uiText("privacy_steps_choose_channel")}</option>
               {NOTIFY_CHANNELS.map((channel) => (
                 <option key={channel} value={channel}>
                   {t[`compliance_steps_channel_${channel}`]}
@@ -167,7 +172,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               type="button"
               variant="outline"
               className="h-9 rounded-lg"
-              disabled={busy}
+              disabled={busy || !notifyChannel}
               onClick={() => void record("notify_subject", notifyChannel)}
             >
               {t.compliance_steps_notified_confirm}
@@ -185,6 +190,19 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
         </p>
         {!merged.recipients_notification ? (
           <div className="flex flex-wrap gap-2">
+            <select
+              aria-label={t.compliance_steps_recipients}
+              className={selectClassName}
+              value={recipientsChannel}
+              onChange={(event) => setRecipientsChannel(event.target.value)}
+            >
+              <option value="">{uiText("privacy_steps_choose_channel")}</option>
+              {NOTIFY_CHANNELS.map((channel) => (
+                <option key={channel} value={channel}>
+                  {t[`compliance_steps_channel_${channel}`]}
+                </option>
+              ))}
+            </select>
             <input
               aria-label={t.compliance_steps_recipients_note}
               placeholder={t.compliance_steps_recipients_note}
@@ -197,8 +215,8 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               type="button"
               variant="outline"
               className="h-9 rounded-lg"
-              disabled={busy}
-              onClick={() => void record("notify_recipients", notifyChannel, recipientsNote.trim())}
+              disabled={busy || !recipientsChannel}
+              onClick={() => void record("notify_recipients", recipientsChannel, recipientsNote.trim())}
             >
               {t.compliance_steps_recipients_confirm}
             </Button>

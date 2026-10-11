@@ -1570,8 +1570,13 @@ function StaffDocumentsPage({
   const hasActivePatientPortalUser = Boolean(
     detail?.has_active_patient_portal_user,
   );
+  // An archived version or a document whose file was deleted is not handed
+  // out (the server refuses it too).
+  const selectedDocumentReleasable = Boolean(
+    detail?.has_stored_file && detail.status !== "archived",
+  );
   const canReleaseSelectedDocumentToPortal = Boolean(
-    detail?.patient_id && hasActivePatientPortalUser,
+    detail?.patient_id && hasActivePatientPortalUser && selectedDocumentReleasable,
   );
   const portalBlockedByMissingActiveUser = Boolean(
     detail?.patient_id && !hasActivePatientPortalUser,
@@ -6093,7 +6098,9 @@ function StaffDocumentsPage({
                         {lang === "de" ? "Übersetzung bearbeiten" : "Редактировать перевод"}
                       </Button>
                     ) : null}
-                    <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} />
+                    {detail.status !== "archived" ? (
+                      <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} />
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -6400,7 +6407,10 @@ function StaffDocumentsPage({
                           {documentTranslationActionLabel(lang)}
                         </Button>
                       ) : null}
-                      <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
+                      {/* Nothing to sign without a file or on an archived version. */}
+                      {selectedDocumentReleasable ? (
+                        <DocumentSignatureAction documentId={detail.id} title={detail.original_filename || detail.auto_name} onDone={() => refresh()} />
+                      ) : null}
                       {/* The server only replaces the newest, non-archived version. */}
                       {canManage &&
                       currentDetailTemplate &&
@@ -6791,7 +6801,7 @@ function StaffDocumentsPage({
                   title={t.documents_text_extraction}
                   tone="neutral"
                   accessory={
-                    canRequestTranslation ? (
+                    canRequestTranslation && detail.has_stored_file ? (
                       <Button
                         type="button"
                         size="sm"
@@ -6811,6 +6821,11 @@ function StaffDocumentsPage({
                 >
                   {textExtractionError ? (
                     <Banner tone="error">{textExtractionError}</Banner>
+                  ) : null}
+                  {!detail.has_stored_file && detail.file_deleted_at ? (
+                    <p className="px-1 py-1 text-sm text-muted-foreground">
+                      {uiText("documents_text_removed_with_file")}
+                    </p>
                   ) : null}
                   <div className="space-y-2.5">
                     {textExtraction && formatExtractionMessageLabel(textExtraction, t) ? (
@@ -7653,8 +7668,14 @@ function StaffDocumentsPage({
                 >
                   {!detail.patient_id ||
                   portalBlockedByMissingActiveUser ||
+                  !selectedDocumentReleasable ||
                   !canManage ? (
                     <div className="rounded-lg bg-amber-50/70 px-4 py-3 text-sm text-amber-900/80">
+                      {!selectedDocumentReleasable ? (
+                        <p className="font-medium text-amber-700">
+                          {uiText("documents_release_unavailable_archived")}
+                        </p>
+                      ) : null}
                       {!detail.patient_id ? (
                         <p className="font-medium text-amber-700">
                           {t.documents_link_patient_before_portal}
@@ -7997,6 +8018,7 @@ function DocumentIntakeQueueTable({
             item.id,
             item.original_filename ?? localizeDocumentCode(item.auto_name, l),
           ),
+        canSign: (item) => item.has_stored_file && item.status !== "archived",
       }),
       {
         id: "document",

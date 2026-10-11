@@ -503,13 +503,27 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   sanctions_confirmed: "api_sanctions_confirmed",
   sanctions_review_pending: "api_sanctions_review_pending",
   blocked_country: "api_blocked_country",
+  // DSGVO register (crates/server/src/routes/admin_compliance.rs, me.rs).
+  privacy_request_open_exists: "api_privacy_request_open_exists",
+  own_privacy_request_open_exists: "api_own_privacy_request_open_exists",
+  erasure_blocked_by_retention: "api_erasure_blocked_by_retention",
+  // Portal release of an archived or file-less document (documents.rs).
+  document_archived_not_releasable: "api_document_archived_not_releasable",
 };
+
+/** The text fields of an error body, as placeholders of its localized message. */
+function apiErrorValues(body: ApiErrorBody | null): Record<string, string> {
+  const values: Record<string, string> = { countries_label: "" };
+  for (const [key, value] of Object.entries(body ?? {})) {
+    if (typeof value === "string") values[key] = value;
+  }
+  return values;
+}
 
 function apiErrorMessage(body: ApiErrorBody | null, res: Response) {
   const localized = body?.error ? LOCALIZED_API_ERRORS[body.error] : undefined;
   if (localized) {
-    const countriesLabel = typeof body?.countries_label === "string" ? body.countries_label : "";
-    return uiText(localized, undefined, { countries_label: countriesLabel });
+    return uiText(localized, undefined, apiErrorValues(body));
   }
   return body?.message ?? body?.error ?? `${res.status} ${res.statusText}`;
 }

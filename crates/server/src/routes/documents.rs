@@ -31500,6 +31500,118 @@ async fn update_document(
     }
 }
 
+/// What [`purge_document_derived_content_in_tx`] removed, for the audit.
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+pub(crate) struct DocumentDerivedContentPurge {
+    pub extracted_texts: u64,
+    pub translation_requests: u64,
+    pub translations: u64,
+    pub clinical_import_drafts: u64,
+    pub auto_naming_results: u64,
+}
+
+/// Removes what the system keeps beside a document's file that repeats the
+/// file's content: the extracted PDF or OCR text, the manual text of a
+/// generated document and its template bindings, the source and translated
+/// texts of its translation requests and stored translations (also where the
+/// document is the translation), the drafts of its clinical imports and the
+/// result of the automatic naming. Open translation requests are cancelled,
+/// open clinical imports and naming jobs fail: there is no file left to work
+/// on. The document rows keep their metadata and history, the clinical record
+/// built from an applied import stays (it is the medical documentation, not a
+/// copy of the file). One procedure for "delete the stored file" and for the
+/// erasure of a patient (Art. 17, Art. 9 DSGVO).
+pub(crate) async fn purge_document_derived_content_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    document_ids: &[Uuid],
+) -> Result<DocumentDerivedContentPurge, sqlx::Error> {
+    if document_ids.is_empty() {
+        return Ok(DocumentDerivedContentPurge::default());
+    }
+    let extracted_texts = sqlx::query(
+        r#"UPDATE documents
+           SET extracted_text = NULL,
+               text_extraction_status = 'not_started',
+               text_extraction_method = NULL,
+               text_extracted_at = NULL,
+               text_extracted_by = NULL,
+               generated_manual_text = NULL,
+               generated_bindings = NULL
+           WHERE id = ANY($1)
+             AND (extracted_text IS NOT NULL
+                  OR text_extraction_status <> 'not_started'
+                  OR generated_manual_text IS NOT NULL
+                  OR generated_bindings IS NOT NULL)"#,
+    )
+    .bind(document_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let translation_requests = sqlx::query(
+        r#"UPDATE document_translation_requests
+           SET source_text = NULL,
+               translated_text = NULL,
+               status = CASE WHEN status IN ('pending', 'in_progress') THEN 'cancelled'
+                             ELSE status END
+           WHERE document_id = ANY($1) OR translated_document_id = ANY($1)"#,
+    )
+    .bind(document_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let translations = sqlx::query(
+        r#"UPDATE document_translations
+           SET source_text = NULL,
+               translated_text = ''
+           WHERE document_id = ANY($1) OR translated_document_id = ANY($1)"#,
+    )
+    .bind(document_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let clinical_import_drafts = sqlx::query(
+        r#"UPDATE clinical_document_imports
+           SET draft = '{"candidates":[],"warnings":[]}'::jsonb,
+               reviewed_draft = NULL,
+               prepared_candidate_payloads = '{}'::jsonb,
+               status = CASE WHEN status IN ('queued', 'processing', 'review_required')
+                             THEN 'failed' ELSE status END,
+               error_message = CASE WHEN status IN ('queued', 'processing', 'review_required')
+                                    THEN 'DOCUMENT_FILE_DELETED' ELSE error_message END,
+               completed_at = CASE WHEN status IN ('queued', 'processing', 'review_required')
+                                   THEN COALESCE(completed_at, now()) ELSE completed_at END,
+               locked_at = NULL,
+               worker_id = NULL
+           WHERE document_id = ANY($1)"#,
+    )
+    .bind(document_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let auto_naming_results = sqlx::query(
+        r#"UPDATE document_auto_naming_jobs
+           SET result = '{}'::jsonb,
+               status = CASE WHEN status IN ('queued', 'processing') THEN 'failed'
+                             ELSE status END,
+               error_code = CASE WHEN status IN ('queued', 'processing')
+                                 THEN 'document_file_deleted' ELSE error_code END,
+               locked_at = NULL,
+               worker_id = NULL
+           WHERE document_id = ANY($1)"#,
+    )
+    .bind(document_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(DocumentDerivedContentPurge {
+        extracted_texts,
+        translation_requests,
+        translations,
+        clinical_import_drafts,
+        auto_naming_results,
+    })
+}
+
 async fn delete_document_file(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -31743,6 +31855,22 @@ async fn delete_document_file(
         }
     };
 
+    // The dialog keeps metadata and history, not the content: the extracted
+    // text, translations and import drafts go with the file.
+    let derived_content = match purge_document_derived_content_in_tx(&mut tx, &[id]).await {
+        Ok(value) => value,
+        Err(error) => {
+            if let Some(staged) = staged_delete.as_ref() {
+                rollback_staged_document_delete(staged).await;
+            }
+            tracing::error!(error = %error, document_id = %id, "remove derived document content");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to delete document file",
+            );
+        }
+    };
+
     match sqlx::query(
         r#"UPDATE documents
            SET status = 'archived',
@@ -31815,6 +31943,7 @@ async fn delete_document_file(
             "file_removed_from_disk": staged_delete.is_some(),
             "questionnaire_source_bytes_removed": questionnaire_source_bytes_removed,
             "revoked_share_ids": revoked_share_ids,
+            "derived_content_removed": derived_content,
         }),
     ));
 
@@ -31888,11 +32017,17 @@ async fn release_document_to_patient_portal_internal(
     let current_visibility = row
         .try_get::<String, _>("visibility")
         .unwrap_or_else(|_| "internal".to_string());
+    // An archived version, also one whose file was deleted, is not handed
+    // out; the code lets the UI say so in the user's language.
     if row.try_get::<String, _>("status").unwrap_or_default() == "archived" {
-        return Err(err(
+        return Err((
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Archived document versions cannot be released to the portal",
-        ));
+            Json(json!({
+                "error": "document_archived_not_releasable",
+                "message": "Archived document versions cannot be released to the portal",
+            })),
+        )
+            .into_response());
     }
     let auto_name = row.try_get::<String, _>("auto_name").unwrap_or_default();
     let channel = "patient_portal".to_string();

@@ -60,7 +60,8 @@ const PORTAL_PRIVACY_REALTIME_EVENTS = [
 
 interface PatientPrivacyState {
   requests: PortalPrivacyRequest[];
-  requestType: RequestType;
+  /** Empty until the patient picks a type: no legal request is pre-chosen. */
+  requestType: RequestType | "";
   reason: string;
   loading: boolean;
   refreshing: boolean;
@@ -76,7 +77,7 @@ type PatientPrivacyAction =
 
 const INITIAL_PATIENT_PRIVACY_STATE: PatientPrivacyState = {
   requests: [],
-  requestType: "restriction",
+  requestType: "",
   reason: "",
   loading: true,
   refreshing: false,
@@ -169,6 +170,7 @@ export function PatientPrivacyPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!requestType) return;
     dispatchPrivacyState({ submitting: true, notice: "", error: "" });
 
     try {
@@ -178,6 +180,7 @@ export function PatientPrivacyPage() {
       });
       dispatchPrivacyState((current) => ({
         reason: "",
+        requestType: "",
         notice: t.portal_privacy_request_submitted,
         submitting: false,
         version: current.version + 1,
@@ -237,9 +240,12 @@ export function PatientPrivacyPage() {
               <NativeComboboxSelect
                 id="privacy-type"
                 value={requestType}
-                onChange={(event) => dispatchPrivacyState({ requestType: event.target.value as RequestType })}
+                onChange={(event) =>
+                  dispatchPrivacyState({ requestType: event.target.value as RequestType | "" })
+                }
                 className={selectClass}
               >
+                <option value="">{uiText("portal_privacy_request_type_choose")}</option>
                 <option value="restriction">{t.portal_privacy_request_restriction}</option>
                 <option value="erasure">{t.portal_privacy_request_erasure}</option>
                 <option value="third_party_revoke">{t.portal_privacy_request_third_party_revoke}</option>
@@ -261,7 +267,7 @@ export function PatientPrivacyPage() {
             <Button
               type="submit"
               className={tokens.control.primaryButton}
-              disabled={submitting}
+              disabled={submitting || !requestType}
             >
               {submitting ? <LoaderCircle className="size-4 animate-spin" /> : null}
               {t.portal_privacy_submit_request}
