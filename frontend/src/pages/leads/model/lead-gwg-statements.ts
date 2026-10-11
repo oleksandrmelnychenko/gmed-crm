@@ -19,7 +19,22 @@ import type {
   LeadRepresentation,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
-import { invoiceTaxLine, invoiceToLabel, type PaymentMethod } from "./lead-payer";
+import {
+  PAYER_RELATIONSHIP_KINDS,
+  invoiceTaxLine,
+  invoiceToLabel,
+  payerRelationshipKindLabel,
+  type PaymentMethod,
+  type PayerRelationshipKind,
+} from "./lead-payer";
+
+/** A recipient's relationship to the patient: the kind, in words for "other". */
+function recipientRelationshipLabel(kind: string | null, words: string | null, tx: Tx): string {
+  if (kind && kind !== "other" && (PAYER_RELATIONSHIP_KINDS as readonly string[]).includes(kind)) {
+    return payerRelationshipKindLabel(kind as PayerRelationshipKind, tx);
+  }
+  return words?.trim() || "";
+}
 
 export type Tx = (ru: string, de: string) => string;
 
@@ -109,6 +124,8 @@ export function hasBillingStatements(
   const billing = intake?.billing;
   if (!billing) return false;
   if (intake?.billing_updated_at) return true;
+  // The invoice recipient of step 3 (2026-10-11) is an answer of its own.
+  if (billing.invoice_recipient) return true;
   return BILLING_ANSWER_KEYS.some((key) => {
     const value = billing[key];
     return typeof value === "boolean" || Boolean(value);
@@ -500,6 +517,13 @@ export function complianceFlagsLine(flags: readonly string[], tx: Tx): string {
 const FLAGGED_METHODS: readonly string[] = ["cash", "crypto", "other"];
 
 export type BillingStatementKey =
+  | "invoice_recipient"
+  | "invoice_recipient_is_payer"
+  | "recipient_relationship"
+  | "recipient_reason"
+  | "recipient_legal_form"
+  | "recipient_contact_name"
+  | "recipient_phone"
   | "invoice_to"
   | "invoice_name"
   | "invoice_address"
@@ -562,9 +586,58 @@ export function billingStatements(
     warning: options.warning === true,
   });
 
-  const invoice: BillingStatement[] = [
-    statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(billing.invoice_to, tx)),
-  ];
+  const invoice: BillingStatement[] = [];
+  // Step 3 of the cabinet (owner spec 2026-10-11): who receives the invoice and
+  // whether that recipient pays, as the lead said it; a third party's data
+  // when it does not pay (one who pays is the payer above).
+  if (billing.invoice_recipient !== undefined) {
+    const party = billing.recipient ?? null;
+    const third = billing.invoice_recipient === "third_party";
+    const paying = billing.invoice_recipient_is_payer === true;
+    const organisation = party?.type === "organisation";
+    const who =
+      billing.invoice_recipient === "self"
+        ? tx("Пациент (сам / законные представители)", "Patient/in (selbst / gesetzliche Vertretung)")
+        : third
+          ? [
+              organisation
+                ? tx("Организация", "Organisation")
+                : party?.type === "person"
+                  ? tx("Физическое лицо", "Privatperson")
+                  : tx("Третье лицо", "Dritte"),
+              party?.name ?? "",
+            ]
+              .filter(Boolean)
+              .join(": ")
+          : "";
+    invoice.push(
+      statement("invoice_recipient", tx("Получатель счёта", "Rechnungsempfänger"), who),
+      statement(
+        "invoice_recipient_is_payer",
+        tx("Получатель счёта — плательщик", "Rechnungsempfänger ist Zahler"),
+        answerLabel(billing.invoice_recipient_is_payer ?? null, tx),
+      ),
+    );
+    if (third && !paying && party) {
+      if (organisation) {
+        invoice.push(
+          statement("recipient_legal_form", tx("Правовая форма", "Rechtsform"), party.legal_form),
+          statement("recipient_contact_name", tx("Контактное лицо", "Ansprechperson"), party.contact_name),
+          statement("recipient_reason", tx("Почему через организацию", "Warum über die Organisation"), party.payment_reason),
+        );
+      } else {
+        invoice.push(
+          statement(
+            "recipient_relationship",
+            tx("Кем приходится пациенту", "Beziehung zur Patientin / zum Patienten"),
+            recipientRelationshipLabel(party.relationship_kind, party.relationship, tx),
+          ),
+        );
+      }
+      if (party.phone) invoice.push(statement("recipient_phone", tx("Телефон получателя", "Telefon des Empfängers"), party.phone));
+    }
+  }
+  invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(billing.invoice_to, tx)));
   if (billing.invoice_to === "other") {
     invoice.push(
       statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), billing.invoice_name),

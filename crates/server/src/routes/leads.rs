@@ -7875,8 +7875,9 @@ pub(crate) async fn anonymize_lead_pii(
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
     // lead's own GwG statements from the cabinet, what the cabinet holds about
     // the lead's representatives, staff's confirmations of the own-account
-    // payments (§ 12 Abs. 1 GwG) and the payer's own statement and links
-    // (phase 3a; the link e-mails go with the links) follow the same rule.
+    // payments (§ 12 Abs. 1 GwG), the payer's own statement and links
+    // (phase 3a; the link e-mails go with the links) and the invoice
+    // recipient of step 3 (2026-10-11) follow the same rule.
     sqlx::query(
         r#"WITH removed_payer AS (
                DELETE FROM lead_payer_declarations
@@ -7910,6 +7911,12 @@ pub(crate) async fn anonymize_lead_pii(
                USING leads lead
                WHERE payments.lead_id = $1
                  AND lead.id = payments.lead_id
+                 AND lead.converted_patient_id IS NULL
+           ), removed_invoice_recipient AS (
+               DELETE FROM lead_invoice_recipients recipient
+               USING leads lead
+               WHERE recipient.lead_id = $1
+                 AND lead.id = recipient.lead_id
                  AND lead.converted_patient_id IS NULL
            )
            UPDATE leads

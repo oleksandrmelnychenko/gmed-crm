@@ -14,12 +14,15 @@ import {
 import {
   LEGAL_QUESTIONS,
   answerFromBoolean,
+  draftFromPayer,
   languageName,
   organisationPayerType,
   payerAnswer,
+  payerChoiceOf,
   payerTypeOf,
   type PayerField,
 } from "./lead-request-model";
+import { knowsRecipient } from "./lead-request-recipient-model";
 import {
   REPRESENTATIVE_FIELDS,
   REPRESENTATIVE_SLOTS,
@@ -50,6 +53,7 @@ export type SummaryGroupId =
   | "insurance"
   | "payer"
   | "billing"
+  | "payment"
   | "legal"
   | "follow_up"
   | "request"
@@ -245,6 +249,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
           ? [[text.custodyQuestion, text.custodyOptions[custody]]]
           : [
               [text.hasRepresentativeQuestion, yesNo(representation.has_representative)],
+              // Asked only after its "yes" (owner 2026-10-11).
               [text.underGuardianshipQuestion, yesNo(representation.under_guardianship)],
             ],
       ),
@@ -254,7 +259,7 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
   }
 
   group("insurance", text.sectionInsurance, [
-    [text.fields.has_insurance, yesNo(data.has_insurance)],
+    [guardian ? text.hasInsuranceGuardian : text.fields.has_insurance, yesNo(data.has_insurance)],
     ...(data.has_insurance
       ? ([
           [text.fields.insurance_type, option(text.insuranceTypeOptions, data.insurance_type)],
@@ -264,6 +269,45 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         ] satisfies Array<[string, string | null]>)
       : []),
   ]);
+
+  // Step 3 (owner spec 2026-10-11): who receives the invoice and whether that
+  // recipient pays, before who pays; the data of a recipient who pays are the payer's.
+  const flowKnown = knowsRecipient(request);
+  if (request.billing && flowKnown) {
+    const billing = request.billing;
+    const recipient = billing.recipient;
+    const third = billing.invoice_recipient === "third_party";
+    const paying = billing.invoice_recipient_is_payer === true;
+    const party = third && !paying && recipient ? recipient : null;
+    const organisation = party?.type === "organisation";
+    const kind = option(text.payerRelationshipOptions, party?.relationship_kind);
+    const relationship =
+      party?.relationship_kind && party.relationship_kind !== "other" ? kind : party?.relationship?.trim() || kind;
+    const name = party
+      ? organisation
+        ? party.organisation_name
+        : [party.first_name, party.last_name].filter((part) => part?.trim()).join(" ") || party.name
+      : "";
+    group("billing", text.recipient.section, [
+      [
+        text.recipient.question,
+        billing.invoice_recipient ? (guardian ? text.recipient.optionsGuardian : text.recipient.options)[billing.invoice_recipient] : "",
+      ],
+      [text.recipient.typeQuestion, third && recipient?.type ? text.recipient.typeOptions[recipient.type] : ""],
+      [organisation ? text.recipient.organisationName : text.recipient.missingPrefix, name],
+      [text.recipient.legalForm, organisation ? party?.legal_form : ""],
+      [text.recipient.contactName, organisation ? party?.contact_name : ""],
+      [text.recipient.relationship, organisation ? "" : relationship],
+      [text.fields.street_address, party?.street],
+      [text.fields.zip_code, party?.zip],
+      [text.fields.city, party?.city],
+      [text.billingFields.invoice_country, country(party?.country)],
+      [third ? text.recipient.email : text.billingFields.invoice_email, paying && third ? "" : recipient?.email],
+      [text.recipient.phone, party?.phone],
+      [text.recipient.paymentReason, organisation ? party?.payment_reason : ""],
+      [text.recipient.isPayerQuestion, yesNo(billing.invoice_recipient_is_payer)],
+    ]);
+  }
 
   if (payer && payerAnsweredByPayer(request)) {
     // The payer answered: the same read-only rows as the block, and why they are read-only.
@@ -298,11 +342,17 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       const kind = option(text.payerRelationshipOptions, party.relationship_kind);
       const relationship =
         party.relationship_kind && party.relationship_kind !== "other" ? kind : party.relationship?.trim() || kind;
+      const organisation = Boolean(organisationPayerType(party.payer_type));
       return [
-        // An older server does not know the type; it is then not shown.
-        [payerLabel("payer_type"), party.payer_type === undefined ? "" : text.payerTypeOptions[payerTypeOf(party)]],
+        // An older server does not know the type; it is then not shown. Step 3 names it in the first answer.
+        [
+          payerLabel("payer_type"),
+          party.payer_type === undefined || flowKnown ? "" : text.payerTypeOptions[payerTypeOf(party)],
+        ],
         ...named,
-        [payerLabel("payer_relationship"), relationship],
+        // An organisation states why the payment goes through it (owner 2026-10-11).
+        [payerLabel("payer_relationship"), organisation && flowKnown ? "" : relationship],
+        [text.recipient.paymentReason, organisation && flowKnown ? identification?.payment_background : ""],
         [payerLabel("payer_email"), party.email],
         [payerLabel("payer_phone"), party.phone],
         [payerLabel("payer_messenger"), party.messenger],
@@ -317,8 +367,15 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
         costEstimateConsentRow(party.cost_estimate_consent_at, text),
       ];
     };
+    // Step 3's one answer: the patient, the paying parent, a person or an organisation.
+    const choice = payerChoiceOf(draftFromPayer(payer, guardian ? request.payer_self_template : null));
+    const choiceLabel =
+      choice === "self" && guardian ? text.recipient.payerSelfGuardian : choice ? text.recipient.payerOptions[choice] : "";
     group("payer", text.sectionPayer, [
-      [text.payerQuestion, option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer)],
+      [
+        text.payerQuestion,
+        flowKnown ? choiceLabel : option(guardian ? text.payerOptionsGuardian : text.payerOptions, answer),
+      ],
       ...(thirdParty ? thirdPartyRows(thirdParty) : []),
       [payerFieldLabel(text, "payer_own_account", guardian), yesNo(payer?.acts_on_own_account)],
       [
@@ -345,17 +402,23 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
       || Boolean(billing.bank_name?.trim())
       || (billing.via_third_party !== null && billing.via_third_party !== undefined);
     const account = asksAccount(billing.payment_method ?? "") && blockCAsked;
-    group("billing", text.sectionBillingSummary, [
-      [
-        label("invoice_to"),
-        billing.invoice_to ? invoiceToLabel(text, billing.invoice_to, guardian, billing.payment_route_by) : "",
-      ],
-      [label("invoice_name"), other ? billing.invoice_name : ""],
-      [label("invoice_street"), other ? billing.invoice_street : ""],
-      [label("invoice_zip"), other ? billing.invoice_zip : ""],
-      [label("invoice_city"), other ? billing.invoice_city : ""],
-      [label("invoice_country"), other ? country(billing.invoice_country) : ""],
-      [label("invoice_email"), billing.invoice_to === "payer" ? "" : billing.invoice_email],
+    // Step 3 lists the recipient above; here only how the patient side pays.
+    const section7: Array<[string, string | null | undefined]> = flowKnown
+      ? []
+      : [
+          [
+            label("invoice_to"),
+            billing.invoice_to ? invoiceToLabel(text, billing.invoice_to, guardian, billing.payment_route_by) : "",
+          ],
+          [label("invoice_name"), other ? billing.invoice_name : ""],
+          [label("invoice_street"), other ? billing.invoice_street : ""],
+          [label("invoice_zip"), other ? billing.invoice_zip : ""],
+          [label("invoice_city"), other ? billing.invoice_city : ""],
+          [label("invoice_country"), other ? country(billing.invoice_country) : ""],
+          [label("invoice_email"), billing.invoice_to === "payer" ? "" : billing.invoice_email],
+        ];
+    group(flowKnown ? "payment" : "billing", flowKnown ? text.sectionPaymentRoute : text.sectionBillingSummary, [
+      ...section7,
       ...(routeAsked
         ? ([
             [label("payment_method"), option(text.paymentMethodOptions, billing.payment_method)],

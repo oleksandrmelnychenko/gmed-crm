@@ -317,7 +317,7 @@ export type InvoiceTo = "self" | "payer" | "other";
 export type PaymentMethod = "bank_transfer" | "card" | "cash" | "crypto" | "other";
 
 /**
- * Who answers how the treatment is paid (contract phase 2, D6): the patient
+ * Who answers how GMED's services are paid (contract phase 2, D6): the patient
  * (nobody else pays), the paying parent whose login fills in the request, or
  * the payer, whom GMED asks on its own — the cabinet then asks nothing.
  */
@@ -360,7 +360,69 @@ export type LeadRequestBilling = {
    */
   via_third_party_kind?: "person" | "psp" | null;
   expected_total_eur?: number | string | null;
+  /**
+   * Step 3 (owner spec 2026-10-11): who receives the invoice — the patient
+   * side or a third party — and whether that recipient pays. Answered
+   * before the payer; section 7 above is derived from them by the server.
+   * Absent on an older server.
+   */
+  invoice_recipient?: InvoiceRecipient | null;
+  invoice_recipient_is_payer?: boolean | null;
+  /** A third-party recipient's data (all `null` for the patient side). */
+  recipient?: LeadRequestRecipient | null;
 };
+
+/** "Кто является получателем счёта?": the patient side, or a third party. */
+export type InvoiceRecipient = "self" | "third_party";
+
+/** A third-party recipient: a natural person or an organisation. */
+export type RecipientType = "person" | "organisation";
+
+/** The data of a third-party invoice recipient as stored for step 3. */
+export type LeadRequestRecipient = {
+  type: RecipientType | null;
+  /** "First Last" or the organisation's name, also of an older request's "another address". */
+  name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  organisation_name: string | null;
+  legal_form: string | null;
+  contact_name: string | null;
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  /** The e-mail for invoices: the patient side's or the recipient's. */
+  email: string | null;
+  phone: string | null;
+  relationship_kind: string | null;
+  relationship: string | null;
+  /** Why the invoice goes through an organisation that does not pay. */
+  payment_reason: string | null;
+};
+
+/** The keys of step 3's recipient on the billing route; `""` clears a text, `null` an answer. */
+export type RecipientPatch = Partial<
+  Record<
+    | "invoice_recipient"
+    | "recipient_type"
+    | "recipient_first_name"
+    | "recipient_last_name"
+    | "recipient_organisation_name"
+    | "recipient_legal_form"
+    | "recipient_contact_name"
+    | "recipient_street"
+    | "recipient_zip"
+    | "recipient_city"
+    | "recipient_country"
+    | "recipient_email"
+    | "recipient_phone"
+    | "recipient_relationship_kind"
+    | "recipient_relationship"
+    | "recipient_payment_reason",
+    string
+  > & { invoice_recipient_is_payer: boolean | null }
+>;
 
 /** What the block-C extras of the billing route take: `null` clears a value. */
 export type BillingExtrasPatch = {
@@ -516,7 +578,15 @@ export type ExtraAnswers = {
 export type EnhancedDetailsPatch = Partial<Record<keyof ExtraAnswers, string>>;
 
 /** The keys of the billing the cabinet writes: everything but what the server computes. */
-export type BillingKey = Exclude<keyof LeadRequestBilling, "payer_declared" | "payment_route_by" | "account_holder_suggestion">;
+export type BillingKey = Exclude<
+  keyof LeadRequestBilling,
+  | "payer_declared"
+  | "payment_route_by"
+  | "account_holder_suggestion"
+  | "invoice_recipient"
+  | "invoice_recipient_is_payer"
+  | "recipient"
+>;
 
 /** Only the changed keys: `""` clears a text or a choice, `null` an answer. */
 export type BillingPatch = Partial<Record<BillingKey, string | boolean | null>>;
@@ -703,6 +773,17 @@ export function uploadLeadRepresentativeDocument(
  * `payment_route_by_payer` when the payment route is the payer's to answer.
  */
 export function saveLeadBilling(leadId: string, patch: BillingPatch): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
+    method: "POST",
+    body: JSON.stringify(patch),
+  });
+}
+
+/**
+ * Step 3's invoice recipient on the billing route (owner spec 2026-10-11):
+ * answered before anybody is named as payer, so no 409 `payer_not_declared`.
+ */
+export function saveLeadInvoiceRecipient(leadId: string, patch: RecipientPatch): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/billing`, {
     method: "POST",
     body: JSON.stringify(patch),

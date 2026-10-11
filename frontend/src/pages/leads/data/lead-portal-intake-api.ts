@@ -180,6 +180,24 @@ export const LEAD_COMPLIANCE_FLAGS = ["cash_payment", "crypto_payment", "other_m
 
 export type LeadComplianceFlag = (typeof LEAD_COMPLIANCE_FLAGS)[number];
 
+/** A third-party invoice recipient as the lead named it (step 3, 2026-10-11). */
+export type LeadPortalRecipient = {
+  /** `person` or `organisation`; null while not chosen (or an older request's "another address"). */
+  type: "person" | "organisation" | null;
+  name: string | null;
+  legal_form: string | null;
+  contact_name: string | null;
+  street: string | null;
+  zip: string | null;
+  city: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+  relationship_kind: string | null;
+  relationship: string | null;
+  payment_reason: string | null;
+};
+
 /**
  * Sections 7 (invoice recipient) and 8 (payment route) of the GwG form as the
  * lead answered them in the cabinet, plus the two staff fields of the payer
@@ -188,6 +206,15 @@ export type LeadComplianceFlag = (typeof LEAD_COMPLIANCE_FLAGS)[number];
  * the payer section.
  */
 export type LeadPortalBilling = {
+  /**
+   * Step 3 of the cabinet (owner spec 2026-10-11), as the lead answered it:
+   * who receives the invoice (`self` or `third_party`), whether that
+   * recipient pays, and a third-party recipient's data. Absent on an older
+   * server; section 7 below is derived from them.
+   */
+  invoice_recipient?: "self" | "third_party" | null;
+  invoice_recipient_is_payer?: boolean | null;
+  recipient?: LeadPortalRecipient | null;
   /** `self`, `payer` or `other`; null while the lead has not answered. */
   invoice_to: InvoiceTo | null;
   /** Name and address on the invoice; only with `other`. */
@@ -561,7 +588,35 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
   const raw = asRecord(value);
   if (!raw) return null;
   const flags: unknown[] = Array.isArray(raw.compliance_flags) ? raw.compliance_flags : [];
+  const party = asRecord(raw.recipient);
+  // Step 3's answers: only from a server that sends them.
+  const recipientKeys: Pick<LeadPortalBilling, "invoice_recipient" | "invoice_recipient_is_payer" | "recipient"> =
+    raw.invoice_recipient === undefined
+      ? {}
+      : {
+          invoice_recipient:
+            raw.invoice_recipient === "self" || raw.invoice_recipient === "third_party" ? raw.invoice_recipient : null,
+          invoice_recipient_is_payer: answerOrNull(raw.invoice_recipient_is_payer),
+          recipient: party
+            ? {
+                type: party.type === "person" || party.type === "organisation" ? party.type : null,
+                name: textOrNull(party.name),
+                legal_form: textOrNull(party.legal_form),
+                contact_name: textOrNull(party.contact_name),
+                street: textOrNull(party.street),
+                zip: textOrNull(party.zip),
+                city: textOrNull(party.city),
+                country: textOrNull(party.country),
+                email: textOrNull(party.email),
+                phone: textOrNull(party.phone),
+                relationship_kind: textOrNull(party.relationship_kind),
+                relationship: textOrNull(party.relationship),
+                payment_reason: textOrNull(party.payment_reason),
+              }
+            : null,
+        };
   return {
+    ...recipientKeys,
     invoice_to: INVOICE_TO_VALUES.find((item) => item === raw.invoice_to) ?? null,
     invoice_name: textOrNull(raw.invoice_name),
     invoice_street: textOrNull(raw.invoice_street),

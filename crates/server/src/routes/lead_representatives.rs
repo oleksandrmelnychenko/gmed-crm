@@ -221,15 +221,43 @@ impl Extras {
 /// The answers that decide who the cabinet asks for.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct Answers {
-    /// Adult: "does somebody act for you?" `None` until answered.
+    /// Adult: "does somebody act on your behalf?" `None` until answered.
     pub has_representative: Option<bool>,
-    /// Adult: "are you under legal guardianship?" `None` until answered.
+    /// Adult, asked only after a "yes" to `has_representative` (owner
+    /// 2026-10-11): "is it a court-appointed representative (rechtliche
+    /// Betreuung)?" `None` until answered.
     pub under_guardianship: Option<bool>,
     /// Minor: who represents the child, as stated by a parent or by staff.
     pub custody: Option<String>,
 }
 
 impl Answers {
+    /// Whether an adult's form asks for the person of `role` (owner
+    /// 2026-10-11): somebody acts for the lead, and that is the legal
+    /// guardian (Betreuer) with "yes" to the court-appointed question, an
+    /// authorised representative (Vollmacht) with "no". A legal guardianship
+    /// stated before the question was nested (2026-10-11) still asks for its
+    /// guardian.
+    pub(crate) fn asks_adult_role(&self, role: &str) -> bool {
+        match role {
+            ROLE_AUTHORISED_REPRESENTATIVE => {
+                self.has_representative == Some(true) && self.under_guardianship == Some(false)
+            }
+            ROLE_LEGAL_GUARDIAN => self.under_guardianship == Some(true),
+            _ => false,
+        }
+    }
+
+    /// [`Answers::asks_adult_role`] with the persons on file: an authorised
+    /// representative recorded beside a legal guardian (before 2026-10-11, or
+    /// by staff) keeps its place while somebody acts for the lead.
+    pub(crate) fn keeps_adult_role(&self, role: &str, on_file: bool) -> bool {
+        self.asks_adult_role(role)
+            || (role == ROLE_AUTHORISED_REPRESENTATIVE
+                && on_file
+                && self.has_representative == Some(true))
+    }
+
     /// The custody that applies to a minor: both parents until somebody says
     /// otherwise.
     pub(crate) fn custody(&self) -> &str {
@@ -422,21 +450,14 @@ pub(crate) fn resolve(
             .collect();
     }
     let mut people = Vec::new();
-    for (role, slot, asked) in [
-        (
-            ROLE_AUTHORISED_REPRESENTATIVE,
-            SLOT_AGENT,
-            answers.has_representative == Some(true),
-        ),
-        (
-            ROLE_LEGAL_GUARDIAN,
-            SLOT_GUARDIAN,
-            answers.under_guardianship == Some(true),
-        ),
+    for (role, slot) in [
+        (ROLE_AUTHORISED_REPRESENTATIVE, SLOT_AGENT),
+        (ROLE_LEGAL_GUARDIAN, SLOT_GUARDIAN),
     ] {
         let found = entries
             .iter()
             .find(|(id, _)| rows.get(id).is_some_and(|extras| extras.role == role));
+        let asked = answers.keeps_adult_role(role, found.is_some());
         if let Some((id, entry)) = found {
             people.push(person(
                 *id,
@@ -779,23 +800,23 @@ pub(crate) fn missing_for_submit(loaded: &Loaded, today: NaiveDate) -> Vec<Strin
         }
         return missing;
     }
-    for (answer, question, slot) in [
-        (
-            representation.answers.has_representative,
-            "has_representative",
-            SLOT_AGENT,
-        ),
-        (
-            representation.answers.under_guardianship,
-            "under_guardianship",
-            SLOT_GUARDIAN,
-        ),
-    ] {
-        match answer {
-            None => missing.push(question.to_string()),
-            Some(true) => missing.extend(place(slot, &ADULT_REQUIRED)),
-            Some(false) => {}
-        }
+    // "Does somebody act on your behalf?" first; only its "yes" asks whether
+    // that is a court-appointed representative (owner 2026-10-11), and that
+    // answer decides whose data the form asks.
+    let answers = &representation.answers;
+    if answers.has_representative.is_none() {
+        missing.push("has_representative".to_string());
+    }
+    if answers.has_representative == Some(true) && answers.under_guardianship.is_none() {
+        missing.push("under_guardianship".to_string());
+    }
+    if answers.asks_adult_role(ROLE_AUTHORISED_REPRESENTATIVE)
+        || representation.in_slot(SLOT_AGENT).is_some()
+    {
+        missing.extend(place(SLOT_AGENT, &ADULT_REQUIRED));
+    }
+    if answers.asks_adult_role(ROLE_LEGAL_GUARDIAN) {
+        missing.extend(place(SLOT_GUARDIAN, &ADULT_REQUIRED));
     }
     missing
 }
@@ -1873,24 +1894,40 @@ pub(crate) async fn update_my_representation(
     let mut next = representation.answers.clone();
     // The persons that go with the change.
     let mut removed: Vec<Uuid> = Vec::new();
-    for (answer, role) in [
-        (patch.has_representative, ROLE_AUTHORISED_REPRESENTATIVE),
-        (patch.under_guardianship, ROLE_LEGAL_GUARDIAN),
-    ] {
-        let Some(answer) = answer else { continue };
-        if role == ROLE_AUTHORISED_REPRESENTATIVE {
-            next.has_representative = answer;
-        } else {
-            next.under_guardianship = answer;
-        }
-        if answer != Some(true)
-            && let Some(person) = representation.with_role(role)
-        {
-            // The person of a question cannot stay without its "yes".
-            if !loaded.can_remove(person) {
-                return in_use();
+    if let Some(answer) = patch.has_representative {
+        next.has_representative = answer;
+    }
+    if let Some(answer) = patch.under_guardianship {
+        next.under_guardianship = answer;
+    }
+    // The court-appointed question belongs to the "yes" of "does somebody
+    // act on your behalf?" (owner 2026-10-11): without it, it goes.
+    if !representation.minor && next.has_representative != Some(true) {
+        next.under_guardianship = None;
+    }
+    if !representation.minor {
+        for role in [ROLE_AUTHORISED_REPRESENTATIVE, ROLE_LEGAL_GUARDIAN] {
+            let Some(person) = representation
+                .with_role(role)
+                .filter(|person| person.slot.is_some())
+            else {
+                continue;
+            };
+            // The person of an answer that no longer asks for anybody goes.
+            if !next.keeps_adult_role(role, true) {
+                if !loaded.can_remove(person) {
+                    return in_use();
+                }
+                removed.push(person.id);
+            } else if role == ROLE_AUTHORISED_REPRESENTATIVE
+                && next.under_guardianship == Some(true)
+                && representation.answers.under_guardianship != Some(true)
+                && loaded.can_remove(person)
+            {
+                // The person who acts is the court-appointed representative
+                // after all: the one the cabinet entered as authorised goes.
+                removed.push(person.id);
             }
-            removed.push(person.id);
         }
     }
     if let Some(custody) = patch.custody {
@@ -2060,10 +2097,11 @@ pub(crate) async fn upsert_my_representative(
             None => return role_invalid(),
         },
     };
-    // An adult's person belongs to a "yes".
+    // An adult's person belongs to the answers that ask for it.
     let declared = match role {
-        ROLE_AUTHORISED_REPRESENTATIVE => answers.has_representative == Some(true),
-        ROLE_LEGAL_GUARDIAN => answers.under_guardianship == Some(true),
+        ROLE_AUTHORISED_REPRESENTATIVE | ROLE_LEGAL_GUARDIAN => {
+            answers.keeps_adult_role(role, known.is_some())
+        }
         _ => true,
     };
     if !declared {
@@ -2873,29 +2911,56 @@ mod tests {
 
     #[test]
     fn an_adult_answers_both_questions_and_names_the_person_of_a_yes() {
+        // "Does somebody act on your behalf?" first (owner 2026-10-11).
         let unanswered = loaded(false, Answers::default(), Vec::new());
         assert_eq!(
             missing_for_submit(&unanswered, today()),
-            vec!["has_representative", "under_guardianship"]
+            vec!["has_representative"]
         );
         let nobody = Answers {
             has_representative: Some(false),
-            under_guardianship: Some(false),
             ..Default::default()
         };
         assert!(missing_for_submit(&loaded(false, nobody, Vec::new()), today()).is_empty());
+        // Its "yes" asks whether that is a court-appointed representative.
+        let acting = Answers {
+            has_representative: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            missing_for_submit(&loaded(false, acting, Vec::new()), today()),
+            vec!["under_guardianship"]
+        );
 
-        // "Yes" without a person: the whole list of that place.
+        // "Yes, a legal guardian" without a person: the whole list of that place.
         let both = Answers {
             has_representative: Some(true),
             under_guardianship: Some(true),
             ..Default::default()
         };
-        let mut expected = keys(SLOT_AGENT, &ADULT_REQUIRED);
-        expected.extend(keys(SLOT_GUARDIAN, &ADULT_REQUIRED));
+        assert!(!both.asks_adult_role(ROLE_AUTHORISED_REPRESENTATIVE));
         assert_eq!(
             missing_for_submit(&loaded(false, both.clone(), Vec::new()), today()),
-            expected
+            keys(SLOT_GUARDIAN, &ADULT_REQUIRED)
+        );
+        // "Yes, not court-appointed": the authorised representative.
+        let agent = Answers {
+            under_guardianship: Some(false),
+            ..both.clone()
+        };
+        assert_eq!(
+            missing_for_submit(&loaded(false, agent, Vec::new()), today()),
+            keys(SLOT_AGENT, &ADULT_REQUIRED)
+        );
+        // A legal guardianship stated before the question was nested keeps its guardian.
+        let older = Answers {
+            has_representative: Some(false),
+            under_guardianship: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(
+            missing_for_submit(&loaded(false, older, Vec::new()), today()),
+            keys(SLOT_GUARDIAN, &ADULT_REQUIRED)
         );
 
         // The representative is entered; the files are still to come.

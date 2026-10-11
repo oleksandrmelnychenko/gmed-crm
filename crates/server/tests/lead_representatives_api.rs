@@ -394,11 +394,9 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         }),
         "{body}"
     );
-    // The guardianship question is asked again (owner 2026-10-10).
-    assert_eq!(
-        missing_representation(&body),
-        vec!["has_representative", "under_guardianship"]
-    );
+    // "Does somebody act on your behalf?" first; the court-appointed question
+    // follows its "yes" only (owner 2026-10-11).
+    assert_eq!(missing_representation(&body), vec!["has_representative"]);
 
     // A key that does not fit an adult, an unknown key and a value of another
     // type are refused with the key.
@@ -904,12 +902,14 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     let guardian = Uuid::new_v4();
     let guardian_path = format!("{request}/representatives/{guardian}");
 
+    // Somebody acts for the lead, and that is a court-appointed legal guardian
+    // (owner 2026-10-11: the second question follows the "yes").
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/representation"),
         &patient,
-        Some(json!({ "has_representative": false, "under_guardianship": true })),
+        Some(json!({ "has_representative": true, "under_guardianship": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -1021,18 +1021,23 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
         "{body}"
     );
 
-    // "No" after all: the person goes with the row, the trusted contact and
-    // the remaining file.
+    // "Nobody acts for me" after all: the court-appointed answer goes with
+    // it, and the person with the row, the trusted contact and the remaining
+    // file.
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/representation"),
         &patient,
-        Some(json!({ "under_guardianship": false })),
+        Some(json!({ "has_representative": false })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    assert_eq!(body["representation"]["under_guardianship"], false);
+    assert_eq!(body["representation"]["has_representative"], false);
+    assert!(
+        body["representation"]["under_guardianship"].is_null(),
+        "{body}"
+    );
     assert_eq!(body["representation"]["representatives"], json!([]));
     assert_eq!(missing_representation(&body), Vec::<String>::new());
     let (contacts, rows, registered, stored): (Value, i64, i64, i64) = sqlx::query_as(
@@ -1054,22 +1059,36 @@ async fn an_adult_under_guardianship_names_the_guardian_and_a_no_removes_the_per
     assert_eq!(removals.len(), 1, "{removals:?}");
     assert_eq!(removals[0]["representative_id"], json!(guardian));
     assert_eq!(removals[0]["documents_withdrawn"], 1, "{removals:?}");
-    // The answer can be taken back; then it is open again.
+    // "Yes" again: the court-appointed question is open again.
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/representation"),
         &patient,
-        Some(json!({ "under_guardianship": null })),
+        Some(json!({ "has_representative": true })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    // The guardianship question is asked again (owner 2026-10-10).
     assert_eq!(
         missing_representation(&body),
         vec!["under_guardianship"],
         "{body}"
     );
+    // A court-appointed "yes" without the first "yes" is not kept.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/representation"),
+        &patient,
+        Some(json!({ "has_representative": false, "under_guardianship": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["representation"]["under_guardianship"].is_null(),
+        "{body}"
+    );
+    assert_eq!(missing_representation(&body), Vec::<String>::new());
 }
 
 #[tokio::test]
@@ -1600,12 +1619,14 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     let (_, stranger) = adult_lead(&app, json!([])).await;
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     let agent = Uuid::new_v4();
+    // Somebody acts for the lead, not court-appointed: an authorised
+    // representative (owner 2026-10-11).
     let (status, body) = json_request(
         router,
         "POST",
         &format!("{request}/representation"),
         &patient,
-        Some(json!({ "has_representative": true })),
+        Some(json!({ "has_representative": true, "under_guardianship": false })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -1702,18 +1723,13 @@ async fn the_representation_is_reached_only_through_the_own_request() {
     let audited = audit_contexts(&app.suite.pool, "remove_lead_representative", lead_id).await;
     assert_eq!(audited.len(), 1, "{audited:?}");
     assert_eq!(audited[0]["representative_id"], json!(agent));
-    // The cabinet asks for the person again (the answer is still yes; the
-    // second question was never answered) and cannot reuse the id of the
-    // contact that stayed.
+    // The cabinet asks for the person again (the answers are still "yes, not
+    // court-appointed") and cannot reuse the id of the contact that stayed.
     let (_, body) = json_request(router, "GET", &request, &patient, None).await;
     // The person's details are asked in the first step again.
     assert_eq!(
         missing_representation(&body),
-        [
-            keys("agent", &ADULT_FIELDS),
-            vec!["under_guardianship".to_string()]
-        ]
-        .concat(),
+        keys("agent", &ADULT_FIELDS),
         "{body}"
     );
     let (status, error) = json_request(

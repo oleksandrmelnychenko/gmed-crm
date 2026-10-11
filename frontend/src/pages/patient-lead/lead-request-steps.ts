@@ -2,6 +2,7 @@ import { INQUIRY_CONSENT, type LeadRequest } from "./lead-request-api";
 import { isBillingField } from "./lead-request-billing-model";
 import { followUpAnswered, followUpMissingAll, followUpShown } from "./lead-request-follow-up-model";
 import { SUBMIT_FIELDS, changedSinceSubmit, consentGiven } from "./lead-request-model";
+import { isRecipientField } from "./lead-request-recipient-model";
 import { representativeSubmitPart } from "./lead-request-representation-model";
 
 // The lead cabinet as a stepper of short tabs (trigger flow 2026-10-07,
@@ -10,12 +11,15 @@ import { representativeSubmitPart } from "./lead-request-representation-model";
 // which step a missing key belongs to (`progress.missing_by_step`); an older
 // server does not, and the cabinet then maps the keys itself.
 
-/** The steps in their order. "follow_up" exists only while the server opened blocks. */
+/**
+ * The steps in their order. "follow_up" exists only while the server opened
+ * blocks. "Who pays" is part of step 3 "Versicherung & Rechnung" since
+ * 2026-10-11 (owner): the invoice recipient comes first and absorbs it.
+ */
 export const STEP_IDS = [
   "person",
   "contact",
   "identity",
-  "payer",
   "billing",
   "declarations",
   "follow_up",
@@ -26,7 +30,7 @@ export const STEP_IDS = [
 export type StepId = (typeof STEP_IDS)[number];
 
 /** The steps whose missing keys the server lists in `missing_by_step` (contract 3.1). */
-export const SERVER_STEPS = ["person", "contact", "identity", "payer", "billing", "declarations"] as const;
+export const SERVER_STEPS = ["person", "contact", "identity", "billing", "declarations"] as const;
 
 /** The steps a key of `missing_for_submit` can belong to (the follow-up has its own list). */
 export type FormStep = Exclude<StepId, "follow_up" | "send">;
@@ -72,17 +76,26 @@ const DECLARATION_KEYS: ReadonlySet<string> = new Set([
 
 /**
  * The step a key of `missing_for_submit` is answered in, for a server that
- * does not say so: the person with the representation, contact and
- * residence, the identity document, who pays, insurance and invoice, the
- * declarations, the reason of the request. A key the cabinet does not know
- * is shown in the first step.
+ * does not say so (or names a step the cabinet no longer has): the person
+ * with the representation, contact and residence, the identity document,
+ * insurance with the invoice recipient and who pays, the declarations, the
+ * reason of the request. A key the cabinet does not know is shown in the
+ * first step.
  */
 export function stepOfField(field: string): FormStep {
   if (PERSON_KEYS.has(field) || representativeSubmitPart(field)) return "person";
   if (CONTACT_KEYS.has(field)) return "contact";
   if (field === "id_document_upload" || field.startsWith("id_")) return "identity";
-  if (field.startsWith("payer_") || field === "payment_background") return "payer";
-  if (field === "has_insurance" || field.startsWith("insurance_") || isBillingField(field)) return "billing";
+  if (
+    field.startsWith("payer_") ||
+    field === "payment_background" ||
+    isRecipientField(field) ||
+    field === "has_insurance" ||
+    field.startsWith("insurance_") ||
+    isBillingField(field)
+  ) {
+    return "billing";
+  }
   if (DECLARATION_KEYS.has(field)) return "declarations";
   if (field === "request_reason") return "documents";
   return "person";

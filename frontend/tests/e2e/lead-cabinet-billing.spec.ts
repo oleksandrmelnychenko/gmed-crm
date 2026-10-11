@@ -446,7 +446,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       .getByTestId("lead-request-step-billing")
       .locator("h3")
       .evaluateAll((titles) => titles.map((title) => title.textContent));
-    expect(order).toEqual(["Versicherung", "Rechnungsempfänger", "Zahlungsweg"]);
+    // Who pays is part of this step since 2026-10-11 (here a server without the recipient's answers).
+    expect(order).toEqual(["Versicherung", "Zahler", "Rechnungsempfänger", "Zahlungsweg"]);
     // Nobody else pays: the invoice goes to the patient or to another address.
     await expect(billing.getByRole("radio")).toHaveCount(2);
     await expect(billing.getByRole("radio", { name: "An mich", exact: true })).not.toBeChecked();
@@ -651,10 +652,10 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     expect(calls.submits).toBe(1);
 
     // "I pay myself": the answer "to the payer" is taken back and the route is asked again, empty.
-    await step(page, "payer");
-    await choose(page, page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Ich selbst");
-    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "self" });
+    // Who pays is part of step 3 since 2026-10-11.
     await step(page, "billing");
+    await choose(page, page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer ist der Zahler?" }), "Ich selbst");
+    await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "self" });
     await expect(answers(billing)).toHaveText(["An mich", "An eine andere Adresse"]);
     await expect(billing.getByRole("radio", { name: "An mich", exact: true })).not.toBeChecked();
     const route = page.getByTestId("lead-request-payment-route");

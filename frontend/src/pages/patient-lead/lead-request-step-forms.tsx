@@ -48,6 +48,7 @@ import {
   ConsentNeededNote,
   ConsentCheckbox,
   FormField,
+  LabeledField,
   MissingList,
   MissingShownContext,
   SaveIndicator,
@@ -58,8 +59,10 @@ import {
   useAutosave,
   type RequestQueue,
 } from "./lead-request-parts";
+import { InvoiceRecipientSection } from "./lead-request-invoice-recipient";
 import { PayerSection } from "./lead-request-payer-section";
 import { PayerQuestionnaireSection } from "./lead-request-payer-questionnaire";
+import { knowsRecipient, payerChoices } from "./lead-request-recipient-model";
 import { RepresentationSection } from "./lead-request-representation";
 import { asLeadCabinetLang, submitFieldLabel, type LeadRequestText } from "./lead-request-text";
 
@@ -592,44 +595,12 @@ export function IdentityStep({ request, text, lang, enqueue, onChange, missing, 
   );
 }
 
-/** Step 4 "Wer zahlt": the patient, a person or an organisation, and the paying parent's own questions. */
-export function PayerStep({ request, text, lang, enqueue, onChange, missing, nav }: StepProps) {
-  const parts = usePartStates();
-  // The own economic interest is asked with a server that knows the GwG statements.
-  const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
-  const withIdentification = request.identification !== undefined;
-  return (
-    <StepFrame testId="lead-request-step-payer" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
-      {/* An older server does not know the question yet. */}
-      {request.payer !== undefined ? (
-        <PayerSection
-          // Read-only once the payer answered on the own link; open again (staff changed the payer): a fresh form.
-          key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
-          request={request}
-          text={text}
-          lang={lang}
-          identification={withIdentification ? identification : undefined}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("payer")}
-        />
-      ) : null}
-      {/* The parent who pays answers the payer-only questions (phase 3a); set for that login only. */}
-      {request.payer_questionnaire ? (
-        <PayerQuestionnaireSection
-          request={request}
-          text={text}
-          lang={lang}
-          enqueue={enqueue}
-          onChange={onChange}
-          onSaveState={parts.on("payerQuestionnaire")}
-        />
-      ) : null}
-    </StepFrame>
-  );
-}
-
-/** Step 5 "Versicherung & Rechnung": the insurance and where the invoice goes (section 7). */
+/**
+ * Step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the insurance,
+ * then who receives the invoice and whether that recipient pays — "who pays"
+ * is part of it —, the bare payment method, and the paying parent's own
+ * questions.
+ */
 export function BillingStep({ request, text, enqueue, onChange, lang, missing, nav }: StepProps) {
   const parts = usePartStates();
   const { draft, set, setDraft, errorFor, fieldProps } = usePersonalForm({
@@ -639,11 +610,24 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
     onChange,
     onSaveState: parts.on("personal"),
   });
+  // The reason an organisation pays is a GwG statement; an older server does not know them.
+  const identification = useIdentificationForm({ request, text, enqueue, onChange, onSaveState: parts.on("identification") });
+  const withIdentification = request.identification !== undefined;
+  const guardian = request.access_kind === "guardian";
+  const flowKnown = knowsRecipient(request);
+  // The payment method belongs to the payer named: asked once somebody is.
+  const payerNamed = Boolean(request.payer) && (!flowKnown || request.billing?.invoice_recipient_is_payer != null);
   return (
     <StepFrame testId="lead-request-step-billing" request={request} text={text} missing={missing} nav={nav} saveState={parts.state}>
       <Section title={text.sectionInsurance}>
         <div className={GRID} data-testid="lead-request-insurance">
-          <FormField field="has_insurance" text={text} error={errorFor("has_insurance")}>
+          <LabeledField
+            id="lead-request-has_insurance"
+            label={guardian ? text.hasInsuranceGuardian : text.fields.has_insurance}
+            error={errorFor("has_insurance")}
+            question
+            className="sm:col-span-2 lg:col-span-3"
+          >
             <NativeComboboxSelect
               {...fieldProps("has_insurance")}
               className={selectClass}
@@ -654,7 +638,7 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
               <option value="yes">{text.insuranceAnswerOptions.yes}</option>
               <option value="no">{text.insuranceAnswerOptions.no}</option>
             </NativeComboboxSelect>
-          </FormField>
+          </LabeledField>
           {/* The details exist only for an insured person. */}
           {draft.has_insurance === "yes" ? (
             <>
@@ -710,8 +694,38 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
           ) : null}
         </div>
       </Section>
-      {/* The invoice recipient; an older server does not know it. The payment route is follow-up block C. */}
-      {request.billing ? (
+      {/* The invoice recipient first, who pays with it (owner spec 2026-10-11). */}
+      {request.billing && flowKnown && request.payer !== undefined ? (
+        <InvoiceRecipientSection
+          request={request}
+          text={text}
+          lang={lang}
+          identification={withIdentification ? identification : undefined}
+          enqueue={enqueue}
+          onChange={onChange}
+          partState={parts.on}
+        />
+      ) : null}
+      {/* An older server: who pays, then section 7 as it was asked. */}
+      {!flowKnown && request.payer !== undefined ? (
+        <PayerSection
+          key={request.payer?.answered_by_payer ? "payer-answered" : "payer"}
+          request={request}
+          text={text}
+          lang={lang}
+          identification={withIdentification ? identification : undefined}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={parts.on("payer")}
+          // Every answer of "who pays", as before the recipient came first.
+          choices={payerChoices(
+            { recipient: "third_party", isPayer: "no" },
+            request,
+            guardian ? (request.payer_self_template ?? null) : null,
+          )}
+        />
+      ) : null}
+      {request.billing && !flowKnown ? (
         <BillingSections
           request={request}
           billing={request.billing}
@@ -721,6 +735,30 @@ export function BillingStep({ request, text, enqueue, onChange, lang, missing, n
           onChange={onChange}
           onSaveState={parts.on("billing")}
           part="invoice"
+        />
+      ) : null}
+      {/* How the patient side will pay: once the payer is named. The details are follow-up block C. */}
+      {request.billing && flowKnown && payerNamed && request.follow_up !== undefined ? (
+        <BillingSections
+          request={request}
+          billing={request.billing}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={parts.on("billing")}
+          part="method"
+        />
+      ) : null}
+      {/* The parent who pays answers the payer-only questions (phase 3a); set for that login only. */}
+      {request.payer_questionnaire ? (
+        <PayerQuestionnaireSection
+          request={request}
+          text={text}
+          lang={lang}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={parts.on("payerQuestionnaire")}
         />
       ) : null}
       {/* An older server still asks the payment route with the base form. */}

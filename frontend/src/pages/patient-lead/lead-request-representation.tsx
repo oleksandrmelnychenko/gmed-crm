@@ -43,6 +43,7 @@ import {
   CUSTODIES,
   REPRESENTATIVE_FIELDS,
   ROLE_OF_SLOT,
+  asksGuardianshipQuestion,
   asksRepresentativeField,
   authorityProofOf,
   draftFromRepresentation,
@@ -64,6 +65,7 @@ import {
   stillRejectedRepresentative,
   withChildAddress,
   withRejectedRepresentative,
+  withRepresentativeAnswer,
   type RejectedRepresentative,
   type RepresentationDraft,
   type RepresentativeDraft,
@@ -729,8 +731,8 @@ export function RepresentationSection({
   const [states, setStates] = useState<Record<string, SaveState>>({});
   // A person's form opens once the server has the answer that asks for it (it
   // then knows whom it holds for that place), and closes with the answer.
-  const stored = shownSlots(minor, draftFromRepresentation(representation));
-  const answered = shownSlots(minor, draft).filter((slot) => stored.includes(slot));
+  const stored = shownSlots(minor, draftFromRepresentation(representation), representation);
+  const answered = shownSlots(minor, draft, representation).filter((slot) => stored.includes(slot));
   // What the step asks of each person: everything in block G; in the first step
   // an adult's representative or guardian whole (owner 2026-10-07: identified
   // before sending), a minor's parents names and contacts. A server that lists
@@ -915,8 +917,9 @@ export function RepresentationSection({
     );
   }
 
-  // The questions in their card, each person's details as a card of their own below it (owner 2026-10-09);
-  // the legal-guardianship question is asked again since 2026-10-10 (owner).
+  // The questions in their card, each person's details as a card of their own below it (owner 2026-10-09).
+  // "Does somebody act on your behalf?" first; only its "yes" asks whether that is a court-appointed
+  // representative (owner 2026-10-11), and that answer decides whose details the form asks.
   return (
     <div className="space-y-4" data-testid="lead-request-representation">
       <Section title={text.sectionRepresentation}>
@@ -928,21 +931,23 @@ export function RepresentationSection({
               value={draft.has_representative}
               text={text}
               onChange={(answer) => {
-                if (answer !== draft.has_representative) change({ ...draft, has_representative: answer });
+                if (answer !== draft.has_representative) change(withRepresentativeAnswer(draft, answer));
               }}
             />
           </LabeledField>
-          <LabeledField id="lead-request-under_guardianship" label={text.underGuardianshipQuestion} required question>
-            <YesNoSelect
-              id="lead-request-under_guardianship"
-              className="sm:max-w-[calc(50%-0.5rem)]"
-              value={draft.under_guardianship}
-              text={text}
-              onChange={(answer) => {
-                if (answer !== draft.under_guardianship) change({ ...draft, under_guardianship: answer });
-              }}
-            />
-          </LabeledField>
+          {asksGuardianshipQuestion(draft) ? (
+            <LabeledField id="lead-request-under_guardianship" label={text.underGuardianshipQuestion} required question>
+              <YesNoSelect
+                id="lead-request-under_guardianship"
+                className="sm:max-w-[calc(50%-0.5rem)]"
+                value={draft.under_guardianship}
+                text={text}
+                onChange={(answer) => {
+                  if (answer !== draft.under_guardianship) change({ ...draft, under_guardianship: answer });
+                }}
+              />
+            </LabeledField>
+          ) : null}
           {problems}
         </div>
       </Section>

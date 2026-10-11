@@ -77,6 +77,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
+use crate::routes::lead_invoice_recipient;
 use crate::routes::lead_payer::{
     self, PaymentRouteBy, PortalBillingError, PortalBillingPatch, PortalFundsError,
     PortalFundsPatch, PortalPayerError, PortalPayerInput,
@@ -639,6 +640,9 @@ const PAYER_MARKER: &str = "payer";
 /// in `leads.portal_field_updates`; separate from [`PAYER_MARKER`], so a
 /// billing save leaves "who pays — from the patient" as it is.
 const BILLING_MARKER: &str = "billing";
+/// Key of the invoice recipient's answers of step 3 (2026-10-11) in
+/// `leads.portal_field_updates`.
+const INVOICE_RECIPIENT_MARKER: &str = "invoice_recipient";
 /// Key of the answers of the extra step in `leads.portal_field_updates`.
 const ENHANCED_DETAILS_MARKER: &str = "enhanced_details";
 
@@ -1981,6 +1985,74 @@ fn missing_for_submit(
     crate::risk::cabinet::reshape_missing(missing, base)
 }
 
+/// Step 3 (owner spec 2026-10-11) on top of [`missing_for_submit`]: the
+/// invoice recipient comes first and absorbs "who pays". Section 7's keys
+/// (`invoice_to` and the other address) give way to the recipient's
+/// ([`lead_invoice_recipient::missing`]); the payer's keys and the bare
+/// payment method count only once the payer named fits the answers
+/// ([`lead_invoice_recipient::payer_fits`]) — until then the one key
+/// `payer_kind`, as soon as the payer question is shown. An organisation
+/// that pays states why the payment goes through it (`payer_payment_reason`,
+/// stored as `payment_background`) instead of a relationship.
+pub(crate) fn with_invoice_recipient(
+    missing: Vec<String>,
+    recipient: &lead_invoice_recipient::Recipient,
+    payer: Option<&lead_payer::Declaration>,
+    paying_parent: bool,
+    payment_background_given: bool,
+) -> Vec<String> {
+    const SECTION_SEVEN: [&str; 6] = [
+        "invoice_to",
+        "invoice_name",
+        "invoice_street",
+        "invoice_zip",
+        "invoice_city",
+        "invoice_country",
+    ];
+    // A payer named before the recipient was answered (a request of an older
+    // cabinet) keeps its keys.
+    let fits = lead_invoice_recipient::payer_fits(recipient, payer, paying_parent)
+        || (recipient.recipient.is_none() && payer.is_some());
+    let organisation_pays =
+        fits && !paying_parent && payer.is_some_and(lead_payer::Declaration::is_organisation);
+    let mut reshaped: Vec<String> = missing
+        .into_iter()
+        .filter(|key| !SECTION_SEVEN.contains(&key.as_str()))
+        .filter(|key| fits || !(key.starts_with("payer_") || key == "payment_method"))
+        .filter(|key| {
+            !(organisation_pays
+                && matches!(
+                    key.as_str(),
+                    "payer_relationship_kind" | "payer_relationship"
+                ))
+        })
+        .collect();
+    let mut step_three: Vec<String> = lead_invoice_recipient::missing(recipient)
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    if !fits && lead_invoice_recipient::payer_question_reached(recipient) {
+        step_three.push("payer_kind".to_string());
+    }
+    let at = reshaped
+        .iter()
+        .position(|key| key.starts_with("payer_") || key == "payment_method")
+        .or_else(|| reshaped.iter().position(|key| key == "request_reason"))
+        .unwrap_or(reshaped.len());
+    for (offset, key) in step_three.into_iter().enumerate() {
+        reshaped.insert(at + offset, key);
+    }
+    if organisation_pays && !payment_background_given {
+        let after = reshaped
+            .iter()
+            .rposition(|key| key.starts_with("payer_"))
+            .map(|index| index + 1)
+            .unwrap_or(reshaped.len());
+        reshaped.insert(after, "payer_payment_reason".to_string());
+    }
+    reshaped
+}
+
 /// Staff took a portal upload over: marked it as reviewed or, for a copy of
 /// the identity document, confirmed it as such. From then on the patient can
 /// no longer remove it.
@@ -2250,9 +2322,10 @@ pub(crate) async fn request_payload(
     // Who pays, who acts for the lead, whether the payer answered through
     // its own link, and the extra step of this login (computed on every
     // load, so it appears as soon as an answer makes it required).
-    let (payer, representation, answered_by_payer, extra, risk) = {
+    let (payer, representation, answered_by_payer, extra, risk, stored_recipient) = {
         let mut conn = state.db.acquire().await?;
         let payer = lead_payer::load_declaration(&mut conn, lead_id).await?;
+        let stored_recipient = lead_invoice_recipient::load(&mut conn, lead_id).await?;
         let answered_by_payer =
             crate::routes::lead_payer_link::answered_by_payer(&mut conn, lead_id, payer.as_ref())
                 .await?;
@@ -2274,7 +2347,14 @@ pub(crate) async fn request_payload(
             crate::risk::cabinet::load_statements(&mut conn, lead_id).await?,
             crate::risk::cabinet::payer_extras(&mut conn, lead_id).await?,
         );
-        (payer, representation, answered_by_payer, extra, risk)
+        (
+            payer,
+            representation,
+            answered_by_payer,
+            extra,
+            risk,
+            stored_recipient,
+        )
     };
     let (base, mut follow_up, review_notice, statements, (payer_extras, billing_extras)) = risk;
     let (identification, _) = load_identification(&state.db, lead_id).await?;
@@ -2364,16 +2444,31 @@ pub(crate) async fn request_payload(
             .filter(|name| !name.is_empty()),
         PaymentRouteBy::Payer => None,
     };
-    let missing = missing_for_submit(
-        &data,
+    // Step 3: the invoice recipient first (owner spec 2026-10-11).
+    let paying_parent =
+        lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+            .is_some();
+    let recipient =
+        lead_invoice_recipient::effective(stored_recipient.as_ref(), payer.as_ref(), paying_parent);
+    let missing = with_invoice_recipient(
+        missing_for_submit(
+            &data,
+            payer.as_ref(),
+            &identification,
+            !identity_documents.is_empty(),
+            lead_representatives::missing_for_submit(&representation, today),
+            route_by,
+            extra,
+            today,
+            &base,
+        ),
+        &recipient,
         payer.as_ref(),
-        &identification,
-        !identity_documents.is_empty(),
-        lead_representatives::missing_for_submit(&representation, today),
-        route_by,
-        extra,
-        today,
-        &base,
+        paying_parent,
+        identification
+            .payment_background
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty()),
     );
     // The follow-up blocks of the risk assessment: which blocks to answer
     // and what each still misses, the answers kept on the payer declaration
@@ -2406,6 +2501,7 @@ pub(crate) async fn request_payload(
         account_holder_suggestion.as_deref(),
     );
     crate::risk::cabinet::merge_into(&mut billing_json, billing_extras);
+    crate::risk::cabinet::merge_into(&mut billing_json, recipient.portal_json());
     // A paying parent answers the payer's questions in the own cabinet
     // (phase 3a); nobody else sees anything of the payer's answers or link.
     let payer_questionnaire = if route_by == PaymentRouteBy::Guardian {
@@ -2842,8 +2938,46 @@ async fn update_my_payer(
     {
         return internal(error, "audit organisation");
     }
+    // Section 7 follows the invoice recipient of step 3: the payer named now
+    // may make "to the payer" an answer, or take it back.
+    let synced = match lead_invoice_recipient::sync_section_seven(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        kind.as_str(),
+    )
+    .await
+    {
+        Ok(synced) => synced,
+        Err(error) => return internal(error, "derive invoice recipient"),
+    };
+    // Section 7 the lead's answers changed is still the lead's entry.
+    let mut markers = Map::new();
+    if !synced.is_empty() {
+        match billing_marker(&mut tx, lead_id, auth.user_id, kind).await {
+            Ok(Some(marker)) => {
+                markers.insert(BILLING_MARKER.to_string(), marker);
+            }
+            Ok(None) => {}
+            Err(error) => return internal(error, "load payer"),
+        }
+    }
     let Some(declaration) = saved else {
-        if !mask_changed.is_empty() {
+        if !mask_changed.is_empty() || !synced.is_empty() {
+            if !markers.is_empty()
+                && let Err(error) = sqlx::query(
+                    r#"UPDATE leads
+                       SET portal_field_updates = portal_field_updates || $2::jsonb,
+                           updated_at = now()
+                       WHERE id = $1"#,
+                )
+                .bind(lead_id)
+                .bind(Value::Object(markers))
+                .execute(&mut *tx)
+                .await
+            {
+                return internal(error, "mark billing");
+            }
             if let Err(error) = tx.commit().await {
                 return internal(error, "commit organisation");
             }
@@ -2855,8 +2989,9 @@ async fn update_my_payer(
             Err(error) => internal(error, "load request"),
         };
     };
-    let marker = json!({
-        PAYER_MARKER: {
+    markers.insert(
+        PAYER_MARKER.to_string(),
+        json!({
             "at": Utc::now(),
             "by": auth.user_id,
             "kind": kind.as_str(),
@@ -2865,15 +3000,15 @@ async fn update_my_payer(
                 PAYER_MARKER,
                 Some(&lead_payer::portal_marker_value(&declaration)),
             ),
-        }
-    });
+        }),
+    );
     if let Err(error) = sqlx::query(
         r#"UPDATE leads
            SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
            WHERE id = $1"#,
     )
     .bind(lead_id)
-    .bind(marker)
+    .bind(Value::Object(markers))
     .execute(&mut *tx)
     .await
     {
@@ -2896,6 +3031,30 @@ async fn update_my_payer(
     }
 }
 
+/// The "entered by the patient" marker of sections 7 and 8, made from the
+/// stored declaration (`None` without one).
+async fn billing_marker(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+    actor: Uuid,
+    kind: AccessKind,
+) -> Result<Option<Value>, sqlx::Error> {
+    Ok(lead_payer::load_declaration(conn, lead_id)
+        .await?
+        .map(|declaration| {
+            json!({
+                "at": Utc::now(),
+                "by": actor,
+                "kind": kind.as_str(),
+                "hash": value_marker(
+                    lead_id,
+                    BILLING_MARKER,
+                    Some(&declaration.billing_marker_value()),
+                ),
+            })
+        }))
+}
+
 /// `POST /me/lead-requests/{lead_id}/billing`: autosave of where the invoice
 /// goes (section 7) and how the payer will pay (section 8), only the changed
 /// keys. Both land in the payer declaration; the payer of the lead's orders
@@ -2904,6 +3063,12 @@ async fn update_my_payer(
 /// as a whole (409 `payment_route_by_payer`); without an answer who pays
 /// there is nothing to patch (409 `payer_not_declared`). The audit event
 /// names the changed fields, never their values.
+///
+/// Step 3 (owner spec 2026-10-11) sends the invoice recipient here as well
+/// (`invoice_recipient`, `invoice_recipient_is_payer`, `recipient_*`): kept
+/// in `lead_invoice_recipients`, answered before anybody is named as payer,
+/// and section 7 of the declaration is derived from them
+/// ([`lead_invoice_recipient::sync_section_seven`]).
 async fn update_my_billing(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2924,11 +3089,17 @@ async fn update_my_billing(
     // Block C of the risk assessment (expected total, through whom another
     // person pays) is stored apart (trigger flow 2026-10-07).
     let block_c = crate::risk::cabinet::take_keys(&mut body, &crate::risk::cabinet::BLOCK_C_KEYS);
+    // The invoice recipient of step 3 (2026-10-11) is stored apart.
+    let recipient_body =
+        crate::risk::cabinet::take_keys(&mut body, &lead_invoice_recipient::RECIPIENT_KEYS);
     let patch = match PortalBillingPatch::parse(&body) {
         Ok(patch) => patch,
         Err(PortalBillingError::Invalid { field, message }) => return invalid(&field, message),
         Err(_) => return invalid("body", "The body could not be read"),
     };
+    // Only the recipient (or block C): no section 7 or 8 key to patch, so
+    // nothing needs a declaration.
+    let sections_sent = body.as_object().is_none_or(|object| !object.is_empty());
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -2970,16 +3141,20 @@ async fn update_my_billing(
             );
         }
     }
-    let saved = match lead_payer::save_billing_from_portal(
-        &mut tx,
-        lead_id,
-        auth.user_id,
-        kind.as_str(),
-        &patch,
-        route_by,
-    )
-    .await
-    {
+    let saved = if !sections_sent {
+        Ok(None)
+    } else {
+        lead_payer::save_billing_from_portal(
+            &mut tx,
+            lead_id,
+            auth.user_id,
+            kind.as_str(),
+            &patch,
+            route_by,
+        )
+        .await
+    };
+    let saved = match saved {
         Ok(saved) => saved,
         Err(PortalBillingError::Invalid { field, message }) => return invalid(&field, message),
         Err(PortalBillingError::RouteByPayer) => {
@@ -3019,40 +3194,100 @@ async fn update_my_billing(
     {
         return internal(error, "audit payment route");
     }
-    let Some(declaration) = saved else {
-        if !block_c_changed.is_empty() {
-            if let Err(error) = tx.commit().await {
-                return internal(error, "commit payment route");
+    // The invoice recipient: applied to the stored answers, or to those an
+    // older request's section 7 says.
+    let mut recipient_marker = None;
+    if !recipient_body.is_empty() {
+        let stored = match lead_invoice_recipient::load(&mut tx, lead_id).await {
+            Ok(stored) => stored,
+            Err(error) => return internal(error, "load invoice recipient"),
+        };
+        let paying_parent =
+            lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+                .is_some();
+        let current =
+            lead_invoice_recipient::effective(stored.as_ref(), payer.as_ref(), paying_parent);
+        let next = match lead_invoice_recipient::apply(&current, &recipient_body) {
+            Ok(next) => next,
+            Err(error) => return error.into_response(),
+        };
+        let changed = lead_invoice_recipient::changed_keys(&current, &next);
+        if !changed.is_empty() || stored.is_none() {
+            if let Err(error) =
+                lead_invoice_recipient::store(&mut tx, lead_id, &next, auth.user_id).await
+            {
+                return internal(error, "store invoice recipient");
             }
-        } else {
-            drop(tx);
+            if let Err(error) = crate::risk::cabinet::audit_keys(
+                &mut tx,
+                "lead_portal_update_invoice_recipient",
+                auth.user_id,
+                lead_id,
+                &changed,
+                kind.as_str(),
+            )
+            .await
+            {
+                return internal(error, "audit invoice recipient");
+            }
+            recipient_marker = Some(next.marker_value());
         }
+    }
+    // Section 7 follows the recipient's answers (also after a patch of an
+    // older cabinet that names `invoice_to` itself).
+    let synced = match lead_invoice_recipient::sync_section_seven(
+        &mut tx,
+        lead_id,
+        auth.user_id,
+        kind.as_str(),
+    )
+    .await
+    {
+        Ok(synced) => synced,
+        Err(error) => return internal(error, "derive invoice recipient"),
+    };
+    if saved.is_none()
+        && block_c_changed.is_empty()
+        && recipient_marker.is_none()
+        && synced.is_empty()
+    {
+        drop(tx);
         return match request_payload(&state, lead_id, auth.user_id, kind).await {
             Ok(payload) => Json(payload).into_response(),
             Err(error) => internal(error, "load request"),
         };
-    };
-    let marker = json!({
-        BILLING_MARKER: {
-            "at": Utc::now(),
-            "by": auth.user_id,
-            "kind": kind.as_str(),
-            "hash": value_marker(
-                lead_id,
-                BILLING_MARKER,
-                Some(&declaration.billing_marker_value()),
-            ),
+    }
+    let mut markers = Map::new();
+    if saved.is_some() || !synced.is_empty() {
+        match billing_marker(&mut tx, lead_id, auth.user_id, kind).await {
+            Ok(Some(marker)) => {
+                markers.insert(BILLING_MARKER.to_string(), marker);
+            }
+            Ok(None) => {}
+            Err(error) => return internal(error, "load payer"),
         }
-    });
-    if let Err(error) = sqlx::query(
-        r#"UPDATE leads
-           SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
-           WHERE id = $1"#,
-    )
-    .bind(lead_id)
-    .bind(marker)
-    .execute(&mut *tx)
-    .await
+    }
+    if let Some(value) = &recipient_marker {
+        markers.insert(
+            INVOICE_RECIPIENT_MARKER.to_string(),
+            json!({
+                "at": Utc::now(),
+                "by": auth.user_id,
+                "kind": kind.as_str(),
+                "hash": value_marker(lead_id, INVOICE_RECIPIENT_MARKER, Some(value)),
+            }),
+        );
+    }
+    if !markers.is_empty()
+        && let Err(error) = sqlx::query(
+            r#"UPDATE leads
+               SET portal_field_updates = portal_field_updates || $2::jsonb, updated_at = now()
+               WHERE id = $1"#,
+        )
+        .bind(lead_id)
+        .bind(Value::Object(markers))
+        .execute(&mut *tx)
+        .await
     {
         return internal(error, "mark billing");
     }
@@ -4394,21 +4629,41 @@ async fn submit_my_lead_request(
         Ok(base) => base,
         Err(error) => return internal(error, "load request reason"),
     };
+    let stored_recipient = match lead_invoice_recipient::load(&mut tx, lead_id).await {
+        Ok(stored) => stored,
+        Err(error) => return internal(error, "load invoice recipient"),
+    };
+    let paying_parent =
+        lead_representatives::payer_same_person(&representation.representation, payer.as_ref())
+            .is_some();
     let today = crate::app_time::today();
-    let missing = missing_for_submit(
-        &data,
-        payer.as_ref(),
-        &identification,
-        identity_uploaded,
-        lead_representatives::missing_for_submit(&representation, today),
-        payment_route_by(
+    let missing = with_invoice_recipient(
+        missing_for_submit(
+            &data,
             payer.as_ref(),
-            &representation.representation,
-            Some(auth.user_id),
+            &identification,
+            identity_uploaded,
+            lead_representatives::missing_for_submit(&representation, today),
+            payment_route_by(
+                payer.as_ref(),
+                &representation.representation,
+                Some(auth.user_id),
+            ),
+            extra,
+            today,
+            &base,
         ),
-        extra,
-        today,
-        &base,
+        &lead_invoice_recipient::effective(
+            stored_recipient.as_ref(),
+            payer.as_ref(),
+            paying_parent,
+        ),
+        payer.as_ref(),
+        paying_parent,
+        identification
+            .payment_background
+            .as_deref()
+            .is_some_and(|reason| !reason.trim().is_empty()),
     );
     if !missing.is_empty() {
         return coded(
@@ -4815,9 +5070,17 @@ async fn get_lead_portal_intake(
                         {
                             // Block C's answers (the expected total, through whom a
                             // payment via a third party goes) beside section 8.
-                            Ok(extra) => crate::risk::cabinet::payer_extras(&mut conn, lead_id)
-                                .await
-                                .map(|(_, billing_extras)| (loaded, extra, billing_extras)),
+                            Ok(extra) => {
+                                match crate::risk::cabinet::payer_extras(&mut conn, lead_id).await {
+                                    // The invoice recipient of step 3 (2026-10-11).
+                                    Ok((_, billing_extras)) => {
+                                        lead_invoice_recipient::load(&mut conn, lead_id).await.map(
+                                            |recipient| (loaded, extra, billing_extras, recipient),
+                                        )
+                                    }
+                                    Err(error) => Err(error),
+                                }
+                            }
                             Err(error) => Err(error),
                         }
                     }
@@ -4826,7 +5089,7 @@ async fn get_lead_portal_intake(
                 Err(error) => Err(error),
             };
             match loaded {
-                Ok((loaded, extra, billing_extras)) => {
+                Ok((loaded, extra, billing_extras, stored_recipient)) => {
                     let route_by =
                         payment_route_by(declaration.as_ref(), &loaded.representation, None);
                     let updated_at = updates.get(ENHANCED_DETAILS_MARKER).and_then(|update| {
@@ -4870,6 +5133,36 @@ async fn get_lead_portal_intake(
                         .unwrap_or_default()
                         .billing_staff_json(route_by);
                     crate::risk::cabinet::merge_into(&mut billing, billing_extras);
+                    // "Со слов пациента": who receives the invoice and whether
+                    // that recipient pays (step 3, 2026-10-11), as the lead
+                    // answered; an older request's section 7 read the same way.
+                    let paying_parent = lead_representatives::payer_same_person(
+                        &loaded.representation,
+                        declaration.as_ref(),
+                    )
+                    .is_some();
+                    let recipient = lead_invoice_recipient::effective(
+                        stored_recipient.as_ref(),
+                        declaration.as_ref(),
+                        paying_parent,
+                    );
+                    crate::risk::cabinet::merge_into(&mut billing, recipient.portal_json());
+                    billing["recipient_updated_at"] = json!(
+                        updates
+                            .get(INVOICE_RECIPIENT_MARKER)
+                            .filter(|update| {
+                                update.get("hash").and_then(Value::as_str)
+                                    == Some(
+                                        value_marker(
+                                            lead_id,
+                                            INVOICE_RECIPIENT_MARKER,
+                                            Some(&recipient.marker_value()),
+                                        )
+                                        .as_str(),
+                                    )
+                            })
+                            .and_then(|update| update.get("at").cloned())
+                    );
                     (
                         lead_representatives::staff_payload(&loaded),
                         lead_representatives::updated_at(&loaded, &updates),
@@ -6586,5 +6879,116 @@ mod tests {
         // route and do not change its marker.
         assert_eq!(current.marker_value(), next.marker_value());
         assert!(!IDENTIFICATION_FIELDS.contains(&"occupation"));
+    }
+
+    fn keys(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn step_three_asks_the_invoice_recipient_before_the_payer() {
+        use lead_invoice_recipient::Recipient;
+        let base = keys(&[
+            "first_name",
+            "has_insurance",
+            "payer_kind",
+            "invoice_to",
+            "payment_method",
+            "request_reason",
+        ]);
+        // Nothing answered: the recipient first, no payer key.
+        assert_eq!(
+            with_invoice_recipient(base.clone(), &Recipient::default(), None, false, false),
+            keys(&[
+                "first_name",
+                "has_insurance",
+                "invoice_recipient",
+                "request_reason"
+            ])
+        );
+        // The recipient answered, "does it pay?" not yet.
+        let own = Recipient {
+            recipient: Some("self".into()),
+            ..Recipient::default()
+        };
+        assert_eq!(
+            with_invoice_recipient(base.clone(), &own, None, false, false),
+            keys(&[
+                "first_name",
+                "has_insurance",
+                "invoice_recipient_is_payer",
+                "request_reason"
+            ])
+        );
+        // "No": the payer question is shown and missing.
+        let not_paying = Recipient {
+            is_payer: Some(false),
+            ..own.clone()
+        };
+        assert_eq!(
+            with_invoice_recipient(base.clone(), &not_paying, None, false, false),
+            keys(&[
+                "first_name",
+                "has_insurance",
+                "payer_kind",
+                "request_reason"
+            ])
+        );
+        // A self-payer does not answer "the recipient (me) does not pay".
+        let own_payer = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_SELF.into(),
+            ..lead_payer::Declaration::default()
+        };
+        assert!(
+            with_invoice_recipient(base.clone(), &not_paying, Some(&own_payer), false, false)
+                .contains(&"payer_kind".to_string())
+        );
+        // An organisation that pays states its reason instead of a relationship.
+        let organisation = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some("organisation".into()),
+            ..lead_payer::Declaration::default()
+        };
+        let missing = keys(&[
+            "payer_organisation_name",
+            "payer_relationship_kind",
+            "payer_contact_consent",
+            "payment_method",
+        ]);
+        assert_eq!(
+            with_invoice_recipient(
+                missing.clone(),
+                &not_paying,
+                Some(&organisation),
+                false,
+                false
+            ),
+            keys(&[
+                "payer_organisation_name",
+                "payer_contact_consent",
+                "payer_payment_reason",
+                "payment_method",
+            ])
+        );
+        assert!(
+            !with_invoice_recipient(missing, &not_paying, Some(&organisation), false, true)
+                .contains(&"payer_payment_reason".to_string())
+        );
+        // A payer named by an older cabinet keeps its keys while the recipient is open.
+        let person = lead_payer::Declaration {
+            payer_kind: lead_payer::PAYER_KIND_THIRD_PARTY.into(),
+            payer_type: Some("person".into()),
+            ..lead_payer::Declaration::default()
+        };
+        assert_eq!(
+            with_invoice_recipient(
+                keys(&["payer_first_name", "invoice_to"]),
+                &Recipient::default(),
+                Some(&person),
+                false,
+                false,
+            ),
+            keys(&["invoice_recipient", "payer_first_name"])
+        );
     }
 }

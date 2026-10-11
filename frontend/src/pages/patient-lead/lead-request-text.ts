@@ -3,12 +3,15 @@ import type { Lang } from "@/lib/i18n";
 import type {
   Custody,
   FollowUpBlock,
+  InvoiceRecipient,
   InvoiceTo,
   PaymentMethod,
   PaymentRouteBy,
   PayerType,
+  RecipientType,
   RepresentativeSlot,
 } from "./lead-request-api";
+import { recipientFieldOf, type PayerChoice, type RecipientDraft } from "./lead-request-recipient-model";
 import {
   BILLING_SUBMIT_FIELDS,
   INVOICE_FIELDS,
@@ -190,6 +193,40 @@ export type LeadRequestText = {
   payerBlockPerson: string;
   payerBlockContact: string;
   payerBlockConsent: string;
+  /** "Do you have health insurance?" for a parent: asked about the patient. */
+  hasInsuranceGuardian: string;
+  /**
+   * Step 3 (owner spec 2026-10-11): the invoice recipient first — the patient
+   * side or a third party (a person or an organisation) with its data —,
+   * whether that recipient pays, and only then who pays.
+   */
+  recipient: {
+    section: string;
+    question: string;
+    options: Record<InvoiceRecipient, string>;
+    optionsGuardian: Record<InvoiceRecipient, string>;
+    typeQuestion: string;
+    typeOptions: Record<RecipientType, string>;
+    dataBlock: string;
+    organisationName: string;
+    legalForm: string;
+    contactName: string;
+    relationship: string;
+    paymentReason: string;
+    email: string;
+    phone: string;
+    isPayerQuestion: string;
+    /** "Who pays" when the recipient does not: one answer of a list. */
+    payerSection: string;
+    payerQuestion: string;
+    payerOptions: Record<PayerChoice, string>;
+    /** "The patient himself" read by a parent who fills in a child's request (an older request only). */
+    payerSelfGuardian: string;
+    /** The recipient who pays: what GMED needs of the payer besides the recipient's data. */
+    payerExtrasBlock: string;
+    /** Prefix of a recipient field in the list of what is still missing. */
+    missingPrefix: string;
+  };
   /**
    * "Ergänzende Angaben" (trigger flow, contract 3.1 and 6): the intro, the
    * title of each block, and sending the answers. Never why the blocks are
@@ -463,6 +500,8 @@ export function payerFieldLabel(
     case "payer_relationship_kind":
     case "payer_relationship":
       return text.payerRelationship;
+    case "payer_payment_reason":
+      return text.recipient.paymentReason;
     case "payer_street":
       return organisation ? text.payerSeatStreet : text.fields.street_address;
     case "payer_zip":
@@ -487,6 +526,44 @@ export function payerFieldLabel(
       return guardian ? text.ownAccountQuestionGuardian : text.ownAccountQuestion;
     case "payer_beneficial_owner":
       return guardian ? text.beneficialOwnerGuardian : text.beneficialOwner;
+  }
+}
+
+/** Label of a field of a third-party invoice recipient (step 3); address and names reuse the patient's labels. */
+export function recipientFieldLabel(text: LeadRequestText, field: keyof RecipientDraft): string {
+  switch (field) {
+    case "recipient":
+      return text.recipient.question;
+    case "is_payer":
+      return text.recipient.isPayerQuestion;
+    case "type":
+      return text.recipient.typeQuestion;
+    case "first_name":
+    case "last_name":
+    case "city":
+      return text.fields[field];
+    case "organisation_name":
+      return text.recipient.organisationName;
+    case "legal_form":
+      return text.recipient.legalForm;
+    case "contact_name":
+      return text.recipient.contactName;
+    case "street":
+      return text.fields.street_address;
+    case "zip":
+      return text.fields.zip_code;
+    case "country":
+      return text.billingFields.invoice_country;
+    case "email":
+      return text.recipient.email;
+    case "phone":
+      return text.recipient.phone;
+    case "relationship_kind":
+      return text.recipient.relationship;
+    case "relationship":
+      return `${text.recipient.relationship} – ${text.payerRelationshipOther}`;
+    case "payment_reason":
+      return text.recipient.paymentReason;
   }
 }
 
@@ -626,7 +703,13 @@ export function submitFieldLabel(
   guardian = false,
   payerType: string | null | undefined = null,
 ): string {
+  if (field === "has_insurance" && guardian) return text.hasInsuranceGuardian;
   if (field in text.fields) return text.fields[field as PersonalField];
+  // Step 3: the two questions stand alone, a field of the third party carries the recipient.
+  if (field === "invoice_recipient") return text.recipient.question;
+  if (field === "invoice_recipient_is_payer") return text.recipient.isPayerQuestion;
+  const recipientField = recipientFieldOf(field);
+  if (recipientField) return `${text.recipient.missingPrefix}: ${recipientFieldLabel(text, recipientField)}`;
   if (field === "payer_kind" || field === "payer_own_account" || field === "payer_beneficial_owner") {
     return payerFieldLabel(text, field, guardian);
   }
@@ -674,7 +757,6 @@ const de: LeadRequestText = {
     person: "Einwilligung & Person",
     contact: "Kontakt & Wohnsitz",
     identity: "Ausweis",
-    payer: "Wer zahlt",
     billing: "Versicherung & Rechnung",
     declarations: "Erklärungen",
     follow_up: "Ergänzende Angaben",
@@ -698,11 +780,11 @@ const de: LeadRequestText = {
     country: "Wohnsitzland",
     phone: "Telefon",
     primary_language: "Bevorzugte Sprache",
-    has_insurance: "Krankenversicherung vorhanden?",
+    has_insurance: "Haben Sie eine Krankenversicherung?",
     insurance_type: "Versicherungsart",
     insurance_provider: "Versicherer",
     insurance_number: "Versicherungsnummer",
-    insurance_covers_germany: "Deckt Behandlung in Deutschland",
+    insurance_covers_germany: "Deckt Leistungen in Deutschland ab",
   },
   legalSexOptions: {
     female: "Weiblich",
@@ -778,7 +860,7 @@ const de: LeadRequestText = {
   changedAfterSend:
     "Sie haben Ihre Anfrage nach dem Senden geändert. Senden Sie sie erneut, damit Ihre Ansprechperson die Änderungen erhält.",
   sectionPayer: "Wer zahlt",
-  payerQuestion: "Wer übernimmt die Kosten der Behandlung?",
+  payerQuestion: "Wer ist der Zahler?",
   payerOptions: { self: "Ich selbst", third_party: "Eine andere Person oder Organisation" },
   payerOptionsGuardian: {
     self: "Die Patientin / der Patient selbst",
@@ -789,7 +871,7 @@ const de: LeadRequestText = {
   payerInformHint:
     "Bitte sagen Sie dieser Person, dass Sie uns ihre Daten für die Kostenübernahme mitgeteilt haben.",
   payerPerson: "Zahler",
-  payerTypeQuestion: "Wer ist der Zahler?",
+  payerTypeQuestion: "Art des Zahlers",
   payerTypeOptions: {
     person: "Privatperson",
     company: "Unternehmen",
@@ -825,7 +907,7 @@ const de: LeadRequestText = {
   payerConsentHint: "Ohne dieses Einverständnis dürfen wir den Zahler nicht ansprechen.",
   payerConsentShort: "Einverständnis zur Kontaktaufnahme",
   payerCostEstimateConsentLabel:
-    "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
+    "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und medizinische Einzelheiten.",
   payerCostEstimateConsentShort: "Einwilligung zur Weitergabe des Kostenvoranschlags",
   payerAnsweredByPayer: "Die zahlende Person hat ihre Angaben selbst gemacht. Änderungen nur über GMED.",
   ownAccountQuestion: "Handeln Sie im eigenen wirtschaftlichen Interesse?",
@@ -840,6 +922,38 @@ const de: LeadRequestText = {
   payerBlockPerson: "Angaben zur zahlenden Person",
   payerBlockContact: "Kontakt",
   payerBlockConsent: "Einwilligungen",
+  hasInsuranceGuardian: "Hat die Patientin / der Patient eine Krankenversicherung?",
+  recipient: {
+    section: "Rechnungsempfänger",
+    question: "Wer ist Rechnungsempfänger?",
+    options: { self: "Ich", third_party: "Eine andere Person oder Organisation" },
+    optionsGuardian: {
+      self: "Ich (als Elternteil / gesetzliche Vertretung)",
+      third_party: "Eine andere Person oder Organisation",
+    },
+    typeQuestion: "Rechnungsempfänger ist",
+    typeOptions: { person: "eine Privatperson", organisation: "eine Organisation" },
+    dataBlock: "Angaben zum Rechnungsempfänger",
+    organisationName: "Name der Organisation",
+    legalForm: "Rechtsform",
+    contactName: "Ansprechperson",
+    relationship: "Beziehung zur Patientin / zum Patienten",
+    paymentReason: "Warum erfolgt die Zahlung über die Organisation?",
+    email: "E-Mail",
+    phone: "Telefon",
+    isPayerQuestion: "Ist der Rechnungsempfänger auch der Zahler?",
+    payerSection: "Zahler",
+    payerQuestion: "Wer ist der Zahler?",
+    payerOptions: {
+      self: "Ich selbst",
+      guardian: "Ich (als Elternteil)",
+      person: "Eine Privatperson",
+      organisation: "Eine Organisation",
+    },
+    payerSelfGuardian: "Die Patientin / der Patient selbst",
+    payerExtrasBlock: "Weitere Angaben zum Zahler",
+    missingPrefix: "Rechnungsempfänger",
+  },
   followUpIntro:
     "Bitte ergänzen Sie die folgenden Angaben und senden Sie sie anschließend ab. Alles wird automatisch gespeichert.",
   followUpBlocks: {
@@ -963,8 +1077,8 @@ const de: LeadRequestText = {
   identityFiles: "Foto oder Scan des Ausweises",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
   sectionRepresentation: "Vertretung",
-  hasRepresentativeQuestion: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
-  underGuardianshipQuestion: "Stehen Sie unter rechtlicher Betreuung?",
+  hasRepresentativeQuestion: "Handelt jemand in Ihrem Namen?",
+  underGuardianshipQuestion: "Ist diese Person vom Gericht bestellt (rechtliche Betreuerin / rechtlicher Betreuer)?",
   sectionLegalRepresentatives: "Gesetzliche Vertreter",
   custodyQuestion: "Wer vertritt das Kind?",
   custodyOptions: {
@@ -1058,7 +1172,7 @@ const de: LeadRequestText = {
   declarationGivenAt: (dateTime) => `Bestätigt am ${dateTime}`,
   payerQuestionnaireTitle: "Angaben als zahlende Person",
   payerQuestionnaireIntro: (section) =>
-    `Sie zahlen die Behandlung. Das Geldwäschegesetz verlangt dazu einige Angaben von Ihnen als zahlender Person. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
+    `Sie zahlen die Leistungen von GMED. Das Geldwäschegesetz verlangt dazu einige Angaben von Ihnen als zahlender Person. Name, Anschrift und Ausweis geben Sie im Abschnitt „${section}“ an.`,
   payerNoticeTitle: "Datenschutzhinweis für die zahlende Person",
   payerNotice:
     "Verantwortlich für die Verarbeitung ist GMED. Ihre Angaben als zahlende Person erhalten wir von Ihnen und aus der Anfrage der Patientin / des Patienten. Wir verarbeiten sie, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), um die Kostenübernahme zu klären und um Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO. Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutzaufsichtsbehörde zu beschweren.",
@@ -1136,7 +1250,6 @@ const ru: LeadRequestText = {
     person: "Согласие и личные данные",
     contact: "Контакты и проживание",
     identity: "Документ",
-    payer: "Кто платит",
     billing: "Страховка и счёт",
     declarations: "Заявления",
     follow_up: "Дополнительные сведения",
@@ -1160,11 +1273,11 @@ const ru: LeadRequestText = {
     country: "Страна проживания",
     phone: "Телефон",
     primary_language: "Предпочитаемый язык",
-    has_insurance: "Есть страхование?",
+    has_insurance: "Есть ли у вас медицинская страховка?",
     insurance_type: "Тип страхования",
     insurance_provider: "Страховая компания",
     insurance_number: "Номер полиса",
-    insurance_covers_germany: "Покрывает лечение в Германии",
+    insurance_covers_germany: "Покрывает услуги в Германии",
   },
   legalSexOptions: {
     female: "Женский",
@@ -1238,17 +1351,17 @@ const ru: LeadRequestText = {
   changedAfterSend:
     "После отправки вы изменили заявку. Отправьте её ещё раз, чтобы менеджер получил изменения.",
   sectionPayer: "Кто оплачивает",
-  payerQuestion: "Кто оплачивает лечение?",
+  payerQuestion: "Кто является плательщиком?",
   payerOptions: { self: "Я сам(а)", third_party: "Другой человек или организация" },
   payerOptionsGuardian: {
     self: "Сам пациент",
     guardian: "Оплачиваю я (как один из родителей)",
     third_party: "Другой человек или организация",
   },
-  payerIntro: "Укажите, пожалуйста, кто оплачивает лечение.",
+  payerIntro: "Укажите, пожалуйста, кто оплачивает услуги.",
   payerInformHint: "Пожалуйста, сообщите этому человеку, что вы передали нам его данные для оформления оплаты.",
   payerPerson: "Плательщик",
-  payerTypeQuestion: "Кто является плательщиком?",
+  payerTypeQuestion: "Тип плательщика",
   payerTypeOptions: {
     person: "Частное лицо",
     company: "Компания",
@@ -1260,7 +1373,7 @@ const ru: LeadRequestText = {
     organisation: "Название организации",
     insurance: "Название страховой компании",
   },
-  payerRelationship: "Кем приходится пациенту",
+  payerRelationship: "Кем приходится пациенту?",
   payerRelationshipOptions: {
     spouse: "Супруг / супруга",
     parent: "Мать / отец",
@@ -1278,13 +1391,13 @@ const ru: LeadRequestText = {
   payerSeatCountry: "Страна местонахождения",
   payerEmail: "E-mail",
   payerConsentLabel:
-    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им моё имя.",
+    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты услуг и сообщит им моё имя.",
   payerConsentLabelGuardian:
-    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты лечения и сообщит им имя пациента.",
+    "Я согласен(на), что GMED свяжется с этим человеком или организацией по вопросу оплаты услуг и сообщит им имя пациента.",
   payerConsentHint: "Без этого согласия мы не вправе обращаться к плательщику.",
   payerConsentShort: "Согласие на контакт",
   payerCostEstimateConsentLabel:
-    "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами – только виды услуг и суммы, без диагнозов и названий лечения.",
+    "Я согласен(на), что GMED передаст плательщику смету с ожидаемыми расходами – только виды услуг и суммы, без диагнозов и медицинских подробностей.",
   payerCostEstimateConsentShort: "Согласие на передачу сметы",
   payerAnsweredByPayer: "Плательщик сам указал свои данные. Изменения только через GMED.",
   ownAccountQuestion: "Вы действуете в собственных экономических интересах?",
@@ -1298,6 +1411,38 @@ const ru: LeadRequestText = {
   payerBlockPerson: "Данные плательщика",
   payerBlockContact: "Контакты",
   payerBlockConsent: "Согласия",
+  hasInsuranceGuardian: "Есть ли у пациента медицинская страховка?",
+  recipient: {
+    section: "Получатель счёта",
+    question: "Кто является получателем счёта?",
+    options: { self: "Я", third_party: "Третье лицо или организация" },
+    optionsGuardian: {
+      self: "Я (как родитель / законный представитель)",
+      third_party: "Третье лицо или организация",
+    },
+    typeQuestion: "Получателем счёта является",
+    typeOptions: { person: "физическое лицо", organisation: "организация" },
+    dataBlock: "Данные получателя счёта",
+    organisationName: "Название организации",
+    legalForm: "Правовая форма",
+    contactName: "Контактное лицо",
+    relationship: "Кем приходится пациенту?",
+    paymentReason: "Почему оплата через организацию?",
+    email: "E-mail",
+    phone: "Телефон",
+    isPayerQuestion: "Получатель счёта является плательщиком?",
+    payerSection: "Плательщик",
+    payerQuestion: "Кто является плательщиком?",
+    payerOptions: {
+      self: "Я сам(а)",
+      guardian: "Я (как родитель)",
+      person: "Физическое лицо",
+      organisation: "Организация",
+    },
+    payerSelfGuardian: "Сам(а) пациент(ка)",
+    payerExtrasBlock: "Дополнительно о плательщике",
+    missingPrefix: "Получатель счёта",
+  },
   followUpIntro: "Пожалуйста, дополните следующие сведения и затем отправьте их. Всё сохраняется автоматически.",
   followUpBlocks: {
     A: "Происхождение средств",
@@ -1421,8 +1566,8 @@ const ru: LeadRequestText = {
   identityFiles: "Фото или скан документа",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
   sectionRepresentation: "Представительство",
-  hasRepresentativeQuestion: "Действует ли кто-то от вашего имени (представитель, посредник, уполномоченное лицо)?",
-  underGuardianshipQuestion: "Назначен ли вам опекун по решению суда (rechtliche Betreuung)?",
+  hasRepresentativeQuestion: "Действует ли кто-то от вашего имени?",
+  underGuardianshipQuestion: "Это представитель, назначенный по решению суда (опекун, rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законные представители",
   custodyQuestion: "Кто представляет ребёнка?",
   custodyOptions: {
@@ -1517,7 +1662,7 @@ const ru: LeadRequestText = {
   declarationGivenAt: (dateTime) => `Подтверждено ${dateTime}`,
   payerQuestionnaireTitle: "Ваши данные как плательщика",
   payerQuestionnaireIntro: (section) =>
-    `Вы оплачиваете лечение. Закон о противодействии отмыванию денег требует для этого некоторых данных о вас как о плательщике. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
+    `Вы оплачиваете услуги GMED. Закон о противодействии отмыванию денег требует для этого некоторых данных о вас как о плательщике. Имя, адрес и документ, удостоверяющий личность, вы указываете в разделе «${section}».`,
   payerNoticeTitle: "Уведомление о защите данных для плательщика",
   payerNotice:
     "Ответственный за обработку — GMED. Ваши данные как плательщика мы получаем от вас и из заявки пациента. Мы обрабатываем их, чтобы идентифицировать вас по Закону Германии о противодействии отмыванию денег (§§ 10–12 GwG), согласовать оплату расходов и выставлять счета. Правовое основание — ст. 6 ч. 1 п. b и c DSGVO (GDPR). Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы вправе получить информацию о своих данных, потребовать их исправления, удаления или ограничения обработки, возразить против обработки, а также подать жалобу в надзорный орган по защите данных.",
@@ -1595,7 +1740,6 @@ const uk: LeadRequestText = {
     person: "Згода й особисті дані",
     contact: "Контакти й проживання",
     identity: "Документ",
-    payer: "Хто платить",
     billing: "Страхування й рахунок",
     declarations: "Заяви",
     follow_up: "Додаткові відомості",
@@ -1619,11 +1763,11 @@ const uk: LeadRequestText = {
     country: "Країна проживання",
     phone: "Телефон",
     primary_language: "Бажана мова",
-    has_insurance: "Є страхування?",
+    has_insurance: "Чи є у вас медичне страхування?",
     insurance_type: "Тип страхування",
     insurance_provider: "Страхова компанія",
     insurance_number: "Номер поліса",
-    insurance_covers_germany: "Покриває лікування в Німеччині",
+    insurance_covers_germany: "Покриває послуги в Німеччині",
   },
   legalSexOptions: {
     female: "Жіноча",
@@ -1697,17 +1841,17 @@ const uk: LeadRequestText = {
   changedAfterSend:
     "Після надсилання ви змінили заявку. Надішліть її ще раз, щоб менеджер отримав зміни.",
   sectionPayer: "Хто оплачує",
-  payerQuestion: "Хто оплачує лікування?",
+  payerQuestion: "Хто є платником?",
   payerOptions: { self: "Я сам(а)", third_party: "Інша людина або організація" },
   payerOptionsGuardian: {
     self: "Сам пацієнт",
     guardian: "Оплачую я (як один із батьків)",
     third_party: "Інша людина або організація",
   },
-  payerIntro: "Вкажіть, будь ласка, хто оплачує лікування.",
+  payerIntro: "Вкажіть, будь ласка, хто оплачує послуги.",
   payerInformHint: "Будь ласка, повідомте цій людині, що ви передали нам її дані для оформлення оплати.",
   payerPerson: "Платник",
-  payerTypeQuestion: "Хто є платником?",
+  payerTypeQuestion: "Тип платника",
   payerTypeOptions: {
     person: "Приватна особа",
     company: "Компанія",
@@ -1719,7 +1863,7 @@ const uk: LeadRequestText = {
     organisation: "Назва організації",
     insurance: "Назва страхової компанії",
   },
-  payerRelationship: "Ким доводиться пацієнту",
+  payerRelationship: "Ким доводиться пацієнту?",
   payerRelationshipOptions: {
     spouse: "Чоловік / дружина",
     parent: "Мати / батько",
@@ -1737,13 +1881,13 @@ const uk: LeadRequestText = {
   payerSeatCountry: "Країна місцезнаходження",
   payerEmail: "E-mail",
   payerConsentLabel:
-    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй моє ім'я.",
+    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати послуг і повідомить їй моє ім'я.",
   payerConsentLabelGuardian:
-    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати лікування і повідомить їй ім'я пацієнта.",
+    "Я погоджуюся, що GMED звернеться до цієї людини або організації щодо оплати послуг і повідомить їй ім'я пацієнта.",
   payerConsentHint: "Без цієї згоди ми не маємо права звертатися до платника.",
   payerConsentShort: "Згода на контакт",
   payerCostEstimateConsentLabel:
-    "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами – лише види послуг і суми, без діагнозів і назв лікування.",
+    "Я погоджуюся, що GMED передасть платнику кошторис з очікуваними витратами – лише види послуг і суми, без діагнозів і медичних подробиць.",
   payerCostEstimateConsentShort: "Згода на передачу кошторису",
   payerAnsweredByPayer: "Платник сам указав свої дані. Зміни лише через GMED.",
   ownAccountQuestion: "Ви дієте у власних економічних інтересах?",
@@ -1757,6 +1901,38 @@ const uk: LeadRequestText = {
   payerBlockPerson: "Дані платника",
   payerBlockContact: "Контакти",
   payerBlockConsent: "Згоди",
+  hasInsuranceGuardian: "Чи є в пацієнта медичне страхування?",
+  recipient: {
+    section: "Отримувач рахунку",
+    question: "Хто є отримувачем рахунку?",
+    options: { self: "Я", third_party: "Третя особа або організація" },
+    optionsGuardian: {
+      self: "Я (як один із батьків / законний представник)",
+      third_party: "Третя особа або організація",
+    },
+    typeQuestion: "Отримувачем рахунку є",
+    typeOptions: { person: "фізична особа", organisation: "організація" },
+    dataBlock: "Дані отримувача рахунку",
+    organisationName: "Назва організації",
+    legalForm: "Правова форма",
+    contactName: "Контактна особа",
+    relationship: "Ким доводиться пацієнту?",
+    paymentReason: "Чому оплата через організацію?",
+    email: "E-mail",
+    phone: "Телефон",
+    isPayerQuestion: "Отримувач рахунку є платником?",
+    payerSection: "Платник",
+    payerQuestion: "Хто є платником?",
+    payerOptions: {
+      self: "Я сам(а)",
+      guardian: "Я (як один із батьків)",
+      person: "Фізична особа",
+      organisation: "Організація",
+    },
+    payerSelfGuardian: "Сам(а) пацієнт(ка)",
+    payerExtrasBlock: "Додатково про платника",
+    missingPrefix: "Отримувач рахунку",
+  },
   followUpIntro: "Будь ласка, доповніть наведені нижче відомості й потім надішліть їх. Усе зберігається автоматично.",
   followUpBlocks: {
     A: "Походження коштів",
@@ -1880,8 +2056,8 @@ const uk: LeadRequestText = {
   identityFiles: "Фото або скан документа",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
   sectionRepresentation: "Представництво",
-  hasRepresentativeQuestion: "Чи діє хтось від вашого імені (представник, посередник, уповноважена особа)?",
-  underGuardianshipQuestion: "Чи призначено вам опікуна за рішенням суду (rechtliche Betreuung)?",
+  hasRepresentativeQuestion: "Чи діє хтось від вашого імені?",
+  underGuardianshipQuestion: "Це представник, призначений рішенням суду (опікун, rechtliche Betreuung)?",
   sectionLegalRepresentatives: "Законні представники",
   custodyQuestion: "Хто представляє дитину?",
   custodyOptions: {
@@ -1976,7 +2152,7 @@ const uk: LeadRequestText = {
   declarationGivenAt: (dateTime) => `Підтверджено ${dateTime}`,
   payerQuestionnaireTitle: "Ваші дані як платника",
   payerQuestionnaireIntro: (section) =>
-    `Ви оплачуєте лікування. Закон про протидію відмиванню грошей вимагає для цього деяких даних про вас як про платника. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
+    `Ви оплачуєте послуги GMED. Закон про протидію відмиванню грошей вимагає для цього деяких даних про вас як про платника. Ім'я, адресу та документ, що посвідчує особу, ви вказуєте в розділі «${section}».`,
   payerNoticeTitle: "Повідомлення про захист даних для платника",
   payerNotice:
     "Відповідальним за обробку є GMED. Ваші дані як платника ми отримуємо від вас і із запиту пацієнта. Ми обробляємо їх, щоб ідентифікувати вас відповідно до Закону Німеччини про протидію відмиванню грошей (§§ 10–12 GwG), узгодити оплату витрат і виставляти рахунки. Правова підстава — ст. 6 ч. 1 п. b і c DSGVO (GDPR). Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до своїх даних, їх виправлення, видалення або обмеження обробки, право заперечити проти обробки, а також право подати скаргу до наглядового органу із захисту даних.",
@@ -2054,7 +2230,6 @@ const en: LeadRequestText = {
     person: "Consent & person",
     contact: "Contact & residence",
     identity: "ID document",
-    payer: "Who pays",
     billing: "Insurance & invoice",
     declarations: "Declarations",
     follow_up: "Additional information",
@@ -2082,7 +2257,7 @@ const en: LeadRequestText = {
     insurance_type: "Type of insurance",
     insurance_provider: "Insurer",
     insurance_number: "Policy number",
-    insurance_covers_germany: "Covers treatment in Germany",
+    insurance_covers_germany: "Covers services in Germany",
   },
   legalSexOptions: {
     female: "Female",
@@ -2156,17 +2331,17 @@ const en: LeadRequestText = {
   changedAfterSend:
     "You changed your request after sending it. Send it again so that your contact person receives the changes.",
   sectionPayer: "Who pays",
-  payerQuestion: "Who pays for the treatment?",
+  payerQuestion: "Who is the payer?",
   payerOptions: { self: "I do", third_party: "Another person or organisation" },
   payerOptionsGuardian: {
     self: "The patient",
     guardian: "I pay (as a parent)",
     third_party: "Another person or organisation",
   },
-  payerIntro: "Please tell us who pays for the treatment.",
+  payerIntro: "Please tell us who pays for the services.",
   payerInformHint: "Please let this person know that you gave us their details for the payment arrangements.",
   payerPerson: "Payer",
-  payerTypeQuestion: "Who is the payer?",
+  payerTypeQuestion: "Type of payer",
   payerTypeOptions: {
     person: "Private person",
     company: "Company",
@@ -2202,7 +2377,7 @@ const en: LeadRequestText = {
   payerConsentHint: "Without this consent we may not approach the payer.",
   payerConsentShort: "Consent to contact",
   payerCostEstimateConsentLabel:
-    "I agree that GMED sends the paying person the cost estimate with the expected costs – only the types of services and the amounts, without diagnoses or names of treatments.",
+    "I agree that GMED sends the paying person the cost estimate with the expected costs – only the types of services and the amounts, without diagnoses or medical details.",
   payerCostEstimateConsentShort: "Consent to pass on the cost estimate",
   payerAnsweredByPayer: "The paying person has given their details themselves. Changes only through GMED.",
   ownAccountQuestion: "Are you acting in your own economic interest?",
@@ -2216,6 +2391,38 @@ const en: LeadRequestText = {
   payerBlockPerson: "Payer's details",
   payerBlockContact: "Contact",
   payerBlockConsent: "Consents",
+  hasInsuranceGuardian: "Does the patient have health insurance?",
+  recipient: {
+    section: "Invoice recipient",
+    question: "Who is the invoice recipient?",
+    options: { self: "Me", third_party: "Another person or an organisation" },
+    optionsGuardian: {
+      self: "Me (as a parent / legal representative)",
+      third_party: "Another person or an organisation",
+    },
+    typeQuestion: "The invoice recipient is",
+    typeOptions: { person: "a private person", organisation: "an organisation" },
+    dataBlock: "Invoice recipient's details",
+    organisationName: "Name of the organisation",
+    legalForm: "Legal form",
+    contactName: "Contact person",
+    relationship: "Relationship to the patient",
+    paymentReason: "Why is the payment made through the organisation?",
+    email: "E-mail",
+    phone: "Phone",
+    isPayerQuestion: "Is the invoice recipient also the payer?",
+    payerSection: "Payer",
+    payerQuestion: "Who is the payer?",
+    payerOptions: {
+      self: "Me",
+      guardian: "Me (as a parent)",
+      person: "A private person",
+      organisation: "An organisation",
+    },
+    payerSelfGuardian: "The patient",
+    payerExtrasBlock: "More about the payer",
+    missingPrefix: "Invoice recipient",
+  },
   followUpIntro: "Please complete the following details and then send them. Everything is saved automatically.",
   followUpBlocks: {
     A: "Source of funds",
@@ -2333,8 +2540,8 @@ const en: LeadRequestText = {
   identityFiles: "Photo or scan of the document",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
   sectionRepresentation: "Representation",
-  hasRepresentativeQuestion: "Is somebody acting for you (representative, messenger, authorised person)?",
-  underGuardianshipQuestion: "Are you under legal guardianship?",
+  hasRepresentativeQuestion: "Does anyone act on your behalf?",
+  underGuardianshipQuestion: "Is this person a court-appointed representative (legal guardian)?",
   sectionLegalRepresentatives: "Legal representatives",
   custodyQuestion: "Who represents the child?",
   custodyOptions: {
@@ -2426,7 +2633,7 @@ const en: LeadRequestText = {
   declarationGivenAt: (dateTime) => `Confirmed on ${dateTime}`,
   payerQuestionnaireTitle: "Your details as the paying person",
   payerQuestionnaireIntro: (section) =>
-    `You pay for the treatment. German anti-money laundering law requires some details from you as the paying person. You enter your name, address and identity document in the section "${section}".`,
+    `You pay for GMED's services. German anti-money laundering law requires some details from you as the paying person. You enter your name, address and identity document in the section "${section}".`,
   payerNoticeTitle: "Privacy notice for the paying person",
   payerNotice:
     "GMED is the controller. We receive your details as the paying person from you and from the patient's request. We process them to identify you under the German Anti-Money Laundering Act (sections 10–12 GwG), to arrange the cost coverage and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR. We keep the details for five years after the end of the business relationship (section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",

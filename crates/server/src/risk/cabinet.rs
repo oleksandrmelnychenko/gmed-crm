@@ -166,7 +166,9 @@ pub fn reshape_missing(missing: Vec<String>, extra: &BaseExtra) -> Vec<String> {
     reshaped
 }
 
-/// The step of the cabinet a key of `missing_for_submit` belongs to.
+/// The step of the cabinet a key of `missing_for_submit` belongs to. Since
+/// 2026-10-11 (owner) "who pays" is part of step 3 "Versicherung &
+/// Rechnung": the invoice recipient comes first and absorbs the payer.
 pub fn step_of(key: &str) -> &'static str {
     match key {
         "street_address" | "zip_code" | "city" | "country" | "phone" | "primary_language"
@@ -175,8 +177,9 @@ pub fn step_of(key: &str) -> &'static str {
         "pep_self" | "pep_related" | "sanctions_links" => "declarations",
         "request_reason" => "documents",
         "payment_method" => "billing",
-        key if key.starts_with("payer_") => "payer",
-        key if key.starts_with("invoice_")
+        key if key.starts_with("payer_")
+            || key.starts_with("invoice_")
+            || key.starts_with("recipient_")
             || key.starts_with("insurance_")
             || key == "has_insurance" =>
         {
@@ -194,7 +197,6 @@ pub fn missing_by_step(missing: &[String]) -> Value {
         "person",
         "contact",
         "identity",
-        "payer",
         "billing",
         "declarations",
         "documents",
@@ -1319,21 +1321,30 @@ mod tests {
             "rep1_phone",
             "street_address",
             "id_document_upload",
+            "has_insurance",
+            "invoice_recipient",
+            "recipient_type",
             "payer_kind",
             "payer_own_account",
             "invoice_to",
-            "has_insurance",
             "pep_related",
             "request_reason",
         ]));
+        // "Who pays" is part of step 3 since 2026-10-11 (owner).
         assert_eq!(
             by_step,
             json!({
                 "person": ["first_name", "birth_place", "has_representative", "under_guardianship", "rep1_phone"],
                 "contact": ["street_address"],
                 "identity": ["id_document_upload"],
-                "payer": ["payer_kind", "payer_own_account"],
-                "billing": ["invoice_to", "has_insurance"],
+                "billing": [
+                    "has_insurance",
+                    "invoice_recipient",
+                    "recipient_type",
+                    "payer_kind",
+                    "payer_own_account",
+                    "invoice_to",
+                ],
                 "declarations": ["pep_related"],
                 "documents": ["request_reason"],
             })

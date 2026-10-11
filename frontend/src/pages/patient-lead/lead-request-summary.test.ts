@@ -144,14 +144,14 @@ describe("lead request summary", () => {
       "Foto oder Scan des Ausweises": "pass-vorne.jpg, pass-hinten.jpg",
     });
     expect(rows(groups, "insurance")).toEqual({
-      "Krankenversicherung vorhanden?": "Ja",
+      "Haben Sie eine Krankenversicherung?": "Ja",
       Versicherungsart: "Privat",
       Versicherer: "Allianz Care",
-      "Deckt Behandlung in Deutschland": "Weiß ich nicht",
+      "Deckt Leistungen in Deutschland ab": "Weiß ich nicht",
     });
     expect(rows(groups, "payer")).toEqual({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
-      "Wer ist der Zahler?": "Privatperson",
+      "Wer ist der Zahler?": "Eine andere Person oder Organisation",
+      "Art des Zahlers":"Privatperson",
       Vorname: "Viktor",
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
@@ -203,9 +203,9 @@ describe("lead request summary", () => {
     });
     const groups = requestSummary(self, de, "de");
     // No insurance: only the answer. "I pay myself": nobody else is named.
-    expect(rows(groups, "insurance")).toEqual({ "Krankenversicherung vorhanden?": "Nein" });
+    expect(rows(groups, "insurance")).toEqual({ "Haben Sie eine Krankenversicherung?": "Nein" });
     expect(rows(groups, "payer")).toEqual({
-      "Wer übernimmt die Kosten der Behandlung?": "Ich selbst",
+      "Wer ist der Zahler?": "Ich selbst",
       "Handeln Sie im eigenen wirtschaftlichen Interesse?": "Ja",
     });
   });
@@ -229,8 +229,8 @@ describe("lead request summary", () => {
       },
     });
     expect(rows(requestSummary(company, de, "de"), "payer")).toEqual({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
-      "Wer ist der Zahler?": "Unternehmen",
+      "Wer ist der Zahler?": "Eine andere Person oder Organisation",
+      "Art des Zahlers":"Unternehmen",
       "Name des Unternehmens": "Beispiel GmbH",
       "Beziehung zur Patientin / zum Patienten": "Arbeitgeber",
       "Sitz (Straße und Hausnummer)": "Musterstraße 1",
@@ -257,7 +257,7 @@ describe("lead request summary", () => {
       payer: { ...company.payer!, payer_type: "insurance", relationship_kind: "other", relationship: " Auslandskrankenversicherung " },
     });
     expect(rows(requestSummary(insurer, leadRequestText("en"), "en"), "payer")).toMatchObject({
-      "Who is the payer?": "Insurer",
+      "Type of payer": "Insurer",
       "Name of the insurer": "Beispiel GmbH",
       // "Other" is shown in the person's own words.
       "Relationship to the patient": "Auslandskrankenversicherung",
@@ -277,19 +277,19 @@ describe("lead request summary", () => {
       payer: { ...request().payer!, first_name: "Maria", last_name: "Muster" },
     });
     expect(rows(requestSummary(parent, de, "de"), "payer")).toMatchObject({
-      "Wer übernimmt die Kosten der Behandlung?": "Ich zahle (als Elternteil)",
-      "Wer ist der Zahler?": "Privatperson",
+      "Wer ist der Zahler?": "Ich zahle (als Elternteil)",
+      "Art des Zahlers":"Privatperson",
       Vorname: "Maria",
       "Beziehung zur Patientin / zum Patienten": "Elternteil",
     });
     // Another name is another person; so is the same name in a request of one's own.
     const other = request({ ...parent, payer: { ...parent.payer!, first_name: "Viktor" } });
-    expect(rows(requestSummary(other, de, "de"), "payer")["Wer übernimmt die Kosten der Behandlung?"]).toBe(
+    expect(rows(requestSummary(other, de, "de"), "payer")["Wer ist der Zahler?"]).toBe(
       "Eine andere Person oder Organisation",
     );
     expect(
       rows(requestSummary(request({ ...parent, access_kind: "self" }), de, "de"), "payer")[
-        "Wer übernimmt die Kosten der Behandlung?"
+        "Wer ist der Zahler?"
       ],
     ).toBe("Eine andere Person oder Organisation");
   });
@@ -308,8 +308,8 @@ describe("lead request summary", () => {
     });
     expect(payerAnsweredByPayer(answered)).toBe(true);
     const expected = {
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
-      "Wer ist der Zahler?": "Privatperson",
+      "Wer ist der Zahler?": "Eine andere Person oder Organisation",
+      "Art des Zahlers":"Privatperson",
       Vorname: "Viktor",
       Nachname: "Zahler",
       "Beziehung zur Patientin / zum Patienten": "Elternteil",
@@ -377,7 +377,7 @@ describe("lead request summary", () => {
       },
     });
     expect(rows(requestSummary(older, de, "de"), "payer")).toEqual({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      "Wer ist der Zahler?": "Eine andere Person oder Organisation",
       Vorname: "Viktor",
       Nachname: "Zahler",
       Geburtsdatum: "03.02.1960",
@@ -393,13 +393,104 @@ describe("lead request summary", () => {
   it("speaks of the patient when a parent fills in the request of a child", () => {
     const groups = requestSummary(request({ access_kind: "guardian" }), de, "de");
     expect(rows(groups, "payer")).toMatchObject({
-      "Wer übernimmt die Kosten der Behandlung?": "Eine andere Person oder Organisation",
+      "Wer ist der Zahler?": "Eine andere Person oder Organisation",
       "Handelt die Patientin / der Patient im eigenen wirtschaftlichen Interesse?": "Nein",
     });
     expect(Object.keys(rows(groups, "legal"))).toContain(de.identificationFieldsGuardian.pep_self);
     expect(requestSummary(request(), leadRequestText("en"), "en").find((group) => group.id === "legal")?.rows).toContainEqual({
       label: "Is an immediate family member or a person close to you politically exposed?",
       value: "Yes",
+    });
+  });
+
+  it("lists step 3's invoice recipient before who pays (owner spec 2026-10-11)", () => {
+    const billing: LeadRequestBilling = {
+      invoice_to: "other",
+      invoice_name: "Beispiel GmbH",
+      invoice_street: "Hauptstraße 1",
+      invoice_zip: "10115",
+      invoice_city: "Berlin",
+      invoice_country: "DE",
+      invoice_email: "rechnung@example.com",
+      payer_declared: false,
+      payment_route_by: "patient",
+      payment_method: "bank_transfer",
+      payment_method_details: null,
+      account_country: null,
+      account_holder: null,
+      bank_name: null,
+      via_third_party: null,
+      via_third_party_details: null,
+      account_holder_suggestion: "Anna Muster",
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: false,
+      recipient: {
+        type: "organisation",
+        name: "Beispiel GmbH",
+        first_name: null,
+        last_name: null,
+        organisation_name: "Beispiel GmbH",
+        legal_form: "GmbH",
+        contact_name: "Ben Muster",
+        street: "Hauptstraße 1",
+        zip: "10115",
+        city: "Berlin",
+        country: "DE",
+        email: "rechnung@example.com",
+        phone: null,
+        relationship_kind: null,
+        relationship: null,
+        payment_reason: "Der Arbeitgeber erhält die Rechnung.",
+      },
+    };
+    const self = request({
+      billing,
+      payer: { ...request().payer!, payer_kind: "self", acts_on_own_account: true, beneficial_owner: null },
+    });
+    const groups = requestSummary(self, de, "de");
+    const ids = groups.map((group) => group.id);
+    expect(ids.indexOf("billing")).toBe(ids.indexOf("insurance") + 1);
+    expect(ids.indexOf("payer")).toBe(ids.indexOf("billing") + 1);
+    expect(rows(groups, "billing")).toEqual({
+      "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
+      "Rechnungsempfänger ist": "eine Organisation",
+      "Name der Organisation": "Beispiel GmbH",
+      Rechtsform: "GmbH",
+      Ansprechperson: "Ben Muster",
+      "Straße und Hausnummer": "Hauptstraße 1",
+      Postleitzahl: "10115",
+      Ort: "Berlin",
+      Land: "Deutschland",
+      "E-Mail": "rechnung@example.com",
+      "Warum erfolgt die Zahlung über die Organisation?": "Der Arbeitgeber erhält die Rechnung.",
+      "Ist der Rechnungsempfänger auch der Zahler?": "Nein",
+    });
+    // Who pays: one answer, no type row; section 7 is not listed again.
+    expect(rows(groups, "payer")).toMatchObject({ "Wer ist der Zahler?": "Ich selbst" });
+    expect(rows(groups, "payer")).not.toHaveProperty("Art des Zahlers");
+    expect(rows(groups, "payment")).toEqual({ "Wie werden Sie bezahlen?": "Überweisung" });
+    // The recipient who pays is the payer: its data are listed there.
+    const paying = request({
+      billing: { ...billing, invoice_recipient_is_payer: true },
+      payer: {
+        ...request().payer!,
+        payer_type: "organisation",
+        organisation_name: "Beispiel GmbH",
+        first_name: null,
+        last_name: null,
+        relationship_kind: null,
+      },
+    });
+    const payingGroups = requestSummary(paying, de, "de");
+    expect(rows(payingGroups, "billing")).toEqual({
+      "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
+      "Rechnungsempfänger ist": "eine Organisation",
+      "Ist der Rechnungsempfänger auch der Zahler?": "Ja",
+    });
+    expect(rows(payingGroups, "payer")).toMatchObject({
+      "Wer ist der Zahler?": "Eine Organisation",
+      "Name der Organisation": "Beispiel GmbH",
+      "Warum erfolgt die Zahlung über die Organisation?": "Mein Vater unterstützt mich.",
     });
   });
 
@@ -504,8 +595,8 @@ describe("lead request summary", () => {
     const group = groups.find((item) => item.id === "representation");
     expect(group?.title).toBe("Vertretung");
     expect(rows(groups, "representation")).toEqual({
-      "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?": "Ja",
-      "Stehen Sie unter rechtlicher Betreuung?": "Nein",
+      "Handelt jemand in Ihrem Namen?": "Ja",
+      "Ist diese Person vom Gericht bestellt (rechtliche Betreuerin / rechtlicher Betreuer)?": "Nein",
     });
     expect(group?.parts?.map((part) => [part.id, part.title])).toEqual([["agent", "Angaben zur vertretenden Person"]]);
     expect(Object.fromEntries((group?.parts?.[0].rows ?? []).map((row) => [row.label, row.value]))).toEqual({

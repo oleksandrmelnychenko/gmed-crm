@@ -45,7 +45,7 @@ describe("lead cabinet steps", () => {
       "person",
       "contact",
       "identity",
-      "payer",
+      // "Who pays" is part of step 3 since 2026-10-11 (owner).
       "billing",
       "declarations",
       "follow_up",
@@ -53,7 +53,7 @@ describe("lead cabinet steps", () => {
       "send",
     ]);
     // "contact" is part of the first tab, the declarations are follow-up block L (owner 2026-10-09).
-    expect(visibleSteps(request())).toEqual(["person", "identity", "payer", "billing", "documents", "send"]);
+    expect(visibleSteps(request())).toEqual(["person", "identity", "billing", "documents", "send"]);
     const sent = "2026-10-07T09:00:00Z";
     expect(visibleSteps(request({ submitted_at: sent, follow_up: undefined }))).not.toContain("follow_up");
     expect(visibleSteps(request({ submitted_at: sent, follow_up: followUp({ blocks: ["A"] }) }))).toContain("follow_up");
@@ -72,7 +72,8 @@ describe("lead cabinet steps", () => {
         progress: {
           filled: 0,
           total: 0,
-          missing_for_submit: ["city", "payer_kind", "request_reason", "pep_self", "id_document_upload", "invoice_to"],
+          missing_for_submit: ["city", "payer_kind", "request_reason", "pep_self", "id_document_upload", "invoice_recipient"],
+          // An older server's step "payer": its keys belong to step 3 now.
           missing_by_step: { contact: ["city"], payer: ["payer_kind"], identity: ["id_document_upload"] },
         },
       }),
@@ -82,9 +83,8 @@ describe("lead cabinet steps", () => {
       person: ["city"],
       contact: [],
       identity: ["id_document_upload"],
-      payer: ["payer_kind"],
-      // Not in the server's map: placed by the cabinet.
-      billing: ["invoice_to"],
+      // Not in the server's map (or of a step the cabinet no longer has): placed by the cabinet.
+      billing: ["invoice_recipient", "payer_kind"],
       declarations: ["pep_self"],
       documents: ["request_reason"],
       follow_up: [],
@@ -99,7 +99,9 @@ describe("lead cabinet steps", () => {
     expect(stepOfField("habitual_residence_country")).toBe("contact");
     expect(stepOfField("contact_channels")).toBe("contact");
     expect(stepOfField("id_valid_until")).toBe("identity");
-    expect(stepOfField("payer_legal_form")).toBe("payer");
+    expect(stepOfField("payer_legal_form")).toBe("billing");
+    expect(stepOfField("invoice_recipient_is_payer")).toBe("billing");
+    expect(stepOfField("recipient_relationship_kind")).toBe("billing");
     expect(stepOfField("insurance_type")).toBe("billing");
     expect(stepOfField("payment_method")).toBe("billing");
     expect(stepOfField("pep_self_details")).toBe("declarations");
@@ -137,7 +139,7 @@ describe("lead cabinet steps", () => {
       firstIncompleteStep(
         request({ progress: { filled: 0, total: 0, missing_for_submit: ["pep_self", "payer_kind"] } }),
       ),
-    ).toBe("payer");
+    ).toBe("billing");
     expect(firstIncompleteStep(request())).toBeNull();
   });
 });

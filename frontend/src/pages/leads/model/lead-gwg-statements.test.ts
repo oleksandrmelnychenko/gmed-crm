@@ -685,6 +685,52 @@ describe("labels of sections 7–8", () => {
 });
 
 describe("sections 7–8 as the group shows them", () => {
+  it("shows the invoice recipient of step 3 as the lead answered it (owner spec 2026-10-11)", () => {
+    const raw = {
+      invoice_to: "other",
+      invoice_name: "Beispiel GmbH",
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: false,
+      recipient: {
+        type: "organisation",
+        name: "Beispiel GmbH",
+        legal_form: "GmbH",
+        contact_name: "Ben Muster",
+        phone: "+49 30 123456",
+        payment_reason: "Der Arbeitgeber erhält die Rechnung.",
+      },
+    };
+    const normalized = normalizeLeadPortalBilling(raw)!;
+    expect(normalized.invoice_recipient).toBe("third_party");
+    expect(normalized.recipient?.type).toBe("organisation");
+    const keys = billingStatements(normalized, ru, "ru").invoice.map((row) => [row.key, row.value]);
+    expect(keys.slice(0, 6)).toEqual([
+      ["invoice_recipient", "Организация: Beispiel GmbH"],
+      ["invoice_recipient_is_payer", "Нет"],
+      ["recipient_legal_form", "GmbH"],
+      ["recipient_contact_name", "Ben Muster"],
+      ["recipient_reason", "Der Arbeitgeber erhält die Rechnung."],
+      ["recipient_phone", "+49 30 123456"],
+    ]);
+    // A person: the relationship to the patient.
+    const person = normalizeLeadPortalBilling({
+      ...raw,
+      recipient: { type: "person", name: "Mia Muster", relationship_kind: "friend" },
+    })!;
+    expect(billingStatements(person, de, "de").invoice.find((row) => row.key === "recipient_relationship")?.value).toBe("Freund/in");
+    // The patient side pays: nothing of a third party.
+    const own = normalizeLeadPortalBilling({ invoice_to: "self", invoice_recipient: "self", invoice_recipient_is_payer: true })!;
+    expect(billingStatements(own, de, "de").invoice.map((row) => row.key)).toEqual([
+      "invoice_recipient",
+      "invoice_recipient_is_payer",
+      "invoice_to",
+      "invoice_email",
+    ]);
+    // An older server sends no recipient: the rows as before.
+    expect(normalizeLeadPortalBilling({ invoice_to: "self" })).not.toHaveProperty("invoice_recipient");
+    expect(hasBillingStatements({ billing: own, billing_updated_at: null })).toBe(true);
+  });
+
   it("shows the expected total of block C once the lead gave it (QA 2026-10-10)", () => {
     const cash = billing({ payment_method: "cash", expected_total_eur: "6000.00", compliance_flags: ["cash_payment"] });
     expect(rows(billingStatements(cash, ru, "ru").payment)).toContainEqual([

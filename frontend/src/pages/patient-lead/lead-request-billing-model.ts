@@ -16,7 +16,7 @@ import type {
 /** Where the invoice can go, in the order of the form. */
 export const INVOICE_TARGETS = ["self", "payer", "other"] as const satisfies readonly InvoiceTo[];
 
-/** How the treatment can be paid, in the order of the form. */
+/** How GMED's services can be paid, in the order of the form. */
 export const PAYMENT_METHODS = ["bank_transfer", "card", "cash", "crypto", "other"] as const satisfies readonly PaymentMethod[];
 
 /** The two sections as the patient types them (strings; answers as "yes", "no" or ""). */

@@ -12,6 +12,12 @@ import type {
   PersonalDataPatch,
 } from "./lead-request-api";
 import { BILLING_SUBMIT_FIELDS, type BillingSubmitField } from "./lead-request-billing-model";
+import {
+  RECIPIENT_SUBMIT_FIELDS,
+  type PayerChoice,
+  type RecipientDraft,
+  type RecipientSubmitField,
+} from "./lead-request-recipient-model";
 import { REPRESENTATION_SUBMIT_FIELDS, type RepresentationSubmitField } from "./lead-request-representation-model";
 
 /** The step-1 form as the patient types it (strings, citizenships as codes). */
@@ -219,6 +225,8 @@ export type PayerField =
   | "payer_citizenships"
   | "payer_relationship_kind"
   | "payer_relationship"
+  /** Step 3 (2026-10-11): why an organisation pays, stored as `payment_background`. */
+  | "payer_payment_reason"
   | "payer_street"
   | "payer_zip"
   | "payer_city"
@@ -245,6 +253,7 @@ export const PAYER_FIELDS: PayerField[] = [
   "payer_citizenships",
   "payer_relationship_kind",
   "payer_relationship",
+  "payer_payment_reason",
   "payer_street",
   "payer_zip",
   "payer_city",
@@ -493,6 +502,110 @@ export function withPayerType(draft: PayerDraft, type: string): PayerDraft {
 /** The draft after the relationship was chosen: the text belongs to "other" only. */
 export function withRelationshipKind(draft: PayerDraft, kind: string): PayerDraft {
   return { ...draft, relationship_kind: kind, relationship: kind === "other" ? draft.relationship : "" };
+}
+
+/**
+ * "Who pays" not answered for the flow of step 3 (owner spec 2026-10-11):
+ * the stored payer does not fit the recipient's answers, so the form starts
+ * empty; the own economic interest (block L) stays as stored.
+ */
+export function unansweredPayerDraft(payer: LeadRequestPayer | null | undefined): PayerDraft {
+  return { ...withoutPayerParty(draftFromPayer(payer)), payer_kind: "", contact_consent: false };
+}
+
+/**
+ * What GMED needs of an invoice recipient who pays (step 3, owner spec
+ * 2026-10-11) besides the recipient's own data: a person's birth date and
+ * citizenships, the messenger number, an organisation's register number, and
+ * the consent that GMED contacts the payer.
+ */
+export type RecipientPayerExtras = {
+  date_of_birth: string;
+  citizenships: string[];
+  messenger: string;
+  register_number: string;
+  contact_consent: boolean;
+};
+
+export function recipientPayerExtras(payer: LeadRequestPayer | null | undefined): RecipientPayerExtras {
+  const third = payer?.payer_kind === "third_party" ? payer : null;
+  return {
+    date_of_birth: third?.date_of_birth ?? "",
+    citizenships: [...(third?.citizenships ?? [])],
+    messenger: third?.messenger ?? "",
+    register_number: third?.organisation_register_number ?? "",
+    contact_consent: Boolean(third?.contact_consent_at),
+  };
+}
+
+/**
+ * The payer's answer when the invoice recipient pays: the third party named
+ * as recipient — a person or an organisation (a company, organisation or
+ * insurer stored before keeps its type) — with the recipient's data and the
+ * payer's extras. The own economic interest of `base` (block L) stays.
+ */
+export function payerDraftFromRecipient(
+  base: PayerDraft,
+  recipient: RecipientDraft,
+  extras: RecipientPayerExtras,
+): PayerDraft {
+  const organisation = recipient.type === "organisation";
+  return {
+    ...base,
+    payer_kind: "third_party",
+    guardian_pays: false,
+    payer_type: organisation ? (organisationPayerType(base.payer_type) ?? "organisation") : "person",
+    organisation_name: organisation ? recipient.organisation_name : "",
+    organisation_legal_form: organisation ? recipient.legal_form : "",
+    organisation_register_number: organisation ? extras.register_number : "",
+    organisation_contact_name: organisation ? recipient.contact_name : "",
+    first_name: organisation ? "" : recipient.first_name,
+    last_name: organisation ? "" : recipient.last_name,
+    date_of_birth: organisation ? "" : extras.date_of_birth,
+    citizenships: organisation ? [] : [...extras.citizenships],
+    relationship_kind: organisation ? "" : recipient.relationship_kind,
+    relationship: organisation ? "" : recipient.relationship,
+    street: recipient.street,
+    zip: recipient.zip,
+    city: recipient.city,
+    country: recipient.country,
+    phone: recipient.phone,
+    email: recipient.email,
+    messenger: extras.messenger,
+    contact_consent: extras.contact_consent,
+  };
+}
+
+/**
+ * The one answer of "who pays" in step 3 (owner spec 2026-10-11): the
+ * patient, the paying parent, a person or an organisation (a company, an
+ * organisation or an insurer stored before counts as an organisation).
+ */
+export function payerChoiceOf(draft: Pick<PayerDraft, "payer_kind" | "guardian_pays" | "payer_type">): PayerChoice | "" {
+  if (draft.payer_kind === "self") return "self";
+  if (draft.payer_kind !== "third_party") return "";
+  if (draft.guardian_pays) return "guardian";
+  return organisationPayerType(draft.payer_type) ? "organisation" : "person";
+}
+
+/**
+ * The draft after the answer of "who pays": the patient, the paying parent
+ * (with the parent's own data, `template`), a person or an organisation. An
+ * organisation stored as a company or insurer keeps its type; another
+ * answer drops what belongs to the one before, as before.
+ */
+export function withPayerChoice(
+  draft: PayerDraft,
+  choice: string,
+  template: PayerSelfTemplate | null | undefined = null,
+): PayerDraft {
+  if (choice === payerChoiceOf(draft)) return draft;
+  if (choice === "self" || choice === "guardian" || choice === "") {
+    return withPayerAnswer(draft, choice === "guardian" ? "guardian" : choice, template);
+  }
+  const third = withPayerAnswer(draft, "third_party", template);
+  if (choice === "organisation") return organisationPayerType(third.payer_type) ? third : withPayerType(third, "organisation");
+  return withPayerType(third, "person");
 }
 
 /**
@@ -795,14 +908,16 @@ export type SubmitField =
   | PayerField
   | IdentificationSubmitField
   | RepresentationSubmitField
+  | RecipientSubmitField
   | BillingSubmitField;
 
 /**
  * Everything `progress.missing_for_submit` can name, in the order of the
- * steps (trigger flow 2026-10-07): person and representation, contact and
- * residence, identity document (upload only), who pays, insurance and
- * invoice, declarations, the reason of the request. The payment route
- * (section 8) is a follow-up block now; its keys stay for an older server.
+ * steps (trigger flow 2026-10-07; step 3 since 2026-10-11): person and
+ * representation, contact and residence, identity document (upload only),
+ * insurance, the invoice recipient, who pays and the payment method,
+ * declarations, the reason of the request. The payment route (section 8) is
+ * a follow-up block now; its keys stay for an older server.
  */
 export const SUBMIT_FIELDS: SubmitField[] = [
   // Person
@@ -830,7 +945,15 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "contact_channels",
   // Identity document: the copy only, the data are entered by GMED
   "id_document_upload",
-  // Who pays
+  // Insurance
+  "has_insurance",
+  "insurance_type",
+  "insurance_provider",
+  "insurance_number",
+  "insurance_covers_germany",
+  // Step 3: who receives the invoice, whether that recipient pays
+  ...RECIPIENT_SUBMIT_FIELDS,
+  // Who pays (when the recipient does not, or the recipient who pays)
   "payer_kind",
   "payer_type",
   "payer_organisation_name",
@@ -843,6 +966,7 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "payer_date_of_birth",
   "payer_relationship_kind",
   "payer_relationship",
+  "payer_payment_reason",
   "payer_email_or_phone",
   "payer_email",
   "payer_phone",
@@ -856,13 +980,7 @@ export const SUBMIT_FIELDS: SubmitField[] = [
   "payer_cost_estimate_consent",
   "payer_own_account",
   "payer_beneficial_owner",
-  // Insurance
-  "has_insurance",
-  "insurance_type",
-  "insurance_provider",
-  "insurance_number",
-  "insurance_covers_germany",
-  // Invoice recipient (and, from an older server, the payment route)
+  // Section 7 of an older server, the payment method (and, from an older server, the payment route)
   ...BILLING_SUBMIT_FIELDS,
   // Declarations
   "pep_self",

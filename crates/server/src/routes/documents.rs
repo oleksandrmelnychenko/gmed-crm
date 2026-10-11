@@ -23560,6 +23560,25 @@ struct LeadDisclosurePayer {
     messenger: Option<String>,
 }
 
+/// "Wer ist Rechnungsempfänger?" as the lead answered it in step 3 (owner
+/// spec 2026-10-11): the patient side or a third party, whether that
+/// recipient pays, and a third party's data when it does not (one who pays
+/// is the payer of the section).
+#[derive(Clone, Debug, Default)]
+struct LeadDisclosureRecipient {
+    third_party: bool,
+    organisation: bool,
+    is_payer: Option<bool>,
+    name: Option<String>,
+    legal_form: Option<String>,
+    contact_name: Option<String>,
+    address: Option<String>,
+    email: Option<String>,
+    phone: Option<String>,
+    relationship: Option<String>,
+    payment_reason: Option<String>,
+}
+
 /// What the lead sent through the cabinet, for the "Patientenformular –
 /// Angaben und Erklärungen" (owner request 2026-10-08). Only the lead's own
 /// answers and staff's identity document data: never the reason of the
@@ -23602,6 +23621,8 @@ struct LeadSelfDisclosure {
     /// Who acts for the lead: an adult's representative and legal guardian,
     /// or a minor's legal representatives (who sign).
     acting_persons: Vec<LeadDisclosurePerson>,
+    /// The invoice recipient of step 3; `None` while not answered.
+    invoice_recipient: Option<LeadDisclosureRecipient>,
     payer: Option<LeadDisclosurePayer>,
     /// How the patient side pays (the base form asks it of a self-payer and
     /// of a paying parent): `None` for a third party, who answers it on the
@@ -23737,6 +23758,9 @@ async fn load_lead_self_disclosure(
         .await
         .map_err(|error| failed(error, "representation"))?
         .unwrap_or_default();
+    let stored_recipient = super::lead_invoice_recipient::load(&mut conn, lead_id)
+        .await
+        .map_err(|error| failed(error, "invoice recipient"))?;
     drop(conn);
 
     let representation = &represented.representation;
@@ -23806,6 +23830,47 @@ async fn load_lead_self_disclosure(
             messenger: declaration.messenger.clone(),
         }
     });
+    // Who receives the invoice (step 3, 2026-10-11), as the lead answered;
+    // an older request's section 7 read the same way.
+    let recipient = super::lead_invoice_recipient::effective(
+        stored_recipient.as_ref(),
+        declaration.as_ref(),
+        paying_representative.is_some(),
+    );
+    let invoice_recipient = recipient.recipient.is_some().then(|| {
+        let organisation = recipient.is_organisation();
+        let paying = recipient.is_payer == Some(true);
+        // A third party who pays is printed as the payer below.
+        let party = |value: &Option<String>| {
+            value
+                .clone()
+                .filter(|_| recipient.is_third_party() && !paying)
+        };
+        let address = gwg_address_line(
+            recipient.street.as_deref(),
+            recipient.zip.as_deref(),
+            recipient.city.as_deref(),
+            recipient.country.as_deref(),
+        );
+        LeadDisclosureRecipient {
+            third_party: recipient.is_third_party(),
+            organisation,
+            is_payer: recipient.is_payer,
+            name: recipient.name().filter(|_| recipient.is_third_party()),
+            legal_form: party(&recipient.legal_form),
+            contact_name: party(&recipient.contact_name),
+            address: Some(address)
+                .filter(|line| !line.is_empty() && recipient.is_third_party() && !paying),
+            email: recipient.email.clone(),
+            phone: party(&recipient.phone),
+            relationship: payer_relationship_label(
+                recipient.relationship_kind.as_deref(),
+                recipient.relationship.as_deref(),
+            )
+            .filter(|_| recipient.is_third_party() && !paying),
+            payment_reason: party(&recipient.payment_reason),
+        }
+    });
     let own_account = declaration
         .as_ref()
         .filter(|declaration| declaration.own_account_answered);
@@ -23826,6 +23891,7 @@ async fn load_lead_self_disclosure(
         .map(fmt_money_de);
     Ok(LeadSelfDisclosure {
         submitted_at,
+        invoice_recipient,
         payment_route,
         expected_total,
         salutation: statements.salutation,
@@ -24183,22 +24249,68 @@ fn build_lead_self_disclosure_pdf(
             &mut section,
             "Vertretung",
             &[
+                // Owner 2026-10-11: "Handelt jemand in Ihrem Namen?" first;
+                // only its "ja" asks for a court-appointed representative.
                 (
-                    "Eine andere Person handelt für mich (Vertreter/in, Bote, Bevollmächtigte/r)",
+                    "Eine andere Person handelt in meinem Namen",
                     yes_no(
                         data.has_representative,
-                        acting("Bevollmächtigte/r Vertreter/in"),
+                        acting("Bevollmächtigte/r Vertreter/in")
+                            .or_else(|| acting("Rechtliche/r Betreuer/in")),
                     ),
                 ),
                 (
-                    "Rechtliche Betreuung",
+                    "Gerichtlich bestellte Vertretung (rechtliche Betreuung)",
                     yes_no(data.under_guardianship, acting("Rechtliche/r Betreuer/in")),
                 ),
             ],
         );
     }
 
-    // 4. Who pays.
+    // 4. Who receives the invoice and who pays (step 3 of the cabinet, owner
+    // spec 2026-10-11: the invoice recipient first).
+    let mut rows: Vec<(&str, Option<String>)> = Vec::new();
+    if let Some(recipient) = data.invoice_recipient.as_ref() {
+        let name = recipient.name.clone().unwrap_or_default();
+        rows.push((
+            "Rechnungsempfänger",
+            Some(if !recipient.third_party {
+                if minor {
+                    "Die gesetzlichen Vertreter der Patientin / des Patienten".to_string()
+                } else {
+                    "Ich selbst".to_string()
+                }
+            } else if recipient.organisation {
+                format!("Eine Organisation: {name}")
+            } else {
+                format!("Eine andere Person: {name}")
+            }),
+        ));
+        rows.push((
+            "Rechnungsempfänger ist zugleich Zahler",
+            recipient
+                .is_payer
+                .map(|_| payer_yes_no(recipient.is_payer, None)),
+        ));
+        rows.extend([
+            ("Rechtsform", recipient.legal_form.clone()),
+            ("Ansprechpartner/in", recipient.contact_name.clone()),
+            (
+                "Anschrift des Rechnungsempfängers",
+                recipient.address.clone(),
+            ),
+            (
+                "Beziehung zur Patientin / zum Patienten",
+                recipient.relationship.clone(),
+            ),
+            (
+                "Grund der Rechnung an die Organisation",
+                recipient.payment_reason.clone(),
+            ),
+            ("E-Mail für Rechnungen", recipient.email.clone()),
+            ("Telefon des Rechnungsempfängers", recipient.phone.clone()),
+        ]);
+    }
     if let Some(payer) = data.payer.as_ref() {
         let residence = [payer.city.clone(), country(payer.country.as_deref())]
             .into_iter()
@@ -24208,7 +24320,6 @@ fn build_lead_self_disclosure_pdf(
             .collect::<Vec<_>>()
             .join(", ");
         let residence = Some(residence).filter(|line| !line.is_empty());
-        let mut rows: Vec<(&str, Option<String>)> = Vec::new();
         if payer.self_payer {
             rows.push((
                 "Wer zahlt?",
@@ -24304,8 +24415,8 @@ fn build_lead_self_disclosure_pdf(
             "Voraussichtlicher Gesamtbetrag",
             data.expected_total.clone(),
         ));
-        lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
     }
+    lead_disclosure_section(&mut layout, &mut section, "Wer zahlt?", &rows);
 
     // 5. The declarations, with the follow-up details where given.
     let (pep_self_label, pep_related_label, sanctions_label) = if minor {
@@ -34463,6 +34574,12 @@ mod tests {
                 role: "Bevollmächtigte/r Vertreter/in",
                 name: "Ben Muster".to_string(),
             }],
+            invoice_recipient: Some(super::LeadDisclosureRecipient {
+                third_party: false,
+                is_payer: Some(false),
+                email: Some("rechnung.anna@example.com".to_string()),
+                ..Default::default()
+            }),
             payer: Some(super::LeadDisclosurePayer {
                 payer_type: "person".to_string(),
                 name: Some("Viktor Zahler".to_string()),
@@ -34560,8 +34677,13 @@ mod tests {
             "31.01.2031",
             "3. Vertretung",
             "ja – Ben Muster",
-            "Rechtliche Betreuung nein",
+            "Eine andere Person handelt in meinem Namen",
+            "ja – Ben Muster",
+            "(rechtliche Betreuung) nein",
             "4. Wer zahlt?",
+            "Rechnungsempfänger Ich selbst",
+            "Rechnungsempfänger ist zugleich Zahler nein",
+            "E-Mail für Rechnungen rechnung.anna@example.com",
             "Eine andere Person",
             "Viktor Zahler",
             "Onkel",

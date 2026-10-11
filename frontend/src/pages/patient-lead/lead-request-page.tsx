@@ -19,7 +19,6 @@ import {
   DeclarationsStep,
   DocumentsStep,
   IdentityStep,
-  PayerStep,
   PersonStep,
   type StepNav,
   type StepProps,
@@ -365,7 +364,6 @@ function LeadRequestView({
           {step === "person" ? <PersonStep {...props} /> : null}
           {step === "contact" ? <ContactStep {...props} /> : null}
           {step === "identity" ? <IdentityStep {...props} /> : null}
-          {step === "payer" ? <PayerStep {...props} /> : null}
           {step === "billing" ? <BillingStep {...props} /> : null}
           {step === "declarations" ? <DeclarationsStep {...props} /> : null}
           {step === "follow_up" ? (

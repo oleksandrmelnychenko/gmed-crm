@@ -220,6 +220,10 @@ const MINOR_REQUIRED = [
 /** Opens a step of the cabinet by its tab. */
 const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 
+// An adult's two questions (owner 2026-10-11): the court appointment only after "yes".
+const ACTS = "Handelt jemand in Ihrem Namen?";
+const APPOINTED = "Ist diese Person vom Gericht bestellt (rechtliche Betreuerin / rechtlicher Betreuer)?";
+
 /** The place a person has in the form, like the server: by role and answer, or by order and custody. */
 function slotOf(request: Request, who: Person): string | null {
   const answers = request.representation;
@@ -228,8 +232,10 @@ function slotOf(request: Request, who: Person): string | null {
     if (index === 0) return "rep1";
     return index === 1 && answers.custody === "joint" ? "rep2" : null;
   }
+  // "Does somebody act for you?" first; its "yes" asks whether that person is court-appointed (owner
+  // 2026-10-11). An authorised representative on file keeps the place while somebody acts.
   if (who.role === "authorised_representative") return answers.has_representative ? "agent" : null;
-  return who.role === "legal_guardian" && answers.under_guardianship ? "guardian" : null;
+  return who.role === "legal_guardian" && answers.has_representative && answers.under_guardianship ? "guardian" : null;
 }
 
 function missingForSubmit(request: Request): string[] {
@@ -252,12 +258,15 @@ function missingForSubmit(request: Request): string[] {
       ...(answers.custody === "joint" ? personKeys("rep2", MINOR_REQUIRED, false) : []),
     ];
   }
-  // The legal-guardianship question is asked again (owner 2026-10-10).
+  // The court appointment is asked only after "yes" (owner 2026-10-11), and decides whose data are asked.
+  const acts = answers.has_representative === true;
+  const appointed = acts && answers.under_guardianship === true;
+  const agentAsked = (acts && answers.under_guardianship === false) || Boolean(inSlot("agent"));
   return [
     ...(answers.has_representative == null ? ["has_representative"] : []),
-    ...(answers.has_representative ? personKeys("agent", ADULT_REQUIRED, true) : []),
-    ...(answers.under_guardianship == null ? ["under_guardianship"] : []),
-    ...(answers.under_guardianship ? personKeys("guardian", ADULT_REQUIRED, true) : []),
+    ...(acts && answers.under_guardianship == null ? ["under_guardianship"] : []),
+    ...(agentAsked ? personKeys("agent", ADULT_REQUIRED, true) : []),
+    ...(appointed ? personKeys("guardian", ADULT_REQUIRED, true) : []),
   ];
 }
 
@@ -369,22 +378,24 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
         answers.custody = custody;
         answers.custody_stated = true;
       } else {
-        const roles = [
-          ["has_representative", "authorised_representative"],
-          ["under_guardianship", "legal_guardian"],
-        ] as const;
+        // "Does somebody act for you?" first; without its "yes" the court-appointed answer goes
+        // (owner 2026-10-11).
+        const next = { has_representative: answers.has_representative, under_guardianship: answers.under_guardianship };
+        for (const key of ["has_representative", "under_guardianship"] as const) {
+          if (key in patch) next[key] = patch[key] as boolean | null;
+        }
+        if (next.has_representative !== true) next.under_guardianship = null;
+        const keeps = (item: Person) =>
+          item.role === "authorised_representative"
+            ? next.has_representative === true && !(next.under_guardianship === true && answers.under_guardianship !== true && item.can_remove)
+            : next.has_representative === true && next.under_guardianship === true;
         // A person that cannot be removed: nothing is saved.
-        for (const [key, role] of roles) {
-          const held = answers.representatives.find((item) => item.role === role);
-          if (key in patch && patch[key] !== true && held && !held.can_remove) {
-            return route.fulfill({ status: 409, json: { code: "representative_in_use", message: "In use" } });
-          }
+        if (answers.representatives.some((item) => !keeps(item) && !item.can_remove)) {
+          return route.fulfill({ status: 409, json: { code: "representative_in_use", message: "In use" } });
         }
-        for (const [key, role] of roles) {
-          if (!(key in patch)) continue;
-          if (patch[key] !== true) answers.representatives = answers.representatives.filter((item) => item.role !== role);
-          answers[key] = patch[key] as boolean | null;
-        }
+        answers.representatives = answers.representatives.filter(keeps);
+        answers.has_representative = next.has_representative;
+        answers.under_guardianship = next.under_guardianship;
       }
       changed();
       return route.fulfill({ json: answer(request) });
@@ -445,8 +456,11 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
             }
           } else {
             if (role === "legal_representative") return refuse(422, "representative_role_invalid");
-            const declared = role === "authorised_representative" ? answers.has_representative : answers.under_guardianship;
-            if (declared !== true) return refuse(409, "representation_not_declared");
+            const declared =
+              role === "authorised_representative"
+                ? answers.has_representative === true && answers.under_guardianship === false
+                : answers.under_guardianship === true;
+            if (!declared) return refuse(409, "representation_not_declared");
             if (answers.representatives.some((item) => item.role === role)) return refuse(409, "representative_limit");
           }
           target = person({
@@ -513,13 +527,14 @@ async function setup(page: Page, options: { minor: boolean; prepare?: (request: 
 }
 
 test.describe("lead cabinet: who acts for an adult", () => {
-  test("nobody acts for the patient: two answers, and the request can be sent", async ({ page }) => {
+  test("nobody acts for the patient: one answer, and the request can be sent", async ({ page }) => {
     const { calls } = await setup(page, { minor: false });
     await page.goto("/");
     const block = page.getByTestId("lead-request-representation");
-    const acts = block.getByRole("combobox", { name: "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?" });
-    // The legal-guardianship question is asked again (owner 2026-10-10).
-    const guardianship = block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" });
+    const acts = block.getByRole("combobox", { name: ACTS });
+    // The court appointment is asked only after "yes" (owner 2026-10-11).
+    const guardianship = block.getByRole("combobox", { name: APPOINTED });
+    await expect(guardianship).toHaveCount(0);
 
     // The block closes the first step, after the person, the address and the contact (owner 2026-10-09: one tab).
     await expect(page.getByRole("heading", { name: "Vertretung", exact: true })).toBeVisible();
@@ -529,13 +544,10 @@ test.describe("lead cabinet: who acts for an adult", () => {
       .evaluateAll((titles) => titles.map((title) => title.textContent));
     expect(order).toEqual(["Datenschutz und Einwilligung", "Persönliche Daten", "Adresse", "Kontakt", "Vertretung"]);
 
-    // Until both questions are answered the request cannot be sent.
+    // Until the question is answered the request cannot be sent.
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing.getByRole("listitem")).toHaveText([
-      "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
-      "Stehen Sie unter rechtlicher Betreuung?",
-    ]);
+    await expect(missing.getByRole("listitem")).toHaveText([ACTS]);
     // Nothing answered yet: no group in the summary (QA 2026-10-10).
     await expect(page.getByTestId("lead-request-summary-representation")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-submit")).toBeDisabled();
@@ -543,17 +555,16 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await step(page, "person");
     await choose(page, acts, "Nein");
     await expect.poll(() => calls.answers).toEqual([{ has_representative: false }]);
-    await choose(page, guardianship, "Nein");
-    await expect.poll(() => calls.answers).toEqual([{ has_representative: false }, { under_guardianship: false }]);
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
-    // "No" names nobody.
+    // "No" names nobody and asks nothing more.
+    await expect(guardianship).toHaveCount(0);
     await expect(page.getByTestId("lead-request-representative-agent")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-representative-guardian")).toHaveCount(0);
 
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     const summary = page.getByTestId("lead-request-summary-representation");
-    await expect(summary.locator("dd")).toHaveText(["Nein", "Nein"]);
+    await expect(summary.locator("dd")).toHaveText(["Nein"]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
@@ -572,14 +583,17 @@ test.describe("lead cabinet: who acts for an adult", () => {
     });
     await page.goto("/");
     const block = page.getByTestId("lead-request-representation");
-    const acts = block.getByRole("combobox", { name: /Handelt jemand für Sie/ });
+    const acts = block.getByRole("combobox", { name: ACTS });
     const agent = page.getByTestId("lead-request-representative-agent");
 
-    // "Yes" opens the form of one person.
+    // "Yes" asks whether the person is court-appointed; "no" to that opens the form of one person.
     await expect(agent).toHaveCount(0);
     await choose(page, acts, "Ja");
+    await expect.poll(() => calls.answers).toEqual([{ has_representative: true }]);
+    await expect(agent).toHaveCount(0);
+    await choose(page, block.getByRole("combobox", { name: APPOINTED }), "Nein");
     await expect(agent).toBeVisible();
-    expect(calls.answers).toEqual([{ has_representative: true }]);
+    expect(calls.answers).toEqual([{ has_representative: true }, { under_guardianship: false }]);
     // The person's details are a card of their own (owner 2026-10-09).
     await expect(agent.getByRole("heading", { name: "Angaben zur vertretenden Person" })).toBeVisible();
     await expect(page.getByTestId("lead-request-representative-guardian")).toHaveCount(0);
@@ -656,10 +670,10 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(missing.getByRole("listitem")).toHaveText([
       "Angaben zur vertretenden Person: Postleitzahl",
       "Angaben zur vertretenden Person: Ort",
-      "Stehen Sie unter rechtlicher Betreuung?",
     ]);
     const summary = page.getByTestId("lead-request-summary-representation");
-    await expect(summary).toContainText("Handelt jemand für Sie");
+    await expect(summary).toContainText(ACTS);
+    await expect(summary).toContainText(APPOINTED);
     const summarized = page.getByTestId("lead-request-summary-representation-agent");
     await expect(summarized).toContainText("Angaben zur vertretenden Person");
     await expect(summarized).toContainText("Ben");
@@ -681,20 +695,21 @@ test.describe("lead cabinet: who acts for an adult", () => {
     expect(asked).toEqual(["Ben Muster: Alle Angaben und hochgeladenen Dateien zu dieser Person werden entfernt. Fortfahren?"]);
     await expect(acts).toContainText("Ja");
     await expect(agent).toBeVisible();
-    expect(calls.answers).toHaveLength(1);
+    expect(calls.answers).toHaveLength(2);
 
     onNextConfirm(page, true, asked);
     await choose(page, acts, "Nein");
     await expect(agent).toHaveCount(0);
-    await expect.poll(() => calls.answers.at(-1)).toEqual({ has_representative: false });
+    await expect(block.getByRole("combobox", { name: APPOINTED })).toHaveCount(0);
+    await expect.poll(() => calls.answers.at(-1)).toMatchObject({ has_representative: false });
     await expect.poll(() => request.representation.representatives).toEqual([]);
     const savedPersons = calls.persons.length;
     // The form that was taken away saves nothing more.
     await page.waitForTimeout(1000);
     expect(calls.persons).toHaveLength(savedPersons);
     await page.locator('[data-step="send"]').click();
-    // Only the second question is still open (asked again since 2026-10-10).
-    await expect(missing.getByRole("listitem")).toHaveText(["Stehen Sie unter rechtlicher Betreuung?"]);
+    // Nothing of the representation is open any more.
+    await expect(missing).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-representation-agent")).toHaveCount(0);
   });
 
@@ -704,9 +719,10 @@ test.describe("lead cabinet: who acts for an adult", () => {
     const block = page.getByTestId("lead-request-representation");
     const guardian = page.getByTestId("lead-request-representative-guardian");
 
-    // Owner 2026-10-10: the cabinet asks about a legal guardianship (rechtliche Betreuung) again.
-    await choose(page, block.getByRole("combobox", { name: "Stehen Sie unter rechtlicher Betreuung?" }), "Ja");
-    await expect.poll(() => calls.answers).toEqual([{ under_guardianship: true }]);
+    // Owner 2026-10-11: somebody acts, and that person is court-appointed (rechtliche Betreuung).
+    await choose(page, block.getByRole("combobox", { name: ACTS }), "Ja");
+    await choose(page, block.getByRole("combobox", { name: APPOINTED }), "Ja");
+    await expect.poll(() => calls.answers).toEqual([{ has_representative: true }, { under_guardianship: true }]);
     await expect(guardian.getByRole("heading", { name: "Betreuer/in" })).toBeVisible();
     await expect(page.getByTestId("lead-request-representative-agent")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-guardian-identity-upload")).toContainText("Ausweis der Betreuerin / des Betreuers");
@@ -727,12 +743,14 @@ test.describe("lead cabinet: who acts for an adult", () => {
 
     await page.locator('[data-step="send"]').click();
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing).toContainText("Handelt jemand für Sie");
     await expect(missing).toContainText("Betreuer/in: Vorname");
     await expect(missing).toContainText("Betreuer/in: Ausweis der Betreuerin / des Betreuers");
     await expect(missing).not.toContainText("Betreuer/in: Bestellungsurkunde oder Betreuerausweis");
     await expect(missing).not.toContainText("Betreuer/in: Nachname");
-    await expect(missing).not.toContainText("Stehen Sie unter rechtlicher Betreuung?");
+    await expect(missing).not.toContainText(ACTS);
+    await expect(missing).not.toContainText(APPOINTED);
+    // The court-appointed person is the one who acts: no authorised representative is asked for.
+    await expect(missing).not.toContainText("Angaben zur vertretenden Person");
   });
 
   test("a person the cabinet may not remove stays, and the answer goes back", async ({ page }) => {
@@ -757,7 +775,7 @@ test.describe("lead cabinet: who acts for an adult", () => {
     });
     await page.goto("/");
     const block = page.getByTestId("lead-request-representation");
-    const acts = block.getByRole("combobox", { name: /Handelt jemand für Sie/ });
+    const acts = block.getByRole("combobox", { name: ACTS });
     const agent = page.getByTestId("lead-request-representative-agent");
 
     await expect(agent.getByRole("textbox", { name: "Vorname" })).toHaveValue("Ben");
@@ -771,7 +789,8 @@ test.describe("lead cabinet: who acts for an adult", () => {
     await expect(page.getByTestId("lead-request-representation-problem")).toHaveText(
       "Diese Person kann hier nicht entfernt werden. Bitte sprechen Sie uns an.",
     );
-    expect(calls.answers).toEqual([{ has_representative: false }]);
+    expect(calls.answers).toHaveLength(1);
+    expect(calls.answers[0]).toMatchObject({ has_representative: false });
     // Nothing was saved: the stored answer and the person are shown again.
     await expect(acts).toContainText("Ja");
     await expect(agent.getByRole("textbox", { name: "Nachname" })).toHaveValue("Muster");
@@ -801,7 +820,7 @@ test.describe("lead cabinet: the legal representatives of a minor", () => {
     // No filler hints in the parents' section (QA 2026-10-10).
     await expect(block).not.toContainText("Für Minderjährige handeln die gesetzlichen Vertreter.");
     await expect(page.getByTestId("lead-request-custody-note")).toHaveCount(0);
-    await expect(block.getByRole("combobox", { name: /Handelt jemand für Sie/ })).toHaveCount(0);
+    await expect(block.getByRole("combobox", { name: ACTS })).toHaveCount(0);
     await expect(custody).toContainText("Beide Eltern gemeinsam");
     await custody.click();
     await expect(page.getByRole("option")).toHaveText([

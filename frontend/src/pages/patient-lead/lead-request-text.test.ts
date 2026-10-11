@@ -57,14 +57,15 @@ describe("lead cabinet languages", () => {
     expect(payerFieldLabel(de, "payer_last_name")).toBe(de.fields.last_name);
     expect(payerFieldLabel(de, "payer_street")).toBe(de.fields.street_address);
     expect(submitFieldLabel(de, "date_of_birth")).toBe("Geburtsdatum");
-    expect(submitFieldLabel(de, "payer_kind")).toBe("Wer übernimmt die Kosten der Behandlung?");
+    // "Who is the payer?" (owner 2026-10-11: GMED sells services, not a treatment).
+    expect(submitFieldLabel(de, "payer_kind")).toBe("Wer ist der Zahler?");
     expect(submitFieldLabel(de, "payer_citizenships")).toBe("Zahler: Staatsangehörigkeit(en)");
     expect(submitFieldLabel(leadRequestText("uk"), "payer_last_name")).toBe("Платник: Прізвище");
   });
 
   it("names a company, organisation or insurer by its kind and its seat", () => {
     const de = leadRequestText("de");
-    expect(payerFieldLabel(de, "payer_type")).toBe("Wer ist der Zahler?");
+    expect(payerFieldLabel(de, "payer_type")).toBe("Art des Zahlers");
     expect(payerFieldLabel(de, "payer_organisation_name", false, "company")).toBe("Name des Unternehmens");
     expect(payerFieldLabel(de, "payer_organisation_name", false, "organisation")).toBe("Name der Organisation");
     expect(payerFieldLabel(de, "payer_organisation_name", false, "insurance")).toBe("Name der Versicherung");
@@ -119,15 +120,15 @@ describe("lead cabinet languages", () => {
     expect(missing("uk", "organisation")).toEqual([
       "Платник: Назва організації",
       "Платник: Країна місцезнаходження",
-      "Платник: Ким доводиться пацієнту",
-      "Платник: Ким доводиться пацієнту – Ким саме доводиться пацієнту",
+      "Платник: Ким доводиться пацієнту?",
+      "Платник: Ким доводиться пацієнту? – Ким саме доводиться пацієнту",
       "Платник: Згода на контакт",
     ]);
     expect(missing("ru", "company")).toEqual([
       "Плательщик: Название компании",
       "Плательщик: Страна местонахождения",
-      "Плательщик: Кем приходится пациенту",
-      "Плательщик: Кем приходится пациенту – Кем именно приходится пациенту",
+      "Плательщик: Кем приходится пациенту?",
+      "Плательщик: Кем приходится пациенту? – Кем именно приходится пациенту",
       "Плательщик: Согласие на контакт",
     ]);
     // A person as payer keeps the labels of a person, also for a parent's login.
@@ -193,7 +194,6 @@ describe("lead cabinet languages", () => {
       person: "Einwilligung & Person",
       contact: "Kontakt & Wohnsitz",
       identity: "Ausweis",
-      payer: "Wer zahlt",
       billing: "Versicherung & Rechnung",
       declarations: "Erklärungen",
       follow_up: "Ergänzende Angaben",
@@ -312,9 +312,9 @@ describe("lead cabinet languages", () => {
   it("asks who pays without a filler sentence and names an organisation's seat", () => {
     expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).payerIntro)).toEqual([
       "Bitte nennen Sie, wer die Kosten übernimmt.",
-      "Please tell us who pays for the treatment.",
-      "Вкажіть, будь ласка, хто оплачує лікування.",
-      "Укажите, пожалуйста, кто оплачивает лечение.",
+      "Please tell us who pays for the services.",
+      "Вкажіть, будь ласка, хто оплачує послуги.",
+      "Укажите, пожалуйста, кто оплачивает услуги.",
     ]);
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
@@ -328,7 +328,7 @@ describe("lead cabinet languages", () => {
   it("asks for the consent to pass the cost estimate on in the owner's words and names it when missing", () => {
     const de = leadRequestText("de");
     expect(payerFieldLabel(de, "payer_cost_estimate_consent")).toBe(
-      "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und Behandlungsnamen.",
+      "Ich willige ein, dass GMED der zahlenden Person den Kostenvoranschlag mit den voraussichtlichen Kosten übermittelt – nur Leistungsarten und Beträge, ohne Diagnosen und medizinische Einzelheiten.",
     );
     // A parent reads the same sentence: it names no patient.
     expect(payerFieldLabel(de, "payer_cost_estimate_consent", true)).toBe(payerFieldLabel(de, "payer_cost_estimate_consent"));
@@ -365,6 +365,47 @@ describe("lead cabinet languages", () => {
       expect(text.payerSignatureSigned("08.10.2026"), option.value).toMatch(/08\.10\.2026/);
       expect(text.payerSignatureSent(""), option.value).not.toMatch(/ {2}/);
       expect(text.payerSignatureSigned(""), option.value).not.toMatch(/ {2}| \./);
+    }
+  });
+
+  it("asks step 3 in the owner's words and never speaks of a treatment GMED sells (2026-10-11)", () => {
+    expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).fields.has_insurance)).toEqual([
+      "Haben Sie eine Krankenversicherung?",
+      "Do you have health insurance?",
+      "Чи є у вас медичне страхування?",
+      "Есть ли у вас медицинская страховка?",
+    ]);
+    const ru = leadRequestText("ru");
+    expect(ru.recipient.question).toBe("Кто является получателем счёта?");
+    expect(ru.recipient.options).toEqual({ self: "Я", third_party: "Третье лицо или организация" });
+    expect(ru.recipient.typeOptions).toEqual({ person: "физическое лицо", organisation: "организация" });
+    expect(ru.recipient.relationship).toBe("Кем приходится пациенту?");
+    expect(ru.recipient.paymentReason).toBe("Почему оплата через организацию?");
+    expect(ru.recipient.isPayerQuestion).toBe("Получатель счёта является плательщиком?");
+    expect(ru.hasRepresentativeQuestion).toBe("Действует ли кто-то от вашего имени?");
+    // Insurance is no answer of the cabinet: a person or an organisation.
+    expect(Object.keys(ru.recipient.payerOptions)).toEqual(["self", "guardian", "person", "organisation"]);
+    expect(submitFieldLabel(ru, "invoice_recipient_is_payer")).toBe("Получатель счёта является плательщиком?");
+    expect(submitFieldLabel(ru, "recipient_relationship_kind")).toBe("Получатель счёта: Кем приходится пациенту?");
+    expect(submitFieldLabel(leadRequestText("de"), "recipient_city")).toBe("Rechnungsempfänger: Ort");
+    expect(submitFieldLabel(leadRequestText("de"), "payer_payment_reason")).toBe(
+      "Zahler: Warum erfolgt die Zahlung über die Organisation?",
+    );
+    expect(submitFieldLabel(ru, "has_insurance", true)).toBe("Есть ли у пациента медицинская страховка?");
+    const treatment = /behandlung|treatment|лечени|лікуванн/i;
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      const words = [
+        text.payerQuestion,
+        text.payerIntro,
+        text.payerConsentLabel,
+        text.payerConsentLabelGuardian,
+        text.payerCostEstimateConsentLabel,
+        text.payerQuestionnaireIntro("X"),
+        text.fields.insurance_covers_germany,
+        ...Object.values(text.recipient).flatMap((value) => (typeof value === "string" ? [value] : Object.values(value))),
+      ];
+      for (const word of words) expect(word, option.value).not.toMatch(treatment);
     }
   });
 

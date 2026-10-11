@@ -892,16 +892,14 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     // payment route is a follow-up block and the lead states the reason of
     // the request.
     // Birth data, the own economic interest and the legal questions are no
-    // longer asked in the base form (owner 2026-10-09); the guardianship
-    // question is asked again (owner 2026-10-10).
+    // longer asked in the base form (owner 2026-10-09). Since 2026-10-11
+    // (owner) the guardianship question follows a "yes" to "does somebody act
+    // on your behalf?", and step 3 asks who receives the invoice first: "who
+    // pays" and the payment method wait for that answer.
     let still_missing = json!([
-        "payer_kind",
         "id_document_upload",
         "has_representative",
-        "under_guardianship",
-        "invoice_to",
-        // The bare payment method (owner 2026-10-10).
-        "payment_method",
+        "invoice_recipient",
         "request_reason"
     ]);
     assert_eq!(
@@ -952,8 +950,7 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         json!([
             "id_document_upload",
             "has_representative",
-            "under_guardianship",
-            "invoice_to",
+            "invoice_recipient",
             "payment_method"
         ]),
         "{body}"
@@ -974,10 +971,11 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["progress"]["missing_for_submit"],
-        json!(["id_document_upload", "invoice_to", "payment_method"]),
+        json!(["id_document_upload", "invoice_recipient", "payment_method"]),
         "{body}"
     );
-    // Where the invoice goes and how the patient pays (phase 2).
+    // Where the invoice goes and how the patient pays (phase 2; the section 7
+    // of an older cabinet still answers the invoice recipient).
     let (status, body) = json_request(
         router,
         "POST",
@@ -1224,11 +1222,12 @@ async fn the_cabinet_states_who_pays_and_every_person_goes_to_the_sanctions_scre
     let (status, body) = json_request(router, "GET", &request, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["payer"].is_null(), "{body}");
+    // Step 3 asks who receives the invoice before who pays (owner 2026-10-11).
     assert!(
         body["progress"]["missing_for_submit"]
             .as_array()
             .unwrap()
-            .contains(&json!("payer_kind")),
+            .contains(&json!("invoice_recipient")),
         "{body}"
     );
 
@@ -2496,14 +2495,15 @@ async fn purging_a_lead_clears_the_portal_intake() {
 
     // Somebody acts for the patient after all: the person, the copy of that
     // person's identity document and the power of attorney are part of what
-    // the request holds.
+    // the request holds. Not court-appointed: an authorised representative
+    // (owner 2026-10-11).
     let representative = Uuid::new_v4();
     let (status, body) = json_request(
         router,
         "POST",
         &format!("/api/v1/me/lead-requests/{lead_id}/representation"),
         &patient,
-        Some(json!({ "has_representative": true })),
+        Some(json!({ "has_representative": true, "under_guardianship": false })),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
@@ -2544,6 +2544,28 @@ async fn purging_a_lead_clears_the_portal_intake() {
     .await
     .unwrap();
     assert_eq!(representative_documents.len(), 2);
+    // A third party who receives the invoice (owner 2026-10-11).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/billing"),
+        &patient,
+        Some(json!({
+            "invoice_recipient": "third_party",
+            "recipient_type": "organisation",
+            "recipient_organisation_name": "Beispiel GmbH",
+            "recipient_city": "Berlin"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let recipients: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(recipients, 1);
 
     let (status, body) = json_request(
         router,
@@ -2585,6 +2607,14 @@ async fn purging_a_lead_clears_the_portal_intake() {
     .await
     .unwrap();
     assert_eq!(proof_files, 0);
+    // So do the answers about the invoice recipient.
+    let recipients: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM lead_invoice_recipients WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(recipients, 0);
     // So does what the request held about the representative: the row, the
     // trusted contact and both files.
     let (representatives, contacts, files): (i64, Value, i64) = sqlx::query_as(
@@ -2708,14 +2738,15 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     }
     assert_eq!(body["payer"]["citizenships"], json!([]), "{body}");
     assert!(body["payer"]["contact_consent_at"].is_null(), "{body}");
-    // Why a company pays is a follow-up block now (trigger flow 2026-10-07).
+    // An organisation states why the payment goes through it instead of a
+    // relationship (owner 2026-10-11, the lead's `payment_background`).
     assert_eq!(
         missing_for_the_payer(&body),
         [
-            "payer_relationship_kind",
             "payer_country",
             "payer_contact_consent",
-            "payer_cost_estimate_consent"
+            "payer_cost_estimate_consent",
+            "payer_payment_reason"
         ],
         "{body}"
     );
@@ -2739,12 +2770,13 @@ async fn an_organisation_pays_and_the_lead_agrees_that_gmed_contacts_it() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["payer"]["country"], "AT", "{body}");
+    // An organisation's relationship is no question of the cabinet any more.
     assert_eq!(
         missing_for_the_payer(&body),
         [
-            "payer_relationship",
             "payer_contact_consent",
-            "payer_cost_estimate_consent"
+            "payer_cost_estimate_consent",
+            "payer_payment_reason"
         ],
         "{body}"
     );
@@ -3199,6 +3231,8 @@ fn missing_for_the_billing(body: &Value) -> Vec<&str> {
         .filter_map(Value::as_str)
         .filter(|key| {
             key.starts_with("invoice_")
+                // The invoice recipient of step 3 (2026-10-11).
+                || key.starts_with("recipient_")
                 || key.starts_with("payment_method")
                 || key.starts_with("account_")
                 || *key == "bank_name"
@@ -3237,16 +3271,25 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
             "via_third_party_details": null,
             "account_holder_suggestion": "Anna Portal",
             // Block C of the risk assessment (trigger flow 2026-10-07).
-            "expected_total_eur": null, "via_third_party_kind": null
+            "expected_total_eur": null, "via_third_party_kind": null,
+            // Step 3: the invoice recipient first (owner spec 2026-10-11).
+            "invoice_recipient": null, "invoice_recipient_is_payer": null,
+            "recipient": {
+                "type": null, "name": null, "first_name": null, "last_name": null,
+                "organisation_name": null, "legal_form": null, "contact_name": null,
+                "street": null, "zip": null, "city": null, "country": null, "email": null,
+                "phone": null, "relationship_kind": null, "relationship": null,
+                "payment_reason": null
+            }
         }),
         "{body}"
     );
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07); the base form asks where the invoice goes and the
-        // bare payment method (owner 2026-10-10).
-        ["invoice_to", "payment_method"],
+        // flow (2026-10-07). Step 3 asks who receives the invoice first; the
+        // bare payment method (owner 2026-10-10) waits for the payer.
+        ["invoice_recipient"],
         "{body}"
     );
     let (status, body) = json_request(
@@ -3336,9 +3379,14 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(shown["account_country"], "DE", "{body}");
     assert_eq!(shown["via_third_party"], true, "{body}");
     assert_eq!(shown["payment_route_by"], "patient", "{body}");
+    // An older cabinet's "another address" reads as a third-party recipient
+    // who does not pay (step 3, 2026-10-11): its address is still missing.
+    assert_eq!(shown["invoice_recipient"], "third_party", "{body}");
+    assert_eq!(shown["invoice_recipient_is_payer"], false, "{body}");
+    assert_eq!(shown["recipient"]["name"], "Anna Muster", "{body}");
     assert_eq!(
         missing_for_the_billing(&body),
-        ["invoice_country"],
+        ["recipient_country"],
         "{body}"
     );
     assert_eq!(
@@ -3573,9 +3621,9 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07); the base form asks where the invoice goes and the
-        // bare payment method (owner 2026-10-10).
-        ["invoice_to", "payment_method"],
+        // flow (2026-10-07); the base form asks who receives the invoice
+        // (step 3, 2026-10-11) and the bare payment method (owner 2026-10-10).
+        ["invoice_recipient", "payment_method"],
         "{body}"
     );
     let stored: (Option<String>, Option<String>, Option<String>) = sqlx::query_as(
@@ -3586,6 +3634,250 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     .await
     .unwrap();
     assert_eq!(stored, (None, None, Some("DE123456789".to_string())));
+}
+
+/// The keys of step 3 in `progress.missing_for_submit`: the invoice
+/// recipient, who pays and the payment method.
+fn missing_for_step_three(body: &Value) -> Vec<&str> {
+    body["progress"]["missing_for_submit"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|key| {
+            key.starts_with("invoice_")
+                || key.starts_with("recipient_")
+                || key.starts_with("payer_")
+                || *key == "payment_method"
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, patient) = lead_with_login(&app, "Rita", "rita.recipient@example.com").await;
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    let billing = format!("{request}/billing");
+    let payer = format!("{request}/payer");
+    let manager = app.staff("patient_manager");
+    let save = |body: Value| {
+        let (router, billing, patient) = (router.clone(), billing.clone(), patient.clone());
+        async move {
+            let (status, answer) =
+                json_request(&router, "POST", &billing, &patient, Some(body)).await;
+            assert_eq!(status, StatusCode::OK, "{answer}");
+            answer
+        }
+    };
+
+    // Nothing answered: who receives the invoice comes first, no payer key.
+    let (_, body) = json_request(router, "GET", &request, &patient, None).await;
+    assert_eq!(
+        missing_for_step_three(&body),
+        ["invoice_recipient"],
+        "{body}"
+    );
+    assert_eq!(
+        body["progress"]["missing_by_step"]["billing"],
+        json!(["invoice_recipient"]),
+        "{body}"
+    );
+    assert!(
+        body["progress"]["missing_by_step"].get("payer").is_none(),
+        "{body}"
+    );
+
+    // A refused value names its key.
+    for (refused, field) in [
+        (
+            json!({ "invoice_recipient": "insurer" }),
+            "invoice_recipient",
+        ),
+        (
+            json!({ "invoice_recipient_is_payer": "yes" }),
+            "invoice_recipient_is_payer",
+        ),
+        (json!({ "recipient_type": "insurance" }), "recipient_type"),
+        (
+            json!({ "recipient_country": "Germany" }),
+            "recipient_country",
+        ),
+        (
+            json!({ "recipient_email": "no-at-sign" }),
+            "recipient_email",
+        ),
+    ] {
+        let (status, error) = json_request(router, "POST", &billing, &patient, Some(refused)).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{error}");
+        assert_eq!(error["field"], field, "{error}");
+    }
+
+    // A third party receives the invoice: answered before anybody pays.
+    let body = save(json!({ "invoice_recipient": "third_party" })).await;
+    assert_eq!(
+        body["billing"]["invoice_recipient"], "third_party",
+        "{body}"
+    );
+    assert_eq!(
+        missing_for_step_three(&body),
+        [
+            "recipient_type",
+            "recipient_street",
+            "recipient_zip",
+            "recipient_city",
+            "recipient_country",
+            "invoice_recipient_is_payer"
+        ],
+        "{body}"
+    );
+    // An organisation that does not pay: its data and why the invoice goes through it.
+    let body = save(json!({
+        "recipient_type": "organisation",
+        "recipient_organisation_name": " Beispiel GmbH ",
+        "recipient_legal_form": "GmbH",
+        "recipient_contact_name": "Ben Muster",
+        "recipient_street": "Hauptstraße 1",
+        "recipient_zip": "10115",
+        "recipient_city": "Berlin",
+        "recipient_country": "de",
+        "recipient_email": "rechnung@example.com",
+        "recipient_payment_reason": "Der Arbeitgeber erhält die Rechnung.",
+        "invoice_recipient_is_payer": false
+    }))
+    .await;
+    let recipient = &body["billing"]["recipient"];
+    assert_eq!(recipient["name"], "Beispiel GmbH", "{body}");
+    assert_eq!(recipient["country"], "DE", "{body}");
+    assert_eq!(
+        body["billing"]["invoice_recipient_is_payer"], false,
+        "{body}"
+    );
+    // Who pays is asked now; nobody is named yet, so section 7 waits.
+    assert_eq!(missing_for_step_three(&body), ["payer_kind"], "{body}");
+    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+
+    // The patient pays: section 7 names the organisation at its address.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({ "payer_kind": "self" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let shown = &body["billing"];
+    assert_eq!(shown["invoice_to"], "other", "{body}");
+    assert_eq!(shown["invoice_name"], "Beispiel GmbH", "{body}");
+    assert_eq!(shown["invoice_city"], "Berlin", "{body}");
+    assert_eq!(shown["invoice_country"], "DE", "{body}");
+    assert_eq!(shown["invoice_email"], "rechnung@example.com", "{body}");
+    assert_eq!(missing_for_step_three(&body), ["payment_method"], "{body}");
+
+    // The recipient pays after all: the patient as payer no longer fits.
+    let body = save(json!({ "invoice_recipient_is_payer": true })).await;
+    assert!(body["billing"]["invoice_to"].is_null(), "{body}");
+    // The reason of a paying organisation is the payer's (`payment_background`).
+    assert!(
+        body["billing"]["recipient"]["payment_reason"].is_null(),
+        "{body}"
+    );
+    assert_eq!(missing_for_step_three(&body), ["payer_kind"], "{body}");
+    // The cabinet names the recipient as payer: section 7 goes "to the payer".
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &payer,
+        &patient,
+        Some(json!({
+            "payer_kind": "third_party",
+            "payer_type": "organisation",
+            "organisation_name": "Beispiel GmbH",
+            "organisation_legal_form": "GmbH",
+            "organisation_contact_name": "Ben Muster",
+            "street": "Hauptstraße 1",
+            "zip": "10115",
+            "city": "Berlin",
+            "country": "DE",
+            "email": "rechnung@example.com",
+            "contact_consent": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["billing"]["invoice_to"], "payer", "{body}");
+    assert!(body["billing"]["invoice_name"].is_null(), "{body}");
+    // An organisation states why it pays instead of a relationship.
+    assert_eq!(
+        missing_for_step_three(&body),
+        ["payer_cost_estimate_consent", "payer_payment_reason"],
+        "{body}"
+    );
+
+    // The patient receives the invoice and a third party pays.
+    let body = save(json!({
+        "invoice_recipient": "self",
+        "invoice_recipient_is_payer": false,
+        "recipient_email": "rita.rechnung@example.com"
+    }))
+    .await;
+    assert_eq!(body["billing"]["invoice_to"], "self", "{body}");
+    assert_eq!(
+        body["billing"]["invoice_email"], "rita.rechnung@example.com",
+        "{body}"
+    );
+    assert!(
+        body["billing"]["recipient"]["organisation_name"].is_null(),
+        "{body}"
+    );
+    assert!(
+        !missing_for_step_three(&body).contains(&"payer_kind"),
+        "{body}"
+    );
+    // "I receive and pay it": the third party no longer fits.
+    let body = save(json!({ "invoice_recipient_is_payer": true })).await;
+    assert!(
+        missing_for_step_three(&body).contains(&"payer_kind"),
+        "{body}"
+    );
+
+    // Staff see the answers "from the patient", with when they were given.
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["billing"]["invoice_recipient"], "self", "{intake}");
+    assert_eq!(
+        intake["billing"]["invoice_recipient_is_payer"], true,
+        "{intake}"
+    );
+    assert!(
+        intake["billing"]["recipient_updated_at"].is_string(),
+        "{intake}"
+    );
+
+    // Audited by key, never by value; section 7's derived changes as billing.
+    let contexts: Vec<Value> = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'lead_portal_update_invoice_recipient' AND entity_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(!contexts.is_empty());
+    for context in &contexts {
+        assert!(!context.to_string().contains("Beispiel"), "{context}");
+    }
+    assert!(audit_count(pool, "lead_portal_update_billing", lead_id).await >= 1);
 }
 
 #[tokio::test]
@@ -3664,9 +3956,9 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
     assert_eq!(
         missing_for_the_billing(&body),
         // The payment route (section 8) is follow-up block C since the trigger
-        // flow (2026-10-07); the base form asks where the invoice goes and the
-        // bare payment method (owner 2026-10-10).
-        ["invoice_to", "payment_method"],
+        // flow (2026-10-07); the base form asks who receives the invoice
+        // (step 3, 2026-10-11) and the bare payment method (owner 2026-10-10).
+        ["invoice_recipient", "payment_method"],
         "{body}"
     );
     // Why "another person" pays is asked only in the extra step (owner rule
@@ -3691,7 +3983,11 @@ async fn a_paying_parent_states_the_payment_route_and_the_other_parent_does_not(
         body["billing"]["account_holder_suggestion"].is_null(),
         "{body}"
     );
-    assert_eq!(missing_for_the_billing(&body), ["invoice_to"], "{body}");
+    assert_eq!(
+        missing_for_the_billing(&body),
+        ["invoice_recipient"],
+        "{body}"
+    );
     let (status, body) = json_request(
         router,
         "POST",

@@ -7,6 +7,7 @@ import {
   REPRESENTATION_SUBMIT_FIELDS,
   REPRESENTATIVE_FIELDS,
   ROLE_OF_SLOT,
+  asksGuardianshipQuestion,
   asksRepresentativeField,
   authorityProofOf,
   draftFromRepresentation,
@@ -27,6 +28,7 @@ import {
   stillRejectedRepresentative,
   withChildAddress,
   withRejectedRepresentative,
+  withRepresentativeAnswer,
 } from "./lead-request-representation-model";
 import {
   LEAD_CABINET_LANGS,
@@ -88,16 +90,26 @@ const ben = person({
 });
 
 describe("who the form asks for", () => {
-  it("names one person per 'yes' of an adult", () => {
+  it("names the person who acts for an adult once both answers are given", () => {
     const answers = draftFromRepresentation(representation());
     expect(answers).toEqual({ has_representative: "", under_guardianship: "", custody: "joint" });
     expect(shownSlots(false, answers)).toEqual([]);
-    expect(shownSlots(false, { ...answers, has_representative: "no", under_guardianship: "no" })).toEqual([]);
-    expect(shownSlots(false, { ...answers, has_representative: "yes" })).toEqual(["agent"]);
-    expect(shownSlots(false, { ...answers, has_representative: "yes", under_guardianship: "yes" })).toEqual([
-      "agent",
-      "guardian",
-    ]);
+    expect(shownSlots(false, { ...answers, has_representative: "no" })).toEqual([]);
+    // "Yes" asks the court-appointed question first (owner 2026-10-11) …
+    expect(asksGuardianshipQuestion({ ...answers, has_representative: "yes" })).toBe(true);
+    expect(asksGuardianshipQuestion({ ...answers, has_representative: "no" })).toBe(false);
+    expect(shownSlots(false, { ...answers, has_representative: "yes" })).toEqual([]);
+    // … which decides whose details are asked.
+    expect(shownSlots(false, { ...answers, has_representative: "yes", under_guardianship: "no" })).toEqual(["agent"]);
+    expect(shownSlots(false, { ...answers, has_representative: "yes", under_guardianship: "yes" })).toEqual(["guardian"]);
+    // A legal guardianship stated before the question was nested keeps its guardian.
+    expect(shownSlots(false, { ...answers, has_representative: "no", under_guardianship: "yes" })).toEqual(["guardian"]);
+    // "No" takes the court-appointed answer back.
+    expect(withRepresentativeAnswer({ ...answers, has_representative: "yes", under_guardianship: "yes" }, "no")).toEqual({
+      ...answers,
+      has_representative: "no",
+      under_guardianship: "",
+    });
     expect(
       draftFromRepresentation(representation({ has_representative: true, under_guardianship: false })),
     ).toMatchObject({ has_representative: "yes", under_guardianship: "no" });
@@ -194,19 +206,26 @@ describe("what a change of the answers removes", () => {
     expect(removedByAnswers(stored, true, { ...draftFromRepresentation(stored), custody: "joint" })).toEqual([]);
   });
 
-  it("removes the person of an adult's answer that is no longer 'yes'", () => {
-    const agent = person({ slot: "agent", role: "authorised_representative", mine: false, first_name: "Ben" });
+  it("removes the person the answers no longer ask for", () => {
+    const agent = person({ slot: "agent", role: "authorised_representative", mine: false, first_name: "Ben", can_remove: true });
     const guardian = person({ id: "44444444-4444-4444-8444-444444444444", slot: "guardian", role: "legal_guardian", first_name: "Mia" });
-    const stored = representation({ has_representative: true, under_guardianship: true, representatives: [agent, guardian] });
-    const answers = draftFromRepresentation(stored);
-    expect(removedByAnswers(stored, false, answers)).toEqual([]);
-    expect(removedByAnswers(stored, false, { ...answers, has_representative: "no" })).toEqual([agent]);
+    const byAgent = representation({ has_representative: true, under_guardianship: false, representatives: [agent] });
+    const answers = draftFromRepresentation(byAgent);
+    expect(removedByAnswers(byAgent, false, answers)).toEqual([]);
+    expect(removedByAnswers(byAgent, false, withRepresentativeAnswer(answers, "no"))).toEqual([agent]);
+    // The court-appointed representative replaces the authorised one the cabinet entered (owner 2026-10-11) …
+    expect(removedByAnswers(byAgent, false, { ...answers, under_guardianship: "yes" })).toEqual([agent]);
+    // … not one staff entered, which stays on file beside the guardian.
+    const staffAgent = { ...agent, can_remove: false };
+    const both = representation({ has_representative: true, under_guardianship: true, representatives: [staffAgent, guardian] });
+    expect(removedByAnswers({ ...byAgent, representatives: [staffAgent] }, false, { ...answers, under_guardianship: "yes" })).toEqual([]);
+    expect(shownSlots(false, draftFromRepresentation(both), both)).toEqual(["agent", "guardian"]);
+    expect(removedByAnswers(both, false, draftFromRepresentation(both))).toEqual([]);
+    const byGuardian = representation({ has_representative: true, under_guardianship: true, representatives: [guardian] });
+    const guardianAnswers = draftFromRepresentation(byGuardian);
     // Taking an answer back removes the person as well.
-    expect(removedByAnswers(stored, false, { ...answers, under_guardianship: "" })).toEqual([guardian]);
-    expect(removedByAnswers(stored, false, { ...answers, has_representative: "no", under_guardianship: "no" })).toEqual([
-      agent,
-      guardian,
-    ]);
+    expect(removedByAnswers(byGuardian, false, { ...guardianAnswers, under_guardianship: "" })).toEqual([guardian]);
+    expect(removedByAnswers(byGuardian, false, withRepresentativeAnswer(guardianAnswers, "no"))).toEqual([guardian]);
   });
 });
 
@@ -381,8 +400,8 @@ describe("what is missing about the representation", () => {
   it("knows every key of the contract, in the order of the form", () => {
     expect(REPRESENTATION_SUBMIT_FIELDS).toEqual([
       "has_representative",
-      ...adult.map((part) => `agent_${part}`),
       "under_guardianship",
+      ...adult.map((part) => `agent_${part}`),
       ...adult.map((part) => `guardian_${part}`),
       ...parent.map((part) => `rep1_${part}`),
       "rep1_authority_upload",
@@ -445,7 +464,7 @@ describe("what is missing about the representation", () => {
       "2. Vertreter/in: E-Mail",
       "2. Vertreter/in: Foto oder Scan des Ausweises",
       "Ausweisdokument: Foto oder Scan des Ausweises",
-      "Wer übernimmt die Kosten der Behandlung?",
+      "Wer ist der Zahler?",
     ]);
   });
 
@@ -465,10 +484,10 @@ describe("what is missing about the representation", () => {
       },
     });
     expect(missing.map((field) => submitFieldLabel(de, field))).toEqual([
-      "Handelt jemand für Sie (Vertreter/in, Bote/Botin, bevollmächtigte Person)?",
+      "Handelt jemand in Ihrem Namen?",
+      "Ist diese Person vom Gericht bestellt (rechtliche Betreuerin / rechtlicher Betreuer)?",
       "Angaben zur vertretenden Person: Straße und Hausnummer",
       "Angaben zur vertretenden Person: Nachweis der Vertretungsmacht (z. B. Vollmacht)",
-      "Stehen Sie unter rechtlicher Betreuung?",
       "Betreuer/in: Ausweis der Betreuerin / des Betreuers",
       "Betreuer/in: Bestellungsurkunde oder Betreuerausweis",
     ]);

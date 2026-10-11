@@ -79,13 +79,37 @@ export function representationPatch(
 }
 
 /**
- * The persons the form asks for. An adult names one per "yes"; a minor has
- * the first representative and, with joint custody, the second.
+ * Whether an adult is asked the court-appointed question (owner 2026-10-11):
+ * only after a "yes" to "does somebody act on your behalf?" — and while an
+ * older request still holds a legal guardianship stated before.
  */
-export function shownSlots(minor: boolean, draft: RepresentationDraft): RepresentativeSlot[] {
+export function asksGuardianshipQuestion(draft: RepresentationDraft): boolean {
+  return draft.has_representative === "yes" || draft.under_guardianship === "yes";
+}
+
+/** The answers after "does somebody act on your behalf?": without its "yes" the court-appointed answer goes. */
+export function withRepresentativeAnswer(draft: RepresentationDraft, answer: string): RepresentationDraft {
+  return { ...draft, has_representative: answer, under_guardianship: answer === "yes" ? draft.under_guardianship : "" };
+}
+
+/**
+ * The persons the form asks for. An adult names the person who acts: the
+ * court-appointed representative (Betreuer) with "yes" to that question, the
+ * authorised representative with "no" (owner 2026-10-11); a legal
+ * guardianship stated before the question was nested keeps its guardian. A
+ * minor has the first representative and, with joint custody, the second.
+ */
+export function shownSlots(
+  minor: boolean,
+  draft: RepresentationDraft,
+  representation: LeadRequestRepresentation | null | undefined = null,
+): RepresentativeSlot[] {
   if (minor) return draft.custody === "joint" ? ["rep1", "rep2"] : ["rep1"];
+  // An authorised representative on file beside a legal guardian (recorded
+  // before 2026-10-11, or by staff) keeps its place while somebody acts.
+  const agentOnFile = draft.has_representative === "yes" && representativeInSlot(representation, "agent") !== null;
   return [
-    ...(draft.has_representative === "yes" ? (["agent"] as const) : []),
+    ...((draft.has_representative === "yes" && draft.under_guardianship === "no") || agentOnFile ? (["agent"] as const) : []),
     ...(draft.under_guardianship === "yes" ? (["guardian"] as const) : []),
   ];
 }
@@ -121,11 +145,16 @@ export function removedByAnswers(
     if (next.custody === "joint" || next.custody === (representation?.custody ?? "joint")) return [];
     return persons.filter((person) => person.slot !== "rep1" && person.can_remove);
   }
-  return persons.filter(
-    (person) =>
-      (person.slot === "agent" && next.has_representative !== "yes") ||
-      (person.slot === "guardian" && next.under_guardianship !== "yes"),
-  );
+  // As on the server: the person of an answer that no longer asks for anybody goes; the
+  // authorised representative the cabinet entered goes when the person who acts turns out
+  // to be court-appointed.
+  const stays = shownSlots(false, next);
+  return persons.filter((person) => {
+    if (person.slot === "guardian") return !stays.includes("guardian");
+    if (person.slot !== "agent" || stays.includes("agent")) return false;
+    if (next.has_representative !== "yes") return true;
+    return next.under_guardianship === "yes" && representation?.under_guardianship !== true && person.can_remove;
+  });
 }
 
 /** "First Last" of a person; empty while nothing is known. */
@@ -385,8 +414,8 @@ function slotSubmitFields(slot: RepresentativeSlot): RepresentationSubmitField[]
 /** Everything the server can name as missing about the representation, in the order of the form. */
 export const REPRESENTATION_SUBMIT_FIELDS: RepresentationSubmitField[] = [
   "has_representative",
-  ...slotSubmitFields("agent"),
   "under_guardianship",
+  ...slotSubmitFields("agent"),
   ...slotSubmitFields("guardian"),
   ...slotSubmitFields("rep1"),
   ...slotSubmitFields("rep2"),

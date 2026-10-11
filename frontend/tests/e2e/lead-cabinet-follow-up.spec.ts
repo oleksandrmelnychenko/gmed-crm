@@ -412,10 +412,11 @@ test.describe("lead cabinet stepper and follow-up", () => {
     const { calls } = await setup(page);
     await page.goto("/");
 
-    // Six steps without open blocks: no "Ergänzende Angaben"; the contact is part of the first step and the
-    // declarations are follow-up block L (owner 2026-10-09).
+    // Five steps without open blocks: no "Ergänzende Angaben"; the contact is part of the first step, the
+    // declarations are follow-up block L (owner 2026-10-09) and who pays is part of step 3 (owner 2026-10-11).
     const tabs = page.getByTestId("lead-request-steps").getByRole("tab");
-    await expect(tabs).toHaveCount(6);
+    await expect(tabs).toHaveCount(5);
+    await expect(tab(page, "payer")).toHaveCount(0);
     await expect(tab(page, "follow_up")).toHaveCount(0);
     await expect(tab(page, "contact")).toHaveCount(0);
     await expect(tab(page, "declarations")).toHaveCount(0);
@@ -472,46 +473,46 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // The summary lists what is missing by step, each with a way there.
     await tab(page, "send").click();
     // Once the summary was opened, every step that misses something shows its badge.
-    await expect(tab(page, "payer").getByTestId("lead-request-step-badge")).toBeVisible();
+    await expect(tab(page, "billing").getByTestId("lead-request-step-badge")).toBeVisible();
     await expect(tab(page, "documents").getByTestId("lead-request-step-badge")).toHaveCount(0);
     const missing = page.getByTestId("lead-request-missing");
-    await expect(missing.getByTestId("lead-request-missing-payer")).toContainText("Wer übernimmt die Kosten der Behandlung?");
-    await missing.getByTestId("lead-request-missing-payer").getByRole("button", { name: "Wer zahlt" }).click();
-    await expect(page.getByTestId("lead-request-step-payer")).toBeVisible();
+    await expect(missing.getByTestId("lead-request-missing-billing")).toContainText("Wer ist der Zahler?");
+    await missing.getByTestId("lead-request-missing-billing").getByRole("button", { name: "Versicherung & Rechnung" }).click();
+    await expect(page.getByTestId("lead-request-step-billing")).toBeVisible();
   });
 
   test("an organisation pays: the organisation mask with legal form, register number and contact person", async ({ page }) => {
     const { calls } = await setup(page);
     await page.goto("/");
-    await tab(page, "payer").click();
+    // Who pays is part of step 3 since 2026-10-11; a company is "an organisation" there.
+    await tab(page, "billing").click();
     const payer = page.getByTestId("lead-request-payer");
-    await choose(page, payer.getByRole("combobox", { name: "Wer übernimmt die Kosten der Behandlung?" }), "Eine andere Person oder Organisation");
-    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Unternehmen");
+    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Eine Organisation");
     await expect(payer.getByRole("textbox", { name: "Vorname" })).toHaveCount(0);
-    await payer.getByRole("textbox", { name: "Name des Unternehmens" }).fill("Beispiel GmbH");
+    await payer.getByRole("textbox", { name: "Name der Organisation" }).fill("Beispiel GmbH");
     await payer.getByRole("textbox", { name: "Rechtsform" }).fill("GmbH");
     await payer.getByRole("textbox", { name: "Registernummer (falls vorhanden)" }).fill("HRB 12345");
     await payer.getByRole("textbox", { name: "Ansprechperson" }).fill("Ben Muster");
     await expect(payer.getByTestId("lead-request-payer-email-or-phone")).toContainText("E-Mail oder Telefon");
     await expect.poll(() => calls.payer.at(-1)).toMatchObject({
       payer_kind: "third_party",
-      payer_type: "company",
+      payer_type: "organisation",
       organisation_name: "Beispiel GmbH",
       organisation_legal_form: "GmbH",
       organisation_register_number: "HRB 12345",
       organisation_contact_name: "Ben Muster",
     });
-    const stepMissing = page.getByTestId("lead-request-step-payer").getByTestId("lead-request-step-missing");
+    const stepMissing = page.getByTestId("lead-request-step-billing").getByTestId("lead-request-step-missing");
     // What is missing shows after "Weiter" (owner 2026-10-09).
     await expect(stepMissing).toHaveCount(0);
-    await page.getByTestId("lead-request-step-payer").getByRole("button", { name: "Weiter" }).click();
+    await page.getByTestId("lead-request-step-billing").getByRole("button", { name: "Weiter" }).click();
     await expect(stepMissing).toContainText("Zahler: E-Mail oder Telefon");
     await expect(stepMissing).toContainText("Zahler: Land des Sitzes");
     await payer.getByRole("textbox", { name: "Telefon" }).fill("+49 30 1234567");
     await expect(stepMissing).not.toContainText("E-Mail oder Telefon");
 
     // Back to a private person: the organisation mask goes with what was typed in it.
-    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Privatperson");
+    await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Eine Privatperson");
     await expect(payer.getByRole("textbox", { name: "Rechtsform" })).toHaveCount(0);
     await expect.poll(() => calls.payer.at(-1)).not.toHaveProperty("organisation_legal_form");
     expect(calls.payer.at(-1)).toMatchObject({ payer_type: "person" });
@@ -750,7 +751,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // A phone: the dots side by side, the current step named below, no horizontal scrolling.
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.getByTestId("lead-request-step-title")).toContainText("Ergänzende Angaben");
-    for (const step of ["person", "identity", "payer", "billing", "follow_up", "documents", "send"]) {
+    for (const step of ["person", "identity", "billing", "follow_up", "documents", "send"]) {
       await tab(page, step).click();
       await expect(page.getByTestId("lead-request-step")).toHaveAttribute("data-current-step", step);
       const overflow = await page.evaluate(() => {

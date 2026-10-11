@@ -215,7 +215,12 @@ export function BillingSections({
   enqueue: RequestQueue;
   onChange: (request: LeadRequest) => void;
   onSaveState: (state: SaveState) => void;
-  part: "invoice" | "route";
+  /**
+   * `invoice`: section 7 as an older server asks it; `method`: only how the
+   * patient side will pay (step 3 since 2026-10-11, after who pays);
+   * `route`: section 8 (follow-up block C).
+   */
+  part: "invoice" | "method" | "route";
   /** Without the own heading: follow-up block C has the same title (QA 2026-10-10). */
   bare?: boolean;
 }) {
@@ -374,6 +379,16 @@ export function BillingSections({
           ) : null}
         </div>
       </Section>
+      ) : null}
+
+      {/* How the patient side will pay, without the account (owner 2026-10-10): cash or crypto
+          counts for the risk at once; the details are follow-up block C. */}
+      {part === "method" && asksPaymentRoute(context.routeBy) ? (
+        <Section title={text.sectionPaymentRoute}>
+          <div className="sm:max-w-[calc(50%-0.5rem)]" data-testid="lead-request-payment-method-base">
+            {paymentMethodField}
+          </div>
+        </Section>
       ) : null}
 
       {part === "route" ? (
