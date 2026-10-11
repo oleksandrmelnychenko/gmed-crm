@@ -3335,7 +3335,7 @@ function useFinanceCatalogPageContent() {
               }
               footer={
                 agencyServiceForm.id ? (
-                  <SheetActionsFooter>
+                  <SheetActionsFooter noChangesHint={!agencyServiceBusy}>
                     <div className="flex w-full items-center justify-between gap-2">
                       <Button
                         type="button"

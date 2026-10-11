@@ -37,6 +37,16 @@ export function formatAppointmentSlotLabel(item: {
     : formatAppointmentDateLabel(item.date);
 }
 
+/** Interpreter hours with a decimal comma ("1,5 ч"), like the order lines. */
+export function formatInterpreterHours(value: string | number | null | undefined) {
+  const numeric =
+    typeof value === "number" ? value : Number(String(value ?? "").trim().replace(",", "."));
+  if (value === null || value === undefined || String(value).trim() === "" || !Number.isFinite(numeric)) {
+    return String(value ?? "");
+  }
+  return numeric.toLocaleString("de-DE", { maximumFractionDigits: 2 });
+}
+
 export function formatAppointmentMoneyLabel(
   value: string | null,
   currency = "EUR",

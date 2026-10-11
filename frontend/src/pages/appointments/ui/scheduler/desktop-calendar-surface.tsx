@@ -17,6 +17,7 @@ import {
 } from "react";
 
 import { berlinNowNaive } from "@/lib/app-time-zone";
+import { appointmentCalendarTitleViews } from "@/pages/appointments/model/calendar-title";
 import {
   CALENDAR_FIRST_DAY,
   CALENDAR_WEEK_NUMBER_CALCULATION,
@@ -210,6 +211,11 @@ export function DesktopCalendarSurface({
     }),
     [],
   );
+  // "Октябрь 2026" / "5–11 октября 2026" instead of the browser's "Окт. 2026 Г.".
+  const titleViews = useMemo(
+    () => appointmentCalendarTitleViews(lang === "de" ? "de" : "ru"),
+    [lang],
+  );
   const buttonText = useMemo(
     () => ({
       today: dictionary.dash_patients_today,
@@ -324,6 +330,7 @@ export function DesktopCalendarSurface({
           ref={calendarRef}
           plugins={FULL_CALENDAR_PLUGINS}
           locale={lang === "de" ? deLocale : ruLocale}
+          views={titleViews}
           eventTimeFormat={FULL_CALENDAR_EVENT_TIME_FORMAT}
           eventDisplay="block"
           displayEventEnd={false}

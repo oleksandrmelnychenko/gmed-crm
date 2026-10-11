@@ -2,7 +2,9 @@ import { memo } from "react";
 import { ArrowUpRight } from "lucide-react";
 
 import { Section } from "@/components/ui-shell";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
@@ -17,6 +19,10 @@ function AppointmentLinksSection({
   onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
   const { t } = useLang();
+  const { user } = useAuth();
+  // The order tile only helps people who may open orders (an interpreter
+  // would land on the dashboard).
+  const canOpenOrder = hasCapability(user, "orders.view");
   const l = (key: string) => t.uiText[key] ?? key;
   const descriptions = {
     patient: l("appointments_linked_tile_patient_description"),
@@ -39,7 +45,7 @@ function AppointmentLinksSection({
           description={descriptions.patient}
           onClick={() => onOpenPreview("patient", patientLabel)}
         />
-        {detail.order_id ? (
+        {detail.order_id && canOpenOrder ? (
           <LinkedRecordTile
             title={orderLabel}
             description={descriptions.order}

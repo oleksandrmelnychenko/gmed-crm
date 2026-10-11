@@ -24,7 +24,11 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch } from "@/lib/api";
-import { APPOINTMENT_REPORTED_FUTURE_DATE_CODE } from "@/pages/appointments/model/completion-rules";
+import { formatAppDate } from "@/lib/app-time-zone";
+import {
+  APPOINTMENT_REPORTED_FUTURE_DATE_CODE,
+  isClosedAppointmentStatus,
+} from "@/pages/appointments/model/completion-rules";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
 import { useLang } from "@/lib/i18n";
@@ -211,6 +215,9 @@ function formatEditAppointmentError(
   if (message.includes("recurrence rule updates require following or series scope")) {
     return translations.uiText.appointments_recurring_scope_required ?? message;
   }
+  if (message === "Completed or cancelled appointments cannot be rescheduled") {
+    return translations.uiText.appointments_edit_locked_closed ?? fallback;
+  }
   return formatScheduleConflictError(error, fallback);
 }
 
@@ -304,6 +311,7 @@ function useEditAppointmentSectionContentContent({
   const canManageStatus = permissions?.canManageStatus ?? false;
   const canManageChecklist = permissions?.canManageChecklist ?? false;
   const canEditAppointmentType = canManageStatus;
+  const editLocked = isClosedAppointmentStatus(detail.status);
   const hasUnsavedChanges = useMemo(
     () =>
       sheetOpen &&
@@ -817,17 +825,25 @@ function useEditAppointmentSectionContentContent({
           <h2 className={tokens.text.sectionTitle}>
             {editOverviewTitle(appointmentText("appointments_appointment"))}
           </h2>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="size-8 rounded-lg"
-            onClick={openSheet}
-            aria-label={t.common_edit}
-          >
-            <Pencil className="size-3.5" />
-          </Button>
+          {/* The server refuses changes to a completed or cancelled appointment. */}
+          {editLocked ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="size-8 rounded-lg"
+              onClick={openSheet}
+              aria-label={t.common_edit}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          )}
         </div>
+        {editLocked ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            {t.uiText.appointments_edit_locked_closed}
+          </p>
+        ) : null}
 
         <div className="mt-5 space-y-5">
           <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
@@ -853,7 +869,7 @@ function useEditAppointmentSectionContentContent({
             />
             <EditOverviewLine
               label={t.appointments_date}
-              value={form.date || t.common_not_set}
+              value={form.date ? formatAppDate(form.date) || form.date : t.common_not_set}
             />
             <EditOverviewLine label={t.appointments_time} value={timeSummary} />
             <EditOverviewLine label={t.common_provider} value={providerSummary} />
@@ -891,6 +907,12 @@ function useEditAppointmentSectionContentContent({
         footerError={error || undefined}
         footer={
           <>
+            {!hasUnsavedChanges && !busy ? (
+              // "Сохранить" stays disabled until something changes; say why.
+              <span className="mr-auto text-xs text-muted-foreground" data-testid="appointment-edit-no-changes">
+                {t.common_save_no_changes}
+              </span>
+            ) : null}
             <Button
               type="button"
               variant="outline"

@@ -8,8 +8,9 @@ import {
   parseTimeValue,
   PICKER_ADAPTER_LOCALE,
   PICKER_LOCALE_TEXT,
+  parsePickerValue,
+  pickerValueFormat,
   pickerVisibleLabel,
-  pickerFieldReadOnly,
   timePickerMinutesStep,
 } from "./input";
 
@@ -31,10 +32,16 @@ describe("Input", () => {
     expect(timePickerMinutesStep("any")).toBe(1);
   });
 
-  it("keeps time fields picker-only instead of keyboard-editable", () => {
-    expect(pickerFieldReadOnly("time", undefined)).toBe(true);
-    expect(pickerFieldReadOnly("time", false)).toBe(true);
-    expect(pickerFieldReadOnly("date", false)).toBe(false);
+  it("hands the form date, date-time and time values in their input formats", () => {
+    expect(pickerValueFormat("date")).toBe("YYYY-MM-DD");
+    expect(pickerValueFormat("datetime-local")).toBe("YYYY-MM-DDTHH:mm");
+    expect(pickerValueFormat("time")).toBe("HH:mm");
+    expect(parsePickerValue("time", "08:30")?.format("HH:mm")).toBe("08:30");
+    expect(parsePickerValue("date", "2026-10-20")?.format("DD.MM.YYYY")).toBe("20.10.2026");
+    expect(parsePickerValue("datetime-local", "2026-10-20T14:05")?.format("DD.MM.YYYY HH:mm")).toBe(
+      "20.10.2026 14:05",
+    );
+    expect(parsePickerValue("date", "")).toBeNull();
   });
 
   it("formats picker values without leaking invalid dates", () => {

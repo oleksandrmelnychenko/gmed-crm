@@ -52,6 +52,10 @@ import {
   conciergeServiceStatusOptions,
   isConciergeServiceFinancialLocked,
 } from "@/pages/concierge/model";
+import {
+  ConciergeKeepBookingAction,
+  ConciergeProviderBookingAction,
+} from "@/pages/concierge/provider-booking-dialog";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type {
   AppointmentDetail,
@@ -171,10 +175,9 @@ function useAppointmentConciergeSectionContent({
           nonMedicalProviders.some((provider) => provider.id === detail.provider_id)
             ? detail.provider_id
             : "",
+        // The appointment's concierge, or none – not the first concierge of the list.
         assignedConciergeId:
-          detail.owner_role === "concierge"
-            ? (detail.owner_user_id ?? "")
-            : (conciergeStaff[0]?.id ?? ""),
+          detail.owner_role === "concierge" ? (detail.owner_user_id ?? "") : "",
         serviceKind: detail.category?.toLowerCase().includes("transfer")
           ? "transfer"
           : "other",
@@ -527,7 +530,7 @@ function useAppointmentConciergeSectionContent({
                         )}
                       </NativeComboboxSelect>
                     </Field>
-                    <Field label={tr.appointments_title_col}>
+                    <Field label={t.staff_services_form_booking_reference}>
                       <Input
                         value={draft.bookingReference}
                         onChange={(event) =>
@@ -651,7 +654,15 @@ function useAppointmentConciergeSectionContent({
                       </Field>
                     ) : null}
                   </div>
-                  <div className="flex justify-end">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <ConciergeKeepBookingAction service={service} lang={lang} onKept={() => onRefresh()} />
+                    {/* "Забронировано"/"Подтверждено" come from the partner booking, not from the status list. */}
+                    <ConciergeProviderBookingAction
+                      service={service}
+                      lang={lang}
+                      size="default"
+                      onBooked={() => onRefresh()}
+                    />
                     <Button
                       type="button"
                       disabled={actionBusy === `service:${service.id}`}

@@ -1241,6 +1241,22 @@ export function providerTypeLabel(value: string, tr: Record<string, string>) {
   });
 }
 
+/**
+ * The provider's own contract state ("С договором" / "Без договора"). The
+ * filter options "Только с/без договора" are not a status (QA 2026-10-11:
+ * every row read "Только без договора"). Unknown state: no label.
+ */
+export function providerContractStatusLabel(
+  hasContract: boolean | null | undefined,
+  tr: Record<string, string>,
+): string | null {
+  if (typeof hasContract !== "boolean") return null;
+  const translations = translateCatalog(getLang());
+  return hasContract
+    ? (tr.providers_contract_status_with ?? translations.providers_contract_status_with)
+    : (tr.providers_contract_status_without ?? translations.providers_contract_status_without);
+}
+
 export function providerPeopleCount(provider: Pick<ProviderSummary, "provider_type" | "doctor_count" | "staff_count">) {
   return provider.provider_type === "non_medical"
     ? provider.staff_count ?? provider.doctor_count

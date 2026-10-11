@@ -248,6 +248,7 @@ export const de = {
   common_discard_unsaved_confirm: "Ohne Speichern schließen?",
   common_discard_unsaved_action: "Ohne Speichern schließen",
   common_save_and_close: "Speichern und schließen",
+  common_save_no_changes: "Keine Änderungen zum Speichern.",
   common_overlay_dismiss_blocked:
     "Nicht gespeicherte Daten gehen verloren, wenn Sie das Fenster ohne Speichern schließen.",
   table_filter: "Filter",
@@ -369,6 +370,8 @@ export const de = {
   providers_contract: "Vertrag",
   providers_contract_with: "Nur mit Vertrag",
   providers_contract_without: "Nur ohne Vertrag",
+  providers_contract_status_with: "Mit Vertrag",
+  providers_contract_status_without: "Ohne Vertrag",
   providers_notes: "Notizen",
   providers_website: "Webseite",
   providers_state: "Status",

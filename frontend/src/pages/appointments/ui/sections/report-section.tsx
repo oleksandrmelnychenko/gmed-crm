@@ -21,6 +21,7 @@ import {
   StatusBadge,
   tokens,
 } from "@/components/ui-shell";
+import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ import {
 } from "@/pages/appointments/model/labels";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
+  formatInterpreterHours,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   parseValidInterpreterReportHours,
@@ -276,7 +278,7 @@ function useAppointmentReportSectionContent({
         width: 110,
         render: (report) => (
           <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {appointmentText("appointments_report_hours_value", { hours: report.hours })}
+            {appointmentText("appointments_report_hours_value", { hours: formatInterpreterHours(report.hours) })}
           </span>
         ),
       },
@@ -423,18 +425,16 @@ function useAppointmentReportSectionContent({
                     t,
                   )}
                 </p>
+                {/* The catalogue service by name and whether the order line exists – no keys or ids. */}
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs opacity-80">
                   {detailReport.billing_service_key ? (
                     <span>
-                      {appointmentText("appointments_catalog_key")}
-                      : {detailReport.billing_service_key}
+                      {t.uiText.appointments_report_billing_service}:{" "}
+                      {agencyServiceNameLabel(detailReport.billing_service_key, null, t)}
                     </span>
                   ) : null}
                   {detailReport.billing_leistung_id ? (
-                    <span>
-                      {appointmentText("appointments_order_line")}
-                      : {detailReport.billing_leistung_id}
-                    </span>
+                    <span>{t.uiText.appointments_report_order_line_linked}</span>
                   ) : null}
                 </div>
               </div>
@@ -639,7 +639,7 @@ function useAppointmentReportSectionContent({
                     className="mt-2 font-mono text-sm tabular-nums text-foreground"
                   >
                     {appointmentText("appointments_report_hours_value", {
-                      hours: detailReport.hours,
+                      hours: formatInterpreterHours(detailReport.hours),
                     })}
                   </p>
                   <p className={cn(tokens.text.label, "mt-4")}>

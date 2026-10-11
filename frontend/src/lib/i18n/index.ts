@@ -238,6 +238,7 @@ export interface Translations
   common_discard_unsaved_confirm: string;
   common_discard_unsaved_action: string;
   common_save_and_close: string;
+  common_save_no_changes: string;
   common_overlay_dismiss_blocked: string;
   table_filter: string;
   table_filter_search_fields: string;
@@ -346,6 +347,8 @@ export interface Translations
   providers_contract: string;
   providers_contract_with: string;
   providers_contract_without: string;
+  providers_contract_status_with: string;
+  providers_contract_status_without: string;
   providers_notes: string;
   providers_website: string;
   providers_state: string;

@@ -1,6 +1,11 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { localizeTaskNote, localizeTaskTitle } from "./task-labels";
+import {
+  followUpReminderStoredNote,
+  followUpReminderStoredTitle,
+  localizeTaskNote,
+  localizeTaskTitle,
+} from "./task-labels";
 import { uiText } from "./i18n";
 
 describe("generated workflow task labels", () => {
@@ -50,6 +55,54 @@ describe("generated workflow task labels", () => {
     expect(localizeTaskNote("Confirm provider details, logistics and patient-facing service delivery", lang)).not.toMatch(/Confirm provider/);
     expect(localizeTaskNote("Gather confirmations and receipts after the non-medical service", lang)).not.toMatch(/Gather/);
     expect(localizeTaskNote("Prepare non-medical support for appointment on 2026-10-05", lang)).toContain("05.10.2026");
+  });
+
+  it("shows follow-up reminders 1W/1M/6M in the reader's language", () => {
+    const title = followUpReminderStoredTitle("post_1m");
+    expect(title).toBe("1-month follow-up check-in");
+    expect(localizeTaskTitle(title ?? "", "ru")).toBe("Контроль через 1 месяц");
+    expect(localizeTaskTitle(title ?? "", "de")).toBe("Nachsorge nach 1 Monat");
+    expect(followUpReminderStoredTitle("post_2y")).toBeNull();
+
+    const note = followUpReminderStoredNote("completion", "P-20261011-0003", "Kardiologie · Kontrolle");
+    expect(localizeTaskNote(note, "de")).toBe(
+      "Automatisch beim Terminabschluss für P-20261011-0003 · Kardiologie · Kontrolle geplant.",
+    );
+    expect(localizeTaskNote(note, "ru")).toBe(
+      "Автоматически запланировано при завершении приёма для P-20261011-0003 · Kardiologie · Kontrolle.",
+    );
+    const fromAppointment = followUpReminderStoredNote("appointment", "PT-1", "Check-up");
+    expect(localizeTaskNote(fromAppointment, "de")).toBe("Automatisch aus Termin PT-1 · Check-up geplant.");
+  });
+
+  it("stores titles the order follow-up gate counts", () => {
+    // orders.rs counts reminders by these title patterns (ILIKE '1-week follow-up check-in%' …).
+    const orders = readFileSync(new URL("../../../crates/server/src/routes/orders.rs", import.meta.url), "utf8");
+    for (const preset of ["post_1w", "post_1m", "post_6m"]) {
+      const title = followUpReminderStoredTitle(preset) ?? "";
+      expect(orders).toContain(`r.title ILIKE '${title}%'`);
+    }
+  });
+
+  it("keeps follow-up reminders stored in Russian or German before readable in the other language", () => {
+    expect(localizeTaskTitle("Контроль через 1 неделю", "de")).toBe("Nachsorge nach 1 Woche");
+    expect(localizeTaskTitle("Контрольный контакт через 6 месяцев", "de")).toBe("Nachsorge nach 6 Monaten");
+    expect(localizeTaskTitle("Nachsorge nach 1 Monat", "ru")).toBe("Контроль через 1 месяц");
+    expect(
+      localizeTaskNote("Автоматически запланировано при завершении приёма для PT-5 · Herz-Check.", "de"),
+    ).toBe("Automatisch beim Terminabschluss für PT-5 · Herz-Check geplant.");
+    expect(localizeTaskNote("Automatisch aus Termin PT-5 · Herz-Check geplant.", "ru")).toBe(
+      "Автоматически запланировано из приёма PT-5 · Herz-Check.",
+    );
+  });
+
+  it("translates the note of the service created for a non-medical appointment", () => {
+    expect(localizeTaskNote("Automatisch aus nichtmedizinischem Termin erstellt", "ru")).toBe(
+      "Создано автоматически из немедицинского приёма",
+    );
+    expect(localizeTaskNote("Automatisch aus nichtmedizinischem Termin erstellt", "de")).toBe(
+      "Automatisch aus nichtmedizinischem Termin erstellt",
+    );
   });
 
   it("preserves custom user text, including English, and empty notes", () => {

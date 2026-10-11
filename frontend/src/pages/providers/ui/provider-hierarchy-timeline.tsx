@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
 import {
+  providerContractStatusLabel,
   providerPeopleCount,
   providerPeopleCountLabel,
   providerTypeLabel,
@@ -118,12 +119,6 @@ function providerSpecializationText(provider: ProviderSummary, lang: Lang) {
   return provider.fachbereich
     ? specializationLabelForValue(provider.fachbereich, provider.specializations, lang)
     : "";
-}
-
-function contractLabel(provider: ProviderSummary, tr: Record<string, string>) {
-  return provider.has_contract
-    ? (tr.providers_contract_with ?? tr.providers_contract ?? "")
-    : (tr.providers_contract_without ?? tr.providers_contract ?? "");
 }
 
 function contractTone(provider: ProviderSummary) {
@@ -447,6 +442,7 @@ function TimelineNode({
     countryNameForDisplay(provider.address_country, lang),
   ].filter(Boolean).join(", ");
   const specializationText = providerSpecializationText(provider, lang);
+  const contractLabel = providerContractStatusLabel(provider.has_contract, tr);
   const connectorWidth = (depth + 1) * CONNECTOR_STEP;
   const currentCenter = depth * CONNECTOR_STEP + CONNECTOR_CENTER;
   const canToggle = hasChildren;
@@ -584,12 +580,14 @@ function TimelineNode({
               >
                 {providerTypeLabel(provider.provider_type, tr)}
               </Badge>
-              <Badge
-                variant="outline"
-                className={cn("rounded-full text-[10px]", contractTone(provider))}
-              >
-                {contractLabel(provider, tr)}
-              </Badge>
+              {contractLabel ? (
+                <Badge
+                  variant="outline"
+                  className={cn("rounded-full text-[10px]", contractTone(provider))}
+                >
+                  {contractLabel}
+                </Badge>
+              ) : null}
             </span>
             <span className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               {specializationText ? (

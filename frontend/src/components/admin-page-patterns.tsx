@@ -8,6 +8,7 @@ import {
   SheetTitle,
   useSheetDismissalGuard,
 } from "@/components/ui/sheet";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useOverlaySaveDisabled } from "@/components/ui/dismissal-guard";
 
@@ -70,6 +71,28 @@ function SheetFooterError({ error }: { error?: ReactNode }) {
       {error}
     </div>
   ) : null;
+}
+
+function SheetFooterHint({ hint }: { hint?: ReactNode }) {
+  return hint ? (
+    <div
+      role="status"
+      className="border-t border-border px-4 pt-2 text-xs text-muted-foreground"
+    >
+      {hint}
+    </div>
+  ) : null;
+}
+
+/**
+ * A sheet that saves only changes (`requireChanges`) disables Save while the
+ * form is unchanged. Say so next to the button instead of a silent, dead
+ * Save (QA 2026-10-11, catalogue item sheet).
+ */
+function useNoChangesHint(enabled: boolean) {
+  const { t } = useLang();
+  const saveDisabled = useOverlaySaveDisabled();
+  return enabled && saveDisabled ? t.common_save_no_changes : null;
 }
 
 function normalizeMetricValue(value: ReactNode) {
@@ -278,18 +301,12 @@ export function SheetFormFooter({
 }) {
   const handleCancel = useSheetDismissalGuard(onCancel);
   const saveDisabled = useOverlaySaveDisabled();
+  const noChangesHint = useNoChangesHint(!submitting);
 
   return (
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
-      {hint && !error ? (
-        <div
-          role="status"
-          className="border-t border-border px-4 pt-2 text-xs text-muted-foreground"
-        >
-          {hint}
-        </div>
-      ) : null}
+      {error ? null : <SheetFooterHint hint={hint ?? noChangesHint} />}
       <div className="flex justify-end gap-2 px-4 py-3">
         <Button
           type="button"
@@ -317,13 +334,26 @@ export function SheetFormFooter({
 export function SheetActionsFooter({
   children,
   error,
+  hint,
+  noChangesHint = false,
 }: {
   children: ReactNode;
   error?: ReactNode;
+  /** Neutral explanation shown above the actions. */
+  hint?: ReactNode;
+  /**
+   * The footer holds the sheet's Save: say "no changes" while a
+   * `requireChanges` sheet is unchanged. Off by default because some footers
+   * only close a read-only sheet.
+   */
+  noChangesHint?: boolean;
 }) {
+  const noChangesText = useNoChangesHint(noChangesHint);
+
   return (
     <div className="shrink-0 bg-popover">
       <SheetFooterError error={error} />
+      {error ? null : <SheetFooterHint hint={hint ?? noChangesText} />}
       <div className="flex justify-end gap-2 px-4 py-3">{children}</div>
     </div>
   );

@@ -6678,13 +6678,15 @@ function ProviderSheetHero({
           </div>
           <div className="flex shrink-0 border-t border-dashed border-border/70 pt-3 text-left xl:w-[190px] xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
             {(Boolean(onEdit) && permissions.canEditProvider) || permissions.canManageRegistry ? (
-              <div className="flex w-full gap-2 xl:flex-col">
+              // Phone width (QA 2026-10-11): two full-width buttons pushed
+              // "Delete" out of the clipped card. They share the row and wrap.
+              <div className="flex w-full flex-wrap gap-2 xl:flex-col xl:flex-nowrap">
               {onEdit ? (
                 <Button
                   type="button"
                   variant="default"
                   size="sm"
-                  className={cn(providerPrimaryActionButtonClassName, "w-full justify-center gap-1.5")}
+                  className={cn(providerPrimaryActionButtonClassName, "flex-1 justify-center gap-1.5 xl:w-full xl:flex-none")}
                   onClick={onEdit}
                 >
                   <Pencil className="size-3.5" />
@@ -6696,7 +6698,7 @@ function ProviderSheetHero({
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-8 w-full justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50"
+                  className="h-8 flex-1 justify-center rounded-lg gap-1.5 border-rose-200 bg-rose-50/40 text-rose-700 hover:bg-rose-50 xl:w-full xl:flex-none"
                   disabled={providerActionBusy === "delete"}
                   onClick={onDelete}
                 >

@@ -14,6 +14,16 @@ import { useLang, type Lang } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 import { readOnlyDisables, useReadOnly, type ReadOnlyExemptProps } from "@/components/read-only-scope"
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard"
+import {
+  applyExternalValue,
+  applyPickerBlur,
+  applyPickerChange,
+  formatPickerValue,
+  pickerDraftFromValue,
+  type PickerDraftStep,
+} from "@/components/ui/picker-draft"
+
+export { formatPickerValue }
 
 const DATE_FORMAT = "DD.MM.YYYY"
 const DATE_VALUE_FORMAT = "YYYY-MM-DD"
@@ -47,10 +57,6 @@ export function parseTimeValue(value: string | number | readonly string[] | unde
   const minute = Number(match[2])
   if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null
   return getTimePickerReferenceDate().hour(hour).minute(minute)
-}
-
-export function formatPickerValue(nextDate: Dayjs | null, format: string) {
-  return nextDate && nextDate.isValid() ? nextDate.format(format) : ""
 }
 
 export function getTimePickerReferenceDate() {
@@ -93,11 +99,16 @@ export function timePickerMinutesStep(step: React.ComponentProps<"input">["step"
   return Math.max(1, Math.round(seconds / 60))
 }
 
-export function pickerFieldReadOnly(
-  type: React.ComponentProps<"input">["type"],
-  readOnly: React.ComponentProps<"input">["readOnly"],
-) {
-  return type === "time" ? true : readOnly
+/** The value format a picker hands to the form ("YYYY-MM-DD", "YYYY-MM-DDTHH:mm", "HH:mm"). */
+export function pickerValueFormat(type: React.ComponentProps<"input">["type"]) {
+  if (type === "time") return TIME_FORMAT
+  if (type === "datetime-local") return DATETIME_LOCAL_VALUE_FORMAT
+  return DATE_VALUE_FORMAT
+}
+
+/** Reads a form value of a picker of this type. */
+export function parsePickerValue(type: React.ComponentProps<"input">["type"], value: string) {
+  return type === "time" ? parseTimeValue(value) : parseDateValue(value)
 }
 
 /**
@@ -198,37 +209,74 @@ function Input({
   const readOnlyScope = useReadOnly()
   const disabled =
     disabledProp || readOnlyDisables(readOnlyScope, { type, "data-readonly": readOnlyExempt })
-  const pickerCurrentValue = typeof value === "string" ? value : null
-  const updateOverlayField = useOverlayDirtyField(pickerCurrentValue ?? "")
-  const lastEmittedPickerValueRef = React.useRef<string | null>(pickerCurrentValue)
+  const isPicker = type === "date" || type === "datetime-local" || type === "time"
+  const pickerValue = typeof value === "string" ? value : ""
+  const pickerFormat = pickerValueFormat(type)
+  const updateOverlayField = useOverlayDirtyField(pickerValue)
   const timePickerReferenceDate = React.useMemo(() => getTimePickerReferenceDate(), [])
   const { lang } = useLang()
-  const isPicker = type === "date" || type === "datetime-local" || type === "time"
   const pickerAnchorRef = React.useRef<HTMLSpanElement | null>(null)
   const explicitAriaLabel = typeof props["aria-label"] === "string" ? props["aria-label"] : undefined
   const ariaLabelledBy =
     typeof props["aria-labelledby"] === "string" ? props["aria-labelledby"] : undefined
   const [visibleLabel, setVisibleLabel] = React.useState<string | undefined>()
+  // The field shows its own last published value; the form gets complete,
+  // allowed dates only (see picker-draft.ts).
+  const [pickerDraft, setPickerDraft] = React.useState(() =>
+    pickerDraftFromValue(isPicker ? pickerValue : "", (raw) => parsePickerValue(type, raw), pickerFormat),
+  )
+  const pickerDraftRef = React.useRef(pickerDraft)
+  const pickerFocusedRef = React.useRef(false)
+  const onChangeRef = React.useRef(onChange)
+
+  React.useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
 
   React.useEffect(() => {
     if (!isPicker || explicitAriaLabel || ariaLabelledBy) return
     setVisibleLabel(pickerVisibleLabel(pickerAnchorRef.current, id))
   }, [ariaLabelledBy, explicitAriaLabel, id, isPicker, lang])
 
-  React.useEffect(() => {
-    if (type === "date" || type === "datetime-local" || type === "time") {
-      lastEmittedPickerValueRef.current = typeof value === "string" ? value : null
+  const applyPickerStep = React.useCallback((step: PickerDraftStep) => {
+    if (step.state !== pickerDraftRef.current) {
+      pickerDraftRef.current = step.state
+      setPickerDraft(step.state)
     }
-  }, [type, value])
+    if (step.emit !== null) {
+      updateOverlayField(step.emit)
+      emitDateChange(onChangeRef.current, step.emit, id, name)
+    }
+  }, [id, name, updateOverlayField])
 
-  const commitPickerValue = React.useCallback((nextValue: string) => {
-    if (lastEmittedPickerValueRef.current === nextValue) {
-      return
-    }
-    lastEmittedPickerValueRef.current = nextValue
-    updateOverlayField(nextValue)
-    emitDateChange(onChange, nextValue, id, name)
-  }, [id, name, onChange, updateOverlayField])
+  React.useEffect(() => {
+    if (!isPicker) return
+    applyPickerStep(
+      applyExternalValue(
+        pickerDraftRef.current,
+        pickerValue,
+        pickerFocusedRef.current,
+        (raw) => parsePickerValue(type, raw),
+        pickerFormat,
+      ),
+    )
+  }, [applyPickerStep, isPicker, pickerFormat, pickerValue, type])
+
+  const handlePickerChange = (nextDate: Dayjs | null, context: { validationError: unknown }) => {
+    applyPickerStep(applyPickerChange(pickerDraftRef.current, nextDate, context.validationError, pickerFormat))
+  }
+
+  const handlePickerFocus = () => {
+    pickerFocusedRef.current = true
+  }
+
+  const handlePickerBlur = (event: React.FocusEvent<HTMLDivElement>) => {
+    onBlur?.(event as unknown as React.FocusEvent<HTMLInputElement>)
+    const next = event.relatedTarget
+    if (next instanceof Node && event.currentTarget.contains(next)) return
+    pickerFocusedRef.current = false
+    applyPickerStep(applyPickerBlur(pickerDraftRef.current, (raw) => parsePickerValue(type, raw), pickerFormat))
+  }
 
   if (type === "date" || type === "datetime-local" || type === "time") {
     const {
@@ -246,7 +294,7 @@ function Input({
       min,
       max,
       step,
-      readOnly: type === "time" ? true : props.readOnly,
+      readOnly: props.readOnly,
       "aria-label": undefined,
       "aria-labelledby": undefined,
     }
@@ -254,11 +302,13 @@ function Input({
       id,
       name,
       required,
-      onBlur,
+      onFocus: handlePickerFocus,
+      onBlur: handlePickerBlur,
       fullWidth: true,
       className: "w-full",
       size: "small" as const,
-      error: props["aria-invalid"] === true || props["aria-invalid"] === "true",
+      // Without an explicit marker MUI flags unfinished or disallowed dates itself.
+      error: props["aria-invalid"] === true || props["aria-invalid"] === "true" ? true : undefined,
       slotProps: {
         input: {
           // The group of date/time spin buttons is what assistive technology
@@ -346,13 +396,8 @@ function Input({
     if (type === "datetime-local") {
       return wrapPicker(
         <DateTimePicker
-          value={parseDateValue(value)}
-          onChange={(nextDate, context) => {
-            if (context.validationError) {
-              return
-            }
-            commitPickerValue(formatPickerValue(nextDate, DATETIME_LOCAL_VALUE_FORMAT))
-          }}
+          value={pickerDraft.draft}
+          onChange={handlePickerChange}
           minDateTime={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
           maxDateTime={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}
           disabled={disabled}
@@ -370,19 +415,11 @@ function Input({
     if (type === "time") {
       return wrapPicker(
         <TimePicker
-          value={parseTimeValue(value)}
-          onChange={(nextDate, context) => {
-            if (context.validationError) {
-              return
-            }
-            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
-          }}
-          onAccept={(nextDate, context) => {
-            if (context.validationError) {
-              return
-            }
-            commitPickerValue(formatPickerValue(nextDate, TIME_FORMAT))
-          }}
+          value={pickerDraft.draft}
+          // Hours and minutes can be typed; the clock button opens the lists,
+          // and "OK", Escape or a click elsewhere close them.
+          onChange={handlePickerChange}
+          onAccept={handlePickerChange}
           minTime={typeof min === "string" && min ? parseTimeValue(min) ?? undefined : undefined}
           maxTime={typeof max === "string" && max ? parseTimeValue(max) ?? undefined : undefined}
           disabled={disabled}
@@ -390,13 +427,9 @@ function Input({
           referenceDate={timePickerReferenceDate}
           format={TIME_FORMAT}
           ampm={false}
-          keepOpenDuringFieldFocus
           minutesStep={timePickerMinutesStep(step)}
           views={["hours", "minutes"]}
           slotProps={{
-            field: {
-              readOnly: pickerFieldReadOnly(type, props.readOnly),
-            },
             textField: sharedTextFieldProps,
           }}
         />
@@ -405,13 +438,8 @@ function Input({
 
     return wrapPicker(
       <DatePicker
-        value={parseDateValue(value)}
-        onChange={(nextDate, context) => {
-          if (context.validationError) {
-            return
-          }
-          commitPickerValue(formatPickerValue(nextDate, DATE_VALUE_FORMAT))
-        }}
+        value={pickerDraft.draft}
+        onChange={handlePickerChange}
         minDate={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
         maxDate={typeof max === "string" && max ? parseDateValue(max) ?? undefined : undefined}
         disabled={disabled}

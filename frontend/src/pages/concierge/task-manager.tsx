@@ -5,8 +5,10 @@ import {
   ArrowUpRight,
   Building2,
   CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   CircleAlert,
   Clock3,
   FolderKanban,
@@ -114,6 +116,8 @@ const copy = {
     active: "Aktiv",
     dueToday: "Heute fällig",
     teamWorkload: "Team-Auslastung",
+    showTeam: "Team anzeigen ({count})",
+    hideTeam: "Team ausblenden",
     checklist: "Checkliste",
     comments: "Kommentare",
     reminder: "Erinnerung",
@@ -188,6 +192,8 @@ const copy = {
     active: "Активные",
     dueToday: "На сегодня",
     teamWorkload: "Загрузка команды",
+    showTeam: "Показать команду ({count})",
+    hideTeam: "Скрыть команду",
     checklist: "Чек-лист",
     comments: "Комментарии",
     reminder: "Напоминание",
@@ -416,7 +422,10 @@ function TaskCard({
                 className="shrink-0 rounded-full border-red-200 bg-red-50 text-[10px] font-medium text-red-700"
                 data-testid="task-assignee-deactivated"
               >
-                {uiText("tasks_assignee_deactivated")}
+                {/* Pass `lang`: the React Compiler caches a call without
+                    reactive inputs, so a bare uiText(key) kept the language
+                    of the first render (QA 2026-10-11). */}
+                {uiText("tasks_assignee_deactivated", lang)}
               </Badge>
             ) : null}
           </div>
@@ -530,6 +539,9 @@ export function ConciergeTaskManager({
     () => new Set(),
   );
   const [clock, setClock] = useState(() => Date.now());
+  // Phone width: the team list (dozens of people) stays folded so the tasks
+  // come first (QA 2026-10-11). From `md` up it is always shown.
+  const [teamExpanded, setTeamExpanded] = useState(false);
   const [filters, setFilters] = useState<ConciergeTaskFilters>({ query: "", assignee: "all", status: "all", priority: "all", kind: "all", audience: "all", timing: "all", archive: "active" });
   const effectiveNow = useMemo(() => new Date(Math.max(now.getTime(), clock)), [clock, now]);
   const filtered = useMemo(() => sortConciergeTasks(filterConciergeTasks(tasks, filters, effectiveNow)), [effectiveNow, filters, tasks]);
@@ -608,8 +620,26 @@ export function ConciergeTaskManager({
   return (
     <section className="space-y-3" aria-label={labels.title}>
       {canManageTeam ? (
-        <Section title={labels.teamWorkload} className="rounded-lg border border-border/70 bg-card p-3">
-          <div className="px-1">
+        <Section
+          title={labels.teamWorkload}
+          className="rounded-lg border border-border/70 bg-card p-3"
+          accessory={(
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8 rounded-md px-2 text-xs md:hidden"
+              aria-expanded={teamExpanded}
+              aria-controls="task-manager-team-workload"
+              data-testid="task-team-workload-toggle"
+              onClick={() => setTeamExpanded((current) => !current)}
+            >
+              {teamExpanded ? <ChevronUp /> : <ChevronDown />}
+              {teamExpanded ? labels.hideTeam : labels.showTeam.replace("{count}", String(workload.length))}
+            </Button>
+          )}
+        >
+          <div id="task-manager-team-workload" className={cn("px-1", !teamExpanded && "hidden md:block")}>
             <div role="tablist" aria-label={labels.teamWorkload} className="flex w-full flex-wrap justify-center gap-1">
               <Button
                 type="button"

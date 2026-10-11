@@ -29,7 +29,11 @@ import {
 } from "@/components/ui-shell";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { localizeTaskTitle } from "@/lib/task-labels";
+import {
+  followUpReminderStoredNote,
+  followUpReminderStoredTitle,
+  localizeTaskTitle,
+} from "@/lib/task-labels";
 import { canRemindAboutAppointment } from "@/pages/appointments/model/staff-roles";
 import {
   fetchPatientInterpreterHistory,
@@ -39,7 +43,7 @@ import {
   type InterpreterPreference,
   type InterpreterSuggestion,
 } from "@/lib/api/clinical";
-import { formatUiText, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   buildAppointmentWorkflowSummary,
@@ -74,6 +78,7 @@ import {
   statusActionKey,
 } from "@/pages/appointments/model/form-factories";
 import {
+  appointmentPluralText,
   appointmentText,
   checklistPhaseLabel,
   followUpPresetLabel,
@@ -1807,11 +1812,13 @@ function AppointmentCompletionSectionContent({
               body: JSON.stringify({
                 user_id: followUpAssigneeId,
                 remind_at: toRfc3339(remindAt),
-                title: followUpPresetTitle(preset.id),
-                description: formatUiText(t.appointments_auto_planned_completion, {
-                  patientPid: detail.patient_pid,
-                  title: detail.title,
-                }),
+                // Stored language-neutral; every reader sees it in their UI language.
+                title: followUpReminderStoredTitle(preset.id) ?? followUpPresetTitle(preset.id),
+                description: followUpReminderStoredNote(
+                  "completion",
+                  detail.patient_pid,
+                  detail.title,
+                ),
               }),
             });
           }),
@@ -1820,9 +1827,10 @@ function AppointmentCompletionSectionContent({
 
       onNotice(
         selectedPresets.length > 0
-          ? appointmentText("appointments_follow_up_reminders_scheduled_notice", {
-              count: selectedPresets.length,
-            })
+          ? appointmentPluralText(
+              "appointments_follow_up_reminders_scheduled_notice",
+              selectedPresets.length,
+            )
           : appointmentText("appointments_appointment_completed"),
       );
       setCompletionSheetOpen(false);

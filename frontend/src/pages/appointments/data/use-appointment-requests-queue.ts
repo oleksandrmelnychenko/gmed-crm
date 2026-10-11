@@ -5,7 +5,8 @@ import {
   type SetStateAction,
 } from "react";
 
-import { apiFetch } from "@/lib/api";
+import { apiFetch, clearApiCache } from "@/lib/api";
+import { useTaskRealtimeRefresh } from "@/pages/concierge/use-task-realtime";
 import type {
   AppointmentRequestItem,
 } from "@/pages/appointments/model/types";
@@ -20,17 +21,38 @@ type AppointmentRequestsQueueState = {
   appointmentRequests: AppointmentRequestItem[];
   appointmentRequestsLoading: boolean;
   appointmentRequestsError: string;
+  /** Bumped by the queue's own refresh (realtime, reconnect, focus, poll). */
+  reloadVersion: number;
 };
 
 type AppointmentRequestsQueuePatch =
   | Partial<AppointmentRequestsQueueState>
   | ((current: AppointmentRequestsQueueState) => Partial<AppointmentRequestsQueueState>);
 
+const APPOINTMENT_REQUESTS_PATH = "/appointments/requests";
+
+/**
+ * The open requests are read again after these events. The toolbar count
+ * ("Очередь (N)") and the queue sheet both show this one list, so the count
+ * follows the list (QA 2026-10-11: the count stayed at 1 while the queue
+ * already listed 2). A reconnect or resync may follow missed request events;
+ * the shared refresh hook also re-reads on focus and polls as a fallback.
+ */
+export const APPOINTMENT_REQUEST_QUEUE_EVENTS = [
+  "realtime.connected",
+  "realtime.resync_required",
+  "appointment_request.created",
+  "appointment_request.reviewed",
+  "appointment_request.converted",
+  "appointment_request.cancelled",
+] as const;
+
 function createAppointmentRequestsQueueState(): AppointmentRequestsQueueState {
   return {
     appointmentRequests: [],
     appointmentRequestsLoading: false,
     appointmentRequestsError: "",
+    reloadVersion: 0,
   };
 }
 
@@ -99,6 +121,7 @@ export function useAppointmentRequestsQueue({
     appointmentRequests,
     appointmentRequestsLoading,
     appointmentRequestsError,
+    reloadVersion,
   } = queueState;
 
   const setAppointmentRequestsError = useCallback(
@@ -113,11 +136,27 @@ export function useAppointmentRequestsQueue({
     [],
   );
 
+  const reloadQueue = useCallback(() => {
+    // A fresh read, never an in-flight GET started before the change.
+    clearApiCache(APPOINTMENT_REQUESTS_PATH);
+    dispatchQueueState((current) => ({ reloadVersion: current.reloadVersion + 1 }));
+  }, []);
+
+  useTaskRealtimeRefresh(reloadQueue, {
+    enabled,
+    busy: appointmentRequestsLoading,
+    eventTypes: APPOINTMENT_REQUEST_QUEUE_EVENTS,
+  });
+
   useEffect(() => {
     let active = true;
 
     if (!enabled) {
-      dispatchQueueState(createAppointmentRequestsQueueState());
+      dispatchQueueState({
+        appointmentRequests: [],
+        appointmentRequestsLoading: false,
+        appointmentRequestsError: "",
+      });
       return () => {
         active = false;
       };
@@ -130,10 +169,10 @@ export function useAppointmentRequestsQueue({
       });
       const [requestedResult, approvedResult] = await Promise.allSettled([
         apiFetch<AppointmentRequestItem[]>(
-          "/appointments/requests?status=requested",
+          `${APPOINTMENT_REQUESTS_PATH}?status=requested`,
         ),
         apiFetch<AppointmentRequestItem[]>(
-          "/appointments/requests?status=approved",
+          `${APPOINTMENT_REQUESTS_PATH}?status=approved`,
         ),
       ]);
       if (!active) return;
@@ -151,7 +190,7 @@ export function useAppointmentRequestsQueue({
     return () => {
       active = false;
     };
-  }, [appointmentsVersion, enabled, failedLoadMessage]);
+  }, [appointmentsVersion, enabled, failedLoadMessage, reloadVersion]);
 
   return {
     appointmentRequests,

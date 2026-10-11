@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { taskRealtimeBatchAffects } from "@/pages/concierge/use-task-realtime";
+
 import type { AppointmentRequestItem } from "../model/types";
-import { settleAppointmentRequestQueueResults } from "./use-appointment-requests-queue";
+import {
+  APPOINTMENT_REQUEST_QUEUE_EVENTS,
+  settleAppointmentRequestQueueResults,
+} from "./use-appointment-requests-queue";
 
 const request = (
   id: string,
@@ -40,5 +45,28 @@ describe("settleAppointmentRequestQueueResults", () => {
     ]);
     expect(state.appointmentRequestsError).toBe("Queue unavailable");
     expect(state.appointmentRequestsLoading).toBe(false);
+  });
+});
+
+describe("APPOINTMENT_REQUEST_QUEUE_EVENTS", () => {
+  it("re-reads the queue on every request change and after a reconnect", () => {
+    expect(APPOINTMENT_REQUEST_QUEUE_EVENTS).toEqual(
+      expect.arrayContaining([
+        "appointment_request.created",
+        "appointment_request.reviewed",
+        "appointment_request.converted",
+        "appointment_request.cancelled",
+        "realtime.connected",
+        "realtime.resync_required",
+      ]),
+    );
+  });
+
+  it("treats any request event as affecting the queue", () => {
+    expect(
+      taskRealtimeBatchAffects([
+        { type: "appointment_request.created", entity_type: "appointment_request", entity_id: "request-2" },
+      ]),
+    ).toBe(true);
   });
 });

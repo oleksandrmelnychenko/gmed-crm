@@ -140,4 +140,28 @@ describe("buildProviderTimelineTree", () => {
     expect(html).toContain("2 Staff");
     expect(html).not.toContain("Doctors");
   });
+
+  it("shows the provider's contract state, not the filter label", () => {
+    const tr = {
+      providers_contract_with: "Только с договором",
+      providers_contract_without: "Только без договора",
+      providers_contract_status_with: "С договором",
+      providers_contract_status_without: "Без договора",
+    };
+    const html = renderToStaticMarkup(
+      createElement(ProviderHierarchyTimeline, {
+        lang: "ru",
+        onProviderClick: () => undefined,
+        providers: [
+          provider("without", "Klinik A", "organization"),
+          { ...provider("with", "Klinik B", "organization"), has_contract: true },
+        ],
+        tr,
+      }),
+    );
+
+    expect(html).toContain("Без договора");
+    expect(html).toContain("С договором");
+    expect(html).not.toContain("Только");
+  });
 });

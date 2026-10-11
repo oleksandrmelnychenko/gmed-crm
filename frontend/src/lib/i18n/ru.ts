@@ -246,6 +246,7 @@ export const ru = {
   common_discard_unsaved_confirm: "Закрыть без сохранения?",
   common_discard_unsaved_action: "Закрыть без сохранения",
   common_save_and_close: "Сохранить и закрыть",
+  common_save_no_changes: "Нет изменений для сохранения.",
   common_overlay_dismiss_blocked:
     "Несохраненные данные будут потеряны, если закрыть окно без сохранения.",
   table_filter: "Фильтр",
@@ -367,6 +368,8 @@ export const ru = {
   providers_contract: "Договор",
   providers_contract_with: "Только с договором",
   providers_contract_without: "Только без договора",
+  providers_contract_status_with: "С договором",
+  providers_contract_status_without: "Без договора",
   providers_notes: "Заметки",
   providers_website: "Сайт",
   providers_state: "Статус",

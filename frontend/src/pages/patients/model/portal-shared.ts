@@ -917,6 +917,25 @@ export function formatPortalDate(value?: string | null) {
   return formatAppDate(value) || value;
 }
 
+/**
+ * The preferred dates of an appointment request: both ends as
+ * "DD.MM.YYYY – DD.MM.YYYY" (QA 2026-10-11: the history showed only the
+ * start), otherwise the one end that is set. `kind` picks the label; an
+ * empty `value` means no date (the caller shows its "not set" text).
+ */
+export function portalPreferredDateRange(
+  from?: string | null,
+  to?: string | null,
+): { kind: "period" | "from" | "to"; value: string } {
+  const start = from ? formatAppDate(from) || from : "";
+  const end = to ? formatAppDate(to) || to : "";
+  if (start && end) {
+    return { kind: "period", value: start === end ? start : `${start} – ${end}` };
+  }
+  if (end) return { kind: "to", value: end };
+  return { kind: "from", value: start };
+}
+
 export function formatPortalFileSize(value?: number | null) {
   if (!value || value <= 0) return portalNotSetLabel();
   if (value < 1024) return `${value} B`;

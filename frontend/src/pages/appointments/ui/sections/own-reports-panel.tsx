@@ -21,6 +21,7 @@ import {
 import {
   formatAppointmentDateTimeLabel,
   formatAppointmentSlotLabel,
+  formatInterpreterHours,
 } from "@/pages/appointments/model/runtime-formatters";
 import type { OwnInterpreterReport } from "@/pages/appointments/model/types";
 
@@ -63,7 +64,7 @@ export function OwnInterpreterReportsList({
                 })}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {appointmentText("appointments_report_hours_value", { hours: report.hours })}
+                {appointmentText("appointments_report_hours_value", { hours: formatInterpreterHours(report.hours) })}
                 {" · "}
                 {t.appointments_report_submitted_prefix}{" "}
                 {formatAppointmentDateTimeLabel(report.created_at)}

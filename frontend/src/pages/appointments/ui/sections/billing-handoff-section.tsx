@@ -27,6 +27,7 @@ import {
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import {
   formatAppointmentSlotLabel as slotLabel,
+  formatInterpreterHours,
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankBillingHandoffForm } from "@/pages/appointments/model/form-factories";
 import {
@@ -179,7 +180,7 @@ function useAppointmentBillingHandoffSectionContentContent({
       }),
       form.kind === "interpreter_hours" && detailReport
         ? appointmentText("appointments_description_interpreter_hours", {
-            hours: detailReport.hours,
+            hours: formatInterpreterHours(detailReport.hours),
             status: reportApprovalLabel(detailReport.approval_status),
           })
         : "",
@@ -229,7 +230,7 @@ function useAppointmentBillingHandoffSectionContentContent({
         : "",
       form.kind === "interpreter_hours" && detailReport
         ? appointmentText("appointments_description_interpreter_hours", {
-            hours: detailReport.hours,
+            hours: formatInterpreterHours(detailReport.hours),
             status: reportApprovalLabel(detailReport.approval_status),
           })
         : "",

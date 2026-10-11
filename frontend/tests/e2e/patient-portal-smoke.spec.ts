@@ -1028,6 +1028,49 @@ test.describe("patient portal smoke flows", () => {
     ).toBeVisible();
   });
 
+  test("patient types the preferred dates with the keyboard (QA C-29)", async ({ page }) => {
+    await page.goto("/appointments");
+    await page
+      .getByRole("button", { name: /Terminanfrage senden|Send appointment request/i })
+      .click();
+    const requestSheet = page
+      .getByRole("dialog")
+      .filter({ hasText: /Termin anfragen|Request a visit/i });
+    await expect(requestSheet).toBeVisible();
+
+    // One key at a time with pauses: the field's timers run between keys, which
+    // used to wipe day and month while the year was typed ("TT.MM.2026").
+    for (const [label, digits, shown] of [
+      [/Bevorzugt ab/i, "26102026", "26.10.2026"],
+      [/Bevorzugt bis/i, "30102026", "30.10.2026"],
+    ] as const) {
+      await requestSheet.getByRole("group", { name: label }).getByRole("spinbutton").first().click();
+      await page.keyboard.type(digits, { delay: 120 });
+      await expect(pickerValueInput(requestSheet, label)).toHaveValue(shown);
+    }
+    await requestSheet.getByLabel(/Anlass|Reason/i).fill("Kontrolle nach dem Eingriff (Tastatur).");
+
+    const submitted = page.waitForRequest(
+      (request) => request.url().includes("/me/appointment-requests") && request.method() === "POST",
+    );
+    await requestSheet
+      .getByRole("button", {
+        name: /Terminanfrage senden|Отправить запрос на запись|Send appointment request/i,
+      })
+      .click();
+    const payload = JSON.parse((await submitted).postData() ?? "{}") as {
+      preferred_date_from?: string;
+      preferred_date_to?: string;
+    };
+    expect(payload.preferred_date_from).toBe("2026-10-26");
+    expect(payload.preferred_date_to).toBe("2026-10-30");
+
+    // The history shows the whole preferred range, not only the start.
+    const requestCard = page.locator("article").filter({ hasText: "Kontrolle nach dem Eingriff (Tastatur)." });
+    await expect(requestCard).toContainText("26.10.2026");
+    await expect(requestCard).toContainText("30.10.2026");
+  });
+
   test("patient can request and cancel an additional service", async ({ page }) => {
     await page.goto("/services");
     await expect(page).toHaveURL(/\/services$/);

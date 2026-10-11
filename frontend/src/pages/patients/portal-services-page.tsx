@@ -35,6 +35,7 @@ import { clearApiCache } from "@/lib/api";
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
+import { localizeTaskNote } from "@/lib/task-labels";
 import {
   cancelPortalService,
   createPortalServiceRequest,
@@ -545,7 +546,7 @@ export function PatientServicesPage() {
 
                   {item.service_notes ? (
                     <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                      {item.service_notes}
+                      {localizeTaskNote(item.service_notes, lang)}
                     </div>
                   ) : null}
 

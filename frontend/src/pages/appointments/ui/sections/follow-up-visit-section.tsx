@@ -21,6 +21,7 @@ import {
 } from "@/components/ui-shell";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { apiFetch } from "@/lib/api";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import {
   appointmentSelectControlClassName,
@@ -515,8 +516,8 @@ function useAppointmentFollowUpVisitSectionContent({
         width: 160,
         render: (item) => (
           <span className="font-mono text-xs tabular-nums text-foreground">
-            {item.date}
-            {item.time_start ? ` ${item.time_start}` : ""}
+            {formatAppDate(item.date) || item.date}
+            {item.time_start ? ` ${item.time_start.slice(0, 5)}` : ""}
           </span>
         ),
       },

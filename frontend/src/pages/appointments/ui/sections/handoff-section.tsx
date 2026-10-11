@@ -12,7 +12,11 @@ import { toast } from "@/components/ui/toast";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import type { ColumnDef } from "@/components/data-table/types";
-import { formatUiText, useLang } from "@/lib/i18n";
+import { useLang } from "@/lib/i18n";
+import {
+  followUpReminderStoredNote,
+  followUpReminderStoredTitle,
+} from "@/lib/task-labels";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
@@ -192,11 +196,9 @@ function AppointmentHandoffSectionContent({
         body: JSON.stringify({
           user_id: followUpAssigneeId,
           remind_at: toRfc3339(remindAt),
-          title: followUpPresetTitle(preset.id),
-          description: formatUiText(t.appointments_auto_planned_from_appointment, {
-            patientPid: detail.patient_pid,
-            title: detail.title,
-          }),
+          // Stored language-neutral; every reader sees it in their UI language.
+          title: followUpReminderStoredTitle(preset.id) ?? followUpPresetTitle(preset.id),
+          description: followUpReminderStoredNote("appointment", detail.patient_pid, detail.title),
         }),
       });
       // Visible confirmation: the reminder does not show up in this tab.

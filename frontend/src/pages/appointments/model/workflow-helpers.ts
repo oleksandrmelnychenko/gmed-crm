@@ -1,4 +1,6 @@
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
+import { getLang } from "@/lib/i18n";
+import { localizeTaskNote } from "@/lib/task-labels";
 import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
 import { appointmentText } from "@/pages/appointments/model/labels";
 import {
@@ -49,7 +51,8 @@ export function buildServiceDraft(
     endsAt: toDateTimeLocalInput(service.ends_at),
     actualCost: service.actual_cost ?? "",
     currency: service.currency || "EUR",
-    serviceNotes: service.service_notes ?? "",
+    // System notes ("Automatisch aus nichtmedizinischem Termin erstellt") in the UI language.
+    serviceNotes: localizeTaskNote(service.service_notes, getLang()),
     billingNotes: service.billing_notes ?? "",
   };
 }

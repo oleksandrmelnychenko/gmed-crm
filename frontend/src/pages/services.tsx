@@ -16,12 +16,19 @@ import {
 import {
   ChevronLeft,
   ChevronRight,
+  ListChecks,
   LoaderCircle,
   Pencil,
   Plus,
   RefreshCw,
   Search,
 } from "lucide-react";
+import { StaffLink } from "@/components/staff-link";
+import { localizeTaskNote } from "@/lib/task-labels";
+import {
+  ConciergeKeepBookingAction,
+  ConciergeProviderBookingAction,
+} from "@/pages/concierge/provider-booking-dialog";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -63,6 +70,7 @@ import {
 } from "@/pages/concierge/model";
 import {
   formatEnumLabelFromKeys,
+  uiText,
   useLang,
   type Lang,
   type Translations,
@@ -114,6 +122,7 @@ type StaffConciergeService = {
   booking_reference: string | null;
   vendor_name: string | null;
   vendor_contact: string | null;
+  service_address?: string | null;
   starts_at: string | null;
   ends_at: string | null;
   cost_estimate: string | null;
@@ -222,6 +231,8 @@ const STAFF_SERVICES_REALTIME_EVENTS = [
   "concierge_service.updated",
   "concierge_service.cancelled",
   "concierge_service.billing_ready",
+  "concierge_service.booking_requested",
+  "concierge_service.booking_confirmed",
 ] as const;
 const formInputClassName = shellInputClassName;
 const formSelectClassName = shellSelectClassName;
@@ -296,7 +307,7 @@ function blankCreateServiceForm(defaultConciergeId = ""): CreateServiceFormState
   };
 }
 
-function buildEditServiceForm(service: StaffConciergeService): EditServiceFormState {
+function buildEditServiceForm(service: StaffConciergeService, lang: Lang): EditServiceFormState {
   return {
     patientId: service.patient_id,
     providerId: service.provider_id ?? "",
@@ -314,7 +325,8 @@ function buildEditServiceForm(service: StaffConciergeService): EditServiceFormSt
     actualCost: service.actual_cost ?? "",
     quantity: service.quantity || "1",
     currency: service.currency || "EUR",
-    serviceNotes: service.service_notes ?? "",
+    // System notes ("Automatisch aus nichtmedizinischem Termin erstellt") in the UI language.
+    serviceNotes: localizeTaskNote(service.service_notes, lang),
     billingNotes: service.billing_notes ?? "",
     status: service.status,
     billingStatus: service.billing_status,
@@ -1133,10 +1145,12 @@ function useStaffServicesPageContent() {
     });
   }
 
-  const defaultConciergeId = useMemo(() => {
-    if (user?.role === "concierge") return user.id;
-    return conciergeStaff[0]?.id ?? "";
-  }, [conciergeStaff, user?.id, user?.role]);
+  // A concierge creates services for itself; others pick the concierge
+  // explicitly instead of getting the first one of the list.
+  const defaultConciergeId = useMemo(
+    () => (user?.role === "concierge" ? user.id : ""),
+    [user?.id, user?.role],
+  );
 
   const selectedPatient = useMemo(
     () => patients.find((patient) => patient.id === createForm.patientId) ?? null,
@@ -1228,7 +1242,7 @@ function useStaffServicesPageContent() {
   const openEditService = useCallback(() => {
     if (!selectedService) return;
     setEditError("");
-    setEditForm(buildEditServiceForm(selectedService));
+    setEditForm(buildEditServiceForm(selectedService, lang));
     setEditMode(true);
   }, [selectedService]);
 
@@ -2311,14 +2325,38 @@ function useStaffServicesPageContent() {
                 </>
               ) : (
                 <>
-                  {canEditService ? (
-                    <div className="flex justify-end">
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <ConciergeKeepBookingAction
+                      service={selectedService}
+                      lang={lang}
+                      onKept={(updated) => dispatchStaffServicesState({ type: "update-success", updated })}
+                    />
+                    {selectedService.linked_task_id ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        nativeButton={false}
+                        render={<StaffLink to={`/task-manager?task=${encodeURIComponent(selectedService.linked_task_id)}`} />}
+                      >
+                        <ListChecks className="size-3.5" />
+                        {uiText("services_open_task", lang)}
+                      </Button>
+                    ) : null}
+                    <ConciergeProviderBookingAction
+                      service={selectedService}
+                      lang={lang}
+                      onBooked={(updated) => {
+                        clearApiCache("/concierge-services");
+                        dispatchStaffServicesState({ type: "update-success", updated });
+                      }}
+                    />
+                    {canEditService ? (
                       <Button type="button" size="sm" variant="outline" onClick={openEditService}>
                         <Pencil className="size-3.5" />
                         {t.common_edit}
                       </Button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                   <Section title={t.staff_services_create_section_service}>
                     <div className="grid gap-1.5 md:grid-cols-2">
                       <ServiceMiniMetric label={t.staff_services_column_status} value={serviceStatusLabel(selectedService.status, t)} />
@@ -2368,7 +2406,7 @@ function useStaffServicesPageContent() {
                       <ServiceDetailField label={t.staff_services_form_booking_reference} value={selectedService.booking_reference} />
                       <ServiceDetailField label={t.staff_services_form_vendor} value={selectedService.vendor_name} />
                       <ServiceDetailField label={t.staff_services_form_vendor_contact} value={selectedService.vendor_contact} />
-                      <ServiceDetailField label={t.staff_services_form_service_notes} value={selectedService.service_notes} multiline />
+                      <ServiceDetailField label={t.staff_services_form_service_notes} value={localizeTaskNote(selectedService.service_notes, lang) || null} multiline />
                       <ServiceDetailField label={t.staff_services_form_billing_notes} value={selectedService.billing_notes} multiline />
                     </div>
                   </Section>

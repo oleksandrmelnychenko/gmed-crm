@@ -168,7 +168,8 @@ describe("AppointmentReportSection review decision", () => {
 
     expect(html).toContain("Решение по проверке");
     expect(html).toContain("Согласовать часы и отчёт");
-    expect(html).toMatch(/data-testid="report-review-hours"[^>]*>2\.5 ч</);
+    // RU decimal comma, like the order line ("2,5"), not "2.5 ч".
+    expect(html).toMatch(/data-testid="report-review-hours"[^>]*>2,5 ч</);
     expect(html).toContain("Часы");
     expect(html).toContain("Accompanied the consultation.");
   });

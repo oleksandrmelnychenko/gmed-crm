@@ -1372,7 +1372,6 @@ html[data-native-platform] {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--color-foreground);
-  text-transform: capitalize;
 }
 .appointments-calendar-shell .fc .fc-button {
   border-radius: 0.5rem;

@@ -25,6 +25,7 @@ import {
   formatWeeklyAvailabilityValue,
   normalizeAvailabilityEditorIntervals,
   parseWeeklyAvailability,
+  providerContractStatusLabel,
   providerPeopleCount,
   providerPeopleCountLabel,
   providerLoadErrorMessage,
@@ -55,6 +56,24 @@ describe("compact provider dates", () => {
     // 28 Sep 00:30 in Berlin, still 27 Sep in UTC; 27 Sep 23:30 in Berlin, already 28 Sep in Kyiv.
     expect(compactDateTime("2026-09-27T22:30:00Z")).toBe("28.09.2026 00:30");
     expect(compactDateTime("2026-09-27T21:30:00Z")).toBe("27.09.2026 23:30");
+  });
+});
+
+describe("providerContractStatusLabel", () => {
+  const tr = {
+    providers_contract_without: "Nur ohne Vertrag",
+    providers_contract_status_with: "Mit Vertrag",
+    providers_contract_status_without: "Ohne Vertrag",
+  };
+
+  it("names the provider's contract state, not the filter option", () => {
+    expect(providerContractStatusLabel(true, tr)).toBe("Mit Vertrag");
+    expect(providerContractStatusLabel(false, tr)).toBe("Ohne Vertrag");
+  });
+
+  it("shows nothing when the state is unknown", () => {
+    expect(providerContractStatusLabel(undefined, tr)).toBeNull();
+    expect(providerContractStatusLabel(null, tr)).toBeNull();
   });
 });
 

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 
 import {
   compactDateTime,
+  providerContractStatusLabel,
   providerPeopleCount,
   providerPeopleCountLabel,
   providerTypeLabel,
@@ -256,11 +257,15 @@ function ContractBadge({
   hasContract,
   tr,
 }: {
-  hasContract: boolean;
+  hasContract: boolean | null | undefined;
   tr: Record<string, string>;
 }) {
+  const label = providerContractStatusLabel(hasContract, tr);
+  if (!label) {
+    return <span className="text-xs text-muted-foreground">{commonNotSet(tr)}</span>;
+  }
   if (!hasContract) {
-    return <span className="text-xs text-muted-foreground">{tr.providers_contract_without ?? commonNotSet(tr)}</span>;
+    return <span className="text-xs text-muted-foreground">{label}</span>;
   }
 
   return (
@@ -268,7 +273,7 @@ function ContractBadge({
       variant="outline"
       className="rounded-full border-emerald-200 bg-emerald-50 text-[10px] text-emerald-700"
     >
-      {tr.providers_contract ?? tr.providers_contract_with ?? commonNotSet(tr)}
+      {label}
     </Badge>
   );
 }

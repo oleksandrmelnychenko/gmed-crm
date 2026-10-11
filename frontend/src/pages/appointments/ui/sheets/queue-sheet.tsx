@@ -212,15 +212,23 @@ function requestConvertActionKey(requestId: string) {
   return `${requestId}:convert`;
 }
 
+/** The prefilled title of an appointment scheduled from a portal request. */
+export function buildRequestScheduleTitle(
+  item: Pick<AppointmentRequestItem, "specialty">,
+): string {
+  return item.specialty?.trim().slice(0, 200) ?? "";
+}
+
 function buildScheduleForm(
   item: AppointmentRequestItem,
   currentUserId?: string,
   currentUserRole?: string,
 ): RequestScheduleFormState {
-  const patientLabel =
-    item.patient_name || item.patient_pid || appointmentText("appointments_patient");
   return {
-    title: `${appointmentTypeLabel(item.appointment_type)} · ${patientLabel}`,
+    // The title is what the patient sees in the portal: start from the
+    // specialty the patient asked for instead of "Медицинский · <patient>"
+    // (a Russian type label with the patient's own name); staff names it.
+    title: buildRequestScheduleTitle(item),
     date: item.preferred_date_from || item.preferred_date_to || currentDateInput(),
     timeStart: "",
     timeEnd: "",

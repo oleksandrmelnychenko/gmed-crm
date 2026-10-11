@@ -82,6 +82,7 @@ import type {
   ConciergeExpenseSubmitInput,
 } from "./expense-receipt-model";
 import { ConciergeTaskAttachments } from "./task-attachments";
+import { ConciergeServiceBookingActionById } from "./provider-booking-dialog";
 import { openSubtaskCount, subtaskProgress } from "./task-workflow";
 import { closeOpenSubtasks, completableParentAfterChild, completeParentTask, ParentCloseChoiceDialog, skippedSubtasksNotice, subtaskCloseStatus, ParentCompletionSuggestionDialog, type ParentCloseRequest, type ParentCompletionSuggestion } from "./subtask-flow";
 
@@ -1113,6 +1114,20 @@ export function ConciergeTaskDetailDialog({
                   <TaskDetailRow label={labels.category} value={<Badge variant="outline" className={cn("rounded-full", taskAudienceClassName(detail.item.task_audience))}>{detail.item.task_audience === "external" ? labels.external : labels.internal}</Badge>} />
                 </div>
               </TaskDetailSection>
+
+              {/* A service task is booked with the partner here ("Забронировано" → "Подтверждено"). */}
+              {detail.item.concierge_service_id && !detail.item.archived_at ? (
+                <div className="flex flex-wrap justify-end gap-2" data-testid="task-detail-service-booking">
+                  <ConciergeServiceBookingActionById
+                    serviceId={detail.item.concierge_service_id}
+                    lang={lang}
+                    onBooked={() => {
+                      void load(true);
+                      onChanged();
+                    }}
+                  />
+                </div>
+              ) : null}
 
               {(detail.item.patient_id && detail.item.patient_name) || (detail.item.order_id && canOpenOrders) || (detail.item.provider_id && detail.item.provider_name) || (detail.item.project_id && detail.item.project_name) || detail.item.task_audience === "external" ? (
                 <TaskDetailSection title={labels.links}>

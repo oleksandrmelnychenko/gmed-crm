@@ -590,6 +590,7 @@ export interface PatientsPortalTranslations {
   portal_appointments_request: string;
   portal_appointments_requested: string;
   portal_appointments_preferred_from: string;
+  portal_appointments_preferred_period: string;
   portal_appointments_time_window: string;
   portal_appointments_review_note: string;
   portal_appointments_scheduled_as: string;
@@ -1572,6 +1573,7 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_request: "запрос",
   portal_appointments_requested: "Запрошено",
   portal_appointments_preferred_from: "Предпочтительно с",
+  portal_appointments_preferred_period: "Предпочтительно",
   portal_appointments_time_window: "Временное окно",
   portal_appointments_review_note: "Комментарий по рассмотрению",
   portal_appointments_scheduled_as: "Назначено как",
@@ -2543,6 +2545,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_request: "Anfrage",
   portal_appointments_requested: "Angefragt",
   portal_appointments_preferred_from: "Bevorzugt ab",
+  portal_appointments_preferred_period: "Bevorzugt",
   portal_appointments_time_window: "Zeitfenster",
   portal_appointments_review_note: "Prüfnotiz",
   portal_appointments_scheduled_as: "Eingeplant als",

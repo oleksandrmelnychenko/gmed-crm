@@ -12,8 +12,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
+import { formatAppDate } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
 import {
   appointmentText,
   appointmentTypeLabel,
@@ -54,6 +58,8 @@ function AppointmentOverviewSection({
   onOpenDetail: (id: string) => void;
 }) {
   const { t } = useLang();
+  const { user } = useAuth();
+  const canSeeOrder = hasCapability(user, "orders.view");
   const tr = t as unknown as Record<string, string>;
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -92,9 +98,12 @@ function AppointmentOverviewSection({
           <p className="mt-0.5 text-[12px] font-mono text-muted-foreground">
             {detail.patient_pid} · {detail.patient_name}
           </p>
-          <p className="text-[11px] font-mono text-muted-foreground/80">
-            {detail.id}
-          </p>
+          {/* The order number instead of the appointment's technical id. */}
+          {detail.order_number && canSeeOrder ? (
+            <p className="text-[11px] text-muted-foreground/80">
+              {appointmentText("appointments_order")} {detail.order_number}
+            </p>
+          ) : null}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 sm:max-w-[40%] sm:justify-end">
           <span
@@ -110,7 +119,8 @@ function AppointmentOverviewSection({
               {carePathKindLabel(detail.care_path_kind)}
             </span>
           ) : null}
-          {canEdit && onEdit ? (
+          {/* A completed or cancelled appointment cannot be changed (the server refuses it). */}
+          {canEdit && onEdit && !isClosedAppointmentStatus(detail.status) ? (
             <Button
               type="button"
               variant="outline"
@@ -349,7 +359,7 @@ function RecurringSeriesDetails({
                   #{item.recurrence_index + 1}
                 </span>
                 <span className="w-[110px] shrink-0 font-mono text-xs tabular-nums text-foreground">
-                  {item.date}
+                  {formatAppDate(item.date) || item.date}
                 </span>
                 {item.id === detail.id ? (
                   <span className="shrink-0 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 font-mono text-[10px] font-medium text-orange-700">
@@ -437,7 +447,8 @@ function OverviewInfoTile({
       <span className="h-px min-w-5 flex-1 self-center bg-border/70" />
       <span
         className={cn(
-          "min-w-0 max-w-[70%] truncate whitespace-nowrap text-right text-sm font-semibold leading-snug",
+          // Wraps instead of cutting "вс, 11.10.2026 · 08:00 - 09:00" on a phone.
+          "min-w-0 max-w-[70%] break-words text-right text-sm font-semibold leading-snug",
           mono && "font-mono text-xs tabular-nums",
           muted ? "font-normal text-muted-foreground" : "text-foreground",
         )}

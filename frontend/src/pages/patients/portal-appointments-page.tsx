@@ -49,6 +49,7 @@ import {
   followupStatusTone,
   formatPortalDate,
   formatPortalDateTime,
+  portalPreferredDateRange,
   portalOrderPhaseLabel as sharedPortalOrderPhaseLabel,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
@@ -575,67 +576,79 @@ function usePatientAppointmentsPageContent() {
               </EmptyCell>
             ) : (
               <div className="space-y-3">
-                {requests.map((item) => (
-                  <ListItem key={item.id} className="space-y-3">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-foreground">
-                          {appointmentTypeLabel(item.appointment_type)} {t.portal_appointments_request}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {appointmentCarePathKindLabel(item.care_path_kind)}
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}
-                        </p>
+                {requests.map((item) => {
+                  const preferredDates = portalPreferredDateRange(
+                    item.preferred_date_from,
+                    item.preferred_date_to,
+                  );
+                  return (
+                    <ListItem key={item.id} className="space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">
+                            {appointmentTypeLabel(item.appointment_type)} {t.portal_appointments_request}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {appointmentCarePathKindLabel(item.care_path_kind)}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {t.portal_appointments_requested} {formatPortalDateTime(item.requested_at)}
+                          </p>
+                        </div>
+                        <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
+                          {portalStatusLabel(item.status)}
+                        </StatusBadge>
                       </div>
-                      <StatusBadge status={item.status} className={appointmentRequestStatusTone(item.status)}>
-                        {portalStatusLabel(item.status)}
-                      </StatusBadge>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <InfoRow
-                        className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={t.portal_appointments_preferred_from}
-                        value={formatPortalDate(item.preferred_date_from)}
-                      />
-                      <InfoRow
-                        className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
-                        label={t.portal_appointments_time_window}
-                        value={appointmentTimeOfDayLabel(item.preferred_time_of_day)}
-                      />
-                    </div>
-                    {item.reason ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
-                    {item.review_note ? (
-                      <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                        {t.portal_appointments_review_note}: {item.review_note}
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={
+                            preferredDates.kind === "period"
+                              ? t.portal_appointments_preferred_period
+                              : preferredDates.kind === "to"
+                                ? t.portal_appointments_preferred_to
+                                : t.portal_appointments_preferred_from
+                          }
+                          value={preferredDates.value || t.common_not_set}
+                        />
+                        <InfoRow
+                          className={cn("rounded-lg p-3", tokens.surface.mutedCard)}
+                          label={t.portal_appointments_time_window}
+                          value={appointmentTimeOfDayLabel(item.preferred_time_of_day)}
+                        />
                       </div>
-                    ) : null}
-                    {item.status === "cancelled" && item.cancellation_reason ? (
-                      <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                        {uiText("portal_request_cancelled_reason")}: {item.cancellation_reason}
-                      </div>
-                    ) : null}
-                    {item.status === "requested" || item.status === "approved" ? (
-                      <WithdrawRequestButton
-                        requestId={item.id}
-                        onWithdrawn={() => {
-                          clearApiCache("/me/appointment-requests");
-                          dispatchPageState((current) => ({
-                            notice: uiText("portal_request_withdrawn_notice"),
-                            version: current.version + 1,
-                          }));
-                        }}
-                        onError={(message) => dispatchPageState({ error: message })}
-                      />
-                    ) : null}
-                    {item.converted_appointment_id ? (
-                      <SuccessBanner>
-                        {t.portal_appointments_scheduled_as} {item.converted_appointment_title || t.portal_appointments_appointment} {t.portal_appointments_on} {formatPortalDate(item.converted_appointment_date)}
-                      </SuccessBanner>
-                    ) : null}
-                  </ListItem>
-                ))}
+                      {item.reason ? <p className="text-sm text-muted-foreground">{item.reason}</p> : null}
+                      {item.review_note ? (
+                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                          {t.portal_appointments_review_note}: {item.review_note}
+                        </div>
+                      ) : null}
+                      {item.status === "cancelled" && item.cancellation_reason ? (
+                        <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
+                          {uiText("portal_request_cancelled_reason")}: {item.cancellation_reason}
+                        </div>
+                      ) : null}
+                      {item.status === "requested" || item.status === "approved" ? (
+                        <WithdrawRequestButton
+                          requestId={item.id}
+                          onWithdrawn={() => {
+                            clearApiCache("/me/appointment-requests");
+                            dispatchPageState((current) => ({
+                              notice: uiText("portal_request_withdrawn_notice"),
+                              version: current.version + 1,
+                            }));
+                          }}
+                          onError={(message) => dispatchPageState({ error: message })}
+                        />
+                      ) : null}
+                      {item.converted_appointment_id ? (
+                        <SuccessBanner>
+                          {t.portal_appointments_scheduled_as} {item.converted_appointment_title || t.portal_appointments_appointment} {t.portal_appointments_on} {formatPortalDate(item.converted_appointment_date)}
+                        </SuccessBanner>
+                      ) : null}
+                    </ListItem>
+                  );
+                })}
               </div>
             )}
           </Section>
