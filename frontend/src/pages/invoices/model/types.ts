@@ -82,6 +82,38 @@ export type InvoicePrepaymentOption = {
   paid_amount: unknown;
   allocated_amount: unknown;
   available_amount: unknown;
+  /** Recipient (debtor) of the advance invoice. */
+  recipient_name?: string | null;
+  /**
+   * Billed to the same recipient as this invoice (or confirmed by number at
+   * its release); otherwise crediting it needs a confirmation for the pair.
+   */
+  same_recipient?: boolean;
+};
+
+/**
+ * An advance invoice settled by a released final invoice: where further
+ * payments go and what rest a credit note still closes.
+ */
+export type InvoiceAdvanceSettlement = {
+  final_invoice_id: string;
+  final_invoice_number: string;
+  final_balance_due: unknown;
+  applied_amount: unknown;
+  /** Not credited into a settlement invoice (unpaid or paid but unused). */
+  open_rest: unknown;
+  /** Part of `open_rest` the patient never paid. */
+  unpaid_rest: unknown;
+};
+
+/** A payment proof the patient uploaded in the portal for this invoice. */
+export type InvoicePaymentProof = {
+  id: string;
+  auto_name: string;
+  original_filename?: string | null;
+  notes?: string | null;
+  financial_status?: string | null;
+  uploaded_at: string;
 };
 
 export type InvoicePrepaymentAllocation = {
@@ -107,6 +139,8 @@ export type InvoicePaymentTransaction = {
   payment_reference: string | null;
   received_on: string;
   note?: string | null;
+  /** Remitter when not the invoice recipient (staff view). */
+  payer_name?: string | null;
   created_by?: string;
   created_by_name?: string;
   created_by_role?: string;
@@ -285,6 +319,7 @@ export type InvoiceReleaseWarning = {
     | "minor_patient_recipient"
     | "recipient_not_contracting_party"
     | "advance_recipient_mismatch"
+    | "services_not_delivered"
     | string;
   missing?: string[];
   advance_invoice_numbers?: (string | null)[];
@@ -381,6 +416,11 @@ export type InvoiceItem = {
   available_prepayments?: InvoicePrepaymentOption[];
   prepayment_allocations?: InvoicePrepaymentAllocation[];
   creditable_lines?: InvoiceCreditableLine[];
+  /** Advance invoices: the released final invoice that settles it. */
+  advance_settlement?: InvoiceAdvanceSettlement | null;
+  payment_proofs?: InvoicePaymentProof[];
+  /** Re-billed supplier costs this invoice bills (unbilled by a credit note below them). */
+  supplier_cost_allocated_gross?: unknown;
 };
 
 export type InvoiceListResponse = {

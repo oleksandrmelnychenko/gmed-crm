@@ -69,6 +69,7 @@ export function PaymentEditForm({
     receivedOn: payment.received_on,
     note: payment.note ?? "",
     reason: "",
+    payerName: payment.payer_name ?? "",
   }));
   const [form, setForm] = useState<PaymentCorrectionForm>(initialForm);
   const problem = paymentCorrectionProblem(form, payment);
@@ -126,6 +127,14 @@ export function PaymentEditForm({
             className={inputClass}
           />
         </Field>
+        <Field label={de ? "Zahler (falls nicht der Rechnungsempfänger)" : "Плательщик (если не получатель счёта)"}>
+          <Input
+            value={form.payerName ?? ""}
+            maxLength={200}
+            onChange={(event) => set({ payerName: event.target.value })}
+            className={inputClass}
+          />
+        </Field>
         <Field label={de ? "Interne Notiz" : "Внутренняя заметка"} className="sm:col-span-2">
           <Input
             value={form.note}
@@ -147,7 +156,8 @@ export function PaymentEditForm({
         </p>
       ) : null}
       <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        {/* Closes only this form, not the invoice card around it. */}
+        <Button type="button" variant="outline" data-inline-cancel="" onClick={onCancel}>
           {cancelLabel}
         </Button>
         <Button

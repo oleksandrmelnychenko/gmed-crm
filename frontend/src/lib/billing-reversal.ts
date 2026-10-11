@@ -38,6 +38,10 @@ export type BillingReversalPreview = {
   draft_invoice_ids: string[];
   requires_credit_note: boolean;
   credit_total_gross: string;
+  /** Advance money credited into the invoice that the credit note releases (refundable). */
+  prepayment_released_gross?: string;
+  /** Re-billed supplier costs the credit note unbills. */
+  supplier_cost_released_gross?: string;
   credit_notes: BillingReversalCreditPreview[];
   blocked_reason: BillingReversalBlockedReason | null;
   can_issue_credit_note?: boolean;
@@ -102,10 +106,28 @@ export function billingReversalEffect(preview: BillingReversalPreview, tx: Bilin
   if (preview.requires_credit_note) {
     const amount = formatMoneyAmount(preview.credit_total_gross, preview.currency);
     const invoices = invoiceNumbers(preview) || "—";
-    return tx(
+    const base = tx(
       `Услуга уже в выпущенном счёте (${invoices}). Будет выставлена кредит-нота на ${amount}, затем услуга будет отменена. Выпущенный счёт не меняется.`,
       `Die Leistung steht in einer ausgestellten Rechnung (${invoices}). Es wird eine Gutschrift über ${amount} ausgestellt und die Leistung storniert. Die ausgestellte Rechnung bleibt unverändert.`,
     );
+    // The patient prepaid more than the corrected invoice keeps (QA D-63).
+    const released = Number(preview.prepayment_released_gross ?? 0);
+    const prepaymentNote =
+      released > 0
+        ? ` ${tx(
+            `Зачтённая предоплата уменьшится на ${formatMoneyAmount(released, preview.currency)}: эта сумма аванса будет закрыта кредит-нотой и станет переплатой пациента (к возврату).`,
+            `Die angerechnete Vorauszahlung sinkt um ${formatMoneyAmount(released, preview.currency)}: Dieser Teil der Anzahlung wird per Gutschrift geschlossen und ist erstattbares Guthaben des Patienten.`,
+          )}`
+        : "";
+    const supplier = Number(preview.supplier_cost_released_gross ?? 0);
+    const supplierNote =
+      supplier > 0
+        ? ` ${tx(
+            `Перевыставленные расходы на ${formatMoneyAmount(supplier, preview.currency)} снова станут невыставленными.`,
+            `Weiterberechnete Kosten über ${formatMoneyAmount(supplier, preview.currency)} gelten wieder als nicht berechnet.`,
+          )}`
+        : "";
+    return `${base}${prepaymentNote}${supplierNote}`;
   }
   return tx(
     "Счёт на услугу ещё не выпущен: утверждённая услуга будет отменена без кредит-ноты.",
@@ -178,6 +200,20 @@ export function billingReversalErrorMessage(error: unknown, tx: Bilingual): stri
         );
       default:
         break;
+    }
+    // Refusals of the credit note itself carry their code in `error`.
+    const creditCode = typeof error.body?.error === "string" ? error.body.error : "";
+    if (creditCode === "credit_note_balance_rules") {
+      return tx(
+        "Кредит-нота превышает сумму, которую можно скорректировать по счёту. Обновите данные и проверьте счёт.",
+        "Die Gutschrift übersteigt den korrigierbaren Betrag der Rechnung. Bitte neu laden und die Rechnung prüfen.",
+      );
+    }
+    if (creditCode === "credit_note_below_applied_advance") {
+      return tx(
+        "Аванс уже зачтён в финальный счёт: сначала скорректируйте финальный счёт.",
+        "Die Anzahlung ist in die Schlussrechnung eingerechnet: zuerst die Schlussrechnung korrigieren.",
+      );
     }
     if (error.status === 422) return billingReversalReasonHint(tx);
     if (error.status === 403) {

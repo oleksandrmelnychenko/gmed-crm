@@ -110,15 +110,22 @@ pub(crate) async fn apply_available_advances_tx(
              AND advance.status NOT IN ('draft', 'cancelled')
              AND advance.paid_amount > 0
              -- § 14 Abs. 5 Satz 2 UStG: only advances billed to the same
-             -- recipient, unless billing confirmed the difference at release.
+             -- recipient. An advance of another recipient only when billing
+             -- confirmed exactly that advance invoice at release: the
+             -- confirmation lists the advance numbers it covers and never
+             -- extends to advances issued later (QA D-57: the payment of one
+             -- debtor settled the invoice of another).
              AND EXISTS (
                  SELECT 1 FROM invoices target
                  WHERE target.id = $3
                    AND (
-                       COALESCE(target.recipient_snapshot -> 'confirmations'
-                                ? 'advance_recipient_mismatch', false)
-                       OR invoice_recipient_identity(advance.recipient_snapshot)
+                       invoice_recipient_identity(advance.recipient_snapshot)
                           IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                       OR COALESCE(
+                              target.recipient_snapshot -> 'confirmations'
+                                  -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers',
+                              '[]'::jsonb
+                          ) ? advance.invoice_number
                    )
              )
            ORDER BY advance.issued_at, advance.id
@@ -205,8 +212,9 @@ pub(crate) async fn open_final_invoices_for_advance_tx(
 }
 
 /// Unapplied paid advance cash each of `invoice_ids` would receive, allocated
-/// oldest first across the open settlement invoices of each order (the rule
-/// of [`net_open_balances`] and of the automatic application).
+/// oldest first across the open settlement invoices of each order and
+/// invoice recipient (the rule of [`net_open_balances`] and of the automatic
+/// application: money of one debtor never nets another debtor's invoice).
 pub(crate) async fn advance_credit_shares(
     pool: &sqlx::PgPool,
     invoice_ids: &[Uuid],
@@ -217,6 +225,8 @@ pub(crate) async fn advance_credit_shares(
     let rows = sqlx::query(
         r#"WITH advance_pool AS (
                SELECT advance.order_id,
+                      COALESCE(invoice_recipient_identity(advance.recipient_snapshot), '')
+                          AS recipient,
                       SUM(GREATEST(
                           LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
                           - COALESCE((
@@ -232,18 +242,20 @@ pub(crate) async fn advance_credit_shares(
                  AND advance.order_id IN (
                      SELECT order_id FROM invoices WHERE id = ANY($1) AND order_id IS NOT NULL
                  )
-               GROUP BY advance.order_id
+               GROUP BY advance.order_id, 2
            ), open_invoice AS (
-               SELECT invoice.id, invoice.order_id,
+               SELECT invoice.id, invoice.order_id, pool.recipient,
                       GREATEST(invoice.total_gross - invoice.credited_amount
                                - invoice.paid_amount - invoice.prepayment_applied_amount, 0) AS due,
                       COALESCE(SUM(GREATEST(invoice.total_gross - invoice.credited_amount
                                             - invoice.paid_amount - invoice.prepayment_applied_amount, 0))
-                          OVER (PARTITION BY invoice.order_id
+                          OVER (PARTITION BY invoice.order_id, pool.recipient
                                 ORDER BY invoice.issued_at, invoice.id
                                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS due_before
                FROM invoices invoice
-               JOIN advance_pool pool ON pool.order_id = invoice.order_id
+               JOIN advance_pool pool
+                 ON pool.order_id = invoice.order_id
+                AND pool.recipient = COALESCE(invoice_recipient_identity(invoice.recipient_snapshot), '')
                WHERE invoice.invoice_type <> 'advance'
                  AND invoice.status NOT IN ('draft', 'cancelled')
            )
@@ -251,7 +263,9 @@ pub(crate) async fn advance_credit_shares(
                   LEAST(open_invoice.due, GREATEST(pool.available - open_invoice.due_before, 0))
                       AS share
            FROM open_invoice
-           JOIN advance_pool pool ON pool.order_id = open_invoice.order_id
+           JOIN advance_pool pool
+             ON pool.order_id = open_invoice.order_id
+            AND pool.recipient = open_invoice.recipient
            WHERE open_invoice.id = ANY($1)"#,
     )
     .bind(invoice_ids)
@@ -391,6 +405,9 @@ pub(crate) async fn publish_applied_advances(
 #[derive(Debug, Clone)]
 pub(crate) struct OpenInvoice {
     pub order_id: Option<Uuid>,
+    /// `invoice_recipient_identity` of the invoice: unapplied advances settle
+    /// only invoices of the same recipient (the automatic application's rule).
+    pub recipient: Option<String>,
     pub is_advance: bool,
     /// What the invoice itself still asks for.
     pub due: Decimal,
@@ -415,10 +432,10 @@ pub(crate) struct NetDue {
 }
 
 /// Nets open invoice balances against money the patient already paid: paid
-/// advances not yet applied settle the same order's settlement invoices
-/// (oldest first, as the automatic application would), credit balances
-/// settle any open invoice (oldest first). One rule for the order card, the
-/// invoice list, the account statement and the portal.
+/// advances not yet applied settle the same order's settlement invoices of
+/// the same recipient (oldest first, as the automatic application would),
+/// credit balances settle any open invoice (oldest first). One rule for the
+/// order card, the invoice list, the account statement and the portal.
 pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
     let mut order = (0..invoices.len()).collect::<Vec<_>>();
     order.sort_by(|left, right| {
@@ -426,11 +443,15 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
             .cmp(&(invoices[*right].issued_at, invoices[*right].id))
     });
     let mut result = vec![NetDue::default(); invoices.len()];
-    let mut advance_pools = std::collections::BTreeMap::<Uuid, Decimal>::new();
+    let pool_key = |invoice: &OpenInvoice| {
+        invoice
+            .order_id
+            .map(|order_id| (order_id, invoice.recipient.clone().unwrap_or_default()))
+    };
+    let mut advance_pools = std::collections::BTreeMap::<(Uuid, String), Decimal>::new();
     for invoice in invoices {
-        if let (true, Some(order_id)) = (invoice.is_advance, invoice.order_id) {
-            *advance_pools.entry(order_id).or_default() +=
-                invoice.advance_available.max(Decimal::ZERO);
+        if let (true, Some(key)) = (invoice.is_advance, pool_key(invoice)) {
+            *advance_pools.entry(key).or_default() += invoice.advance_available.max(Decimal::ZERO);
         }
     }
     let mut credit_pool: Decimal = invoices
@@ -441,7 +462,7 @@ pub(crate) fn net_open_balances(invoices: &[OpenInvoice]) -> Vec<NetDue> {
         let invoice = &invoices[*index];
         let mut left = invoice.due.max(Decimal::ZERO);
         if !invoice.is_advance
-            && let Some(pool) = invoice.order_id.and_then(|id| advance_pools.get_mut(&id))
+            && let Some(pool) = pool_key(invoice).and_then(|key| advance_pools.get_mut(&key))
         {
             let take = (*pool).min(left);
             *pool -= take;
@@ -477,6 +498,7 @@ mod tests {
     ) -> OpenInvoice {
         OpenInvoice {
             order_id: order.map(Uuid::from_u128),
+            recipient: Some("patient".to_string()),
             is_advance,
             due: dec(due),
             advance_available: dec(advance_available),
@@ -514,6 +536,21 @@ mod tests {
             net.iter().map(|item| item.to_pay).sum::<Decimal>(),
             dec(702)
         );
+    }
+
+    #[test]
+    fn an_unapplied_advance_never_nets_the_invoice_of_another_recipient() {
+        let mut mia_advance = open(Some(1), true, 69, 50, 0, 1);
+        mia_advance.recipient = Some("name:mia muster".to_string());
+        let mut company_final = open(Some(1), false, 785, 0, 0, 2);
+        company_final.recipient = Some("name:beispiel gmbh".to_string());
+        let mut mia_final = open(Some(1), false, 119, 0, 0, 3);
+        mia_final.recipient = Some("name:mia muster".to_string());
+        let net = net_open_balances(&[mia_advance, company_final, mia_final]);
+        assert_eq!(net[1].advance_credit, dec(0), "QA D-57");
+        assert_eq!(net[1].to_pay, dec(785));
+        assert_eq!(net[2].advance_credit, dec(50));
+        assert_eq!(net[2].to_pay, dec(69));
     }
 
     #[test]

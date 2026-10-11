@@ -1071,6 +1071,9 @@ async fn load_patient_account_statement(
                     order_id: row
                         .try_get::<Option<Uuid>, _>("order_id")
                         .unwrap_or_default(),
+                    recipient: row
+                        .try_get::<Option<String>, _>("recipient_identity")
+                        .unwrap_or_default(),
                     is_advance: invoice_type == "advance",
                     due,
                     advance_available,

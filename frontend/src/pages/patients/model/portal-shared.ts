@@ -248,6 +248,23 @@ export type PortalAccountStatementItem = {
   due_date?: string | null;
 };
 
+/**
+ * The "open / available" figure of a statement row: what the document still
+ * asks for, or for a paid advance its money not used yet. An unpaid advance
+ * invoice asks for its amount (QA D-50: it showed 0,00 while the summary
+ * asked for 1.000,00).
+ */
+export function portalStatementOpenAmount(item: PortalAccountStatementItem): {
+  kind: "due" | "available";
+  amount: string;
+} {
+  const due = Number(item.amount_due ?? 0);
+  if (item.kind === "prepayment" && !(due > 0)) {
+    return { kind: "available", amount: item.prepayment_available ?? "0" };
+  }
+  return { kind: "due", amount: item.amount_due ?? "0" };
+}
+
 export type PortalAccountMovement = {
   id: string;
   kind:

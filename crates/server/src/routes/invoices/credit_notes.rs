@@ -495,6 +495,82 @@ fn plan_vat_rate(
     ))
 }
 
+/// A selection that credits `amount` (gross) over all open lines of an
+/// invoice in proportion to what each line still has, whatever its VAT rate:
+/// the VAT split of the credit keeps the invoice's own split (used to close
+/// the rest of an advance invoice). Lines are credited in full when `amount`
+/// covers everything still open; an invoice without lines (early advance
+/// invoices) takes a plain amount. `None` when nothing is open.
+pub(crate) fn proportional_selection(
+    lines: &[CreditableLine],
+    amount: Decimal,
+) -> Option<CreditSelection> {
+    let amount = amount.round_cents();
+    if amount <= Decimal::ZERO {
+        return None;
+    }
+    if lines.is_empty() {
+        return Some(CreditSelection::Amount(amount));
+    }
+    let open = lines
+        .iter()
+        .filter(|line| line.remaining_gross() > Decimal::ZERO)
+        .collect::<Vec<_>>();
+    let open_total: Decimal = open.iter().map(|line| line.remaining_gross()).sum();
+    if open.is_empty() || open_total <= Decimal::ZERO {
+        return None;
+    }
+    if amount >= open_total {
+        return Some(CreditSelection::Lines(
+            open.iter().map(|line| (line.index, None)).collect(),
+        ));
+    }
+    let mut shares = open
+        .iter()
+        .map(|line| share(amount, line.remaining_gross(), open_total).min(line.remaining_gross()))
+        .collect::<Vec<_>>();
+    let cent = Decimal::new(1, 2);
+    let mut left = amount - shares.iter().copied().sum::<Decimal>();
+    while left != Decimal::ZERO {
+        let before = left;
+        for (position, line) in open.iter().enumerate() {
+            if left > Decimal::ZERO && shares[position] < line.remaining_gross() {
+                let step = cent
+                    .min(left)
+                    .min(line.remaining_gross() - shares[position]);
+                shares[position] += step;
+                left -= step;
+            } else if left < Decimal::ZERO && shares[position] > Decimal::ZERO {
+                let step = cent.min(-left).min(shares[position]);
+                shares[position] -= step;
+                left += step;
+            }
+            if left == Decimal::ZERO {
+                break;
+            }
+        }
+        if left == before {
+            return None;
+        }
+    }
+    let selected = open
+        .iter()
+        .zip(shares)
+        .filter(|(_, amount)| *amount > Decimal::ZERO)
+        .map(|(line, amount)| {
+            (
+                line.index,
+                if amount == line.remaining_gross() {
+                    None
+                } else {
+                    Some(amount)
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    (!selected.is_empty()).then_some(CreditSelection::Lines(selected))
+}
+
 /// Credited lines, VAT and totals for `selection`.
 pub(crate) fn plan_credit_note(
     lines: &[CreditableLine],
@@ -808,6 +884,35 @@ mod tests {
                 },
             ),
             Err(CreditPlanError::VatRateExceeded)
+        );
+    }
+
+    #[test]
+    fn proportional_selection_keeps_the_invoice_vat_split() {
+        // An advance of 1000: 518.49 at 19 % and 481.51 pass-through at 0 %.
+        let advance = json!([
+            {"description": "Anzahlung 19 %", "vat_rate": "19", "line_net": "435.71", "line_vat": "82.78", "line_gross": "518.49"},
+            {"description": "Anzahlung 0 %", "vat_rate": "0", "line_net": "481.51", "line_vat": "0", "line_gross": "481.51"}
+        ]);
+        let lines = creditable_lines(&advance, &[]);
+        let selection = proportional_selection(&lines, dec("400")).unwrap();
+        let plan = plan_credit_note(&lines, &selection).unwrap();
+        assert_eq!(plan.gross, dec("400"));
+        assert_eq!(plan.lines.len(), 2);
+        assert_eq!(plan.lines[0].gross, dec("207.40"));
+        assert_eq!(plan.lines[1].gross, dec("192.60"));
+        assert_eq!(plan.lines[1].vat, Decimal::ZERO);
+
+        // The whole rest credits every open line in full.
+        assert_eq!(
+            proportional_selection(&lines, dec("1000")),
+            Some(CreditSelection::Lines(vec![(0, None), (1, None)]))
+        );
+        assert_eq!(proportional_selection(&lines, Decimal::ZERO), None);
+        // Early advance invoices without lines take a plain amount.
+        assert_eq!(
+            proportional_selection(&[], dec("12.5")),
+            Some(CreditSelection::Amount(dec("12.50")))
         );
     }
 

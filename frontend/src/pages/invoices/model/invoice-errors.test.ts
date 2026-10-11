@@ -62,10 +62,41 @@ describe("localizeInvoiceError", () => {
     ).toContain("Kostenübernehmer");
     expect(
       invoiceReleaseWarningText({ code: "advance_recipient_mismatch" }, "ru"),
-    ).toContain("авансы того же получателя");
+    ).toContain("закрывает именно эти авансы");
+    expect(
+      invoiceReleaseWarningText({ code: "services_not_delivered" }, "de"),
+    ).toContain("Leistung noch nicht erbracht");
     expect(
       localizeInvoiceError({ code: "payer_email_invalid", body: {} }, "de", "x"),
     ).toBe("Die E-Mail-Adresse des Zahlers ist ungültig.");
+  });
+
+  it("translates payment and credit-note refusals instead of showing English (QA D-07, D-63)", () => {
+    const overpaid = {
+      code: "payment_exceeds_balance",
+      body: {
+        error: "payment_exceeds_balance",
+        message:
+          "Payment exceeds invoice balance; confirm the overpayment to record the excess as patient credit",
+      },
+    };
+    expect(localizeInvoiceError(overpaid, "ru", "x")).toContain("переплату пациента");
+    expect(
+      localizeInvoiceError(new Error("Credit note violates invoice balance rules"), "de", "x"),
+    ).toContain("Gutschrift");
+    expect(
+      localizeInvoiceError({ body: { error: "credit_note_below_applied_advance" } }, "ru", "x"),
+    ).toContain("зачтён в финальный счёт");
+    expect(
+      localizeInvoiceError(
+        { body: { error: "prepayment_recipient_mismatch", confirm_field: "confirm_recipient_mismatch" } },
+        "ru",
+        "x",
+      ),
+    ).toContain("другому получателю");
+    expect(localizeInvoiceError(new Error("Refund exceeds the refundable cash credit"), "ru", "x")).toBe(
+      "Сумма возврата больше доступной к возврату переплаты.",
+    );
   });
 
   it("turns reload hints into a localized reload request", () => {

@@ -531,7 +531,10 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
     .await
     .unwrap();
 
-    let (status, _) = request_json(
+    // QA D-64: crediting the re-billed cost unbills it for the credited part
+    // (the allocation is reversed and the rest re-allocated) instead of
+    // refusing the credit note the card offered.
+    let (status, credit) = request_json(
         &ctx.app,
         "POST",
         &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
@@ -539,12 +542,31 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
         Some(json!({
             "request_id": Uuid::new_v4(),
             "amount_gross": 1,
-            "reason": "Would undercut reconciliation",
+            "reason": "Supplier cost partly refunded",
             "issued_on": gmed_server::app_time::today().to_string()
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+    assert_eq!(credit["reversed_supplier_cost_gross"], "1");
+    let active: Vec<Decimal> = sqlx::query_scalar(
+        r#"SELECT amount_gross FROM external_invoice_patient_invoice_allocations
+           WHERE patient_invoice_id = $1 AND reversed_at IS NULL"#,
+    )
+    .bind(invoice_id)
+    .fetch_all(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(active, vec![Decimal::new(19, 0)]);
+    let reversed: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM external_invoice_patient_invoice_allocations
+           WHERE patient_invoice_id = $1 AND reversed_at IS NOT NULL"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(reversed, 1);
 
     let payer_change = sqlx::query(
         "UPDATE external_invoices SET status = 'paid', paid_by = 'patient' WHERE id = $1",
@@ -560,8 +582,13 @@ async fn credit_note_and_allocation_caps_preserve_adjusted_receivables() {
     );
 }
 
+/// QA D-63: the patient prepaid, the final invoice deducted the advance, and
+/// a service is dropped afterwards. The credit note releases the advance
+/// money beyond the corrected final invoice and closes that rest of the
+/// advance with its own credit note, so the money is refundable. Crediting
+/// the advance itself below what the final invoice uses stays refused.
 #[tokio::test]
-async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
+async fn credit_note_below_the_applied_advance_releases_it_and_makes_it_refundable() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {
         return;
     };
@@ -577,8 +604,10 @@ async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
                 order_id, patient_id, invoice_number, invoice_type, status,
                 issued_at, total_net, total_vat, total_gross, paid_amount,
                 line_items, portal_visible, hide_amounts_from_patient, created_by
-           ) VALUES ($1, $2, $3, 'advance', 'paid', now() - interval '5 days',
-                     100, 0, 100, 100, '[]', true, false, $4)
+           ) VALUES ($1, $2, $3, 'advance', 'sent', now() - interval '6 days',
+                     84.03, 15.97, 100, 0,
+                     '[{"description":"Anzahlung","quantity":"1","line_net":"84.03","line_vat":"15.97","line_gross":"100"}]',
+                     true, false, $4)
            RETURNING id"#,
     )
     .bind(order_id)
@@ -588,35 +617,93 @@ async fn credit_note_requires_prepayment_allocations_to_be_released_first() {
     .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    sqlx::query(
-        r#"INSERT INTO invoice_prepayment_allocations (
-                advance_invoice_id, target_invoice_id, amount_gross, created_by
-           ) VALUES ($1, $2, 60, $3)"#,
+    let ceo = auth_header(ctx.admin_id, "ceo");
+    let today = gmed_server::app_time::today().to_string();
+
+    // The paid advance settles the released final invoice at once.
+    let (status, payment) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_invoice_id}/payments"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 100,
+            "payment_method": "bank_transfer",
+            "payment_reference": format!("ADV-PAY-{tag}"),
+            "received_on": today
+        })),
     )
-    .bind(advance_invoice_id)
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{payment:?}");
+    let (_, target) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{target_invoice_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(target["prepayment_applied_amount"], "100", "{target}");
+
+    // The advance cannot be credited below what the final invoice uses.
+    let (status, refused) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{advance_invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 50,
+            "reason": "Would undercut applied prepayment",
+            "issued_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "credit_note_below_applied_advance");
+
+    let (status, credit) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{target_invoice_id}/credit-notes"),
+        &ceo,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": 50,
+            "reason": "Leistung entfällt",
+            "issued_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credit}");
+    assert_eq!(credit["released_prepayment_gross"], "50");
+    assert_eq!(credit["invoice"]["prepayment_applied_amount"], "50");
+    assert_eq!(credit["invoice"]["balance_due"], "0");
+    let follow_ups = credit["advance_credit_notes"].as_array().unwrap();
+    assert_eq!(follow_ups.len(), 1, "{credit}");
+    assert_eq!(follow_ups[0]["invoice_id"], advance_invoice_id.to_string());
+    assert_eq!(follow_ups[0]["amount_gross"], "50");
+
+    let (_, advance) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/invoices/{advance_invoice_id}"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(advance["credited_amount"], "50", "{advance}");
+    assert_eq!(advance["balance_due"], "0");
+    assert_eq!(advance["refundable_cash_amount"], "50");
+    let released: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_prepayment_allocation_releases WHERE target_invoice_id = $1",
+    )
     .bind(target_invoice_id)
-    .bind(ctx.admin_id)
-    .execute(&ctx.pool)
+    .fetch_one(&ctx.pool)
     .await
     .unwrap();
-    let ceo = auth_header(ctx.admin_id, "ceo");
-
-    for invoice_id in [advance_invoice_id, target_invoice_id] {
-        let (status, _) = request_json(
-            &ctx.app,
-            "POST",
-            &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
-            &ceo,
-            Some(json!({
-                "request_id": Uuid::new_v4(),
-                "amount_gross": 50,
-                "reason": "Would undercut applied prepayment",
-                "issued_on": gmed_server::app_time::today().to_string()
-            })),
-        )
-        .await;
-        assert_eq!(status, StatusCode::CONFLICT);
-    }
+    assert_eq!(released, 1, "the released allocation stays in the history");
 }
 
 #[tokio::test]

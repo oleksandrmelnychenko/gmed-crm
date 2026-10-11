@@ -1022,6 +1022,20 @@ pub(crate) async fn draft_release_checks(
             "advance_invoice_numbers": evaluation.mismatched_advances,
         }));
     }
+    // A settlement invoice for services not rendered yet: allowed, printed as
+    // "Leistung noch nicht erbracht" (§ 14 Abs. 4 Nr. 6 UStG); billing sees it
+    // before releasing (QA D-11). No confirmation is needed.
+    let (invoice_type, line_items) = sqlx::query_as::<_, (String, Value)>(
+        "SELECT invoice_type, line_items FROM invoices WHERE id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if invoice_type != "advance"
+        && super::document::bills_services_not_rendered(conn, &line_items).await?
+    {
+        warnings.push(json!({ "code": "services_not_delivered" }));
+    }
     Ok(json!({
         "warnings": warnings,
         "contracting_party": party_summary(&evaluation.party),

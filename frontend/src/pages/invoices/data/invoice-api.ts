@@ -190,6 +190,18 @@ export function applyInvoicePrepayment(invoiceId: string, payload: JsonPayload) 
   );
 }
 
+/**
+ * Closes the rest of an advance invoice that a released final invoice
+ * settles with a credit note (unpaid part dropped, unused paid money
+ * becomes the patient's refundable credit).
+ */
+export function closeAdvanceRest(invoiceId: string) {
+  return postJson<{ document_number: string; amount_gross: string; invoice: InvoiceItem }>(
+    `/invoices/${invoiceId}/advance-rest`,
+    {},
+  );
+}
+
 export function releaseInvoicePrepayment(
   invoiceId: string,
   allocationId: string,

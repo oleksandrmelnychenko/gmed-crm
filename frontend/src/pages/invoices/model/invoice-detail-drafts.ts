@@ -13,6 +13,8 @@ export type InvoicePaymentDraft = {
   paymentReference: string;
   receivedOn: string;
   note: string;
+  /** Remitter, when not the invoice recipient (e.g. a relative paid). */
+  payerName: string;
 };
 
 export type InvoiceCreditNoteDraft = {
@@ -60,6 +62,7 @@ export function newPaymentDraft(balanceDue: unknown, today = isoToday()): Invoic
     paymentReference: "",
     receivedOn: today,
     note: "",
+    payerName: "",
   };
 }
 

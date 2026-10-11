@@ -47,6 +47,7 @@ import {
   downloadPortalInvoicePdf,
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
+  portalStatementOpenAmount,
   portalStatusLabel,
 } from "@/pages/patients/model/portal-shared";
 import type {
@@ -586,7 +587,7 @@ function usePatientInvoicesPageContent() {
                         {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(Number(item.cash_paid ?? 0) + Number(item.prepayment_applied ?? 0), accountStatement.currency) : hidden}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
-                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(item.kind === "prepayment" ? item.prepayment_available : item.amount_due, accountStatement.currency) : hidden}
+                        {isCreditAdjustment ? "—" : item.amounts_visible ? formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency) : hidden}
                       </td>
                     </tr>
                   );
@@ -637,8 +638,8 @@ function usePatientInvoicesPageContent() {
                   /> : null}
                   {!isCreditAdjustment ? <InfoRow
                     className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)}
-                    label={item.kind === "prepayment" ? (lang === "de" ? "Noch verfügbar" : "Ещё доступно") : (lang === "de" ? "Noch zu zahlen" : "Требуется доплатить")}
-                    value={item.amounts_visible ? formatPortalCurrency(item.kind === "prepayment" ? item.prepayment_available : item.amount_due, accountStatement.currency) : t.portal_invoices_hidden}
+                    label={portalStatementOpenAmount(item).kind === "available" ? (lang === "de" ? "Noch verfügbar" : "Ещё доступно") : (lang === "de" ? "Noch zu zahlen" : "Требуется доплатить")}
+                    value={item.amounts_visible ? formatPortalCurrency(portalStatementOpenAmount(item).amount, accountStatement.currency) : t.portal_invoices_hidden}
                   /> : null}
                 </div>
               </ListItem>

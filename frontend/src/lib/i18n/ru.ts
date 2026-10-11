@@ -1324,7 +1324,7 @@ export const ru = {
   invoices_workspace_create_invoice_description: "Создайте авансовый, промежуточный или финальный счёт из снимка предложения.",
   invoices_workspace_selected_quote_snapshot: "Выбранный снимок предложения",
   invoices_workspace_choose_quote: "Выберите предложение",
-  invoices_workspace_notes: "Заметки",
+  invoices_workspace_notes: "Примечание для клиента (печатается в счёте)",
   invoices_workspace_billing_note_placeholder: "Примечание для бухгалтерии или инструкция по оплате",
   invoices_workspace_detail_sheet_description: "Суммы, статус оплаты и снимок позиций для выбранного счёта.",
   invoices_workspace_no_invoice_selected: "Счёт не выбран",

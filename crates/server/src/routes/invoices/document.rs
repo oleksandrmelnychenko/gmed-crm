@@ -365,6 +365,34 @@ pub(super) async fn load_invoice_service_period(
         .zip(supplier_days.iter().max().copied()))
 }
 
+/// Whether the invoice bills order services that were neither delivered nor
+/// approved yet (a final invoice ahead of the treatment).
+pub(crate) async fn bills_services_not_rendered(
+    conn: &mut PgConnection,
+    line_items: &Value,
+) -> Result<bool, sqlx::Error> {
+    let source_line_ids = super::extract_source_line_ids(line_items);
+    if source_line_ids.is_empty() {
+        return Ok(false);
+    }
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM order_leistungen service
+               WHERE service.id = ANY($1)
+                 AND (
+                      service.status = 'planned'
+                      OR (service.status = 'invoiced'
+                          AND service.delivered_at IS NULL
+                          AND service.approved_at IS NULL)
+                 )
+           )"#,
+    )
+    .bind(&source_line_ids)
+    .fetch_one(conn)
+    .await
+}
+
 /// How a VAT breakdown row is taxed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum VatGroupKind {

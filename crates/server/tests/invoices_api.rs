@@ -2258,6 +2258,43 @@ async fn new_quote_supersedes_older_open_quotes_and_keeps_their_advance_creditab
     assert_eq!(status_of(&first_quote_id), "superseded");
     assert_eq!(status_of(&second_quote_id), "draft");
     assert_eq!(status_of(third_quote["id"].as_str().unwrap()), "draft");
+
+    // Cash belongs to the quote whose invoices received it (QA D-23): the new
+    // quote has none, the advance money moved with its allocation to the
+    // quote of the final invoice.
+    assert_eq!(third_quote["paid_amount"], "0", "{third_quote}");
+    assert!(third_quote["paid_at"].is_null(), "{third_quote}");
+    for (quote_id, paid) in [(&first_quote_id, "0"), (&second_quote_id, "100")] {
+        let (status, quote) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/quotes/{quote_id}"),
+            &billing_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{quote}");
+        assert_eq!(quote["paid_amount"], paid, "{quote}");
+    }
+
+    // The final invoice bills the whole service: what the superseded quote's
+    // advance asked for beyond the 100 paid is closed by a credit note
+    // (QA D-56), so the patient is asked only once.
+    let (status, advance_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{advance_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{advance_detail}");
+    assert_eq!(advance_detail["balance_due"], "0", "{advance_detail}");
+    assert_eq!(advance_detail["status"], "paid", "{advance_detail}");
+    assert_eq!(
+        advance_detail["adjusted_total_gross"], "100",
+        "{advance_detail}"
+    );
 }
 
 fn line_index_by_description(line_items: &Value, description: &str) -> usize {

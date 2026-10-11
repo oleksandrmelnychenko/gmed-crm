@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   confirmDirtyDismiss,
   isAuxiliaryOverlayEscape,
+  isCancelDismissControl,
   isInternalOverlayInteractionEvent,
   isOverlayDirty,
   isOverlayDismissReason,
@@ -12,6 +13,36 @@ import {
 describe("dismissal guard", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+  })
+
+  it("leaves the cancel button of an inline form to that form (QA D-08)", () => {
+    class FakeElement {
+      attributes: Record<string, string>
+      textContent: string
+      constructor(attributes: Record<string, string>, textContent: string) {
+        this.attributes = attributes
+        this.textContent = textContent
+      }
+      closest() {
+        return this
+      }
+      getAttribute(name: string) {
+        return this.attributes[name] ?? null
+      }
+      hasAttribute(name: string) {
+        return name in this.attributes
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+    vi.stubGlobal("HTMLElement", FakeElement)
+
+    expect(isCancelDismissControl(new FakeElement({}, "Отмена") as unknown as EventTarget, "Отмена")).toBe(true)
+    expect(
+      isCancelDismissControl(
+        new FakeElement({ "data-inline-cancel": "" }, "Отмена") as unknown as EventTarget,
+        "Отмена",
+      ),
+    ).toBe(false)
   })
 
   it("asks for confirmation only when a dirty surface is being dismissed", () => {

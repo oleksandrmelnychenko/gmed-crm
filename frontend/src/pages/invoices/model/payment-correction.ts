@@ -19,6 +19,8 @@ export type PaymentCorrectionForm = {
   receivedOn: string;
   note: string;
   reason: string;
+  /** Remitter when not the invoice recipient; empty clears it. */
+  payerName?: string;
 };
 
 export type PaymentCorrectionProblem =
@@ -61,7 +63,8 @@ export function paymentCorrectionProblem(
   payment: Pick<
     InvoicePaymentTransaction,
     "amount_gross" | "payment_method" | "payment_reference" | "received_on" | "note"
-  >,
+  > &
+    Partial<Pick<InvoicePaymentTransaction, "payer_name">>,
 ): PaymentCorrectionProblem | null {
   const amount = Number(form.amountGross);
   if (!Number.isFinite(amount) || amount <= 0) return "invalid_amount";
@@ -71,7 +74,8 @@ export function paymentCorrectionProblem(
     form.paymentMethod === payment.payment_method &&
     form.paymentReference.trim() === (payment.payment_reference ?? "").trim() &&
     form.receivedOn === payment.received_on &&
-    form.note.trim() === (payment.note ?? "").trim();
+    form.note.trim() === (payment.note ?? "").trim() &&
+    (form.payerName ?? "").trim() === (payment.payer_name ?? "").trim();
   if (unchanged) return "unchanged";
   if (!form.reason.trim()) return "missing_reason";
   return null;
@@ -88,5 +92,6 @@ export function buildPaymentCorrectionPayload(form: PaymentCorrectionForm, maxAm
     reason: form.reason.trim(),
     // The form shows the excess before saving; saving confirms it.
     accept_overpayment: paymentCorrectionOverpayment(form, maxAmount) > 0,
+    ...(form.payerName === undefined ? {} : { payer_name: form.payerName.trim() }),
   };
 }

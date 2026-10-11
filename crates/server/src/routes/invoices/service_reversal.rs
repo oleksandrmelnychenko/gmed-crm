@@ -57,6 +57,11 @@ pub(crate) struct InvoiceCredit {
     pub line_indexes: Vec<usize>,
     pub amount_gross: Decimal,
     pub currency: String,
+    /// Advance money credited into the invoice that the credit note releases
+    /// (it becomes the patient's refundable credit on the advance).
+    pub prepayment_released_gross: Decimal,
+    /// Re-billed supplier costs the credit note unbills.
+    pub supplier_cost_released_gross: Decimal,
 }
 
 /// What cancelling a service involves, read without changing anything.
@@ -107,6 +112,12 @@ impl ServiceReversalPreview {
             "draft_invoice_ids": self.draft_invoice_ids,
             "requires_credit_note": self.needs_credit_note(),
             "credit_total_gross": decimal_to_string(self.credit_total()),
+            "prepayment_released_gross": decimal_to_string(
+                self.credits.iter().map(|credit| credit.prepayment_released_gross).sum::<Decimal>()
+            ),
+            "supplier_cost_released_gross": decimal_to_string(
+                self.credits.iter().map(|credit| credit.supplier_cost_released_gross).sum::<Decimal>()
+            ),
             "credit_notes": self
                 .credits
                 .iter()
@@ -116,6 +127,8 @@ impl ServiceReversalPreview {
                     "line_indexes": credit.line_indexes,
                     "amount_gross": decimal_to_string(credit.amount_gross),
                     "currency": credit.currency,
+                    "prepayment_released_gross": decimal_to_string(credit.prepayment_released_gross),
+                    "supplier_cost_released_gross": decimal_to_string(credit.supplier_cost_released_gross),
                 }))
                 .collect::<Vec<_>>(),
             "blocked_reason": blocked_reason,
@@ -248,12 +261,16 @@ async fn plan(
             .filter_map(|index| creditable.get(*index))
             .map(|line| line.remaining_gross())
             .sum();
+        let (prepayment_released_gross, supplier_cost_released_gross) =
+            super::advance_settlement::credit_room_needed(conn, &context, amount_gross).await?;
         preview.credits.push(InvoiceCredit {
             invoice_id,
             invoice_number: context.invoice_number.clone(),
             line_indexes: open,
             amount_gross,
             currency: context.currency.clone(),
+            prepayment_released_gross,
+            supplier_cost_released_gross,
         });
         contexts.push(context);
     }
@@ -377,21 +394,18 @@ impl ServiceReversal {
         .await;
     }
 
+    /// Every credit note the cancellation issued: those of the invoices that
+    /// billed the service, then those closing the rest of advances whose
+    /// money they released.
     pub fn credit_notes_json(&self) -> Vec<Value> {
         self.credit_notes
             .iter()
-            .map(|credit| {
-                json!({
-                    "credit_note_transaction_id": credit.id,
-                    "document_number": credit.document_number,
-                    "invoice_id": credit.invoice_id,
-                    "invoice_number": credit.invoice_number,
-                    "amount_net": decimal_to_string(credit.net),
-                    "amount_vat": decimal_to_string(credit.vat),
-                    "amount_gross": decimal_to_string(credit.gross),
-                    "currency": credit.currency,
-                })
-            })
+            .map(IssuedCreditNote::summary_json)
+            .chain(
+                self.credit_notes
+                    .iter()
+                    .flat_map(IssuedCreditNote::follow_ups_json),
+            )
             .collect()
     }
 

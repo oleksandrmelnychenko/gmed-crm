@@ -107,6 +107,234 @@ const EXACT: Record<string, Pair> = {
     "Keine Berechtigung für diese Aktion.",
     "Недостаточно прав для этого действия.",
   ],
+  // Payments, refunds, corrections (QA 2026-10-11: no raw English 409/422).
+  "payment exceeds invoice balance": [
+    "Der Betrag übersteigt den offenen Betrag der Rechnung. Den Überschuss als Guthaben bestätigen.",
+    "Сумма больше остатка по счёту. Подтвердите излишек как переплату пациента.",
+  ],
+  "payment was already reversed": [
+    "Diese Zahlung wurde bereits storniert.",
+    "Этот платёж уже сторнирован.",
+  ],
+  "refund was already reversed": [
+    "Diese Erstattung wurde bereits storniert.",
+    "Этот возврат уже сторнирован.",
+  ],
+  "only a payment can be corrected": [
+    "Nur ein Zahlungseingang kann korrigiert werden.",
+    "Исправить можно только поступление оплаты.",
+  ],
+  "only a payment can be reversed": [
+    "Nur ein Zahlungseingang kann storniert werden.",
+    "Сторнировать можно только поступление оплаты.",
+  ],
+  "only a refund can be reversed": [
+    "Nur eine Erstattung kann storniert werden.",
+    "Сторнировать можно только возврат.",
+  ],
+  "only a credit note can be reversed": [
+    "Nur eine Gutschrift kann storniert werden.",
+    "Сторнировать можно только кредит-ноту.",
+  ],
+  "correction does not change the payment": [
+    "Die Korrektur ändert nichts an der Zahlung.",
+    "Исправление ничего не меняет в платеже.",
+  ],
+  "correction reason is required": [
+    "Bitte den Grund der Korrektur angeben.",
+    "Укажите причину исправления.",
+  ],
+  "imported opening balances cannot be corrected; reverse them instead": [
+    "Importierte Anfangsbestände werden nicht korrigiert, sondern storniert.",
+    "Импортированный начальный остаток не исправляется — сторнируйте его.",
+  ],
+  "a credit transfer is corrected by reversing the transfer": [
+    "Eine Guthabenumbuchung wird durch Storno der Umbuchung korrigiert.",
+    "Перенос переплаты исправляется сторнированием переноса.",
+  ],
+  "this receipt is a credit transfer; reverse the transfer instead": [
+    "Dieser Eingang ist eine Guthabenumbuchung – bitte die Umbuchung stornieren.",
+    "Это поступление — перенос переплаты: сторнируйте перенос.",
+  ],
+  "this refund is a credit transfer; reverse the transfer instead": [
+    "Diese Erstattung ist eine Guthabenumbuchung – bitte die Umbuchung stornieren.",
+    "Этот возврат — перенос переплаты: сторнируйте перенос.",
+  ],
+  "applied advances must be released before this payment can be corrected": [
+    "Vor der Korrektur die angerechneten Vorauszahlungen dieser Anzahlung freigeben.",
+    "Перед исправлением снимите зачёт этого аванса в других счетах.",
+  ],
+  "refunds and applied advances must be reversed or released before this payment can be reduced": [
+    "Vor dem Verringern Erstattungen stornieren und angerechnete Vorauszahlungen freigeben.",
+    "Перед уменьшением платежа сторнируйте возвраты и снимите зачёт аванса.",
+  ],
+  "refunds and applied advances must be reversed or released before this payment can be reversed": [
+    "Vor dem Storno Erstattungen stornieren und angerechnete Vorauszahlungen freigeben.",
+    "Перед сторно платежа сторнируйте возвраты и снимите зачёт аванса.",
+  ],
+  "refunds and applied advances of the target invoice must be reversed first": [
+    "Zuerst Erstattungen und angerechnete Vorauszahlungen der Zielrechnung zurücknehmen.",
+    "Сначала сторнируйте возвраты и снимите зачёт аванса по целевому счёту.",
+  ],
+  "refund exceeds the refundable cash credit": [
+    "Die Erstattung übersteigt das erstattbare Guthaben.",
+    "Сумма возврата больше доступной к возврату переплаты.",
+  ],
+  "refunds require an active released invoice": [
+    "Erstattungen nur für eine ausgestellte, nicht stornierte Rechnung.",
+    "Возвраты записываются только по выпущенному неотменённому счёту.",
+  ],
+  "refund reason is required": ["Bitte den Grund der Erstattung angeben.", "Укажите причину возврата."],
+  "refund reversal reason is required": [
+    "Bitte den Grund für das Storno der Erstattung angeben.",
+    "Укажите причину сторно возврата.",
+  ],
+  "reversal reason is required": ["Bitte den Grund für das Storno angeben.", "Укажите причину сторно."],
+  "reversal date cannot precede the original payment": [
+    "Das Storno darf nicht vor dem Zahlungseingang liegen.",
+    "Дата сторно не может быть раньше даты платежа.",
+  ],
+  "reversal date cannot precede the refund date": [
+    "Das Storno darf nicht vor der Erstattung liegen.",
+    "Дата сторно не может быть раньше даты возврата.",
+  ],
+  "reversal date cannot precede the credit-note date": [
+    "Das Storno darf nicht vor der Gutschrift liegen.",
+    "Дата сторно не может быть раньше даты кредит-ноты.",
+  ],
+  "reversal date cannot precede the transfer": [
+    "Das Storno darf nicht vor der Umbuchung liegen.",
+    "Дата сторно не может быть раньше даты переноса.",
+  ],
+  "invalid payment amount": ["Ungültiger Betrag.", "Некорректная сумма."],
+  "payment amount must be greater than zero": [
+    "Der Betrag muss größer als null sein.",
+    "Сумма должна быть больше нуля.",
+  ],
+  "invalid payment date": [
+    "Ungültiges Eingangsdatum (nicht in der Zukunft).",
+    "Некорректная дата поступления (не может быть в будущем).",
+  ],
+  "invalid payment method": ["Ungültige Zahlungsart.", "Недопустимый способ оплаты."],
+  "invalid refund amount": ["Ungültiger Erstattungsbetrag.", "Некорректная сумма возврата."],
+  "refund amount must be greater than zero": [
+    "Der Erstattungsbetrag muss größer als null sein.",
+    "Сумма возврата должна быть больше нуля.",
+  ],
+  "invalid refund date": [
+    "Ungültiges Erstattungsdatum (nicht in der Zukunft).",
+    "Некорректная дата возврата (не может быть в будущем).",
+  ],
+  "invalid refund method": ["Ungültige Erstattungsart.", "Недопустимый способ возврата."],
+  "invalid reversal date": ["Ungültiges Stornodatum.", "Некорректная дата сторно."],
+  "invalid transfer amount": ["Ungültiger Umbuchungsbetrag.", "Некорректная сумма переноса."],
+  "transfer amount must be greater than zero": [
+    "Der Umbuchungsbetrag muss größer als null sein.",
+    "Сумма переноса должна быть больше нуля.",
+  ],
+  "credit can only be moved to another invoice": [
+    "Guthaben kann nur auf eine andere Rechnung umgebucht werden.",
+    "Переплату можно перенести только на другой счёт.",
+  ],
+  "credit can only be moved between invoices of the same patient and currency": [
+    "Guthaben nur zwischen Rechnungen desselben Patienten und derselben Währung umbuchen.",
+    "Переплату можно переносить только между счетами одного пациента в одной валюте.",
+  ],
+  "the moved credit is no longer on the target invoice": [
+    "Das umgebuchte Guthaben ist auf der Zielrechnung nicht mehr vorhanden.",
+    "Перенесённой переплаты на целевом счёте уже нет.",
+  ],
+  // Credit notes.
+  "credit note exceeds invoice total": [
+    "Die Gutschrift übersteigt den Rechnungsbetrag.",
+    "Кредит-нота больше суммы счёта.",
+  ],
+  "credit-note reason is required": [
+    "Bitte den Grund der Gutschrift angeben.",
+    "Укажите причину кредит-ноты.",
+  ],
+  "invalid credit-note date": [
+    "Ungültiges Datum der Gutschrift (nicht in der Zukunft).",
+    "Некорректная дата кредит-ноты (не может быть в будущем).",
+  ],
+  "invalid credit-note amount": ["Ungültiger Betrag der Gutschrift.", "Некорректная сумма кредит-ноты."],
+  "credit-note amount must be greater than zero": [
+    "Der Betrag der Gutschrift muss größer als null sein.",
+    "Сумма кредит-ноты должна быть больше нуля.",
+  ],
+  "select at least one invoice line to credit": [
+    "Bitte mindestens eine Rechnungsposition auswählen.",
+    "Выберите хотя бы одну позицию счёта.",
+  ],
+  "credit note exceeds the remaining amount of an invoice line": [
+    "Die Gutschrift übersteigt den Restbetrag einer Position.",
+    "Кредит-нота больше остатка позиции.",
+  ],
+  "credit note exceeds the remaining amount of this vat rate": [
+    "Die Gutschrift übersteigt den Restbetrag dieses Steuersatzes.",
+    "Кредит-нота больше остатка по этой ставке НДС.",
+  ],
+  "the invoice has several vat rates: select the credited lines or a vat rate": [
+    "Die Rechnung hat mehrere Steuersätze: Positionen oder einen Steuersatz wählen.",
+    "В счёте несколько ставок НДС: выберите позиции или ставку.",
+  ],
+  "the invoice is already fully credited": [
+    "Die Rechnung ist bereits vollständig gutgeschrieben.",
+    "Счёт уже полностью скорректирован кредит-нотами.",
+  ],
+  "credit-note request id was already used with different data": [
+    "Diese Gutschrift wurde bereits mit anderen Angaben gesendet. Seite neu laden.",
+    "Эта кредит-нота уже отправлена с другими данными. Обновите страницу.",
+  ],
+  // Prepayments.
+  "prepayments can only be applied between released invoices": [
+    "Vorauszahlungen nur zwischen ausgestellten Rechnungen anrechnen.",
+    "Зачитывать предоплату можно только между выпущенными счетами.",
+  ],
+  "prepayments require an invoice linked to an order": [
+    "Vorauszahlungen nur für Rechnungen mit Auftrag.",
+    "Предоплата зачитывается только в счёт, привязанный к заказу.",
+  ],
+  "prepayment amount must be greater than zero": [
+    "Der Betrag muss größer als null sein.",
+    "Сумма должна быть больше нуля.",
+  ],
+  "invalid prepayment amount": ["Ungültiger Betrag.", "Некорректная сумма."],
+  // Dunning and status.
+  "dunning is already blocked": ["Die Mahnsperre ist bereits aktiv.", "Блокировка напоминаний уже установлена."],
+  "dunning is not blocked": ["Es gibt keine aktive Mahnsperre.", "Активной блокировки напоминаний нет."],
+  "dunning is blocked for this invoice; clear the dunning block first": [
+    "Für diese Rechnung gilt eine Mahnsperre. Zuerst die Sperre aufheben.",
+    "Напоминания по счёту заблокированы. Сначала снимите блокировку.",
+  ],
+  "this dunning level already exists for this invoice": [
+    "Diese Mahnstufe gibt es für die Rechnung bereits.",
+    "Это напоминание по счёту уже есть.",
+  ],
+  "invoice is not eligible for dunning": [
+    "Für diese Rechnung ist keine Mahnung möglich.",
+    "По этому счёту напоминание невозможно.",
+  ],
+  "invoice must be sent before dunning starts": [
+    "Die Rechnung muss vor der ersten Mahnung ausgestellt sein.",
+    "Сначала выпустите счёт, затем отправляйте напоминание.",
+  ],
+  "invoice due date is required for dunning": [
+    "Für eine Mahnung braucht die Rechnung ein Fälligkeitsdatum.",
+    "Для напоминания у счёта должен быть срок оплаты.",
+  ],
+  "a reason of 3 to 1000 characters is required": [
+    "Bitte einen Grund mit 3 bis 1000 Zeichen angeben.",
+    "Укажите причину (от 3 до 1000 символов).",
+  ],
+  "payment status is derived from payment transactions and prepayments": [
+    "Der Zahlungsstatus ergibt sich aus Zahlungen und Vorauszahlungen und wird nicht manuell gesetzt.",
+    "Статус оплаты определяется по платежам и предоплатам и вручную не ставится.",
+  ],
+  "recorded payments must be reversed before cancellation": [
+    "Vor der Stornierung die erfassten Zahlungen stornieren.",
+    "Перед отменой сторнируйте записанные оплаты.",
+  ],
 };
 
 /** Machine-readable error codes of the payer and release checks. */
@@ -124,12 +352,40 @@ const CODES: Record<string, Pair> = {
     "Получатель счёта не является стороной договора. Отметьте плательщика как стороннего получателя счёта (Kostenübernehmer) или подтвердите выпуск.",
   ],
   advance_recipient_mismatch: [
-    "Anzahlungsrechnungen dieses Auftrags gingen an einen anderen Rechnungsempfänger. Verrechnet werden nur Anzahlungen desselben Empfängers – bitte bestätigen.",
-    "Авансовые счета по этому заказу выставлены другому получателю. Зачитываются только авансы того же получателя — подтвердите выпуск.",
+    "Anzahlungsrechnungen dieses Auftrags gingen an einen anderen Rechnungsempfänger. Mit der Bestätigung rechnet diese Schlussrechnung genau diese Anzahlungen ab: Gezahltes wird abgezogen, der offene Rest mit einer Gutschrift geschlossen. Spätere Anzahlungen anderer Empfänger bleiben unberührt.",
+    "Авансовые счета по этому заказу выставлены другому получателю. При подтверждении этот финальный счёт закрывает именно эти авансы: оплаченное зачитывается, неоплаченный остаток закрывается кредит-нотой. Последующие авансы других получателей не затрагиваются.",
   ],
   credit_transfer_recipient_mismatch: [
     "Die Rechnungen haben unterschiedliche Rechnungsempfänger. Guthaben nur nach Bestätigung umbuchen.",
     "У счетов разные получатели. Перенести переплату можно только после подтверждения.",
+  ],
+  prepayment_recipient_mismatch: [
+    "Die Anzahlungsrechnung ist an einen anderen Rechnungsempfänger adressiert. Das Geld eines Zahlers nur nach Bestätigung auf die Rechnung eines anderen anrechnen.",
+    "Авансовый счёт выставлен другому получателю. Зачесть деньги одного плательщика в счёт другого можно только после подтверждения.",
+  ],
+  services_not_delivered: [
+    "Die Rechnung enthält noch nicht erbrachte Leistungen. Auf der Rechnung steht dann „Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)“.",
+    "В счёте есть ещё не оказанные услуги. В счёте будет указано «Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)» — услуги ещё не оказаны.",
+  ],
+  payment_exceeds_balance: [
+    "Der Betrag übersteigt den offenen Betrag der Rechnung. Den Überschuss als Guthaben des Patienten bestätigen.",
+    "Сумма больше остатка по счёту. Подтвердите излишек как переплату пациента.",
+  ],
+  credit_note_balance_rules: [
+    "Die Gutschrift übersteigt den korrigierbaren Betrag der Rechnung.",
+    "Кредит-нота превышает сумму, которую можно скорректировать по счёту.",
+  ],
+  credit_note_below_applied_advance: [
+    "Diese Anzahlung ist in eine Schlussrechnung eingerechnet. Zuerst dort die angerechnete Vorauszahlung freigeben oder die Schlussrechnung per Gutschrift korrigieren.",
+    "Этот аванс зачтён в финальный счёт. Сначала снимите зачёт в финальном счёте или скорректируйте финальный счёт кредит-нотой.",
+  ],
+  advance_not_settled_by_final_invoice: [
+    "Noch keine ausgestellte Schlussrechnung rechnet diese Anzahlung ab.",
+    "Этот аванс ещё не закрыт выпущенным финальным счётом.",
+  ],
+  advance_rest_already_closed: [
+    "Die Anzahlungsrechnung hat keinen offenen Rest mehr.",
+    "У авансового счёта больше нет открытого остатка.",
   ],
   payer_email_invalid: [
     "Die E-Mail-Adresse des Zahlers ist ungültig.",

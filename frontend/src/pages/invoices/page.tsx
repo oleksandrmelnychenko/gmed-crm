@@ -85,6 +85,11 @@ import { invoiceCreationErrorMessage } from "./model/billing-release";
 import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
 import { buildPaymentCorrectionPayload, canCorrectPayment } from "./model/payment-correction";
 import {
+  creditNoteReleases,
+  invoiceListAmounts,
+  paymentCorrectionLimit,
+} from "./model/invoice-amounts";
+import {
   invoiceDetailHasUnsavedInput,
   newCreditNoteDraft,
   newPaymentDraft,
@@ -110,6 +115,7 @@ import {
 } from "./appearance/status-appearance";
 import {
   applyInvoicePrepayment,
+  closeAdvanceRest,
   createInvoiceCreditNote,
   createInvoicePayment,
   createInvoiceRefund,
@@ -987,6 +993,9 @@ function useStaffInvoicesPageContent() {
   const [prepaymentRequestId, setPrepaymentRequestId] = useState(() => crypto.randomUUID());
   const [prepaymentBusy, setPrepaymentBusy] = useState(false);
   const [prepaymentError, setPrepaymentError] = useState<string | null>(null);
+  const [prepaymentConfirmMismatch, setPrepaymentConfirmMismatch] = useState(false);
+  const [advanceRestBusy, setAdvanceRestBusy] = useState(false);
+  const [advanceRestError, setAdvanceRestError] = useState<string | null>(null);
   // What the page prefilled for the prepayment; only a change away from it is user input.
   const [prepaymentBaseline, setPrepaymentBaseline] = useState<InvoicePrepaymentDraft>({
     invoiceId: "",
@@ -1012,6 +1021,7 @@ function useStaffInvoicesPageContent() {
   );
   const [creditNoteBusy, setCreditNoteBusy] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
+  const [creditNoteNotice, setCreditNoteNotice] = useState<string | null>(null);
   const [reversingCreditNoteId, setReversingCreditNoteId] = useState("");
   const [creditNoteReversalReason, setCreditNoteReversalReason] = useState("");
   const [refundDraft, setRefundForm, resetRefundForm] = useDraftWithBaseline(() => newRefundDraft());
@@ -1081,7 +1091,13 @@ function useStaffInvoicesPageContent() {
     setPrepaymentBaseline(prefilled);
     setPrepaymentRequestId(crypto.randomUUID());
     setPrepaymentError(null);
+    setPrepaymentConfirmMismatch(false);
+    setAdvanceRestError(null);
   }, [detail?.id, detail?.available_prepayments]);
+
+  useEffect(() => {
+    setCreditNoteNotice(null);
+  }, [detail?.id]);
 
   useEffect(() => {
     // A prefill, not an edit: the open balance received today is the baseline.
@@ -1285,19 +1301,30 @@ function useStaffInvoicesPageContent() {
         width: 150,
         render: (row) => formatDate(row.due_date, locale, t.common_not_set),
       },
+      // Итого − Оплачено = Баланс on every row (QA D-33): the total after
+      // credit notes, paid including the advance money credited into it.
       {
         id: "paid_amount",
-        label: t.invoices_paid,
-        accessor: (row) => Number(row.paid_amount ?? 0),
+        label: lang === "de" ? "Bezahlt / angerechnet" : "Оплачено / зачтено",
+        accessor: (row) => invoiceListAmounts(row).settled,
         filterType: "number",
         group: "finance",
         sortable: true,
-        width: 140,
-        render: (row) => (
-          <span className="block text-right tabular-nums text-foreground">
-            {formatMoney(row.paid_amount, row.currency)}
-          </span>
-        ),
+        width: 150,
+        render: (row) => {
+          const amounts = invoiceListAmounts(row);
+          return (
+            <span className="block text-right tabular-nums text-foreground">
+              {formatMoney(amounts.settled, row.currency)}
+              {amounts.prepayment > 0 ? (
+                <span className="block text-xs text-muted-foreground">
+                  {lang === "de" ? "davon Vorauszahlung" : "в т.ч. предоплата"}{" "}
+                  {formatMoney(amounts.prepayment, row.currency)}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         id: "balance_due",
@@ -1318,22 +1345,37 @@ function useStaffInvoicesPageContent() {
                 {t.finance_invoice_amount_to_pay}: {formatMoney(row.amount_to_pay, row.currency)}
               </span>
             ) : null}
+            {invoiceListAmounts(row).credit > 0 ? (
+              <span className="block text-xs text-amber-700">
+                {lang === "de" ? "Guthaben" : "Переплата"}{" "}
+                {formatMoney(invoiceListAmounts(row).credit, row.currency)}
+              </span>
+            ) : null}
           </span>
         ),
       },
       {
         id: "total_gross",
         label: t.invoices_total,
-        accessor: (row) => Number(row.total_gross ?? 0),
+        accessor: (row) => invoiceListAmounts(row).total,
         filterType: "number",
         group: "finance",
         sortable: true,
         width: 150,
-        render: (row) => (
-          <span className="block text-right tabular-nums text-foreground">
-            {formatMoney(row.total_gross, row.currency)}
-          </span>
-        ),
+        render: (row) => {
+          const amounts = invoiceListAmounts(row);
+          return (
+            <span className="block text-right tabular-nums text-foreground">
+              {formatMoney(amounts.total, row.currency)}
+              {amounts.credited > 0 ? (
+                <span className="block text-xs text-muted-foreground">
+                  {formatMoney(amounts.issuedTotal, row.currency)} − {lang === "de" ? "Gutschriften" : "кредит-ноты"}{" "}
+                  {formatMoney(amounts.credited, row.currency)}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
   ];
   const accountingTableColumns: ColumnDef<AccountingEntry>[] = [
@@ -1850,6 +1892,13 @@ function useStaffInvoicesPageContent() {
 
   async function handleApplyPrepayment() {
     if (!detail || !prepaymentInvoiceId || Number(prepaymentAmount) <= 0) return;
+    const advance = detail.available_prepayments?.find(
+      (item) => item.invoice_id === prepaymentInvoiceId,
+    );
+    // Money of one debtor on another debtor's invoice only with this
+    // confirmation for the pair (QA D-57).
+    const otherRecipient = advance?.same_recipient === false;
+    if (otherRecipient && !prepaymentConfirmMismatch) return;
     setPrepaymentBusy(true);
     setPrepaymentError(null);
     try {
@@ -1857,14 +1906,30 @@ function useStaffInvoicesPageContent() {
         request_id: prepaymentRequestId,
         advance_invoice_id: prepaymentInvoiceId,
         amount_gross: Number(prepaymentAmount),
+        confirm_recipient_mismatch: otherRecipient && prepaymentConfirmMismatch,
       });
       setDetail(updated);
       setPrepaymentRequestId(crypto.randomUUID());
+      setPrepaymentConfirmMismatch(false);
       setReloadToken((current) => current + 1);
     } catch (error) {
       setPrepaymentError(localizeInvoiceError(error, lang, t.common_error));
     } finally {
       setPrepaymentBusy(false);
+    }
+  }
+
+  async function handleCloseAdvanceRest() {
+    if (!detail) return;
+    setAdvanceRestBusy(true);
+    setAdvanceRestError(null);
+    try {
+      await closeAdvanceRest(detail.id);
+      setReloadToken((current) => current + 1);
+    } catch (error) {
+      setAdvanceRestError(localizeInvoiceError(error, lang, t.common_error));
+    } finally {
+      setAdvanceRestBusy(false);
     }
   }
 
@@ -1880,6 +1945,7 @@ function useStaffInvoicesPageContent() {
         payment_reference: paymentForm.paymentReference.trim() || null,
         received_on: paymentForm.receivedOn,
         note: paymentForm.note.trim() || null,
+        payer_name: paymentForm.payerName.trim() || null,
         // The notice above the button showed the excess before this click.
         accept_overpayment: paymentOverpayment(paymentForm.amountGross, detail.balance_due) > 0,
       });
@@ -1937,14 +2003,29 @@ function useStaffInvoicesPageContent() {
     if (!detail || creditNotePreview.error || !creditNoteForm.reason.trim()) return;
     setCreditNoteBusy(true);
     setCreditNoteError(null);
+    setCreditNoteNotice(null);
     try {
-      await createInvoiceCreditNote(detail.id, {
+      const created = (await createInvoiceCreditNote(detail.id, {
         request_id: creditNoteForm.requestId,
         ...creditNoteSelectionPayload(detail.creditable_lines, creditNoteForm.selection),
         reason: creditNoteForm.reason.trim(),
         issued_on: creditNoteForm.issuedOn,
         portal_visible: creditNoteForm.portalVisible,
-      });
+      })) as {
+        advance_credit_notes?: { document_number: string; invoice_number: string | null; amount_gross: string }[];
+      } | null;
+      // Credit notes closing the rest of released advances (QA D-63).
+      const followUps = created?.advance_credit_notes ?? [];
+      if (followUps.length > 0) {
+        const listed = followUps
+          .map((credit) => `${credit.document_number} (${credit.invoice_number ?? "—"}, ${formatMoney(credit.amount_gross, detail.currency)})`)
+          .join(", ");
+        setCreditNoteNotice(
+          lang === "de"
+            ? `Zusätzlich ausgestellt: ${listed}. Das freigewordene Geld der Anzahlung ist erstattbares Guthaben des Patienten.`
+            : `Дополнительно выставлено: ${listed}. Освободившиеся деньги аванса — переплата пациента (к возврату).`,
+        );
+      }
       resetCreditNoteForm(newCreditNoteDraft());
       setReloadToken((current) => current + 1);
     } catch (error) {
@@ -2922,6 +3003,49 @@ function useStaffInvoicesPageContent() {
                       {text.paymentsDescription}
                     </p>
 
+                    {detail.invoice_type === "advance" && detail.advance_settlement ? (
+                      <ShellBanner tone="warning">
+                        {lang === "de"
+                          ? `Diese Anzahlung rechnet die Schlussrechnung ${detail.advance_settlement.final_invoice_number} ab. Neue Zahlungen bitte auf die Schlussrechnung buchen; hier gebucht werden sie Guthaben des Patienten.`
+                          : `Этот аванс закрыт финальным счётом ${detail.advance_settlement.final_invoice_number}. Новые оплаты записывайте на финальный счёт; записанные здесь, они станут переплатой пациента.`}
+                      </ShellBanner>
+                    ) : null}
+
+                    {(detail.payment_proofs?.length ?? 0) > 0 ? (
+                      <div className="space-y-2 rounded-lg border border-sky-200 bg-sky-50/60 p-3">
+                        <div className="text-sm font-semibold text-foreground">
+                          {lang === "de"
+                            ? "Zahlungsnachweise des Patienten"
+                            : "Подтверждения оплаты от пациента"}
+                        </div>
+                        {detail.payment_proofs?.map((proof) => (
+                          <div
+                            key={proof.id}
+                            className="flex flex-wrap items-center justify-between gap-2 text-xs"
+                          >
+                            <span className="min-w-0 break-words text-foreground">
+                              <FileText className="mr-1 inline size-3.5 text-sky-700" />
+                              {proof.auto_name || proof.original_filename || proof.id}
+                              {" · "}
+                              {formatDateTime(proof.uploaded_at, locale, t.common_not_set)}
+                              {proof.notes ? ` · ${proof.notes}` : ""}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 px-2 text-xs"
+                              onClick={() =>
+                                window.open(`/documents/${proof.id}`, "_blank", "noopener,noreferrer")
+                              }
+                            >
+                              {lang === "de" ? "Öffnen" : "Открыть"}
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
                     {/* Receipts are recorded also on settled invoices: money that
                         arrives twice becomes the patient's credit balance. */}
                     {access.canManage &&
@@ -2988,6 +3112,20 @@ function useStaffInvoicesPageContent() {
                               setPaymentForm((current) => ({
                                 ...current,
                                 paymentReference: event.target.value,
+                              }))
+                            }
+                            className={shellInputClassName}
+                          />
+                        </Field>
+                        <Field label={lang === "de" ? "Zahler (falls nicht der Rechnungsempfänger)" : "Плательщик (если не получатель счёта)"}>
+                          <Input
+                            value={paymentForm.payerName}
+                            maxLength={200}
+                            placeholder={detail.recipient?.name ?? ""}
+                            onChange={(event) =>
+                              setPaymentForm((current) => ({
+                                ...current,
+                                payerName: event.target.value,
                               }))
                             }
                             className={shellInputClassName}
@@ -3090,6 +3228,11 @@ function useStaffInvoicesPageContent() {
                                       ? ` · ${payment.payment_reference}`
                                       : ""}
                                   </div>
+                                  {payment.payer_name ? (
+                                    <div className="mt-1 text-xs text-foreground">
+                                      {lang === "de" ? "Zahler" : "Плательщик"}: {payment.payer_name}
+                                    </div>
+                                  ) : null}
                                   {payment.payment_method === CREDIT_TRANSFER_METHOD ? (
                                     <div className="mt-2 text-xs text-muted-foreground">
                                       {t.finance_payment_credit_transfer_from.replace(
@@ -3158,7 +3301,7 @@ function useStaffInvoicesPageContent() {
                                 <PaymentEditForm
                                   lang={lang}
                                   payment={payment}
-                                  maxAmount={Number(detail.balance_due ?? 0) + Number(payment.amount_gross ?? 0)}
+                                  maxAmount={paymentCorrectionLimit(detail, payment)}
                                   currency={detail.currency ?? "EUR"}
                                   methodLabels={text.paymentMethods}
                                   busy={paymentBusy}
@@ -3180,6 +3323,7 @@ function useStaffInvoicesPageContent() {
                                     <Button
                                       type="button"
                                       variant="outline"
+                                      data-inline-cancel=""
                                       onClick={() => {
                                         setReversingPaymentId("");
                                         setReversalNote("");
@@ -3222,7 +3366,29 @@ function useStaffInvoicesPageContent() {
                         onSubmit={() => void handleCreateCreditNote()}
                       />
                     ) : null}
+                    {(() => {
+                      // What the credit note releases besides the invoice
+                      // amount (QA D-63, D-64): shown before it is issued.
+                      if (!access.canManage || creditNotePreview.error) return null;
+                      const releases = creditNoteReleases(detail, creditNotePreview.gross);
+                      if (releases.prepayment <= 0 && releases.supplierCost <= 0) return null;
+                      return (
+                        <ShellBanner tone="warning">
+                          {releases.prepayment > 0
+                            ? lang === "de"
+                              ? `Die angerechnete Vorauszahlung sinkt um ${formatMoney(releases.prepayment, detail.currency)}: Die Anzahlung wird in dieser Höhe per Gutschrift geschlossen, das Geld wird erstattbares Guthaben des Patienten. `
+                              : `Зачтённая предоплата уменьшится на ${formatMoney(releases.prepayment, detail.currency)}: аванс будет закрыт кредит-нотой на эту сумму, деньги станут переплатой пациента (к возврату). `
+                            : ""}
+                          {releases.supplierCost > 0
+                            ? lang === "de"
+                              ? `Weiterberechnete Kosten über ${formatMoney(releases.supplierCost, detail.currency)} gelten danach wieder als nicht berechnet (Liste „Kosten zur Weiterberechnung“).`
+                              : `Перевыставленные расходы на ${formatMoney(releases.supplierCost, detail.currency)} снова станут невыставленными (список «Расходы для перевыставления»).`
+                            : ""}
+                        </ShellBanner>
+                      );
+                    })()}
                     {creditNoteError ? <ShellBanner tone="error">{creditNoteError}</ShellBanner> : null}
+                    {creditNoteNotice ? <ShellBanner tone="warning">{creditNoteNotice}</ShellBanner> : null}
                     {creditNoteTransactions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                         {t.finance_credit_note_empty}
@@ -3614,6 +3780,7 @@ function useStaffInvoicesPageContent() {
                                   (item) => item.invoice_id === invoiceId,
                                 );
                                 setPrepaymentInvoiceId(invoiceId);
+                                setPrepaymentConfirmMismatch(false);
                                 setPrepaymentAmount(
                                   advance
                                     ? cappedPrepaymentAmount(
@@ -3628,6 +3795,9 @@ function useStaffInvoicesPageContent() {
                               {detail.available_prepayments?.map((advance) => (
                                 <option key={advance.invoice_id} value={advance.invoice_id}>
                                   {advance.invoice_number} · {formatMoney(advance.available_amount, detail?.currency)}
+                                  {advance.same_recipient === false && advance.recipient_name
+                                    ? ` · ${advance.recipient_name}`
+                                    : ""}
                                 </option>
                               ))}
                             </NativeComboboxSelect>
@@ -3653,7 +3823,11 @@ function useStaffInvoicesPageContent() {
                             disabled={
                               prepaymentBusy ||
                               !prepaymentInvoiceId ||
-                              Number(prepaymentAmount) <= 0
+                              Number(prepaymentAmount) <= 0 ||
+                              (detail.available_prepayments?.find(
+                                (item) => item.invoice_id === prepaymentInvoiceId,
+                              )?.same_recipient === false &&
+                                !prepaymentConfirmMismatch)
                             }
                             onClick={() => void handleApplyPrepayment()}
                           >
@@ -3662,11 +3836,61 @@ function useStaffInvoicesPageContent() {
                             ) : null}
                             {text.applyPrepayment}
                           </Button>
+                          {detail.available_prepayments?.find(
+                            (item) => item.invoice_id === prepaymentInvoiceId,
+                          )?.same_recipient === false ? (
+                            <label className="flex items-start gap-2 text-xs text-amber-800 sm:col-span-3">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={prepaymentConfirmMismatch}
+                                onChange={(event) => setPrepaymentConfirmMismatch(event.target.checked)}
+                              />
+                              <span>
+                                {lang === "de"
+                                  ? "Die Anzahlung ist an einen anderen Rechnungsempfänger adressiert. Ich bestätige, das Geld dieses Zahlers auf diese Rechnung anzurechnen."
+                                  : "Аванс выставлен другому получателю счёта. Подтверждаю зачёт денег этого плательщика в этот счёт."}
+                              </span>
+                            </label>
+                          ) : null}
                         </div>
                       ) : null}
                       {prepaymentError ? (
                         <ShellBanner tone="error">{prepaymentError}</ShellBanner>
                       ) : null}
+                    </div>
+                  </SectionCard>
+                ) : null}
+
+                {detail.invoice_type === "advance" && detail.advance_settlement ? (
+                  <SectionCard title={lang === "de" ? "Abrechnung über die Schlussrechnung" : "Расчёт через финальный счёт"}>
+                    <div className="space-y-3 text-sm">
+                      <p className="text-muted-foreground">
+                        {lang === "de"
+                          ? `Die Schlussrechnung ${detail.advance_settlement.final_invoice_number} berechnet die Leistung und zieht ${formatMoney(detail.advance_settlement.applied_amount, detail.currency)} dieser Anzahlung ab. Weitere Zahlungen bitte auf die Schlussrechnung buchen (offen: ${formatMoney(detail.advance_settlement.final_balance_due, detail.currency)}).`
+                          : `Финальный счёт ${detail.advance_settlement.final_invoice_number} выставляет услуги и зачитывает ${formatMoney(detail.advance_settlement.applied_amount, detail.currency)} из этого аванса. Дальнейшие оплаты записывайте на финальный счёт (к оплате: ${formatMoney(detail.advance_settlement.final_balance_due, detail.currency)}).`}
+                      </p>
+                      {Number(detail.advance_settlement.open_rest ?? 0) > 0 ? (
+                        <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                          <p className="text-amber-900">
+                            {lang === "de"
+                              ? `Offener Rest dieser Anzahlung: ${formatMoney(detail.advance_settlement.open_rest, detail.currency)}${Number(detail.advance_settlement.unpaid_rest ?? 0) > 0 ? `, davon nicht bezahlt ${formatMoney(detail.advance_settlement.unpaid_rest, detail.currency)}` : ""}. Eine Gutschrift schließt ihn: Nicht Bezahltes wird nicht mehr verlangt, bezahltes, nicht angerechnetes Geld wird Guthaben des Patienten (Erstattung oder Umbuchung).`
+                              : `Открытый остаток аванса: ${formatMoney(detail.advance_settlement.open_rest, detail.currency)}${Number(detail.advance_settlement.unpaid_rest ?? 0) > 0 ? `, из них не оплачено ${formatMoney(detail.advance_settlement.unpaid_rest, detail.currency)}` : ""}. Кредит-нота закроет его: неоплаченное больше не требуется, оплаченная, но не зачтённая сумма станет переплатой пациента (к возврату или переносу).`}
+                          </p>
+                          {access.canManage ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={advanceRestBusy}
+                              onClick={() => void handleCloseAdvanceRest()}
+                            >
+                              {advanceRestBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+                              {lang === "de" ? "Rest per Gutschrift schließen" : "Закрыть остаток кредит-нотой"}
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {advanceRestError ? <ShellBanner tone="error">{advanceRestError}</ShellBanner> : null}
                     </div>
                   </SectionCard>
                 ) : null}
@@ -4563,6 +4787,7 @@ function useStaffInvoicesPageContent() {
                     }
                     disabled={!access.canManage}
                   />
+                  <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                 </Field>
               </div>
               <div className="flex justify-end">

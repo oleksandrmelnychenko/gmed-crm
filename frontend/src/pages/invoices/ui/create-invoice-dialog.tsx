@@ -313,6 +313,8 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                   <textarea rows={2} className={cn(textareaClass, "min-h-20")} value={form.notes}
                     onChange={(event) => onFormChange((current) => ({ ...current, notes: event.target.value }))}
                     placeholder={t.invoices_workspace_billing_note_placeholder} />
+                  {/* Printed on the issued, immutable invoice (QA D-62). */}
+                  <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                 </FormField>
               </fieldset>
 

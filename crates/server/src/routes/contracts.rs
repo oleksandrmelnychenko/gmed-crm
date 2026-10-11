@@ -396,8 +396,8 @@ pub async fn run_quote_expiry_once(state: &AppState) -> Result<QuoteExpiryRunSum
                  )
                RETURNING quote.order_id, quote.quote_number, previous.status AS previous_status,
                          quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
-                         order_recorded_cash_paid(quote.order_id) AS paid_amount,
-                         order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                         quote_recorded_cash_paid(quote.id) AS paid_amount,
+                         quote_recorded_cash_received_at(quote.id) AS paid_at,
                          quote.line_items, quote.notes"#,
         )
         .bind(quote_id)
@@ -909,8 +909,8 @@ pub(crate) async fn close_open_order_quotes_for_cancelled_order_tx(
              )
            RETURNING quote.id, quote.quote_number, previous.status AS previous_status,
                      quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
-                     order_recorded_cash_paid(quote.order_id) AS paid_amount,
-                     order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                     quote_recorded_cash_paid(quote.id) AS paid_amount,
+                     quote_recorded_cash_received_at(quote.id) AS paid_at,
                      quote.line_items, quote.notes"#,
     )
     .bind(order_id)
@@ -1004,8 +1004,8 @@ async fn supersede_open_order_quotes_tx(
              )
            RETURNING quote.id, quote.quote_number, previous.status AS previous_status,
                      quote.total_net, quote.total_vat, quote.total_gross, quote.valid_until,
-                     order_recorded_cash_paid(quote.order_id) AS paid_amount,
-                     order_recorded_cash_received_at(quote.order_id) AS paid_at,
+                     quote_recorded_cash_paid(quote.id) AS paid_amount,
+                     quote_recorded_cash_received_at(quote.id) AS paid_at,
                      quote.line_items, quote.notes"#,
     )
     .bind(order_id)
@@ -3489,7 +3489,7 @@ async fn load_quote_detail(
 ) -> Result<Option<Value>, axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
-                  q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
+                  q.status, q.valid_until, quote_recorded_cash_paid(q.id) AS paid_amount, quote_recorded_cash_received_at(q.id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM quote_line_invoiced_quantities(q.id) allocated
@@ -3610,7 +3610,7 @@ async fn list_quotes(
 
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
-                  q.status, q.valid_until, order_recorded_cash_paid(q.order_id) AS paid_amount, order_recorded_cash_received_at(q.order_id) AS paid_at, q.line_items, q.notes,
+                  q.status, q.valid_until, quote_recorded_cash_paid(q.id) AS paid_amount, quote_recorded_cash_received_at(q.id) AS paid_at, q.line_items, q.notes,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM quote_line_invoiced_quantities(q.id) allocated
@@ -3898,21 +3898,12 @@ async fn create_quote(
     }
 
     let totals = compute_quote_totals(&line_items);
-    // Cash is read from the journal, never carried from a mutable quote flag.
-    let (carried_paid_amount, carried_paid_at) =
-        match sqlx::query_as::<_, (Decimal, Option<DateTime<Utc>>)>(
-            "SELECT order_recorded_cash_paid($1), order_recorded_cash_received_at($1)",
-        )
-        .bind(order_id)
-        .fetch_one(&mut *tx)
-        .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                tracing::error!(%error, %order_id, "load recorded order cash");
-                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to create quote");
-            }
-        };
+    // Cash belongs to the quote whose invoices received it (read from the
+    // journals by `quote_recorded_cash_paid`); a new quote has none yet. The
+    // order's cash on a new quote made it look paid while the invoiced
+    // quote looked unpaid (QA D-23).
+    let (carried_paid_amount, carried_paid_at): (Decimal, Option<DateTime<Utc>>) =
+        (Decimal::ZERO, None);
     let seq: i64 = match sqlx::query_scalar("SELECT nextval('quote_number_seq')")
         .fetch_one(&mut *tx)
         .await
@@ -4528,7 +4519,7 @@ async fn update_quote_status(
                notes = COALESCE($3, notes)
            WHERE id = $1
            RETURNING order_id, quote_number, status, total_net, total_vat, total_gross,
-                     valid_until, order_recorded_cash_paid(order_id) AS paid_amount, order_recorded_cash_received_at(order_id) AS paid_at, line_items, notes"#,
+                     valid_until, quote_recorded_cash_paid(id) AS paid_amount, quote_recorded_cash_received_at(id) AS paid_at, line_items, notes"#,
     )
     .bind(quote_id)
     .bind(body.status.clone())

@@ -54,6 +54,11 @@ describe("billing reversal texts", () => {
     expect(text).toContain("кредит-нота");
     expect(text).toContain("RE-2026-0001");
     expect(text).toMatch(/119,00/);
+    expect(text).not.toContain("предоплата");
+    // QA D-63: the advance money beyond the corrected invoice is released.
+    const prepaid = billingReversalEffect({ ...invoiced, prepayment_released_gross: "14.40" }, ru);
+    expect(prepaid).toContain("Зачтённая предоплата уменьшится на 14,40");
+    expect(prepaid).toContain("к возврату");
   });
 
   it("names why a cancellation is blocked", () => {

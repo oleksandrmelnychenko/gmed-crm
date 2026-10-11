@@ -1138,9 +1138,35 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
     })
     .await;
 
-    // Paid after the release: credited against the open final invoice.
-    let late = record_payment(&app, &billing, late_advance, Uuid::new_v4(), 100, "ADV-3").await;
-    assert_eq!(late["invoice"]["status"], "paid");
+    // The advance still unpaid at the release is billed by the final invoice:
+    // its request is closed by a credit note, so the patient is not asked
+    // twice (QA D-56).
+    let (_, late_detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{late_advance}"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(late_detail["credited_amount"], "100", "{late_detail}");
+    assert_eq!(late_detail["balance_due"], "0");
+    assert_eq!(late_detail["display_status"], "credited");
+    assert_eq!(
+        late_detail["advance_settlement"]["final_invoice_id"],
+        final_invoice.to_string()
+    );
+    assert_eq!(late_detail["advance_settlement"]["open_rest"], "0");
+    let credit_reason: String = sqlx::query_scalar(
+        "SELECT reason FROM invoice_credit_note_transactions WHERE invoice_id = $1",
+    )
+    .bind(late_advance)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(credit_reason.contains("Schlussrechnung"), "{credit_reason}");
+    // The patient pays the rest on the final invoice.
+    record_payment(&app, &billing, final_invoice, Uuid::new_v4(), 100, "FINAL").await;
     let (_, final_detail) = json_request(
         &app,
         "GET",
@@ -1149,7 +1175,7 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
         None,
     )
     .await;
-    assert_eq!(final_detail["prepayment_applied_amount"], "900");
+    assert_eq!(final_detail["prepayment_applied_amount"], "800");
     assert_eq!(final_detail["balance_due"], "100");
 
     // One "to pay" figure everywhere: order card, invoice list, statement.

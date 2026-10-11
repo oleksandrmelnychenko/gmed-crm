@@ -150,7 +150,10 @@ export function isCancelDismissControl(
 
   if (
     control.getAttribute("data-slot") === "sheet-close" ||
-    control.getAttribute("data-slot") === "dialog-close"
+    control.getAttribute("data-slot") === "dialog-close" ||
+    // "Cancel" of an inline form inside the overlay closes only that form
+    // (QA D-08: it closed the whole invoice card).
+    control.hasAttribute("data-inline-cancel")
   ) {
     return false
   }

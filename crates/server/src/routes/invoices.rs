@@ -32,6 +32,7 @@ use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
 pub(crate) mod advance_application;
+pub(crate) mod advance_settlement;
 mod credit_note_pdf;
 pub(crate) mod credit_notes;
 mod credit_transfers;
@@ -183,6 +184,10 @@ pub fn router() -> Router<AppState> {
             delete(release_invoice_prepayment),
         )
         .route(
+            "/invoices/{invoice_id}/advance-rest",
+            post(advance_settlement::close_advance_rest),
+        )
+        .route(
             "/invoices/{invoice_id}/dunning",
             get(list_dunning_events).post(create_dunning_event),
         )
@@ -274,6 +279,10 @@ struct ApplyInvoicePrepaymentRequest {
     request_id: Uuid,
     advance_invoice_id: Uuid,
     amount_gross: MoneyInput,
+    /// Credits the advance of one recipient (debtor) against the invoice of
+    /// another; only with billing's explicit confirmation for this pair.
+    #[serde(default)]
+    confirm_recipient_mismatch: bool,
 }
 
 #[derive(Deserialize)]
@@ -332,6 +341,9 @@ struct CorrectInvoicePaymentRequest {
     note: Option<String>,
     reason: String,
     accept_overpayment: Option<bool>,
+    /// Remitter of the corrected receipt; absent keeps the original one, an
+    /// empty value clears it.
+    payer_name: Option<String>,
 }
 
 /// 409 for a receipt above the open balance that billing did not confirm as
@@ -662,6 +674,10 @@ struct InvoicePdfContext {
     recipient: document::InvoiceRecipient,
     /// Leistungszeitraum (first and last service day).
     service_period: Option<(NaiveDate, NaiveDate)>,
+    /// Without a service period: the invoice bills services not rendered
+    /// yet (printed as such, § 14 Abs. 4 Nr. 6 UStG); otherwise the service
+    /// date is the invoice date.
+    service_not_rendered: bool,
     order_number: String,
     quote_number: Option<String>,
     language: String,
@@ -877,7 +893,7 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// the supporting documents list, the contract link, the credit-note form
 /// data, credit transfers (internal notes, other invoices) and the patient's
 /// relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 9] = [
+const STAFF_ONLY_INVOICE_KEYS: [&str; 12] = [
     "dunning_block",
     "visibility_note",
     "available_prepayments",
@@ -887,6 +903,9 @@ const STAFF_ONLY_INVOICE_KEYS: [&str; 9] = [
     "credit_transfers",
     "credit_transfer_targets",
     "payer_relation_options",
+    "advance_settlement",
+    "payment_proofs",
+    "supplier_cost_allocated_gross",
 ];
 
 /// Internal pricing and sourcing fields of an invoice line (VAT source
@@ -2717,6 +2736,18 @@ fn invoice_pdf_label<'a>(language: &str, key: &'a str) -> &'a str {
         ("ru", "service_date") => "Дата оказания услуг",
         ("en", "service_date") => "Service date",
         (_, "service_date") => "Leistungsdatum",
+        // § 14 Abs. 4 Nr. 6 UStG, UStAE 14.5 Abs. 17: an invoice for services
+        // still ahead says so instead of a service date.
+        ("uk", "service_not_rendered") => "послуги ще не надано (рахунок до надання послуг)",
+        ("ru", "service_not_rendered") => "услуги ещё не оказаны (счёт до оказания услуг)",
+        ("en", "service_not_rendered") => "not yet rendered (invoiced before the service)",
+        (_, "service_not_rendered") => {
+            "Leistung noch nicht erbracht (Abrechnung vor Leistungserbringung)"
+        }
+        ("uk", "service_date_is_invoice_date") => "відповідає даті рахунку",
+        ("ru", "service_date_is_invoice_date") => "соответствует дате счёта",
+        ("en", "service_date_is_invoice_date") => "same as the invoice date",
+        (_, "service_date_is_invoice_date") => "entspricht dem Rechnungsdatum",
         ("uk", "column_net") => "Нетто",
         ("ru", "column_net") => "Нетто",
         ("en", "column_net") => "Net",
@@ -4495,8 +4526,17 @@ async fn load_invoice_detail(
                           LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
                           - COALESCE(SUM(allocation.amount_gross), 0),
                           0
-                      ) AS available_amount
+                      ) AS available_amount,
+                      advance.recipient_snapshot ->> 'name' AS recipient_name,
+                      (invoice_recipient_identity(advance.recipient_snapshot)
+                          IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                       OR COALESCE(
+                              target.recipient_snapshot -> 'confirmations'
+                                  -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers',
+                              '[]'::jsonb
+                          ) ? COALESCE(advance.invoice_number, '')) AS same_recipient
                FROM invoices advance
+               JOIN invoices target ON target.id = $3
                LEFT JOIN invoice_prepayment_allocations allocation
                  ON allocation.advance_invoice_id = advance.id
                WHERE advance.order_id = $1
@@ -4504,13 +4544,14 @@ async fn load_invoice_detail(
                  AND advance.invoice_type = 'advance'
                  AND advance.status <> 'cancelled'
                  AND advance.paid_amount > 0
-               GROUP BY advance.id
+               GROUP BY advance.id, target.id
                HAVING LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
                       - COALESCE(SUM(allocation.amount_gross), 0) > 0
                ORDER BY advance.issued_at, advance.id"#,
         )
         .bind(invoice_order_id)
         .bind(patient_id)
+        .bind(invoice_id)
         .fetch_all(&state.db)
         .await
         .map_err(|e| {
@@ -4530,9 +4571,98 @@ async fn load_invoice_detail(
                 "paid_amount": decimal_to_string(advance.try_get::<Decimal, _>("paid_amount").unwrap_or(Decimal::ZERO)),
                 "allocated_amount": decimal_to_string(advance.try_get::<Decimal, _>("allocated_amount").unwrap_or(Decimal::ZERO)),
                 "available_amount": decimal_to_string(advance.try_get::<Decimal, _>("available_amount").unwrap_or(Decimal::ZERO)),
+                "recipient_name": advance.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
+                "same_recipient": advance.try_get::<Option<bool>, _>("same_recipient").unwrap_or_default().unwrap_or(false),
             })
         })
         .collect::<Vec<_>>()
+    };
+    // An advance invoice that a released final invoice settles: where to
+    // record further payments and what rest a credit note still closes.
+    let advance_settlement_state = if row.try_get::<String, _>("invoice_type").unwrap_or_default()
+        == "advance"
+        && !matches!(invoice_status.as_str(), "draft" | "cancelled")
+    {
+        let mut conn = state.db.acquire().await.map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "acquire connection for advance settlement");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?;
+        advance_settlement::advance_settlement_json(
+            &mut conn,
+            invoice_id,
+            total_gross,
+            credited_amount,
+            paid_amount,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load advance settlement");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+    } else {
+        Value::Null
+    };
+    // Re-billed supplier costs this invoice bills: a credit note below them
+    // unbills the credited part (shown in the credit-note form).
+    let supplier_cost_allocated_gross = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(allocation.amount_gross), 0)
+           FROM external_invoice_patient_invoice_allocations allocation
+           JOIN external_invoices external ON external.id = allocation.external_invoice_id
+           WHERE allocation.patient_invoice_id = $1
+             AND allocation.reversed_at IS NULL
+             AND external.status <> 'cancelled'"#,
+    )
+    .bind(invoice_id)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice supplier cost allocations");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+    })?;
+    // Payment proofs the patient uploaded in the portal for this invoice
+    // (matched like the portal does: invoice number or id in name or note).
+    let payment_proofs = match row
+        .try_get::<Option<String>, _>("invoice_number")
+        .unwrap_or_default()
+    {
+        Some(number) if !number.trim().is_empty() => sqlx::query(
+            r#"SELECT d.id, d.auto_name, d.original_filename, d.notes, d.created_at,
+                      d.financial_status
+               FROM documents d
+               WHERE d.patient_id = $1
+                 AND d.order_id IS NOT DISTINCT FROM $2
+                 AND d.art = 'payment_proof'
+                 AND d.status <> 'archived'
+                 AND (
+                      d.auto_name ILIKE '%' || $3 || '%'
+                   OR COALESCE(d.notes, '') ILIKE '%' || $3 || '%'
+                   OR COALESCE(d.notes, '') ILIKE '%' || $4::text || '%'
+                 )
+               ORDER BY d.created_at DESC"#,
+        )
+        .bind(patient_id)
+        .bind(invoice_order_id)
+        .bind(number.trim())
+        .bind(invoice_id)
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice payment proofs");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+        })?
+        .into_iter()
+        .map(|document| {
+            json!({
+                "id": document.try_get::<Uuid, _>("id").unwrap_or_default(),
+                "auto_name": document.try_get::<String, _>("auto_name").unwrap_or_default(),
+                "original_filename": document.try_get::<Option<String>, _>("original_filename").unwrap_or_default(),
+                "notes": document.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                "financial_status": document.try_get::<Option<String>, _>("financial_status").unwrap_or_default(),
+                "uploaded_at": document.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>(),
+        _ => Vec::new(),
     };
 
     // Advances credited automatically on release share one transaction
@@ -4768,6 +4898,9 @@ async fn load_invoice_detail(
         "credit_transfer_targets": credit_transfer_targets,
         "available_prepayments": available_prepayments,
         "prepayment_allocations": prepayment_allocations,
+        "advance_settlement": advance_settlement_state,
+        "payment_proofs": payment_proofs,
+        "supplier_cost_allocated_gross": decimal_to_string(supplier_cost_allocated_gross),
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
         "creditable_lines": creditable_lines,
@@ -4879,6 +5012,8 @@ async fn load_invoice_pdf_context_on(
         &line_items,
     )
     .await?;
+    let service_not_rendered = service_period.is_none()
+        && document::bills_services_not_rendered(conn, &line_items).await?;
     let deducted_advances = document::load_deducted_advances(conn, invoice_id).await?;
     // A draft previews the recipient its release will freeze: the
     // Leistungsempfänger line, the declared e-mail and tax numbers.
@@ -4958,6 +5093,7 @@ async fn load_invoice_pdf_context_on(
             .filter(|value| !value.is_empty()),
         recipient,
         service_period,
+        service_not_rendered,
         order_number: row
             .try_get::<Option<String>, _>("order_number")
             .unwrap_or_default()
@@ -5288,6 +5424,23 @@ fn build_invoice_pdf(context: &InvoicePdfContext) -> Result<Vec<u8>, &'static st
     if let Some(period) = context.service_period {
         let (label, value) = format_invoice_pdf_service_period(language, period);
         meta_cells.push((label, value));
+    } else if context.invoice_type != "advance" {
+        // § 14 Abs. 4 Nr. 6 UStG: never without the time of supply. Services
+        // not rendered yet are named as such (UStAE 14.5 Abs. 17); otherwise
+        // the service date is the invoice date (QA D-11). An advance invoice
+        // is titled as a prepayment request already.
+        meta_cells.push((
+            invoice_pdf_label(language, "service_date"),
+            invoice_pdf_label(
+                language,
+                if context.service_not_rendered {
+                    "service_not_rendered"
+                } else {
+                    "service_date_is_invoice_date"
+                },
+            )
+            .to_string(),
+        ));
     }
     // Addressed to someone other than the contracting party (e.g. a
     // Kostenübernehmer): the invoice still names the Leistungsempfänger.
@@ -7692,6 +7845,44 @@ async fn apply_invoice_prepayment(
         };
     }
 
+    // Money belongs to whoever paid it (§ 14 Abs. 5 Satz 2 UStG): the advance
+    // of another recipient (debtor) is credited only with billing's explicit
+    // confirmation for this pair, or when billing confirmed exactly this
+    // advance at the release of the target invoice (QA D-57).
+    let recipient_mismatch = match sqlx::query_scalar::<_, bool>(
+        r#"SELECT invoice_recipient_identity(advance.recipient_snapshot)
+                      IS DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                  AND NOT COALESCE(
+                      target.recipient_snapshot -> 'confirmations'
+                          -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers',
+                      '[]'::jsonb
+                  ) ? COALESCE(advance.invoice_number, '')
+           FROM invoices advance, invoices target
+           WHERE advance.id = $1 AND target.id = $2"#,
+    )
+    .bind(body.advance_invoice_id)
+    .bind(invoice_id)
+    .fetch_one(&mut *transaction)
+    .await
+    {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "compare prepayment recipients");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to apply prepayment",
+            );
+        }
+    };
+    if recipient_mismatch && !body.confirm_recipient_mismatch {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "prepayment_recipient_mismatch",
+            "The advance invoice is addressed to another recipient; confirm to credit its money against this invoice",
+            serde_json::json!({ "confirm_field": "confirm_recipient_mismatch" }),
+        );
+    }
+
     let result = sqlx::query(
         r#"INSERT INTO invoice_prepayment_allocations (
                 request_id, advance_invoice_id, target_invoice_id, amount_gross, created_by
@@ -7769,6 +7960,7 @@ async fn apply_invoice_prepayment(
             "advance_invoice_id": body.advance_invoice_id,
             "amount_gross": decimal_to_string(amount_gross),
             "patient_id": patient_id,
+            "recipient_mismatch_confirmed": recipient_mismatch,
         }),
     )
     .await
@@ -9321,6 +9513,7 @@ async fn correct_invoice_payment(
     let row = match sqlx::query(
         r#"SELECT payment.amount_gross, payment.payment_method, payment.received_on,
                   payment.payment_reference, payment.note, payment.transaction_type,
+                  payment.payer_name,
                   invoice.order_id, invoice.invoice_number, invoice.status,
                   invoice.total_vat, invoice.total_gross, invoice.credited_amount,
                   invoice.prepayment_applied_amount, invoice.line_items, invoice.currency,
@@ -9427,6 +9620,22 @@ async fn correct_invoice_payment(
         .unwrap_or_default();
     let original_received_on = row.try_get::<NaiveDate, _>("received_on").unwrap_or(today);
     let original_note = row.try_get::<Option<String>, _>("note").unwrap_or_default();
+    let original_payer_name = row
+        .try_get::<Option<String>, _>("payer_name")
+        .unwrap_or_default();
+    let payer_name = match body.payer_name.as_deref() {
+        Some(value) => normalize_optional(Some(value)),
+        None => original_payer_name.clone(),
+    };
+    if payer_name
+        .as_ref()
+        .is_some_and(|name| name.chars().count() > 200)
+    {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Payer name is too long (max 200)",
+        );
+    }
     if original_method == "legacy_import" {
         return err(
             StatusCode::CONFLICT,
@@ -9444,6 +9653,7 @@ async fn correct_invoice_payment(
         && original_reference == payment_reference
         && original_received_on == received_on
         && original_note == note
+        && original_payer_name == payer_name
     {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -9596,8 +9806,9 @@ async fn correct_invoice_payment(
     let corrected_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_payment_transactions (
                 invoice_id, transaction_type, request_id, corrects_transaction_id,
-                amount_gross, payment_method, payment_reference, received_on, note, created_by
-           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9)
+                amount_gross, payment_method, payment_reference, received_on, note, created_by,
+                payer_name
+           ) VALUES ($1, 'payment', $2, $3, $4, $5, $6, $7, $8, $9, $10)
            RETURNING id"#,
     )
     .bind(invoice_id)
@@ -9609,6 +9820,7 @@ async fn correct_invoice_payment(
     .bind(received_on)
     .bind(note.clone())
     .bind(auth.user_id)
+    .bind(payer_name.clone())
     .fetch_one(&mut *transaction)
     .await
     {
@@ -9940,6 +10152,9 @@ async fn create_invoice_credit_note(
                 "amount_net": decimal_to_string(issued.net),
                 "amount_vat": decimal_to_string(issued.vat),
                 "amount_gross": decimal_to_string(issued.gross),
+                "released_prepayment_gross": decimal_to_string(issued.released_prepayment_gross()),
+                "reversed_supplier_cost_gross": decimal_to_string(issued.reversed_supplier_cost_gross()),
+                "advance_credit_notes": issued.follow_ups_json(),
                 "invoice": invoice,
             })),
         )
@@ -9976,18 +10191,27 @@ struct IssuedCreditNote {
     pub gross: Decimal,
     pub currency: String,
     blob: Option<stored_documents::PendingBlob>,
+    /// What the credit note released to keep the invoice's rules.
+    pub room: advance_settlement::CreditRoom,
+    /// Credit notes closing the rest of advances whose money this credit
+    /// note released (same transaction).
+    pub follow_ups: Vec<IssuedCreditNote>,
 }
 
 impl IssuedCreditNote {
-    /// Removes the archived PDF written for a transaction that did not commit.
+    /// Removes the archived PDFs written for a transaction that did not commit.
     pub async fn discard_document(&mut self) {
         if let Some(blob) = self.blob.take() {
             blob.discard().await;
         }
+        for follow_up in &mut self.follow_ups {
+            if let Some(blob) = follow_up.blob.take() {
+                blob.discard().await;
+            }
+        }
     }
 
-    /// Realtime event after the commit.
-    pub async fn publish(&self, state: &AppState, user_id: Uuid) {
+    async fn publish_one(&self, state: &AppState, user_id: Uuid) {
         crate::realtime::publish_invoice_event(
             state,
             Some(user_id),
@@ -10001,17 +10225,101 @@ impl IssuedCreditNote {
         )
         .await;
     }
+
+    /// Realtime events after the commit.
+    pub async fn publish(&self, state: &AppState, user_id: Uuid) {
+        self.publish_one(state, user_id).await;
+        for follow_up in &self.follow_ups {
+            follow_up.publish_one(state, user_id).await;
+        }
+    }
+
+    pub fn released_prepayment_gross(&self) -> Decimal {
+        self.room
+            .released_prepayments
+            .iter()
+            .map(|(_, amount)| *amount)
+            .sum()
+    }
+
+    pub fn reversed_supplier_cost_gross(&self) -> Decimal {
+        self.room
+            .reversed_supplier_costs
+            .iter()
+            .map(|(_, amount)| *amount)
+            .sum()
+    }
+
+    pub fn summary_json(&self) -> Value {
+        serde_json::json!({
+            "credit_note_transaction_id": self.id,
+            "document_number": self.document_number,
+            "invoice_id": self.invoice_id,
+            "invoice_number": self.invoice_number,
+            "amount_net": decimal_to_string(self.net),
+            "amount_vat": decimal_to_string(self.vat),
+            "amount_gross": decimal_to_string(self.gross),
+            "currency": self.currency,
+        })
+    }
+
+    pub fn follow_ups_json(&self) -> Vec<Value> {
+        self.follow_ups.iter().map(Self::summary_json).collect()
+    }
 }
 
 /// Issues a credit note on an invoice the transaction has locked (`context`
 /// read `FOR UPDATE`): lines and VAT per rate, gapless number, balances,
-/// archived PDF and the audit row, all in the caller's transaction. The
-/// caller commits and, when the commit fails, discards the document.
+/// archived PDF and the audit row, all in the caller's transaction. Advance
+/// money credited into the invoice beyond its corrected total is released and
+/// the rest of that advance closed (refundable), re-billed supplier costs
+/// beyond it are unbilled again ([`advance_settlement`]). The caller commits
+/// and, when the commit fails, discards the documents.
 async fn issue_credit_note_locked(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     context: &InvoicePaymentContext,
     issue: &CreditNoteIssue<'_>,
 ) -> Result<IssuedCreditNote, axum::response::Response> {
+    let plan = plan_credit_note_tx(transaction, context, issue.selection).await?;
+    let room = advance_settlement::make_room_for_credit_tx(
+        transaction,
+        context,
+        plan.gross,
+        issue.user_id,
+    )
+    .await?;
+    let mut issued =
+        store_credit_note_tx(transaction, context, issue, &plan, room.audit_json()).await?;
+    issued.room = room;
+    for advance_id in issued.room.released_advance_ids() {
+        // The released money is no longer needed by this invoice: the
+        // advance's unused rest is closed, so the cash is refundable.
+        match advance_settlement::close_advance_rest_tx(
+            transaction,
+            advance_id,
+            &context.invoice_number,
+            issue.user_id,
+            advance_settlement::AdvanceRest::Unused,
+        )
+        .await
+        {
+            Ok(Some(credit)) => issued.follow_ups.push(credit),
+            Ok(None) => {}
+            Err(response) => {
+                issued.discard_document().await;
+                return Err(response);
+            }
+        }
+    }
+    Ok(issued)
+}
+
+/// Lines, VAT and totals of a credit note on a locked invoice.
+async fn plan_credit_note_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    selection: &credit_notes::CreditSelection,
+) -> Result<credit_notes::CreditNotePlan, axum::response::Response> {
     let invoice_id = context.invoice_id;
     let failed = || {
         err(
@@ -10027,7 +10335,7 @@ async fn issue_credit_note_locked(
             failed()
         })?;
     let creditable = credit_notes::creditable_lines(&context.line_items, &existing_credits);
-    let planned = match (issue.selection, creditable.is_empty()) {
+    let planned = match (selection, creditable.is_empty()) {
         (credit_notes::CreditSelection::Amount(amount), true) => {
             Ok(credit_notes::CreditNotePlan::without_lines(
                 *amount,
@@ -10035,7 +10343,7 @@ async fn issue_credit_note_locked(
                 context.total_gross,
             ))
         }
-        _ => credit_notes::plan_credit_note(&creditable, issue.selection),
+        _ => credit_notes::plan_credit_note(&creditable, selection),
     };
     let plan = planned.map_err(|error| {
         err(
@@ -10053,6 +10361,25 @@ async fn issue_credit_note_locked(
             "Credit note exceeds invoice total",
         ));
     }
+    Ok(plan)
+}
+
+/// Stores a planned credit note: gapless number, journal row, balances,
+/// archived PDF and the audit row (`extra_audit` merged into its context).
+async fn store_credit_note_tx(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    issue: &CreditNoteIssue<'_>,
+    plan: &credit_notes::CreditNotePlan,
+    extra_audit: Value,
+) -> Result<IssuedCreditNote, axum::response::Response> {
+    let invoice_id = context.invoice_id;
+    let failed = || {
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to create credit note",
+        )
+    };
     // Gapless: the counter row is locked until this transaction ends.
     let sequence = release::next_correction_number(transaction, release::SERIES_CREDIT_NOTE)
         .await
@@ -10095,9 +10422,12 @@ async fn issue_credit_note_locked(
                 Some("23505" | "23514" | "P0001")
             ) =>
         {
-            return Err(err(
+            tracing::warn!(error = %db_error, invoice_id = %invoice_id, "credit note refused by invoice rules");
+            return Err(coded_err(
                 StatusCode::CONFLICT,
+                "credit_note_balance_rules",
                 "Credit note violates invoice balance rules",
+                serde_json::json!({}),
             ));
         }
         Err(e) => {
@@ -10129,31 +10459,39 @@ async fn issue_credit_note_locked(
         gross: plan.gross,
         currency: context.currency.clone(),
         blob: document.blob,
+        room: advance_settlement::CreditRoom::default(),
+        follow_ups: Vec::new(),
     };
+    let mut audit_context = serde_json::json!({
+        "document_sha256": document.sha256,
+        "document_file_name": document.file_name,
+        "credit_note_transaction_id": credit_note_id,
+        "document_number": issued.document_number,
+        "credit_mode": plan.mode,
+        "credited_line_indexes": plan
+            .lines
+            .iter()
+            .map(|line| line.invoice_line_index)
+            .collect::<Vec<_>>(),
+        "amount_net": decimal_to_string(plan.net),
+        "amount_vat": decimal_to_string(plan.vat),
+        "amount_gross": decimal_to_string(plan.gross),
+        "currency": context.currency,
+        "reason": issue.reason,
+        "patient_id": context.patient_id,
+        "source_order_leistung_id": issue.source_order_leistung_id,
+    });
+    if let (Some(target), Some(extra)) = (audit_context.as_object_mut(), extra_audit.as_object()) {
+        for (key, value) in extra {
+            target.insert(key.clone(), value.clone());
+        }
+    }
     let audited = write_invoice_audit_tx(
         transaction,
         issue.user_id,
         "credit_note_created",
         invoice_id,
-        serde_json::json!({
-            "document_sha256": document.sha256,
-            "document_file_name": document.file_name,
-            "credit_note_transaction_id": credit_note_id,
-            "document_number": issued.document_number,
-            "credit_mode": plan.mode,
-            "credited_line_indexes": plan
-                .lines
-                .iter()
-                .map(|line| line.invoice_line_index)
-                .collect::<Vec<_>>(),
-            "amount_net": decimal_to_string(plan.net),
-            "amount_vat": decimal_to_string(plan.vat),
-            "amount_gross": decimal_to_string(plan.gross),
-            "currency": context.currency,
-            "reason": issue.reason,
-            "patient_id": context.patient_id,
-            "source_order_leistung_id": issue.source_order_leistung_id,
-        }),
+        audit_context,
     )
     .await;
     if let Err(e) = audited {
@@ -13254,6 +13592,27 @@ async fn update_invoice_status(
                     "Failed to update invoice",
                 );
             }
+            // The final invoice bills the whole service and deducts the advance
+            // money received: what its advances asked for beyond that is closed
+            // by a credit note on each advance, so nothing is asked twice
+            // (QA D-56).
+            let mut advance_credit_notes = if locked_status == "draft"
+                && requested_status == "sent"
+                && locked_invoice_type == "final"
+            {
+                match advance_settlement::close_settled_advances_tx(
+                    &mut transaction,
+                    invoice_id,
+                    auth.user_id,
+                )
+                .await
+                {
+                    Ok(value) => value,
+                    Err(response) => return response,
+                }
+            } else {
+                Vec::new()
+            };
 
             let settlement = match sqlx::query(
                 r#"SELECT status, paid_amount, prepayment_applied_amount, paid_at
@@ -13267,6 +13626,9 @@ async fn update_invoice_status(
                 Ok(row) => row,
                 Err(e) => {
                     tracing::error!(error = %e, invoice_id = %invoice_id, "load recomputed invoice settlement");
+                    for credit in &mut advance_credit_notes {
+                        credit.discard_document().await;
+                    }
                     return err(
                         StatusCode::INTERNAL_SERVER_ERROR,
                         "Failed to update invoice",
@@ -13300,7 +13662,12 @@ async fn update_invoice_status(
                 .await
                 {
                     Ok((_, _, blob)) => blob,
-                    Err(resp) => return resp,
+                    Err(resp) => {
+                        for credit in &mut advance_credit_notes {
+                            credit.discard_document().await;
+                        }
+                        return resp;
+                    }
                 }
             } else {
                 None
@@ -13340,6 +13707,10 @@ async fn update_invoice_status(
                         "storno_reason": storno_reason,
                         "storno_amount_gross": issued_storno.as_ref().map(|storno| decimal_to_string(storno.amount_gross)),
                         "storno_document_sha256": storno_blob.as_ref().map(|(_, _, sha)| sha.clone()),
+                        "advance_credit_notes": advance_credit_notes
+                            .iter()
+                            .map(IssuedCreditNote::summary_json)
+                            .collect::<Vec<_>>(),
                     }),
                 )
                 .await?;
@@ -13364,6 +13735,9 @@ async fn update_invoice_status(
                 if let Some((blob, _, _)) = storno_blob {
                     blob.discard().await;
                 }
+                for credit in &mut advance_credit_notes {
+                    credit.discard_document().await;
+                }
                 return err(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to update invoice",
@@ -13376,6 +13750,9 @@ async fn update_invoice_status(
                 &applied_advances,
             )
             .await;
+            for credit in &advance_credit_notes {
+                credit.publish(&state, auth.user_id).await;
+            }
             if let Some(paid_at) = paid_at
                 && let Err(resp) = sync_reimbursed_financial_documents_for_paid_invoice(
                     &state,
@@ -13464,6 +13841,7 @@ mod tests {
                 ..Default::default()
             },
             service_period: None,
+            service_not_rendered: false,
             order_number: "ORD-UNIT-1".to_string(),
             quote_number: Some("Q-UNIT-1".to_string()),
             language: "ru".to_string(),
@@ -13732,6 +14110,27 @@ mod tests {
         assert!(text.contains("Leistungsdatum"));
         assert!(text.contains("03.09.2026"));
         assert!(!text.contains("§ 4 Nr. 14"));
+    }
+
+    /// § 14 Abs. 4 Nr. 6 UStG: a final invoice without dated services still
+    /// names the time of supply (QA D-11).
+    #[test]
+    fn an_invoice_without_service_dates_still_names_the_time_of_supply() {
+        let mut context = sample_context();
+        context.language = "de".to_string();
+        context.service_period = None;
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistungsdatum"), "{text}");
+        assert!(text.contains("entspricht dem Rechnungsdatum"), "{text}");
+
+        context.service_not_rendered = true;
+        let text = pdf_text(&context);
+        assert!(text.contains("Leistung noch nicht erbracht"), "{text}");
+
+        // The advance invoice is a prepayment request by its title.
+        context.invoice_type = "advance".to_string();
+        let text = pdf_text(&context);
+        assert!(!text.contains("Leistungsdatum"), "{text}");
     }
 
     /// The advance invoice of the QA walkthrough (order A-20260928-0005): a

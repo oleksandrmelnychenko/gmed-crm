@@ -1424,7 +1424,7 @@ function useContractsPageContent() {
         accessor: (row) => row.paid_at ?? "",
         sortable: true,
         width: 170,
-        render: (row) => formatDateTime(row.paid_at, locale, t.common_not_set),
+        render: (row) => formatDate(row.paid_at, locale, t.common_not_set),
       },
       {
         id: "line_item_count",
@@ -2787,7 +2787,9 @@ function useContractsPageContent() {
                 <section className="rounded-lg border border-border/70 bg-card p-5">
                   <h2 className={tokens.text.sectionTitle}>{titleWithDot(text.quoteNotesSection)}</h2>
                   <div className="mt-5">
-                    <Field label={t.contracts_notes}>
+                    {/* Printed on the cost estimate and copied into its
+                        invoices (QA D-62). */}
+                    <Field label={t.finance_quote_printed_notes}>
                       <textarea
                         className={textareaClassName}
                         value={createQuoteForm.notes}
@@ -2796,6 +2798,7 @@ function useContractsPageContent() {
                         }
                         placeholder={t.patients_notes}
                       />
+                      <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                     </Field>
                   </div>
                 </section>
@@ -3064,7 +3067,7 @@ function useContractsPageContent() {
                         />
                         <ContractSummaryLine
                           label={t.invoices_paid_at}
-                          value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)}
+                          value={formatDate(quoteDetail.paid_at, locale, t.common_not_set)}
                         />
                         <ContractSummaryLine label={t.invoices_subtotal} value={formatCurrency(quoteDetail.total_net)} />
                         <ContractSummaryLine label={text.vatTotal} value={formatCurrency(quoteDetail.total_vat)} />
@@ -3082,7 +3085,7 @@ function useContractsPageContent() {
                       <div className="space-y-2.5">
                         <div className="flex items-start justify-between gap-4">
                           <div>
-                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.contracts_notes)}</h2>
+                            <h2 className={tokens.text.sectionTitle}>{titleWithDot(t.finance_quote_printed_notes)}</h2>
                           </div>
                         </div>
                         <div className="rounded-xl border border-border bg-background/60 p-4 text-sm leading-snug text-muted-foreground">
@@ -3202,11 +3205,11 @@ function useContractsPageContent() {
                           <Input
                             type="text"
                             className={shellInputClassName}
-                            value={formatDateTime(quoteDetail.paid_at, locale, t.common_not_set)}
+                            value={formatDate(quoteDetail.paid_at, locale, t.common_not_set)}
                             readOnly
                           />
                         </Field>
-                        <Field label={t.contracts_notes} className="sm:col-span-3">
+                        <Field label={t.finance_quote_printed_notes} className="sm:col-span-3">
                           <textarea
                             className={textareaClassName}
                             value={quoteStatusForm.notes}
@@ -3215,6 +3218,7 @@ function useContractsPageContent() {
                               setQuoteStatusForm((current) => ({ ...current, notes: event.target.value }))
                             }
                           />
+                          <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                         </Field>
                       </div>
                       <div className="flex items-center justify-between gap-3 pt-1">

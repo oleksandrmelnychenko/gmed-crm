@@ -1529,6 +1529,177 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
         .collect::<Vec<_>>();
     assert_eq!(invoice_items.len(), 1, "{narrowed}");
     assert_eq!(invoice_items[0]["recipient_name"], "Firma Zahlt GmbH");
+
+    // The confirmed advance of the patient is billed by the company's final
+    // invoice: its request is closed, the patient is not asked again.
+    let (_, patient_advance) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{}", advance["id"].as_str().unwrap()),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(patient_advance["balance_due"], "0", "{patient_advance}");
+    assert_eq!(patient_advance["display_status"], "credited");
+}
+
+async fn pay(app: &axum::Router, auth: &str, invoice_id: &str, amount: &str) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        auth,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "bank_transfer",
+            "payment_reference": format!("PAY-{invoice_id}"),
+            "received_on": gmed_server::app_time::today().to_string(),
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    body
+}
+
+/// QA D-57: the confirmation of an advance of another recipient covers the
+/// advance invoices it names, never advances issued later. Money of one
+/// debtor (Mia Muster) never settles the invoice of another (Beispiel GmbH);
+/// her own final invoice deducts it and closes the unpaid rest.
+#[tokio::test]
+async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
+    let Some(fx) = fixture("payer-advance-pair").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let quote = create_quote(&fx.app, &fx.manager, order).await;
+    let company = json!({
+        "payer_contact_name": "Beispiel GmbH",
+        "payer_address_street": "Musterweg 1",
+        "payer_address_zip": "10115",
+        "payer_address_city": "Berlin",
+        "payer_address_country": "DE",
+        "payer_role": "cost_bearer"
+    });
+    let mia = json!({
+        "payer_contact_name": "Mia Muster",
+        "payer_address_street": "Musterweg 3",
+        "payer_address_zip": "10115",
+        "payer_address_city": "Berlin",
+        "payer_address_country": "DE",
+        "payer_role": "cost_bearer"
+    });
+
+    // The patient's advance, then the company's final invoice (confirmed).
+    let patient_advance = create_draft(&fx.app, &fx.billing, &quote, "advance").await;
+    let patient_advance_id = patient_advance["id"].as_str().unwrap().to_string();
+    let (status, body) = release(&fx.app, &fx.billing, &patient_advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let company_final = create_draft(&fx.app, &fx.billing, &quote, "final").await;
+    let company_final_id = company_final["id"].as_str().unwrap().to_string();
+    let (status, _) =
+        set_invoice_payer(&fx.app, &fx.billing, &company_final_id, company.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = release(
+        &fx.app,
+        &fx.billing,
+        &company_final_id,
+        json!({ "confirm_advance_recipient_mismatch": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["prepayment_applied_amount"], "0", "{body}");
+
+    // A new service, a new quote and an advance to Mia, half paid.
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Anpassung', 1, 100, 19, 'approved')"#,
+    )
+    .bind(order)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let second_quote = create_quote(&fx.app, &fx.manager, order).await;
+    let mia_advance = create_draft(&fx.app, &fx.billing, &second_quote, "advance").await;
+    let mia_advance_id = mia_advance["id"].as_str().unwrap().to_string();
+    let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &mia_advance_id, mia.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = release(&fx.app, &fx.billing, &mia_advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total_gross"], "119", "{body}");
+    pay(&fx.app, &fx.billing, &mia_advance_id, "50").await;
+
+    // The company's final invoice does not take Mia's money.
+    let (_, company_detail) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{company_final_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        company_detail["prepayment_applied_amount"], "0",
+        "{company_detail}"
+    );
+    let offered = company_detail["available_prepayments"].as_array().unwrap();
+    let mia_offer = offered
+        .iter()
+        .find(|advance| advance["invoice_id"] == mia_advance_id)
+        .unwrap();
+    assert_eq!(mia_offer["same_recipient"], false);
+    // By hand only with a confirmation for this pair.
+    let (status, refused) = json_request(
+        &fx.app,
+        "POST",
+        &format!("/api/v1/invoices/{company_final_id}/prepayment-allocations"),
+        &fx.billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "advance_invoice_id": mia_advance_id,
+            "amount_gross": "10",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "prepayment_recipient_mismatch");
+    assert_eq!(refused["confirm_field"], "confirm_recipient_mismatch");
+
+    // Mia's own final invoice deducts her 50 and closes the unpaid 69.
+    let mia_final = create_draft(&fx.app, &fx.billing, &second_quote, "final").await;
+    let mia_final_id = mia_final["id"].as_str().unwrap().to_string();
+    let (status, _) = set_invoice_payer(&fx.app, &fx.billing, &mia_final_id, mia).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = release(
+        &fx.app,
+        &fx.billing,
+        &mia_final_id,
+        json!({ "confirm_advance_recipient_mismatch": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["prepayment_applied_amount"], "50", "{body}");
+    assert_eq!(body["balance_due"], "69", "{body}");
+    let (_, mia_advance_detail) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{mia_advance_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        mia_advance_detail["credited_amount"], "69",
+        "{mia_advance_detail}"
+    );
+    assert_eq!(mia_advance_detail["balance_due"], "0");
+    assert_eq!(mia_advance_detail["status"], "paid");
+    assert_eq!(
+        mia_advance_detail["advance_settlement"]["final_invoice_id"],
+        mia_final_id
+    );
 }
 
 #[tokio::test]

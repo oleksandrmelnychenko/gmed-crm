@@ -76,6 +76,9 @@ export interface FinanceBalancesTranslations {
   finance_settlement_billable_now: string;
   finance_settlement_unmatched_lines: string;
   finance_settlement_basis: string;
+  /** Quote notes: printed on the cost estimate and copied into its invoices. */
+  finance_quote_printed_notes: string;
+  finance_printed_notes_hint: string;
 }
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
@@ -158,6 +161,9 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
     "Строки счетов на {amount} не удалось сопоставить с услугами заказа — проверьте их перед закрытием расчёта.",
   finance_settlement_basis:
     "Итог = выставлено (за вычетом кредит-нот) + не выставлено − оплачено (включая авансы). Так же считается сальдо в карточке пациента.",
+  finance_quote_printed_notes: "Примечание для клиента (печатается в предложении и счетах)",
+  finance_printed_notes_hint:
+    "Этот текст видит клиент: он печатается в документе и переносится в счета. Внутренние заметки сюда не вносите.",
 };
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
@@ -242,4 +248,7 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
     "Rechnungspositionen über {amount} konnten keiner Auftragsleistung zugeordnet werden – bitte vor dem Abschluss prüfen.",
   finance_settlement_basis:
     "Saldo = berechnet (abzüglich Rechnungskorrekturen) + nicht berechnet − bezahlt (inklusive Anzahlungen). Genauso wird der Saldo in der Patientenakte berechnet.",
+  finance_quote_printed_notes: "Hinweis für den Kunden (wird auf Angebot und Rechnungen gedruckt)",
+  finance_printed_notes_hint:
+    "Diesen Text sieht der Kunde: Er wird auf das Dokument gedruckt und in die Rechnungen übernommen. Keine internen Notizen eintragen.",
 };

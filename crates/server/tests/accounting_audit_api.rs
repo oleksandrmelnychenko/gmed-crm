@@ -1140,6 +1140,13 @@ async fn audit_quote_manual_flag_is_not_a_payment() {
         false,
     )
     .await;
+    // Cash counts for the quote whose invoice received it (QA D-23).
+    sqlx::query("UPDATE invoices SET quote_id = $1 WHERE id = $2")
+        .bind(quote)
+        .bind(invoice)
+        .execute(&pool)
+        .await
+        .unwrap();
     record_payment(&app, &bearer, invoice, Uuid::new_v4(), 40, "received").await;
     let (status, body) = json_request(
         &app,
