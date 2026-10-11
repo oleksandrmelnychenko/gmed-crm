@@ -1,7 +1,19 @@
 import { startTransition, useCallback, useEffect, useMemo, useReducer } from "react";
-import { Download, LoaderCircle, RefreshCw, ShieldCheck } from "lucide-react";
+import {
+  CalendarDays,
+  Download,
+  FileText,
+  LayoutGrid,
+  LoaderCircle,
+  MessageSquare,
+  ReceiptText,
+  RefreshCw,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { OverflowMenu } from "@/components/ui/overflow-menu";
 import {
   Banner,
   CountBadge,
@@ -19,9 +31,10 @@ import {
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { formatPluralCount, formatUiText, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
+import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import {
   downloadPatientPortalExport,
   fetchPatientPortalWorkspace,
@@ -30,13 +43,15 @@ import {
   appointmentStatusTone,
   conciergeServiceKindLabel,
   conciergeServiceStatusTone,
+  feedbackStatusLabel,
   feedbackStatusTone,
   formatPortalCurrency,
   formatPortalDate,
   formatPortalDateTime,
   invoiceStatusTone,
   nextActionTone,
-  portalDocumentValueLabel as sharedPortalDocumentValueLabel,
+  portalAppointmentPlaceLabel,
+  portalDocumentTypeLabels,
   portalStatusLabel,
   privacyRequestLabel,
   privacyStatusTone,
@@ -127,16 +142,6 @@ function compareNextActions(a: PortalNextActionItem, b: PortalNextActionItem) {
   return aDue - bDue;
 }
 
-function formatPortalCountLabel(template: string, count: number) {
-  return template.replace("{count}", String(count));
-}
-
-function portalDocumentValueLabel(
-  value: string | null | undefined,
-) {
-  return sharedPortalDocumentValueLabel(value);
-}
-
 interface PatientDashboardState {
   loading: boolean;
   refreshing: boolean;
@@ -188,7 +193,9 @@ function patientDashboardReducer(
 
 function usePatientDashboardPageContent() {
   const { user } = useAuth();
-  const { t } = useLang();
+  const { lang, t } = useLang();
+  // Portal routes are checked against the patient whitelist.
+  const { staffGo } = useStaffNavigate();
   const [dashboardState, dispatchDashboardState] = useReducer(
     patientDashboardReducer,
     INITIAL_PATIENT_DASHBOARD_STATE,
@@ -275,9 +282,24 @@ function usePatientDashboardPageContent() {
   }, [t.portal_dashboard_failed_to_load_portal_workspace, version]);
 
   const releasedDocuments = documents.length;
-  const upcomingAppointments = useMemo(
-    () => appointments.filter((item) => isUpcomingPortalAppointment(item)).length,
+  const upcomingAppointmentItems = useMemo(
+    () =>
+      appointments
+        .filter((item) => isUpcomingPortalAppointment(item))
+        .toSorted((a, b) =>
+          `${a.date} ${a.time_start ?? ""}`.localeCompare(`${b.date} ${b.time_start ?? ""}`),
+        ),
     [appointments],
+  );
+  const upcomingAppointments = upcomingAppointmentItems.length;
+  const nextAppointment = upcomingAppointmentItems[0] ?? null;
+  const appointmentsById = useMemo(
+    () => new Map(appointments.map((item) => [item.id, item])),
+    [appointments],
+  );
+  const openInvoiceCount = useMemo(
+    () => invoices.filter((item) => Number(item.balance_due ?? 0) > 0).length,
+    [invoices],
   );
   const pendingConfirmations = useMemo(
     () => documents.filter((item) => item.requires_confirmation && !item.confirmed).length,
@@ -307,8 +329,8 @@ function usePatientDashboardPageContent() {
   // "Upcoming visits" lists only visits still ahead: not completed,
   // cancelled or past ones.
   const recentAppointments = useMemo(
-    () => appointments.filter((item) => isUpcomingPortalAppointment(item)).slice(0, 4),
-    [appointments],
+    () => upcomingAppointmentItems.slice(0, 4),
+    [upcomingAppointmentItems],
   );
   const recentServices = useMemo(() => services.slice(0, 4), [services]);
   const recentInvoices = useMemo(() => invoices.slice(0, 4), [invoices]);
@@ -329,6 +351,16 @@ function usePatientDashboardPageContent() {
   }, [nextActions]);
   const recentRecommendations = useMemo(() => recommendations.slice(0, 4), [recommendations]);
   const recentRequests = useMemo(() => requests.slice(0, 4), [requests]);
+
+  // An upcoming visit names its place like "Upcoming visits" does (clinic and
+  // doctor), not by the free-text location the server sends as description.
+  function nextActionText(item: PortalNextActionItem) {
+    if (item.kind === "upcoming_appointment") {
+      const appointment = appointmentsById.get(item.entity_id);
+      if (appointment) return portalAppointmentPlaceLabel(appointment);
+    }
+    return nextActionDescription(item, t);
+  }
 
   async function handleExportData() {
     dispatchDashboardState({ exportBusy: true });
@@ -357,44 +389,10 @@ function usePatientDashboardPageContent() {
         title={`${greeting}, ${user?.name ?? patientLabel}`}
         description={t.portal_dashboard_only_explicitly_released_documents_and_privacy_workflows_are_sho}
         actions={
+          // Two actions and a menu: the sections are in the side navigation
+          // too, and eight buttons drew over the bell and the language
+          // switch in the top bar (QA 2026-10-11).
           <>
-            <CountBadge>{t.portal_dashboard_patient_portal}</CountBadge>
-            <a href="/documents">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <Download className="size-4" />
-                {t.portal_dashboard_my_documents}
-              </Button>
-            </a>
-            <a href="/appointments">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <Download className="size-4" />
-                {t.portal_dashboard_my_appointments}
-              </Button>
-            </a>
-            <a href="/privacy">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <ShieldCheck className="size-4" />
-                {t.portal_dashboard_privacy_requests}
-              </Button>
-            </a>
-            <a href="/feedback">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <ShieldCheck className="size-4" />
-                {t.portal_dashboard_my_feedback}
-              </Button>
-            </a>
-            <a href="/services">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <Download className="size-4" />
-                {t.portal_dashboard_my_services}
-              </Button>
-            </a>
-            <a href="/invoices">
-              <Button variant="outline" className={tokens.control.primaryButton}>
-                <Download className="size-4" />
-                {t.portal_dashboard_my_invoices}
-              </Button>
-            </a>
             <Button
               variant="outline"
               className={tokens.control.primaryButton}
@@ -412,6 +410,24 @@ function usePatientDashboardPageContent() {
               {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               {t.portal_dashboard_refresh}
             </Button>
+            <OverflowMenu
+              label={t.portal_dashboard_more_sections}
+              triggerClassName={cn(tokens.control.primaryButton, "max-lg:col-span-2")}
+              triggerContent={
+                <>
+                  <LayoutGrid aria-hidden="true" />
+                  <span className="lg:sr-only">{t.portal_dashboard_more_sections}</span>
+                </>
+              }
+              items={[
+                { key: "documents", label: t.portal_dashboard_my_documents, icon: <FileText />, onSelect: () => staffGo("/documents") },
+                { key: "appointments", label: t.portal_dashboard_my_appointments, icon: <CalendarDays />, onSelect: () => staffGo("/appointments") },
+                { key: "services", label: t.portal_dashboard_my_services, icon: <Sparkles />, onSelect: () => staffGo("/services") },
+                { key: "invoices", label: t.portal_dashboard_my_invoices, icon: <ReceiptText />, onSelect: () => staffGo("/invoices") },
+                { key: "feedback", label: t.portal_dashboard_my_feedback, icon: <MessageSquare />, onSelect: () => staffGo("/feedback") },
+                { key: "privacy", label: t.portal_dashboard_privacy_requests, icon: <ShieldCheck />, onSelect: () => staffGo("/privacy") },
+              ]}
+            />
           </>
         }
       />
@@ -457,12 +473,11 @@ function usePatientDashboardPageContent() {
                   {t.portal_dashboard_required_documents}
                 </p>
                 <p className="mt-2 text-sm font-semibold text-foreground">
-                  {formatPortalCountLabel(
-                    documentAlerts.missing_count === 1
-                      ? t.portal_dashboard_missing_required_document_one
-                      : t.portal_dashboard_missing_required_document_many,
-                    documentAlerts.missing_count,
-                  )}
+                  {formatPluralCount(lang, documentAlerts.missing_count, {
+                    one: t.portal_dashboard_missing_required_document_one,
+                    few: t.portal_dashboard_missing_required_document_many,
+                    many: t.portal_dashboard_missing_required_document_many,
+                  })}
                 </p>
                 <p className={cn("mt-1", tokens.text.muted)}>
                   {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
@@ -533,8 +548,8 @@ function usePatientDashboardPageContent() {
                         <CountBadge>{recommendationPriorityLabel(item.priority || "normal")}</CountBadge>
                       </div>
                       <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
-                      {nextActionDescription(item, t) ? (
-                        <p className={cn("mt-1", tokens.text.muted)}>{nextActionDescription(item, t)}</p>
+                      {nextActionText(item) ? (
+                        <p className={cn("mt-1", tokens.text.muted)}>{nextActionText(item)}</p>
                       ) : null}
                     </div>
                   </div>
@@ -601,12 +616,62 @@ function usePatientDashboardPageContent() {
         </Section>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-5">
-        <StatCard label={t.portal_dashboard_upcoming_visits} value={upcomingAppointments} description={formatPortalCountLabel(t.portal_dashboard_released_documents_count, releasedDocuments)} />
-        <StatCard label={t.portal_dashboard_open_service_requests} value={openServiceRequests} description={formatPortalCountLabel(t.portal_dashboard_total_concierge_entries_count, services.length)} />
-        <StatCard label={t.portal_dashboard_outstanding_balance} value={outstandingBalance === 0 ? formatPortalCurrency(0) : formatPortalCurrency(outstandingBalance)} />
-        <StatCard label={t.portal_dashboard_open_privacy_requests} value={openRequests} description={formatPortalCountLabel(t.portal_dashboard_pending_confirmations_count, pendingConfirmations)} />
-        <StatCard label={t.portal_dashboard_feedback_sent} value={feedback.length} description={formatPortalCountLabel(t.portal_dashboard_promoter_ratings_count, promoterCount)} />
+      {/* Each tile's sub-line counts the tile's own subject. */}
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+        <StatCard
+          label={t.portal_dashboard_upcoming_visits}
+          value={upcomingAppointments}
+          description={
+            nextAppointment
+              ? formatUiText(t.portal_dashboard_next_visit_on, { date: formatPortalDate(nextAppointment.date) })
+              : t.portal_dashboard_no_visit_planned
+          }
+        />
+        <StatCard
+          label={t.portal_dashboard_released_documents}
+          value={releasedDocuments}
+          description={formatPluralCount(lang, pendingConfirmations, {
+            one: t.portal_dashboard_awaiting_confirmation_one,
+            few: t.portal_dashboard_awaiting_confirmation_few,
+            many: t.portal_dashboard_awaiting_confirmation_many,
+          })}
+        />
+        <StatCard
+          label={t.portal_dashboard_open_service_requests}
+          value={openServiceRequests}
+          description={formatPluralCount(lang, services.length, {
+            one: t.portal_dashboard_concierge_entries_total_one,
+            few: t.portal_dashboard_concierge_entries_total_few,
+            many: t.portal_dashboard_concierge_entries_total_many,
+          })}
+        />
+        <StatCard
+          label={t.portal_dashboard_outstanding_balance}
+          value={formatPortalCurrency(outstandingBalance)}
+          description={formatPluralCount(lang, openInvoiceCount, {
+            one: t.portal_dashboard_open_invoices_count_one,
+            few: t.portal_dashboard_open_invoices_count_few,
+            many: t.portal_dashboard_open_invoices_count_many,
+          })}
+        />
+        <StatCard
+          label={t.portal_dashboard_open_privacy_requests}
+          value={openRequests}
+          description={formatPluralCount(lang, requests.length, {
+            one: t.portal_dashboard_privacy_requests_total_one,
+            few: t.portal_dashboard_privacy_requests_total_few,
+            many: t.portal_dashboard_privacy_requests_total_many,
+          })}
+        />
+        <StatCard
+          label={t.portal_dashboard_feedback_sent}
+          value={feedback.length}
+          description={
+            feedback.length > 0
+              ? formatUiText(t.portal_dashboard_high_ratings_count, { count: promoterCount })
+              : undefined
+          }
+        />
       </section>
 
       <section className="grid gap-6 xl:grid-cols-3 2xl:grid-cols-6">
@@ -631,7 +696,7 @@ function usePatientDashboardPageContent() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.title}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {[item.provider_name, item.doctor_name].filter(Boolean).join(" / ")}
+                        {portalAppointmentPlaceLabel(item)}
                       </p>
                     </div>
                     <StatusBadge status={item.status} className={appointmentStatusTone(item.status)}>
@@ -666,10 +731,7 @@ function usePatientDashboardPageContent() {
                     <div>
                       <p className="text-sm font-semibold text-foreground">{item.auto_name}</p>
                       <p className={cn("mt-1", tokens.text.muted)}>
-                        {[
-                          portalDocumentValueLabel(item.art),
-                          item.category ? portalDocumentValueLabel(item.category) : null,
-                        ].filter(Boolean).join(" / ")}
+                        {portalDocumentTypeLabels(item.art, item.category).join(" / ")}
                       </p>
                     </div>
                     <StatusBadge tone={item.confirmed ? "success" : item.requires_confirmation ? "warning" : "info"}>
@@ -826,7 +888,7 @@ function usePatientDashboardPageContent() {
                       </p>
                     </div>
                     <StatusBadge status={item.status} className={feedbackStatusTone(item.status)}>
-                      {portalStatusLabel(item.status)}
+                      {feedbackStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
                 </ListItem>

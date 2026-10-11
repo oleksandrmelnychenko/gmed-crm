@@ -10,6 +10,7 @@ import {
   MessageSquare,
   LoaderCircle,
   UserRoundPlus,
+  Users,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { clearApiCache } from "@/lib/api";
@@ -48,6 +49,7 @@ import {
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
 import { AiMark } from "@/components/ui/ai-mark";
+import { OverflowMenu } from "@/components/ui/overflow-menu";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import {
   Dialog,
@@ -353,16 +355,16 @@ export function Topbar() {
           </TopbarIconButton>
           <div aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
           <div className="flex min-w-0 items-center gap-2 px-1.5 sm:px-2">
-            <span className="sr-only">{t.app_name}</span>
+            {/* "CONSOLE" is the staff workspace; patients see their portal. */}
+            <span className="sr-only">
+              {isPatientPortal ? `GMED ${t.portal_dashboard_patient_portal}` : t.app_name}
+            </span>
             <GmedWordmark className="h-6 w-auto shrink-0 text-[#04060c]" />
             <span
               aria-hidden="true"
-              className={cn(
-                "self-end truncate text-[12px] font-semibold leading-none tracking-normal text-foreground",
-                isPatientPortal && "hidden sm:inline",
-              )}
+              className="hidden self-end truncate text-[12px] font-semibold leading-none tracking-normal text-foreground sm:inline"
             >
-              CONSOLE
+              {isPatientPortal ? t.portal_dashboard_patient_portal : "CONSOLE"}
             </span>
           </div>
         </div>
@@ -391,15 +393,17 @@ export function Topbar() {
             />
           ) : null}
 
-          {/* Online users avatars */}
+          {/* Online users avatars; below md they live in the "more" menu. */}
           {!isPatientPortal && onlineUsersWithSelf.length > 0 && (
-            <OnlineAvatars
-              users={onlineUsersWithSelf}
-              onToggle={() => {
-                setUsersOpen(!usersOpen);
-                setNotifOpen(false);
-              }}
-            />
+            <div className="hidden md:flex">
+              <OnlineAvatars
+                users={onlineUsersWithSelf}
+                onToggle={() => {
+                  setUsersOpen(!usersOpen);
+                  setNotifOpen(false);
+                }}
+              />
+            </div>
           )}
 
           {showLeadShortcut ? (
@@ -445,7 +449,9 @@ export function Topbar() {
                     aria-label={leadQueueCopy.title}
                     data-origin="top-right"
                     className={cn(
-                      "t-dropdown absolute right-0 top-10 z-50 w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-border bg-background shadow-xl",
+                      // On phones the button sits mid-bar: span the screen instead
+                      // of hanging off its left edge.
+                      "t-dropdown fixed inset-x-3 top-14 z-50 overflow-hidden rounded-xl border border-border bg-background shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-10 sm:w-[min(22rem,calc(100vw-1.5rem))]",
                       leadQueueOpen && "is-open",
                       leadQueueClosing && "is-closing",
                     )}
@@ -556,17 +562,54 @@ export function Topbar() {
           </TopbarIconButton>
           )}
 
-          {/* Lang */}
+          {/* Lang; staff below md reach it through the "more" menu. */}
           <button
             type="button"
             onClick={toggleLang}
             title={t.topbar_language_toggle}
             aria-label={t.topbar_language_toggle}
-            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:px-2.5"
+            className={cn(
+              "h-8 items-center gap-1.5 rounded-lg px-2 text-[12px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none sm:px-2.5",
+              isPatientPortal ? "flex" : "hidden md:flex",
+            )}
           >
             <Globe aria-hidden="true" className="size-3.5" />
             {t.common_lang_native}
           </button>
+
+          {/* Staff top bar on phones and small tablets (QA 2026-10-11: 571 px
+              of items in a 375 px bar): the online users and the language
+              switch move into a menu; the sidebar toggle, leads and
+              notifications stay. */}
+          {!isPatientPortal ? (
+            <div className="flex md:hidden">
+              <OverflowMenu
+                label={t.topbar_more}
+                triggerClassName="size-8 border-0 bg-transparent px-0 text-muted-foreground hover:text-foreground [&_svg]:size-[17px]"
+                items={[
+                  ...(onlineUsersWithSelf.length > 0
+                    ? [{
+                        key: "online-users",
+                        label: t.topbar_online_users,
+                        icon: <Users aria-hidden="true" />,
+                        detail: onlineUsersWithSelf.length,
+                        onSelect: () => {
+                          setNotifOpen(false);
+                          setUsersOpen(true);
+                        },
+                      }]
+                    : []),
+                  {
+                    key: "language",
+                    label: t.topbar_language_toggle,
+                    icon: <Globe aria-hidden="true" />,
+                    detail: t.common_lang_native,
+                    onSelect: toggleLang,
+                  },
+                ]}
+              />
+            </div>
+          ) : null}
         </div>
       </header>
 

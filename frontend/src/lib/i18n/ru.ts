@@ -86,8 +86,9 @@ export const ru = {
   login_totp_code: "Код",
   login_totp_submit: "Войти",
   login_totp_error: "Код не подходит. Попробуйте ещё раз или войдите заново.",
+  // One login page for patients and staff: no staff-only wording.
   login_sign_in_subtitle:
-    "Продолжить в операционное пространство для клиник, врачей и приёмов.",
+    "Войдите, указав адрес электронной почты и пароль.",
   login_brand_tagline: "Медицинское консьерж-агентство",
   login_back_home: "На главную",
   login_show_password: "Показать пароль",
@@ -306,7 +307,7 @@ export const ru = {
   patients_subtitle: "Управление картотекой пациентов",
   patients_new: "Новый пациент",
   patients_col_status: "Статус",
-  patients_col_no: "№",
+  patients_col_no: "ID пациента",
   patients_col_patient: "Пациент",
   patients_col_id: "ID",
   patients_last_name: "Фамилия",

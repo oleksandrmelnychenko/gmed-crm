@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import type { PatientContactFormState, PatientTrustedContactFormState } from "./list-model";
-import { patientProfileFieldKey, validatePatientProfileForm } from "./profile-validation";
+import {
+  blankPatientForm,
+  type PatientContactFormState,
+  type PatientTrustedContactFormState,
+} from "./list-model";
+import {
+  isGermanyCountry,
+  newPatientFieldKey,
+  patientProfileFieldKey,
+  postalCodeError,
+  validateNewPatientForm,
+  validatePatientProfileForm,
+  withMinorGuardianRelations,
+} from "./profile-validation";
 
 const messages = {
   required: "Обязательное поле",
@@ -72,5 +84,80 @@ describe("validatePatientProfileForm", () => {
       [patientProfileFieldKey.trustedName("t1")]: messages.required,
       [patientProfileFieldKey.trustedPhone("t2")]: messages.required,
     });
+  });
+});
+
+const zipMessages = { zipGermany: "Deutsche PLZ: 5 Ziffern", zipInvalid: "Nur Buchstaben und Ziffern" };
+
+describe("postalCodeError", () => {
+  it("wants five digits in Germany", () => {
+    expect(postalCodeError("10115", "DE", zipMessages)).toBeUndefined();
+    expect(postalCodeError(" 10115 ", "de", zipMessages)).toBeUndefined();
+    expect(postalCodeError("10115Герман", "DE", zipMessages)).toBe(zipMessages.zipGermany);
+    expect(postalCodeError("1011", "DE", zipMessages)).toBe(zipMessages.zipGermany);
+    expect(postalCodeError("D-10115", "Deutschland", zipMessages)).toBe(zipMessages.zipGermany);
+  });
+
+  it("allows letters, digits, spaces and hyphens elsewhere", () => {
+    expect(postalCodeError("SW1A 1AA", "GB", zipMessages)).toBeUndefined();
+    expect(postalCodeError("00-950", "PL", zipMessages)).toBeUndefined();
+    expect(postalCodeError("01001", "", zipMessages)).toBeUndefined();
+    expect(postalCodeError("01001 Киев", "UA", zipMessages)).toBe(zipMessages.zipInvalid);
+    expect(postalCodeError("12345678901", "AT", zipMessages)).toBe(zipMessages.zipInvalid);
+    expect(postalCodeError("-1234", "AT", zipMessages)).toBe(zipMessages.zipInvalid);
+  });
+
+  it("leaves an empty postal code alone", () => {
+    expect(postalCodeError("  ", "DE", zipMessages)).toBeUndefined();
+  });
+
+  it("recognises Germany by code and by older stored names", () => {
+    expect(["DE", "deu", "Germany", "Deutschland", "Германия"].every(isGermanyCountry)).toBe(true);
+    expect(isGermanyCountry("AT")).toBe(false);
+    expect(isGermanyCountry(null)).toBe(false);
+  });
+});
+
+describe("validateNewPatientForm", () => {
+  const newPatientMessages = {
+    ...messages,
+    ...zipMessages,
+    minorNeedsGuardian: "Elternteil oder Vormund mit Telefon",
+  };
+
+  it("does not accept the blank form: the sex has no default", () => {
+    const errors = validateNewPatientForm(blankPatientForm(), false, newPatientMessages);
+    expect(Object.keys(errors).sort()).toEqual(["birthDate", "firstName", "gender", "lastName"]);
+  });
+
+  it("checks the postal code against the address country", () => {
+    const errors = validateNewPatientForm(
+      { ...blankPatientForm(), ...person, addressZip: "10115Г", addressCountry: "DE" },
+      false,
+      newPatientMessages,
+    );
+    expect(errors).toEqual({ [newPatientFieldKey.addressZip]: zipMessages.zipGermany });
+  });
+
+  it("asks a minor for a parent or guardian with name and phone", () => {
+    const minor = { ...blankPatientForm(), ...person, birthDate: "2015-03-01" };
+    expect(validateNewPatientForm(minor, true, newPatientMessages)).toEqual({
+      [newPatientFieldKey.guardian]: newPatientMessages.minorNeedsGuardian,
+    });
+    const guardian = { ...trusted("t1", "Ben Muster", "+49 151 1234567"), relation: "guardian" };
+    expect(
+      validateNewPatientForm({ ...minor, trustedContacts: [guardian] }, true, newPatientMessages),
+    ).toEqual({});
+  });
+});
+
+describe("withMinorGuardianRelations", () => {
+  it("saves a minor's contact as the guardian the form shows", () => {
+    const contacts = [trusted("t1", "Ben Muster"), { ...trusted("t2", "Mia Muster"), relation: "parent" }];
+    expect(withMinorGuardianRelations(contacts, true).map((contact) => contact.relation)).toEqual([
+      "guardian",
+      "parent",
+    ]);
+    expect(withMinorGuardianRelations(contacts, false)).toBe(contacts);
   });
 });

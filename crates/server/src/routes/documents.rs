@@ -12017,6 +12017,17 @@ fn parse_patient_upload_preset(
             default_title: "Insurance document",
             is_medical: false,
         }),
+        // The patient's own passport or ID card. Stored as a passport scan in
+        // the identity category, which the required "passport" document
+        // accepts, so the portal upload can fulfil it (QA 2026-10-11); the
+        // care team still checks the file in the patient's documents.
+        "identity_document" | "identity" | "passport" => Ok(PatientUploadPreset {
+            kind: "identity_document",
+            art: "passport_scan",
+            category: "identity",
+            default_title: "Passport / ID card",
+            is_medical: false,
+        }),
         "payment_proof" => Ok(PatientUploadPreset {
             kind: "payment_proof",
             art: "payment_proof",
@@ -12026,8 +12037,40 @@ fn parse_patient_upload_preset(
         }),
         _ => Err(err(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "Upload kind must be general, correspondence, analyses, conclusions, invoices, translations, medical_record, insurance_document or payment_proof",
+            "Upload kind must be general, correspondence, analyses, conclusions, invoices, translations, medical_record, insurance_document, identity_document or payment_proof",
         )),
+    }
+}
+
+#[cfg(test)]
+mod patient_upload_preset_tests {
+    use super::*;
+
+    #[test]
+    fn a_portal_identity_upload_is_a_classified_passport_scan() {
+        for kind in [
+            "identity_document",
+            "identity",
+            "passport",
+            " Identity_Document ",
+        ] {
+            let Ok(preset) = parse_patient_upload_preset(kind) else {
+                panic!("{kind:?} is an upload kind");
+            };
+            assert_eq!(preset.kind, "identity_document", "{kind:?}");
+            assert_eq!(preset.art, "passport_scan", "{kind:?}");
+            assert_eq!(preset.category, "identity", "{kind:?}");
+            assert!(!preset.is_medical, "{kind:?}");
+            assert!(
+                !document_needs_categorization(Some(preset.art), Some(preset.category)),
+                "{kind:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_upload_kind_is_refused() {
+        assert!(parse_patient_upload_preset("visa").is_err());
     }
 }
 

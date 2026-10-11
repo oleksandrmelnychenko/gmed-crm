@@ -205,6 +205,9 @@ test.describe("patients data-table", () => {
     await expect(patientGrid(page).getByText("PT-0002")).toBeVisible();
     await expect(patientGrid(page).getByText("PT-0003")).not.toBeVisible();
     await expect(page.locator('[role="table"] input[type="checkbox"]')).toHaveCount(0);
+    // The ID column is labelled and the footer counts in the right form ("2 пациента", not "2 пациенты").
+    await expect(page.locator('[role="columnheader"][data-column-id="no"]')).toContainText("ID пациента");
+    await expect(page.getByText(/^2( \/ \d+)? пациента$/)).toBeVisible();
   });
 
   test("global search filters rows", async ({ page }) => {

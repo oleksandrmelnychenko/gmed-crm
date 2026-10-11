@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Mail, Phone, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
   makePatientTrustedContactForm,
   normalizePatientContactForms,
 } from "../../model/list-model";
+import { newPatientFieldKey } from "../../model/profile-validation";
 import {
   CountrySelect,
   Field,
@@ -33,6 +35,48 @@ function isGuardianOrParentRelation(value: string) {
   return value.trim() === "guardian" || value.trim() === "parent";
 }
 
+/**
+ * The validation messages of one form instance and the prefix of its field
+ * ids (the list's detail pane and the create sheet can be open together).
+ */
+type PatientFieldErrors = {
+  messages: Record<string, string>;
+  idPrefix: string;
+};
+
+function fieldDomId(fieldKey: string, fieldErrors: PatientFieldErrors) {
+  return `${fieldErrors.idPrefix}-${fieldKey.replace(/[^a-zA-Z0-9-]/g, "-")}`;
+}
+
+/** id and ARIA state of a field that may carry a validation error. */
+function fieldErrorProps(fieldKey: string, fieldErrors: PatientFieldErrors) {
+  const id = fieldDomId(fieldKey, fieldErrors);
+  const invalid = Boolean(fieldErrors.messages[fieldKey]);
+  return {
+    id,
+    "aria-invalid": invalid || undefined,
+    "aria-describedby": invalid ? `${id}-error` : undefined,
+  };
+}
+
+function FieldErrorText({
+  fieldKey,
+  fieldErrors,
+}: {
+  fieldKey: string;
+  fieldErrors: PatientFieldErrors;
+}) {
+  const message = fieldErrors.messages[fieldKey];
+  if (!message) return null;
+  return (
+    <p id={`${fieldDomId(fieldKey, fieldErrors)}-error`} className="text-xs text-destructive">
+      {message}
+    </p>
+  );
+}
+
+const NO_FIELD_ERRORS: Record<string, string> = {};
+
 type PatientFormFieldsProps = {
   form: PatientFormState;
   onChange: (field: keyof PatientFormState, value: string) => void;
@@ -41,6 +85,8 @@ type PatientFormFieldsProps = {
   contactMode?: "simple" | "multiple";
   includeBirthAndGender?: boolean;
   readOnly?: boolean;
+  /** Messages per field key (`newPatientFieldKey`), shown under the fields. */
+  fieldErrors?: Record<string, string>;
 };
 
 type PatientFormTranslations = ReturnType<typeof useLang>["t"];
@@ -72,8 +118,14 @@ export function PatientFormFields({
   contactMode = "simple",
   includeBirthAndGender = false,
   readOnly = false,
+  fieldErrors: fieldErrorMessages = NO_FIELD_ERRORS,
 }: PatientFormFieldsProps) {
   const { t, lang } = useLang();
+  const fieldIdPrefix = useId();
+  const fieldErrors: PatientFieldErrors = {
+    messages: fieldErrorMessages,
+    idPrefix: `patient-form${fieldIdPrefix.replace(/[^a-zA-Z0-9-]/g, "")}`,
+  };
   const l = (key: string) => t.uiText[key] ?? key;
   const age = computeAge(form.birthDate);
   const isMinor = includeBirthAndGender && age !== null && age < 18;
@@ -174,6 +226,7 @@ export function PatientFormFields({
     <div className="space-y-3">
       <PatientPersonalDataSection
         form={form}
+        fieldErrors={fieldErrors}
         includeBirthAndGender={includeBirthAndGender}
         isMinor={isMinor}
         notSetLabel={notSetLabel}
@@ -186,6 +239,7 @@ export function PatientFormFields({
 
       <PatientContactSection
         contactMode={contactMode}
+        fieldErrors={fieldErrors}
         form={form}
         readOnly={readOnly}
         t={t}
@@ -216,13 +270,17 @@ export function PatientFormFields({
               disabled={readOnly}
             />
           </Field>
-          <Field label={t.patients_address_zip}>
+          <Field label={t.patients_address_zip} htmlFor={fieldDomId(newPatientFieldKey.addressZip, fieldErrors)}>
             <Input
+              {...fieldErrorProps(newPatientFieldKey.addressZip, fieldErrors)}
               value={form.addressZip}
               onChange={(event) => onChange("addressZip", event.target.value)}
               className={formInputClassName}
               disabled={readOnly}
+              autoComplete="postal-code"
+              maxLength={10}
             />
+            <FieldErrorText fieldKey={newPatientFieldKey.addressZip} fieldErrors={fieldErrors} />
           </Field>
           <Field label={t.patients_address_country}>
             <CountrySelect
@@ -282,17 +340,24 @@ export function PatientFormFields({
           </p>
           {!readOnly ? (
             <Button
+              id={fieldDomId(newPatientFieldKey.guardian, fieldErrors)}
               type="button"
               variant="outline"
               size="sm"
               className={cn(contactAddButtonClassName, "shrink-0 gap-1.5")}
               onClick={addTrustedContact}
+              aria-describedby={
+                fieldErrors.messages[newPatientFieldKey.guardian]
+                  ? `${fieldDomId(newPatientFieldKey.guardian, fieldErrors)}-error`
+                  : undefined
+              }
             >
               <Plus className="size-3.5" />
               {lang === "de" ? "Kontakt hinzufügen" : "Добавить контакт"}
             </Button>
           ) : null}
         </div>
+        <FieldErrorText fieldKey={newPatientFieldKey.guardian} fieldErrors={fieldErrors} />
 
         {form.trustedContacts.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border px-3 py-5 text-center text-sm text-muted-foreground">
@@ -329,23 +394,35 @@ export function PatientFormFields({
                     ) : null}
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    <Field label={t.patients_emergency_name} required={isMinor || contactHasData}>
+                    <Field
+                      label={t.patients_emergency_name}
+                      required={isMinor || contactHasData}
+                      htmlFor={fieldDomId(newPatientFieldKey.trustedName(contact.id), fieldErrors)}
+                    >
                       <Input
+                        {...fieldErrorProps(newPatientFieldKey.trustedName(contact.id), fieldErrors)}
                         value={contact.name}
                         onChange={(event) => updateTrustedContact(contact.id, { name: event.target.value })}
                         className={formInputClassName}
                         disabled={readOnly}
                         required={isMinor || contactHasData}
                       />
+                      <FieldErrorText fieldKey={newPatientFieldKey.trustedName(contact.id)} fieldErrors={fieldErrors} />
                     </Field>
-                    <Field label={t.patients_emergency_phone} required={isMinor}>
+                    <Field
+                      label={t.patients_emergency_phone}
+                      required={isMinor}
+                      htmlFor={fieldDomId(newPatientFieldKey.trustedPhone(contact.id), fieldErrors)}
+                    >
                       <Input
+                        {...fieldErrorProps(newPatientFieldKey.trustedPhone(contact.id), fieldErrors)}
                         value={contact.phone}
                         onChange={(event) => updateTrustedContact(contact.id, { phone: event.target.value })}
                         className={formInputClassName}
                         disabled={readOnly}
                         required={isMinor}
                       />
+                      <FieldErrorText fieldKey={newPatientFieldKey.trustedPhone(contact.id)} fieldErrors={fieldErrors} />
                     </Field>
                     <Field label={t.patients_emergency_relation} required>
                       <NativeComboboxSelect
@@ -398,6 +475,7 @@ export function PatientFormFields({
 
 function PatientPersonalDataSection({
   form,
+  fieldErrors,
   includeBirthAndGender,
   isMinor,
   notSetLabel,
@@ -408,6 +486,7 @@ function PatientPersonalDataSection({
   onChange,
 }: {
   form: PatientFormState;
+  fieldErrors: PatientFieldErrors;
   includeBirthAndGender: boolean;
   isMinor: boolean;
   notSetLabel: string;
@@ -428,30 +507,35 @@ function PatientPersonalDataSection({
             disabled={readOnly}
           />
         </Field>
-        <Field label={t.patients_first_name} required>
+        <Field label={t.patients_first_name} required htmlFor={fieldDomId(newPatientFieldKey.firstName, fieldErrors)}>
           <Input
+            {...fieldErrorProps(newPatientFieldKey.firstName, fieldErrors)}
             value={form.firstName}
             onChange={(event) => onChange("firstName", event.target.value)}
             className={formInputClassName}
             disabled={readOnly}
             required
           />
+          <FieldErrorText fieldKey={newPatientFieldKey.firstName} fieldErrors={fieldErrors} />
         </Field>
-        <Field label={t.patients_last_name} required>
+        <Field label={t.patients_last_name} required htmlFor={fieldDomId(newPatientFieldKey.lastName, fieldErrors)}>
           <Input
+            {...fieldErrorProps(newPatientFieldKey.lastName, fieldErrors)}
             value={form.lastName}
             onChange={(event) => onChange("lastName", event.target.value)}
             className={formInputClassName}
             disabled={readOnly}
             required
           />
+          <FieldErrorText fieldKey={newPatientFieldKey.lastName} fieldErrors={fieldErrors} />
         </Field>
       </div>
 
       {includeBirthAndGender ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <Field label={t.patients_birth_date} required>
+          <Field label={t.patients_birth_date} required htmlFor={fieldDomId(newPatientFieldKey.birthDate, fieldErrors)}>
             <Input
+              {...fieldErrorProps(newPatientFieldKey.birthDate, fieldErrors)}
               type="date"
               value={form.birthDate}
               onChange={(event) => onBirthDateChange(event.target.value)}
@@ -459,18 +543,25 @@ function PatientPersonalDataSection({
               disabled={readOnly}
               required
             />
+            <FieldErrorText fieldKey={newPatientFieldKey.birthDate} fieldErrors={fieldErrors} />
           </Field>
-          <Field label={t.patients_gender}>
+          {/* No preselected sex: a silent default was saved when nobody looked. */}
+          <Field label={t.patients_gender} required htmlFor={fieldDomId(newPatientFieldKey.gender, fieldErrors)}>
             <NativeComboboxSelect
+              {...fieldErrorProps(newPatientFieldKey.gender, fieldErrors)}
               value={form.gender}
-              onChange={(event) => onChange("gender", event.target.value ?? "male")}
+              onChange={(event) => onChange("gender", event.target.value ?? "")}
               className={cn("w-full", formInputClassName)}
               disabled={readOnly}
+              required
+              hidePlaceholderOption
             >
+              <option value="">{t.patient_form_choose_gender}</option>
               <option value="male">{t.gender_male}</option>
               <option value="female">{t.gender_female}</option>
               <option value="diverse">{t.gender_diverse}</option>
             </NativeComboboxSelect>
+            <FieldErrorText fieldKey={newPatientFieldKey.gender} fieldErrors={fieldErrors} />
           </Field>
         </div>
       ) : null}
@@ -522,6 +613,7 @@ function PatientPersonalDataSection({
 
 function PatientContactSection({
   contactMode,
+  fieldErrors,
   form,
   readOnly,
   t,
@@ -533,6 +625,7 @@ function PatientContactSection({
   onUpdateContact,
 }: {
   contactMode: "simple" | "multiple";
+  fieldErrors: PatientFieldErrors;
   form: PatientFormState;
   readOnly: boolean;
   t: PatientFormTranslations;
@@ -645,8 +738,13 @@ function PatientContactSection({
                     <option value="other">{l("providers_contact_type_other")}</option>
                   </NativeComboboxSelect>
                 </Field>
-                <Field label={contactValueLabel(contact.contactKind)} className="sm:col-span-2 xl:col-span-1">
+                <Field
+                  label={contactValueLabel(contact.contactKind)}
+                  className="sm:col-span-2 xl:col-span-1"
+                  htmlFor={fieldDomId(newPatientFieldKey.contact(contact.id), fieldErrors)}
+                >
                   <Input
+                    {...fieldErrorProps(newPatientFieldKey.contact(contact.id), fieldErrors)}
                     type={contact.contactKind === "email" ? "email" : "tel"}
                     value={contact.value}
                     onChange={(event) =>
@@ -655,6 +753,7 @@ function PatientContactSection({
                     className={formInputClassName}
                     disabled={readOnly}
                   />
+                  <FieldErrorText fieldKey={newPatientFieldKey.contact(contact.id)} fieldErrors={fieldErrors} />
                 </Field>
               </div>
             </div>

@@ -21,6 +21,11 @@ import {
   type PatientFormState,
   type PatientsDictionary,
 } from "../../model/list-model";
+import {
+  validateNewPatientForm,
+  withMinorGuardianRelations,
+  type NewPatientValidationMessages,
+} from "../../model/profile-validation";
 import { parseFunctionalLabels } from "../shared/patient-form-primitives";
 import { PatientFormFields } from "../shared/patient-form-fields";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -36,7 +41,33 @@ type CreatePatientSheetState = {
   form: PatientFormState;
   busy: boolean;
   error: string;
+  /** Field errors show after the first create attempt and then follow the input. */
+  validationAttempted: boolean;
 };
+
+function newPatientValidationMessages(
+  dictionary: PatientsDictionary,
+): NewPatientValidationMessages {
+  return {
+    required: dictionary.patient_profile_editor_required_field,
+    invalidEmail: dictionary.patient_profile_editor_invalid_email,
+    invalidPhone: dictionary.patient_profile_editor_invalid_phone,
+    zipGermany: dictionary.patient_form_zip_invalid_germany,
+    zipInvalid: dictionary.patient_form_zip_invalid,
+    minorNeedsGuardian: dictionary.patient_form_minor_needs_guardian,
+  };
+}
+
+/** The checks of the form as the patient would be saved. */
+function newPatientFieldErrors(form: PatientFormState, dictionary: PatientsDictionary) {
+  const age = computeAge(form.birthDate);
+  const isMinor = age !== null && age < 18;
+  return validateNewPatientForm(
+    { ...form, trustedContacts: withMinorGuardianRelations(form.trustedContacts, isMinor) },
+    isMinor,
+    newPatientValidationMessages(dictionary),
+  );
+}
 
 type CreatePatientSheetPatch =
   | Partial<CreatePatientSheetState>
@@ -65,9 +96,11 @@ function CreatePatientSheet({
       form: blankPatientForm(),
       busy: false,
       error: "",
+      validationAttempted: false,
     }),
   );
-  const { form, busy, error } = sheetState;
+  const { form, busy, error, validationAttempted } = sheetState;
+  const fieldErrors = validationAttempted ? newPatientFieldErrors(form, dictionary) : undefined;
   const setForm = (nextValue: SetStateAction<PatientFormState>) => {
     dispatchSheetState((current) => ({
       form:
@@ -83,12 +116,27 @@ function CreatePatientSheet({
         form: blankPatientForm(),
         busy: false,
         error: "",
+        validationAttempted: false,
       });
     }
   }, [open]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
+    // The app's own checks and messages (the form has `noValidate`): the
+    // browser's bubble spoke the browser's language, not the app's.
+    const formElement = event.currentTarget;
+    if (Object.keys(newPatientFieldErrors(form, dictionary)).length > 0) {
+      dispatchSheetState({
+        validationAttempted: true,
+        error: dictionary.patient_profile_editor_check_fields,
+      });
+      window.requestAnimationFrame(() => {
+        formElement.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+      });
+      return;
+    }
     dispatchSheetState({
       busy: true,
       error: "",
@@ -96,21 +144,11 @@ function CreatePatientSheet({
 
     try {
       const age = computeAge(form.birthDate);
-      const contactPayload = patientContactFormsToPayload(form.contacts);
-      const trustedContacts = patientTrustedContactsToPayload(form.trustedContacts);
-      const invalidTrustedContact = trustedContacts.find((contact) => !contact.name);
-      if (invalidTrustedContact) {
-        throw new Error("Укажите имя доверенного контакта");
-      }
       const isMinor = age !== null && age < 18;
-      if (
-        isMinor &&
-        !trustedContacts.some((contact) =>
-          ["guardian", "parent"].includes(contact.relation) && Boolean(contact.phone)
-        )
-      ) {
-        throw new Error("Для несовершеннолетнего укажите родителя или опекуна и его телефон");
-      }
+      const contactPayload = patientContactFormsToPayload(form.contacts);
+      const trustedContacts = patientTrustedContactsToPayload(
+        withMinorGuardianRelations(form.trustedContacts, isMinor),
+      );
       const primaryTrustedContact = trustedContacts[0];
       const patientRelations = trustedContacts.map((contact) => ({
         related_name: contact.name,
@@ -167,6 +205,7 @@ function CreatePatientSheet({
       title={dictionary.patients_create}
       width="default"
       onSubmit={handleSubmit}
+      noValidate
       footer={
         <>
           <Button
@@ -202,6 +241,7 @@ function CreatePatientSheet({
         }
         contactMode="multiple"
         includeBirthAndGender
+        fieldErrors={fieldErrors}
       />
     </PatientSheetScaffold>
   );

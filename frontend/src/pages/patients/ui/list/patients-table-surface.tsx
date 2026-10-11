@@ -8,6 +8,7 @@ import type {
   SortStack,
   ViewMode,
 } from "@/components/data-table/types";
+import { formatPluralCount, type Lang } from "@/lib/i18n";
 
 import type { PatientSummary } from "../../model/list-model";
 import type { PatientDetailSheetProps } from "../sheets/patient-list-detail-sheet";
@@ -28,6 +29,7 @@ type PatientsTableSurfaceProps = {
   emptyLabel: string;
   frozenColumns: string[];
   hiddenColumns: string[];
+  lang: Lang;
   loading: boolean;
   maxFrozenColumns: number;
   onCloseDetail: () => void;
@@ -54,6 +56,7 @@ export function PatientsTableSurface({
   emptyLabel,
   frozenColumns,
   hiddenColumns,
+  lang,
   loading,
   maxFrozenColumns,
   onCloseDetail,
@@ -127,10 +130,14 @@ export function PatientsTableSurface({
         footer={
           <div className="flex items-center justify-between">
             <span className="tabular-nums">
-              {filteredCount === totalCount
-                ? `${totalCount}`
-                : `${filteredCount} / ${totalCount}`}{" "}
-              {t.patients_title.toLowerCase()}
+              {/* "1 пациент", "3 пациента", "12 / 40 пациентов": the noun follows the last number. */}
+              {formatPluralCount(lang, totalCount, {
+                one: t.patients_list_count_one,
+                few: t.patients_list_count_few,
+                many: t.patients_list_count_many,
+              }, {
+                count: filteredCount === totalCount ? `${totalCount}` : `${filteredCount} / ${totalCount}`,
+              })}
             </span>
           </div>
         }

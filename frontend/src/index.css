@@ -274,6 +274,13 @@
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
 }
 
+/* Once a sliding pill is placed it alone marks the active tab: with the tab's
+   own background as well, two tabs looked active while the pill slid. */
+.lead-wizard-step-tabs[data-pill-ready="true"] > .lead-wizard-step-tab[aria-selected="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+
 .lead-wizard-step-pill {
   top: 0;
   height: 2.5rem;

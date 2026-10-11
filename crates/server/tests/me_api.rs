@@ -704,6 +704,54 @@ async fn patient_can_upload_document_for_self_and_download_it() {
 }
 
 #[tokio::test]
+async fn patient_identity_upload_is_stored_as_a_passport_scan() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("me-upload-identity");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) = multipart_upload(
+        &app,
+        "/api/v1/me/documents/upload",
+        &patient_bearer,
+        &[
+            ("upload_kind", "identity_document".to_string()),
+            ("auto_name", "Reisepass".to_string()),
+        ],
+        "reisepass.pdf",
+        "application/pdf",
+        b"%PDF-passport-upload%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["upload_kind"], "identity_document");
+    let document_id = body["id"].as_str().unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/documents/uploads",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body.as_array().expect("patient uploads");
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], document_id);
+    // The type and category the required "passport" document accepts.
+    assert_eq!(items[0]["art"], "passport_scan");
+    assert_eq!(items[0]["category"], "identity");
+    assert_eq!(items[0]["is_medical"], false);
+    assert_eq!(items[0]["visibility"], "internal");
+}
+
+#[tokio::test]
 async fn patient_can_list_own_invoices_and_payment_proof_status() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

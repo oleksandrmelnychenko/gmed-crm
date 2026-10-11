@@ -4039,6 +4039,7 @@ export function LeadWizard({
   useEffect(() => {
     if (!open) {
       stepPillReadyRef.current = false;
+      if (stepTabsRef.current) delete stepTabsRef.current.dataset.pillReady;
       return;
     }
     const stepNav = stepNavRef.current;
@@ -4067,6 +4068,10 @@ export function LeadWizard({
     const animationFrame = window.requestAnimationFrame(() => {
       movePill(stepPillReadyRef.current && !reduceMotion);
       stepPillReadyRef.current = true;
+      // From now on the pill alone marks the active step; the tab's own
+      // background stays only as the first-frame fallback. Both together
+      // showed two highlighted steps while the pill slid (QA B-17).
+      stepTabs.dataset.pillReady = "true";
 
       const active = activeStep();
       if (!active) return;
@@ -4082,9 +4087,28 @@ export function LeadWizard({
     });
     const handleResize = () => movePill(false);
     window.addEventListener("resize", handleResize);
+    // A tab changes width without a window resize (a step turns done and its
+    // number becomes a check mark): keep the pill on the active tab.
+    // The first report only states the current sizes; acting on it would cut
+    // the slide to the newly chosen step short.
+    let initialSizesReported = false;
+    const tabsObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(() => {
+          if (!initialSizesReported) {
+            initialSizesReported = true;
+            return;
+          }
+          if (stepPillReadyRef.current) movePill(false);
+        });
+    tabsObserver?.observe(stepTabs);
+    for (const tab of stepTabs.querySelectorAll<HTMLElement>("[data-step]")) {
+      tabsObserver?.observe(tab);
+    }
     return () => {
       window.cancelAnimationFrame(animationFrame);
       window.removeEventListener("resize", handleResize);
+      tabsObserver?.disconnect();
     };
   }, [lang, open, step]);
 

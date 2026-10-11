@@ -539,6 +539,7 @@ function PatientsPageContent() {
           filteredCount={displayedPatients.length}
           frozenColumns={frozenColumns}
           hiddenColumns={hiddenColumns}
+          lang={lang}
           loading={listBusy && patients.length === 0}
           maxFrozenColumns={MAX_PATIENT_FROZEN_COLUMNS}
           onCloseDetail={() => handleDetailOpenChange(false)}

@@ -94,9 +94,10 @@ export function BuildReleaseWidget({ onOpen }: { onOpen?: () => void }) {
         className="flex h-7 items-center gap-1.5 rounded-md bg-[#111111] px-2.5 font-mono text-[10.5px] font-semibold tracking-[0.02em] text-[#789487] transition-colors hover:bg-black hover:text-[#8fa99c] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 motion-reduce:transition-none"
       >
         <span>{channelLabel}</span>
-        <span aria-hidden="true" className="text-[#566b62]">·</span>
+        {/* Phones show only the channel; the panel names the build time. */}
+        <span aria-hidden="true" className="hidden text-[#566b62] sm:inline">·</span>
         <span className="hidden uppercase md:inline">{text.button}</span>
-        <span className="tracking-normal">{buildTimeLabel(release.builtAt)}</span>
+        <span className="hidden tracking-normal sm:inline">{buildTimeLabel(release.builtAt)}</span>
       </button>
 
       {open ? createPortal(

@@ -470,10 +470,25 @@ export interface PatientsPortalTranslations {
   portal_dashboard_general_feedback: string;
   portal_dashboard_missing_required_document_one: string;
   portal_dashboard_missing_required_document_many: string;
-  portal_dashboard_released_documents_count: string;
-  portal_dashboard_total_concierge_entries_count: string;
-  portal_dashboard_pending_confirmations_count: string;
-  portal_dashboard_promoter_ratings_count: string;
+  // KPI tiles: each sub-line counts the tile's own subject; "{count}" phrases
+  // come in the CLDR forms one / few / many (German uses "many" for "other").
+  portal_dashboard_more_sections: string;
+  portal_dashboard_next_visit_on: string;
+  portal_dashboard_no_visit_planned: string;
+  portal_dashboard_released_documents: string;
+  portal_dashboard_awaiting_confirmation_one: string;
+  portal_dashboard_awaiting_confirmation_few: string;
+  portal_dashboard_awaiting_confirmation_many: string;
+  portal_dashboard_concierge_entries_total_one: string;
+  portal_dashboard_concierge_entries_total_few: string;
+  portal_dashboard_concierge_entries_total_many: string;
+  portal_dashboard_open_invoices_count_one: string;
+  portal_dashboard_open_invoices_count_few: string;
+  portal_dashboard_open_invoices_count_many: string;
+  portal_dashboard_privacy_requests_total_one: string;
+  portal_dashboard_privacy_requests_total_few: string;
+  portal_dashboard_privacy_requests_total_many: string;
+  portal_dashboard_high_ratings_count: string;
   portal_documents_failed_to_load_documents: string;
   portal_documents_choose_a_file_first: string;
   portal_documents_upload_sent_to_the_care_team: string;
@@ -518,6 +533,8 @@ export interface PatientsPortalTranslations {
   portal_documents_invoices: string;
   portal_documents_translations: string;
   portal_documents_insurance_document: string;
+  portal_documents_identity_document: string;
+  portal_documents_upload_identity_document: string;
   portal_documents_title: string;
   portal_documents_optional_title: string;
   portal_documents_file: string;
@@ -606,7 +623,9 @@ export interface PatientsPortalTranslations {
   portal_appointments_additional_note: string;
   portal_appointments_optional_logistical_or_clinical_context: string;
   portal_appointments_send_appointment_request: string;
-  portal_appointments_shared_documents_count: string;
+  portal_appointments_shared_documents_count_one: string;
+  portal_appointments_shared_documents_count_few: string;
+  portal_appointments_shared_documents_count_many: string;
   portal_invoices_failed_to_load_invoices: string;
   portal_invoices_failed_to_load_invoice_detail: string;
   portal_invoices_choose_a_file_first: string;
@@ -678,6 +697,15 @@ export interface PatientsPortalTranslations {
   patient_profile_editor_invalid_email: string;
   patient_profile_editor_invalid_phone: string;
   patient_profile_editor_check_fields: string;
+  // New-patient form: no preselected sex, postcode checks, minor guardian.
+  patient_form_choose_gender: string;
+  patient_form_zip_invalid_germany: string;
+  patient_form_zip_invalid: string;
+  patient_form_minor_needs_guardian: string;
+  // Patients list footer: "1 Patient", "2 пациента", "5 пациентов".
+  patients_list_count_one: string;
+  patients_list_count_few: string;
+  patients_list_count_many: string;
   patient_profile_editor_personal_data: string;
   patient_profile_editor_title: string;
   patient_profile_editor_first_name: string;
@@ -1426,10 +1454,23 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_dashboard_general_feedback: "Общий отзыв",
   portal_dashboard_missing_required_document_one: "Еще не хватает {count} обязательного документа.",
   portal_dashboard_missing_required_document_many: "Еще не хватает {count} обязательных документов.",
-  portal_dashboard_released_documents_count: "{count} опубликованных документа",
-  portal_dashboard_total_concierge_entries_count: "Всего {count} записей консьерж-сервиса",
-  portal_dashboard_pending_confirmations_count: "{count} ожидающих подтверждений",
-  portal_dashboard_promoter_ratings_count: "{count} оценок промоутеров",
+  portal_dashboard_more_sections: "Другие разделы",
+  portal_dashboard_next_visit_on: "Ближайший визит: {date}",
+  portal_dashboard_no_visit_planned: "Визитов не запланировано",
+  portal_dashboard_released_documents: "Опубликованные документы",
+  portal_dashboard_awaiting_confirmation_one: "{count} документ ждёт подтверждения",
+  portal_dashboard_awaiting_confirmation_few: "{count} документа ждут подтверждения",
+  portal_dashboard_awaiting_confirmation_many: "{count} документов ждут подтверждения",
+  portal_dashboard_concierge_entries_total_one: "Всего {count} запись консьерж-сервиса",
+  portal_dashboard_concierge_entries_total_few: "Всего {count} записи консьерж-сервиса",
+  portal_dashboard_concierge_entries_total_many: "Всего {count} записей консьерж-сервиса",
+  portal_dashboard_open_invoices_count_one: "{count} неоплаченный счёт",
+  portal_dashboard_open_invoices_count_few: "{count} неоплаченных счёта",
+  portal_dashboard_open_invoices_count_many: "{count} неоплаченных счетов",
+  portal_dashboard_privacy_requests_total_one: "Всего {count} запрос",
+  portal_dashboard_privacy_requests_total_few: "Всего {count} запроса",
+  portal_dashboard_privacy_requests_total_many: "Всего {count} запросов",
+  portal_dashboard_high_ratings_count: "из них с оценкой 9–10: {count}",
   portal_documents_failed_to_load_documents: "Не удалось загрузить документы.",
   portal_documents_choose_a_file_first: "Сначала выберите файл.",
   portal_documents_upload_sent_to_the_care_team: "Загрузка отправлена команде сопровождения.",
@@ -1474,6 +1515,8 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_documents_invoices: "Счета",
   portal_documents_translations: "Переводы",
   portal_documents_insurance_document: "Страховой документ",
+  portal_documents_identity_document: "Паспорт / удостоверение личности",
+  portal_documents_upload_identity_document: "Загрузить паспорт",
   portal_documents_title: "Название",
   portal_documents_optional_title: "Необязательное название",
   portal_documents_file: "Файл",
@@ -1562,7 +1605,9 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   portal_appointments_additional_note: "Дополнительная заметка",
   portal_appointments_optional_logistical_or_clinical_context: "Необязательный логистический или клинический контекст.",
   portal_appointments_send_appointment_request: "Отправить запрос на запись",
-  portal_appointments_shared_documents_count: "{count} переданных документов",
+  portal_appointments_shared_documents_count_one: "{count} переданный документ",
+  portal_appointments_shared_documents_count_few: "{count} переданных документа",
+  portal_appointments_shared_documents_count_many: "{count} переданных документов",
   portal_invoices_failed_to_load_invoices: "Не удалось загрузить счета.",
   portal_invoices_failed_to_load_invoice_detail: "Не удалось загрузить детали счета.",
   portal_invoices_choose_a_file_first: "Сначала выберите файл.",
@@ -1634,6 +1679,13 @@ export const patientsPortalRu: PatientsPortalTranslations = {
   patient_profile_editor_invalid_email: "Введите корректный адрес электронной почты",
   patient_profile_editor_invalid_phone: "Введите корректный номер телефона",
   patient_profile_editor_check_fields: "Проверьте отмеченные поля",
+  patient_form_choose_gender: "Выберите пол",
+  patient_form_zip_invalid_germany: "Немецкий индекс — 5 цифр",
+  patient_form_zip_invalid: "Только буквы, цифры, пробел и дефис (до 10 знаков)",
+  patient_form_minor_needs_guardian: "Для несовершеннолетнего добавьте родителя или опекуна с телефоном",
+  patients_list_count_one: "{count} пациент",
+  patients_list_count_few: "{count} пациента",
+  patients_list_count_many: "{count} пациентов",
   patient_profile_editor_personal_data: "Личные данные",
   patient_profile_editor_title: "Обращение",
   patient_profile_editor_first_name: "Имя",
@@ -2371,12 +2423,25 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_dashboard_submitted_quality_surveys_and_review_follow_up: "Eingereichte Qualitätsumfragen und deren Review-Status.",
   portal_dashboard_no_feedback_submitted_yet: "Noch kein Feedback eingereicht.",
   portal_dashboard_general_feedback: "Allgemeines Feedback",
-  portal_dashboard_missing_required_document_one: "Es fehlen noch {count} Pflichtdokument.",
+  portal_dashboard_missing_required_document_one: "Es fehlt noch {count} Pflichtdokument.",
   portal_dashboard_missing_required_document_many: "Es fehlen noch {count} Pflichtdokumente.",
-  portal_dashboard_released_documents_count: "{count} freigegebene Dokumente",
-  portal_dashboard_total_concierge_entries_count: "{count} Concierge-Einträge gesamt",
-  portal_dashboard_pending_confirmations_count: "{count} ausstehende Bestätigungen",
-  portal_dashboard_promoter_ratings_count: "{count} Promotor-Bewertungen",
+  portal_dashboard_more_sections: "Weitere Bereiche",
+  portal_dashboard_next_visit_on: "Nächster Termin: {date}",
+  portal_dashboard_no_visit_planned: "Kein Termin geplant",
+  portal_dashboard_released_documents: "Freigegebene Dokumente",
+  portal_dashboard_awaiting_confirmation_one: "{count} Dokument wartet auf Bestätigung",
+  portal_dashboard_awaiting_confirmation_few: "{count} Dokumente warten auf Bestätigung",
+  portal_dashboard_awaiting_confirmation_many: "{count} Dokumente warten auf Bestätigung",
+  portal_dashboard_concierge_entries_total_one: "{count} Concierge-Eintrag gesamt",
+  portal_dashboard_concierge_entries_total_few: "{count} Concierge-Einträge gesamt",
+  portal_dashboard_concierge_entries_total_many: "{count} Concierge-Einträge gesamt",
+  portal_dashboard_open_invoices_count_one: "{count} offene Rechnung",
+  portal_dashboard_open_invoices_count_few: "{count} offene Rechnungen",
+  portal_dashboard_open_invoices_count_many: "{count} offene Rechnungen",
+  portal_dashboard_privacy_requests_total_one: "{count} Anfrage insgesamt",
+  portal_dashboard_privacy_requests_total_few: "{count} Anfragen insgesamt",
+  portal_dashboard_privacy_requests_total_many: "{count} Anfragen insgesamt",
+  portal_dashboard_high_ratings_count: "davon mit 9–10 Punkten: {count}",
   portal_documents_failed_to_load_documents: "Dokumente konnten nicht geladen werden.",
   portal_documents_choose_a_file_first: "Bitte zuerst eine Datei auswählen.",
   portal_documents_upload_sent_to_the_care_team: "Datei wurde an das Betreuungsteam gesendet.",
@@ -2417,10 +2482,12 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_general: "Allgemein",
   portal_documents_correspondence: "Korrespondenz",
   portal_documents_analyses: "Analysen",
-  portal_documents_conclusions: "Befunde / Schl?sse",
+  portal_documents_conclusions: "Befunde / Schlüsse",
   portal_documents_invoices: "Rechnungen",
-  portal_documents_translations: "?bersetzungen",
+  portal_documents_translations: "Übersetzungen",
   portal_documents_insurance_document: "Versicherungsdokument",
+  portal_documents_identity_document: "Reisepass / Ausweis",
+  portal_documents_upload_identity_document: "Ausweis hochladen",
   portal_documents_title: "Titel",
   portal_documents_optional_title: "Optionaler Titel",
   portal_documents_file: "Datei",
@@ -2438,7 +2505,7 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_documents_russian: "Russisch",
   portal_documents_cancel: "Abbrechen",
   portal_documents_send_request: "Anfrage senden",
-  portal_documents_missing_required_document_one: "Es fehlen noch {count} Pflichtdokument.",
+  portal_documents_missing_required_document_one: "Es fehlt noch {count} Pflichtdokument.",
   portal_documents_missing_required_document_many: "Es fehlen noch {count} Pflichtdokumente.",
   portal_appointments_failed_to_load_appointment_workspace: "Terminbereich konnte nicht geladen werden.",
   portal_appointments_appointment_request_sent_to_the_care_team: "Terminanfrage wurde an das Betreuungsteam gesendet.",
@@ -2509,7 +2576,9 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   portal_appointments_additional_note: "Zusätzliche Notiz",
   portal_appointments_optional_logistical_or_clinical_context: "Optionaler logistischer oder klinischer Kontext.",
   portal_appointments_send_appointment_request: "Terminanfrage senden",
-  portal_appointments_shared_documents_count: "{count} geteilte Dokumente",
+  portal_appointments_shared_documents_count_one: "{count} geteiltes Dokument",
+  portal_appointments_shared_documents_count_few: "{count} geteilte Dokumente",
+  portal_appointments_shared_documents_count_many: "{count} geteilte Dokumente",
   portal_invoices_failed_to_load_invoices: "Rechnungen konnten nicht geladen werden.",
   portal_invoices_failed_to_load_invoice_detail: "Rechnungsdetails konnten nicht geladen werden.",
   portal_invoices_choose_a_file_first: "Bitte zuerst eine Datei auswählen.",
@@ -2581,6 +2650,13 @@ export const patientsPortalDe: PatientsPortalTranslations = {
   patient_profile_editor_invalid_email: "Gültige E-Mail-Adresse eingeben",
   patient_profile_editor_invalid_phone: "Gültige Telefonnummer eingeben",
   patient_profile_editor_check_fields: "Markierte Felder prüfen",
+  patient_form_choose_gender: "Geschlecht wählen",
+  patient_form_zip_invalid_germany: "Deutsche PLZ: 5 Ziffern",
+  patient_form_zip_invalid: "Nur Buchstaben, Ziffern, Leerzeichen und Bindestrich (bis 10 Zeichen)",
+  patient_form_minor_needs_guardian: "Für Minderjährige einen Elternteil oder Vormund mit Telefonnummer hinzufügen",
+  patients_list_count_one: "{count} Patient",
+  patients_list_count_few: "{count} Patienten",
+  patients_list_count_many: "{count} Patienten",
   patient_profile_editor_personal_data: "Persönliche Daten",
   patient_profile_editor_title: "Titel",
   patient_profile_editor_first_name: "Vorname",

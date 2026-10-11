@@ -4030,6 +4030,36 @@ test.describe("responsive staff workspace", () => {
     await expect(page.locator(".appointments-calendar-shell")).toHaveCount(0);
   });
 
+  test("fits the top bar on a phone and keeps the secondary items in a menu", async ({ page }, testInfo) => {
+    const topbar = page.locator("header").filter({ has: page.locator("#topbar-page-slot") });
+    for (const width of [375, 390]) {
+      await page.setViewportSize({ width, height: 812 });
+      await page.goto("/leads");
+      const toggle = topbar.getByRole("button", { name: "Seitenleiste umschalten" });
+      await expect(toggle).toBeInViewport();
+      await expect(topbar.getByRole("button", { name: "Benachrichtigungen" })).toBeInViewport();
+      await expect(topbar.getByRole("button", { name: "Mehr" })).toBeInViewport();
+      const metrics = await topbar.evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      }));
+      expect(metrics.scrollWidth, `${width}: top bar does not overflow`).toBeLessThanOrEqual(metrics.clientWidth);
+      // Nothing lies on top of the sidebar toggle (the DEV badge used to).
+      const box = await toggle.boundingBox();
+      const hit = await page.evaluate(
+        ([x, y]) => document.elementFromPoint(x, y)?.closest("button")?.getAttribute("aria-label") ?? null,
+        [box!.x + box!.width / 2, box!.y + box!.height / 2],
+      );
+      expect(hit, `${width}: sidebar toggle is not covered`).toBe("Seitenleiste umschalten");
+    }
+
+    await topbar.getByRole("button", { name: "Mehr" }).click();
+    await expect(page.getByRole("menuitem", { name: /Benutzer online/ })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("staff-topbar-phone-menu.png") });
+    await page.getByRole("menuitem", { name: /Sprache wechseln/ }).click();
+    await expect(topbar.getByRole("button", { name: "Ещё" })).toBeVisible();
+  });
+
   test("keeps onboarding steps labeled, localized, and reachable on mobile", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     await page.goto("/leads");

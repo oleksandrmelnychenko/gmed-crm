@@ -505,8 +505,14 @@ async function installPatientPortalMocks(page: Page) {
         appointment_title: null,
         auto_name: autoName,
         original_filename: "portal-upload.pdf",
-        art: uploadKind || "general",
-        category: uploadKind === "insurance_document" ? "insurance" : "general",
+        // As the server stores them (parse_patient_upload_preset).
+        art: uploadKind === "identity_document" ? "passport_scan" : uploadKind || "general",
+        category:
+          uploadKind === "insurance_document"
+            ? "insurance"
+            : uploadKind === "identity_document"
+              ? "identity"
+              : "general",
         status: "active",
         visibility: "internal",
         is_medical: uploadKind === "medical_record",
@@ -860,6 +866,117 @@ test.describe("patient portal smoke flows", () => {
       .getByRole("button", { name: /Herunterladen|Скачать|Download/i })
       .click();
     await uploadDownloadRequest;
+  });
+
+  test("patient sends the missing passport in the identity category", async ({ page }, testInfo) => {
+    let passportUploaded = false;
+    await page.route("**/api/v1/me/document-alerts", (route) =>
+      json(route, {
+        configured_rule_count: 1,
+        document_pack_complete: passportUploaded,
+        stored_document_pack_complete: passportUploaded,
+        out_of_sync: false,
+        required_documents: [
+          { key: "passport", label: "Passport", fulfilled: passportUploaded, matching_documents: [] },
+        ],
+        missing_documents: passportUploaded ? [] : [{ key: "passport", label: "Passport" }],
+        missing_count: passportUploaded ? 0 : 1,
+      }),
+    );
+    await page.route("**/api/v1/me/documents/upload", async (route) => {
+      if (multipartField(route.request().postDataBuffer(), "upload_kind") === "identity_document") {
+        passportUploaded = true;
+      }
+      await route.fallback();
+    });
+
+    await page.goto("/documents");
+    await expect(page.getByText("Es fehlt noch 1 Pflichtdokument.", { exact: true })).toBeVisible();
+
+    // The categories read correctly (no "Schl?sse" / "?bersetzungen").
+    const category = page.getByRole("combobox", { name: /Kategorie/i });
+    await category.click();
+    await expect(page.getByRole("option", { name: "Befunde / Schlüsse", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Übersetzungen", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Reisepass / Ausweis", exact: true })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Ausweis hochladen", exact: true }).click();
+    await expect(category).toContainText("Reisepass / Ausweis");
+    await page.getByLabel(/Titel/i).fill("Reisepass Anna");
+    const fileInput = page.locator("#portal-document-upload-file");
+    await fileInput.setInputFiles({
+      name: "reisepass.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("reisepass"),
+    });
+    const uploadRequest = page.waitForRequest((request) =>
+      request.method() === "POST" && request.url().includes("/api/v1/me/documents/upload"),
+    );
+    await page.getByRole("button", { name: "Datei senden", exact: true }).click();
+    expect(multipartField((await uploadRequest).postDataBuffer(), "upload_kind")).toBe("identity_document");
+
+    await expect(page.getByText("Datei wurde an das Betreuungsteam gesendet.")).toBeVisible();
+    // The list and the requirement update without a reload; the sent file is no longer selected.
+    await expect(page.locator("article").filter({ hasText: "Reisepass Anna" })).toBeVisible();
+    await expect(page.getByText("Ihr Mindest-Dokumentenpaket ist vollständig.")).toBeVisible();
+    await expect(fileInput).toHaveValue("");
+    await expect(category).toContainText("Allgemein");
+    await page.screenshot({ path: testInfo.outputPath("patient-documents-after-passport.png"), fullPage: true });
+  });
+
+  test("dashboard header fits the top bar on wide and narrow desktops", async ({ page }, testInfo) => {
+    const topbar = page.locator("header").filter({ has: page.locator("#topbar-page-slot") });
+    const slot = page.locator("#topbar-page-slot");
+    for (const width of [1638, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      const exportButton = slot.getByRole("button", { name: "Meine Daten exportieren" });
+      const refreshButton = slot.getByRole("button", { name: "Aktualisieren" });
+      const menuButton = slot.getByRole("button", { name: "Weitere Bereiche" });
+      const bell = topbar.getByRole("button", { name: "Benachrichtigungen" });
+      const language = topbar.getByRole("button", { name: "Sprache wechseln" });
+      await expect(exportButton).toBeVisible();
+      const [exportBox, refreshBox, menuBox, bellBox, languageBox] = await Promise.all(
+        [exportButton, refreshButton, menuButton, bell, language].map((locator) => locator.boundingBox()),
+      );
+      expect(exportBox!.x + exportBox!.width, `${width}: export before refresh`).toBeLessThanOrEqual(refreshBox!.x);
+      expect(menuBox!.x + menuBox!.width, `${width}: page actions before the bell`).toBeLessThanOrEqual(bellBox!.x);
+      expect(languageBox!.x + languageBox!.width, `${width}: language switch on screen`).toBeLessThanOrEqual(width);
+      const header = await topbar.evaluate((element) => ({
+        scrollWidth: element.scrollWidth,
+        clientWidth: element.clientWidth,
+      }));
+      expect(header.scrollWidth, `${width}: top bar does not overflow`).toBeLessThanOrEqual(header.clientWidth);
+      // The patient sees the portal, not the staff console.
+      await expect(topbar.getByText("CONSOLE", { exact: true })).toHaveCount(0);
+      await expect(topbar.getByText("Patientenportal", { exact: true })).toBeVisible();
+      await page.screenshot({ path: testInfo.outputPath(`patient-dashboard-${width}.png`) });
+    }
+
+    // Each tile's sub-line belongs to its own subject.
+    const tile = (label: string) => page.locator("main div").filter({ has: page.getByText(label, { exact: true }) }).last();
+    await expect(tile("Offene Datenschutzanfragen")).toContainText("1 Anfrage insgesamt");
+    await expect(tile("Freigegebene Dokumente")).toContainText("1 Dokument wartet auf Bestätigung");
+    await expect(page.getByText(/Unbekannter Wert/i)).toHaveCount(0);
+
+    await slot.getByRole("button", { name: "Weitere Bereiche" }).click();
+    await page.getByRole("menuitem", { name: "Meine Dokumente" }).click();
+    await expect(page).toHaveURL(/\/documents$/);
+
+    // A header whose actions do not fit next to the title keeps them in the
+    // page instead of drawing them over the bell (any page, any width).
+    await expect(slot.getByRole("heading", { level: 1 })).toHaveText("Meine Dokumente");
+    await expect(page.getByText("Released discharge note")).toBeVisible();
+    const refresh = page.getByRole("button", { name: "Aktualisieren", exact: true });
+    await expect(refresh).toBeVisible();
+    const [refreshBox, bellBox] = await Promise.all([
+      refresh.boundingBox(),
+      topbar.getByRole("button", { name: "Benachrichtigungen" }).boundingBox(),
+    ]);
+    const clearOfBell =
+      refreshBox!.x + refreshBox!.width <= bellBox!.x || refreshBox!.y >= bellBox!.y + bellBox!.height;
+    expect(clearOfBell, "documents header actions stay clear of the bell at 1024 px").toBe(true);
+    await page.screenshot({ path: testInfo.outputPath("patient-documents-1024.png") });
   });
 
   test("patient can submit an appointment request and see it in portal history", async ({

@@ -248,9 +248,9 @@ describe("patientContactFormsToPayload", () => {
 });
 
 describe("blankPatientForm", () => {
-  it("defaults gender to male, other fields empty", () => {
+  it("leaves gender unset (an explicit choice), other fields empty", () => {
     const f = blankPatientForm();
-    expect(f.gender).toBe("male");
+    expect(f.gender).toBe("");
     expect(f.firstName).toBe("");
     expect(f.email).toBe("");
   });

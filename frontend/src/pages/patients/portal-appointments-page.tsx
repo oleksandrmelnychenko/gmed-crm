@@ -33,7 +33,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { uiText, useLang } from "@/lib/i18n";
+import { formatPluralCount, uiText, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
@@ -196,12 +196,8 @@ function WithdrawRequestButton({
   );
 }
 
-function formatPortalCountLabel(template: string, count: number) {
-  return template.replace("{count}", String(count));
-}
-
 function usePatientAppointmentsPageContent() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const [pageState, dispatchPageState] = useReducer(
     patientAppointmentsReducer,
     undefined,
@@ -513,7 +509,11 @@ function usePatientAppointmentsPageContent() {
                       label: t.portal_appointments_results_handoff,
                       value: portalStatusLabel(item.results_handoff_status),
                       tone: followupStatusTone(item.results_handoff_status),
-                      hint: formatPortalCountLabel(t.portal_appointments_shared_documents_count, item.results_portal_shares),
+                      hint: formatPluralCount(lang, item.results_portal_shares, {
+                        one: t.portal_appointments_shared_documents_count_one,
+                        few: t.portal_appointments_shared_documents_count_few,
+                        many: t.portal_appointments_shared_documents_count_many,
+                      }),
                     },
                   ];
 

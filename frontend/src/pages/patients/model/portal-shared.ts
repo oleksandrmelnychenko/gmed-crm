@@ -945,6 +945,51 @@ export function privacyStatusTone(status: string) {
   return "border-slate-200 bg-slate-100 text-slate-700";
 }
 
+// Feedback has its own states (patient_feedback_forms.status).
+const PORTAL_FEEDBACK_STATUS_LABEL_KEYS = {
+  submitted: "feedback_status_submitted",
+  reviewed: "feedback_status_reviewed",
+  archived: "feedback_status_archived",
+} satisfies Partial<Record<string, TranslationKey>>;
+
+export function feedbackStatusLabel(status?: string | null) {
+  return portalEnumLabel(status, PORTAL_FEEDBACK_STATUS_LABEL_KEYS);
+}
+
+/**
+ * The type and the category of a document as the portal names them, each
+ * name once: a medical report filed under "report" reads "Medizinischer
+ * Bericht", not "Medizinischer Bericht / Medizinischer Bericht".
+ */
+export function portalDocumentTypeLabels(
+  art?: string | null,
+  category?: string | null,
+): string[] {
+  const labels: string[] = [];
+  for (const value of [art, category]) {
+    if (!value?.trim()) continue;
+    const label = portalDocumentValueLabel(value);
+    if (!labels.some((existing) => existing.toLowerCase() === label.toLowerCase())) {
+      labels.push(label);
+    }
+  }
+  return labels;
+}
+
+/**
+ * Where an appointment takes place, the same way everywhere in the portal:
+ * clinic and doctor, else the free-text location.
+ */
+export function portalAppointmentPlaceLabel(
+  item: Pick<PortalAppointmentItem, "provider_name" | "doctor_name" | "location">,
+) {
+  const place = [item.provider_name, item.doctor_name]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(" / ");
+  return place || item.location?.trim() || "";
+}
+
 export function feedbackStatusTone(status: string) {
   if (status === "reviewed") return "border-emerald-200 bg-emerald-50 text-emerald-700";
   if (status === "archived") return "border-slate-300 bg-slate-100 text-slate-700";

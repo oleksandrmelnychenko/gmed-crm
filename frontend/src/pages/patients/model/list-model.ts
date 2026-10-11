@@ -277,7 +277,8 @@ export function blankPatientForm(): PatientFormState {
     firstName: "",
     lastName: "",
     birthDate: "",
-    gender: "male",
+    // No default: the sex is chosen explicitly (a silent "male" got saved).
+    gender: "",
     nationality: "",
     residenceCountry: "",
     languages: "",

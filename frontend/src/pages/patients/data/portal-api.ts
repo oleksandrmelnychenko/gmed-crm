@@ -133,22 +133,20 @@ export function withdrawPortalAppointmentRequest(requestId: string) {
   return postJson(`/me/appointment-requests/${requestId}/withdraw`, {});
 }
 
-export async function fetchPortalDocumentsWorkspace() {
+/**
+ * The documents page data. `forceFresh` skips the client cache and any
+ * request still in flight, e.g. right after an upload, so the new file and
+ * the updated required-document state show at once.
+ */
+export async function fetchPortalDocumentsWorkspace({ forceFresh = false }: { forceFresh?: boolean } = {}) {
+  const init = { cacheTtlMs: PORTAL_CACHE_TTL_MS, forceFresh };
   const [releasedDocuments, uploadedDocuments, documentAlerts, translationRequests] = await Promise.all([
-    apiFetch<PortalDocumentItem[]>("/me/documents", {
-      cacheTtlMs: PORTAL_CACHE_TTL_MS,
-    }),
-    apiFetch<PortalUploadedDocumentItem[]>("/me/documents/uploads", {
-      cacheTtlMs: PORTAL_CACHE_TTL_MS,
-    }),
-    apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts", {
-      cacheTtlMs: PORTAL_CACHE_TTL_MS,
-    }).catch(
+    apiFetch<PortalDocumentItem[]>("/me/documents", init),
+    apiFetch<PortalUploadedDocumentItem[]>("/me/documents/uploads", init),
+    apiFetch<PortalDocumentAlertsSummary>("/me/document-alerts", init).catch(
       () => null,
     ),
-    apiFetch<PortalTranslationRequestItem[]>("/me/translation-requests", {
-      cacheTtlMs: PORTAL_CACHE_TTL_MS,
-    }).catch(() => []),
+    apiFetch<PortalTranslationRequestItem[]>("/me/translation-requests", init).catch(() => []),
   ]);
 
   return { releasedDocuments, uploadedDocuments, documentAlerts, translationRequests };

@@ -659,6 +659,8 @@ function useLeadsPageContent() {
     const animationFrame = window.requestAnimationFrame(() => {
       movePill(conciergeTabPillReadyRef.current && !reduceMotion);
       conciergeTabPillReadyRef.current = true;
+      // The placed pill alone marks the active tab (see index.css).
+      tabs.dataset.pillReady = "true";
     });
     const handleResize = () => movePill(false);
     window.addEventListener("resize", handleResize);

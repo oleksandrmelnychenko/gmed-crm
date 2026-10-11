@@ -1703,6 +1703,27 @@ export function uiText(
   return formatUiText(t(lang).uiText[key] ?? key, values);
 }
 
+/** The forms of a counted phrase; German needs only `one` and `many`. */
+export type PluralForms = { one: string; few: string; many: string };
+
+/**
+ * A counted phrase in the form the count needs ("1 Patient" / "2 Patienten",
+ * "1 пациент" / "2 пациента" / "5 пациентов", also "21 пациент"), with
+ * `{count}` filled in. Russian fractions and the German "other" use `many`.
+ * `values` fills further placeholders and may show `{count}` differently
+ * ("12 / 40") while `count` picks the form.
+ */
+export function formatPluralCount(
+  lang: Lang,
+  count: number,
+  forms: PluralForms,
+  values?: UiTextValues,
+): string {
+  const category = new Intl.PluralRules(lang).select(count);
+  const template = category === "one" ? forms.one : category === "few" ? forms.few : forms.many;
+  return formatUiText(template, { count, ...values });
+}
+
 export type EnumLabelMap = Partial<Record<string, string>>;
 export type TranslationKey = {
   [Key in keyof Translations]: Translations[Key] extends string ? Key : never;

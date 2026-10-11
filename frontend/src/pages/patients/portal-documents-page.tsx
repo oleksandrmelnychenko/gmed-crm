@@ -1,6 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { startTransition, useCallback, useEffect, useMemo, useReducer, type FormEvent } from "react";
-import { Download, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
+import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, type FormEvent } from "react";
+import { Download, IdCard, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,7 +31,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { useLang } from "@/lib/i18n";
+import { formatPluralCount, useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -52,6 +52,7 @@ import {
   formatPortalDateTime,
   formatPortalFileSize,
   portalDocumentSourceLabel as sharedPortalDocumentSourceLabel,
+  portalDocumentTypeLabels,
   portalDocumentValueLabel as sharedPortalDocumentValueLabel,
   portalStatusLabel,
   translationRequestTone,
@@ -91,8 +92,26 @@ function portalDocumentSourceLabel(
   return sharedPortalDocumentSourceLabel(source, clinic);
 }
 
-function formatPortalCountLabel(template: string, count: number) {
-  return template.replace("{count}", String(count));
+/**
+ * Upload kind for an identity document. The server stores it as a passport
+ * scan in the identity category, which the required "passport" document
+ * accepts; the care team still checks the file.
+ */
+const IDENTITY_UPLOAD_KIND = "identity_document";
+
+/** Required-document rules that ask for the patient's passport or ID card. */
+const IDENTITY_RULE_KEYS = new Set([
+  "passport",
+  "reisepass",
+  "passport_scan",
+  "identity",
+  "identity_document",
+  "id_card",
+  "personalausweis",
+]);
+
+function isIdentityRuleKey(key: string) {
+  return IDENTITY_RULE_KEYS.has(key.trim().toLowerCase().replace(/[\s-]+/g, "_"));
 }
 
 interface PatientDocumentsState {
@@ -161,7 +180,8 @@ function patientDocumentsReducer(
 }
 
 function usePatientDocumentsPageContent() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
+  const uploadFileInputRef = useRef<HTMLInputElement>(null);
   const [documentsState, dispatchDocumentsState] = useReducer(
     patientDocumentsReducer,
     INITIAL_PATIENT_DOCUMENTS_STATE,
@@ -280,15 +300,33 @@ function usePatientDocumentsPageContent() {
 
       await uploadPortalDocument(formData);
 
-      dispatchDocumentsState((current) => ({
+      // The file input is not controlled by React: clear it, or the sent file
+      // stays selected and a second click sends it again.
+      if (uploadFileInputRef.current) uploadFileInputRef.current.value = "";
+      dispatchDocumentsState({
         notice: t.portal_documents_upload_sent_to_the_care_team,
         uploadFile: null,
         uploadName: "",
         uploadNotes: "",
         uploadKind: "general",
         uploadBusy: false,
-        version: current.version + 1,
-      }));
+      });
+      // Show the new file and the required-document state at once, past the
+      // client cache and any list request that started before the upload.
+      try {
+        const workspace = await fetchPortalDocumentsWorkspace({ forceFresh: true });
+        startTransition(() =>
+          dispatchDocumentsState({
+            documents: workspace.releasedDocuments,
+            documentAlerts: workspace.documentAlerts,
+            uploads: workspace.uploadedDocuments,
+            translationRequests: workspace.translationRequests,
+          }),
+        );
+      } catch {
+        dispatchDocumentsState((current) => ({ version: current.version + 1 }));
+      }
+      // The automatic file name arrives a little later.
       window.setTimeout(
         () => dispatchDocumentsState((current) => ({ version: current.version + 1 })),
         3_500,
@@ -303,6 +341,14 @@ function usePatientDocumentsPageContent() {
         uploadBusy: false,
       });
     }
+  }
+
+  /** The missing passport: pick the identity category and go to the file field. */
+  function startIdentityUpload() {
+    dispatchDocumentsState({ uploadKind: IDENTITY_UPLOAD_KIND, uploadError: "" });
+    const input = uploadFileInputRef.current;
+    input?.scrollIntoView({ block: "center", behavior: "smooth" });
+    input?.focus({ preventScroll: true });
   }
 
   async function handleConfirm(documentId: string) {
@@ -445,24 +491,34 @@ function usePatientDocumentsPageContent() {
               <div className="space-y-3">
                 <div>
                   <p className="font-semibold">
-                    {formatPortalCountLabel(
-                      documentAlerts.missing_count === 1
-                        ? t.portal_documents_missing_required_document_one
-                        : t.portal_documents_missing_required_document_many,
-                      documentAlerts.missing_count,
-                    )}
+                    {formatPluralCount(lang, documentAlerts.missing_count, {
+                      one: t.portal_documents_missing_required_document_one,
+                      few: t.portal_documents_missing_required_document_many,
+                      many: t.portal_documents_missing_required_document_many,
+                    })}
                   </p>
                   <p className="mt-1 text-sm">
                     {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
                   </p>
                 </div>
                 {documentAlerts.missing_count > 0 ? (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     {documentAlerts.missing_documents.map((item) => (
                       <StatusBadge key={item.key} tone="warning">
                         {localizeRequiredDocumentLabel(item.key, item.label, l)}
                       </StatusBadge>
                     ))}
+                    {documentAlerts.missing_documents.some((item) => isIdentityRuleKey(item.key)) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-8 rounded-lg"
+                        onClick={startIdentityUpload}
+                      >
+                        <IdCard className="size-4" />
+                        {t.portal_documents_upload_identity_document}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -536,10 +592,9 @@ function usePatientDocumentsPageContent() {
                           <h2 className="mt-3 text-base font-semibold text-foreground">{item.auto_name}</h2>
                           <p className="mt-2 text-sm text-muted-foreground">
                             {[
-                              portalDocumentValueLabel(item.art),
-                              item.category ? portalDocumentValueLabel(item.category) : null,
+                              ...portalDocumentTypeLabels(item.art, item.category),
                               formatPortalFileSize(item.file_size),
-                            ].filter(Boolean).join(" / ")}
+                            ].join(" / ")}
                           </p>
                         </div>
                         {item.requires_confirmation && !item.confirmed ? (
@@ -646,6 +701,7 @@ function usePatientDocumentsPageContent() {
                   <option value="invoices">{t.portal_documents_invoices}</option>
                   <option value="translations">{t.portal_documents_translations}</option>
                   <option value="insurance_document">{t.portal_documents_insurance_document}</option>
+                  <option value={IDENTITY_UPLOAD_KIND}>{t.portal_documents_identity_document}</option>
                 </NativeComboboxSelect>
               </Field>
               <Field label={t.portal_documents_title} htmlFor="portal-document-upload-title">
@@ -659,6 +715,7 @@ function usePatientDocumentsPageContent() {
               </Field>
               <Field label={t.portal_documents_file} htmlFor="portal-document-upload-file">
                 <input
+                  ref={uploadFileInputRef}
                   id="portal-document-upload-file"
                   type="file"
                   onChange={(event) => dispatchDocumentsState({ uploadFile: event.target.files?.[0] ?? null })}
@@ -717,7 +774,8 @@ function usePatientDocumentsPageContent() {
                           <p className="mt-3 text-sm font-semibold text-foreground">{item.auto_name}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {[
-                              item.category ? portalDocumentValueLabel(item.category) : null,
+                              // The badge above names the type; the category only when it says more.
+                              portalDocumentTypeLabels(item.art, item.category)[1] ?? null,
                               item.order_number,
                               item.appointment_title,
                               formatPortalFileSize(item.file_size),

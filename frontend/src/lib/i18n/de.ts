@@ -86,8 +86,9 @@ export const de = {
   login_totp_code: "Code",
   login_totp_submit: "Anmelden",
   login_totp_error: "Der Code stimmt nicht. Versuchen Sie es erneut oder melden Sie sich neu an.",
+  // One login page for patients and staff: no staff-only wording.
   login_sign_in_subtitle:
-    "Weiter zum operativen Arbeitsbereich für Kliniken, Ärzte und Termine.",
+    "Melden Sie sich mit Ihrer E-Mail-Adresse und Ihrem Passwort an.",
   login_brand_tagline: "Medizinische Concierge-Agentur",
   login_back_home: "Zur Startseite",
   login_show_password: "Passwort anzeigen",
@@ -308,7 +309,7 @@ export const de = {
   patients_subtitle: "Patientenakten verwalten",
   patients_new: "Neuer Patient",
   patients_col_status: "Status",
-  patients_col_no: "№",
+  patients_col_no: "Patienten-ID",
   patients_col_patient: "Patient",
   patients_col_id: "ID",
   patients_last_name: "Nachname",

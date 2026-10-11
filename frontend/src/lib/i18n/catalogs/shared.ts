@@ -11,6 +11,7 @@ export interface SharedCoreTranslations {
   table_filter_days_suffix: string;
   topbar_language_toggle: string;
   topbar_online_users: string;
+  topbar_more: string;
   topbar_realtime_connected: string;
   topbar_realtime_connecting: string;
   topbar_realtime_reconnecting: string;
@@ -36,6 +37,7 @@ export const sharedCoreRu: SharedCoreTranslations = {
   table_filter_days_suffix: " дн.",
   topbar_language_toggle: "Переключить язык",
   topbar_online_users: "Пользователи онлайн",
+  topbar_more: "Ещё",
   topbar_realtime_connected: "Realtime подключен",
   topbar_realtime_connecting: "Realtime подключается...",
   topbar_realtime_reconnecting: "Realtime переподключается ({attempt})",
@@ -61,6 +63,7 @@ export const sharedCoreDe: SharedCoreTranslations = {
   table_filter_days_suffix: " T.",
   topbar_language_toggle: "Sprache wechseln",
   topbar_online_users: "Benutzer online",
+  topbar_more: "Mehr",
   topbar_realtime_connected: "Realtime verbunden",
   topbar_realtime_connecting: "Realtime verbindet...",
   topbar_realtime_reconnecting: "Realtime verbindet erneut ({attempt})",
