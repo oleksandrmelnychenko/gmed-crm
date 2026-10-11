@@ -545,6 +545,16 @@ pub(super) async fn candidates(
                AND d.signed_at IS NULL AND d.storage_key IS NOT NULL
                AND d.mime_type = 'application/pdf'
                AND COALESCE(d.ursprung, '') NOT IN ('electronic_signature', 'electronic_signature_package')
+               -- Uploaded evidence is never a document to sign: medical files,
+               -- identity scans, proofs of authority, funds and relationship
+               -- (DEV check 2026-10-11: the composer offered the passport scans).
+               AND NOT COALESCE(d.is_medical, false)
+               AND COALESCE(d.compliance_kind, '') <> 'identity'
+               AND lower(COALESCE(d.art, '')) NOT IN (
+                   'identity', 'passport', 'passport_scan', 'reisepass',
+                   'representative_identity', 'representative_authority',
+                   'payer_identity', 'payer_funds_proof', 'self_funds_proof',
+                   'relationship_proof')
                AND NOT EXISTS(SELECT 1 FROM documents v WHERE v.replaces_document_id = d.id)
                AND (($1::uuid IS NOT NULL AND d.patient_id = $1)
                     OR ($1::uuid IS NULL AND d.lead_id = $2 AND d.patient_id IS NULL))
