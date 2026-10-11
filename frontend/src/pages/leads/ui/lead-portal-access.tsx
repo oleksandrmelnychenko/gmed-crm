@@ -644,17 +644,18 @@ function PortalCredentialsContent({
   const canEmail = Boolean(targetId && userId && emailInfo?.can_send);
 
   return (
-    <div className="space-y-4 text-sm">
-      <dl className="grid grid-cols-[6rem_1fr_auto] items-center gap-x-3 gap-y-2">
+    // A long login (plus addressing) wraps instead of pushing the dialog wider (DEV 2026-10-11).
+    <div className="min-w-0 space-y-4 text-sm">
+      <dl className="grid grid-cols-[6rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2">
         <dt className="text-muted-foreground">{de ? "Login" : "Логин"}</dt>
-        <dd className="select-all truncate" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
+        <dd className="min-w-0 select-all [overflow-wrap:anywhere]" data-copy-source="email" data-testid="portal-credentials-email">{credentials.email}</dd>
         <CopyButton copied={copied === "email"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("email", credentials.email, event)} />
         <dt className="text-muted-foreground">{de ? "Passwort" : "Пароль"}</dt>
-        <dd className="select-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
+        <dd className="min-w-0 select-all break-all font-mono" data-copy-source="password" data-testid="portal-credentials-password">{credentials.password}</dd>
         <CopyButton copied={copied === "password"} label={de ? "Kopieren" : "Копировать"} onClick={(event) => void copy("password", credentials.password, event)} />
       </dl>
-      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
-        <div className="flex items-center justify-between gap-2">
+      <div className="min-w-0 space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-muted-foreground">
             {parent
               ? de
@@ -685,7 +686,7 @@ function PortalCredentialsContent({
             ))}
           </div>
         </div>
-        <pre className="select-all whitespace-pre-wrap break-words font-sans text-xs text-foreground" data-copy-source="message">{message}</pre>
+        <pre className="select-all whitespace-pre-wrap font-sans text-xs text-foreground [overflow-wrap:anywhere]" data-copy-source="message">{message}</pre>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
@@ -701,7 +702,7 @@ function PortalCredentialsContent({
             <Button
               type="button"
               size="sm"
-              className="h-7 gap-1.5 rounded-md text-xs"
+              className="h-auto min-h-7 max-w-full gap-1.5 whitespace-normal rounded-md py-1 text-left text-xs [overflow-wrap:anywhere]"
               disabled={emailBusy}
               onClick={() => void sendByEmail()}
               data-testid="portal-credentials-send-email"
