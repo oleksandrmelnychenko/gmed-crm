@@ -60,6 +60,21 @@ describe("lead wizard commercial source of truth", () => {
   it("keeps an authoritative empty order empty instead of restoring stale draft lines", () => {
     expect(preferPersistedCommercialLines([storedLine("150")], [])).toEqual([]);
     expect(preferPersistedCommercialLines([storedLine("150")], undefined)).toHaveLength(1);
+    // A draft saved before the order changed stays stale.
+    expect(
+      preferPersistedCommercialLines([storedLine("150")], [], "2026-10-11T10:00:00Z", "2026-10-11T11:00:00Z"),
+    ).toEqual([]);
+  });
+
+  it("keeps lines the wizard saved after the empty order last changed", () => {
+    const lines = preferPersistedCommercialLines(
+      [storedLine("70")],
+      [],
+      "2026-10-11T13:19:19Z",
+      "2026-10-11T12:30:52Z",
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.price).toBe("70");
   });
 
   it("rounds each line like the quote backend before summing totals", () => {

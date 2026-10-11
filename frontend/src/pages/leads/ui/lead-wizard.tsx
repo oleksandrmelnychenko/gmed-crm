@@ -466,6 +466,8 @@ type AutosaveSnapshot = {
 
 type StoredCommercialDraft = {
   lines: ServiceLine[];
+  /** When the wizard saved the draft; absent on drafts saved before 2026-10-11. */
+  savedAt: string | null;
   paidAmount: string;
   prepayment: boolean;
   prepaymentAmount: string;
@@ -973,6 +975,7 @@ function storedCommercialDraftFromLead(lead: LeadDetail): StoredCommercialDraft 
 
   return {
     lines,
+    savedAt: typeof stored.saved_at === "string" ? stored.saved_at : null,
     paidAmount: inputString(stored.paid_amount),
     prepayment: stored.prepayment === true,
     prepaymentAmount: inputString(stored.prepayment_amount),
@@ -1111,6 +1114,7 @@ function autosavePayload(
         paid_amount: paidAmount,
         prepayment,
         prepayment_amount: prepaymentAmount,
+        saved_at: new Date().toISOString(),
       },
     },
   };
@@ -2151,8 +2155,19 @@ function lineFromOrderLeistung(item: Leistung): ServiceLine {
 export function preferPersistedCommercialLines(
   storedLines: ServiceLine[],
   orderLeistungen: Leistung[] | undefined,
+  draftSavedAt: string | null = null,
+  orderUpdatedAt: string | null = null,
 ) {
-  return withEstimatedOutlaysLast(orderLeistungen !== undefined
+  // An empty order wins over stale draft lines, but not over lines the wizard
+  // saved after the order last changed (DEV check 2026-10-11: a service picked
+  // before "Сохранить договор и заказ" vanished when the wizard was reopened).
+  const draftIsNewer = orderLeistungen !== undefined
+    && orderLeistungen.length === 0
+    && storedLines.length > 0
+    && draftSavedAt !== null
+    && orderUpdatedAt !== null
+    && Date.parse(draftSavedAt) > Date.parse(orderUpdatedAt);
+  return withEstimatedOutlaysLast(orderLeistungen !== undefined && !draftIsNewer
     ? orderLeistungen.map(lineFromOrderLeistung)
     : storedLines);
 }
@@ -3601,6 +3616,8 @@ export function LeadWizard({
       const nextLines = preferPersistedCommercialLines(
         storedCommercialDraft?.lines ?? [],
         nextOrderDetail?.leistungen,
+        storedCommercialDraft?.savedAt ?? null,
+        nextOrderDetail?.updated_at ?? null,
       );
       const nextPrepayment = nextOrder
         ? Boolean(nextOrder.prepayment_required)
