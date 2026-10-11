@@ -2495,6 +2495,31 @@ async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
             - json_money(&baseline_billing_kpis["outstanding_receivables_total"]),
         595.0,
     );
+    // One receivables definition: the billing scorecard shows the figure of
+    // the company finance page ("Долг пациентов").
+    let (position_status, position) = json_request(
+        &app,
+        "GET",
+        "/api/v1/company-financial-position?currency=EUR",
+        &auth_header_for(billing_id, "billing"),
+        None,
+    )
+    .await;
+    assert_eq!(position_status, StatusCode::OK, "{position}");
+    assert_money_close(
+        json_money(&billing_kpis["outstanding_receivables_total"]),
+        json_money(&position["summary"]["patient_receivables_calculated"]),
+    );
+    assert_money_close(
+        json_money(&billing_kpis["open_advance_requests_total"]),
+        json_money(&position["summary"]["open_advance_requests"]),
+    );
+    assert!(
+        billing_kpis["avg_service_to_invoice_days"]
+            .as_f64()
+            .is_some_and(|days| days >= 0.0),
+        "{billing_kpis}"
+    );
     assert!(
         billing_kpis["avg_invoice_gross"]
             .as_f64()

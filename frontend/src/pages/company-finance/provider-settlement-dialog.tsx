@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useReadOnly } from "@/components/read-only-scope";
 import {
   Banner as ShellBanner,
   selectClass as shellSelectClassName,
@@ -84,6 +85,9 @@ const copy = {
     saveFailed: "Не удалось записать выплату.",
     reversalFailed: "Не удалось отменить выплату.",
     correction: "Исправить или отменить счёт без заказа",
+    amountExceeds: (remaining: string) =>
+      `Сумма больше, чем осталось выплатить по счёту (${remaining}).`,
+    reversalReasonShown: "Причина отмены",
   },
   de: {
     title: "Zahlungen an Partner / Leistungserbringer",
@@ -123,6 +127,9 @@ const copy = {
     saveFailed: "Die Zahlung konnte nicht erfasst werden.",
     reversalFailed: "Die Zahlung konnte nicht storniert werden.",
     correction: "Rechnung ohne Auftrag korrigieren oder stornieren",
+    amountExceeds: (remaining: string) =>
+      `Der Betrag übersteigt den noch zu zahlenden Rest der Rechnung (${remaining}).`,
+    reversalReasonShown: "Stornogrund",
   },
 } as const;
 
@@ -164,6 +171,7 @@ export function ProviderSettlementDialog({
 }: Props) {
   const { lang } = useLang();
   const text = copy[lang];
+  const readOnly = useReadOnly();
   const [settlement, setSettlement] = useState<CompanyProviderSettlement | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -346,7 +354,12 @@ export function ProviderSettlementDialog({
 
   const currency = settlement?.currency ?? "EUR";
   const remaining = Number(settlement?.remaining_provider_liability_gross ?? 0);
-  const canPay = settlement
+  const paymentAmount = Number(paymentForm.amount.trim().replace(",", "."));
+  const paymentExceedsRemaining = Number.isFinite(paymentAmount) && paymentAmount > remaining;
+  // Read-only roles (CEO assistant) see the settlement, not the payment,
+  // approval or reversal controls.
+  const canPay = !readOnly
+    && settlement
     && remaining > 0
     && (settlement.status === "approved" || settlement.status === "overdue")
     && settlement.paid_by !== "patient";
@@ -402,7 +415,15 @@ export function ProviderSettlementDialog({
                       {activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name} · {formatMoney(account.current_balance, account.currency, locale)}</option>)}
                     </select>
                   </label>
-                  <label className={paymentFieldClassName}><span>{text.amount}</span><Input className={paymentInputClassName} required inputMode="decimal" value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+                  <label className={paymentFieldClassName}>
+                    <span>{text.amount}</span>
+                    <Input className={paymentInputClassName} required inputMode="decimal" aria-invalid={paymentExceedsRemaining || undefined} value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} />
+                    {paymentExceedsRemaining ? (
+                      <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">
+                        {text.amountExceeds(formatMoney(settlement.remaining_provider_liability_gross, currency, locale))}
+                      </span>
+                    ) : null}
+                  </label>
                   <label className={paymentFieldClassName}><span>{text.date}</span><Input className={paymentInputClassName} required type="date" max={todayIso()} value={paymentForm.paidOn} onChange={(event) => setPaymentForm((current) => ({ ...current, paidOn: event.target.value }))} /></label>
                   <label className={paymentFieldClassName}>
                     <span>{text.method}</span>
@@ -428,7 +449,9 @@ export function ProviderSettlementDialog({
               <div className="space-y-2">
                 <ShellBanner tone="warning">{text.approveFirst}</ShellBanner>
                 {approvalError ? <ShellBanner tone="error">{approvalError}</ShellBanner> : null}
-                <Button type="button" size="sm" disabled={approvalBusy || loading || Boolean(loadError)} onClick={() => void handleApproval()}>{approvalBusy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}{text.approve}</Button>
+                {readOnly ? null : (
+                  <Button type="button" size="sm" data-action="write" disabled={approvalBusy || loading || Boolean(loadError)} onClick={() => void handleApproval()}>{approvalBusy ? <LoaderCircle className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}{text.approve}</Button>
+                )}
               </div>
             ) : settlement.status === "expected" ? (
               <ShellBanner tone="warning">{text.expected}</ShellBanner>
@@ -436,7 +459,7 @@ export function ProviderSettlementDialog({
               <div role="status" className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><CheckCircle2 aria-hidden className="mt-0.5 size-4 shrink-0" /><p>{text.paidInFull}</p></div>
             ) : null}
 
-            {liability && canCorrectUnassignedInvoice({ ...liability, company_paid_gross: settlement.company_paid_gross, status: settlement.status, paid_by: settlement.paid_by }) ? (
+            {!readOnly && liability && canCorrectUnassignedInvoice({ ...liability, company_paid_gross: settlement.company_paid_gross, status: settlement.status, paid_by: settlement.paid_by }) ? (
               <SettlementSection title={text.correction}>
                 <UnassignedInvoiceCorrection
                   key={liability.id}
@@ -471,9 +494,18 @@ export function ProviderSettlementDialog({
                           <p className={cn("shrink-0 whitespace-nowrap font-mono text-sm font-semibold tabular-nums", isReversal ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{isReversal ? "+" : "−"} {formatMoney(item.amount_gross, item.currency, locale)}</p>
                         </div>
                         <p className="mt-1.5 break-words text-xs leading-5">{item.financial_account_name}</p>
-                        <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{item.reference || item.note || "—"}</p>
+                        {isReversal ? (
+                          // A reversal keeps the payment's reference; its own
+                          // note is the reason the user entered.
+                          <>
+                            {item.reference ? <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{item.reference}</p> : null}
+                            <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{text.reversalReasonShown}: {item.note || "—"}</p>
+                          </>
+                        ) : (
+                          <p className="mt-1 break-words text-xs leading-5 text-muted-foreground">{item.reference || item.note || "—"}</p>
+                        )}
                         <p className="mt-1 break-words text-[11px] leading-5 text-muted-foreground">{text.by}: {item.created_by_name}</p>
-                        {!isReversal && !isReversed ? <div className="mt-2 flex justify-end"><Button type="button" size="sm" variant="ghost" className="h-8 rounded-md text-xs text-muted-foreground hover:text-destructive" onClick={() => { setReversalError(null); setReversalDirty(false); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button></div> : null}
+                        {!readOnly && !isReversal && !isReversed ? <div className="mt-2 flex justify-end"><Button type="button" size="sm" variant="ghost" data-action="write" className="h-8 rounded-md text-xs text-muted-foreground hover:text-destructive" onClick={() => { setReversalError(null); setReversalDirty(false); setReversal(item); setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" }); }}><Undo2 className="size-3.5" />{text.reverse}</Button></div> : null}
                       </article>
                     );
                   })}

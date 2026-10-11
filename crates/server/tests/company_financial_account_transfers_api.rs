@@ -164,7 +164,9 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
         "amount": "30.00",
         "effective_on": gmed_server::app_time::today().to_string(),
         "reference": "Cash replenishment",
-        "note": "Internal transfer test"
+        "note": "Internal transfer test",
+        // The bank account's balance in a fresh database may be below 30.
+        "confirm_negative_balance": true
     });
 
     let (forbidden_status, _) = request_json(
@@ -297,4 +299,194 @@ async fn internal_transfers_preserve_company_cash_and_are_reversible() {
             .execute(&ctx.pool)
             .await;
     assert!(immutable.is_err(), "internal transfers must be append-only");
+}
+
+async fn create_account(
+    app: &axum::Router,
+    bearer: &str,
+    name: String,
+    account_type: &str,
+    opening_balance: &str,
+) -> Uuid {
+    let (status, body) = request_json(
+        app,
+        Method::POST,
+        "/api/v1/company-financial-accounts",
+        bearer,
+        Some(json!({
+            "name": name,
+            "account_type": account_type,
+            "currency": "EUR",
+            "opening_balance": opening_balance,
+            "opening_balance_on": "2020-01-01",
+            "is_default": false
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "create account: {body:?}");
+    Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+}
+
+/// A cash box never goes below zero (transfer, its reversal and a
+/// reconciliation outflow are refused); a bank account may, but only when the
+/// transfer is confirmed.
+#[tokio::test]
+async fn transfers_respect_the_source_balance() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let billing_id = seed_user(&ctx.pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let list_path = "/api/v1/company-financial-accounts?currency=EUR&include_inactive=true";
+    let today = gmed_server::app_time::today().to_string();
+    let transfers = "/api/v1/company-financial-account-transfers";
+
+    // A role without the right gets 403 even for a malformed body.
+    let sales = auth_header_for(seed_user(&ctx.pool, &tag, "sales").await, "sales");
+    let (status, _) =
+        request_json(&ctx.app, Method::POST, transfers, &sales, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let cash = create_account(&ctx.app, &billing, format!("Kasse {tag}"), "cash", "50.00").await;
+    let bank = create_account(&ctx.app, &billing, format!("Bank {tag}"), "bank", "100.00").await;
+    let other_bank =
+        create_account(&ctx.app, &billing, format!("Bank 2 {tag}"), "bank", "0.00").await;
+
+    // Cash 50 -> 100 out: refused with the available balance.
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        transfers,
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "source_account_id": cash,
+            "target_account_id": bank,
+            "amount": "100.00",
+            "effective_on": today,
+            "confirm_negative_balance": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(body["error"], "cash_account_insufficient_balance");
+    assert_eq!(body["available_balance"], "50");
+
+    // The whole cash balance may leave.
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        transfers,
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "source_account_id": cash,
+            "target_account_id": bank,
+            "amount": "50.00",
+            "effective_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+
+    // Bank 150 -> 200 out: needs the confirmation, then goes through.
+    let overdraft = json!({
+        "request_id": Uuid::new_v4(),
+        "source_account_id": bank,
+        "target_account_id": other_bank,
+        "amount": "200.00",
+        "effective_on": today
+    });
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        transfers,
+        &billing,
+        Some(overdraft.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body:?}");
+    assert_eq!(
+        body["error"],
+        "account_negative_balance_confirmation_required"
+    );
+    assert_eq!(body["confirm_field"], "confirm_negative_balance");
+    assert_eq!(body["available_balance"], "150");
+    assert_eq!(body["balance_after"], "-50");
+    let mut confirmed = overdraft;
+    confirmed["confirm_negative_balance"] = json!(true);
+    let (status, body) =
+        request_json(&ctx.app, Method::POST, transfers, &billing, Some(confirmed)).await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+
+    let (_, accounts) = request_json(&ctx.app, Method::GET, list_path, &billing, None).await;
+    assert_eq!(account_balance(&accounts, cash), Decimal::ZERO);
+    assert_eq!(account_balance(&accounts, bank), Decimal::from(-50));
+    assert_eq!(account_balance(&accounts, other_bank), Decimal::from(200));
+
+    // Bank 2 -> cash 20, then the cash spends it: the reversal of the first
+    // transfer would take the cash box below zero.
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        transfers,
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "source_account_id": other_bank,
+            "target_account_id": cash,
+            "amount": "20.00",
+            "effective_on": today
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let refill_id = body["id"].as_str().unwrap().to_string();
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        &format!("/api/v1/company-financial-accounts/{cash}/adjustments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "direction": "outflow",
+            "amount": "25.00",
+            "effective_on": today,
+            "reason": "Kassensturz"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(body["error"], "cash_account_insufficient_balance");
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        &format!("/api/v1/company-financial-accounts/{cash}/adjustments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "direction": "outflow",
+            "amount": "15.00",
+            "effective_on": today,
+            "reason": "Kassensturz"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body:?}");
+    let (status, body) = request_json(
+        &ctx.app,
+        Method::POST,
+        &format!("{transfers}/{refill_id}/reversal"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "effective_on": today,
+            "reference": "Falsch gebucht"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+    assert_eq!(body["error"], "cash_account_insufficient_balance");
+    assert_eq!(body["available_balance"], "5");
 }

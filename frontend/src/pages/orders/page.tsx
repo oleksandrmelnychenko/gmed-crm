@@ -96,6 +96,7 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { localizeWorkflowItemText } from "@/lib/workflow-labels";
 import { summarizeOrderNeeds } from "./model/order-needs";
+import { priceVersionDisplayName } from "./model/order-service-presentation";
 import {
   createOrderServiceGroup,
   fetchOrderServiceGroup,
@@ -218,6 +219,7 @@ import {
   patientLabel,
   recheckMissingFieldLabel,
   leistungLineAmounts,
+  leistungVatLabel,
   summarizeLeistungMetrics,
   workflowChecklistLabel,
 } from "./model/order-model";
@@ -7324,7 +7326,7 @@ function useOrdersPageContent() {
                                   />
                                   <MiniMetric
                                     label={l("orders_mwst")}
-                                    value={`${formatNumber(leistung.vat_rate, locale)}%`}
+                                    value={leistungVatLabel(leistung, locale, lang)}
                                   />
                                   {permissions.canManagePartnerCosts ? <MiniMetric
                                     label={lang === "de" ? "Geplante Partnerkosten mit Mehrwertsteuer" : "Плановые затраты на партнёра с налогом"}
@@ -9170,7 +9172,9 @@ function useOrdersPageContent() {
                             ? formatDateOnlyLabel(priceVersion.valid_to)
                             : t.finance_catalog_open_ended
                         }`;
-                        const versionName = priceVersion.name?.trim();
+                        // The automatic "YYYY-MM-DD · 95 EUR" name only repeats
+                        // the start date and the price shown beside it.
+                        const versionName = priceVersionDisplayName(priceVersion);
                         return (
                           <option
                             key={priceVersion.id || "catalog-fallback"}

@@ -95,6 +95,7 @@ import {
   formatCurrency,
   formatDate,
   formatDateTime,
+  formatQuantity,
   isContractClosed,
   isQuoteSuperseded,
   orderOptionLabel,
@@ -1275,6 +1276,8 @@ function useContractsPageContent() {
         accessor: (row) => Number(row.quantity ?? 0),
         sortable: true,
         width: 90,
+        // "2,5" like the order card, not the API's "2.5".
+        render: (row) => formatQuantity(row.quantity),
       },
       {
         id: "unit_price",
@@ -1424,6 +1427,7 @@ function useContractsPageContent() {
         accessor: (row) => row.paid_at ?? "",
         sortable: true,
         width: 170,
+        // A payment date is a calendar day, not an instant ("11.10.2026").
         render: (row) => formatDate(row.paid_at, locale, t.common_not_set),
       },
       {

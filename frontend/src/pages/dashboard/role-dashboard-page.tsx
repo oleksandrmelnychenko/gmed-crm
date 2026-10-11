@@ -17,6 +17,7 @@ import {
 
 import { apiFetch } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
+import { formatMoneyAmount } from "@/lib/money";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -93,6 +94,7 @@ const METRIC_ROUTES: Record<string, string> = {
   converted_leads_30d: "/leads",
   lead_to_patient_conversion_rate_pct: "/leads",
   outstanding_receivables_total: "/company-finance",
+  open_advance_requests_total: "/invoices",
   overdue_invoice_count: "/company-finance",
   invoices_30d: "/company-finance",
   active_sessions: "/admin/security",
@@ -115,37 +117,28 @@ function numberValue(value: unknown): number | null {
   return null;
 }
 
+// German number style in every language, like the finance pages ("1.234,5");
+// money as "10.595,40 €" (lib/money).
+const METRIC_NUMBER = new Intl.NumberFormat("de-DE", { maximumFractionDigits: 1 });
+
 function formatMetric(metric: RoleDashboardMetric, value: unknown, lang: Lang): string {
   const numeric = numberValue(value);
   if (numeric === null) return "—";
 
   switch (metric.format) {
     case "currency":
-      return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        style: "currency",
-        currency: "EUR",
-        maximumFractionDigits: 0,
-      }).format(numeric);
+      return formatMoneyAmount(numeric, "EUR");
     case "percent":
-      return `${new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        maximumFractionDigits: 1,
-      }).format(numeric)}%`;
+      return `${METRIC_NUMBER.format(numeric)} %`;
     case "hours":
-      return `${new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        maximumFractionDigits: 1,
-      }).format(numeric)} ${lang === "de" ? "Std." : "ч"}`;
+      return `${METRIC_NUMBER.format(numeric)} ${lang === "de" ? "Std." : "ч"}`;
     case "days":
-      return `${new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        maximumFractionDigits: 1,
-      }).format(numeric)} ${lang === "de" ? "Tage" : "дн."}`;
+      // A duration is never negative.
+      return `${METRIC_NUMBER.format(Math.max(numeric, 0))} ${lang === "de" ? "Tage" : "дн."}`;
     case "score":
-      return `${new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        maximumFractionDigits: 1,
-      }).format(numeric)} / 5`;
+      return `${METRIC_NUMBER.format(numeric)} / 5`;
     default:
-      return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-        maximumFractionDigits: 1,
-      }).format(numeric);
+      return METRIC_NUMBER.format(numeric);
   }
 }
 

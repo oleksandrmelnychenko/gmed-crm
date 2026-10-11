@@ -14,6 +14,29 @@ use super::gen_invoice_number;
 /// Payment term when neither the request nor the draft names a due date.
 pub(super) const DEFAULT_INVOICE_PAYMENT_TERM_DAYS: u64 = 14;
 
+/// Error code of a release refused because GMED's own tax registration is
+/// missing; the UI points to the system settings with it.
+pub(super) const ISSUER_TAX_REGISTRATION_MISSING: &str = "issuer_tax_registration_missing";
+
+/// Whether GMED's Steuernummer or USt-IdNr. is set (`system_settings`
+/// `agency_tax_number` / `agency_vat_id`). An invoice must name one of them
+/// (§ 14 Abs. 4 Nr. 2 UStG) and the e-invoice cannot be built without it, so
+/// a draft is not released while both are empty. Drafts stay possible.
+pub(crate) async fn issuer_tax_registration_configured(
+    conn: &mut PgConnection,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM system_settings
+               WHERE key IN ('agency_tax_number', 'agency_vat_id')
+                 AND NULLIF(BTRIM(value #>> '{}'), '') IS NOT NULL
+           )"#,
+    )
+    .fetch_one(conn)
+    .await
+}
+
 /// `system_settings.invoice_payment_term_days`, else the default.
 pub(super) async fn load_invoice_payment_term_days(
     conn: &mut PgConnection,

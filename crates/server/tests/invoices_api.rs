@@ -2651,6 +2651,242 @@ fn invoice_counter_suffix(number: &str) -> i64 {
     number.rsplit('-').next().unwrap().parse().unwrap()
 }
 
+async fn set_system_setting(pool: &PgPool, key: &str, value: &str) {
+    sqlx::query(
+        r#"INSERT INTO system_settings (key, value, description)
+           VALUES ($1, to_jsonb($2::text), $1)
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value"#,
+    )
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// § 14 Abs. 4 Nr. 2 UStG: an invoice names the issuer's Steuernummer or
+/// USt-IdNr. While both settings are empty a draft can be prepared but not
+/// released (no number is consumed); either one of them is enough.
+#[tokio::test]
+async fn invoice_release_requires_the_issuer_tax_registration() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("issuer-tax-registration");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let sales_id = seed_user(&pool, &tag, "sales").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Dolmetscherstunden', 2, 95, 19, 'approved')"#,
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let quote = create_quote(&app, &pm_bearer, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    set_system_setting(&pool, "agency_tax_number", "").await;
+    set_system_setting(&pool, "agency_vat_id", "  ").await;
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/issuer-tax-registration",
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["configured"], false);
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/issuer-tax-registration",
+        &auth_header_for(sales_id, "sales"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The draft is still possible and warns before the release.
+    let draft = create_draft_invoice(&app, &billing_bearer, quote_id).await;
+    let draft_id = draft["id"].as_str().unwrap().to_string();
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{draft_id}"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert!(
+        detail["release_checks"]["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning["code"] == "issuer_tax_registration_missing"),
+        "{detail}"
+    );
+
+    let counter_before: i64 = sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, body) = post_invoice_status(
+        &app,
+        &billing_bearer,
+        &draft_id,
+        json!({ "status": "sent" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "issuer_tax_registration_missing", "{body}");
+    let (status_after, number_after): (String, Option<String>) =
+        sqlx::query_as("SELECT status, invoice_number FROM invoices WHERE id = $1::uuid")
+            .bind(&draft_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status_after, "draft");
+    assert!(number_after.is_none());
+    let counter_after: i64 = sqlx::query_scalar("SELECT last_value FROM invoice_number_counter")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(counter_after, counter_before, "no number is consumed");
+
+    // The USt-IdNr. alone is enough.
+    set_system_setting(&pool, "agency_vat_id", "DE123456789").await;
+    let (_, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/invoices/issuer-tax-registration",
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(body["configured"], true);
+    let released = release_invoice(&app, &billing_bearer, &draft_id).await;
+    assert!(
+        released["invoice_number"]
+            .as_str()
+            .is_some_and(|number| number.starts_with("INV-")),
+        "{released}"
+    );
+}
+
+/// A tax profile's VAT rate lies between 0 and 100 %; the VAT mapping of the
+/// catalogue shows the rate a new order line is billed with (the price
+/// version valid today), not an outdated catalog rate.
+#[tokio::test]
+async fn tax_profile_vat_rate_is_bounded_and_catalog_shows_the_billed_rate() {
+    let Some((app, pool, _admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("tax-profile-range");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let profile_key = format!("qa_{}", Uuid::new_v4().simple());
+    let body = |vat_rate: Value| {
+        json!({
+            "profile_key": profile_key,
+            "name": "Ermäßigter Satz",
+            "vat_rate": vat_rate,
+            "vat_category": "standard",
+            "is_active": true
+        })
+    };
+    for invalid in [json!(150), json!(-1), json!(100.01)] {
+        let (status, response) = json_request(
+            &app,
+            "POST",
+            "/api/v1/tax-profiles",
+            &billing,
+            Some(body(invalid.clone())),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{invalid}: {response}"
+        );
+        assert_eq!(response["error"], "vat_rate_out_of_range", "{response}");
+    }
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/tax-profiles",
+        &billing,
+        Some(body(json!(7))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let profile_id = created["id"].as_str().unwrap().to_string();
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/tax-profiles/{profile_id}"),
+        &billing,
+        Some(body(json!(150))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{response}");
+    let (status, response) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/tax-profiles/{profile_id}"),
+        &billing,
+        Some(body(json!(100))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+
+    // Catalog rate 19 % replaced by a 0 % price version: the mapping shows 0 %.
+    let catalog_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO agency_service_catalog (
+               service_key, service_name, unit_label, unit_price, currency,
+               vat_rate, is_active, valid_from, created_by
+           ) VALUES ($1, 'Organisation der Behandlung', 'case', 550, 'EUR', 19,
+                     true, DATE '2020-01-01', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("treatment-{tag}"))
+    .bind(billing_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO agency_service_price_versions (
+               agency_service_id, name, unit_price, currency, vat_rate, valid_from, created_by
+           ) VALUES ($1, 'Organisation 2020', 550, 'EUR', 0, DATE '2020-01-01', $2)"#,
+    )
+    .bind(catalog_id)
+    .bind(billing_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, catalog) =
+        json_request(&app, "GET", "/api/v1/tax-profiles/catalog", &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{catalog}");
+    let row = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["catalog_id"] == catalog_id.to_string())
+        .expect("catalog row");
+    assert_eq!(row["vat_rate"], "19", "{row}");
+    assert_eq!(row["effective_vat_rate"], "0", "{row}");
+}
+
 /// Drafts carry no number; release numbers them from a gapless counter, dates
 /// them, needs a due date on or after the invoice date and is final: no way
 /// back to draft, no new due date, no new payer. A draft cancelled before

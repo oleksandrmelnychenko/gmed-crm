@@ -32,7 +32,10 @@ import { ReadOnlyScope } from "@/components/read-only-scope";
 import { cn } from "@/lib/utils";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 
+import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registration-banner";
+
 import { CompanyAccountsWorkspace } from "./accounts-workspace";
+import { localizeCompanyFinanceError } from "./errors";
 import { ConciergeExpenseReviewPanel } from "./concierge-expense-review-panel";
 import { ProviderSettlementDialog } from "./provider-settlement-dialog";
 import { ProviderStatementDialog } from "./provider-statement-dialog";
@@ -154,6 +157,13 @@ const textByLanguage = {
     calculated: "Расчетное",
     confirmed: "Подтверждено",
     shown: (shown: number, total: number) => `Показано ${shown} из ${total}`,
+    receivablesDefinition:
+      "Долг пациентов: открытые выпущенные счета (кроме авансовых) после кредит-нот, оплат и зачтённых авансов, плюс не выставленные расходы GMED и корректировки, минус незачтённые оплаченные авансы и переплаты. Та же сумма — на дашбордах CEO и Billing.",
+    openAdvanceRequests: (amount: string) =>
+      `Запрошенные авансы (не оплачены, в долг не входят): ${amount}.`,
+    nonCashOffsets: (amount: string) =>
+      `Зачёты переплат между счетами за период: ${amount} — без движения денег, в поступления и выплаты не входят.`,
+    loadFailed: "Не удалось загрузить финансовую позицию. Обновите страницу.",
   },
   de: {
     title: "Unternehmenssaldo",
@@ -244,6 +254,13 @@ const textByLanguage = {
     calculated: "Berechnet",
     confirmed: "Bestätigt",
     shown: (shown: number, total: number) => `${shown} von ${total} angezeigt`,
+    receivablesDefinition:
+      "Patientenforderungen: offene ausgestellte Rechnungen (ohne Anzahlungsrechnungen) nach Gutschriften, Zahlungen und angerechneten Anzahlungen, zuzüglich noch nicht berechneter GMED-Auslagen und Korrekturen, abzüglich nicht angerechneter bezahlter Anzahlungen und Überzahlungen. Derselbe Betrag steht auf den Dashboards von CEO und Billing.",
+    openAdvanceRequests: (amount: string) =>
+      `Angeforderte Anzahlungen (unbezahlt, nicht in den Forderungen): ${amount}.`,
+    nonCashOffsets: (amount: string) =>
+      `Umbuchungen von Überzahlungen zwischen Rechnungen im Zeitraum: ${amount} – ohne Geldbewegung, nicht in Ein- und Auszahlungen.`,
+    loadFailed: "Die Finanzposition konnte nicht geladen werden. Bitte Seite neu laden.",
   },
 } as const;
 
@@ -300,7 +317,7 @@ function SummaryCard({
   );
 }
 
-function CompanyFinancePageContent() {
+function CompanyFinancePageContent({ readOnly }: { readOnly: boolean }) {
   const { lang } = useLang();
   const text = textByLanguage[lang];
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -363,7 +380,7 @@ function CompanyFinancePageContent() {
         })
         .catch((requestError: unknown) => {
           if (!active) return;
-          setError(requestError instanceof Error ? requestError.message : "Failed to load");
+          setError(localizeCompanyFinanceError(requestError, lang, text.loadFailed));
         })
         .finally(() => {
           if (active) setLoading(false);
@@ -373,7 +390,7 @@ function CompanyFinancePageContent() {
       active = false;
       window.clearTimeout(timer);
     };
-  }, [filters, reloadToken]);
+  }, [filters, lang, reloadToken, text.loadFailed]);
 
   useEffect(() => {
     if (!position || selectedProviderLiability) return;
@@ -742,7 +759,7 @@ function CompanyFinancePageContent() {
         <select
           className={cn(shellSelectClassName, "h-8 min-w-44 rounded-md bg-field text-xs")}
           value={row.financial_account_id ?? ""}
-          disabled={assignmentBusyId === row.id}
+          disabled={readOnly || assignmentBusyId === row.id}
           aria-label={text.financialAccount}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => void handleAssignMovement(row.id, event.target.value)}
@@ -755,7 +772,7 @@ function CompanyFinancePageContent() {
     { id: "net", label: text.net, accessor: (row) => parseAmount(row.amount_net), filterType: "number", sortable: true, width: 130, render: (row) => money(row.amount_net) },
     { id: "vat", label: text.vat, accessor: (row) => parseAmount(row.amount_vat), filterType: "number", sortable: true, width: 120, render: (row) => money(row.amount_vat) },
     { id: "gross", label: text.gross, accessor: (row) => parseAmount(row.amount_gross), filterType: "number", sortable: true, width: 150, render: (row) => <span className={cn("font-semibold", row.movement === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>{row.movement === "inflow" ? "+" : "−"} {money(row.amount_gross)}</span> },
-  ], [accounts?.items, assignmentBusyId, lang, locale, money, openExternalInvoice, text]);
+  ], [accounts?.items, assignmentBusyId, lang, locale, money, openExternalInvoice, readOnly, text]);
 
   async function handleAssignMovement(entryId: string, financialAccountId: string) {
     setAssignmentBusyId(entryId);
@@ -764,9 +781,7 @@ function CompanyFinancePageContent() {
       await assignAccountingEntryFinancialAccount(entryId, financialAccountId);
       setReloadToken((current) => current + 1);
     } catch (requestError) {
-      setAssignmentError(
-        requestError instanceof Error ? requestError.message : text.assignmentFailed,
-      );
+      setAssignmentError(localizeCompanyFinanceError(requestError, lang, text.assignmentFailed));
     } finally {
       setAssignmentBusyId("");
     }
@@ -778,6 +793,8 @@ function CompanyFinancePageContent() {
         title={text.title}
         description={text.subtitle}
       />
+
+      <IssuerTaxRegistrationBanner refreshKey={reloadToken} />
 
       <section className="relative z-30 grid grid-cols-2 items-end gap-2 rounded-lg border border-border/70 bg-card p-2.5 shadow-sm sm:flex sm:flex-nowrap sm:gap-1.5 sm:overflow-x-auto sm:px-3 sm:py-2">
         <ToolbarField label={text.from} className="w-full sm:w-[150px]">
@@ -865,6 +882,16 @@ function CompanyFinancePageContent() {
               )}
             </ShellBanner>
           ) : null}
+
+          <div className="space-y-0.5 text-[11px] leading-4 text-muted-foreground" data-testid="company-finance-definitions">
+            <p>{text.receivablesDefinition}</p>
+            {parseAmount(summary.open_advance_requests) > 0 ? (
+              <p>{text.openAdvanceRequests(money(summary.open_advance_requests))}</p>
+            ) : null}
+            {parseAmount(summary.non_cash_offsets) !== 0 ? (
+              <p>{text.nonCashOffsets(money(summary.non_cash_offsets))}</p>
+            ) : null}
+          </div>
         </>
       ) : loading ? (
         <div className="rounded-lg border border-border/70 bg-card px-4 py-12 text-center text-sm text-muted-foreground">
@@ -982,7 +1009,11 @@ function CompanyFinancePageContent() {
                 mobilePrimaryColumnId="document"
                 mobileDetailColumnIds={["status", "provider", "amount", "company_paid", "remaining", "order"]}
                 rowActionsWidth={185}
-                rowActions={(row) => <Button type="button" size="sm" variant={Number(row.remaining_gross) > 0 ? "default" : "outline"} onClick={(event) => { event.stopPropagation(); setSelectedProviderLiability(row); }}>{Number(row.remaining_gross) > 0 ? text.recordPayment : text.providerSettlements}</Button>}
+                rowActions={(row) => {
+                  // Read-only roles open the settlement to look, not to pay.
+                  const pay = !readOnly && Number(row.remaining_gross) > 0;
+                  return <Button type="button" size="sm" variant={pay ? "default" : "outline"} onClick={(event) => { event.stopPropagation(); setSelectedProviderLiability(row); }}>{pay ? text.recordPayment : text.providerSettlements}</Button>;
+                }}
                 defaultSort={[{ field: "due_date", dir: "asc" }]}
                 emptyState={text.noRows}
                 pagination={{ pageSize: 50, resetKey: `${providerFilter}:${selectedProviderId ?? "all"}` }}
@@ -1087,9 +1118,10 @@ function CompanyFinancePageContent() {
 
 export function CompanyFinancePage() {
   const { user } = useAuth();
+  const readOnly = !hasCapability(user, "company_finance.edit");
   return (
-    <ReadOnlyScope active={!hasCapability(user, "company_finance.edit")}>
-      <CompanyFinancePageContent />
+    <ReadOnlyScope active={readOnly}>
+      <CompanyFinancePageContent readOnly={readOnly} />
     </ReadOnlyScope>
   );
 }

@@ -167,19 +167,21 @@ export function roleDashboardDefinition(role: string, lang: Lang): RoleDashboard
         subtitle: subtitle(lang, "billing"),
         primaryModules: modules("billing"),
         metrics: [
-          metric(lang, "outstanding_receivables_total", { ru: "Дебиторка", de: "Offene Forderungen" }, { ru: "к получению", de: "noch einzuziehen" }, "currency"),
+          // Same figure as "Долг пациентов" on the company finance page.
+          metric(lang, "outstanding_receivables_total", { ru: "Дебиторка", de: "Offene Forderungen" }, { ru: "долг пациентов, без авансовых счетов", de: "Patientenforderungen ohne Anzahlungsrechnungen" }, "currency"),
+          metric(lang, "open_advance_requests_total", { ru: "Запрошенные авансы", de: "Angeforderte Anzahlungen" }, { ru: "не оплачены, в дебиторку не входят", de: "unbezahlt, nicht in den Forderungen" }, "currency"),
           metric(lang, "overdue_invoice_count", { ru: "Просроченные счета", de: "Überfällige Rechnungen" }, { ru: "требуют действия", de: "Handlungsbedarf" }),
           metric(lang, "invoices_30d", { ru: "Счета", de: "Rechnungen" }, { ru: "создано за 30 дней", de: "in 30 Tagen erstellt" }),
           metric(lang, "paid_within_14d_rate_pct", { ru: "Оплата до 14 дней", de: "Zahlung bis 14 Tage" }, { ru: "доля оплат", de: "Zahlungsquote" }, "percent"),
           metric(lang, "avg_invoice_gross", { ru: "Средний счёт", de: "Ø Rechnungswert" }, { ru: "брутто", de: "brutto" }, "currency"),
-          metric(lang, "avg_service_to_invoice_days", { ru: "До выставления", de: "Bis Rechnungsstellung" }, { ru: "среднее время", de: "durchschnittlich" }, "days"),
+          metric(lang, "avg_service_to_invoice_days", { ru: "До выставления", de: "Bis Rechnungsstellung" }, { ru: "от услуги до счёта, без авансов", de: "Leistung bis Rechnung, ohne Anzahlungen" }, "days"),
         ],
         focus: [
           l(lang, { ru: "Отработать просроченные счета", de: "Überfällige Rechnungen bearbeiten" }),
           l(lang, { ru: "Проверить готовые к выставлению заказы", de: "Abrechnungsbereite Aufträge prüfen" }),
           l(lang, { ru: "Закрыть расхождения между услугами и счетами", de: "Abweichungen zwischen Leistungen und Rechnungen klären" }),
         ],
-        preview: { outstanding_receivables_total: "18240.50", overdue_invoice_count: 6, invoices_30d: 34, paid_within_14d_rate_pct: 76, avg_invoice_gross: 2840, avg_service_to_invoice_days: 3.4 },
+        preview: { outstanding_receivables_total: "18240.50", open_advance_requests_total: "4500.00", overdue_invoice_count: 6, invoices_30d: 34, paid_within_14d_rate_pct: 76, avg_invoice_gross: 2840, avg_service_to_invoice_days: 3.4 },
       };
     case "sales":
       return {

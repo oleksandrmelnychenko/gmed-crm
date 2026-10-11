@@ -3,15 +3,54 @@ import { describe, expect, it } from "vitest";
 import {
   agencyServiceGrossAmount,
   agencyServicePackageUsagesByServiceId,
+  catalogEffectiveVatRate,
   createPackageItemFromAgencyService,
   packageItemPatchFromAgencyService,
   packageItemSelectablePriceVersions,
   packageItemVatRate,
   pricePeriodState,
+  priceVersionNameLabel,
   recommendedPackageItemPriceVersion,
+  seedTaxProfileText,
   sortPriceVersionsForDisplay,
+  taxProfileVatRateIsValid,
   validateAgencyServiceForm,
 } from "./finance-catalog";
+
+describe("tax profile VAT rate", () => {
+  it("accepts 0 to 100 % only (a 150 % profile must not reach invoices)", () => {
+    expect(taxProfileVatRateIsValid(0)).toBe(true);
+    expect(taxProfileVatRateIsValid(7)).toBe(true);
+    expect(taxProfileVatRateIsValid(100)).toBe(true);
+    expect(taxProfileVatRateIsValid(150)).toBe(false);
+    expect(taxProfileVatRateIsValid(-1)).toBe(false);
+    expect(taxProfileVatRateIsValid(Number.NaN)).toBe(false);
+  });
+
+  it("shows the billed rate in the VAT mapping, not an outdated catalog rate", () => {
+    expect(catalogEffectiveVatRate({ vat_rate: "19", effective_vat_rate: "0" })).toBe("0");
+    expect(catalogEffectiveVatRate({ vat_rate: "19" })).toBe("19");
+  });
+});
+
+describe("seedTaxProfileText", () => {
+  it("translates the English seed names while nobody renamed them", () => {
+    expect(seedTaxProfileText("termin_fee_0", "Termin fee 0% VAT", "name", "ru")).toBe(
+      "Организация лечения, НДС 0 %",
+    );
+    expect(seedTaxProfileText("standard_vat", "Standard VAT", "name", "de")).toBe("Regelsteuersatz");
+    expect(seedTaxProfileText("standard_vat", "Eigener Name", "name", "ru")).toBeNull();
+    expect(seedTaxProfileText("qa_profile", "Standard VAT", "name", "ru")).toBeNull();
+  });
+});
+
+describe("priceVersionNameLabel", () => {
+  it("writes the automatic version name with a German date and amount", () => {
+    expect(priceVersionNameLabel("2026-04-14 · 240 EUR")).toBe("14.04.2026 · 240,00 €");
+    expect(priceVersionNameLabel("Preis ab 2027-01-01")).toBe("Preis ab 01.01.2027");
+    expect(priceVersionNameLabel(null)).toBe("");
+  });
+});
 
 describe("pricePeriodState", () => {
   const today = "2026-09-04";

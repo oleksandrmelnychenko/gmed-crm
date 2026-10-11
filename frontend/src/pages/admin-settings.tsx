@@ -56,6 +56,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Input } from "@/components/ui/input";
+import { issuerTaxRegistrationText } from "@/components/issuer-tax-registration-banner";
 import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
@@ -518,6 +519,13 @@ function useAdminSettingsPageContent() {
   );
   const groupHasChanges =
     selectedGroup?.fields.some((field) => hasFieldChanged(field.key)) ?? false;
+  // Invoices are not released without GMED's Steuernummer or USt-IdNr.
+  const issuerTaxRegistrationMissing =
+    !loading
+    && settings.length > 0
+    && ["agency_tax_number", "agency_vat_id"].every(
+      (key) => !normalizeAdminSettingValue(settingsMap[key]?.value).trim(),
+    );
 
   const handleGroupSheetOpenChange = useSheetDirtyGuard({
     isDirty: groupHasChanges,
@@ -969,9 +977,18 @@ function useAdminSettingsPageContent() {
     roleLabel,
   ]);
 
+  const issuerTaxText = issuerTaxRegistrationText(lang);
+
   return (
     <>
       <div className="space-y-4">
+        {issuerTaxRegistrationMissing ? (
+          <Banner tone="warning" withIcon>
+            <p className="font-medium">{issuerTaxText.title}</p>
+            <p className="mt-1">{issuerTaxText.body}</p>
+            <p className="mt-1">{issuerTaxText.onSettings}</p>
+          </Banner>
+        ) : null}
         <PageHeader
           title={t.settings_title}
           description={t.settings_subtitle}

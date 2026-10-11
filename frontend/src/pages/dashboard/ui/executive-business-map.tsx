@@ -17,6 +17,7 @@ import {
   startOfMonthKey,
 } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { localizeTimelineTitle } from "@/lib/timeline-labels";
 import { cn } from "@/lib/utils";
 
@@ -74,7 +75,9 @@ const ExecutiveCashChart = lazy(async () => {
 
   return {
     default: function ExecutiveCashChart({ data, locale, labels }: { data: CashDatum[]; locale: string; labels: { inflow: string; outflow: string; net: string } }) {
-    const currency = new Intl.NumberFormat(locale, {
+    void locale;
+    // Axis ticks in whole euros, German style ("5.850 €"); the tooltip shows cents.
+    const currency = new Intl.NumberFormat("de-DE", {
       style: "currency",
       currency: "EUR",
       maximumFractionDigits: 0,
@@ -92,7 +95,7 @@ const ExecutiveCashChart = lazy(async () => {
             tickFormatter={(value) => currency.format(Number(value))}
           />
           <Tooltip
-            formatter={(value, key) => [currency.format(Number(value)), String(key)]}
+            formatter={(value, key) => [formatMoneyAmount(Number(value), "EUR"), String(key)]}
             contentStyle={{
               border: "1px solid #e5e7eb",
               borderRadius: 8,
@@ -374,9 +377,10 @@ export function ExecutiveBusinessMap({
   const l = (key: string) =>
     t.uiText[key] ?? (t as unknown as Record<string, string>)[key] ?? key;
   const locale = lang === "de" ? "de-DE" : "ru-RU";
+  // One money style app-wide ("1.234,56 €", lib/money), whatever the language.
   const money = useMemo(
-    () => new Intl.NumberFormat(locale, { style: "currency", currency: "EUR", minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    [locale],
+    () => ({ format: (value: number) => formatMoneyAmount(value, "EUR") }),
+    [],
   );
   const today = new Date();
   const date = `${appDateTimeFormat(locale, { weekday: "long" }).format(today)}, ${formatAppDate(today)}`;

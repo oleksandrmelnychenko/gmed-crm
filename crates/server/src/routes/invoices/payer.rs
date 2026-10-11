@@ -1004,6 +1004,11 @@ pub(crate) async fn draft_release_checks(
 ) -> Result<Value, sqlx::Error> {
     let evaluation = evaluate_recipient(conn, invoice_id).await?;
     let mut warnings = Vec::new();
+    // Blocks the release until the system settings name GMED's Steuernummer
+    // or USt-IdNr.
+    if !super::release::issuer_tax_registration_configured(conn).await? {
+        warnings.push(json!({ "code": super::release::ISSUER_TAX_REGISTRATION_MISSING }));
+    }
     if !evaluation.missing.is_empty() {
         warnings.push(json!({
             "code": "recipient_address_incomplete",

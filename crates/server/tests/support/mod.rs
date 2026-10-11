@@ -209,6 +209,17 @@ async fn create_suite_database(backend: Arc<TestDatabaseBackend>) -> Result<Suit
     .await
     .map_err(|error| format!("activate test admin in {database_name}: {error}"))?;
 
+    // Invoices are released only once GMED's tax registration is set (§ 14
+    // Abs. 4 Nr. 2 UStG); a fresh database has it empty. Suites get a
+    // synthetic Steuernummer; the release-block test clears it again.
+    sqlx::query(
+        "UPDATE system_settings SET value = to_jsonb('143/999/00001'::text)
+         WHERE key = 'agency_tax_number'",
+    )
+    .execute(&pool)
+    .await
+    .map_err(|error| format!("set test tax number in {database_name}: {error}"))?;
+
     let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = $1")
         .bind("admin@gmed.de")
         .fetch_one(&pool)

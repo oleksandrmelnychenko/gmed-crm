@@ -483,6 +483,13 @@ export function formatCurrency(value: unknown) {
   return formatMoneyAmount(value);
 }
 
+/** A line quantity as written in German ("2,5"; up to four decimals). */
+export function formatQuantity(value: unknown) {
+  const numeric = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(numeric)) return String(value ?? "");
+  return numeric.toLocaleString("de-DE", { maximumFractionDigits: 4 });
+}
+
 export function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
 }

@@ -2,9 +2,14 @@ import { expect, test, type Download, type Page, type WebSocketRoute } from "@pl
 import { readFile } from "node:fs/promises";
 import type { CompanyFinancialAccount, CompanyFinancialPosition, CompanyProviderLiability, CompanyProviderPosition, CompanyProviderPaymentTransaction } from "../../src/pages/company-finance/types";
 
-async function mockFinance(page: Page, connected = true) {
+async function mockFinance(
+  page: Page,
+  connected = true,
+  options: { role?: string; extraAccounts?: CompanyFinancialAccount[] } = {},
+) {
   const state = { receivable: "100.00", cash: "500.00", remaining: "100.00", invoiceStatus: "approved", positionReads: 0, accountReads: 0, queueReads: 0, settlementReads: 0, statementReads: 0, fail: false };
   const payments: CompanyProviderPaymentTransaction[] = [];
+  const transfers: Record<string, unknown>[] = [];
   let providerTables: { positions: CompanyProviderPosition[]; liabilities: CompanyProviderLiability[] } | null = null;
   const sockets: WebSocketRoute[] = [];
   let seq = 0;
@@ -50,7 +55,12 @@ async function mockFinance(page: Page, connected = true) {
     const path = url.pathname.replace("/api/v1", "");
     let body: unknown = [];
     if (path === "/auth/refresh") body = { access_token: "finance-test-token", refresh_token: "finance-test-refresh" };
-    if (path === "/me") body = { id: "tester", name: "Finance Tester", email: "finance@example.com", role: "ceo", created_at: "2026-01-01T00:00:00Z" };
+    if (path === "/me") body = { id: "tester", name: "Finance Tester", email: "finance@example.com", role: options.role ?? "ceo", created_at: "2026-01-01T00:00:00Z" };
+    if (path === "/invoices/issuer-tax-registration") body = { configured: true };
+    if (path === "/company-financial-account-transfers" && route.request().method() === "POST") {
+      transfers.push(route.request().postDataJSON());
+      return route.fulfill({ status: 201, json: { id: `transfer-${transfers.length}`, idempotent_replay: false } });
+    }
     if (path === "/invoices") body = { items: [], total: 0, page: 1, per_page: 25, total_pages: 1 };
     if (path === "/invoices/accounting-ledger") body = { entries: [], monthly: [], currency: "EUR", available_currencies: ["EUR"], summary: {} };
     if (path === "/external-invoices") body = { items: (providerTables?.liabilities ?? [liability()]).map(row => ({ ...row, currency: "EUR", invoice_scope: row.patient_id ? "patient_order" : "company" })), total: providerTables?.liabilities.length ?? 1, page: 1, per_page: 25 };
@@ -75,7 +85,7 @@ async function mockFinance(page: Page, connected = true) {
     }
     if (path === "/company-financial-accounts") {
       state.accountReads += 1;
-      body = { currency: "EUR", available_currencies: ["EUR"], items: [account()], adjustments: [], transfers: [],
+      body = { currency: "EUR", available_currencies: ["EUR"], items: [account(), ...(options.extraAccounts ?? [])], adjustments: [], transfers: [],
         unassigned_movement_count: 0, unassigned_signed_amount: "0.00", generated_at: new Date().toISOString() };
     }
     if (path === "/concierge-expenses") {
@@ -107,6 +117,8 @@ async function mockFinance(page: Page, connected = true) {
   return {
     state,
     payments,
+    transfers,
+    account,
     provider,
     liability,
     setProviderTables(positions: CompanyProviderPosition[], liabilities: CompanyProviderLiability[]) { providerTables = { positions, liabilities }; },
@@ -475,4 +487,49 @@ test("a blocked document tab shows guidance without downloading the file", async
   await expect(page.getByRole("alert")).toContainText("Bitte das Öffnen eines neuen Tabs erlauben");
   expect(downloads).toBe(0);
   await expect(page.getByRole("dialog")).toHaveCount(0);
+});
+
+const cashBox: CompanyFinancialAccount = {
+  id: "account-cash", name: "Realtime Kasse", account_type: "cash", currency: "EUR", iban: null,
+  opening_balance: "50.00", opening_balance_on: "2026-01-01", movement_balance: "0.00", adjustment_balance: "0.00",
+  transfer_balance: "0.00", current_balance: "50.00", movement_count: 0, transfer_count: 0, latest_movement_on: null,
+  is_default: false, is_active: true, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-09-05T00:00:00Z",
+};
+
+test("read-only roles see the GMED accounts without any write control", async ({ page }) => {
+  await mockFinance(page, true, { role: "ceo_assistant", extraAccounts: [cashBox] });
+  await page.goto("/company-finance?tab=accounts");
+  await expect(page.getByText("Realtime Kasse", { exact: true }).first()).toBeVisible();
+  for (const name of ["Zwischen Konten umbuchen", "Konto hinzufügen", "Abstimmungsbuchung", "Bearbeiten", "Löschen", "Als Standard setzen"]) {
+    await expect(page.getByRole("button", { name, exact: true })).toHaveCount(0);
+  }
+});
+
+test("a cash box cannot go below zero and a bank overdraft needs a confirmation", async ({ page }) => {
+  const api = await mockFinance(page, true, { extraAccounts: [cashBox] });
+  await page.goto("/company-finance?tab=accounts");
+  await page.getByRole("button", { name: "Zwischen Konten umbuchen", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  const source = dialog.getByLabel("Vom Konto");
+  const amount = dialog.getByLabel("Betrag", { exact: true });
+  await source.selectOption({ label: "Realtime Kasse" });
+  await amount.fill("100");
+  await expect(dialog.getByText("Eine Kasse kann nicht ins Minus gehen", { exact: false })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Speichern", exact: true })).toBeDisabled();
+
+  await source.selectOption({ label: "Realtime Bank" });
+  await amount.fill("600");
+  const save = dialog.getByRole("button", { name: "Umbuchen und ins Minus gehen", exact: true });
+  await expect(dialog.getByText("Nach der Umbuchung ist der Kontostand negativ", { exact: false })).toBeVisible();
+  await expect(save).toBeDisabled();
+  await dialog.getByLabel("Ich bestätige: Das Konto geht ins Minus").check();
+  await save.click();
+  await expect(dialog).toHaveCount(0);
+  expect(api.transfers).toHaveLength(1);
+  expect(api.transfers[0]).toMatchObject({
+    source_account_id: "account-1",
+    target_account_id: "account-cash",
+    amount: "600",
+    confirm_negative_balance: true,
+  });
 });

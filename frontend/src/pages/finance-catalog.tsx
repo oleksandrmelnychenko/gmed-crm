@@ -58,7 +58,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKey } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import {
   agencyServiceDescriptionLabel,
   agencyServiceNameLabel,
@@ -106,12 +106,19 @@ type CatalogTaxProfile = {
   service_key: string;
   service_name: string;
   vat_rate: string;
+  /** The rate a new order line is billed with (price valid today, else `vat_rate`). */
+  effective_vat_rate?: string | null;
   vat_source: string;
   tax_profile_id?: string | null;
   tax_profile_key?: string | null;
   tax_profile_name?: string | null;
   tax_profile_vat_rate?: string | null;
 };
+
+/** The rate the VAT mapping shows: the one the service is billed with now. */
+export function catalogEffectiveVatRate(row: Pick<CatalogTaxProfile, "vat_rate" | "effective_vat_rate">) {
+  return row.effective_vat_rate ?? row.vat_rate;
+}
 
 type AgencyServiceRemovalResult = {
   ok: boolean;
@@ -662,6 +669,83 @@ function createFinanceCatalogFieldPatch<K extends keyof FinanceCatalogState>(
   } as Partial<FinanceCatalogState>);
 }
 
+/**
+ * The tax profiles the migration seeds carry English names and descriptions.
+ * As long as nobody renamed them, they are shown in the UI language.
+ */
+const SEED_TAX_PROFILE_TEXTS: Record<
+  string,
+  { name: string; description: string; ru: [string, string]; de: [string, string] }
+> = {
+  standard_vat: {
+    name: "Standard VAT",
+    description: "Default VAT profile for taxable services such as interpreter support.",
+    ru: ["Стандартная ставка НДС", "Профиль по умолчанию для облагаемых услуг, например услуг переводчика."],
+    de: ["Regelsteuersatz", "Standardprofil für steuerpflichtige Leistungen, z. B. Dolmetschen."],
+  },
+  termin_fee_0: {
+    name: "Termin fee 0% VAT",
+    description: "Default zero VAT profile for appointment/termin organization fees.",
+    ru: ["Организация лечения, НДС 0 %", "Профиль 0 % для организации лечения и приёмов (§ 4 Nr. 14 UStG)."],
+    de: ["Behandlungsorganisation, 0 % USt.", "0-%-Profil für die Organisation von Behandlung und Terminen (§ 4 Nr. 14 UStG)."],
+  },
+  vat_exempt_0: {
+    name: "VAT exempt 0%",
+    description: "Generic VAT exempt profile for manually reviewed services.",
+    ru: ["Без НДС (освобождено), 0 %", "Общий профиль освобождения от НДС для вручную проверенных услуг."],
+    de: ["Steuerfrei, 0 %", "Allgemeines steuerfreies Profil für manuell geprüfte Leistungen."],
+  },
+};
+
+export function seedTaxProfileText(
+  key: string | null | undefined,
+  value: string | null | undefined,
+  field: "name" | "description",
+  lang: string,
+): string | null {
+  const seed = key ? SEED_TAX_PROFILE_TEXTS[key.trim()] : undefined;
+  if (!seed || (value ?? "").trim() !== seed[field]) return null;
+  const texts = lang === "de" ? seed.de : seed.ru;
+  return field === "name" ? texts[0] : texts[1];
+}
+
+/** A tax profile's VAT rate: 0 to 100 % (the server refuses anything else). */
+export function taxProfileVatRateIsValid(rate: number) {
+  return Number.isFinite(rate) && rate >= 0 && rate <= 100;
+}
+
+function taxProfileErrorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string") return code;
+  }
+  return "";
+}
+
+/** "2026-04-14" → "14.04.2026"; other text unchanged. */
+function dateLabel(value: string | null | undefined) {
+  return value ? formatAppDate(value) || value : "";
+}
+
+/** "14.04.2026 — 31.12.2026" or "14.04.2026 — <open ended>". */
+function pricePeriodLabel(from: string, to: string | null | undefined, openEnded: string) {
+  return `${dateLabel(from)} — ${to ? dateLabel(to) : openEnded}`;
+}
+
+/**
+ * Name of a price version: the automatic "YYYY-MM-DD · 240 EUR" name the
+ * migration gave old versions is written "14.04.2026 · 240,00 €"; ISO dates in
+ * other names become DD.MM.YYYY (owner rule).
+ */
+export function priceVersionNameLabel(name: string | null | undefined, currency = "EUR") {
+  const trimmed = name?.trim() ?? "";
+  const automatic = /^(\d{4}-\d{2}-\d{2}) · ([\d.,]+) ([A-Z]{3})$/u.exec(trimmed);
+  if (automatic) {
+    return `${dateLabel(automatic[1])} · ${formatMoneyAmount(Number(automatic[2].replace(",", ".")), automatic[3] || currency)}`;
+  }
+  return trimmed.replace(/\b(\d{4})-(\d{2})-(\d{2})\b/gu, "$3.$2.$1");
+}
+
 function useFinanceCatalogPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
@@ -673,6 +757,8 @@ function useFinanceCatalogPageContent() {
     name: string | null | undefined,
     key: string | null | undefined,
   ) => {
+    const seeded = seedTaxProfileText(key, name, "name", lang);
+    if (seeded) return seeded;
     const trimmedName = name?.trim();
     if (trimmedName) return trimmedName;
     if (key?.trim()) return formatUnknownValue(key, t);
@@ -868,7 +954,7 @@ function useFinanceCatalogPageContent() {
         width: 180,
         render: (version) => (
           <span className="truncate font-medium text-foreground">
-            {version.name?.trim() || `${t.finance_catalog_price_current} · ${version.valid_from}`}
+            {priceVersionNameLabel(version.name, version.currency) || `${t.finance_catalog_price_current} · ${dateLabel(version.valid_from)}`}
           </span>
         ),
       },
@@ -891,7 +977,7 @@ function useFinanceCatalogPageContent() {
         align: "right",
         width: 90,
         render: (version) => (
-          <span className="tabular-nums text-foreground">{String(version.vat_rate)} %</span>
+          <span className="tabular-nums text-foreground">{String(version.vat_rate).replace(".", ",")} %</span>
         ),
       },
       {
@@ -901,7 +987,7 @@ function useFinanceCatalogPageContent() {
         width: 230,
         render: (version) => (
           <span className="font-mono text-xs text-foreground">
-            {version.valid_from} — {version.valid_to || t.finance_catalog_open_ended}
+            {pricePeriodLabel(version.valid_from, version.valid_to, t.finance_catalog_open_ended)}
           </span>
         ),
       },
@@ -970,7 +1056,7 @@ function useFinanceCatalogPageContent() {
         width: 180,
         render: (version) => (
           <span className="truncate font-medium text-foreground">
-            {version.name?.trim() || `${t.finance_catalog_price_current} · ${version.valid_from}`}
+            {priceVersionNameLabel(version.name, version.currency) || `${t.finance_catalog_price_current} · ${dateLabel(version.valid_from)}`}
           </span>
         ),
       },
@@ -1017,7 +1103,7 @@ function useFinanceCatalogPageContent() {
         width: 220,
         render: (version) => (
           <span className="font-mono text-xs text-foreground">
-            {version.valid_from} — {version.valid_to || t.finance_catalog_open_ended}
+            {pricePeriodLabel(version.valid_from, version.valid_to, t.finance_catalog_open_ended)}
           </span>
         ),
       },
@@ -1076,15 +1162,24 @@ function useFinanceCatalogPageContent() {
       {
         id: "vat_rate",
         label: t.finance_catalog_vat_label,
-        accessor: (row) => Number(row.vat_rate) || 0,
+        accessor: (row) => Number(catalogEffectiveVatRate(row)) || 0,
         filterType: "number",
         sortable: true,
         width: 110,
-        render: (row) => (
-          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {row.vat_rate}%
-          </span>
-        ),
+        render: (row) => {
+          const effective = catalogEffectiveVatRate(row);
+          const differs = Number(effective) !== Number(row.vat_rate);
+          return (
+            <span
+              className="block text-right font-mono text-xs tabular-nums text-foreground"
+              title={differs
+                ? t.finance_catalog_vat_effective_hint.replace("{rate}", `${String(row.vat_rate).replace(".", ",")} %`)
+                : undefined}
+            >
+              {String(effective).replace(".", ",")} %
+            </span>
+          );
+        },
       },
       {
         id: "vat_source",
@@ -1121,7 +1216,7 @@ function useFinanceCatalogPageContent() {
       {
         id: "name",
         label: t.finance_catalog_tax_profile_prefix,
-        accessor: (profile) => profile.name,
+        accessor: (profile) => taxProfileLabel(profile.name, profile.profile_key),
         filterType: "text",
         sortable: true,
         searchable: true,
@@ -1130,7 +1225,7 @@ function useFinanceCatalogPageContent() {
         render: (profile) => (
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate font-mono text-xs text-foreground">
-              {profile.name}
+              {taxProfileLabel(profile.name, profile.profile_key)}
             </span>
             {profile.is_default ? (
               <Badge
@@ -1151,7 +1246,7 @@ function useFinanceCatalogPageContent() {
         sortable: true,
         width: 100,
         render: (profile) => (
-          <span className="tabular-nums text-foreground">{profile.vat_rate}%</span>
+          <span className="tabular-nums text-foreground">{String(profile.vat_rate).replace(".", ",")} %</span>
         ),
       },
       {
@@ -1171,15 +1266,23 @@ function useFinanceCatalogPageContent() {
       {
         id: "description",
         label: t.revenue_agency_service_description_label,
-        accessor: (profile) => profile.description ?? "",
+        accessor: (profile) =>
+          seedTaxProfileText(profile.profile_key, profile.description, "description", lang)
+          ?? profile.description
+          ?? "",
         filterType: "text",
         searchable: true,
         width: 320,
-        render: (profile) => (
-          <span className="truncate text-foreground" title={profile.description ?? undefined}>
-            {profile.description || "—"}
-          </span>
-        ),
+        render: (profile) => {
+          const description =
+            seedTaxProfileText(profile.profile_key, profile.description, "description", lang)
+            ?? profile.description;
+          return (
+            <span className="truncate text-foreground" title={description ?? undefined}>
+              {description || "—"}
+            </span>
+          );
+        },
       },
       {
         id: "status",
@@ -1207,7 +1310,7 @@ function useFinanceCatalogPageContent() {
         ),
       },
     ],
-    [t, vatCategoryLabel],
+    [lang, t, taxProfileLabel, vatCategoryLabel],
   );
 
   type PackageTableRow = {
@@ -1267,10 +1370,10 @@ function useFinanceCatalogPageContent() {
         rowId: `${row.rowId}:price:${price.id}`,
         kind: "price" as const,
         name:
-          price.name?.trim() ||
+          priceVersionNameLabel(price.name, price.currency) ||
           t.finance_catalog_price_period
-            .replace("{from}", price.valid_from)
-            .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
+            .replace("{from}", dateLabel(price.valid_from))
+            .replace("{to}", price.valid_to ? dateLabel(price.valid_to) : t.finance_catalog_open_ended),
         itemCount: 0,
         childCount: 0,
         gross: Number(price.base_price_gross) || 0,
@@ -1280,9 +1383,12 @@ function useFinanceCatalogPageContent() {
         isActive: pricePeriodState(price.valid_from, price.valid_to) === "current",
         description: [
           t.finance_catalog_price_period
-            .replace("{from}", price.valid_from)
-            .replace("{to}", price.valid_to || t.finance_catalog_open_ended),
-          price.tax_profile_name,
+            .replace("{from}", dateLabel(price.valid_from))
+            .replace("{to}", price.valid_to ? dateLabel(price.valid_to) : t.finance_catalog_open_ended),
+          price.tax_profile_name
+            ? seedTaxProfileText(price.tax_profile_key, price.tax_profile_name, "name", lang)
+              ?? price.tax_profile_name
+            : null,
         ]
           .filter(Boolean)
           .join(" · "),
@@ -1309,7 +1415,7 @@ function useFinanceCatalogPageContent() {
       }));
       return [...priceRows, ...itemRows];
     },
-    [expandedPackages, t],
+    [expandedPackages, lang, t],
   );
   const packageTableColumns = useMemo<ColumnDef<PackageTableRow>[]>(
     () => [
@@ -1540,7 +1646,7 @@ function useFinanceCatalogPageContent() {
         label: t.finance_catalog_service,
         accessor: (row) =>
           row.kind === "price"
-            ? row.version?.name?.trim() || row.version?.valid_from || ""
+            ? priceVersionNameLabel(row.version?.name, row.version?.currency) || dateLabel(row.version?.valid_from)
             : agencyServiceNameLabel(row.service.service_key, row.service.service_name, t),
         filterType: "text",
         sortable: true,
@@ -1555,13 +1661,13 @@ function useFinanceCatalogPageContent() {
               <div className="flex min-w-0 items-center gap-1.5 pl-7 text-xs text-foreground">
                 <CornerDownRight className="size-3 shrink-0 text-amber-600" />
                 <span className="min-w-0 truncate font-medium">
-                  {row.version.name?.trim() ||
+                  {priceVersionNameLabel(row.version.name, row.version.currency) ||
                     t.finance_catalog_price_period
-                      .replace("{from}", row.version.valid_from)
-                      .replace("{to}", row.version.valid_to || t.finance_catalog_open_ended)}
+                      .replace("{from}", dateLabel(row.version.valid_from))
+                      .replace("{to}", row.version.valid_to ? dateLabel(row.version.valid_to) : t.finance_catalog_open_ended)}
                 </span>
                 <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
-                  {row.version.valid_from} — {row.version.valid_to || t.finance_catalog_open_ended}
+                  {pricePeriodLabel(row.version.valid_from, row.version.valid_to, t.finance_catalog_open_ended)}
                 </span>
                 {isCurrent ? (
                   <Badge
@@ -1873,7 +1979,7 @@ function useFinanceCatalogPageContent() {
       setCreateError(t.finance_catalog_error_profile_required);
       return;
     }
-    if (!Number.isFinite(vatRate) || vatRate < 0) {
+    if (!taxProfileVatRateIsValid(vatRate)) {
       setCreateError(t.finance_catalog_error_vat_rate);
       return;
     }
@@ -1900,7 +2006,9 @@ function useFinanceCatalogPageContent() {
       await load();
     } catch (err) {
       setCreateError(
-        err instanceof Error ? err.message : t.finance_catalog_error_create_tax_profile,
+        taxProfileErrorCode(err) === "vat_rate_out_of_range"
+          ? t.finance_catalog_error_vat_rate
+          : err instanceof Error ? err.message : t.finance_catalog_error_create_tax_profile,
       );
     } finally {
       setCreateBusy(false);
@@ -1918,7 +2026,7 @@ function useFinanceCatalogPageContent() {
       setTaxEditError(t.finance_catalog_error_profile_required);
       return;
     }
-    if (!Number.isFinite(vatRate) || vatRate < 0) {
+    if (!taxProfileVatRateIsValid(vatRate)) {
       setTaxEditError(t.finance_catalog_error_vat_rate);
       return;
     }
@@ -1945,7 +2053,9 @@ function useFinanceCatalogPageContent() {
       await load();
     } catch (err) {
       setTaxEditError(
-        err instanceof Error ? err.message : t.finance_catalog_error_update_tax_profile,
+        taxProfileErrorCode(err) === "vat_rate_out_of_range"
+          ? t.finance_catalog_error_vat_rate
+          : err instanceof Error ? err.message : t.finance_catalog_error_update_tax_profile,
       );
     } finally {
       setTaxEditBusy(false);
@@ -2869,7 +2979,7 @@ function useFinanceCatalogPageContent() {
                           <option value="">{t.finance_catalog_no_vat_profile}</option>
                           {taxProfiles.map((profile) => (
                             <option key={profile.id} value={profile.id}>
-                              {profile.name} ({profile.vat_rate}%)
+                              {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                             </option>
                           ))}
                         </select>
@@ -3144,7 +3254,7 @@ function useFinanceCatalogPageContent() {
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
           <form className="flex h-full min-h-0 flex-col" onSubmit={handleSaveTaxProfile}>
             <AdminSheetScaffold
-              title={t.finance_catalog_save_vat_profile}
+              title={t.finance_catalog_edit_tax_profile}
               footer={
                 <SheetFormFooter
                   cancelLabel={t.common_cancel}
@@ -3777,7 +3887,7 @@ function useFinanceCatalogPageContent() {
                           <option value="__none__">{t.finance_catalog_no_vat_profile}</option>
                           {taxProfiles.map((profile) => (
                             <option key={profile.id} value={profile.id}>
-                              {profile.name} ({profile.vat_rate}%)
+                              {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                             </option>
                           ))}
                         </NativeComboboxSelect>
@@ -4080,7 +4190,7 @@ function useFinanceCatalogPageContent() {
                               </option>
                               {taxProfiles.map((profile) => (
                                 <option key={profile.id} value={profile.id}>
-                                  {profile.name} ({profile.vat_rate}%)
+                                  {taxProfileLabel(profile.name, profile.profile_key)} ({String(profile.vat_rate).replace(".", ",")} %)
                                 </option>
                               ))}
                             </NativeComboboxSelect>

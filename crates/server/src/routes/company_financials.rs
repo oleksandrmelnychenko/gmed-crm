@@ -126,93 +126,10 @@ fn parse_search(value: Option<&str>) -> Result<Option<String>, String> {
     Ok(Some(format!("%{value}%")))
 }
 
-async fn get_company_financial_position(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Query(query): Query<CompanyFinancialQuery>,
-) -> axum::response::Response {
-    if !can_read_company_financials(auth.role) {
-        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
-    }
-
-    let today = crate::app_time::today();
-    let default_from = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
-    let from = match parse_date(query.from.as_deref(), "from") {
-        Ok(value) => value.unwrap_or(default_from),
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    };
-    let to = match parse_date(query.to.as_deref(), "to") {
-        Ok(value) => value.unwrap_or(today),
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    };
-    if from > to {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "from cannot be later than to",
-        );
-    }
-    let requested_currency = match parse_currency(query.currency.as_deref()) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    };
-    let movement = match parse_movement(query.movement.as_deref()) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    };
-    let search = match parse_search(query.search.as_deref()) {
-        Ok(value) => value,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
-    };
-
-    let mut available_currencies = match sqlx::query_scalar::<_, String>(
-        r#"SELECT DISTINCT currency
-           FROM (
-               SELECT UPPER(TRIM(invoice.currency)) AS currency
-               FROM invoices invoice
-               WHERE invoice.status <> 'cancelled'
-               UNION ALL
-               SELECT UPPER(TRIM(external.currency))
-               FROM external_invoices external
-               WHERE external.status <> 'cancelled'
-               UNION ALL
-               SELECT UPPER(TRIM(adjustment.currency))
-               FROM patient_balance_adjustments adjustment
-               UNION ALL
-               SELECT UPPER(TRIM(entry.currency))
-               FROM accounting_entries entry
-           ) currencies
-           WHERE currency ~ '^[A-Z]{3}$'
-           ORDER BY currency"#,
-    )
-    .fetch_all(&state.db)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(error) => {
-            tracing::error!(error = %error, "load company financial currencies");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to load company financial position",
-            );
-        }
-    };
-    let currency = requested_currency.unwrap_or_else(|| {
-        if available_currencies.iter().any(|value| value == "EUR") {
-            "EUR".to_string()
-        } else {
-            available_currencies
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "EUR".to_string())
-        }
-    });
-    if !available_currencies.iter().any(|value| value == &currency) {
-        available_currencies.push(currency.clone());
-        available_currencies.sort();
-    }
-
-    let patient_rows = match sqlx::query(
-        r#"WITH source_allocations AS (
+/// The per-patient position the company finance page lists. The same SQL
+/// feeds [`open_patient_receivables`], so the company finance page, the CEO
+/// dashboard and the billing dashboard show one receivables figure.
+const PATIENT_POSITIONS_SQL: &str = r#"WITH source_allocations AS (
                SELECT allocation.advance_invoice_id,
                       COALESCE(SUM(allocation.amount_gross), 0) AS allocated
                FROM invoice_prepayment_allocations allocation
@@ -315,11 +232,182 @@ async fn get_company_financial_position(
            JOIN patients patient ON patient.id = scoped.patient_id
            LEFT JOIN invoice_positions invoice ON invoice.patient_id = patient.id
            LEFT JOIN external_positions external ON external.patient_id = patient.id
-           LEFT JOIN manual_positions manual ON manual.patient_id = patient.id"#,
+           LEFT JOIN manual_positions manual ON manual.patient_id = patient.id"#;
+
+/// One patient's balance with GMED: open released invoices (interim, final,
+/// termination) after credit notes, payments and applied advances, plus
+/// GMED-paid client costs not billed yet and manual adjustments, less paid
+/// advances not applied yet and invoice overpayments. Positive is a debt.
+struct PatientBalance {
+    invoice_due: Decimal,
+    available_prepayment: Decimal,
+    external_receivable: Decimal,
+    manual_balance: Decimal,
+    invoice_cash_credit: Decimal,
+    calculated_balance: Decimal,
+    reconciliation_required: bool,
+}
+
+impl PatientBalance {
+    fn from_row(row: &sqlx::postgres::PgRow) -> Self {
+        let amount = |column: &str| row.try_get::<Decimal, _>(column).unwrap_or(Decimal::ZERO);
+        let invoice_due = amount("invoice_due");
+        let available_prepayment = amount("available_prepayment");
+        let external_receivable = amount("external_receivable");
+        let manual_balance = amount("manual_balance");
+        let invoice_cash_credit = amount("invoice_cash_credit");
+        let released_invoice_count = row.try_get::<i64, _>("released_invoice_count").unwrap_or(0);
+        let calculated_balance = (invoice_due + external_receivable + manual_balance
+            - available_prepayment
+            - invoice_cash_credit)
+            .round_cents();
+        Self {
+            invoice_due,
+            available_prepayment,
+            external_receivable,
+            manual_balance,
+            invoice_cash_credit,
+            calculated_balance,
+            reconciliation_required: external_receivable > Decimal::ZERO
+                && released_invoice_count > 0,
+        }
+    }
+}
+
+/// Open patient receivables (offene Patientenforderungen): the sum of the
+/// positive patient balances ([`PatientBalance`]). The one definition behind
+/// "Долг пациентов" on the company finance page, the CEO dashboard and the
+/// billing dashboard's "Дебиторка" (docs/architecture/company-finance-figures_ua.md).
+/// Unpaid advance invoices are payment requests, not receivables: no service
+/// was rendered yet and they are booked when paid; see
+/// [`open_advance_requests`].
+pub(crate) async fn open_patient_receivables(
+    db: &sqlx::PgPool,
+    currency: &str,
+) -> Result<Decimal, sqlx::Error> {
+    let rows = sqlx::query(PATIENT_POSITIONS_SQL)
+        .bind(currency)
+        .fetch_all(db)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| PatientBalance::from_row(row).calculated_balance)
+        .filter(|balance| *balance > Decimal::ZERO)
+        .sum::<Decimal>()
+        .round_cents())
+}
+
+/// Open amounts of released advance invoices (Anzahlungsanforderungen),
+/// shown next to the receivables and never added to them.
+pub(crate) async fn open_advance_requests(
+    db: &sqlx::PgPool,
+    currency: &str,
+) -> Result<Decimal, sqlx::Error> {
+    let value = sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT COALESCE(SUM(GREATEST(
+                      invoice.total_gross - invoice.credited_amount - invoice.paid_amount,
+                      0
+                  )), 0)
+           FROM invoices invoice
+           WHERE invoice.invoice_type = 'advance'
+             AND invoice.status IN ('sent', 'partially_paid', 'overdue')
+             AND UPPER(invoice.currency) = $1"#,
     )
-    .bind(&currency)
+    .bind(currency)
+    .fetch_one(db)
+    .await?;
+    Ok(value.round_cents())
+}
+
+async fn get_company_financial_position(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<CompanyFinancialQuery>,
+) -> axum::response::Response {
+    if !can_read_company_financials(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+
+    let today = crate::app_time::today();
+    let default_from = NaiveDate::from_ymd_opt(today.year(), 1, 1).unwrap_or(today);
+    let from = match parse_date(query.from.as_deref(), "from") {
+        Ok(value) => value.unwrap_or(default_from),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let to = match parse_date(query.to.as_deref(), "to") {
+        Ok(value) => value.unwrap_or(today),
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    if from > to {
+        return err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "from cannot be later than to",
+        );
+    }
+    let requested_currency = match parse_currency(query.currency.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let movement = match parse_movement(query.movement.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+    let search = match parse_search(query.search.as_deref()) {
+        Ok(value) => value,
+        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
+    };
+
+    let mut available_currencies = match sqlx::query_scalar::<_, String>(
+        r#"SELECT DISTINCT currency
+           FROM (
+               SELECT UPPER(TRIM(invoice.currency)) AS currency
+               FROM invoices invoice
+               WHERE invoice.status <> 'cancelled'
+               UNION ALL
+               SELECT UPPER(TRIM(external.currency))
+               FROM external_invoices external
+               WHERE external.status <> 'cancelled'
+               UNION ALL
+               SELECT UPPER(TRIM(adjustment.currency))
+               FROM patient_balance_adjustments adjustment
+               UNION ALL
+               SELECT UPPER(TRIM(entry.currency))
+               FROM accounting_entries entry
+           ) currencies
+           WHERE currency ~ '^[A-Z]{3}$'
+           ORDER BY currency"#,
+    )
     .fetch_all(&state.db)
     .await
+    {
+        Ok(rows) => rows,
+        Err(error) => {
+            tracing::error!(error = %error, "load company financial currencies");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load company financial position",
+            );
+        }
+    };
+    let currency = requested_currency.unwrap_or_else(|| {
+        if available_currencies.iter().any(|value| value == "EUR") {
+            "EUR".to_string()
+        } else {
+            available_currencies
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "EUR".to_string())
+        }
+    });
+    if !available_currencies.iter().any(|value| value == &currency) {
+        available_currencies.push(currency.clone());
+        available_currencies.sort();
+    }
+
+    let patient_rows = match sqlx::query(PATIENT_POSITIONS_SQL)
+        .bind(&currency)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => rows,
         Err(error) => {
@@ -337,28 +425,15 @@ async fn get_company_financial_position(
     let mut reconciliation_count = 0_u64;
     let mut patient_positions = Vec::new();
     for row in patient_rows {
-        let invoice_due = row
-            .try_get::<Decimal, _>("invoice_due")
-            .unwrap_or(Decimal::ZERO);
-        let available_prepayment = row
-            .try_get::<Decimal, _>("available_prepayment")
-            .unwrap_or(Decimal::ZERO);
-        let external_receivable = row
-            .try_get::<Decimal, _>("external_receivable")
-            .unwrap_or(Decimal::ZERO);
-        let manual_balance = row
-            .try_get::<Decimal, _>("manual_balance")
-            .unwrap_or(Decimal::ZERO);
-        let released_invoice_count = row.try_get::<i64, _>("released_invoice_count").unwrap_or(0);
-        let invoice_cash_credit = row
-            .try_get::<Decimal, _>("invoice_cash_credit")
-            .unwrap_or(Decimal::ZERO);
-        let calculated_balance = (invoice_due + external_receivable + manual_balance
-            - available_prepayment
-            - invoice_cash_credit)
-            .round_cents();
-        let reconciliation_required =
-            external_receivable > Decimal::ZERO && released_invoice_count > 0;
+        let PatientBalance {
+            invoice_due,
+            available_prepayment,
+            external_receivable,
+            manual_balance,
+            invoice_cash_credit,
+            calculated_balance,
+            reconciliation_required,
+        } = PatientBalance::from_row(&row);
         if calculated_balance > Decimal::ZERO {
             patient_receivables += calculated_balance;
         } else if calculated_balance < Decimal::ZERO {
@@ -587,20 +662,34 @@ async fn get_company_financial_position(
         right_value.cmp(&left_value)
     });
 
+    // A credit transfer (an overpayment moved to another invoice) books a
+    // refund leg and a payment leg without any money moving: it is not a
+    // cash movement and stays out of the receipts, payouts and the movement
+    // list; it is reported separately as a non-cash offset.
     let cash_summary = match sqlx::query(
         r#"WITH movements AS (
                SELECT CASE
                           WHEN entry.direction = 'income' THEN entry.amount_gross
                           ELSE -entry.amount_gross
-                      END AS signed_amount
+                      END AS signed_amount,
+                      COALESCE(entry.metadata ->> 'payment_method', '') = 'credit_transfer'
+                          AS non_cash,
+                      entry.entry_kind
                FROM accounting_entries entry
                WHERE entry.entry_date >= $1
                  AND entry.entry_date <= $2
                  AND UPPER(entry.currency) = $3
            )
-           SELECT COALESCE(SUM(GREATEST(signed_amount, 0)), 0) AS cash_inflow,
-                  COALESCE(SUM(GREATEST(-signed_amount, 0)), 0) AS cash_outflow,
-                  COALESCE(SUM(signed_amount), 0) AS net_cash_flow
+           SELECT COALESCE(SUM(GREATEST(signed_amount, 0)) FILTER (WHERE NOT non_cash), 0)
+                      AS cash_inflow,
+                  COALESCE(SUM(GREATEST(-signed_amount, 0)) FILTER (WHERE NOT non_cash), 0)
+                      AS cash_outflow,
+                  COALESCE(SUM(signed_amount) FILTER (WHERE NOT non_cash), 0) AS net_cash_flow,
+                  -- The payment legs net of their reversals: the amount moved
+                  -- between invoices in the period.
+                  COALESCE(SUM(signed_amount) FILTER (
+                      WHERE non_cash AND entry_kind = 'invoice_payment'
+                  ), 0) AS non_cash_offsets
            FROM movements"#,
     )
     .bind(from)
@@ -626,6 +715,9 @@ async fn get_company_financial_position(
         .unwrap_or(Decimal::ZERO);
     let net_cash_flow = cash_summary
         .try_get::<Decimal, _>("net_cash_flow")
+        .unwrap_or(Decimal::ZERO);
+    let non_cash_offsets = cash_summary
+        .try_get::<Decimal, _>("non_cash_offsets")
         .unwrap_or(Decimal::ZERO);
 
     let cash_rows = match sqlx::query(
@@ -655,6 +747,7 @@ async fn get_company_financial_position(
                WHERE entry.entry_date >= $1
                  AND entry.entry_date <= $2
                  AND UPPER(entry.currency) = $3
+                 AND COALESCE(entry.metadata ->> 'payment_method', '') <> 'credit_transfer'
            ), filtered AS (
                SELECT *, COUNT(*) OVER() AS total_count
                FROM movements
@@ -737,6 +830,17 @@ async fn get_company_financial_position(
         })
         .collect::<Vec<_>>();
 
+    let advance_requests = match open_advance_requests(&state.db, &currency).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, currency = %currency, "load open advance requests");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load company financial position",
+            );
+        }
+    };
+
     patient_receivables = patient_receivables.round_cents();
     patient_credits = patient_credits.round_cents();
     provider_payables = provider_payables.round_cents();
@@ -768,9 +872,11 @@ async fn get_company_financial_position(
             } else {
                 json!(decimal_to_string(calculated_net_position))
             },
+            "open_advance_requests": decimal_to_string(advance_requests),
             "cash_inflow": decimal_to_string(cash_inflow),
             "cash_outflow": decimal_to_string(cash_outflow),
             "net_cash_flow": decimal_to_string(net_cash_flow),
+            "non_cash_offsets": decimal_to_string(non_cash_offsets),
         },
         "patient_positions": patient_positions,
         "provider_positions": provider_positions,

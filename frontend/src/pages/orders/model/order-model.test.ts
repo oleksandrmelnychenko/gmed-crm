@@ -10,6 +10,7 @@ import {
   formatOptionalCurrency,
   inputDateTimeToApiValue,
   leistungLineAmounts,
+  leistungVatLabel,
   orderProcessGatesToForm,
   sumLeistungGross,
   summarizeLeistungMetrics,
@@ -181,6 +182,17 @@ describe("leistungLineAmounts / sumLeistungGross", () => {
       vat_rate_snapshot: vatRate,
       is_cost_passthrough: isCostPassthrough,
     }) as Leistung;
+
+  it("shows the billed 0 % for a pass-through line and its purchase rate as info", () => {
+    expect(leistungVatLabel(line("planned", "3", "120", "7", true), "de-DE", "ru")).toBe(
+      "0 % (закупка 7 %)",
+    );
+    expect(leistungVatLabel(line("planned", "3", "120", "7", true), "de-DE", "de")).toBe(
+      "0 % (Einkauf 7 %)",
+    );
+    expect(leistungVatLabel(line("planned", "3", "120", "0", true), "de-DE", "ru")).toBe("0 %");
+    expect(leistungVatLabel(line("planned", "2.5", "95", "19"), "de-DE", "ru")).toBe("19 %");
+  });
 
   it("rounds each line like quotes and invoices", () => {
     expect(leistungLineAmounts(line("planned", "2.5", "95", "19"))).toEqual({

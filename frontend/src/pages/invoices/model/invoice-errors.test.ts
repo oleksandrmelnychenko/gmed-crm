@@ -7,6 +7,18 @@ import {
 } from "./invoice-errors";
 
 describe("localizeInvoiceError", () => {
+  it("points to the system settings when GMED's tax number is missing", () => {
+    const error = Object.assign(
+      new Error("GMED's tax number or VAT ID is missing; set it in the system settings before releasing invoices"),
+      { code: "issuer_tax_registration_missing", body: { error: "issuer_tax_registration_missing" } },
+    );
+    expect(localizeInvoiceError(error, "ru", "Ошибка")).toContain("Системных настройках");
+    expect(localizeInvoiceError(error, "de", "Fehler")).toContain("Systemeinstellungen");
+    expect(
+      invoiceReleaseWarningText({ code: "issuer_tax_registration_missing" }, "ru"),
+    ).toContain("Steuernummer");
+  });
+
   it("says a credit note was already reversed in the UI language", () => {
     const error = new Error("Credit note was already reversed");
     expect(localizeInvoiceError(error, "ru", "Ошибка")).toBe("Эта кредит-нота уже сторнирована.");

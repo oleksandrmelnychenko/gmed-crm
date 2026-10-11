@@ -111,6 +111,10 @@ pub fn router() -> Router<AppState> {
             "/invoices/accounting-ledger/export",
             get(export_accounting_ledger),
         )
+        .route(
+            "/invoices/issuer-tax-registration",
+            get(get_issuer_tax_registration),
+        )
         .route("/invoices", get(list_invoices))
         .route("/invoices/{invoice_id}", get(get_invoice))
         .route("/invoices/{invoice_id}/pdf", get(download_invoice_pdf))
@@ -6016,6 +6020,42 @@ fn csv_escape(value: &str) -> String {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {
         value.to_string()
+    }
+}
+
+/// `GET /invoices/issuer-tax-registration`: whether GMED's Steuernummer or
+/// USt-IdNr. is set, for the warning on the billing pages and the settings
+/// (no values, only the flag).
+async fn get_issuer_tax_registration(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+) -> axum::response::Response {
+    if !auth.role.can_any(&[
+        Capability::InvoicesView,
+        Capability::CompanyFinanceView,
+        Capability::AdminSettings,
+    ]) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let mut conn = match state.db.acquire().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            tracing::error!(%error, "acquire issuer tax registration connection");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the issuer tax registration",
+            );
+        }
+    };
+    match release::issuer_tax_registration_configured(&mut conn).await {
+        Ok(configured) => Json(json!({ "configured": configured })).into_response(),
+        Err(error) => {
+            tracing::error!(%error, "load issuer tax registration");
+            err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to load the issuer tax registration",
+            )
+        }
     }
 }
 
@@ -13352,6 +13392,30 @@ async fn update_invoice_status(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to release invoice prepayment",
         );
+    }
+
+    // The issuer's own tax registration (§ 14 Abs. 4 Nr. 2 UStG) must be on
+    // the invoice; a released invoice is immutable, so it is never numbered
+    // without it.
+    if releasing {
+        match release::issuer_tax_registration_configured(&mut transaction).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return coded_err(
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    release::ISSUER_TAX_REGISTRATION_MISSING,
+                    "GMED's tax number or VAT ID is missing; set it in the system settings before releasing invoices",
+                    json!({}),
+                );
+            }
+            Err(error) => {
+                tracing::error!(%error, %invoice_id, "load issuer tax registration");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update invoice",
+                );
+            }
+        }
     }
 
     // The recipient is checked and frozen with the release (§ 14 Abs. 4

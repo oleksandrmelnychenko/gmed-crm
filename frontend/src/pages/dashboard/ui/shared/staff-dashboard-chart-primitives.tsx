@@ -10,6 +10,7 @@ import {
   type TranslationKey,
   uiText,
 } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { orderPhaseTextKey } from "@/lib/workflow-labels";
 
 import {
@@ -270,7 +271,7 @@ export function ServiceMixTable({
               {row.item_count}
             </div>
             <div className="w-[120px] shrink-0 text-right text-[12px] font-medium tabular-nums text-foreground">
-              {translateCatalog(getLang()).uiText.common_currency_eur} {row.gross_total}
+              {formatMoneyAmount(row.gross_total, "EUR")}
             </div>
           </div>
         );
@@ -318,7 +319,7 @@ export function OrdersValuedBars({
               {item.count} {translateCatalog(getLang()).dash_order_count_suffix}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
-              {translateCatalog(getLang()).uiText.common_currency_eur} {value.toLocaleString()}
+              {formatMoneyAmount(value, "EUR")}
             </div>
           </div>
         );

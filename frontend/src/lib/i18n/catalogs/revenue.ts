@@ -25,6 +25,8 @@ export interface RevenueTranslations {
   finance_catalog_active: string;
   finance_catalog_create: string;
   finance_catalog_save_vat_profile: string;
+  finance_catalog_edit_tax_profile: string;
+  finance_catalog_vat_effective_hint: string;
   finance_catalog_loading_tax_profiles: string;
   finance_catalog_empty_tax_profiles: string;
   finance_catalog_default_badge: string;
@@ -870,6 +872,8 @@ export const revenueRu: RevenueTranslations = {
   finance_catalog_active: "Активен",
   finance_catalog_create: "Создать",
   finance_catalog_save_vat_profile: "Сохранить профиль НДС",
+  finance_catalog_edit_tax_profile: "Редактировать налоговый профиль",
+  finance_catalog_vat_effective_hint: "Ставка, с которой услуга выставляется сейчас (действующая цена). В карточке каталога записано {rate}.",
   finance_catalog_loading_tax_profiles: "Загрузка налоговых профилей...",
   finance_catalog_empty_tax_profiles: "Налоговые профили пока не настроены.",
   finance_catalog_default_badge: "по умолчанию",
@@ -965,7 +969,7 @@ export const revenueRu: RevenueTranslations = {
     "Позиция не используется и будет удалена без возможности восстановления.",
   finance_catalog_archive_agency_service_message:
     "Позиция уже используется в системе, поэтому она будет деактивирована. Существующие связи и документы сохранятся.",
-  finance_catalog_error_vat_rate: "Ставка НДС должна быть неотрицательным числом.",
+  finance_catalog_error_vat_rate: "Ставка НДС должна быть числом от 0 до 100 %.",
   finance_catalog_error_package_required: "Укажите ключ пакета и название.",
   finance_catalog_error_package_item_description:
     "Для каждой позиции пакета нужно описание.",
@@ -1282,6 +1286,8 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_active: "Aktiv",
   finance_catalog_create: "Anlegen",
   finance_catalog_save_vat_profile: "USt.-Profil speichern",
+  finance_catalog_edit_tax_profile: "Steuerprofil bearbeiten",
+  finance_catalog_vat_effective_hint: "Satz, mit dem die Leistung derzeit abgerechnet wird (gültiger Preis). Im Katalogeintrag steht {rate}.",
   finance_catalog_loading_tax_profiles: "Steuerprofile werden geladen...",
   finance_catalog_empty_tax_profiles: "Noch keine Steuerprofile konfiguriert.",
   finance_catalog_default_badge: "Standard",
@@ -1379,7 +1385,7 @@ export const revenueDe: RevenueTranslations = {
   finance_catalog_archive_agency_service_message:
     "Die Position wird bereits im System verwendet und deshalb deaktiviert. Bestehende Verknüpfungen und Dokumente bleiben erhalten.",
   finance_catalog_error_vat_rate:
-    "Der USt.-Satz muss eine nicht negative Zahl sein.",
+    "Der USt.-Satz muss eine Zahl von 0 bis 100 % sein.",
   finance_catalog_error_package_required: "Paketschlüssel und Name sind erforderlich.",
   finance_catalog_error_package_item_description:
     "Jede Paketposition benötigt eine Beschreibung.",

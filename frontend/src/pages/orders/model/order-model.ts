@@ -521,6 +521,19 @@ export function leistungLineAmounts(item: Leistung): MoneyLineAmounts {
 }
 
 /**
+ * The VAT shown for an order service: the rate it is billed with. A
+ * pass-through line (e.g. a hotel bought at 7 %) is re-billed at 0 %; its
+ * purchase rate is named as information only ("0 % (закупка 7 %)").
+ */
+export function leistungVatLabel(item: Leistung, locale = "de-DE", lang = "ru") {
+  const stored = numberFromUnknown(item.vat_rate_snapshot) ?? numberFromUnknown(item.vat_rate) ?? 0;
+  if (!item.is_cost_passthrough) return `${formatNumber(stored, locale)} %`;
+  if (stored === 0) return "0 %";
+  const purchase = `${formatNumber(stored, locale)} %`;
+  return lang === "de" ? `0 % (Einkauf ${purchase})` : `0 % (закупка ${purchase})`;
+}
+
+/**
  * Counters of the order services. Cancelled lines are left out of the totals
  * and counted separately. "Delivered" includes approved and invoiced services
  * (they were delivered first); "awaiting approval" is delivered but not yet

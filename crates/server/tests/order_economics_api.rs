@@ -1222,6 +1222,87 @@ async fn economics_plan_skips_cancelled_services() {
     assert_eq!(kept["planned_revenue_net"], "100");
 }
 
+/// A pass-through line (hotel bought at 7 %) is re-billed at 0 %: the plan
+/// counts no VAT for it, so "revenue with VAT" matches the quote and invoice.
+#[tokio::test]
+async fn economics_plan_bills_pass_through_lines_at_zero_vat() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo_id = seed_user(&pool, &tag, "ceo").await;
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for (description, quantity, unit_price, vat_rate, passthrough) in [
+        (
+            "Interpreter support",
+            Decimal::new(25, 1),
+            Decimal::new(95, 0),
+            19,
+            false,
+        ),
+        (
+            "Hotel Musterhof 3 Nächte",
+            Decimal::new(3, 0),
+            Decimal::new(120, 0),
+            7,
+            true,
+        ),
+    ] {
+        sqlx::query(
+            r#"INSERT INTO order_leistungen (
+                   order_id, patient_id, description, quantity, unit_price, currency,
+                   vat_rate, is_cost_passthrough, status
+               ) VALUES ($1, $2, $3, $4, $5, 'EUR', $6, $7, 'planned')"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(description)
+        .bind(quantity)
+        .bind(unit_price)
+        .bind(Decimal::from(vat_rate))
+        .bind(passthrough)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (status, economics) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}/economics"),
+        &auth_header(ceo_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "economics: {economics:?}");
+    // 237.50 + 45.13 VAT (19 %) and 360 at 0 %.
+    assert_eq!(economics["planned"]["revenue_net"], "597.5");
+    assert_eq!(economics["planned"]["revenue_vat"], "45.13");
+    assert_eq!(economics["planned"]["revenue_gross"], "642.63");
+    let hotel = economics["services"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|service| service["is_cost_passthrough"] == true)
+        .expect("pass-through row");
+    assert_eq!(hotel["planned_revenue_vat"], "0");
+    assert_eq!(hotel["planned_revenue_gross"], "360");
+}
+
 /// "Billed to the patient" includes issued advance invoices; once an advance
 /// is credited into a settlement invoice it is not counted twice. The unpaid
 /// part of an advance is still to be received.

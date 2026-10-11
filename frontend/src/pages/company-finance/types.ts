@@ -20,6 +20,10 @@ export type CompanyFinancialSummary = {
   cash_inflow: string;
   cash_outflow: string;
   net_cash_flow: string;
+  /** Open amounts of released advance invoices: requests, not receivables. */
+  open_advance_requests?: string;
+  /** Overpayments moved between invoices in the period: no money moved. */
+  non_cash_offsets?: string;
 };
 
 export type CompanyPatientPosition = {

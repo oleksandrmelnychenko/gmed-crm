@@ -119,6 +119,27 @@ fn parse_optional_date(
     }
 }
 
+/// Error code of a VAT rate outside 0–100 %; the finance catalogue maps it.
+const VAT_RATE_OUT_OF_RANGE: &str = "vat_rate_out_of_range";
+
+/// A VAT rate of a profile: 0 to 100 %, rounded to cents. German rates are
+/// 0, 7 and 19 %; anything above 100 % is a typing error that would end up on
+/// invoices of every service using the profile.
+fn validated_vat_rate(value: Option<Decimal>) -> Result<Decimal, axum::response::Response> {
+    let vat_rate = value.unwrap_or(Decimal::ZERO).round_commercial(2);
+    if vat_rate < Decimal::ZERO || vat_rate > Decimal::ONE_HUNDRED {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(serde_json::json!({
+                "error": VAT_RATE_OUT_OF_RANGE,
+                "message": "vat_rate must be between 0 and 100",
+            })),
+        )
+            .into_response());
+    }
+    Ok(vat_rate)
+}
+
 fn valid_vat_category(value: &str) -> bool {
     matches!(
         value,
@@ -188,13 +209,10 @@ async fn create_tax_profile(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_commercial(2);
-    if vat_rate < Decimal::ZERO {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "vat_rate must be non-negative",
-        );
-    }
+    let vat_rate = match validated_vat_rate(body.vat_rate) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let vat_category = body
         .vat_category
         .as_deref()
@@ -304,13 +322,10 @@ async fn update_tax_profile(
         Ok(value) => value,
         Err(resp) => return resp,
     };
-    let vat_rate = body.vat_rate.unwrap_or(Decimal::ZERO).round_commercial(2);
-    if vat_rate < Decimal::ZERO {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "vat_rate must be non-negative",
-        );
-    }
+    let vat_rate = match validated_vat_rate(body.vat_rate) {
+        Ok(value) => value,
+        Err(resp) => return resp,
+    };
     let vat_category = body
         .vat_category
         .as_deref()
@@ -417,15 +432,30 @@ async fn list_catalog_tax_profiles(
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
+    // `effective_vat_rate` is the rate a new order line of the service is
+    // billed with: the price version valid today (the one order lines take),
+    // else the catalog rate. The catalog's own `vat_rate` can be an old value
+    // that the price versions replaced.
     match sqlx::query(
         r#"SELECT c.id, c.service_key, c.service_name, c.vat_rate, c.vat_source,
                   tp.id AS tax_profile_id, tp.profile_key, tp.name AS tax_profile_name,
-                  tp.vat_rate AS tax_profile_vat_rate
+                  tp.vat_rate AS tax_profile_vat_rate,
+                  COALESCE(price.vat_rate, c.vat_rate) AS effective_vat_rate
            FROM agency_service_catalog c
            LEFT JOIN tax_profiles tp ON tp.id = c.tax_profile_id
+           LEFT JOIN LATERAL (
+               SELECT version.vat_rate
+               FROM agency_service_price_versions version
+               WHERE version.agency_service_id = c.id
+                 AND version.valid_from <= $1
+                 AND (version.valid_to IS NULL OR version.valid_to >= $1)
+               ORDER BY version.valid_from DESC, version.created_at DESC
+               LIMIT 1
+           ) price ON true
            WHERE c.is_active = true
            ORDER BY c.service_key"#,
     )
+    .bind(crate::app_time::today())
     .fetch_all(&state.db)
     .await
     {
@@ -437,6 +467,7 @@ async fn list_catalog_tax_profiles(
                         "service_key": row.try_get::<String, _>("service_key").unwrap_or_default(),
                         "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
                         "vat_rate": decimal_to_string(row.try_get::<Decimal, _>("vat_rate").unwrap_or(Decimal::ZERO)),
+                        "effective_vat_rate": decimal_to_string(row.try_get::<Decimal, _>("effective_vat_rate").unwrap_or(Decimal::ZERO)),
                         "vat_source": row.try_get::<String, _>("vat_source").unwrap_or_else(|_| "catalog".to_string()),
                         "tax_profile_id": row.try_get::<Option<Uuid>, _>("tax_profile_id").unwrap_or_default(),
                         "tax_profile_key": row.try_get::<Option<String>, _>("profile_key").unwrap_or_default(),

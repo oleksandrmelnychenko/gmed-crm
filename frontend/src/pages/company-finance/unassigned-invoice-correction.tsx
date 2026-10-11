@@ -177,7 +177,7 @@ export function UnassignedInvoiceCorrection({ liability, onChanged, onDirtyChang
           <span>{text.cancelReason}</span>
           <Input className={inputClassName} maxLength={1000} value={reason} onChange={(event) => setReason(event.target.value)} />
         </label>
-        <Button type="button" variant="destructive" size="sm" className="h-9 rounded-md" disabled={busy !== null || reason.trim().length < 3} onClick={() => void handleCancel()}>
+        <Button type="button" variant="destructive" size="sm" className="h-9 rounded-md" data-action="write" disabled={busy !== null || reason.trim().length < 3} onClick={() => void handleCancel()}>
           {busy === "cancel" ? <LoaderCircle className="size-4 animate-spin" /> : <Ban className="size-4" />}
           {text.cancel}
         </Button>

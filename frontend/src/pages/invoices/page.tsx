@@ -67,6 +67,7 @@ import { clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
+import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registration-banner";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { describeCashMovement } from "@/pages/company-finance/table-model";
@@ -2312,6 +2313,8 @@ function useStaffInvoicesPageContent() {
             </>
           )}
         />
+
+        <IssuerTaxRegistrationBanner refreshKey={reloadToken} />
 
         <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
           <nav aria-label={lang === "de" ? "Rechnungsquelle" : "Источник счетов"} className="flex w-max min-w-full justify-center gap-1">

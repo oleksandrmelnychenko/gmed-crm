@@ -282,7 +282,7 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                                   value={form.lineQuantities[String(index)] ?? ""}
                                   className={cn(inputClass, "h-8 text-right tabular-nums", final && "border-transparent bg-transparent shadow-none")}
                                   onChange={(event) => onFormChange((current) => ({ ...current, lineQuantities: { ...current.lineQuantities, [String(index)]: event.target.value } }))} />
-                                <span className="block">{availableLabel}: {available}</span>
+                                <span className="block">{availableLabel}: {available.toLocaleString("de-DE", { maximumFractionDigits: 4 })}</span>
                               </label>
                               <div className="min-w-24 text-right">
                                 <p className="mb-1 text-xs text-muted-foreground">{de ? "Brutto" : "Сумма с НДС"}</p>

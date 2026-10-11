@@ -4931,9 +4931,15 @@ async fn get_order_economics(
             let unit_price = row
                 .try_get::<rust_decimal::Decimal, _>("unit_price_snapshot")
                 .unwrap_or(rust_decimal::Decimal::ZERO);
-            let vat_rate = row
-                .try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
-                .unwrap_or(rust_decimal::Decimal::ZERO);
+            // A pass-through line is re-billed at 0 % whatever VAT its
+            // purchase carried (quotes and invoices force 0 %); the plan
+            // counts only VAT that is actually billed.
+            let vat_rate = if is_cost_passthrough {
+                rust_decimal::Decimal::ZERO
+            } else {
+                row.try_get::<rust_decimal::Decimal, _>("vat_rate_snapshot")
+                    .unwrap_or(rust_decimal::Decimal::ZERO)
+            };
             let money::LineAmounts {
                 net: service_planned_net,
                 vat: service_planned_vat,

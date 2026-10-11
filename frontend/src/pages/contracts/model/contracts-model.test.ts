@@ -6,6 +6,7 @@ import {
   contractToStatusForm,
   formatDate,
   formatDateTime,
+  formatQuantity,
   listAgencyServicePriceChoices,
   resolveAgencyServicePrice,
   validateCreateContractForm,
@@ -22,6 +23,14 @@ import {
   type ContractFormValidationMessages,
 } from "./contracts-model";
 import type { AgencyServiceItem, ContractItem } from "./types";
+
+describe("formatQuantity", () => {
+  it("writes quote quantities German style like the order card", () => {
+    expect(formatQuantity("2.5")).toBe("2,5");
+    expect(formatQuantity(3)).toBe("3");
+    expect(formatQuantity("1.2500")).toBe("1,25");
+  });
+});
 
 const messages: ContractFormValidationMessages = {
   invalidConditionsJson: "Conditions must be valid JSON.",

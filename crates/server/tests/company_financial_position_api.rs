@@ -341,6 +341,30 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
         .unwrap();
     }
 
+    // A credit transfer of 30 from one invoice to another moves no money:
+    // its refund and payment legs are neither receipts nor payouts.
+    for (entry_kind, gross) in [("invoice_refund", -30_i64), ("invoice_payment", 30_i64)] {
+        sqlx::query(
+            r#"INSERT INTO accounting_entries (
+                   entry_kind, direction, category, order_id, patient_id,
+                   entry_date, description, amount_net, amount_vat,
+                   amount_gross, currency, metadata, created_by
+               ) VALUES (
+                   $1, 'income', 'service_revenue', $2, $3, CURRENT_DATE,
+                   'Company position credit transfer', $4, 0, $4, 'GBP',
+                   '{"payment_method": "credit_transfer"}'::jsonb, $5
+               )"#,
+        )
+        .bind(entry_kind)
+        .bind(order_id)
+        .bind(patient_a)
+        .bind(gross)
+        .bind(ctx.admin_id)
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+    }
+
     let billing = auth_header_for(billing_id, "billing");
     let (status, result) = request_json(
         &ctx.app,
@@ -360,6 +384,17 @@ async fn company_position_separates_receivables_payables_expected_costs_and_cash
     assert_eq!(result["summary"]["cash_inflow"], "100");
     assert_eq!(result["summary"]["cash_outflow"], "50");
     assert_eq!(result["summary"]["net_cash_flow"], "50");
+    assert_eq!(result["summary"]["non_cash_offsets"], "30");
+    // The paid advance is no open request.
+    assert_eq!(result["summary"]["open_advance_requests"], "0");
+    assert!(
+        result["cash_movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|movement| movement["description"] != "Company position credit transfer"),
+        "credit transfers are not cash movements: {result:?}"
+    );
     assert_eq!(result["patient_positions"].as_array().unwrap().len(), 2);
     assert_eq!(result["provider_liabilities"].as_array().unwrap().len(), 3);
     let liabilities = result["provider_liabilities"].as_array().unwrap();

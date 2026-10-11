@@ -13401,7 +13401,9 @@ async fn patient_service_report_aggregates_order_leistungen_and_respects_rbac() 
     assert_eq!(body["summary"]["service_count"], 2);
     assert_eq!(body["summary"]["delivered_count"], 2);
     assert_eq!(body["summary"]["approved_count"], 1);
-    assert_eq!(body["summary"]["total_gross"], "220");
+    // The pass-through line is re-billed at 0 % whatever VAT it was bought
+    // with: 100 (80 + 25 %) + 100 (2 × 50, no VAT).
+    assert_eq!(body["summary"]["total_gross"], "200");
     assert_eq!(
         body["summary"]["first_service_at"],
         "2030-02-04T10:00:00+00:00"
@@ -13433,8 +13435,9 @@ async fn patient_service_report_aggregates_order_leistungen_and_respects_rbac() 
     assert_eq!(items[1]["quantity"], "2");
     assert_eq!(items[1]["unit_price"], "50");
     assert_eq!(items[1]["line_net"], "100");
-    assert_eq!(items[1]["line_vat"], "20");
-    assert_eq!(items[1]["line_gross"], "120");
+    assert_eq!(items[1]["vat_rate"], "0");
+    assert_eq!(items[1]["line_vat"], "0");
+    assert_eq!(items[1]["line_gross"], "100");
     assert_eq!(items[1]["currency"], "EUR");
     assert_eq!(items[1]["order_number"], format!("ORD-SVC-{tag}"));
     assert_eq!(items[1]["is_cost_passthrough"], true);

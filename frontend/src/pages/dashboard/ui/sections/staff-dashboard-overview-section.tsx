@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { useLang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import { numberOrDash } from "../../model/staff-dashboard-formatters";
@@ -123,15 +124,10 @@ export function StaffDashboardOverviewSection({
   tr: DashboardTranslations;
 }) {
   const { lang } = useLang();
-  const locale = lang === "de" ? "de-DE" : "ru-RU";
+  // One money style app-wide ("1.234,56 €", lib/money), whatever the language.
   const money = (value: string | number | null | undefined) => {
     const numeric = Number(value ?? 0);
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency: "EUR",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(Number.isFinite(numeric) ? numeric : 0);
+    return formatMoneyAmount(Number.isFinite(numeric) ? numeric : 0, "EUR");
   };
   const financeCopy = lang === "de"
     ? {

@@ -8758,8 +8758,11 @@ async fn get_patient_service_report(
                       WHERE ol.approved_at IS NOT NULL
                          OR ol.status IN ('approved', 'invoiced')
                   ) AS approved_count,
+                  -- Pass-through lines are re-billed at 0 %.
                   COALESCE(
-                      SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                      SUM(ol.quantity * ol.unit_price * (1 + (
+                          CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
+                      ))),
                       0
                   ) AS total_gross,
                   MIN(COALESCE(ol.approved_at, ol.delivered_at, ol.created_at)) AS first_service_at,
@@ -8788,10 +8791,15 @@ async fn get_patient_service_report(
                   ol.quantity,
                   ol.unit_price,
                   ol.currency,
-                  ol.vat_rate,
+                  -- The billed rate: pass-through lines are re-billed at 0 %.
+                  CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END AS vat_rate,
                   (ol.quantity * ol.unit_price) AS line_net,
-                  ((ol.quantity * ol.unit_price) * (ol.vat_rate / 100)) AS line_vat,
-                  (ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))) AS line_gross,
+                  ((ol.quantity * ol.unit_price)
+                      * (CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100))
+                      AS line_vat,
+                  (ol.quantity * ol.unit_price * (1 + (
+                      CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
+                  ))) AS line_gross,
                   ol.provider_id,
                   p.name AS provider_name,
                   ol.doctor_id,

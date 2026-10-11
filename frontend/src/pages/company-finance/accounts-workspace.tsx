@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { useReadOnly } from "@/components/read-only-scope";
 import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/components/ui-shell";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
@@ -39,6 +40,7 @@ import {
   deleteCompanyFinancialAccount,
   updateCompanyFinancialAccount,
 } from "./data";
+import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import type {
   CompanyFinancialAccount,
   CompanyFinancialAccountAdjustment,
@@ -112,9 +114,18 @@ const copy = {
     operation: "Операция",
     author: "Автор",
     reverse: "Сторнировать",
+    storno: "Сторно",
     reversalTitle: "Сторно операции",
     reversalReason: "Причина сторно",
     noAdjustments: "Операций сверки пока нет",
+    available: "Доступно на счете",
+    balanceAfter: "Остаток после операции",
+    cashCannotGoNegative: "Касса не может уйти в минус: сумма больше остатка в кассе.",
+    negativeWarning: (after: string) =>
+      `После перевода остаток счета станет отрицательным: ${after}. Проверьте сумму или подтвердите перевод в минус (овердрафт).`,
+    confirmNegative: "Подтверждаю: счет уйдет в минус",
+    saveNegative: "Перевести и уйти в минус",
+    failed: "Не удалось сохранить. Повторите попытку.",
     unassigned: (count: number, amount: string) =>
       `${count} денежных движений еще не привязаны к счету (${amount}).`,
   },
@@ -175,9 +186,18 @@ const copy = {
     operation: "Vorgang",
     author: "Erfasst von",
     reverse: "Stornieren",
+    storno: "Storno",
     reversalTitle: "Buchung stornieren",
     reversalReason: "Stornogrund",
     noAdjustments: "Noch keine Abstimmungsbuchungen",
+    available: "Verfügbar auf dem Konto",
+    balanceAfter: "Bestand danach",
+    cashCannotGoNegative: "Eine Kasse kann nicht ins Minus gehen: Der Betrag übersteigt den Kassenbestand.",
+    negativeWarning: (after: string) =>
+      `Nach der Umbuchung ist der Kontostand negativ: ${after}. Bitte Betrag prüfen oder die Umbuchung ins Minus (Überziehung) bestätigen.`,
+    confirmNegative: "Ich bestätige: Das Konto geht ins Minus",
+    saveNegative: "Umbuchen und ins Minus gehen",
+    failed: "Speichern fehlgeschlagen. Bitte erneut versuchen.",
     unassigned: (count: number, amount: string) =>
       `${count} Geldbewegungen sind noch keinem Konto zugeordnet (${amount}).`,
   },
@@ -185,6 +205,17 @@ const copy = {
 
 function todayIso() {
   return appDateKey();
+}
+
+/** "1.234,56" / "1234,56" / "1234.56" as typed, in the API's "1234.56" form. */
+function normalizeAmountInput(value: string) {
+  const compact = value.trim().replace(/\s/g, "");
+  return compact.includes(",") ? compact.replace(/\./g, "").replace(",", ".") : compact;
+}
+
+function amountValue(value: string) {
+  const parsed = Number(normalizeAmountInput(value));
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
 }
 
 function accountIcon(type: CompanyFinancialAccount["account_type"]) {
@@ -201,6 +232,10 @@ function formatDate(value: string) {
 export function CompanyAccountsWorkspace({ payload, currency, locale, money, onChanged }: Props) {
   const { lang } = useLang();
   const text = copy[lang];
+  // CEO assistant and other read-only roles see the accounts without any
+  // control that would change them (the server refuses those anyway).
+  const readOnly = useReadOnly();
+  const errorText = (error: unknown) => localizeCompanyFinanceError(error, lang, text.failed, currency);
   const [createOpen, setCreateOpen] = useState(false);
   const [createBusy, setCreateBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -259,6 +294,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
     effectiveOn: todayIso(),
     reference: "",
     note: "",
+    confirmNegative: false,
   });
   const [reverseTransfer, setReverseTransfer] =
     useState<CompanyFinancialAccountTransfer | null>(null);
@@ -273,6 +309,27 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
   const activeAccounts = payload.items.filter((account) => account.is_active);
   const transferRows = useMemo(() => payload.transfers ?? [], [payload.transfers]);
 
+  // The source account after the transfer: a cash box never goes below zero,
+  // a bank account only with an explicit confirmation (the server checks the
+  // same with the locked balance).
+  const transferSource = activeAccounts.find((account) => account.id === transferForm.sourceAccountId);
+  const transferAmount = amountValue(transferForm.amount);
+  const transferBalanceAfter = transferSource && Number.isFinite(transferAmount)
+    ? Number(transferSource.current_balance) - transferAmount
+    : null;
+  const transferGoesNegative = transferBalanceAfter !== null && transferBalanceAfter < 0;
+  const transferCashBlocked = transferGoesNegative && transferSource?.account_type === "cash";
+  const transferNeedsConfirmation = transferGoesNegative && !transferCashBlocked;
+
+  const adjustAmount = amountValue(adjustForm.amount);
+  const adjustCashBlocked = Boolean(
+    adjustAccount
+      && adjustAccount.account_type === "cash"
+      && adjustForm.direction === "outflow"
+      && Number.isFinite(adjustAmount)
+      && Number(adjustAccount.current_balance) - adjustAmount < 0,
+  );
+
   function openTransferDialog() {
     const source = activeAccounts.find((account) => account.is_default) ?? activeAccounts[0];
     const target = activeAccounts.find((account) => account.id !== source?.id);
@@ -285,6 +342,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       effectiveOn: todayIso(),
       reference: "",
       note: "",
+      confirmNegative: false,
     });
     setTransferOpen(true);
   }
@@ -299,7 +357,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         account_type: createForm.accountType,
         currency,
         iban: createForm.iban.trim() || null,
-        opening_balance: createForm.openingBalance,
+        opening_balance: normalizeAmountInput(createForm.openingBalance),
         opening_balance_on: createForm.openingBalanceOn,
         is_default: createForm.isDefault,
       });
@@ -314,7 +372,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       });
       onChanged();
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create account");
+      setCreateError(errorText(error));
     } finally {
       setCreateBusy(false);
     }
@@ -343,14 +401,14 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         name: editForm.name.trim(),
         account_type: editForm.accountType,
         iban: editForm.iban.trim(),
-        opening_balance: editForm.openingBalance,
+        opening_balance: normalizeAmountInput(editForm.openingBalance),
         opening_balance_on: editForm.openingBalanceOn,
         is_active: editForm.isActive,
       });
       setEditAccount(null);
       onChanged();
     } catch (error) {
-      setEditError(error instanceof Error ? error.message : "Failed to update account");
+      setEditError(errorText(error));
     } finally {
       setEditBusy(false);
     }
@@ -365,7 +423,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       setDeleteAccount(null);
       onChanged();
     } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Failed to delete account");
+      setDeleteError(errorText(error));
     } finally {
       setDeleteBusy(false);
     }
@@ -378,7 +436,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       await updateCompanyFinancialAccount(account.id, { is_default: true, is_active: true });
       onChanged();
     } catch (error) {
-      setWorkspaceError(error instanceof Error ? error.message : "Failed to update account");
+      setWorkspaceError(errorText(error));
     } finally {
       setDefaultBusyId("");
     }
@@ -386,14 +444,14 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
   async function handleAdjustment(event: FormEvent) {
     event.preventDefault();
-    if (!adjustAccount) return;
+    if (!adjustAccount || adjustCashBlocked) return;
     setAdjustBusy(true);
     setAdjustError(null);
     try {
       await createCompanyFinancialAccountAdjustment(adjustAccount.id, {
         request_id: adjustForm.requestId,
         direction: adjustForm.direction,
-        amount: adjustForm.amount,
+        amount: normalizeAmountInput(adjustForm.amount),
         effective_on: adjustForm.effectiveOn,
         reason: adjustForm.reason.trim(),
         note: adjustForm.note.trim() || null,
@@ -409,7 +467,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       });
       onChanged();
     } catch (error) {
-      setAdjustError(error instanceof Error ? error.message : "Failed to record adjustment");
+      setAdjustError(errorText(error));
     } finally {
       setAdjustBusy(false);
     }
@@ -434,7 +492,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       setReverseForm({ requestId: crypto.randomUUID(), effectiveOn: todayIso(), reason: "" });
       onChanged();
     } catch (error) {
-      setReverseError(error instanceof Error ? error.message : "Failed to reverse adjustment");
+      setReverseError(errorText(error));
     } finally {
       setReverseBusy(false);
     }
@@ -442,6 +500,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
   async function handleTransfer(event: FormEvent) {
     event.preventDefault();
+    if (transferCashBlocked || (transferNeedsConfirmation && !transferForm.confirmNegative)) return;
     setTransferBusy(true);
     setTransferError(null);
     try {
@@ -449,15 +508,21 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
         request_id: transferForm.requestId,
         source_account_id: transferForm.sourceAccountId,
         target_account_id: transferForm.targetAccountId,
-        amount: transferForm.amount,
+        amount: normalizeAmountInput(transferForm.amount),
         effective_on: transferForm.effectiveOn,
         reference: transferForm.reference.trim() || null,
         note: transferForm.note.trim() || null,
+        confirm_negative_balance: transferForm.confirmNegative,
       });
       setTransferOpen(false);
       onChanged();
     } catch (error) {
-      setTransferError(error instanceof Error ? error.message : "Failed to record transfer");
+      setTransferError(errorText(error));
+      // The server saw a lower balance than this page: ask for the
+      // confirmation again instead of failing silently.
+      if (companyFinanceErrorCode(error) === "account_negative_balance_confirmation_required") {
+        setTransferForm((current) => ({ ...current, confirmNegative: false }));
+      }
     } finally {
       setTransferBusy(false);
     }
@@ -484,7 +549,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       });
       onChanged();
     } catch (error) {
-      setReverseTransferError(error instanceof Error ? error.message : "Failed to reverse transfer");
+      setReverseTransferError(errorText(error));
     } finally {
       setReverseTransferBusy(false);
     }
@@ -503,7 +568,14 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       sortable: true,
       required: true,
       width: 280,
-      render: (row) => <div className="truncate" title={row.reference ?? row.note ?? undefined}>{row.transaction_type === "reversal" ? <Badge className="mr-2 rounded-full text-[10px]" variant="outline">{text.reverse}</Badge> : null}{row.reference || row.note || "—"}</div>,
+      render: (row) => (
+        <div className="flex min-w-0 items-center gap-2" title={row.reference ?? row.note ?? undefined}>
+          {row.transaction_type === "reversal" ? (
+            <Badge className="shrink-0 rounded-full text-[10px]" variant="outline">{text.storno}</Badge>
+          ) : null}
+          <span className="truncate">{row.reference || row.note || "—"}</span>
+        </div>
+      ),
     },
     { id: "author", label: text.author, accessor: (row) => row.created_by_name, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <span className="text-muted-foreground">{row.created_by_name}</span> },
     {
@@ -516,18 +588,18 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       render: (row) => (
         <span className="inline-flex w-full items-center justify-end font-semibold">
           {money(row.amount)}
-          {row.transaction_type === "transfer" && !transferRows.some((item) => item.reverses_transfer_id === row.id) ? (
-            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={(event) => { event.stopPropagation(); setReverseTransferError(null); setReverseTransfer(row); }}><Undo2 /></Button>
+          {!readOnly && row.transaction_type === "transfer" && !transferRows.some((item) => item.reverses_transfer_id === row.id) ? (
+            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} title={text.reverse} data-action="write" onClick={(event) => { event.stopPropagation(); setReverseTransferError(null); setReverseTransfer(row); }}><Undo2 /></Button>
           ) : null}
         </span>
       ),
     },
-  ], [locale, money, text, transferRows]);
+  ], [locale, money, readOnly, text, transferRows]);
 
   const adjustmentColumns = useMemo<ColumnDef<CompanyFinancialAccountAdjustment>[]>(() => [
     { id: "date", label: text.date, accessor: (row) => row.effective_on, filterType: "date", sortable: true, pinned: "left", width: 130, render: (row) => formatDate(row.effective_on) },
     { id: "account", label: text.account, accessor: (row) => row.account_name, filterType: "enum", sortable: true, searchable: true, width: 210 },
-    { id: "operation", label: text.operation, accessor: (row) => row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow, filterType: "enum", sortable: true, width: 180, render: (row) => <Badge variant="outline" className="rounded-full text-[10px]">{row.transaction_type === "reversal" ? text.reverse : row.direction === "inflow" ? text.inflow : text.outflow}</Badge> },
+    { id: "operation", label: text.operation, accessor: (row) => row.transaction_type === "reversal" ? text.storno : row.direction === "inflow" ? text.inflow : text.outflow, filterType: "enum", sortable: true, width: 180, render: (row) => <Badge variant="outline" className="rounded-full text-[10px]">{row.transaction_type === "reversal" ? text.storno : row.direction === "inflow" ? text.inflow : text.outflow}</Badge> },
     { id: "reason", label: text.reason, accessor: (row) => row.reason, filterType: "text", searchable: true, sortable: true, required: true, width: 280, render: (row) => <div className="truncate" title={row.reason}>{row.reason}</div> },
     { id: "author", label: text.author, accessor: (row) => row.created_by_name, filterType: "text", searchable: true, sortable: true, width: 180, render: (row) => <span className="text-muted-foreground">{row.created_by_name}</span> },
     {
@@ -540,13 +612,13 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
       render: (row) => (
         <span className={cn("inline-flex w-full items-center justify-end font-semibold", row.direction === "inflow" ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400")}>
           {row.direction === "inflow" ? "+" : "−"} {money(row.amount)}
-          {row.transaction_type === "adjustment" && !payload.adjustments.some((item) => item.reverses_adjustment_id === row.id) ? (
-            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} onClick={(event) => { event.stopPropagation(); setReverseError(null); setReverseAdjustment(row); }}><Undo2 /></Button>
+          {!readOnly && row.transaction_type === "adjustment" && !payload.adjustments.some((item) => item.reverses_adjustment_id === row.id) ? (
+            <Button type="button" size="icon-xs" variant="ghost" className="ml-2" aria-label={text.reverse} title={text.reverse} data-action="write" onClick={(event) => { event.stopPropagation(); setReverseError(null); setReverseAdjustment(row); }}><Undo2 /></Button>
           ) : null}
         </span>
       ),
     },
-  ], [locale, money, payload.adjustments, text]);
+  ], [locale, money, payload.adjustments, readOnly, text]);
 
   return (
     <div className="space-y-3">
@@ -559,23 +631,26 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
             </ShellBanner>
           ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={activeAccounts.length < 2}
-            title={activeAccounts.length < 2 ? text.transferUnavailable : undefined}
-            onClick={openTransferDialog}
-          >
-            <ArrowRightLeft className="size-4" />
-            {text.internalTransfer}
-          </Button>
-          <Button type="button" size="sm" onClick={() => setCreateOpen(true)}>
-            <Plus className="size-4" />
-            {text.create}
-          </Button>
-        </div>
+        {readOnly ? null : (
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              data-action="write"
+              disabled={activeAccounts.length < 2}
+              title={activeAccounts.length < 2 ? text.transferUnavailable : undefined}
+              onClick={openTransferDialog}
+            >
+              <ArrowRightLeft className="size-4" />
+              {text.internalTransfer}
+            </Button>
+            <Button type="button" size="sm" data-action="write" onClick={() => setCreateOpen(true)}>
+              <Plus className="size-4" />
+              {text.create}
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -601,7 +676,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 <span className="text-xs font-medium text-muted-foreground">{account.currency}</span>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">{text.currentBalance}</p>
-              <p className="mt-1 text-xl font-semibold tracking-tight tabular-nums">{money(account.current_balance)}</p>
+              <p className={cn("mt-1 text-xl font-semibold tracking-tight tabular-nums", Number(account.current_balance) < 0 && "text-rose-700 dark:text-rose-400")}>{money(account.current_balance)}</p>
               <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-3 text-xs sm:grid-cols-4">
                 <div><dt className="text-muted-foreground">{text.opening}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.opening_balance)}</dd></div>
                 <div><dt className="text-muted-foreground">{text.movements}</dt><dd className="mt-1 font-medium tabular-nums">{money(account.movement_balance)}</dd></div>
@@ -611,28 +686,30 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
               <p className="mt-2 text-[11px] text-muted-foreground">
                 {formatDate(account.opening_balance_on)} · {account.movement_count + (account.transfer_count ?? 0)} {text.movementCount}
               </p>
-              <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
-                <Button type="button" size="xs" variant="outline" disabled={!account.is_active} onClick={() => {
-                  setAdjustError(null);
-                  setAdjustAccount(account);
-                }}>
-                  {text.addAdjustment}
-                </Button>
-                <div className="flex shrink-0 items-center gap-0.5">
-                  {!account.is_default && account.is_active ? (
-                    <Button type="button" size="xs" variant="ghost" className="mr-1" disabled={defaultBusyId === account.id} onClick={() => void handleMakeDefault(account)}>
-                      {defaultBusyId === account.id ? <RefreshCw className="animate-spin" /> : null}
-                      {text.makeDefault}
+              {readOnly ? null : (
+                <div className="mt-3 flex items-center justify-between gap-2 border-t border-border/70 pt-3">
+                  <Button type="button" size="xs" variant="outline" data-action="write" disabled={!account.is_active} onClick={() => {
+                    setAdjustError(null);
+                    setAdjustAccount(account);
+                  }}>
+                    {text.addAdjustment}
+                  </Button>
+                  <div className="flex shrink-0 items-center gap-0.5">
+                    {!account.is_default && account.is_active ? (
+                      <Button type="button" size="xs" variant="ghost" className="mr-1" data-action="write" disabled={defaultBusyId === account.id} onClick={() => void handleMakeDefault(account)}>
+                        {defaultBusyId === account.id ? <RefreshCw className="animate-spin" /> : null}
+                        {text.makeDefault}
+                      </Button>
+                    ) : null}
+                    <Button type="button" size="icon-xs" variant="ghost" data-action="write" aria-label={text.edit} title={text.edit} onClick={() => openEditDialog(account)}>
+                      <Pencil />
                     </Button>
-                  ) : null}
-                  <Button type="button" size="icon-xs" variant="ghost" aria-label={text.edit} title={text.edit} onClick={() => openEditDialog(account)}>
-                    <Pencil />
-                  </Button>
-                  <Button type="button" size="icon-xs" variant="ghost" className="text-destructive hover:text-destructive" aria-label={text.delete} title={text.delete} onClick={() => { setDeleteError(null); setDeleteAccount(account); }}>
-                    <Trash2 />
-                  </Button>
+                    <Button type="button" size="icon-xs" variant="ghost" className="text-destructive hover:text-destructive" data-action="write" aria-label={text.delete} title={text.delete} onClick={() => { setDeleteError(null); setDeleteAccount(account); }}>
+                      <Trash2 />
+                    </Button>
+                  </div>
                 </div>
-              </div>
+              )}
             </article>
           );
         })}
@@ -662,6 +739,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                     setTransferForm((current) => ({
                       ...current,
                       sourceAccountId,
+                      confirmNegative: false,
                       targetAccountId: current.targetAccountId === sourceAccountId
                         ? activeAccounts.find((account) => account.id !== sourceAccountId)?.id ?? ""
                         : current.targetAccountId,
@@ -670,6 +748,11 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                 >
                   {activeAccounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
+                {transferSource ? (
+                  <span className="block text-xs text-muted-foreground">
+                    {text.available}: <span className="font-medium tabular-nums text-foreground">{money(transferSource.current_balance)}</span>
+                  </span>
+                ) : null}
               </label>
               <label className="block space-y-1.5 text-sm">
                 <span>{text.targetAccount}</span>
@@ -677,14 +760,44 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
                   {activeAccounts.filter((account) => account.id !== transferForm.sourceAccountId).map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
               </label>
-              <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" aria-invalid={transferCashBlocked || undefined} value={transferForm.amount} onChange={(event) => setTransferForm((current) => ({ ...current, amount: event.target.value, confirmNegative: false }))} /></label>
               <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" value={transferForm.effectiveOn} onChange={(event) => setTransferForm((current) => ({ ...current, effectiveOn: event.target.value }))} /></label>
             </div>
+            {transferCashBlocked ? (
+              <p role="alert" className="text-sm text-rose-700 dark:text-rose-400">{text.cashCannotGoNegative}</p>
+            ) : null}
+            {transferNeedsConfirmation && transferBalanceAfter !== null ? (
+              <div className="space-y-2">
+                <ShellBanner tone="warning" withIcon>{text.negativeWarning(money(String(transferBalanceAfter)))}</ShellBanner>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={transferForm.confirmNegative}
+                    onChange={(event) => setTransferForm((current) => ({ ...current, confirmNegative: event.target.checked }))}
+                  />
+                  {text.confirmNegative}
+                </label>
+              </div>
+            ) : null}
             <label className="block space-y-1.5 text-sm"><span>{text.reference}</span><Input maxLength={120} value={transferForm.reference} onChange={(event) => setTransferForm((current) => ({ ...current, reference: event.target.value }))} /></label>
             <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={2000} value={transferForm.note} onChange={(event) => setTransferForm((current) => ({ ...current, note: event.target.value }))} /></label>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setTransferOpen(false)}>{text.cancel}</Button>
-              <Button type="submit" disabled={transferBusy || Number(transferForm.amount) <= 0 || !transferForm.sourceAccountId || !transferForm.targetAccountId || transferForm.sourceAccountId === transferForm.targetAccountId}>{text.save}</Button>
+              <Button
+                type="submit"
+                variant={transferNeedsConfirmation ? "destructive" : "default"}
+                disabled={
+                  transferBusy
+                  || !(transferAmount > 0)
+                  || !transferForm.sourceAccountId
+                  || !transferForm.targetAccountId
+                  || transferForm.sourceAccountId === transferForm.targetAccountId
+                  || transferCashBlocked
+                  || (transferNeedsConfirmation && !transferForm.confirmNegative)
+                }
+              >
+                {transferNeedsConfirmation ? text.saveNegative : text.save}
+              </Button>
             </div>
           </form>
         </DialogContent>
@@ -739,7 +852,7 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
           <DialogHeader><DialogTitle>{text.deleteTitle}</DialogTitle><DialogDescription>{text.deleteDescription}</DialogDescription></DialogHeader>
           {deleteError ? <ShellBanner tone="error">{deleteError}</ShellBanner> : null}
           <p className="text-sm font-medium">{deleteAccount?.name}</p>
-          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteAccount(null)}>{text.cancel}</Button><Button type="button" variant="destructive" disabled={deleteBusy} onClick={() => void handleDelete()}>{text.delete}</Button></div>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteAccount(null)}>{text.cancel}</Button><Button type="button" variant="destructive" data-action="write" disabled={deleteBusy} onClick={() => void handleDelete()}>{text.delete}</Button></div>
         </DialogContent>
       </Dialog>
 
@@ -763,17 +876,20 @@ export function CompanyAccountsWorkspace({ payload, currency, locale, money, onC
 
       <Dialog open={Boolean(adjustAccount)} onOpenChange={(open) => { if (!open) setAdjustAccount(null); }}>
         <DialogContent className="sm:max-w-lg">
-          <DialogHeader><DialogTitle>{text.adjustmentTitle}</DialogTitle><DialogDescription>{adjustAccount?.name}</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>{text.adjustmentTitle}</DialogTitle><DialogDescription>{adjustAccount ? `${adjustAccount.name} · ${text.currentBalance}: ${money(adjustAccount.current_balance)}` : ""}</DialogDescription></DialogHeader>
           <form className="space-y-4" onSubmit={handleAdjustment}>
             {adjustError ? <ShellBanner tone="error">{adjustError}</ShellBanner> : null}
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block space-y-1.5 text-sm"><span>{text.direction}</span><select className={shellSelectClassName} value={adjustForm.direction} onChange={(event) => setAdjustForm((current) => ({ ...current, direction: event.target.value }))}><option value="inflow">{text.inflow}</option><option value="outflow">{text.outflow}</option></select></label>
-              <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" value={adjustForm.amount} onChange={(event) => setAdjustForm((current) => ({ ...current, amount: event.target.value }))} /></label>
+              <label className="block space-y-1.5 text-sm"><span>{text.amount}</span><Input required inputMode="decimal" aria-invalid={adjustCashBlocked || undefined} value={adjustForm.amount} onChange={(event) => setAdjustForm((current) => ({ ...current, amount: event.target.value }))} /></label>
               <label className="block space-y-1.5 text-sm"><span>{text.date}</span><Input required type="date" value={adjustForm.effectiveOn} onChange={(event) => setAdjustForm((current) => ({ ...current, effectiveOn: event.target.value }))} /></label>
               <label className="block space-y-1.5 text-sm"><span>{text.reason}</span><Input required maxLength={500} value={adjustForm.reason} onChange={(event) => setAdjustForm((current) => ({ ...current, reason: event.target.value }))} /></label>
             </div>
+            {adjustCashBlocked ? (
+              <p role="alert" className="text-sm text-rose-700 dark:text-rose-400">{text.cashCannotGoNegative}</p>
+            ) : null}
             <label className="block space-y-1.5 text-sm"><span>{text.note}</span><Input maxLength={2000} value={adjustForm.note} onChange={(event) => setAdjustForm((current) => ({ ...current, note: event.target.value }))} /></label>
-            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAdjustAccount(null)}>{text.cancel}</Button><Button type="submit" disabled={adjustBusy || Number(adjustForm.amount) <= 0 || !adjustForm.reason.trim()}>{text.save}</Button></div>
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setAdjustAccount(null)}>{text.cancel}</Button><Button type="submit" disabled={adjustBusy || !(adjustAmount > 0) || !adjustForm.reason.trim() || adjustCashBlocked}>{text.save}</Button></div>
           </form>
         </DialogContent>
       </Dialog>

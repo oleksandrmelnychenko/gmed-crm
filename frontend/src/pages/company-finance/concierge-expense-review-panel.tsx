@@ -1127,7 +1127,7 @@ export function ConciergeExpenseReviewPanel({
                         {successMessage ? <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">{successMessage}</div> : null}
 
                         <div className="grid min-w-0 gap-3 rounded-lg border border-border/70 bg-card p-3">
-                          <Button type="button" className="w-full" disabled={!decisionReady || postValidation.length > 0 || mutationBusy !== null} onClick={() => void postExpense()}>
+                          <Button type="button" className="w-full" data-action="write" disabled={!decisionReady || postValidation.length > 0 || mutationBusy !== null} onClick={() => void postExpense()}>
                             {mutationBusy === "post" ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
                             {text.approve}
                           </Button>
@@ -1143,7 +1143,7 @@ export function ConciergeExpenseReviewPanel({
                                 onChange={(event) => setRejectReason(event.target.value)}
                               />
                             </label>
-                            <Button type="button" variant="destructive" className="mt-2 w-full" disabled={!decisionReady || !validateExpenseRejection(rejectReason) || mutationBusy !== null} onClick={() => void rejectExpense()}>
+                            <Button type="button" variant="destructive" className="mt-2 w-full" data-action="write" disabled={!decisionReady || !validateExpenseRejection(rejectReason) || mutationBusy !== null} onClick={() => void rejectExpense()}>
                               {mutationBusy === "reject" ? <Loader2 className="size-4 animate-spin" /> : <XCircle className="size-4" />}
                               {text.reject}
                             </Button>
@@ -1204,6 +1204,7 @@ export function ConciergeExpenseReviewPanel({
                             type="button"
                             variant="destructive"
                             className="w-full"
+                            data-action="write"
                             disabled={!reverseReady || mutationBusy !== null}
                             onClick={() => void reverseExpense()}
                           >

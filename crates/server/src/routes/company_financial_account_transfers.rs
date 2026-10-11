@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::post,
@@ -14,6 +14,9 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::company_financial_accounts::{
+    account_balance, cash_account_insufficient_balance, read_body,
+};
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
@@ -42,7 +45,16 @@ struct CreateTransferRequest {
     effective_on: String,
     reference: Option<String>,
     note: Option<String>,
+    /// Confirms a transfer that takes a bank (or card/other) account below
+    /// zero; a cash account never goes below zero.
+    #[serde(default)]
+    confirm_negative_balance: bool,
 }
+
+/// Error code: the transfer takes a non-cash source account below zero and
+/// needs `confirm_negative_balance`.
+const NEGATIVE_BALANCE_CONFIRMATION_REQUIRED: &str =
+    "account_negative_balance_confirmation_required";
 
 #[derive(Deserialize)]
 struct ReverseTransferRequest {
@@ -105,11 +117,15 @@ async fn lock_request(
 async fn create_company_financial_account_transfer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Json(body): Json<CreateTransferRequest>,
+    body: Result<Json<CreateTransferRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     if body.source_account_id == body.target_account_id {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -200,7 +216,7 @@ async fn create_company_financial_account_transfer(
     }
 
     let accounts = match sqlx::query(
-        r#"SELECT id, currency, is_active, opening_balance_on
+        r#"SELECT id, currency, is_active, opening_balance_on, account_type
            FROM company_financial_accounts
            WHERE id IN ($1, $2)
            ORDER BY id
@@ -259,6 +275,41 @@ async fn create_company_financial_account_transfer(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Transfer cannot precede an account opening date",
         );
+    }
+
+    // The source balance after the transfer: a cash box never goes below
+    // zero; a bank account may (overdraft), but only when confirmed. Both
+    // rows are locked above, so no movement slips in between.
+    let source_balance = match account_balance(&mut transaction, body.source_account_id).await {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::error!(error = %error, "load internal transfer source balance");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to record internal transfer",
+            );
+        }
+    };
+    if source_balance - amount < Decimal::ZERO {
+        let source_type = source
+            .try_get::<String, _>("account_type")
+            .unwrap_or_default();
+        if source_type == "cash" {
+            return cash_account_insufficient_balance(source_balance);
+        }
+        if !body.confirm_negative_balance {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({
+                    "error": NEGATIVE_BALANCE_CONFIRMATION_REQUIRED,
+                    "message": "The transfer takes the source account below zero; confirm to record it",
+                    "confirm_field": "confirm_negative_balance",
+                    "available_balance": crate::money::money_string(source_balance),
+                    "balance_after": crate::money::money_string(source_balance - amount),
+                })),
+            )
+                .into_response();
+        }
     }
 
     let transfer_id = match sqlx::query_scalar::<_, Uuid>(
@@ -334,11 +385,15 @@ async fn reverse_company_financial_account_transfer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(transfer_id): Path<Uuid>,
-    Json(body): Json<ReverseTransferRequest>,
+    body: Result<Json<ReverseTransferRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let effective_on = match parse_date(&body.effective_on, "effective_on") {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
@@ -471,6 +526,40 @@ async fn reverse_company_financial_account_transfer(
     let currency = original
         .try_get::<String, _>("currency")
         .unwrap_or_default();
+    // The reversal takes the amount back from the original target: a cash
+    // box that has spent it cannot give it back below zero.
+    let target_type = match sqlx::query_scalar::<_, String>(
+        "SELECT account_type FROM company_financial_accounts WHERE id = $1 FOR UPDATE",
+    )
+    .bind(target_account_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Financial account not found"),
+        Err(error) => {
+            tracing::error!(error = %error, transfer_id = %transfer_id, "lock reversal account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse internal transfer",
+            );
+        }
+    };
+    if target_type == "cash" {
+        let balance = match account_balance(&mut transaction, target_account_id).await {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, transfer_id = %transfer_id, "load reversal account balance");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to reverse internal transfer",
+                );
+            }
+        };
+        if balance - amount < Decimal::ZERO {
+            return cash_account_insufficient_balance(balance);
+        }
+    }
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO company_financial_account_transfers (
                transaction_type, request_id, reverses_transfer_id,

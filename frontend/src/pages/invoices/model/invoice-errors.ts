@@ -339,6 +339,11 @@ const EXACT: Record<string, Pair> = {
 
 /** Machine-readable error codes of the payer and release checks. */
 const CODES: Record<string, Pair> = {
+  // § 14 Abs. 4 Nr. 2 UStG: GMED's Steuernummer or USt-IdNr. must be on the invoice.
+  issuer_tax_registration_missing: [
+    "Die Rechnung kann nicht ausgestellt werden: Steuernummer und USt-IdNr. der GMED fehlen. Bitte in den Systemeinstellungen (Administration → Systemeinstellungen) eintragen lassen; der Entwurf bleibt erhalten.",
+    "Счёт нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Их нужно заполнить в «Системных настройках» (Администрирование → Системные настройки); черновик сохранён.",
+  ],
   recipient_address_incomplete: [
     "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land).",
     "Для выпуска счёта нужны имя и полный адрес получателя счёта: улица, индекс, город и страна.",

@@ -24,14 +24,20 @@ export function formatReportDate(
   return formatAppDate(value) || emptyLabel;
 }
 
+// One decimal, German style ("2,5") in every language, like the money figures.
+const ONE_DECIMAL = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
 export function formatRating(value?: number | null, emptyLabel = "-") {
   if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)}/5`;
+  return `${ONE_DECIMAL.format(value)}/5`;
 }
 
 export function formatPercent(value?: number | null, emptyLabel = "-") {
   if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${value.toFixed(1)}%`;
+  return `${ONE_DECIMAL.format(value)} %`;
 }
 
 function formatOneDecimal(value: number, lang: Lang) {
@@ -47,16 +53,16 @@ export function formatHours(value?: number | null, emptyLabel = "-", lang: Lang 
   return `${formatOneDecimal(value, lang)} ${lang === "de" ? "Std." : "ч"}`;
 }
 
-/** "2,3 дн." / "2,3 Tage" (QA E-25: no English unit, decimal comma). */
+/** "2,3 дн." / "2,3 Tage" (QA E-25: no English unit, decimal comma); never negative. */
 export function formatDays(value?: number | null, emptyLabel = "-", lang: Lang = "ru") {
   if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
-  return `${formatOneDecimal(value, lang)} ${lang === "de" ? "Tage" : "дн."}`;
+  return `${formatOneDecimal(Math.max(value, 0), lang)} ${lang === "de" ? "Tage" : "дн."}`;
 }
 
 export function formatChange(value?: number | null, emptyLabel = "-") {
   if (typeof value !== "number" || Number.isNaN(value)) return emptyLabel;
   const prefix = value > 0 ? "+" : "";
-  return `${prefix}${value.toFixed(1)}%`;
+  return `${prefix}${ONE_DECIMAL.format(value)} %`;
 }
 
 export function serviceTypeLabel(value: string, labels: Record<string, string> | undefined, unknownLabel: string) {

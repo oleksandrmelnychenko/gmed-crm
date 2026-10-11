@@ -1282,15 +1282,14 @@ async fn load_ceo_summary(state: &AppState) -> Result<Value, sqlx::Error> {
                 COALESCE(SUM(CASE
                     WHEN status <> 'cancelled'
                      AND issued_at >= date_trunc('quarter', now())
-                    THEN total_gross - credited_amount ELSE 0 END), 0) AS invoiced_this_quarter,
-                COALESCE(SUM(CASE
-                    WHEN status NOT IN ('paid', 'cancelled')
-                    THEN GREATEST(total_gross - credited_amount - paid_amount - prepayment_applied_amount, 0)
-                    ELSE 0 END), 0) AS outstanding_receivables
+                    THEN total_gross - credited_amount ELSE 0 END), 0) AS invoiced_this_quarter
            FROM invoices"#,
     )
     .fetch_one(&state.db)
     .await?;
+    // The one receivables definition of the company finance page.
+    let outstanding_receivables =
+        super::company_financials::open_patient_receivables(&state.db, "EUR").await?;
 
     let average_revenue_row = sqlx::query(
         r#"SELECT COALESCE(
@@ -1376,11 +1375,7 @@ async fn load_ceo_summary(state: &AppState) -> Result<Value, sqlx::Error> {
                 .try_get::<Decimal, _>("invoiced_this_quarter")
                 .unwrap_or(Decimal::ZERO)
         ),
-        "outstanding_receivables": decimal_to_string(
-            finance
-                .try_get::<Decimal, _>("outstanding_receivables")
-                .unwrap_or(Decimal::ZERO)
-        ),
+        "outstanding_receivables": decimal_to_string(outstanding_receivables),
         "average_revenue_per_patient": decimal_to_string(
             average_revenue_row
                 .try_get::<Decimal, _>("average_revenue_per_patient")
@@ -1454,8 +1449,11 @@ async fn load_ceo_service_mix(state: &AppState) -> Result<Vec<Value>, sqlx::Erro
                     ELSE 'medical'
                 END AS service_type,
                 COUNT(*)::bigint AS item_count,
+                -- Pass-through lines are re-billed at 0 %.
                 COALESCE(
-                    SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                    SUM(ol.quantity * ol.unit_price * (1 + (
+                        CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
+                    ))),
                     0
                 ) AS gross_total
            FROM order_leistungen ol
@@ -1978,6 +1976,7 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     i.id,
                     i.order_id,
                     i.patient_id,
+                    i.invoice_type,
                     i.status,
                     i.issued_at,
                     i.created_at,
@@ -2000,16 +1999,20 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 GROUP BY i.id
            ),
            delivered_mix AS (
+                -- Pass-through lines are re-billed at 0 % whatever VAT
+                -- their purchase carried.
                 SELECT
                     COALESCE(
-                        SUM(ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))),
+                        SUM(ol.quantity * ol.unit_price * (1 + (
+                            CASE WHEN ol.is_cost_passthrough THEN 0 ELSE ol.vat_rate END / 100
+                        ))),
                         0
                     ) AS delivered_gross,
                     COALESCE(
                         SUM(
                             CASE
                                 WHEN ol.is_cost_passthrough
-                                    THEN ol.quantity * ol.unit_price * (1 + (ol.vat_rate / 100))
+                                    THEN ol.quantity * ol.unit_price
                                 ELSE 0
                             END
                         ),
@@ -2038,14 +2041,18 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                 COUNT(*)::bigint AS tracked_invoice_count,
                 COUNT(*) FILTER (WHERE i.status = 'overdue')::bigint AS overdue_invoice_count,
                 ROUND(AVG(i.total_gross)::numeric, 2) AS avg_invoice_gross,
-                -- Time from the service to its invoice: an advance invoice
-                -- issued before the first service has no such delay and
-                -- would turn the average negative (QA E-25).
+                -- Days from the first service to the invoice. Advance
+                -- invoices are issued before any service by design and
+                -- stay out; an invoice issued on the service day counts 0.
                 ROUND(
-                    (
-                        AVG(EXTRACT(EPOCH FROM (i.issued_at - sa.first_service_at)) / 86400.0)
-                            FILTER (WHERE i.issued_at >= sa.first_service_at)
-                    )::numeric,
+                    (AVG(
+                        CASE
+                            WHEN sa.first_service_at IS NOT NULL THEN GREATEST(
+                                EXTRACT(EPOCH FROM (i.issued_at - sa.first_service_at)) / 86400.0,
+                                0
+                            )
+                        END
+                    ) FILTER (WHERE i.invoice_type <> 'advance'))::numeric,
                     2
                 ) AS avg_service_to_invoice_days,
                 ROUND(
@@ -2059,16 +2066,6 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                     )::numeric,
                     2
                 ) AS paid_within_14d_rate_pct,
-                COALESCE(
-                    SUM(
-                        CASE
-                            WHEN i.status IN ('sent', 'partially_paid', 'overdue')
-                                THEN i.total_gross - i.credited_amount - i.paid_amount - i.prepayment_applied_amount
-                            ELSE 0
-                        END
-                    ),
-                    0
-                ) AS outstanding_receivables_total,
                 MAX(dm.delivered_gross) AS delivered_gross,
                 MAX(dm.cost_passthrough_gross) AS cost_passthrough_gross,
                 MAX(ipm.self_pay_gross) AS self_pay_gross,
@@ -2095,6 +2092,12 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
     let invoice_gross_total = row
         .try_get::<Decimal, _>("invoice_gross_total")
         .unwrap_or(Decimal::ZERO);
+    // The one receivables definition of the company finance page; open
+    // advance invoices are requests and are shown apart.
+    let outstanding_receivables_total =
+        super::company_financials::open_patient_receivables(&state.db, "EUR").await?;
+    let open_advance_requests_total =
+        super::company_financials::open_advance_requests(&state.db, "EUR").await?;
 
     Ok(json!({
         "invoices_30d": row.try_get::<i64, _>("invoices_30d").unwrap_or(0),
@@ -2110,9 +2113,8 @@ async fn load_billing_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
         "paid_within_14d_rate_pct": optional_decimal_to_f64(
             row.try_get::<Option<Decimal>, _>("paid_within_14d_rate_pct").unwrap_or_default()
         ),
-        "outstanding_receivables_total": decimal_to_string(
-            row.try_get::<Decimal, _>("outstanding_receivables_total").unwrap_or(Decimal::ZERO)
-        ),
+        "outstanding_receivables_total": decimal_to_string(outstanding_receivables_total),
+        "open_advance_requests_total": decimal_to_string(open_advance_requests_total),
         "self_pay_share_pct": decimal_percentage(self_pay_gross, invoice_gross_total),
         "cost_passthrough_share_pct": decimal_percentage(cost_passthrough_gross, delivered_gross),
     }))

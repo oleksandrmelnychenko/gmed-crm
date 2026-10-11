@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -104,6 +104,17 @@ fn can_manage_company_accounts(role: Role) -> bool {
     role.can(Capability::CompanyFinanceEdit)
 }
 
+/// The JSON body, read only after the permission check: a role without the
+/// right gets 403 even for a malformed request; a malformed body of an
+/// allowed role keeps axum's own rejection (422/400/415).
+#[allow(clippy::result_large_err)]
+pub(crate) fn read_body<T>(
+    body: Result<Json<T>, JsonRejection>,
+) -> Result<T, axum::response::Response> {
+    body.map(|Json(body)| body)
+        .map_err(IntoResponse::into_response)
+}
+
 fn decimal_to_string(value: Decimal) -> String {
     crate::money::money_string(value)
 }
@@ -153,6 +164,68 @@ fn clean_optional(value: Option<&str>, max: usize) -> Result<Option<String>, &'s
 
 fn account_type_is_valid(value: &str) -> bool {
     matches!(value, "bank" | "cash" | "card" | "other")
+}
+
+/// Error code: a cash account (Kasse) would go below zero.
+pub(crate) const CASH_ACCOUNT_INSUFFICIENT_BALANCE: &str = "cash_account_insufficient_balance";
+
+/// The actual balance of one GMED account up to today, as the accounts page
+/// shows it: opening balance plus cash movements, reconciliation entries and
+/// internal transfers. Credit transfers between invoices move no money and
+/// are left out. Callers lock the account row first (`FOR UPDATE`), which
+/// also holds back new accounting entries on it (their trigger shares the
+/// row).
+pub(crate) async fn account_balance(
+    conn: &mut sqlx::PgConnection,
+    account_id: Uuid,
+) -> Result<Decimal, sqlx::Error> {
+    sqlx::query_scalar::<_, Decimal>(
+        r#"SELECT account.opening_balance
+                  + COALESCE((
+                      SELECT SUM(CASE WHEN entry.direction = 'income'
+                                      THEN entry.amount_gross ELSE -entry.amount_gross END)
+                      FROM accounting_entries entry
+                      WHERE entry.financial_account_id = account.id
+                        AND entry.entry_date >= account.opening_balance_on
+                        AND entry.entry_date <= CURRENT_DATE
+                        AND COALESCE(entry.metadata ->> 'payment_method', '') <> 'credit_transfer'
+                  ), 0)
+                  + COALESCE((
+                      SELECT SUM(CASE WHEN adjustment.direction = 'inflow'
+                                      THEN adjustment.amount ELSE -adjustment.amount END)
+                      FROM company_financial_account_adjustments adjustment
+                      WHERE adjustment.financial_account_id = account.id
+                        AND adjustment.effective_on >= account.opening_balance_on
+                        AND adjustment.effective_on <= CURRENT_DATE
+                  ), 0)
+                  + COALESCE((
+                      SELECT SUM(CASE WHEN transfer.source_account_id = account.id
+                                      THEN -transfer.amount ELSE transfer.amount END)
+                      FROM company_financial_account_transfers transfer
+                      WHERE (transfer.source_account_id = account.id
+                             OR transfer.target_account_id = account.id)
+                        AND transfer.effective_on >= account.opening_balance_on
+                        AND transfer.effective_on <= CURRENT_DATE
+                  ), 0)
+           FROM company_financial_accounts account
+           WHERE account.id = $1"#,
+    )
+    .bind(account_id)
+    .fetch_one(conn)
+    .await
+}
+
+/// 422 for a cash account that would go below zero, with the balance it has.
+pub(crate) fn cash_account_insufficient_balance(available: Decimal) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": CASH_ACCOUNT_INSUFFICIENT_BALANCE,
+            "message": "A cash account cannot go below zero",
+            "available_balance": decimal_to_string(available),
+        })),
+    )
+        .into_response()
 }
 
 fn account_row_payload(row: &sqlx::postgres::PgRow) -> Value {
@@ -285,6 +358,8 @@ async fn list_company_financial_accounts(
                       WHERE entry.financial_account_id = account.id
                         AND entry.entry_date >= account.opening_balance_on
                         AND entry.entry_date <= CURRENT_DATE
+                        -- Credit transfers move no money (see account_balance).
+                        AND COALESCE(entry.metadata ->> 'payment_method', '') <> 'credit_transfer'
                   ), 0) AS movement_balance,
                   COALESCE((
                       SELECT SUM(CASE WHEN adjustment.direction = 'inflow'
@@ -306,7 +381,9 @@ async fn list_company_financial_accounts(
                   (SELECT COUNT(*) FROM accounting_entries entry
                    WHERE entry.financial_account_id = account.id
                      AND entry.entry_date >= account.opening_balance_on
-                     AND entry.entry_date <= CURRENT_DATE)::bigint AS movement_count,
+                     AND entry.entry_date <= CURRENT_DATE
+                     AND COALESCE(entry.metadata ->> 'payment_method', '') <> 'credit_transfer'
+                  )::bigint AS movement_count,
                   (SELECT COUNT(*) FROM company_financial_account_transfers transfer
                    WHERE (transfer.source_account_id = account.id
                           OR transfer.target_account_id = account.id)
@@ -407,7 +484,8 @@ async fn list_company_financial_accounts(
                                     THEN amount_gross ELSE -amount_gross END), 0) AS signed_amount
            FROM accounting_entries
            WHERE financial_account_id IS NULL
-             AND UPPER(currency) = $1"#,
+             AND UPPER(currency) = $1
+             AND COALESCE(metadata ->> 'payment_method', '') <> 'credit_transfer'"#,
     )
     .bind(&currency)
     .fetch_one(&state.db)
@@ -439,11 +517,15 @@ async fn list_company_financial_accounts(
 async fn create_company_financial_account(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
-    Json(body): Json<CreateAccountRequest>,
+    body: Result<Json<CreateAccountRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let name = match clean_required(&body.name, 120, "Account name is required") {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
@@ -579,11 +661,15 @@ async fn update_company_financial_account(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(account_id): Path<Uuid>,
-    Json(body): Json<UpdateAccountRequest>,
+    body: Result<Json<UpdateAccountRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let name = match body.name.as_deref() {
         Some(value) => match clean_required(value, 120, "Account name is required") {
             Ok(value) => Some(value),
@@ -798,11 +884,15 @@ async fn create_company_financial_account_adjustment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(account_id): Path<Uuid>,
-    Json(body): Json<CreateAdjustmentRequest>,
+    body: Result<Json<CreateAdjustmentRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let direction = body.direction.trim().to_lowercase();
     if !matches!(direction.as_str(), "inflow" | "outflow") {
         return err(
@@ -895,6 +985,42 @@ async fn create_company_financial_account_adjustment(
             );
         }
     }
+    // A cash box never holds less than nothing: an outflow that would take a
+    // cash account below zero is refused.
+    if direction == "outflow" {
+        let account_type = match sqlx::query_scalar::<_, String>(
+            "SELECT account_type FROM company_financial_accounts WHERE id = $1 FOR UPDATE",
+        )
+        .bind(account_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        {
+            Ok(Some(value)) => value,
+            Ok(None) => return err(StatusCode::NOT_FOUND, "Financial account not found"),
+            Err(error) => {
+                tracing::error!(error = %error, account_id = %account_id, "lock adjusted account");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to record account adjustment",
+                );
+            }
+        };
+        if account_type == "cash" {
+            let balance = match account_balance(&mut transaction, account_id).await {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(error = %error, account_id = %account_id, "load adjusted account balance");
+                    return err(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to record account adjustment",
+                    );
+                }
+            };
+            if balance - amount < Decimal::ZERO {
+                return cash_account_insufficient_balance(balance);
+            }
+        }
+    }
     let adjustment_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO company_financial_account_adjustments (
                financial_account_id, transaction_type, request_id, direction,
@@ -956,11 +1082,15 @@ async fn reverse_company_financial_account_adjustment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((account_id, adjustment_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseAdjustmentRequest>,
+    body: Result<Json<ReverseAdjustmentRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let effective_on = match parse_date(&body.effective_on, "effective_on") {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),
@@ -1136,11 +1266,15 @@ async fn assign_accounting_entry_financial_account(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(entry_id): Path<Uuid>,
-    Json(body): Json<AssignEntryAccountRequest>,
+    body: Result<Json<AssignEntryAccountRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_company_accounts(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_body(body) {
+        Ok(body) => body,
+        Err(rejection) => return rejection,
+    };
     let mut transaction = match state.db.begin().await {
         Ok(value) => value,
         Err(error) => {
