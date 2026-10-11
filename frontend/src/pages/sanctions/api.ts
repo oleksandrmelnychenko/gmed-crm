@@ -67,9 +67,17 @@ export type LeadSanctionsFlag = {
 export type HitStatus = "open" | "false_positive" | "confirmed";
 /**
  * `lead_bank`: the bank of the lead's payment route; `lead_recipient`: a third-party invoice
- * recipient who does not pay (owner decisions 2026-10-11).
+ * recipient who does not pay (owner decisions 2026-10-11); `patient_relation`: a relation of a
+ * patient who pays or receives the invoices (QA 2026-10-11 B-25), its role in `relation`.
  */
-export type SubjectKind = "lead_patient" | "lead_guardian" | "lead_payer" | "lead_bank" | "lead_recipient" | "patient";
+export type SubjectKind =
+  | "lead_patient"
+  | "lead_guardian"
+  | "lead_payer"
+  | "lead_bank"
+  | "lead_recipient"
+  | "patient"
+  | "patient_relation";
 
 export type SubjectData = {
   first_name: string;
@@ -123,7 +131,10 @@ export type ListEntry = {
 export type SanctionsHit = {
   id: string;
   subject_kind: SubjectKind;
-  /** Which subject of the kind: for a bank `patient-bank` or `payer-bank`, `invoice-recipient` for the recipient. */
+  /**
+   * Which subject of the kind: for a bank `patient-bank` or `payer-bank`, `invoice-recipient` for the
+   * recipient, the relation id for a patient's relation.
+   */
   subject_ref?: string;
   lead_id: string | null;
   patient_id: string | null;

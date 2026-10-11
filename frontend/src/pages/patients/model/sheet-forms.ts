@@ -1,6 +1,7 @@
 import type { PatientLegalStatus } from "./legal-status";
 import { normalizePatientLegalStatus } from "./legal-status";
 import { normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
+import { countryCodeFromStoredValue } from "@/components/ui/country-select";
 import { nationalityCountryCode } from "./nationalities";
 
 import {
@@ -102,7 +103,10 @@ export function relationToForm(relation: RelationItem): RelationFormState {
     addressStreet: relation.address_street ?? "",
     addressZip: relation.address_zip ?? "",
     addressCity: relation.address_city ?? "",
-    addressCountry: relation.address_country ?? "",
+    // The country picker stores ISO codes (QA 2026-10-11 B-25). An older
+    // free-text country it recognises ("Deutschland", "Germany") is saved as
+    // its code with the next save; anything else is kept as written.
+    addressCountry: countryCodeFromStoredValue(relation.address_country),
     isDefaultPayer: relation.is_default_payer ?? false,
   };
 }

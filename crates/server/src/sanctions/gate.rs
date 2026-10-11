@@ -16,6 +16,11 @@
 //! an order or an order service, terminating a framework contract, rejecting
 //! or deleting a quote, supplier invoices and dunning are never blocked.
 //!
+//! A hit of a patient's relation that pays or receives the invoices
+//! (`patient_relation`) belongs to the patient and holds like the patient's
+//! own. Invoices are not guarded for anybody (bookkeeping of services already
+//! rendered, GoBD); the hold is on new orders, contracts and signatures.
+//!
 //! The gate is one middleware on the protected router ([`middleware`]) so the
 //! rule lives in one place instead of in every handler. [`classify`] maps the
 //! guarded routes; its tests pin the list.

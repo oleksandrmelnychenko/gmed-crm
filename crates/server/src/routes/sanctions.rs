@@ -404,7 +404,13 @@ async fn hit_json(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<Value
                     subject.kind.as_str() == subject_kind && subject.subject_ref == subject_ref
                 })
             }),
-        (None, Some(patient_id)) => screening::load_patient_subject(&state.db, patient_id).await?,
+        // The patient or one of its relations that pay or receive invoices.
+        (None, Some(patient_id)) => screening::load_patient_subjects(&state.db, patient_id)
+            .await?
+            .into_iter()
+            .find(|subject| {
+                subject.kind.as_str() == subject_kind && subject.subject_ref == subject_ref
+            }),
         (None, None) => None,
     };
     Ok(json!({
@@ -412,7 +418,8 @@ async fn hit_json(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<Value
         "subject_kind": subject_kind,
         // Whose subject among several of a kind: a guardian's contact id, a
         // payer reference, `patient-bank` / `payer-bank` for a bank,
-        // `invoice-recipient` for the invoice recipient.
+        // `invoice-recipient` for the invoice recipient, the relation id for
+        // a patient's relation.
         "subject_ref": subject_ref,
         "lead_id": lead_id,
         "patient_id": patient_id,

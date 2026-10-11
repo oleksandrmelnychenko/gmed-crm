@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
@@ -458,16 +459,18 @@ function PatientRelationEditorSheet({
               className={inputClass}
             />
           </FormField>
-          <FormField label={tx("Страна", "Land")} htmlFor="relation-country">
-            <Input
-              id="relation-country"
+          <FormField label={tx("Страна", "Land")}>
+            {/* ISO code like every other address; an old free-text value stays selectable as written. */}
+            <CountrySelect
+              aria-label={tx("Страна", "Land")}
               value={form.addressCountry}
-              onChange={(event) =>
+              lang={lang}
+              className={selectClass}
+              onChange={(code) =>
                 dispatchRelationState((current) => ({
-                  form: { ...current.form, addressCountry: event.target.value },
+                  form: { ...current.form, addressCountry: code ?? "" },
                 }))
               }
-              className={inputClass}
             />
           </FormField>
         </div>

@@ -6,6 +6,7 @@ import { ALL_STAFF_ROLES, canAccessStaffRoute, listStaffNavItems } from "@/lib/s
 import type { LeadSanctionsStatus, SanctionsHit } from "./api";
 import {
   FISALIS_URL,
+  PATIENT_RELATION_ROLES,
   PAYER_BANK_REF,
   fisalisSearchText,
   formatListBirthDate,
@@ -108,6 +109,22 @@ describe("hit subject labels", () => {
     expect(subjectKindLabel("lead_recipient", ru, "invoice-recipient")).toBe("Получатель счёта");
     expect(subjectKindLabel("lead_recipient", de, "invoice-recipient")).toBe("Rechnungsempfänger");
     expect(subjectKindLabel("lead_recipient", de)).toBe("Rechnungsempfänger");
+  });
+
+  it("says why a patient's relation is screened (QA 2026-10-11 B-25)", () => {
+    const ref = "5d0c1f0e-0000-4000-8000-000000000001";
+    expect(subjectKindLabel("patient_relation", ru, ref, "default_payer")).toBe("Плательщик пациента по умолчанию");
+    expect(subjectKindLabel("patient_relation", de, ref, "default_payer")).toBe("Standardzahler des Patienten");
+    expect(subjectKindLabel("patient_relation", ru, ref, "invoice_payer")).toBe(
+      "Плательщик в заказе или счёте пациента",
+    );
+    expect(subjectKindLabel("patient_relation", de, ref, "legal_representative")).toBe(
+      "Elternteil / Vormund des Patienten",
+    );
+    // An unknown role still names a relation of the patient.
+    expect(subjectKindLabel("patient_relation", ru, ref, null)).toBe("Связь пациента");
+    expect(subjectKindLabel("patient_relation", de)).toBe("Bezugsperson des Patienten");
+    expect([...PATIENT_RELATION_ROLES]).toEqual(["default_payer", "invoice_payer", "legal_representative"]);
   });
 
   it("keeps the labels of persons and payers", () => {

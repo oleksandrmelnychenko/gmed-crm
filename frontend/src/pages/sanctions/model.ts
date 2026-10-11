@@ -74,12 +74,36 @@ export function fisalisSearchText(subject: Pick<SubjectData, "first_name" | "mid
 export const PAYER_BANK_REF = "payer-bank";
 
 /**
- * What the hit is about. A bank says whose payment route it is: the payer's
- * bank (`subject_ref` "payer-bank") or the patient's.
+ * Why a patient's relation is screened (`relation` of a `patient_relation` subject): the default
+ * payer, the payer an order or invoice names, a minor's parent or guardian.
  */
-export function subjectKindLabel(kind: SubjectKind, t: Translations, subjectRef?: string | null): string {
+export const PATIENT_RELATION_ROLES = ["default_payer", "invoice_payer", "legal_representative"] as const;
+
+/**
+ * What the hit is about. A bank says whose payment route it is: the payer's
+ * bank (`subject_ref` "payer-bank") or the patient's. A patient's relation
+ * says why it is screened (`relation`).
+ */
+export function subjectKindLabel(
+  kind: SubjectKind,
+  t: Translations,
+  subjectRef?: string | null,
+  relation?: string | null,
+): string {
   if (kind === "lead_bank") {
     return subjectRef === PAYER_BANK_REF ? t.sanctions_kind_payer_bank : t.sanctions_kind_patient_bank;
+  }
+  if (kind === "patient_relation") {
+    switch (relation) {
+      case "default_payer":
+        return t.sanctions_kind_relation_default_payer;
+      case "invoice_payer":
+        return t.sanctions_kind_relation_invoice_payer;
+      case "legal_representative":
+        return t.sanctions_kind_relation_legal_representative;
+      default:
+        return t.sanctions_kind_patient_relation;
+    }
   }
   return {
     lead_patient: t.sanctions_kind_lead_patient,

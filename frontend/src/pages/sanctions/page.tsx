@@ -27,6 +27,7 @@ import { SanctionsListSettings } from "./list-settings";
 import { RiskSettingsTab } from "./risk-settings";
 import {
   FISALIS_URL,
+  PATIENT_RELATION_ROLES,
   countryList,
   fisalisSearchText,
   formatListBirthDate,
@@ -40,8 +41,8 @@ import {
 } from "./model";
 
 type Tab = "open" | "decided" | "countries" | "list" | "risk";
-/** Relations the kind label already names (`lead_payer`, `lead_recipient`). */
-const HIDDEN_RELATIONS = new Set(["payer", "invoice_recipient"]);
+/** Relations the kind label already names (`lead_payer`, `lead_recipient`, `patient_relation`). */
+const HIDDEN_RELATIONS = new Set<string>(["payer", "invoice_recipient", ...PATIENT_RELATION_ROLES]);
 const TABS: Tab[] = ["open", "decided", "countries", "list", "risk"];
 
 function errorText(error: unknown, fallback: string): string {
@@ -151,7 +152,7 @@ function HitCard({
               {hitStatusLabel(hit.status, t)}
             </StatusBadge>
             <span className="text-sm font-semibold" data-testid="sanctions-hit-kind">
-              {subjectKindLabel(hit.subject_kind, t, hit.subject_ref)}
+              {subjectKindLabel(hit.subject_kind, t, hit.subject_ref, subject.relation)}
             </span>
             {hit.owner_name ? <span className="text-sm text-muted-foreground">· {hit.owner_name}</span> : null}
             {hit.patient_number ? <span className="font-mono text-xs text-muted-foreground">{hit.patient_number}</span> : null}

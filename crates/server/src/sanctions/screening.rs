@@ -30,13 +30,18 @@
 //!   (`lead_payer`), never twice — see [`recipient_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
+//! * the relations of such a patient that pay or receive the invoices
+//!   (`patient_relation`, QA 2026-10-11 B-25): the default payer, a relation
+//!   an order or an invoice names as payer, and the parents and guardians of
+//!   a minor patient (the contracting party and default invoice recipient) —
+//!   see [`relation_subjects`]. The hit belongs to the patient.
 //!
 //! Triggers: database triggers queue a lead or patient whenever a screened
-//! field changes (any writer: wizard, public intake, patient portal); the
-//! worker in [`spawn_screening_worker`] screens the queue. A new list version
-//! re-screens every open subject ([`rescreen_all`]). The gate screens the
-//! lead once more right before qualification, conversion and the agency
-//! countersignature.
+//! field changes (any writer: wizard, public intake, patient portal, the
+//! patient card's relations); the worker in [`spawn_screening_worker`]
+//! screens the queue. A new list version re-screens every open subject
+//! ([`rescreen_all`]). The gate screens the lead once more right before
+//! qualification, conversion and the agency countersignature.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -70,6 +75,8 @@ pub enum SubjectKind {
     /// A third-party invoice recipient who does not pay.
     LeadRecipient,
     Patient,
+    /// A relation of a patient who pays or receives the patient's invoices.
+    PatientRelation,
 }
 
 impl SubjectKind {
@@ -81,9 +88,20 @@ impl SubjectKind {
             Self::LeadBank => "lead_bank",
             Self::LeadRecipient => "lead_recipient",
             Self::Patient => "patient",
+            Self::PatientRelation => "patient_relation",
         }
     }
 }
+
+/// `relation` of a relation subject: the patient's default payer
+/// (`patient_relations.is_default_payer`).
+pub const RELATION_ROLE_DEFAULT_PAYER: &str = "default_payer";
+/// `relation` of a relation subject: an order or an invoice of the patient
+/// names it as payer (`payer_patient_relation_id`).
+pub const RELATION_ROLE_INVOICE_PAYER: &str = "invoice_payer";
+/// `relation` of a relation subject: a parent or guardian of a minor patient,
+/// the contracting party (§ 1629 BGB) and default invoice recipient.
+pub const RELATION_ROLE_LEGAL_REPRESENTATIVE: &str = "legal_representative";
 
 /// `subject_ref` of the invoice recipient (one per lead).
 pub const INVOICE_RECIPIENT_REF: &str = "invoice-recipient";
@@ -103,7 +121,8 @@ pub struct SubjectRecord {
     pub kind: SubjectKind,
     pub lead_id: Option<Uuid>,
     pub patient_id: Option<Uuid>,
-    /// Guardian contact id or payer declaration id; empty for the patient.
+    /// Guardian contact id or payer declaration id, the relation id of a
+    /// patient's relation; empty for the patient.
     pub subject_ref: String,
     pub subject: Subject,
     /// ISO codes of the residence country (country policy only).
@@ -115,9 +134,14 @@ pub struct SubjectRecord {
 impl SubjectRecord {
     /// Citizenships and residence, the countries the country policy checks.
     /// A bank has none: the policy is about people, the account country is
-    /// only a hint for the CEO's review.
+    /// only a hint for the CEO's review. A patient's relation has none either:
+    /// the policy stays with the patient and the lead (whose block the CEO
+    /// lifts per lead); the relation's countries are shown in the review.
     pub fn countries(&self) -> Vec<String> {
-        if self.kind == SubjectKind::LeadBank {
+        if matches!(
+            self.kind,
+            SubjectKind::LeadBank | SubjectKind::PatientRelation
+        ) {
             return Vec::new();
         }
         let mut countries = self.subject.citizenships.clone();
@@ -886,6 +910,230 @@ pub async fn load_patient_subject(
     }))
 }
 
+/// The subjects of a patient: the patient ([`load_patient_subject`]) and the
+/// relations that pay or receive the invoices ([`relation_subjects`]). Empty
+/// for missing, prospective, deleted or anonymised records — the relations of
+/// a patient that is not screened are not screened either.
+pub async fn load_patient_subjects(
+    db: &gmed_db::DbPool,
+    patient_id: Uuid,
+) -> Result<Vec<SubjectRecord>, sqlx::Error> {
+    let Some(patient) = load_patient_subject(db, patient_id).await? else {
+        return Ok(Vec::new());
+    };
+    let rows = load_relation_rows(db, patient_id).await?;
+    let relations = relation_subjects(
+        patient_id,
+        patient.subject.date_of_birth,
+        &rows,
+        crate::app_time::today(),
+    );
+    let mut subjects = Vec::with_capacity(1 + relations.len());
+    subjects.push(patient);
+    subjects.extend(relations);
+    Ok(subjects)
+}
+
+/// The relations of a patient as JSON rows for [`relation_subjects`]: the
+/// relation's own columns, whether an order or an invoice names it as payer
+/// (`names_payer`) and the patient record it is linked to (`linked`, `null`
+/// for a separate contact).
+async fn load_relation_rows(
+    db: &gmed_db::DbPool,
+    patient_id: Uuid,
+) -> Result<Vec<Value>, sqlx::Error> {
+    sqlx::query_scalar::<_, Value>(
+        r#"SELECT jsonb_build_object(
+                      'id', r.id,
+                      'related_name', r.related_name,
+                      'notes', r.notes,
+                      'relation_type', r.relation_type,
+                      'address_country', r.address_country,
+                      'is_default_payer', r.is_default_payer,
+                      'names_payer',
+                          EXISTS (SELECT 1 FROM orders o
+                                  WHERE o.payer_patient_relation_id = r.id)
+                          OR EXISTS (SELECT 1 FROM invoices i
+                                     WHERE i.payer_patient_relation_id = r.id),
+                      'linked', CASE WHEN p.id IS NULL THEN NULL ELSE jsonb_build_object(
+                          'first_name', p.first_name,
+                          'last_name', p.last_name,
+                          'birth_date', p.birth_date,
+                          'citizenships', to_jsonb(p.citizenships),
+                          'nationality', p.nationality,
+                          'residence_country', p.residence_country,
+                          'address_country', p.address_country
+                      ) END
+                  )
+           FROM patient_relations r
+           LEFT JOIN patients p ON p.id = r.related_patient_id
+           WHERE r.patient_id = $1
+           ORDER BY r.created_at, r.id"#,
+    )
+    .bind(patient_id)
+    .fetch_all(db)
+    .await
+}
+
+/// Legal forms that make a separate contact's name an organisation's. Only
+/// words no person's name consists of: no `ko`, `sa` or `ao`, which are also
+/// names, and compared as written (lower case), not in the canonical form
+/// that folds `ООО` into an initial `O`.
+const ORGANISATION_LEGAL_FORMS: &[&str] = &[
+    "gmbh", "mbh", "ag", "kg", "kgaa", "ohg", "ug", "llc", "ltd", "limited", "inc", "corp", "plc",
+    "llp", "jsc", "pjsc", "ojsc", "cjsc", "ooo", "oao", "zao", "pao", "sarl", "srl", "spa", "bv",
+    "nv", "fze", "ооо", "оао", "зао", "пао", "тов", "пат",
+];
+
+/// Whether a contact's name carries a legal form ([`ORGANISATION_LEGAL_FORMS`]).
+fn names_an_organisation(name: &str) -> bool {
+    name.split(|ch: char| !ch.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .any(|word| ORGANISATION_LEGAL_FORMS.contains(&word.to_lowercase().as_str()))
+}
+
+/// The birth date in a relation's notes: the lead conversion writes a trusted
+/// contact's birth date there as `Geburtsdatum: 1985-03-02`
+/// (`routes::leads`), staff may write `Geburtsdatum: 02.03.1985`.
+fn notes_birth_date(notes: &str) -> Option<NaiveDate> {
+    const LABEL: &str = "geburtsdatum:";
+    notes.lines().find_map(|line| {
+        let line = line.trim();
+        if !line.get(..LABEL.len())?.eq_ignore_ascii_case(LABEL) {
+            return None;
+        }
+        let value = line[LABEL.len()..].trim();
+        let head = value.get(..10).unwrap_or(value);
+        NaiveDate::parse_from_str(head, "%Y-%m-%d")
+            .or_else(|_| NaiveDate::parse_from_str(head, "%d.%m.%Y"))
+            .ok()
+    })
+}
+
+/// A separate contact by its name as staff entered it (the relation has no
+/// citizenship; a birth date only in its notes, [`notes_birth_date`]): a
+/// person by given names and the last word, an organisation by the whole name
+/// when it carries a legal form or is a single word (a person needs a first
+/// name to be screened; like a payer without a first name).
+fn contact_subject(name: &str, date_of_birth: Option<NaiveDate>) -> Subject {
+    let whole = name.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (first_name, last_name) = split_full_name(&whole);
+    if first_name.is_empty() || names_an_organisation(&whole) {
+        Subject {
+            first_name: String::new(),
+            middle_name: None,
+            last_name: whole,
+            date_of_birth: None,
+            citizenships: Vec::new(),
+            organisation: true,
+        }
+    } else {
+        Subject {
+            first_name,
+            middle_name: None,
+            last_name,
+            date_of_birth,
+            citizenships: Vec::new(),
+            organisation: false,
+        }
+    }
+}
+
+/// The relations of a patient that are screened (QA 2026-10-11 B-25: a
+/// relation marked "Оплачивает счета пациента по умолчанию" became the invoice
+/// recipient without screening), in this order of precedence for the role in
+/// `relation`:
+///
+/// * the default payer (`is_default_payer`, [`RELATION_ROLE_DEFAULT_PAYER`]),
+///   who receives the patient's invoices unless an order names another payer;
+/// * a relation an order or an invoice of the patient names as payer
+///   (`names_payer`, [`RELATION_ROLE_INVOICE_PAYER`]);
+/// * for a minor patient (Europe/Berlin), every `parent` and `guardian`
+///   relation ([`RELATION_ROLE_LEGAL_REPRESENTATIVE`]): the contracting party
+///   and the default invoice recipient of a minor
+///   (`services::contracting_party`), as the lead screens a minor's parents.
+///
+/// Other relations (an adult's spouse, a friend, an emergency contact) are no
+/// subjects. A relation linked to a patient record (`linked`) is screened with
+/// that record's name, birth date and citizenships — the name an invoice
+/// carries — a separate contact by its name and the birth date in its notes
+/// (`contact_subject`). The residence is the relation's address country
+/// (where its invoices go), then the linked record's countries: shown to the
+/// CEO, not part of the country policy ([`SubjectRecord::countries`]). One
+/// subject per relation, the relation id as `subject_ref`; the hit belongs to
+/// the patient.
+pub fn relation_subjects(
+    patient_id: Uuid,
+    patient_birth_date: Option<NaiveDate>,
+    rows: &[Value],
+    today: NaiveDate,
+) -> Vec<SubjectRecord> {
+    let minor = crate::routes::leads::is_minor_on(patient_birth_date, today);
+    let mut subjects = Vec::new();
+    for row in rows {
+        let relation_id = json_text(row, "id").to_lowercase();
+        if relation_id.is_empty() {
+            continue;
+        }
+        let flag = |key: &str| row.get(key).and_then(Value::as_bool) == Some(true);
+        let role = if flag("is_default_payer") {
+            RELATION_ROLE_DEFAULT_PAYER
+        } else if flag("names_payer") {
+            RELATION_ROLE_INVOICE_PAYER
+        } else if minor
+            && matches!(
+                json_text(row, "relation_type").as_str(),
+                "parent" | "guardian"
+            )
+        {
+            RELATION_ROLE_LEGAL_REPRESENTATIVE
+        } else {
+            continue;
+        };
+        let mut residence = json_codes(row, "address_country");
+        let subject = match row.get("linked").filter(|linked| linked.is_object()) {
+            Some(linked) => {
+                let mut citizenships = json_codes(linked, "citizenships");
+                for code in json_codes(linked, "nationality") {
+                    if !citizenships.contains(&code) {
+                        citizenships.push(code);
+                    }
+                }
+                for code in json_codes(linked, "residence_country")
+                    .into_iter()
+                    .chain(json_codes(linked, "address_country"))
+                {
+                    if !residence.contains(&code) {
+                        residence.push(code);
+                    }
+                }
+                Subject {
+                    first_name: json_text(linked, "first_name"),
+                    middle_name: None,
+                    last_name: json_text(linked, "last_name"),
+                    date_of_birth: json_date(linked, "birth_date"),
+                    citizenships,
+                    organisation: false,
+                }
+            }
+            None => contact_subject(
+                &json_text(row, "related_name"),
+                notes_birth_date(&json_text(row, "notes")),
+            ),
+        };
+        subjects.push(SubjectRecord {
+            kind: SubjectKind::PatientRelation,
+            lead_id: None,
+            patient_id: Some(patient_id),
+            subject_ref: relation_id,
+            subject,
+            residence,
+            relation: Some(role.to_string()),
+        });
+    }
+    subjects
+}
+
 /// Normalised fingerprint of what we know about a subject: a false-positive
 /// decision covers exactly this data.
 pub fn subject_fingerprint(subject: &Subject) -> String {
@@ -955,7 +1203,8 @@ pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport
     Ok(report)
 }
 
-/// Screens a patient and stores its possible matches.
+/// Screens a patient and the relations that pay or receive its invoices
+/// ([`load_patient_subjects`]) and stores their possible matches.
 pub async fn screen_patient(
     state: &AppState,
     patient_id: Uuid,
@@ -963,10 +1212,7 @@ pub async fn screen_patient(
     let Some(index) = store::active_index(&state.db).await? else {
         return Ok(ScreenReport::default());
     };
-    let subjects: Vec<SubjectRecord> = load_patient_subject(&state.db, patient_id)
-        .await?
-        .into_iter()
-        .collect();
+    let subjects = load_patient_subjects(&state.db, patient_id).await?;
     screen_owner(state, &index, Owner::Patient(patient_id), subjects).await
 }
 
@@ -1120,11 +1366,15 @@ async fn screen_owner(
                 .await?;
                 continue;
             }
-            if inherited.contains(&(
-                entry.logical_id.clone(),
-                subject_fp.clone(),
-                entry_fp.clone(),
-            )) {
+            // The lead's decisions are about the patient only, never about a
+            // relation that happens to carry the same data.
+            if record.kind == SubjectKind::Patient
+                && inherited.contains(&(
+                    entry.logical_id.clone(),
+                    subject_fp.clone(),
+                    entry_fp.clone(),
+                ))
+            {
                 continue;
             }
 
@@ -1356,8 +1606,9 @@ pub struct RescreenReport {
     pub errors: usize,
 }
 
-/// Screens every open lead and every active or inactive patient again, after
-/// a new list version.
+/// Screens every open lead and every active or inactive patient (with the
+/// relations that pay or receive its invoices) again, after a new list
+/// version.
 pub async fn rescreen_all(state: &AppState) -> Result<RescreenReport, sqlx::Error> {
     let lead_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"SELECT id FROM leads
@@ -2023,5 +2274,237 @@ mod tests {
             relation: None,
         };
         assert_eq!(record.countries(), vec!["UA", "RU"]);
+    }
+
+    fn relation_row(id: Uuid, name: &str, relation_type: &str, extra: Value) -> Value {
+        let mut row = json!({
+            "id": id.to_string().to_uppercase(),
+            "related_name": name,
+            "relation_type": relation_type,
+            "address_country": null,
+            "is_default_payer": false,
+            "names_payer": false,
+            "linked": null,
+        });
+        for (key, value) in extra.as_object().cloned().unwrap_or_default() {
+            row[key.as_str()] = value;
+        }
+        row
+    }
+
+    #[test]
+    fn relations_that_pay_or_receive_the_invoices_are_subjects_of_the_patient() {
+        let patient_id = Uuid::new_v4();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        let adult = NaiveDate::from_ymd_opt(1980, 1, 1);
+        let default_payer = Uuid::new_v4();
+        let order_payer = Uuid::new_v4();
+        let rows = vec![
+            relation_row(
+                default_payer,
+                "  Testomir   Korneev ",
+                "other",
+                json!({ "is_default_payer": true, "address_country": "Deutschland" }),
+            ),
+            relation_row(
+                order_payer,
+                "Viktor Zahler",
+                "friend",
+                json!({ "names_payer": true }),
+            ),
+            // An adult's spouse, parent and emergency contact pay nothing.
+            relation_row(Uuid::new_v4(), "Mia Muster", "spouse", json!({})),
+            relation_row(Uuid::new_v4(), "Anna Muster", "parent", json!({})),
+            // A row without an id is nobody's subject.
+            relation_row(
+                Uuid::new_v4(),
+                "Ben Muster",
+                "other",
+                json!({ "id": "", "is_default_payer": true }),
+            ),
+        ];
+        let subjects = relation_subjects(patient_id, adult, &rows, today);
+        assert_eq!(subjects.len(), 2, "{subjects:?}");
+        let payer = &subjects[0];
+        assert_eq!(payer.kind, SubjectKind::PatientRelation);
+        assert_eq!(payer.kind.as_str(), "patient_relation");
+        assert_eq!(payer.patient_id, Some(patient_id));
+        assert_eq!(payer.lead_id, None);
+        // The relation id, lower case whatever the row says.
+        assert_eq!(payer.subject_ref, default_payer.to_string());
+        assert_eq!(payer.relation.as_deref(), Some("default_payer"));
+        assert!(!payer.subject.organisation);
+        assert_eq!(
+            (
+                payer.subject.first_name.as_str(),
+                payer.subject.last_name.as_str()
+            ),
+            ("Testomir", "Korneev")
+        );
+        // The address country (a legacy name) is shown, not part of the
+        // country policy.
+        assert_eq!(payer.residence, ["DE"]);
+        assert!(payer.countries().is_empty());
+        assert_eq!(payer.snapshot()["relation"], "default_payer");
+        assert_eq!(subjects[1].subject_ref, order_payer.to_string());
+        assert_eq!(subjects[1].relation.as_deref(), Some("invoice_payer"));
+
+        // A minor's parents and guardians are the contracting party and the
+        // default invoice recipient; the default payer keeps its role.
+        let minor = NaiveDate::from_ymd_opt(2015, 6, 1);
+        let mother = Uuid::new_v4();
+        let rows = vec![
+            relation_row(mother, "Anna Muster", "parent", json!({})),
+            relation_row(Uuid::new_v4(), "Ben Muster", "guardian", json!({})),
+            relation_row(Uuid::new_v4(), "Mia Muster", "sibling", json!({})),
+            relation_row(
+                Uuid::new_v4(),
+                "Viktor Zahler",
+                "parent",
+                json!({ "is_default_payer": true }),
+            ),
+        ];
+        let subjects = relation_subjects(patient_id, minor, &rows, today);
+        let roles: Vec<&str> = subjects
+            .iter()
+            .filter_map(|record| record.relation.as_deref())
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                "legal_representative",
+                "legal_representative",
+                "default_payer"
+            ]
+        );
+        assert_eq!(subjects[0].subject_ref, mother.to_string());
+        // Without a birth date the patient counts as an adult.
+        assert!(relation_subjects(patient_id, None, &rows[..3], today).is_empty());
+    }
+
+    #[test]
+    fn a_relation_is_screened_as_its_patient_record_or_by_the_contact_name() {
+        let patient_id = Uuid::new_v4();
+        let today = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        // Linked to a patient record: that record's name, birth date and
+        // citizenships — the name the invoice carries — not the stored text.
+        let linked = relation_row(
+            Uuid::new_v4(),
+            "Old Name",
+            "spouse",
+            json!({
+                "is_default_payer": true,
+                "address_country": "AT",
+                "linked": {
+                    "first_name": "Testomir",
+                    "last_name": "Korneev",
+                    "birth_date": "1961-03-14",
+                    "citizenships": ["RU"],
+                    "nationality": "Ukraine",
+                    "residence_country": "CY",
+                    "address_country": "AT",
+                },
+            }),
+        );
+        let record = &relation_subjects(patient_id, None, &[linked], today)[0];
+        assert!(!record.subject.organisation);
+        assert_eq!(record.subject.first_name, "Testomir");
+        assert_eq!(record.subject.last_name, "Korneev");
+        assert_eq!(
+            record.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1961, 3, 14)
+        );
+        assert_eq!(record.subject.citizenships, ["RU", "UA"]);
+        assert_eq!(record.residence, ["AT", "CY"]);
+
+        // A separate contact: a person by given names and the last word; a
+        // legal form or a single word make it an organisation by the whole
+        // name.
+        let subject = |name: &str| contact_subject(name, None);
+        let person = subject("Anna Maria Beispiel");
+        assert!(!person.organisation);
+        assert_eq!(
+            (person.first_name.as_str(), person.last_name.as_str()),
+            ("Anna Maria", "Beispiel")
+        );
+        // The birth date the lead conversion wrote into the notes counts for
+        // a person (a conflicting date then rules a namesake out).
+        let converted = relation_row(
+            Uuid::new_v4(),
+            "Anna Muster",
+            "parent",
+            json!({
+                "is_default_payer": true,
+                "notes": "Email: anna@example.com\nGeburtsdatum: 1985-03-02\nAdresse: Musterweg 1",
+            }),
+        );
+        assert_eq!(
+            relation_subjects(patient_id, None, &[converted], today)[0]
+                .subject
+                .date_of_birth,
+            NaiveDate::from_ymd_opt(1985, 3, 2)
+        );
+        assert_eq!(
+            notes_birth_date("geburtsdatum: 02.03.1985"),
+            NaiveDate::from_ymd_opt(1985, 3, 2)
+        );
+        for notes in [
+            "",
+            "Geburtsdatum:",
+            "Geburtsdatum: unbekannt",
+            "Dr. Geburtsdatum: 1985-03-02",
+        ] {
+            assert_eq!(notes_birth_date(notes), None, "{notes}");
+        }
+        assert_eq!(
+            contact_subject("Polartek Shipping LLC", NaiveDate::from_ymd_opt(1985, 3, 2))
+                .date_of_birth,
+            None
+        );
+        for name in [
+            "Polartek Shipping LLC",
+            "Beispiel GmbH & Co. KG",
+            "ООО Полартек",
+            "Polartek",
+        ] {
+            let organisation = subject(name);
+            assert!(organisation.organisation, "{name}");
+            assert_eq!(organisation.first_name, "", "{name}");
+            assert_eq!(organisation.last_name, name, "{name}");
+        }
+        // Initials and short names stay people.
+        for name in ["Anna O. Muster", "Sa Ko", "Ao Beispiel"] {
+            assert!(!subject(name).organisation, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_relation_payer_on_the_list_is_found_and_another_name_is_not() {
+        let index = crate::sanctions::matching::SanctionsIndex::build(
+            crate::sanctions::fsf::parse_fsf_xml(include_bytes!("testdata/synthetic_fsf_1_1.xml"))
+                .unwrap()
+                .entries,
+        );
+        let today = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        let record = |name: &str| {
+            relation_subjects(
+                Uuid::new_v4(),
+                None,
+                &[relation_row(
+                    Uuid::new_v4(),
+                    name,
+                    "other",
+                    json!({ "is_default_payer": true }),
+                )],
+                today,
+            )
+            .remove(0)
+        };
+        assert_eq!(screen_subject(&index, &record("Testomir Korneev")).len(), 1);
+        assert_eq!(
+            screen_subject(&index, &record("Polartek Shipping LLC")).len(),
+            1
+        );
+        assert!(screen_subject(&index, &record("Mia Beispiel")).is_empty());
     }
 }

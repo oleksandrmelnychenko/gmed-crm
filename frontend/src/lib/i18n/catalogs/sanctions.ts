@@ -22,6 +22,10 @@ export interface SanctionsTranslations {
   sanctions_kind_patient: string;
   sanctions_kind_patient_bank: string;
   sanctions_kind_payer_bank: string;
+  sanctions_kind_patient_relation: string;
+  sanctions_kind_relation_default_payer: string;
+  sanctions_kind_relation_invoice_payer: string;
+  sanctions_kind_relation_legal_representative: string;
   sanctions_our_person: string;
   sanctions_list_entry: string;
   sanctions_field_names: string;
@@ -167,6 +171,10 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_kind_patient: "Пациент",
   sanctions_kind_patient_bank: "Банк пациента",
   sanctions_kind_payer_bank: "Банк плательщика",
+  sanctions_kind_patient_relation: "Связь пациента",
+  sanctions_kind_relation_default_payer: "Плательщик пациента по умолчанию",
+  sanctions_kind_relation_invoice_payer: "Плательщик в заказе или счёте пациента",
+  sanctions_kind_relation_legal_representative: "Родитель / опекун пациента",
   sanctions_our_person: "Наши данные",
   sanctions_list_entry: "Запись в списке ЕС",
   sanctions_field_names: "Имена",
@@ -322,6 +330,10 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_kind_patient: "Patient",
   sanctions_kind_patient_bank: "Bank des Patienten",
   sanctions_kind_payer_bank: "Bank des Zahlers",
+  sanctions_kind_patient_relation: "Bezugsperson des Patienten",
+  sanctions_kind_relation_default_payer: "Standardzahler des Patienten",
+  sanctions_kind_relation_invoice_payer: "Zahler in Auftrag oder Rechnung des Patienten",
+  sanctions_kind_relation_legal_representative: "Elternteil / Vormund des Patienten",
   sanctions_our_person: "Unsere Daten",
   sanctions_list_entry: "Eintrag der EU-Liste",
   sanctions_field_names: "Namen",
