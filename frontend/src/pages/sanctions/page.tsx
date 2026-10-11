@@ -40,6 +40,8 @@ import {
 } from "./model";
 
 type Tab = "open" | "decided" | "countries" | "list" | "risk";
+/** Relations the kind label already names (`lead_payer`, `lead_recipient`). */
+const HIDDEN_RELATIONS = new Set(["payer", "invoice_recipient"]);
 const TABS: Tab[] = ["open", "decided", "countries", "list", "risk"];
 
 function errorText(error: unknown, fallback: string): string {
@@ -93,7 +95,8 @@ function SubjectDetails({
           {countryList(subject.residence, lang)}
         </Row>
       ) : null}
-      {subject.relation && subject.relation !== "payer" && !bank ? (
+      {/* The kind label already says "payer" or "invoice recipient". */}
+      {subject.relation && !HIDDEN_RELATIONS.has(subject.relation) && !bank ? (
         <Row label={t.sanctions_field_relation}>{subject.relation}</Row>
       ) : null}
     </dl>

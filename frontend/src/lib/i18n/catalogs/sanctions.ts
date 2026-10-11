@@ -18,6 +18,7 @@ export interface SanctionsTranslations {
   sanctions_kind_lead_patient: string;
   sanctions_kind_lead_guardian: string;
   sanctions_kind_lead_payer: string;
+  sanctions_kind_lead_recipient: string;
   sanctions_kind_patient: string;
   sanctions_kind_patient_bank: string;
   sanctions_kind_payer_bank: string;
@@ -162,6 +163,7 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_kind_lead_patient: "Пациент (лид)",
   sanctions_kind_lead_guardian: "Родитель / опекун",
   sanctions_kind_lead_payer: "Плательщик",
+  sanctions_kind_lead_recipient: "Получатель счёта",
   sanctions_kind_patient: "Пациент",
   sanctions_kind_patient_bank: "Банк пациента",
   sanctions_kind_payer_bank: "Банк плательщика",
@@ -210,7 +212,7 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_open_lead: "Открыть лид",
   sanctions_open_patient: "Открыть пациента",
   sanctions_country_hint:
-    "Лиды, у которых гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего или плательщика входит в список заблокированных стран.",
+    "Лиды, у которых гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список заблокированных стран.",
   sanctions_country_none: "Нет лидов с заблокированной страной",
   sanctions_country_lift: "Снять блокировку для лида",
   sanctions_country_lift_title: "Снять блокировку по стране для этого лида",
@@ -238,7 +240,7 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_list_source_upload: "вручную",
   sanctions_blocked_countries: "Заблокированные страны",
   sanctions_blocked_countries_hint:
-    "Если гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего или плательщика входит в список, лид нельзя квалифицировать и конвертировать, а агентство не подписывает заказ, пока CEO не снимет блокировку для лида. Санкции ЕС касаются конкретных лиц и секторов и не запрещают лечение граждан страны как таковых: отказ по гражданству — деловое решение с рисками AGG § 19 и DSGVO ст. 22 (нужна проверка юриста).",
+    "Если гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список, лид нельзя квалифицировать и конвертировать, а агентство не подписывает заказ, пока CEO не снимет блокировку для лида. Санкции ЕС касаются конкретных лиц и секторов и не запрещают лечение граждан страны как таковых: отказ по гражданству — деловое решение с рисками AGG § 19 и DSGVO ст. 22 (нужна проверка юриста).",
   sanctions_blocked_countries_placeholder: "Страны",
   sanctions_blocked_countries_saved: "Список заблокированных стран сохранён",
   sanctions_settings_title: "Санкции и заблокированные страны",
@@ -316,6 +318,7 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_kind_lead_patient: "Patient (Lead)",
   sanctions_kind_lead_guardian: "Elternteil / Vormund",
   sanctions_kind_lead_payer: "Zahler",
+  sanctions_kind_lead_recipient: "Rechnungsempfänger",
   sanctions_kind_patient: "Patient",
   sanctions_kind_patient_bank: "Bank des Patienten",
   sanctions_kind_payer_bank: "Bank des Zahlers",
@@ -364,7 +367,7 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_open_lead: "Lead öffnen",
   sanctions_open_patient: "Patient öffnen",
   sanctions_country_hint:
-    "Leads, bei denen Staatsangehörigkeit oder Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen oder des Zahlers auf der Liste der gesperrten Länder stehen.",
+    "Leads, bei denen Staatsangehörigkeit oder Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste der gesperrten Länder stehen.",
   sanctions_country_none: "Keine Leads mit gesperrtem Land",
   sanctions_country_lift: "Sperre für diesen Lead aufheben",
   sanctions_country_lift_title: "Länder-Sperre für diesen Lead aufheben",
@@ -392,7 +395,7 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_list_source_upload: "manuell",
   sanctions_blocked_countries: "Gesperrte Länder",
   sanctions_blocked_countries_hint:
-    "Steht die Staatsangehörigkeit oder das Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen oder des Zahlers auf der Liste, kann der Lead weder qualifiziert noch konvertiert werden und die Agentur unterzeichnet keinen Auftrag, bis der CEO die Sperre für den Lead aufhebt. EU-Sanktionen betreffen bestimmte Personen und Sektoren und verbieten keine Behandlung von Staatsangehörigen als solchen: Eine Ablehnung wegen der Staatsangehörigkeit ist eine geschäftliche Entscheidung mit Risiken nach AGG § 19 und DSGVO Art. 22 (anwaltliche Prüfung erforderlich).",
+    "Steht die Staatsangehörigkeit oder das Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste, kann der Lead weder qualifiziert noch konvertiert werden und die Agentur unterzeichnet keinen Auftrag, bis der CEO die Sperre für den Lead aufhebt. EU-Sanktionen betreffen bestimmte Personen und Sektoren und verbieten keine Behandlung von Staatsangehörigen als solchen: Eine Ablehnung wegen der Staatsangehörigkeit ist eine geschäftliche Entscheidung mit Risiken nach AGG § 19 und DSGVO Art. 22 (anwaltliche Prüfung erforderlich).",
   sanctions_blocked_countries_placeholder: "Länder",
   sanctions_blocked_countries_saved: "Gesperrte Länder gespeichert",
   sanctions_settings_title: "Sanktionen und gesperrte Länder",

@@ -85,6 +85,7 @@ export function subjectKindLabel(kind: SubjectKind, t: Translations, subjectRef?
     lead_patient: t.sanctions_kind_lead_patient,
     lead_guardian: t.sanctions_kind_lead_guardian,
     lead_payer: t.sanctions_kind_lead_payer,
+    lead_recipient: t.sanctions_kind_lead_recipient,
     patient: t.sanctions_kind_patient,
   }[kind];
 }

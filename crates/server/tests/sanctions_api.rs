@@ -1672,3 +1672,277 @@ async fn the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit
     set_payment_route(&app, paid, "Deutsche Bank AG", "DE").await;
     assert_eq!(lead_status(&app, paid).await["screening"], "confirmed");
 }
+
+/// Step 3 of the cabinet as any writer stores it: the invoice recipient
+/// answers (`lead_invoice_recipients`), the keys of `recipient` only.
+async fn set_recipient(app: &TestApp, lead_id: Uuid, recipient: Value) {
+    sqlx::query(
+        r#"INSERT INTO lead_invoice_recipients
+               (lead_id, recipient, recipient_is_payer, recipient_type, first_name, last_name,
+                organisation_name, country)
+           SELECT $1, r.recipient, r.recipient_is_payer, r.recipient_type, r.first_name,
+                  r.last_name, r.organisation_name, r.country
+           FROM jsonb_populate_record(NULL::lead_invoice_recipients, $2) r
+           ON CONFLICT (lead_id) DO UPDATE SET
+               recipient = EXCLUDED.recipient,
+               recipient_is_payer = EXCLUDED.recipient_is_payer,
+               recipient_type = EXCLUDED.recipient_type,
+               first_name = EXCLUDED.first_name,
+               last_name = EXCLUDED.last_name,
+               organisation_name = EXCLUDED.organisation_name,
+               country = EXCLUDED.country,
+               updated_at = now()"#,
+    )
+    .bind(lead_id)
+    .bind(recipient)
+    .execute(app.pool())
+    .await
+    .unwrap();
+}
+
+async fn lead_hits(app: &TestApp, lead_id: Uuid) -> Vec<Value> {
+    open_hits(app)
+        .await
+        .into_iter()
+        .filter(|hit| hit["lead_id"] == json!(lead_id))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_third_party_invoice_recipient_who_does_not_pay_is_screened_like_a_payer() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+
+    // A person receives the invoice; the patient pays (nobody declared).
+    let person_lead = insert_lead(
+        &app,
+        "Anna",
+        "Muster",
+        Some("1990-02-02"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    assert_eq!(lead_status(&app, person_lead).await["screening"], "clear");
+    assert!(!lead_is_queued(&app, person_lead).await);
+    set_recipient(
+        &app,
+        person_lead,
+        json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "person",
+            "first_name": "Testomir",
+            "last_name": "Korneev",
+            "country": "AT"
+        }),
+    )
+    .await;
+    assert!(
+        lead_is_queued(&app, person_lead).await,
+        "the recipient's answers queue the lead"
+    );
+    let status = lead_status(&app, person_lead).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = lead_hits(&app, person_lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let person_hit = hits[0].clone();
+    assert_eq!(person_hit["subject_kind"], "lead_recipient", "{person_hit}");
+    assert_eq!(person_hit["subject_ref"], "invoice-recipient");
+    assert_eq!(person_hit["owner_name"], "Anna Muster");
+    assert_eq!(person_hit["list_logical_id"], "900101");
+    let subject = &person_hit["current_subject"];
+    assert_eq!(subject["organisation"], false, "{person_hit}");
+    assert_eq!(subject["first_name"], "Testomir", "{person_hit}");
+    assert_eq!(subject["last_name"], "Korneev", "{person_hit}");
+    assert_eq!(subject["residence"], json!(["AT"]), "{person_hit}");
+    assert_eq!(subject["relation"], "invoice_recipient", "{person_hit}");
+    // The CEO is told without the recipient's or the patient's name.
+    let notifications: Vec<(String, String)> = sqlx::query_as(
+        "SELECT title, COALESCE(body, '') FROM user_notifications WHERE user_id = $1 AND kind = 'sanctions_possible_match'",
+    )
+    .bind(app.ceo_id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(notifications.len(), 1);
+    for (title, body) in &notifications {
+        for name in ["Testomir", "Korneev", "Muster"] {
+            assert!(
+                !title.contains(name) && !body.contains(name),
+                "{title} {body}"
+            );
+        }
+    }
+    // The hold of any open hit; T16 of the payer's side although the
+    // patient pays (the recipient is a third party on the money side).
+    let (code, body) = qualify(&app, person_lead).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+    assert_eq!(t16_subjects(&app, person_lead).await, vec!["payer"]);
+
+    // An organisation receives the invoice: screened against the listed
+    // entities by its name, its seat as residence.
+    let organisation_lead = insert_lead(
+        &app,
+        "Ben",
+        "Muster",
+        Some("1985-03-03"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    set_recipient(
+        &app,
+        organisation_lead,
+        json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "organisation",
+            "organisation_name": "Polartek Shipping LLC",
+            "country": "CY"
+        }),
+    )
+    .await;
+    assert_eq!(
+        lead_status(&app, organisation_lead).await["screening"],
+        "review_pending"
+    );
+    let hits = lead_hits(&app, organisation_lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let organisation_hit = hits[0].clone();
+    assert_eq!(organisation_hit["subject_kind"], "lead_recipient");
+    assert_eq!(organisation_hit["list_entry"]["subject_type"], "entity");
+    let subject = &organisation_hit["current_subject"];
+    assert_eq!(subject["organisation"], true, "{organisation_hit}");
+    assert_eq!(subject["first_name"], "", "{organisation_hit}");
+    assert_eq!(
+        subject["last_name"], "Polartek Shipping LLC",
+        "{organisation_hit}"
+    );
+    assert_eq!(subject["residence"], json!(["CY"]), "{organisation_hit}");
+
+    // A confirmed recipient match: the enhanced check is required (the
+    // payer's side) and the gates hold.
+    decide(
+        &app,
+        organisation_hit["id"].as_str().unwrap(),
+        "confirmed",
+        "Same company name and seat as the EU entry",
+    )
+    .await;
+    assert_eq!(
+        lead_status(&app, organisation_lead).await["screening"],
+        "confirmed"
+    );
+    let (code, body) = qualify(&app, organisation_lead).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_confirmed");
+    let check = enhanced_check(&app, organisation_lead).await;
+    assert_eq!(check["required"], true, "{check}");
+    assert!(
+        check["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "payer_sanctioned"),
+        "{check}"
+    );
+    assert_eq!(t16_subjects(&app, organisation_lead).await, vec!["payer"]);
+
+    // A recipient who pays is the third-party payer: screened once, as the
+    // payer, never as the recipient besides.
+    let paying_lead = insert_lead(
+        &app,
+        "Mia",
+        "Muster",
+        Some("1992-04-04"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    declare_payer(
+        &app,
+        paying_lead,
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Testomir",
+            "last_name": "Korneev",
+            "source_of_funds": "savings"
+        }),
+    )
+    .await;
+    set_recipient(
+        &app,
+        paying_lead,
+        json!({
+            "recipient": "third_party",
+            "recipient_is_payer": true,
+            "recipient_type": "person",
+            "first_name": "Testomir",
+            "last_name": "Korneev",
+            "country": "AT"
+        }),
+    )
+    .await;
+    assert_eq!(
+        lead_status(&app, paying_lead).await["screening"],
+        "review_pending"
+    );
+    let hits = lead_hits(&app, paying_lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "lead_payer", "{hits:?}");
+    let recipient_hits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sanctions_hits WHERE lead_id = $1 AND subject_kind = 'lead_recipient'",
+    )
+    .bind(paying_lead)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(recipient_hits, 0);
+
+    // Another recipient re-screens at once: the old match no longer matches.
+    set_recipient(
+        &app,
+        person_lead,
+        json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "person",
+            "first_name": "Mia",
+            "last_name": "Beispiel",
+            "country": "AT"
+        }),
+    )
+    .await;
+    assert!(lead_is_queued(&app, person_lead).await);
+    lead_status(&app, person_lead).await;
+    let still_matches: bool = sqlx::query_scalar(
+        "SELECT still_matches FROM sanctions_hits WHERE lead_id = $1 AND subject_kind = 'lead_recipient'",
+    )
+    .bind(person_lead)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert!(!still_matches);
+    // Removing the answers queues the lead as well.
+    sqlx::query("DELETE FROM lead_invoice_recipients WHERE lead_id = $1")
+        .bind(person_lead)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    assert!(lead_is_queued(&app, person_lead).await);
+    // The CEO's false positive withdraws T16 like any hit.
+    decide(
+        &app,
+        person_hit["id"].as_str().unwrap(),
+        "false_positive",
+        "Another person: born in Austria, passport checked",
+    )
+    .await;
+    assert_eq!(lead_status(&app, person_lead).await["screening"], "clear");
+    assert!(t16_subjects(&app, person_lead).await.is_empty());
+}

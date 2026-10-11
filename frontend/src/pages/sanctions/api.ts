@@ -65,8 +65,11 @@ export type LeadSanctionsFlag = {
 };
 
 export type HitStatus = "open" | "false_positive" | "confirmed";
-/** `lead_bank`: the bank of the lead's payment route (owner decision 2026-10-11). */
-export type SubjectKind = "lead_patient" | "lead_guardian" | "lead_payer" | "lead_bank" | "patient";
+/**
+ * `lead_bank`: the bank of the lead's payment route; `lead_recipient`: a third-party invoice
+ * recipient who does not pay (owner decisions 2026-10-11).
+ */
+export type SubjectKind = "lead_patient" | "lead_guardian" | "lead_payer" | "lead_bank" | "lead_recipient" | "patient";
 
 export type SubjectData = {
   first_name: string;
@@ -120,7 +123,7 @@ export type ListEntry = {
 export type SanctionsHit = {
   id: string;
   subject_kind: SubjectKind;
-  /** Which subject of the kind: for a bank `patient-bank` or `payer-bank`. */
+  /** Which subject of the kind: for a bank `patient-bank` or `payer-bank`, `invoice-recipient` for the recipient. */
   subject_ref?: string;
   lead_id: string | null;
   patient_id: string | null;

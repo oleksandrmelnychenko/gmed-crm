@@ -15,7 +15,9 @@
 //! * a citizenship of the third-party payer is on the black list
 //!   (`payer_citizenship_blacklist`; a person only);
 //! * the sanctions screening has a confirmed match for the patient
-//!   (`patient_sanctioned`) or for the third-party payer (`payer_sanctioned`).
+//!   (`patient_sanctioned`) or for the third-party payer (`payer_sanctioned`;
+//!   also the bank the payer pays through and the third-party invoice
+//!   recipient who does not pay, owner decisions 2026-10-11).
 //!
 //! The black list is [`BLACK_LIST_COUNTRY_CODES`], the FATF "call for
 //! action" countries — not the longer list of high-risk third countries and
@@ -253,20 +255,22 @@ pub(crate) async fn load_subjects(
                             AND h.status = 'open'
                       ) AS patient_open,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind = 'lead_payer'
+                          WHERE (h.subject_kind IN ('lead_payer', 'lead_recipient')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind = 'lead_payer'
+                          WHERE (h.subject_kind IN ('lead_payer', 'lead_recipient')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'open'
                       ) AS payer_open
                FROM sanctions_hits h
-               -- A hit on the bank counts for whoever pays through it (owner
-               -- decision 2026-10-11).
+               -- A hit on the bank counts for whoever pays through it; a hit
+               -- on the third-party invoice recipient who does not pay counts
+               -- for the payer's side (owner decisions 2026-10-11).
                WHERE (h.lead_id = l.id
-                      AND h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank'))
+                      AND h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank',
+                                             'lead_recipient'))
                   -- The patient record of a repeat intake or of the converted lead.
                   OR (h.subject_kind = 'patient'
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))

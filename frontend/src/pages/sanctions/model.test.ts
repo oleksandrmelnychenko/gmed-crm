@@ -104,6 +104,12 @@ describe("hit subject labels", () => {
     expect(PAYER_BANK_REF).toBe("payer-bank");
   });
 
+  it("names the invoice recipient (owner decision 2026-10-11)", () => {
+    expect(subjectKindLabel("lead_recipient", ru, "invoice-recipient")).toBe("Получатель счёта");
+    expect(subjectKindLabel("lead_recipient", de, "invoice-recipient")).toBe("Rechnungsempfänger");
+    expect(subjectKindLabel("lead_recipient", de)).toBe("Rechnungsempfänger");
+  });
+
   it("keeps the labels of persons and payers", () => {
     expect(subjectKindLabel("lead_payer", ru)).toBe(ru.sanctions_kind_lead_payer);
     expect(subjectKindLabel("lead_patient", de, "")).toBe(de.sanctions_kind_lead_patient);

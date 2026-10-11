@@ -20,10 +20,12 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 )"#;
 
 /// A sanctions hit (`h`) on the payer's side: the third-party payer and the
-/// people behind it, and the bank the payer pays through (owner decision
-/// 2026-10-11). Every other hit of the lead — the patient, a guardian, the
-/// bank the patient pays through — is the patient's side (T16).
-pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind = 'lead_payer' \
+/// people behind it, the bank the payer pays through and the third-party
+/// invoice recipient who does not pay (owner decisions 2026-10-11: the
+/// recipient is a third party on the money side). Every other hit of the
+/// lead — the patient, a guardian, the bank the patient pays through — is the
+/// patient's side (T16).
+pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient') \
      OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))";
 
 /// The inputs of a lead; `None` when the lead does not exist.
@@ -63,6 +65,7 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                   ) AS identity_on_file,
                   COALESCE(hits.patient_hit, false) AS patient_hit,
                   COALESCE(hits.payer_hit, false) AS payer_hit,
+                  COALESCE(hits.recipient_hit, false) AS recipient_hit,
                   lead_orders.lead_value,
                   COALESCE(lead_orders.order_payers, 0) AS order_payers
            FROM leads l
@@ -71,7 +74,9 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
            LEFT JOIN LATERAL (
                SELECT bool_or(NOT {PAYER_SIDE_HIT_SQL}) AS patient_hit,
-                      bool_or({PAYER_SIDE_HIT_SQL}) AS payer_hit
+                      bool_or({PAYER_SIDE_HIT_SQL} AND h.subject_kind <> 'lead_recipient')
+                          AS payer_hit,
+                      bool_or(h.subject_kind = 'lead_recipient') AS recipient_hit
                FROM sanctions_hits h
                WHERE h.status IN ('open', 'confirmed')
                  AND ((h.lead_id = l.id AND h.subject_kind <> 'patient')
@@ -191,7 +196,9 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         patient_sanctions_links: flag("sanctions_links"),
         payer_sanctions_links: third_party && flag("statement_sanctions_links"),
         patient_hit: flag("patient_hit"),
-        payer_hit: third_party && flag("payer_hit"),
+        // A hit of the invoice recipient is the payer's side even while the
+        // patient pays: the recipient is a third party on the money side.
+        payer_hit: (third_party && flag("payer_hit")) || flag("recipient_hit"),
         today: Some(today),
     };
     Ok(Some(inputs))

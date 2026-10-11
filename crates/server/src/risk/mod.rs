@@ -342,7 +342,9 @@ pub struct Inputs {
     pub payer_sanctions_links: bool,
     /// An open or confirmed sanctions hit of the patient or a representative.
     pub patient_hit: bool,
-    /// An open or confirmed sanctions hit of the payer.
+    /// An open or confirmed sanctions hit of the payer's side: the
+    /// third-party payer, its bank, or the third-party invoice recipient who
+    /// does not pay (owner decision 2026-10-11).
     pub payer_hit: bool,
     /// Today in Europe/Berlin.
     pub today: Option<NaiveDate>,

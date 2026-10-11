@@ -23,6 +23,11 @@
 //!   [`SanctionsIndex::screen_bank`](super::matching::SanctionsIndex::screen_bank);
 //!   `patient-bank` while the patient pays, `payer-bank` while a third party
 //!   pays — see [`bank_subjects`];
+//! * the invoice recipient (`lead_recipient`, owner decision 2026-10-11): a
+//!   third party — a person or an organisation — the lead named in step 3
+//!   of the cabinet (`lead_invoice_recipients`) that does not pay. A
+//!   recipient who pays is the third-party payer and screened as such
+//!   (`lead_payer`), never twice — see [`recipient_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
 //!
@@ -62,6 +67,8 @@ pub enum SubjectKind {
     LeadPayer,
     /// The bank of the lead's payment route.
     LeadBank,
+    /// A third-party invoice recipient who does not pay.
+    LeadRecipient,
     Patient,
 }
 
@@ -72,10 +79,16 @@ impl SubjectKind {
             Self::LeadGuardian => "lead_guardian",
             Self::LeadPayer => "lead_payer",
             Self::LeadBank => "lead_bank",
+            Self::LeadRecipient => "lead_recipient",
             Self::Patient => "patient",
         }
     }
 }
+
+/// `subject_ref` of the invoice recipient (one per lead).
+pub const INVOICE_RECIPIENT_REF: &str = "invoice-recipient";
+/// `relation` of the invoice recipient in the hit's snapshot.
+pub const INVOICE_RECIPIENT_RELATION: &str = "invoice_recipient";
 
 /// `subject_ref` of the bank the patient pays through (the patient or nobody
 /// else declared as payer).
@@ -270,17 +283,38 @@ pub async fn load_leads_subjects(
     .await?;
     let mut payers = load_payer_rows(db, lead_ids).await;
     let mut representatives = load_representative_rows(db, lead_ids).await?;
+    let mut recipients = load_recipient_rows(db, lead_ids).await?;
     let today = crate::app_time::today();
     let mut leads = Vec::with_capacity(rows.len());
     for row in rows {
         let lead_id: Uuid = row.try_get("id")?;
         let payer_rows = payers.remove(&lead_id).unwrap_or_default();
         let representative_rows = representatives.remove(&lead_id).unwrap_or_default();
-        if let Some(lead) = lead_subjects_from_row(&row, &payer_rows, &representative_rows, today) {
+        let recipient = recipients.remove(&lead_id);
+        if let Some(mut lead) =
+            lead_subjects_from_row(&row, &payer_rows, &representative_rows, today)
+        {
+            lead.subjects
+                .extend(recipient_subjects(lead_id, recipient.as_ref(), &payer_rows));
             leads.push(lead);
         }
     }
     Ok(leads)
+}
+
+/// The invoice recipients of the leads (`lead_invoice_recipients`, step 3 of
+/// the cabinet since 2026-10-11) as JSON rows, by lead.
+async fn load_recipient_rows(
+    db: &gmed_db::DbPool,
+    lead_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Value>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        "SELECT r.lead_id, to_jsonb(r) FROM lead_invoice_recipients r WHERE r.lead_id = ANY($1)",
+    )
+    .bind(lead_ids)
+    .fetch_all(db)
+    .await?;
+    Ok(rows.into_iter().collect())
 }
 
 /// What the cabinet holds about the representatives of the leads
@@ -703,6 +737,80 @@ pub fn bank_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
         });
     }
     subjects
+}
+
+/// The invoice recipient of a lead as a subject (owner decision 2026-10-11):
+/// a third party (`recipient = 'third_party'`) the lead named in step 3 of
+/// the cabinet, while it does not pay.
+///
+/// A recipient pays by the server's own rule
+/// ([`SectionSeven::of_recipient`](crate::routes::lead_invoice_recipient::SectionSeven::of_recipient)):
+/// the lead answered "Ist der Rechnungsempfänger der Zahler?" with yes and
+/// the declaration names a third party as payer. That recipient is the payer
+/// and screened as `lead_payer`; it is no subject here, so nobody is reviewed
+/// twice. Until a third party is declared as payer (or with "nein", or before
+/// the answer) the recipient is a subject of its own.
+///
+/// An organisation (`recipient_type = 'organisation'`) is screened against
+/// the listed entities by its name — in `last_name`, like an organisation
+/// payer — with its seat as residence. A person is screened by first and last
+/// name with the country of the address as residence (the cabinet asks no
+/// birth date or citizenship of a recipient). A row without a type is a
+/// person when it holds a last name, otherwise an organisation by its name.
+/// One subject per lead under [`INVOICE_RECIPIENT_REF`].
+pub fn recipient_subjects(
+    lead_id: Uuid,
+    recipient: Option<&Value>,
+    payer_rows: &[Value],
+) -> Vec<SubjectRecord> {
+    use crate::routes::lead_invoice_recipient::{
+        RECIPIENT_THIRD_PARTY, RECIPIENT_TYPE_ORGANISATION, RECIPIENT_TYPE_PERSON,
+    };
+    let Some(row) = recipient else {
+        return Vec::new();
+    };
+    if json_text(row, "recipient") != RECIPIENT_THIRD_PARTY {
+        return Vec::new();
+    }
+    let answered_pays = row.get("recipient_is_payer").and_then(Value::as_bool) == Some(true);
+    let third_party_payer = payer_rows
+        .iter()
+        .any(|payer| json_text(payer, "payer_kind") == "third_party");
+    if answered_pays && third_party_payer {
+        return Vec::new();
+    }
+    let recipient_type = json_text(row, "recipient_type");
+    let last_name = json_text(row, "last_name");
+    let organisation = recipient_type == RECIPIENT_TYPE_ORGANISATION
+        || (recipient_type != RECIPIENT_TYPE_PERSON && last_name.is_empty());
+    let subject = if organisation {
+        Subject {
+            first_name: String::new(),
+            middle_name: None,
+            last_name: json_text(row, "organisation_name"),
+            date_of_birth: None,
+            citizenships: Vec::new(),
+            organisation: true,
+        }
+    } else {
+        Subject {
+            first_name: json_text(row, "first_name"),
+            middle_name: None,
+            last_name,
+            date_of_birth: None,
+            citizenships: Vec::new(),
+            organisation: false,
+        }
+    };
+    vec![SubjectRecord {
+        kind: SubjectKind::LeadRecipient,
+        lead_id: Some(lead_id),
+        patient_id: None,
+        subject_ref: INVOICE_RECIPIENT_REF.to_string(),
+        subject,
+        residence: json_codes(row, "country"),
+        relation: Some(INVOICE_RECIPIENT_RELATION.to_string()),
+    }]
 }
 
 /// Possible matches of one subject: a bank against the listed entities by
@@ -1759,6 +1867,144 @@ mod tests {
         let generic = record("Bank Testgrad Commerce");
         assert_eq!(screen_subject(&index, &generic).len(), 1);
         assert!(screen_subject(&index, &record("Bank")).is_empty());
+    }
+
+    #[test]
+    fn a_third_party_invoice_recipient_who_does_not_pay_is_a_subject_of_its_own() {
+        let lead_id = Uuid::new_v4();
+        let person = json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "person",
+            "first_name": " Mia ",
+            "last_name": "Muster",
+            "country": "AT",
+            "relationship_kind": "employer",
+        });
+        let subjects = recipient_subjects(lead_id, Some(&person), &[]);
+        assert_eq!(subjects.len(), 1);
+        let record = &subjects[0];
+        assert_eq!(record.kind, SubjectKind::LeadRecipient);
+        assert_eq!(record.kind.as_str(), "lead_recipient");
+        assert_eq!(record.lead_id, Some(lead_id));
+        assert_eq!(record.subject_ref, INVOICE_RECIPIENT_REF);
+        assert_eq!(record.relation.as_deref(), Some("invoice_recipient"));
+        assert!(!record.subject.organisation);
+        assert_eq!(
+            (
+                record.subject.first_name.as_str(),
+                record.subject.last_name.as_str()
+            ),
+            ("Mia", "Muster")
+        );
+        assert_eq!(record.residence, ["AT"]);
+        assert_eq!(record.countries(), ["AT"]);
+        assert!(record.subject.is_screenable());
+
+        // An organisation by its name, its seat as residence; a person's
+        // data of an earlier answer do not count.
+        let organisation = json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "organisation",
+            "organisation_name": "Beispiel GmbH",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "country": "CY",
+        });
+        let subjects = recipient_subjects(lead_id, Some(&organisation), &[]);
+        assert_eq!(subjects.len(), 1);
+        assert!(subjects[0].subject.organisation);
+        assert_eq!(subjects[0].subject.first_name, "");
+        assert_eq!(subjects[0].subject.last_name, "Beispiel GmbH");
+        assert_eq!(subjects[0].residence, ["CY"]);
+        assert_eq!(subjects[0].snapshot()["organisation"], true);
+        assert_ne!(
+            subject_fingerprint(&subjects[0].subject),
+            subject_fingerprint(&record.subject)
+        );
+
+        // Before "Ist der Rechnungsempfänger der Zahler?" is answered the
+        // recipient is screened as well.
+        let unanswered = json!({
+            "recipient": "third_party",
+            "recipient_type": "person",
+            "first_name": "Mia",
+            "last_name": "Muster",
+        });
+        assert_eq!(recipient_subjects(lead_id, Some(&unanswered), &[]).len(), 1);
+        // A row without a type: a person by a last name, else an
+        // organisation by its name.
+        let untyped = json!({ "recipient": "third_party", "organisation_name": "Beispiel GmbH" });
+        assert!(
+            recipient_subjects(lead_id, Some(&untyped), &[])[0]
+                .subject
+                .organisation
+        );
+    }
+
+    #[test]
+    fn an_invoice_recipient_who_pays_or_the_patient_side_is_no_recipient_subject() {
+        let lead_id = Uuid::new_v4();
+        let third_party_payer = json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+        });
+        let pays = json!({
+            "recipient": "third_party",
+            "recipient_is_payer": true,
+            "recipient_type": "person",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+        });
+        // The recipient who pays is the payer: one subject, `lead_payer`.
+        assert!(
+            recipient_subjects(
+                lead_id,
+                Some(&pays),
+                std::slice::from_ref(&third_party_payer)
+            )
+            .is_empty()
+        );
+        assert_eq!(
+            payer_subjects(lead_id, std::slice::from_ref(&third_party_payer)).len(),
+            1
+        );
+        // "Pays" answered but nobody declared as third-party payer yet: the
+        // recipient is not screened as payer, so it is screened here.
+        assert_eq!(
+            recipient_subjects(lead_id, Some(&pays), &[json!({ "payer_kind": "self" })]).len(),
+            1
+        );
+        // A recipient who does not pay stays a subject next to another payer.
+        let other = json!({
+            "recipient": "third_party",
+            "recipient_is_payer": false,
+            "recipient_type": "organisation",
+            "organisation_name": "Beispiel GmbH",
+        });
+        assert_eq!(
+            recipient_subjects(
+                lead_id,
+                Some(&other),
+                std::slice::from_ref(&third_party_payer)
+            )
+            .len(),
+            1
+        );
+        // The patient side as recipient, no answer, no row: nothing.
+        for row in [
+            json!({ "recipient": "self", "recipient_is_payer": true }),
+            json!({ "recipient": null }),
+        ] {
+            assert!(
+                recipient_subjects(lead_id, Some(&row), &[]).is_empty(),
+                "{row}"
+            );
+        }
+        assert!(recipient_subjects(lead_id, None, &[]).is_empty());
     }
 
     #[test]

@@ -101,7 +101,61 @@ const bankHit = (status: "open" | "false_positive" | "confirmed" = "open") => {
   };
 };
 
-type HitFactory = (status?: "open" | "false_positive" | "confirmed") => ReturnType<typeof hit> | ReturnType<typeof bankHit>;
+/**
+ * A possible match of a third-party invoice recipient who does not pay (owner decision
+ * 2026-10-11): a person by name and country of the address, or an organisation by its name.
+ */
+const recipientHit = (kind: "person" | "organisation") => (status: "open" | "false_positive" | "confirmed" = "open") => {
+  const subject =
+    kind === "person"
+      ? {
+          first_name: "Testomir",
+          middle_name: null,
+          last_name: "Korneev",
+          date_of_birth: null,
+          citizenships: [],
+          residence: ["AT"],
+          organisation: false,
+          relation: "invoice_recipient",
+        }
+      : {
+          first_name: "",
+          middle_name: null,
+          last_name: "Polartek Shipping LLC",
+          date_of_birth: null,
+          citizenships: [],
+          residence: ["CY"],
+          organisation: true,
+          relation: "invoice_recipient",
+        };
+  const base = hit(status);
+  return {
+    ...base,
+    subject_kind: "lead_recipient",
+    subject_ref: "invoice-recipient",
+    owner_name: "Anna Muster",
+    subject_snapshot: subject,
+    current_subject: { ...subject },
+    ...(kind === "organisation"
+      ? {
+          list_logical_id: "900201",
+          list_entry: {
+            logical_id: "900201",
+            eu_reference: "EU.9002.01",
+            subject_type: "entity",
+            names: [{ whole_name: "OOO Polartek Shipping" }],
+            birth_dates: [],
+            citizenships: [],
+            regulations: [{ programme: "RUS", number_title: "2099/3 (OJ L 3)", publication_date: "2099-03-01" }],
+            remark: "Synthetic test company",
+          },
+          match_details: { score: 0.97, name_score: 0.97, matched_name: "OOO Polartek Shipping", dob: "unknown", citizenship: "unknown" },
+        }
+      : {}),
+  };
+};
+
+type HitFactory = (status?: "open" | "false_positive" | "confirmed") => { status: string };
 
 async function setup(page: Page, lang = "ru", make: HitFactory = hit) {
   let current = make();
@@ -239,6 +293,40 @@ test("a hit on the patient's bank in German", async ({ page }) => {
   const card = page.getByTestId("sanctions-hit");
   await expect(card.getByTestId("sanctions-hit-kind")).toHaveText("Bank des Patienten");
   await expect(card).toContainText("Kontoland");
+});
+
+test("a hit on the invoice recipient names it and FiSaLis gets the recipient's name", async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(baseURL!).origin });
+  await setup(page, "ru", recipientHit("person"));
+  const card = page.getByTestId("sanctions-hit");
+  await expect(card.getByTestId("sanctions-hit-kind")).toHaveText("Получатель счёта");
+  await expect(card).toContainText("Anna Muster");
+  await expect(card).toContainText("Страна проживания");
+  // The label says who it is; no raw relation key.
+  await expect(card).not.toContainText("invoice_recipient");
+  await expect(card).not.toContainText("Отношение");
+
+  const popupPromise = context.waitForEvent("page");
+  await card.getByRole("button", { name: "Проверить в FiSaLis" }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  expect(popup.url()).toBe("https://www.finanz-sanktionsliste.de/fisalis/");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Testomir Korneev");
+});
+
+test("an organisation as invoice recipient in German", async ({ page }) => {
+  await setup(page, "de", recipientHit("organisation"));
+  const card = page.getByTestId("sanctions-hit");
+  await expect(card.getByTestId("sanctions-hit-kind")).toHaveText("Rechnungsempfänger");
+  await expect(card).toContainText("Polartek Shipping LLC");
+  await expect(card).toContainText("OOO Polartek Shipping");
+  await expect(card).toContainText("Sitzland");
+  // An organisation has no birth date or citizenship of ours.
+  await expect(card).not.toContainText("Geburtsdatum");
 });
 
 test("confirming warns that the stop is final (German, phone width)", async ({ page }) => {

@@ -411,7 +411,8 @@ async fn hit_json(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<Value
         "id": row.try_get::<Uuid, _>("id")?,
         "subject_kind": subject_kind,
         // Whose subject among several of a kind: a guardian's contact id, a
-        // payer reference, `patient-bank` / `payer-bank` for a bank.
+        // payer reference, `patient-bank` / `payer-bank` for a bank,
+        // `invoice-recipient` for the invoice recipient.
         "subject_ref": subject_ref,
         "lead_id": lead_id,
         "patient_id": patient_id,
