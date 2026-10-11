@@ -15,6 +15,12 @@ use crate::{audit::AuditContext, auth::middleware::AuthUser, state::AppState};
 
 const MAX_NAME_LENGTH: usize = 500;
 const SUGGESTION_LIMIT: usize = 50;
+/// Name suggestions and the pair check of the medication form (also used by
+/// the clinical import): the roles that enter medication and import clinical
+/// documents (owner decision 2026-10-11 — the patient manager imports for its
+/// own patients). Saving a confirmed pair with a medication was already open
+/// to both; maintaining the catalogue page stays with the CEO.
+const LOOKUP_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager];
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -151,7 +157,7 @@ async fn check_pair(
     Extension(auth): Extension<AuthUser>,
     Query(input): Query<PairInput>,
 ) -> Response {
-    if let Err(response) = auth.require_any_role(&[Role::Ceo]) {
+    if let Err(response) = auth.require_any_role(LOOKUP_ROLES) {
         return response;
     }
     let input = match normalize_pair(input) {
@@ -457,7 +463,7 @@ async fn search_names(
     Query(query): Query<NameQuery>,
 ) -> Response {
     // Same access as the clinical medication editor.
-    if let Err(response) = auth.require_any_role(&[Role::Ceo]) {
+    if let Err(response) = auth.require_any_role(LOOKUP_ROLES) {
         return response;
     }
     if query.q.chars().count() > MAX_NAME_LENGTH

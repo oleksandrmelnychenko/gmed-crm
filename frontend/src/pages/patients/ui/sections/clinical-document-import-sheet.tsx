@@ -36,7 +36,7 @@ import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
-import { clearApiCache } from "@/lib/api";
+import { ApiRequestError, clearApiCache } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createDocumentPreviewObjectUrl,
@@ -49,7 +49,9 @@ import {
   clinicalDocumentImportAfterPrepare,
   clinicalDocumentPreviewPage,
   clinicalDocumentTextPages,
+  clinicalImportErrorReason,
   clinicalImportNeedsSourceCountry,
+  clinicalImportStoredDocumentMessage,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
   fetchClinicalDocumentImport,
@@ -983,6 +985,10 @@ export function ClinicalDocumentImportSheet({
   ) => Promise<ApplyResult>;
 }) {
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
+  const importLang = lang === "de" ? "de" : "ru";
+  const isForbiddenError = (error: unknown) => error instanceof ApiRequestError && error.status === 403;
+  const historyErrorMessage = (error: unknown) =>
+    `${tx("История недоступна: ", "Verlauf nicht verfügbar: ")}${clinicalImportErrorReason(error, importLang)}`;
   const fileRef = useRef<HTMLInputElement>(null);
   const previewUrlRef = useRef<string | null>(null);
   const appliedNoticeRef = useRef<HTMLDivElement>(null);
@@ -1017,6 +1023,9 @@ export function ClinicalDocumentImportSheet({
   const [imports, setImports] = useState<ClinicalDocumentImportSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
+  // The history request runs the same access check as the import: when the
+  // server refuses it, uploading would only store a file nobody can import.
+  const [importRefused, setImportRefused] = useState(false);
   const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ClinicalDocumentImportSummary | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -1044,15 +1053,13 @@ export function ClinicalDocumentImportSheet({
         if (!cancelled) {
           setImports(items);
           setHistoryError("");
+          setImportRefused(false);
         }
       })
-      .catch((error) => {
+      .catch((error: unknown) => {
         if (!cancelled) {
-          setHistoryError(
-            error instanceof Error
-              ? error.message
-              : tx("Не удалось загрузить историю", "Verlauf konnte nicht geladen werden"),
-          );
+          setImportRefused(isForbiddenError(error));
+          setHistoryError(historyErrorMessage(error));
         }
       })
       .finally(() => {
@@ -1117,12 +1124,10 @@ export function ClinicalDocumentImportSheet({
     try {
       const response = await fetchClinicalDocumentImports(patientId);
       setImports(response.items);
+      setImportRefused(false);
     } catch (error) {
-      setHistoryError(
-        error instanceof Error
-          ? error.message
-          : tx("Не удалось загрузить историю", "Verlauf konnte nicht geladen werden"),
-      );
+      setImportRefused(isForbiddenError(error));
+      setHistoryError(historyErrorMessage(error));
     } finally {
       if (!silent) setHistoryLoading(false);
     }
@@ -1454,8 +1459,9 @@ export function ClinicalDocumentImportSheet({
   }
 
   async function startImport() {
-    if (!file) return;
+    if (!file || importRefused) return;
     setBusy(true);
+    let storedDocumentId: string | null = null;
     try {
       const form = new FormData();
       form.append("file", file);
@@ -1468,6 +1474,7 @@ export function ClinicalDocumentImportSheet({
       form.append("is_medical", "true");
       form.append("ursprung", "clinical_document_import");
       const uploaded = await uploadDocument(form);
+      storedDocumentId = uploaded.id;
       clearApiCache("/documents");
       clearApiCache(`/patients/${patientId}/documents`);
       const created = await createClinicalDocumentImport(patientId, uploaded.id);
@@ -1483,11 +1490,20 @@ export function ClinicalDocumentImportSheet({
         ),
       );
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : tx("Не удалось загрузить документ", "Dokument konnte nicht hochgeladen werden"),
-      );
+      if (storedDocumentId) {
+        // The upload succeeded and the file is now a patient document; only
+        // the import was refused. Say so instead of a bare server error.
+        if (isForbiddenError(error)) setImportRefused(true);
+        setFile(null);
+        if (fileRef.current) fileRef.current.value = "";
+        toast.error(clinicalImportStoredDocumentMessage(error, importLang), 10_000);
+      } else {
+        toast.error(
+          error instanceof Error && error.message
+            ? `${tx("Не удалось загрузить документ", "Dokument konnte nicht hochgeladen werden")}: ${error.message}`
+            : tx("Не удалось загрузить документ", "Dokument konnte nicht hochgeladen werden"),
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -2674,12 +2690,20 @@ export function ClinicalDocumentImportSheet({
                     type="button"
                     size="sm"
                     className="h-9 w-full rounded-lg text-xs"
-                    disabled={!file || busy}
+                    disabled={!file || busy || importRefused}
                     onClick={startImport}
                   >
                     {busy ? <LoaderCircle className="size-4 animate-spin" /> : <FileUp className="size-4" />}
                     {tx("Загрузить и построить черновик", "Hochladen und Entwurf erstellen")}
                   </Button>
+                  {importRefused ? (
+                    <p className="text-[11px] leading-relaxed text-muted-foreground" role="status">
+                      {tx(
+                        "Распознавание для этого пациента вам недоступно, поэтому файл не загружается.",
+                        "Die Erkennung ist für diesen Patienten für Sie nicht verfügbar, daher wird keine Datei hochgeladen.",
+                      )}
+                    </p>
+                  ) : null}
                 </section>
 
                 <section className="overflow-hidden rounded-xl border border-border/70 bg-white">

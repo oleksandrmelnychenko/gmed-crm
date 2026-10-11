@@ -48,6 +48,7 @@ import {
   invoiceTaxFieldsShown,
   invoiceToLabel,
   isOrganisationPayerForm,
+  payerDeclarationPrefillForm,
   payerDeclarationToForm,
   payerFormMissing,
   payerReasonLabel,
@@ -58,6 +59,7 @@ import {
   payerTypeLabel,
   statedFundsSourcesLabel,
   sourceOfFundsLabel,
+  type PayerDeclaration,
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
   type PayerDeclarationStatus,
@@ -149,6 +151,7 @@ export function LeadPayerDeclarationSection({
   leadLanguage,
   onPayerLinkSent,
   enhancedDetails,
+  prefill = null,
 }: {
   leadId: string;
   data: PayerDeclarationResponse | null;
@@ -175,10 +178,19 @@ export function LeadPayerDeclarationSection({
    * without it the declaration's answers are shown without files.
    */
   enhancedDetails?: LeadPortalEnhancedDetails | null;
+  /**
+   * A repeat intake without a declaration of its own: the patient's declaration
+   * fixed at the conversion of the last request. It only fills the form; staff
+   * check it and save (QA B-18, 2026-10-11).
+   */
+  prefill?: PayerDeclaration | null;
 }) {
+  const prefillActive = !data?.declaration && Boolean(prefill);
+  const initialForm = (): PayerDeclarationForm =>
+    !data?.declaration && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
   // The stored declaration is the first form state as well, so a render
   // without effects (static markup) already shows it.
-  const [form, setForm] = useState<PayerDeclarationForm>(() => payerDeclarationToForm(data?.declaration));
+  const [form, setForm] = useState<PayerDeclarationForm>(initialForm);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState<"save" | "upload" | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
@@ -188,12 +200,13 @@ export function LeadPayerDeclarationSection({
   // Take the stored declaration unless the user is editing it. Sending the
   // payer link marks the payer as informed without another change.
   useEffect(() => {
-    const key = `${leadId}:${data?.declaration?.updated_at ?? "none"}:${data?.declaration?.payer_informed_at ?? ""}`;
+    const prefillKey = prefillActive ? `prefill-${prefill?.updated_at ?? ""}` : "";
+    const key = `${leadId}:${data?.declaration?.updated_at ?? "none"}:${data?.declaration?.payer_informed_at ?? ""}:${prefillKey}`;
     if (dirty && loadedFor.current?.startsWith(`${leadId}:`)) return;
     if (loadedFor.current === key) return;
     loadedFor.current = key;
-    setForm(payerDeclarationToForm(data?.declaration));
-  }, [data, dirty, leadId]);
+    setForm(prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration));
+  }, [data, dirty, leadId, prefill, prefillActive]);
 
   const patch = <K extends keyof PayerDeclarationForm>(key: K, value: PayerDeclarationForm[K]) => {
     setDirty(true);
@@ -361,6 +374,14 @@ export function LeadPayerDeclarationSection({
           : null}
         {loading && !data ? (
           <p className="text-xs text-muted-foreground">{tx("Загружается…", "Wird geladen…")}</p>
+        ) : null}
+        {prefillActive && canEdit ? (
+          <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800" data-testid="lead-payer-prefill-note">
+            {tx(
+              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные и сохраните — до сохранения ничего не записано.",
+              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen und speichern – vor dem Speichern wird nichts übernommen.",
+            )}
+          </p>
         ) : null}
 
         <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex flex-wrap gap-2">

@@ -6,6 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
+import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
@@ -562,7 +563,7 @@ function DiagnosisRow({
             ) : null}
             {node.diagnosed_on ? (
               <span className="min-w-0 max-w-full break-words text-[11px] text-muted-foreground">
-                {node.diagnosed_on}
+                {formatAppDate(node.diagnosed_on) || node.diagnosed_on}
               </span>
             ) : null}
           </div>

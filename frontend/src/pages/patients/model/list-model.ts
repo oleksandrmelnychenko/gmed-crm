@@ -79,7 +79,21 @@ export type PatientDetail = PatientSummary & {
   legal_status?: unknown;
   clinical_warnings?: string | null;
   notes?: string | null;
+  /**
+   * Field groups the caller's role does not receive (`patient_detail_hidden_fields`
+   * on the server): "insurance", "address", "passport", "emergency_contact",
+   * "legal_status", ... The card shows them as hidden, never as "not set".
+   */
+  hidden_fields?: string[];
 };
+
+/** Whether the server left `group` out of the patient detail for the caller's role. */
+export function patientFieldHidden(
+  detail: Pick<PatientDetail, "hidden_fields"> | null | undefined,
+  group: string,
+): boolean {
+  return detail?.hidden_fields?.includes(group) ?? false;
+}
 
 export type PatientAssignment = {
   user_id: string;

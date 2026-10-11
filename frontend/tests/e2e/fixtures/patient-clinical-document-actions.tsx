@@ -15,7 +15,7 @@ function Fixture() {
       patientId="patient-one"
       lang={lang}
       canViewClinical={params.get("clinical") !== "false"}
-      canManageDocuments={params.get("scan") !== "false"}
+      canImportDocuments={params.get("scan") !== "false"}
       importAttentionCount={2}
       onScan={() => setScanning(true)}
     />

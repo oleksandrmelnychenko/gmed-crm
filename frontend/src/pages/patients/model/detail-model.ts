@@ -296,11 +296,21 @@ export function canLoadPatientAssignableStaff(actor?: Actor) {
   return hasCapability(actor, "users.view");
 }
 
+/**
+ * `/patients/{id}/documents`: the record roles and the CEO assistant, who
+ * reads the patient's documents read-only by the same per-document rule as
+ * `/documents?patient_id=` (owner decision 2026-10-11).
+ */
+const PATIENT_DOCUMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
+  ...PATIENT_RECORD_SERVER_ROLES,
+  "ceo_assistant",
+]);
+
 export function canViewPatientDocumentsSurface(actor?: Actor) {
   return (
     hasCapability(actor, "patients.view") &&
     hasCapability(actor, "documents.view") &&
-    serverAdmitsRole(actor, PATIENT_RECORD_SERVER_ROLES)
+    serverAdmitsRole(actor, PATIENT_DOCUMENTS_SERVER_ROLES)
   );
 }
 
@@ -325,6 +335,33 @@ export function canViewPatientClinicalProfile(actor?: Actor) {
 
 export function canEditPatientClinicalProfile(actor?: Actor) {
   return hasCapability(actor, "patients.medical.edit");
+}
+
+/**
+ * `IMPORT_ROLES` in `clinical_document_imports.rs` and `LOOKUP_ROLES` in
+ * `medication_names.rs` (owner decision 2026-10-11): the CEO imports clinical
+ * documents for every patient, the patient manager for the patients assigned
+ * to it (the server checks the assignment), and both read the medication name
+ * suggestions. The other roles get neither the entry points nor the requests
+ * the server would always answer with 403 (QA B-02).
+ */
+const CLINICAL_IMPORT_SERVER_ROLES: ReadonlySet<string> = new Set(["ceo", "patient_manager"]);
+const MEDICATION_NAME_CATALOG_SERVER_ROLES: ReadonlySet<string> = new Set(["ceo", "patient_manager"]);
+
+/**
+ * "Scan and recognise", the import sheet with its history, "Recognise
+ * document" on a document row and the medication import history.
+ */
+export function canImportPatientClinicalDocuments(actor?: Actor) {
+  return (
+    hasCapability(actor, "documents.manage") &&
+    serverAdmitsRole(actor, CLINICAL_IMPORT_SERVER_ROLES)
+  );
+}
+
+/** Name suggestions and the brand/substance pair check in the medication form. */
+export function canUseMedicationNameCatalog(actor?: Actor) {
+  return serverAdmitsRole(actor, MEDICATION_NAME_CATALOG_SERVER_ROLES);
 }
 
 export function canManagePatientProfile(actor?: Actor) {

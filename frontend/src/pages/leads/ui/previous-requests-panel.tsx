@@ -34,9 +34,10 @@ export function PreviousRequestsPanel({ requests, currentConcern, tx, specialtyL
           const period = request.date_from || request.date_to
             ? `${formatIntakeDate(request.date_from)} – ${formatIntakeDate(request.date_to)}`
             : null;
+          // "Заказ A-20260301-0001": the bare number reads like an internal code.
           const meta = [
             formatIntakeDate(request.created_at),
-            request.order_number,
+            request.order_number ? `${tx("Заказ", "Auftrag")} ${request.order_number}` : null,
             period,
             request.specialties.map(specialtyLabel).join(", ") || null,
           ].filter(Boolean).join(" · ");

@@ -16,6 +16,7 @@ pub mod medication_benefit_evidence;
 pub mod medication_evidence_reviews;
 pub mod medication_identity;
 pub mod medication_intelligence_sources;
+pub mod medication_labels;
 pub mod order_payment_tracking;
 pub mod order_service_groups;
 pub mod patient_clinical_pdf;

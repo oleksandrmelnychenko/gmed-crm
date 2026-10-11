@@ -45,7 +45,7 @@ import {
 import { patientRelationTypeLabel } from "../../model/detail-model";
 import type { DocumentItem, RelationItem } from "../../model/detail-tab-types";
 import type { PatientLegalStatus } from "../../model/legal-status";
-import type { PatientDetail } from "../../model/list-model";
+import { patientFieldHidden, type PatientDetail } from "../../model/list-model";
 import {
   createPatientLeadOrigin,
   type LeadOriginSelectedWorkType,
@@ -493,6 +493,8 @@ type PatientProfileTabProps = {
     canViewContracts: boolean;
     canViewDocuments: boolean;
     canViewInvoices: boolean;
+    /** `leads.view`: the source lead opens as a link; otherwise it is plain text. */
+    canViewLeads?: boolean;
   };
   complianceExportBusy: boolean;
   detail: PatientDetail;
@@ -556,6 +558,7 @@ function usePatientProfileTabContent({
     canViewContracts,
     canViewDocuments,
     canViewInvoices,
+    canViewLeads = false,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
   const [identityDocumentsState, setIdentityDocumentsState] = useState<{
@@ -666,9 +669,18 @@ function usePatientProfileTabContent({
     programDateTo ? formatDate(programDateTo) : null,
   ].filter(Boolean).join(" - ");
   const hasIntakeProfile = leadOrigin.hasData;
+  const sourceLeadLabel = [
+    leadOrigin.sourceLeadName,
+    leadOrigin.sourceLeadDate ? formatDate(leadOrigin.sourceLeadDate) : null,
+  ].filter(Boolean).join(" · ") || t.patient_profile_intake_open_lead;
   const booleanValue = (value: boolean | null) => (
     value == null ? t.common_not_set : value ? l("patients_yes") : l("patients_no")
   );
+  // Groups the server leaves out for this role read "hidden", never "not set"
+  // or a legal status that looks unstarted (QA B-14, 2026-10-11).
+  const isHidden = (group: string) => patientFieldHidden(detail, group);
+  const hiddenOr = (group: string, value: ReactNode) => (isHidden(group) ? t.access_hidden : value);
+  const legalStatusHidden = isHidden("legal_status");
 
   return (
     <div className="space-y-5 mt-4 min-h-[400px]">
@@ -680,39 +692,40 @@ function usePatientProfileTabContent({
         >
           <ProfileSummaryLine
             label={t.patients_nationality}
-            value={fieldValue(
+            value={hiddenOr("nationality", fieldValue(
               detail.citizenships?.length
                 ? detail.citizenships.map((code) => countryNameForDisplay(code, getLang())).join(", ")
                 : nationalityNameForDisplay(detail.nationality, getLang()),
               t.common_not_set,
-            )}
+            ))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_nationality, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_residence_country}
-            value={fieldValue(
+            value={hiddenOr("nationality", fieldValue(
               countryNameForDisplay(detail.residence_country, getLang()),
               t.common_not_set,
-            )}
+            ))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_residence_country, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_languages}
-            value={fieldValue(detail.languages, t.common_not_set)}
+            value={hiddenOr("languages", fieldValue(detail.languages, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_languages, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patient_profile_functional_labels}
-            value={
+            value={hiddenOr(
+              "functional_labels",
               detail.functional_labels?.length
                 ? detail.functional_labels
                     .map((label) => humanizeFunctionalLabel(label))
                     .join(", ")
-                : t.common_not_set
-            }
+                : t.common_not_set,
+            )}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patient_profile_functional_labels, t.patient_profile_edit_field_aria)}
           />
@@ -727,7 +740,10 @@ function usePatientProfileTabContent({
               label={contact.label}
               value={(
                 <span className="flex min-w-0 flex-col items-end gap-0.5">
-                  <span>{fieldValue(contact.value, t.common_not_set)}</span>
+                  <span>{hiddenOr(
+                    contact.key === "phone_secondary" ? "contacts" : contact.key === "phone_primary" ? "phone" : contact.key,
+                    fieldValue(contact.value, t.common_not_set),
+                  )}</span>
                   {contact.note ? (
                     <span className="break-words text-[11px] font-normal leading-4 text-muted-foreground">
                       {contact.note}
@@ -746,19 +762,21 @@ function usePatientProfileTabContent({
         >
           <ProfileSummaryLine
             label={t.patients_insurance_type}
-            value={insuranceLabel(detail.insurance_type, tr)}
+            value={hiddenOr("insurance", insuranceLabel(detail.insurance_type, tr))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_insurance_type, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_insurance_provider}
-            value={fieldValue(detail.insurance_provider, t.common_not_set)}
+            value={hiddenOr("insurance", fieldValue(detail.insurance_provider, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_insurance_provider, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_insurance_number}
-            value={fieldValue(detail.insurance_number, t.common_not_set)}
+            value={isHidden("insurance_number")
+              ? t.access_hidden
+              : hiddenOr("insurance", fieldValue(detail.insurance_number, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_insurance_number, t.patient_profile_edit_field_aria)}
           />
@@ -773,28 +791,28 @@ function usePatientProfileTabContent({
         >
           <ProfileSummaryLine
             label={t.patients_address_street}
-            value={fieldValue(detail.address_street, t.common_not_set)}
+            value={hiddenOr("address", fieldValue(detail.address_street, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_address_street, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_city}
-            value={fieldValue(detail.address_city, t.common_not_set)}
+            value={hiddenOr("address", fieldValue(detail.address_city, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_address_city, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_zip}
-            value={fieldValue(detail.address_zip, t.common_not_set)}
+            value={hiddenOr("address", fieldValue(detail.address_zip, t.common_not_set))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_address_zip, t.patient_profile_edit_field_aria)}
           />
           <ProfileSummaryLine
             label={t.patients_address_country}
-            value={fieldValue(
+            value={hiddenOr("address", fieldValue(
               countryNameForDisplay(detail.address_country, getLang()),
               t.common_not_set,
-            )}
+            ))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_address_country, t.patient_profile_edit_field_aria)}
           />
@@ -803,18 +821,22 @@ function usePatientProfileTabContent({
         <ProfileSummaryCard
           title={t.patient_profile_emergency_contact}
         >
-          <PatientEmergencyContactSummary
-            detail={detail}
-            fieldValue={fieldValue}
-            formatDate={formatDate}
-            t={t}
-          />
+          {isHidden("emergency_contact") ? (
+            <ProfileSummaryLine label={t.patient_profile_emergency_contact} value={t.access_hidden} />
+          ) : (
+            <PatientEmergencyContactSummary
+              detail={detail}
+              fieldValue={fieldValue}
+              formatDate={formatDate}
+              t={t}
+            />
+          )}
         </ProfileSummaryCard>
 
         {hasIntakeProfile ? (
           <ProfileSummaryCard
             title={t.patient_profile_intake_data}
-            action={leadOrigin.sourceLeadId ? (
+            action={leadOrigin.sourceLeadId && canViewLeads ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -834,7 +856,16 @@ function usePatientProfileTabContent({
             {leadOrigin.sourceLeadId ? (
               <ProfileSummaryLine
                 label={t.patient_profile_intake_lead_id}
-                value={<span className="font-mono text-xs tabular-nums">{leadOrigin.sourceLeadId}</span>}
+                value={canViewLeads ? (
+                  <button
+                    type="button"
+                    className="max-w-full break-words text-right text-[var(--brand)] underline-offset-2 hover:underline"
+                    title={t.patient_profile_intake_open_lead}
+                    onClick={() => staffGo(`/leads?lead=${encodeURIComponent(leadOrigin.sourceLeadId ?? "")}`)}
+                  >
+                    {sourceLeadLabel}
+                  </button>
+                ) : sourceLeadLabel}
               />
             ) : null}
             <ProfileSummaryLine
@@ -1042,12 +1073,12 @@ function usePatientProfileTabContent({
           ) : null}
           <ProfileSummaryLine
             label={t.patient_profile_editor_passport_number}
-            value={fieldValue(detail.passport_number, t.common_not_set)}
+            value={hiddenOr("passport", fieldValue(detail.passport_number, t.common_not_set))}
           />
           <ProfileSummaryLine
             label={t.patient_profile_editor_passport_expiry}
             value={
-              detail.passport_expiry ? (
+              isHidden("passport") ? t.access_hidden : detail.passport_expiry ? (
                 <span className="inline-flex flex-wrap items-center justify-end gap-2">
                   <span>{formatDate(detail.passport_expiry)}</span>
                   {detail.passport_status === "expired" ||
@@ -1078,11 +1109,11 @@ function usePatientProfileTabContent({
         title={
           <span className="inline-flex items-center gap-2">
             {t.patients_legal_status}
-            <LegalStatusPill status={legalStatus} />
+            {legalStatusHidden ? null : <LegalStatusPill status={legalStatus} />}
           </span>
         }
         accessory={
-          canEditPatientProfile ? (
+          canEditPatientProfile && !legalStatusHidden ? (
             <Button type="button" size="sm" className="h-8 rounded-lg gap-1.5" onClick={() => handleLegalStatusSheetOpenChange(true)}>
               <Pencil className="size-3.5" />
               {t.patient_profile_update_status}
@@ -1090,6 +1121,11 @@ function usePatientProfileTabContent({
           ) : null
         }
       >
+        {legalStatusHidden ? (
+          <p className="rounded-lg border border-border/70 bg-card px-3 py-2.5 text-sm text-muted-foreground">
+            {t.access_hidden}
+          </p>
+        ) : <>
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
           {[
             {
@@ -1170,6 +1206,7 @@ function usePatientProfileTabContent({
             </p>
           </ProfileRecordShell>
         ) : null}
+        </>}
 
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
           {canCreateTasks && id ? (
@@ -1249,7 +1286,9 @@ function usePatientProfileTabContent({
         }
       >
         <div className="rounded-xl border border-border/50 bg-muted/25 p-4">
-          {detail.notes ? (
+          {isHidden("notes") ? (
+            <p className="text-sm text-muted-foreground italic">{t.access_hidden}</p>
+          ) : detail.notes ? (
             <p className="text-sm text-foreground whitespace-pre-wrap">{detail.notes}</p>
           ) : (
             <p className="text-sm text-muted-foreground italic">

@@ -325,16 +325,17 @@ describe("patient surface access helpers", () => {
   });
 
   it("shows the ceo assistant only the surfaces the server serves to the role (read-only)", () => {
-    // Refused by the server role lists: documents, relations, workflow,
-    // assignments (curators), orders, appointments and the timeline.
+    // Refused by the server role lists: relations, workflow, assignments
+    // (curators), orders, appointments and the timeline.
     expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
     expect(canViewPatientAssignmentsSurface("ceo_assistant")).toBe(false);
     expect(canViewPatientCareHistorySurface("ceo_assistant")).toBe(false);
     expect(canViewPatientAppointmentsSurface("ceo_assistant")).toBe(false);
-    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(false);
-    expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(false);
     expect(canLoadPatientAssignableStaff("ceo_assistant")).toBe(false);
-    // Served: profile, clinical profile, contracts, invoices and finance.
+    // Served: profile, documents (read-only, owner decision 2026-10-11),
+    // clinical profile, contracts, invoices and finance.
+    expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(true);
+    expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(true);
     expect(canViewPatientClinicalProfile("ceo_assistant")).toBe(true);
     expect(canViewPatientContractsSurface("ceo_assistant")).toBe(true);
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
@@ -343,14 +344,15 @@ describe("patient surface access helpers", () => {
       canViewOperationalSurface: false,
       canViewCareHistory: false,
       canViewAssignments: false,
-      canViewDocuments: false,
+      canViewDocuments: canViewPatientDocumentsSurface("ceo_assistant"),
       canViewContracts: true,
       canViewInvoices: true,
       canViewClinical: true,
     };
-    for (const tab of ["documents", "relations", "appointments", "orders", "timeline", "curators", "workflow"]) {
+    for (const tab of ["relations", "appointments", "orders", "timeline", "curators", "workflow"]) {
       expect(normalizePatientDetailTab(tab, access)).toBe("profile");
     }
+    expect(normalizePatientDetailTab("documents", access)).toBe("documents");
     expect(normalizePatientDetailTab("contracts", access)).toBe("contracts");
     expect(normalizePatientDetailTab("clinical", access)).toBe("clinical");
   });

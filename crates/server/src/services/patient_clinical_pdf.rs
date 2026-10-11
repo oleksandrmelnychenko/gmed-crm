@@ -9,6 +9,7 @@ use printpdf::{
 };
 use serde_json::Value;
 
+use super::medication_labels::{dosage_form_label, route_label};
 use super::patient_pdf_brand::{PatientPdfBrand, append_company_chrome, append_company_footer};
 
 const LEFT: f32 = 25.0;
@@ -77,6 +78,83 @@ fn clean_note(text: &str) -> String {
         .trim()
         .to_owned()
 }
+/// The labels the anamnesis form pre-fills its blocks with
+/// (`NARRATIVE_FIELD_TEMPLATES` in `anamnese-section.tsx`).
+const ANAMNESIS_TEMPLATE_LABELS: &[&str] = &[
+    "Vorerkrankungen",
+    "Risikofaktoren",
+    "Appetit",
+    "Trinkmenge",
+    "Wasserlassen",
+    "Stuhlgang",
+    "Schlaf",
+    "Familienstand",
+    "Kinder",
+    "Wohnsituation",
+    "Bildung",
+    "Beruf",
+];
+
+fn is_template_label(line: &str) -> bool {
+    line.trim().strip_suffix(':').is_some_and(|label| {
+        ANAMNESIS_TEMPLATE_LABELS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(label.trim()))
+    })
+}
+
+/// An anamnesis block without the template labels nobody filled in. A label
+/// counts as filled when text follows it on its line or on the lines below
+/// (before the next template label). A block of unfilled labels only becomes
+/// empty and is left out of the summary (QA B-04, 2026-10-11).
+pub(crate) fn without_unfilled_template_labels(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut kept: Vec<&str> = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        if is_template_label(line) {
+            let next = lines[index + 1..]
+                .iter()
+                .copied()
+                .find(|candidate| !candidate.trim().is_empty());
+            if next.is_none_or(is_template_label) {
+                continue;
+            }
+        }
+        if line.trim().is_empty() && kept.last().is_none_or(|last| last.trim().is_empty()) {
+            continue;
+        }
+        kept.push(line);
+    }
+    kept.join("\n").trim().to_owned()
+}
+
+/// The checklist answers of a specialty anamnesis ("CVRF: ja", "- art.
+/// Hypertonie: nein (seit 2019)") are stored in German; a Russian summary
+/// prints "да"/"нет". Mirrors `localizeChecklistAnswerText` of the card.
+pub(crate) fn localize_checklist_answers(text: &str, russian: bool) -> String {
+    if !russian {
+        return text.to_owned();
+    }
+    text.lines()
+        .map(|line| {
+            for (position, _) in line.match_indices(": ") {
+                let rest = &line[position + 2..];
+                for (answer, translated) in [("ja", "да"), ("nein", "нет")] {
+                    let Some(tail) = rest.strip_prefix(answer) else {
+                        continue;
+                    };
+                    let detail = tail.trim_end();
+                    if detail.is_empty() || (detail.starts_with(" (") && detail.ends_with(')')) {
+                        return format!("{}{translated}{tail}", &line[..position + 2]);
+                    }
+                }
+            }
+            line.to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn date(raw: &str) -> String {
     chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
         .map(|d| d.format("%d.%m.%Y").to_string())
@@ -443,26 +521,38 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
         ),
         ("red_flags", "Важные признаки", "Warnhinweise"),
     ] {
-        let text = clean_note(&value(narrative, key));
+        let text = without_unfilled_template_labels(&clean_note(&value(narrative, key)));
         if !text.is_empty() {
             history.push(Entry {
                 title: context.tx(ru, de).into(),
                 lines: vec![text],
-                source: source(context, narrative),
-                indent: 0.0,
+                ..Entry::default()
             });
         }
     }
     for row in records(narrative, "specializations") {
-        let text = clean_note(&value(row, "narrative_text"));
+        let text =
+            localize_checklist_answers(&clean_note(&value(row, "narrative_text")), context.russian);
         if !text.is_empty() {
             history.push(Entry {
                 title: specialization_name(context, row),
                 lines: vec![text],
-                source: source(context, narrative),
-                indent: 0.0,
+                ..Entry::default()
             });
         }
+    }
+    // Every block belongs to the same anamnesis version: its source and
+    // "Anamnesedatum" are printed once above the blocks instead of under
+    // each one (QA B-04 found a block without it after a page break).
+    let anamnesis_source = source(context, narrative);
+    if !history.is_empty() && !anamnesis_source.is_empty() {
+        history.insert(
+            0,
+            Entry {
+                source: anamnesis_source,
+                ..Entry::default()
+            },
+        );
     }
     section(
         context,
@@ -557,19 +647,8 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
             });
         }
     }
-    if assessment.is_empty() {
-        assessment.push(Entry {
-            lines: vec![
-                context
-                    .tx(
-                        "Оценка врача не внесена в карточку.",
-                        "Keine ärztliche Beurteilung in der Patientenakte hinterlegt.",
-                    )
-                    .into(),
-            ],
-            ..Entry::default()
-        });
-    }
+    // Without an assessment the section is left out like the other empty
+    // sections (procedures, examinations, recommendations, vitals).
     section(
         context,
         &mut sections,
@@ -631,14 +710,28 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 &[
                     ("wirkstoff", "ACT-значение", "ACT-Bedeutung"),
                     ("staerke", "Дозировка", "Stärke"),
-                    ("form", "Форма", "Darreichungsform"),
-                    ("einnahmeform", "Способ применения", "Anwendung"),
+                ],
+            );
+            field(
+                &mut lines,
+                context.tx("Форма", "Darreichungsform"),
+                dosage_form_label(&value(row, "form"), context.russian),
+            );
+            field(
+                &mut lines,
+                context.tx("Способ применения", "Anwendung"),
+                route_label(&value(row, "einnahmeform"), context.russian),
+            );
+            lines.extend(fields(
+                context,
+                row,
+                &[
                     ("einheit", "Единица", "Einheit"),
                     ("hinweis", "Указания", "Hinweise"),
                     ("grund", "Показание", "Grund"),
                     ("sonstige_vermerke", "Примечание", "Weitere Hinweise"),
                 ],
-            );
+            ));
             let doses = [
                 ("dose_morgens", "Утро", "Morgens"),
                 ("dose_mittags", "День", "Mittags"),
@@ -1020,11 +1113,31 @@ impl Layout<'_> {
         self.current_section = section.title.clone();
         self.section_heading(&section.title);
         for entry in section.entries {
-            let title_height = self
-                .wrap(&entry.title, 10.5, WIDTH - 6.0 - entry.indent, true)
-                .len() as f32
-                * 4.8;
-            self.ensure((title_height + 5.0).clamp(14.0, 50.0))?;
+            let text_width = WIDTH - 6.0 - entry.indent;
+            let title_height = if entry.title.is_empty() {
+                0.0
+            } else {
+                self.wrap(&entry.title, 10.5, text_width, true).len() as f32 * 4.8
+            };
+            let body_height: f32 = entry
+                .lines
+                .iter()
+                .map(|line| self.wrap(line, 10.0, text_width, false).len() as f32 * 4.8)
+                .chain(
+                    entry
+                        .source
+                        .iter()
+                        .map(|line| self.wrap(line, 8.3, text_width, false).len() as f32 * 4.1),
+                )
+                .sum();
+            // A short entry stays on one page with its source lines; a long
+            // one starts where its title and first lines still fit.
+            let entry_height = title_height + body_height + 1.0;
+            self.ensure(if entry_height <= 60.0 {
+                entry_height.max(14.0)
+            } else {
+                (title_height + 5.0).clamp(14.0, 50.0)
+            })?;
             if !entry.title.is_empty() {
                 self.indented_paragraph(&entry.title, 10.5, true, false, entry.indent)?;
             }
@@ -1280,6 +1393,92 @@ mod tests {
             assert_eq!(text.matches("LEGACY_FOLLOW_UP").count(), 1);
             assert_eq!(text.matches("Penicillin - DEMO").count(), 1);
             assert!(text.contains("Anamnesedatum: 01.09.2026 14:00"));
+        }
+    }
+
+    #[test]
+    fn unfilled_template_labels_are_dropped_and_filled_ones_kept() {
+        assert_eq!(
+            without_unfilled_template_labels(
+                "Appetit:\nTrinkmenge:\nWasserlassen:\nStuhlgang:\nSchlaf:"
+            ),
+            ""
+        );
+        assert_eq!(
+            without_unfilled_template_labels("Vorerkrankungen:\n\nRisikofaktoren:"),
+            ""
+        );
+        assert_eq!(
+            without_unfilled_template_labels(
+                "Familienstand: verheiratet\nKinder:\nWohnsituation:\nmit Familie\nBildung:\nBeruf:"
+            ),
+            "Familienstand: verheiratet\nWohnsituation:\nmit Familie"
+        );
+        // Labels of the clinic's own text are not template labels.
+        assert_eq!(
+            without_unfilled_template_labels("Beschwerden:\nThoraxschmerz seit 2 Tagen"),
+            "Beschwerden:\nThoraxschmerz seit 2 Tagen"
+        );
+    }
+
+    #[test]
+    fn checklist_answers_are_printed_in_the_document_language() {
+        let text = "Kardiovaskuläre Risikofaktoren:\nCVRF: ja\n- art. Hypertonie: ja\n- Nikotin: nein\n- Antikoagulation: ja (Apixaban)\n\nPatient: ja, kommt wieder";
+        assert_eq!(
+            localize_checklist_answers(text, true),
+            "Kardiovaskuläre Risikofaktoren:\nCVRF: да\n- art. Hypertonie: да\n- Nikotin: нет\n- Antikoagulation: да (Apixaban)\n\nPatient: ja, kommt wieder"
+        );
+        assert_eq!(localize_checklist_answers(text, false), text);
+    }
+
+    #[test]
+    fn clinical_report_omits_template_skeleton_and_empty_assessment_and_prints_readable_forms() {
+        for russian in [false, true] {
+            let mut context = example(russian);
+            context.data["narrative"] = json!({
+                "anamnese_aktuelle": "Belastungsdyspnoe seit 3 Wochen.",
+                "anamnese_vorgeschichte": "Vorerkrankungen:\n\nRisikofaktoren:",
+                "anamnese_vegetative": "Appetit:\nTrinkmenge:\nWasserlassen:\nStuhlgang:\nSchlaf:",
+                "anamnese_sozial": "Familienstand: verheiratet\nKinder:\nWohnsituation:\nBildung:\nBeruf:",
+                "anamnese_at": "2026-10-05T08:30:00Z",
+                "specializations": [{"name_ru":"Кардиология", "name_de":"Kardiologie", "narrative_text":"CVRF: ja\n- art. Hypertonie: ja"}]
+            });
+            context.data["medications"] = json!([{
+                "category":"dauer", "handelsname":"Ramipril - DEMO", "wirkstoff":"Ramipril",
+                "staerke":"5 mg", "form":"TABL", "einnahmeform":"Oral", "dose_morgens":"1"
+            }]);
+            let bytes = build_clinical_report_pdf(&context).unwrap();
+            let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+            for label in [
+                "Vorerkrankungen:",
+                "Appetit:",
+                "Trinkmenge:",
+                "Kinder:",
+                "Beruf:",
+            ] {
+                assert!(!text.contains(label), "template label {label} printed");
+            }
+            assert!(text.contains("Familienstand: verheiratet"));
+            assert!(!text.contains(context.tx("Вегетативный анамнез", "Vegetative Anamnese")));
+            assert!(!text.contains(context.tx("Предшествующий анамнез", "Vorgeschichte")));
+            assert!(text.contains(context.tx("Социальный анамнез", "Sozialanamnese")));
+            assert_eq!(
+                text.matches(context.tx("Дата анамнеза:", "Anamnesedatum:"))
+                    .count(),
+                1
+            );
+            assert!(text.contains(context.tx("CVRF: да", "CVRF: ja")));
+            assert!(text.contains(context.tx("art. Hypertonie: да", "art. Hypertonie: ja")));
+            assert!(
+                !text.contains(context.tx("Оценка и заключение врача", "Ärztliche Beurteilung"))
+            );
+            assert!(
+                !text
+                    .contains(context.tx("Оценка врача не внесена", "Keine ärztliche Beurteilung"))
+            );
+            assert!(text.contains(context.tx("Форма: Таблетки", "Darreichungsform: Tabletten")));
+            assert!(text.contains(context.tx("Способ применения: Перорально", "Anwendung: Oral")));
+            assert!(!text.contains("TABL"));
         }
     }
 

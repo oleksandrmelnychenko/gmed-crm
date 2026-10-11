@@ -60,6 +60,7 @@ import { canPickInvoiceStatus } from "@/pages/invoices/model/invoice-model";
 
 import {
   buildPatientLabelPrintHtml,
+  canImportPatientClinicalDocuments,
   canManagePatientProfile,
   canLoadPatientAssignableStaff,
   canOpenPatientDocumentsWorkspace,
@@ -1148,6 +1149,7 @@ function usePatientDetailPageContent() {
   const canViewDocuments = canViewPatientDocumentsSurface(user);
   const canOpenDocumentsWorkspace = canOpenPatientDocumentsWorkspace(user);
   const canManageDocuments = hasCapability(user, "documents.manage");
+  const canImportClinicalDocuments = canImportPatientClinicalDocuments(user);
   const canViewContracts = canViewPatientContractsSurface(user);
   const canManageContracts = hasCapability(user, "contracts.edit");
   const canViewInvoices = canViewPatientInvoicesSurface(user);
@@ -1309,8 +1311,8 @@ function usePatientDetailPageContent() {
     [detail?.legal_status]
   );
   const legalStatusChecklist = useMemo(
-    () => getPatientLegalStatusChecklist(legalStatus),
-    [legalStatus]
+    () => getPatientLegalStatusChecklist(legalStatus, lang),
+    [legalStatus, lang]
   );
   const legalStatusCompletion = useMemo(
     () => getPatientLegalStatusCompletion(legalStatus),
@@ -2003,6 +2005,7 @@ function usePatientDetailPageContent() {
         canCreateTasks={canCreateTasks}
         canEditPatientProfile={canEditPatientProfile}
         canExportPatientCompliance={canExportPatientCompliance}
+        canImportClinicalDocuments={canImportClinicalDocuments}
         canManage={canManage}
         canRevokeAssignments={canRevokeAssignments}
         canManageContracts={canManageContracts}

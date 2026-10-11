@@ -9,6 +9,8 @@ import {
   clinicalDocumentPreviewPage,
   clinicalDocumentTextPages,
   clinicalImportNeedsSourceCountry,
+  clinicalImportStartErrorMessage,
+  clinicalImportStoredDocumentMessage,
   createClinicalDocumentImport,
   deleteClinicalDocumentImport,
   fetchClinicalDocumentImport,
@@ -337,5 +339,31 @@ describe("clinical document import API", () => {
         }),
       },
     );
+  });
+});
+
+describe("refused clinical imports in the UI language (QA B-02/B-05)", () => {
+  const refused = (status: number, message = "Insufficient permissions") =>
+    Object.assign(new Error(message), { status });
+
+  it("never shows the server's English text", () => {
+    for (const lang of ["ru", "de"] as const) {
+      for (const status of [403, 404, 409, 413, 422, 423, 500]) {
+        const text = clinicalImportStartErrorMessage(refused(status), lang);
+        expect(text).not.toContain("Insufficient permissions");
+        expect(text.length).toBeGreaterThan(20);
+      }
+    }
+    expect(clinicalImportStartErrorMessage(refused(403), "ru")).toContain("нет доступа");
+    expect(clinicalImportStartErrorMessage(refused(422, "Clinical import requires a medical document"), "de"))
+      .toContain("nur medizinische Dokumente");
+  });
+
+  it("tells that an uploaded file stayed in the patient's documents", () => {
+    const ru = clinicalImportStoredDocumentMessage(refused(403), "ru");
+    expect(ru).toContain("Файл сохранён в документах пациента");
+    expect(ru).toContain("распознавание не запущено");
+    expect(clinicalImportStoredDocumentMessage(refused(403), "de"))
+      .toContain("in den Dokumenten des Patienten gespeichert");
   });
 });

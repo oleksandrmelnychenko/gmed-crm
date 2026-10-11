@@ -14,8 +14,10 @@ import {
   isOrganisationPayerForm,
   leadSelfFundsStated,
   normalizePayerDeclarationResponse,
+  patientDeclarationLeadId,
   payerAmlCountries,
   payerDeclarationPayload,
+  payerDeclarationPrefillForm,
   payerDeclarationToForm,
   payerFormMissing,
   payerGateErrorText,
@@ -706,5 +708,51 @@ describe("the third-party payer's messenger / WhatsApp number", () => {
     expect(payerRelationshipKindLabel("sibling", tx)).toBe("Брат / сестра");
     expect(payerRelationshipKindLabel("grandparent", tx)).toBe("Бабушка / дедушка");
     expect(payerRelationshipKindLabel("relative", tx)).toBe("Другой родственник");
+  });
+});
+
+describe("a repeat intake starts from the patient's declaration (QA B-18)", () => {
+  it("finds the lead of the last conversion, else the first source lead", () => {
+    expect(patientDeclarationLeadId({
+      legal_status: { payer_declaration: { lead_id: "lead-latest" } },
+      source_lead_id: "lead-first",
+    })).toBe("lead-latest");
+    expect(patientDeclarationLeadId({ legal_status: {}, source_lead_id: "lead-first" })).toBe("lead-first");
+    expect(patientDeclarationLeadId({ legal_status: null, source_lead_id: null })).toBeNull();
+    expect(patientDeclarationLeadId(null)).toBeNull();
+  });
+
+  it("prefills who pays and the GwG answers, never what belongs to the earlier request", () => {
+    const form = payerDeclarationPrefillForm({
+      ...thirdParty,
+      source_of_funds_document_id: "evidence-of-the-earlier-lead",
+    });
+    expect(form.kind).toBe("third_party");
+    expect(form.firstName).toBe("Erika");
+    expect(form.sourceOfFunds).toBe("savings");
+    expect(form.actsOnOwnAccount).toBe(true);
+    // Art. 14 DSGVO is confirmed per request; the file is the earlier lead's.
+    expect(form.payerInformed).toBe(false);
+    expect(form.sourceOfFundsDocumentId).toBe("");
+  });
+
+  it("turns the earlier cabinet statement of a self-payer into the staff answer", () => {
+    const form = payerDeclarationPrefillForm({
+      ...thirdParty,
+      payer_kind: "self",
+      source_of_funds: null,
+      self_funds_source: "inheritance_gift",
+      self_funds_description: "Erbe der Großmutter",
+    });
+    expect(form.leadSelfFundsStated).toBe(false);
+    expect(form.sourceOfFunds).toBe("inheritance_gift");
+    expect(form.sourceOfFundsDescription).toBe("Erbe der Großmutter");
+    // "income" has no single staff category: staff choose it.
+    expect(payerDeclarationPrefillForm({
+      ...thirdParty,
+      payer_kind: "self",
+      source_of_funds: null,
+      self_funds_source: "income",
+    }).sourceOfFunds).toBe("");
   });
 });

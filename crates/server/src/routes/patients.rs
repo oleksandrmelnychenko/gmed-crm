@@ -3374,7 +3374,7 @@ async fn update_patient(
                   insurance_provider, insurance_number, insurance_type,
                   emergency_contact_name, emergency_contact_phone, emergency_contact_relation,
                   passport_number, passport_expiry,
-                  notes
+                  notes, clinical_warnings, citizenships, legal_status
            FROM patients
            WHERE id = $1"#,
     )
@@ -3392,6 +3392,56 @@ async fn update_patient(
             );
         }
     };
+    // What the card showed before the save, to name the fields it changes.
+    let stored_text = |key: &str| current.try_get::<Option<String>, _>(key).ok().flatten();
+    let profile_before = json!({
+        "title": stored_text("title"),
+        "first_name": stored_text("first_name"),
+        "last_name": stored_text("last_name"),
+        "birth_date": current
+            .try_get::<Option<chrono::NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten()
+            .map(|date| date.to_string()),
+        "gender": stored_text("gender"),
+        "phone_primary": stored_text("phone_primary"),
+        "phone_secondary": stored_text("phone_secondary"),
+        "email": stored_text("email"),
+        "nationality": stored_text("nationality"),
+        "residence_country": stored_text("residence_country"),
+        "languages": current.try_get::<Vec<String>, _>("languages").unwrap_or_default(),
+        "functional_labels": current
+            .try_get::<Vec<String>, _>("functional_labels")
+            .unwrap_or_default(),
+        "address_street": stored_text("address_street"),
+        "address_city": stored_text("address_city"),
+        "address_zip": stored_text("address_zip"),
+        "address_country": stored_text("address_country"),
+        "insurance_provider": stored_text("insurance_provider"),
+        "insurance_number": stored_text("insurance_number"),
+        "insurance_type": stored_text("insurance_type"),
+        "emergency_contact_name": stored_text("emergency_contact_name"),
+        "emergency_contact_phone": stored_text("emergency_contact_phone"),
+        "emergency_contact_relation": stored_text("emergency_contact_relation"),
+        "passport_number": stored_text("passport_number"),
+        "passport_expiry": current
+            .try_get::<Option<chrono::NaiveDate>, _>("passport_expiry")
+            .ok()
+            .flatten()
+            .map(|date| date.to_string()),
+        "notes": stored_text("notes"),
+        "clinical_warnings": stored_text("clinical_warnings"),
+        "citizenships": current
+            .try_get::<Option<Vec<String>>, _>("citizenships")
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
+    });
+    let stored_legal_status: Value = current
+        .try_get::<Option<Value>, _>("legal_status")
+        .ok()
+        .flatten()
+        .unwrap_or(Value::Null);
 
     let contacts_patch = body.contacts;
     let contacts_patch_supplied = contacts_patch.is_some();
@@ -3776,7 +3826,14 @@ async fn update_patient(
         }
         None => None,
     };
-    let legal_status_updated = legal_status.is_some();
+    // The profile editor sends the whole legal status with every save: only a
+    // value that really differs counts as a legal-status change (QA B-26, a
+    // phone change showed as "legal status changed" in the timeline).
+    let legal_status_changed_keys = legal_status
+        .as_ref()
+        .map(|next| legal_status_changed_keys(&stored_legal_status, &next.0))
+        .unwrap_or_default();
+    let legal_status_updated = !legal_status_changed_keys.is_empty();
     let clinical_warnings_updated = clinical_warnings_supplied;
     let functional_labels_updated = functional_labels_supplied;
     let birth_date_updated = birth_date_supplied;
@@ -3799,6 +3856,76 @@ async fn update_patient(
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
+    let mut profile_after = json!({
+        "title": &title,
+        "first_name": &first,
+        "last_name": &last,
+        "birth_date": birth_date.to_string(),
+        "gender": &gender,
+        "phone_primary": &phone_primary,
+        "phone_secondary": &phone_secondary,
+        "email": &email,
+        "nationality": &nationality,
+        "residence_country": &residence_country,
+        "languages": &languages,
+        "functional_labels": &functional_labels,
+        "address_street": &address_street,
+        "address_city": &address_city,
+        "address_zip": &address_zip,
+        "address_country": &address_country,
+        "insurance_provider": &insurance_provider,
+        "insurance_number": &insurance_number,
+        "insurance_type": &insurance_type,
+        "emergency_contact_name": &emergency_contact_name,
+        "emergency_contact_phone": &emergency_contact_phone,
+        "emergency_contact_relation": &emergency_contact_relation,
+        "passport_number": &passport_number,
+        "passport_expiry": passport_expiry.map(|date| date.to_string()),
+        "notes": &notes,
+    });
+    if let Some(warnings) = clinical_warnings.as_ref() {
+        profile_after["clinical_warnings"] = json!(warnings);
+    }
+    if let Some(codes) = citizenships.as_ref() {
+        profile_after["citizenships"] = json!(codes);
+    }
+    // Field names only: the audit log is append-only and outlives an erasure
+    // under Art. 17 DSGVO, so it keeps no copy of the patient's data.
+    let mut changed_fields = changed_profile_fields(&profile_before, &profile_after);
+    if let Some(contacts) = normalized_contacts.as_ref() {
+        match sqlx::query_as::<_, (String, String, String, bool, Option<String>)>(
+            "SELECT contact_kind, contact_type, value, is_primary, notes
+             FROM patient_contacts WHERE patient_id = $1",
+        )
+        .bind(patient_uuid)
+        .fetch_all(&state.db)
+        .await
+        {
+            Ok(mut stored) => {
+                let mut next = contacts
+                    .iter()
+                    .map(|contact| {
+                        (
+                            contact.contact_kind.clone(),
+                            contact.contact_type.clone(),
+                            contact.value.clone(),
+                            contact.is_primary,
+                            contact.notes.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                stored.sort();
+                next.sort();
+                if stored != next {
+                    changed_fields.push("contacts".to_string());
+                    changed_fields.sort();
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, patient_id = %patient_uuid, "Failed to compare patient contacts for the audit");
+            }
+        }
+    }
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -3876,6 +4003,8 @@ async fn update_patient(
     .await;
 
     let audit_context = serde_json::json!({
+        "changed_fields": changed_fields,
+        "legal_status_changed_keys": legal_status_changed_keys,
         "legal_status_updated": legal_status_updated,
         "clinical_warnings_updated": clinical_warnings_updated,
         "functional_labels_updated": functional_labels_updated,
@@ -6374,6 +6503,136 @@ fn validate_patient_risk_score_type(value: &str) -> Result<String, axum::respons
 }
 
 #[allow(clippy::result_large_err)]
+/// Whether a profile value is empty: no value, blank text or an empty list.
+fn profile_value_blank(value: Option<&Value>) -> bool {
+    match value {
+        None | Some(Value::Null) => true,
+        Some(Value::String(text)) => text.trim().is_empty(),
+        Some(Value::Array(items)) => items.is_empty(),
+        _ => false,
+    }
+}
+
+/// The keys of `after` whose value differs from `before`, sorted. Blank and
+/// missing values are the same ("" = null = []). Used for the audit of a
+/// profile save, which records field names only.
+pub(crate) fn changed_profile_fields(before: &Value, after: &Value) -> Vec<String> {
+    let Value::Object(after) = after else {
+        return Vec::new();
+    };
+    let mut changed = after
+        .iter()
+        .filter(|(key, value)| {
+            let previous = before.get(key.as_str());
+            if profile_value_blank(previous) && profile_value_blank(Some(*value)) {
+                return false;
+            }
+            match (previous, value) {
+                (Some(Value::String(old)), Value::String(new)) => old.trim() != new.trim(),
+                (previous, value) => previous != Some(*value),
+            }
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    changed.sort();
+    changed
+}
+
+/// The keys of a normalized legal status (`normalize_legal_status`) whose
+/// value differs from the stored one. A flag missing in the stored status is
+/// `false`, a missing text is empty and a missing contract status is
+/// `not_started` (what the card shows), so re-sending the unchanged status
+/// changes nothing.
+pub(crate) fn legal_status_changed_keys(stored: &Value, next: &Value) -> Vec<String> {
+    let Value::Object(next) = next else {
+        return Vec::new();
+    };
+    let mut changed = next
+        .iter()
+        .filter(|(key, value)| {
+            let previous = stored.get(key.as_str());
+            match value {
+                Value::Bool(flag) => previous.and_then(Value::as_bool).unwrap_or(false) != *flag,
+                Value::Null => !profile_value_blank(previous),
+                Value::String(text) => {
+                    let default = if key.as_str() == "contract_status" {
+                        "not_started"
+                    } else {
+                        ""
+                    };
+                    let stored_text = previous
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|stored| !stored.is_empty())
+                        .unwrap_or(default);
+                    stored_text != text.trim()
+                }
+                other => previous != Some(*other),
+            }
+        })
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    changed.sort();
+    changed
+}
+
+#[cfg(test)]
+mod profile_change_tests {
+    use super::{changed_profile_fields, legal_status_changed_keys};
+    use serde_json::json;
+
+    #[test]
+    fn a_phone_change_names_only_the_phone() {
+        let before = json!({
+            "first_name": "Mia", "phone_primary": "+49 30 1234567", "email": null,
+            "languages": [], "notes": "", "address_city": "Berlin"
+        });
+        let after = json!({
+            "first_name": "Mia", "phone_primary": "+49 30 7654321", "email": "",
+            "languages": [], "notes": null, "address_city": " Berlin "
+        });
+        assert_eq!(
+            changed_profile_fields(&before, &after),
+            vec!["phone_primary"]
+        );
+        assert!(changed_profile_fields(&before, &before).is_empty());
+        let added = json!({ "languages": ["de", "uk"], "email": "mia.muster@example.com" });
+        assert_eq!(
+            changed_profile_fields(&before, &added),
+            vec!["email", "languages"]
+        );
+    }
+
+    #[test]
+    fn re_sending_the_unchanged_legal_status_changes_nothing() {
+        // What the profile editor sends with every save for a fresh patient.
+        let sent = json!({
+            "dsgvo_signed": false, "confidentiality_release_signed": false,
+            "identity_verified": false, "document_pack_complete": false,
+            "compliance_completed": false, "contract_status": "not_started", "notes": null
+        });
+        assert!(legal_status_changed_keys(&json!(null), &sent).is_empty());
+        assert!(legal_status_changed_keys(&json!({}), &sent).is_empty());
+        let stored = json!({
+            "dsgvo_signed": true, "confidentiality_release_signed": false,
+            "contract_status": "signed", "notes": "Geprüft", "payer_declaration": {"lead_id": "x"}
+        });
+        let same = json!({
+            "dsgvo_signed": true, "confidentiality_release_signed": false,
+            "identity_verified": false, "document_pack_complete": false,
+            "compliance_completed": false, "contract_status": "signed", "notes": "Geprüft"
+        });
+        assert!(legal_status_changed_keys(&stored, &same).is_empty());
+        let mut changed = same.clone();
+        changed["dsgvo_signed"] = json!(false);
+        changed["notes"] = json!(null);
+        assert_eq!(
+            legal_status_changed_keys(&stored, &changed),
+            vec!["dsgvo_signed", "notes"]
+        );
+    }
+}
+
 fn normalize_legal_status(value: Value) -> Result<Value, axum::response::Response> {
     let Value::Object(map) = value else {
         return Err(err(
@@ -7076,8 +7335,15 @@ async fn list_patient_documents(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
+    // The CEO assistant reads the patient's documents here exactly as in
+    // `GET /documents?patient_id=` (RBAC matrix row "CEO Assistant":
+    // documents and scans "read only what is allowed"; owner decision
+    // 2026-10-11): the same per-document rule below admits only what the
+    // assistant may open — e.g. a medical document once it is released. This
+    // endpoint only reads.
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -9815,6 +10081,34 @@ async fn get_patient_timeline(
                         AND COALESCE((al.context->>'legal_status_updated')::boolean, false)
                     )
               )
+
+            UNION ALL
+
+            -- A profile save names the fields it changed (`changed_fields`,
+            -- names only, never values). The allergies field is medical and
+            -- left out for roles without medical access.
+            SELECT 'patient'::text AS entity_type,
+                   COALESCE(al.entity_id, $1) AS entity_id,
+                   'Profile updated: ' || profile_change.fields AS title,
+                   'profile'::text AS category,
+                   'completed'::text AS status,
+                   al.created_at AS happened_at,
+                   u.name AS source_label
+            FROM audit_log al
+            LEFT JOIN users u ON u.id = al.user_id
+            CROSS JOIN LATERAL (
+                SELECT string_agg(changed.field, ', ' ORDER BY changed.field) AS fields
+                FROM jsonb_array_elements_text(
+                         CASE WHEN jsonb_typeof(al.context->'changed_fields') = 'array'
+                              THEN al.context->'changed_fields'
+                              ELSE '[]'::jsonb END
+                     ) AS changed(field)
+                WHERE $11::boolean OR changed.field <> 'clinical_warnings'
+            ) profile_change
+            WHERE al.entity_type = 'patient'
+              AND al.entity_id = $1
+              AND al.action = 'update_patient'
+              AND profile_change.fields IS NOT NULL
         )"#;
 
     let filter_clause = r#"
@@ -11297,9 +11591,57 @@ fn build_patient_detail_json(
         }
 
         insert_clinical_warnings_field(map, auth, policies, patient.clinical_warnings);
+        map.insert(
+            "hidden_fields".to_string(),
+            json!(patient_detail_hidden_fields(auth, policies)),
+        );
     }
 
     data
+}
+
+/// The field groups of the patient card the caller's role does not receive.
+/// A hidden field is left out of the payload, which reads like "not set"; the
+/// card shows "hidden" for these groups instead of empty or negative values
+/// (an interpreter saw "not set" for the insurance and a legal status "not
+/// started 0/5", QA B-14, 2026-10-11). Mirrors the inserts above.
+fn patient_detail_hidden_fields(
+    auth: &AuthUser,
+    policies: &HashMap<String, FieldPolicy>,
+) -> Vec<&'static str> {
+    let full_access = auth.role.has_full_access();
+    let mut hidden = Vec::new();
+    for (policy, group) in [
+        ("name", "name"),
+        ("birth_date", "birth_date"),
+        ("phone", "phone"),
+        ("email", "email"),
+        ("nationality", "nationality"),
+        ("languages", "languages"),
+        ("functional_labels", "functional_labels"),
+        ("insurance", "insurance"),
+    ] {
+        if matches!(
+            field_access(policies, policy, full_access),
+            Some(FieldAccess::Hidden) | None
+        ) {
+            hidden.push(group);
+        }
+    }
+    if !(full_access || matches!(auth.role, Role::PatientManager | Role::Concierge)) {
+        hidden.extend([
+            "address",
+            "passport",
+            "emergency_contact",
+            "legal_status",
+            "contacts",
+            "insurance_number",
+            "notes",
+        ]);
+    } else if auth.role == Role::Concierge {
+        hidden.extend(["intake_profile", "notes"]);
+    }
+    hidden
 }
 
 fn collect_visible_fields(value: &Value) -> Vec<String> {
@@ -11307,7 +11649,11 @@ fn collect_visible_fields(value: &Value) -> Vec<String> {
         return Vec::new();
     };
 
-    let mut fields = map.keys().cloned().collect::<Vec<_>>();
+    let mut fields = map
+        .keys()
+        .filter(|key| key.as_str() != "hidden_fields")
+        .cloned()
+        .collect::<Vec<_>>();
     fields.sort();
     fields
 }
@@ -16148,11 +16494,15 @@ async fn get_patient_medikationsplan_pdf(
                     notes.push(format!("{label}: {date}"));
                 }
             }
-            let form = [value("form"), value("einnahmeform")]
-                .into_iter()
-                .filter(|text| !text.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
+            // Readable names instead of the stored codes ("TABL" / "Oral").
+            let form = [
+                crate::services::medication_labels::dosage_form_label(&value("form"), russian),
+                crate::services::medication_labels::route_label(&value("einnahmeform"), russian),
+            ]
+            .into_iter()
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
             crate::services::patient_medication_pdf::MedicationPlanEntry {
                 category: value("category"),
                 cells: [

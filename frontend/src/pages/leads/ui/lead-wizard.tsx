@@ -63,6 +63,7 @@ import { CountrySelect, countryCodeFromStoredValue, countryLabel } from "@/compo
 import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { nationalityCountryCode } from "@/pages/patients/model/nationalities";
 import {
+  patientDeclarationLeadId,
   payerAmlCountries,
   payerGateErrorText,
   payerReadinessReasonFields,
@@ -132,7 +133,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
-import { ApiRequestError, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
@@ -227,6 +228,7 @@ import {
 } from "@/pages/patients/data/patient-clinical";
 import type { PatientDetail } from "@/pages/patients/model/list-model";
 import { fetchProviders, fetchSpecializations } from "@/pages/providers/data/provider-api";
+import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 import { SanctionsLeadBanner, SanctionsLiveCheckNotice } from "@/pages/sanctions/components";
 import { isSanctionsGateError, liveCheckInput } from "@/pages/sanctions/model";
@@ -3010,6 +3012,35 @@ export function LeadWizard({
   const repeatPatientNumber = isRepeatIntake
     ? repeatIntakePatientNumber(existingPatient?.patient_id, lead)
     : null;
+  // A repeat intake starts "Кто платит" from the declaration fixed when the
+  // patient's last request was converted (QA B-18, 2026-10-11): the form is
+  // prefilled, staff check and save it.
+  const knownRepeatPayerLeadId = useMemo(
+    () => (isRepeatIntake ? patientDeclarationLeadId(existingPatient) : null),
+    [existingPatient, isRepeatIntake],
+  );
+  const [fetchedRepeatPayerLead, setFetchedRepeatPayerLead] = useState<{
+    patientId: string;
+    leadId: string | null;
+  } | null>(null);
+  useEffect(() => {
+    if (!open || !isRepeatIntake || !repeatPatientId || knownRepeatPayerLeadId) return;
+    let active = true;
+    void apiFetch<PatientDetail>(`/patients/${repeatPatientId}`)
+      .then((patient) => {
+        if (active) setFetchedRepeatPayerLead({ patientId: repeatPatientId, leadId: patientDeclarationLeadId(patient) });
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [isRepeatIntake, knownRepeatPayerLeadId, open, repeatPatientId]);
+  const repeatPayerLeadId = knownRepeatPayerLeadId
+    ?? (fetchedRepeatPayerLead?.patientId === repeatPatientId ? fetchedRepeatPayerLead.leadId : null);
+  const previousPayer = useLeadPayerDeclaration(
+    open && repeatPayerLeadId && repeatPayerLeadId !== leadId ? repeatPayerLeadId : null,
+  );
+  const payerPrefill = isRepeatIntake ? previousPayer.data?.declaration ?? null : null;
   // Read by callbacks created before the lead is loaded (e.g. the clinical
   // loader), so they follow the lead's repeat mode without being recreated.
   const isRepeatIntakeRef = useRef(isRepeatIntake);
@@ -6457,7 +6488,9 @@ ${serviceCommentLines.join("\n")}`
     const specialty = specialties.find(
       (item) => specializationValue(item) === value,
     );
-    if (!specialty) return value;
+    // The catalogue loads lazily and may not hold an old code: the built-in
+    // names keep "cardiology" from showing as a raw code (QA B-18).
+    if (!specialty) return specializationLabelForValue(value, [], lang === "de" ? "de" : "ru");
     return lang === "de"
       ? specialty.name_de || specialty.name_en
       : specialty.name_ru || specialty.name_de || specialty.name_en;
@@ -7870,6 +7903,7 @@ ${serviceCommentLines.join("\n")}`
                   tx={tx}
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
                   enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
+                  prefill={payerPrefill}
                   payerLink={payerLink}
                   payerLinkCanEdit={canEditPayerLink}
                   leadLanguage={draft.language}

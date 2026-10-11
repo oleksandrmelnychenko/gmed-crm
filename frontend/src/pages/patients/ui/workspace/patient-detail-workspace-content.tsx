@@ -249,6 +249,7 @@ type PatientDetailWorkspaceContentProps = {
   canCreateTasks: boolean;
   canEditPatientProfile: boolean;
   canExportPatientCompliance: boolean;
+  canImportClinicalDocuments: boolean;
   canManage: boolean;
   canRevokeAssignments: boolean;
   canManageContracts: boolean;
@@ -417,6 +418,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
     canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
+    canImportClinicalDocuments,
     canManage,
     canRevokeAssignments,
     canManageContracts,
@@ -644,7 +646,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
   ).length;
 
   useEffect(() => {
-    if (!id || !canManageDocuments) return;
+    if (!id || !canImportClinicalDocuments) return;
     let cancelled = false;
 
     const refreshClinicalImports = () => {
@@ -668,7 +670,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [canManageDocuments, id]);
+  }, [canImportClinicalDocuments, id]);
 
   function handleWorkspaceTabChange(nextTab: string) {
     preloadPatientWorkspaceTab(nextTab);
@@ -795,7 +797,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
         patientId={id}
         lang={lang}
         canViewClinical={canViewClinical}
-        canManageDocuments={canManageDocuments}
+        canImportDocuments={canImportClinicalDocuments}
         importAttentionCount={clinicalImportAttentionCount}
         onScan={openClinicalDocumentImport}
       /> : null}
@@ -839,6 +841,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 canViewContracts,
                 canViewDocuments,
                 canViewInvoices,
+                canViewLeads,
               }}
               complianceExportBusy={complianceExportBusy}
               detail={detail}
@@ -955,6 +958,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 patientIdentifier: detail.patient_id,
               }}
               canManage={canManageDocuments}
+              canImportDocuments={canImportClinicalDocuments}
               documentImportOpen={clinicalDocumentImportOpen}
               onDocumentImportOpenChange={setClinicalDocumentImportOpen}
             />
@@ -991,7 +995,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
               onResetDocumentFilters={onResetDocumentFilters}
               canManageDocuments={canManageDocuments}
               onOpenUpload={onOpenUpload}
-              onRecognizeDocument={recognizeExistingPatientDocument}
+              onRecognizeDocument={canImportClinicalDocuments ? recognizeExistingPatientDocument : undefined}
               statusColors={statusColors}
               statusLabel={patientDetailStatusLabel}
               formatDate={formatDate}

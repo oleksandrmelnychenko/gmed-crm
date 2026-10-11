@@ -116,6 +116,14 @@ export function createPatientLeadOrigin(detail: PatientDetail) {
     });
 
   const sourceLeadId = detail.source_lead_id ?? stringFromUnknown(snapshot["id"]);
+  // A lead has no number of its own: the card names it by the person and the
+  // date of the request instead of its UUID (QA B-17, 2026-10-11).
+  const sourceLeadName = [snapshot["first_name"], snapshot["last_name"]]
+    .map(stringFromUnknown)
+    .filter(Boolean)
+    .join(" ");
+  const sourceLeadDate =
+    stringFromUnknown(snapshot["submitted_at"]) ?? stringFromUnknown(snapshot["created_at"]);
   const hasData = Boolean(sourceLeadId) || Object.values(profile).some(hasValue) || Object.values(snapshot).some(hasValue);
 
   return {
@@ -127,7 +135,9 @@ export function createPatientLeadOrigin(detail: PatientDetail) {
     selectedWorkTypes,
     serviceRequests,
     snapshot,
+    sourceLeadDate,
     sourceLeadId,
+    sourceLeadName,
     string,
     strings,
     value,

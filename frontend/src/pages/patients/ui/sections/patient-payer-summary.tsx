@@ -288,7 +288,19 @@ function LoadedCard({
       ) : null}
       {identification ? (
         <div data-testid={`${TEST_ID}-identification`}>
-          <GroupHeading>{tx("Идентификация", "Identifizierung")}</GroupHeading>
+          {/* The § 12 GwG route (QES plus a payment from the person's own
+              account) is a check of its own, next to the identity document
+              ticked in the legal status (QA B-17, 2026-10-11). */}
+          <GroupHeading>{tx(
+            "Идентификация по GwG: КЭП и платёж с собственного счёта",
+            "GwG-Identifizierung: QES und Zahlung vom eigenen Konto",
+          )}</GroupHeading>
+          <p className="px-3.5 pb-1.5 text-[11px] leading-4 text-muted-foreground">
+            {tx(
+              "Отдельно от проверки удостоверения личности в правовом статусе.",
+              "Unabhängig von der Prüfung des Ausweisdokuments im Rechtsstatus.",
+            )}
+          </p>
           <ul className="space-y-2 px-3.5 pb-2.5">
             {identificationRows.map((row) => (
               <li

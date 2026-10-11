@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Autocomplete } from "@base-ui/react/autocomplete";
 
 import { useOverlayDirtyField } from "@/components/ui/dismissal-guard";
+import { useOptionalAuthUser } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import {
   fetchMedicationNames,
@@ -10,6 +11,7 @@ import {
   type MedicationNameSuggestions,
   type MedicationPairConfirmation,
 } from "../../data/medication-names";
+import { canUseMedicationNameCatalog } from "../../model/detail-model";
 import { MedicationNameReview } from "./medication-name-review";
 
 type NameValues = { handelsname: string; wirkstoff: string | null; name_pair_confirmation?: MedicationPairConfirmation | null };
@@ -27,6 +29,12 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
 }) {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
   const id = useId();
+  const user = useOptionalAuthUser();
+  // The name lookups are open to the CEO and the patient manager on the
+  // server: other roles type the names by hand and never send the lookups the
+  // server would refuse with 403. Without a signed-in user (a component
+  // rendered on its own) the server decides.
+  const catalogAvailable = user ? canUseMedicationNameCatalog(user) : true;
   const [search, setSearch] = useState<Search | null>(null);
   const [lookup, setLookup] = useState<Lookup | null>(null);
   const [focusRequest, setFocusRequest] = useState<{ field: MedicationNameField; revision: number } | null>(null);
@@ -40,7 +48,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
   const inputs = useRef<Record<MedicationNameField, HTMLInputElement | null>>({ handelsname: null, wirkstoff: null });
   const dirtyBrand = useOverlayDirtyField(value.handelsname);
   const dirtySubstance = useOverlayDirtyField(value.wirkstoff ?? "");
-  const searchKey = search ? JSON.stringify(search) : "";
+  const searchKey = search && catalogAvailable ? JSON.stringify(search) : "";
 
   useEffect(() => { latest.current = value; }, [value]);
   useEffect(() => {
@@ -96,7 +104,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
 
   async function commitName(field: MedicationNameField, name: string, selected = false) {
     const key = nameKey(name);
-    if (!key || committed.current[field] === key) return;
+    if (!catalogAvailable || !key || committed.current[field] === key) return;
     committed.current[field] = key;
     resolving.current?.abort();
     const controller = new AbortController();
@@ -155,7 +163,7 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
     <div className="grid gap-2 md:grid-cols-2">
       {(["handelsname", "wirkstoff"] as const).map((field) => {
         const label = field === "handelsname" ? tx("Торговое название", "Handelsname") : tx("ACT-значение", "ACT-Bedeutung");
-        const open = search?.field === field;
+        const open = catalogAvailable && search?.field === field;
         return (
           <div key={field} className="min-w-0">
             <label htmlFor={`${id}-${field}`} className="mb-1 block text-[11px] font-medium text-muted-foreground">
@@ -222,13 +230,22 @@ export function MedicationNameFields({ value, onChange, lang, inputClassName }: 
           </div>
         );
       })}
-      <MedicationNameReview
-        names={{ handelsname: value.handelsname, wirkstoff: value.wirkstoff ?? "" }}
-        confirmation={value.name_pair_confirmation}
-        onConfirm={(name_pair_confirmation) => onChange({ name_pair_confirmation })}
-        onChoose={(field, name) => { changeName(field, name); void commitName(field, name, true); }}
-        lang={lang}
-      />
+      {catalogAvailable ? (
+        <MedicationNameReview
+          names={{ handelsname: value.handelsname, wirkstoff: value.wirkstoff ?? "" }}
+          confirmation={value.name_pair_confirmation}
+          onConfirm={(name_pair_confirmation) => onChange({ name_pair_confirmation })}
+          onChoose={(field, name) => { changeName(field, name); void commitName(field, name, true); }}
+          lang={lang}
+        />
+      ) : (
+        <p className="md:col-span-2 text-xs text-muted-foreground">
+          {tx(
+            "Введите названия вручную — медикамент сохранится у пациента. Подсказки из справочника названий для вашей роли не показываются.",
+            "Namen bitte manuell eingeben – das Medikament wird beim Patienten gespeichert. Vorschläge aus dem Namensverzeichnis gibt es für Ihre Rolle nicht.",
+          )}
+        </p>
+      )}
     </div>
   );
 }

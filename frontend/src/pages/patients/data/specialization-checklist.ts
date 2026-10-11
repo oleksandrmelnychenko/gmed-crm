@@ -250,6 +250,27 @@ function answerDetails(item: ChecklistItem, answer: ChecklistAnswer): string {
   return parts.join("; ");
 }
 
+// A composed answer line: "CVRF: ja", "- art. Hypertonie: nein (seit 2019)".
+const ANSWER_LINE_RE = /^(\s*(?:-\s+)?[^\n]*?:\s)(ja|nein)((?:\s\(.*\))?\s*)$/;
+
+/**
+ * The composed text in the reader's language. The answers are stored as
+ * "ja"/"nein" (the text prints into German letters as well); a Russian
+ * reader sees "да"/"нет" (QA B-03, 2026-10-11). Mirrors
+ * `localize_checklist_answers` of the clinical summary PDF.
+ */
+export function localizeChecklistAnswerText(text: string, lang: string): string {
+  if (lang !== "ru" || !text) return text;
+  return text
+    .split("\n")
+    .map((line) =>
+      line.replace(ANSWER_LINE_RE, (_match, head: string, answer: string, tail: string) =>
+        `${head}${answer === "ja" ? "да" : "нет"}${tail}`,
+      ),
+    )
+    .join("\n");
+}
+
 /** The readable text of the answered questions followed by the free text. */
 export function composeChecklistText(checklist: SpecializationChecklist): string {
   const items = parseChecklistTemplate(checklist.template);

@@ -20,6 +20,7 @@ import {
   emptySpecializationChecklist,
   isChecklistTemplate,
   isUnansweredChecklistNotation,
+  localizeChecklistAnswerText,
   readSpecializationChecklist,
   type SpecializationChecklist,
 } from "@/pages/patients/data/specialization-checklist";
@@ -505,7 +506,7 @@ export function AnamneseSection({
                               {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
                             </dt>
                             <dd className="mt-0.5 whitespace-pre-line text-sm text-foreground">
-                              {item.narrative_text}
+                              {localizeChecklistAnswerText(item.narrative_text, lang)}
                             </dd>
                           </div>
                         ) : null}

@@ -4878,23 +4878,34 @@ async fn ceo_assistant_only_sees_released_medical_documents() {
     )
     .await;
 
-    let (status, body) = json_request(
+    // The global list and the patient card's documents tab follow the same
+    // rule (RBAC matrix, CEO Assistant: documents "read only what is
+    // allowed"; owner decision 2026-10-11, QA B-14).
+    for path in [
+        format!("/api/v1/documents?patient_id={patient_id}"),
+        format!("/api/v1/patients/{patient_id}/documents"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant_bearer, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+        let ids: Vec<_> = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|item| item["id"].as_str())
+            .collect();
+        assert!(ids.contains(&released_id.to_string().as_str()), "{path}");
+        assert!(!ids.contains(&internal_id.to_string().as_str()), "{path}");
+    }
+    // Read-only: the assistant changes no document.
+    let (status, _) = json_request(
         &app,
-        "GET",
-        &format!("/api/v1/documents?patient_id={patient_id}"),
+        "POST",
+        &format!("/api/v1/documents/{released_id}/update"),
         &assistant_bearer,
-        None,
+        Some(json!({ "art": "lab_report" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    let ids: Vec<_> = body
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|item| item["id"].as_str())
-        .collect();
-    assert!(ids.contains(&released_id.to_string().as_str()));
-    assert!(!ids.contains(&internal_id.to_string().as_str()));
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

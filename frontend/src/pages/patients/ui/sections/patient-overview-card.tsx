@@ -458,7 +458,7 @@ export function PatientOverviewCard({
     const laterality = lateralityLabel(item.laterality, tx);
     const code = isProzedur ? item.ops_code : item.icd_code;
     const sub: string[] = [];
-    if (item.diagnosed_on) sub.push(`${isProzedur ? "" : "ED "}${item.diagnosed_on}`);
+    if (item.diagnosed_on) sub.push(`${isProzedur ? "" : "ED "}${formatAppDate(item.diagnosed_on) || item.diagnosed_on}`);
     if (item.grade) sub.push(item.grade);
     const hasDocumentSource = Boolean(
       item.source_document_id || item.source_document_name || item.source_import_id,

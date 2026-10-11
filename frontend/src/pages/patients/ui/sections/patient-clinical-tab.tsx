@@ -2490,10 +2490,15 @@ function MedicationHistoryTree({
   );
 }
 
+function emptyMedicationImportHistoryPage() {
+  return { items: [] as MedicationImportHistoryEvent[], total: 0, limit: 200, offset: 0 };
+}
+
 export function PatientClinicalTab({
   patientId,
   patientIdentity,
   canManage,
+  canImportDocuments = false,
   documentImportOpen,
   onDocumentImportOpenChange,
   embedded = false,
@@ -2506,6 +2511,11 @@ export function PatientClinicalTab({
     patientIdentifier?: string | null;
   };
   canManage: boolean;
+  /**
+   * The clinical import and its medication history are CEO-only on the
+   * server; other roles neither see the import sheet nor request the history.
+   */
+  canImportDocuments?: boolean;
   documentImportOpen: boolean;
   onDocumentImportOpenChange: (open: boolean) => void;
   embedded?: boolean;
@@ -2583,12 +2593,9 @@ export function PatientClinicalTab({
       apiFetch<{ items: PatientRiskScore[] }>(`/patients/${patientId}/risk-scores`).catch(() => ({
         items: [] as PatientRiskScore[],
       })),
-      fetchPatientMedicationImportHistory(patientId).catch(() => ({
-        items: [] as MedicationImportHistoryEvent[],
-        total: 0,
-        limit: 200,
-        offset: 0,
-      })),
+      canImportDocuments
+        ? fetchPatientMedicationImportHistory(patientId).catch(() => emptyMedicationImportHistoryPage())
+        : Promise.resolve(emptyMedicationImportHistoryPage()),
     ])
       .then(([clinical, recs, providerRows, doctorRows, specializationRows, vitals, labs, scores, medicationHistory]) => {
         if (!active) return;
@@ -2629,7 +2636,7 @@ export function PatientClinicalTab({
     return () => {
       active = false;
     };
-  }, [patientId, version]);
+  }, [canImportDocuments, patientId, version]);
 
   const filteredLabResults = useMemo(
     () => filterPatientLabResultsByPeriod(
@@ -3307,7 +3314,7 @@ export function PatientClinicalTab({
         }}
       />
 
-      <ClinicalDocumentImportSheet
+      {canImportDocuments ? <ClinicalDocumentImportSheet
         key={patientId}
         open={documentImportOpen}
         onOpenChange={onDocumentImportOpenChange}
@@ -3379,7 +3386,7 @@ export function PatientClinicalTab({
           })),
         }}
         onApply={applyClinicalDocumentCandidates}
-      />
+      /> : null}
 
       {/* ---- Therapie / Procedures (OPS) ---- */}
       <ClinicalSection<ClinicalProcedure>

@@ -72,7 +72,7 @@ export const INTAKE_CHECK_LABELS: Record<string, [string, string]> = {
   contract: ["Подписанный рамочный договор действует", "Unterzeichneter Rahmenvertrag liegt vor"],
   base_data_ready: ["Основные данные заполнены", "Stammdaten vollständig"],
   compliance_ready: ["Проверка и согласие на обработку данных", "Prüfung und Datenschutz-Einwilligung"],
-  identity_ready: ["Личность подтверждена", "Identität bestätigt"],
+  identity_ready: ["Удостоверение личности проверено", "Ausweisdokument geprüft"],
   document_pack_ready: ["Обязательные документы пациента", "Erforderliche Patientendokumente"],
   confidentiality_release_ready: ["Освобождение от врачебной тайны", "Schweigepflichtentbindung"],
   debt_clear: ["Нет блокировки из-за задолженности", "Keine Schuldensperre"],

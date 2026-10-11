@@ -429,6 +429,58 @@ export function payerDeclarationToForm(
 }
 
 /**
+ * The lead whose declaration counts for a converted patient: the most recently
+ * converted one (`legal_status.payer_declaration.lead_id`, written at every
+ * conversion), else the patient's first source lead.
+ */
+export function patientDeclarationLeadId(
+  patient: { legal_status?: unknown; source_lead_id?: string | null } | null | undefined,
+): string | null {
+  const legal = patient?.legal_status;
+  const summary = legal && typeof legal === "object" && !Array.isArray(legal)
+    ? (legal as Record<string, unknown>)["payer_declaration"]
+    : null;
+  const leadId = summary && typeof summary === "object" && !Array.isArray(summary)
+    ? (summary as Record<string, unknown>)["lead_id"]
+    : null;
+  if (typeof leadId === "string" && leadId.trim()) return leadId.trim();
+  return patient?.source_lead_id?.trim() || null;
+}
+
+/** The self-payer's own statement in the cabinet, where it names a category of the declaration. */
+const STATED_TO_DECLARED_SOURCE: Partial<Record<string, SourceOfFunds>> = {
+  savings: "savings",
+  asset_sale: "asset_sale",
+  inheritance_gift: "inheritance_gift",
+  other: "other",
+};
+
+/**
+ * "Кто платит" of a repeat intake, prefilled from the declaration fixed when
+ * the patient's last request was converted (QA B-18, 2026-10-11): who pays,
+ * the own-account answer, the source of funds and a third party's data. What
+ * belongs to the earlier request stays empty — "payer informed" (Art. 14
+ * DSGVO is confirmed per request) and the evidence file of the earlier lead.
+ * Staff check the answers and save; nothing is stored before.
+ */
+export function payerDeclarationPrefillForm(declaration: PayerDeclaration): PayerDeclarationForm {
+  const form = payerDeclarationToForm(declaration);
+  const stated = declaration.payer_kind === "self" ? declaration.self_funds_source?.trim() ?? "" : "";
+  const statedSource = STATED_TO_DECLARED_SOURCE[stated];
+  return {
+    ...form,
+    payerInformed: false,
+    sourceOfFundsDocumentId: "",
+    // The earlier lead's cabinet answer is not this lead's: it becomes the
+    // staff answer where it maps onto a category.
+    leadSelfFundsStated: false,
+    sourceOfFunds: form.sourceOfFunds || statedSource || "",
+    sourceOfFundsDescription:
+      form.sourceOfFundsDescription || (statedSource ? declaration.self_funds_description?.trim() ?? "" : ""),
+  };
+}
+
+/**
  * Whether the inputs USt-IdNr. / Steuernummer are offered: not on a server
  * known to reject them.
  */

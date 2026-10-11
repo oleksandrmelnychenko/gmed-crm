@@ -132,17 +132,21 @@ describe("patient detail model", () => {
   // Billing reads orders and the timeline but holds no `appointments.view`.
   const APPOINTMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "concierge", "interpreter"];
   const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
+  // `/patients/{id}/documents`: the record roles and, read-only, the CEO
+  // assistant (owner decision 2026-10-11).
+  const DOCUMENT_ROLES = [...RECORD_ROLES, "ceo_assistant"];
 
   it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {
     forEachActor((actor, has, actorRole) => {
       if (actorRole !== role) return;
       const record = RECORD_ROLES.includes(role);
+      const documents = DOCUMENT_ROLES.includes(role);
       expect(canViewPatientOperationalSurface(actor)).toBe(has("patients.view") && record);
       expect(canViewPatientAssignmentsSurface(actor)).toBe(
         has("patients.view") && ASSIGNMENT_ROLES.includes(role),
       );
-      expect(canViewPatientDocumentsSurface(actor)).toBe(has("patients.view") && has("documents.view") && record);
-      expect(canOpenPatientDocumentsWorkspace(actor)).toBe(has("patients.view") && has("documents.view") && record);
+      expect(canViewPatientDocumentsSurface(actor)).toBe(has("patients.view") && has("documents.view") && documents);
+      expect(canOpenPatientDocumentsWorkspace(actor)).toBe(has("patients.view") && has("documents.view") && documents);
       expect(canViewPatientContractsSurface(actor)).toBe(has("contracts.view"));
       expect(canViewPatientInvoicesSurface(actor)).toBe(has("invoices.view"));
       expect(canViewPatientFinanceSurface(actor)).toBe(has("invoices.view"));

@@ -5457,6 +5457,21 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
     assert!(body.get("notes").is_none());
     assert_eq!(body["functional_labels"][0], "vip");
     assert_eq!(body["functional_labels"][1], "high_risk");
+    // The card is told which groups are hidden for the role, so it shows
+    // "hidden" instead of "not set" or an unstarted legal status (QA B-14).
+    let hidden = body["hidden_fields"].as_array().expect("hidden_fields");
+    for group in ["insurance", "address", "passport", "legal_status", "notes"] {
+        assert!(
+            hidden.iter().any(|field| field == group),
+            "{group}: {hidden:?}"
+        );
+    }
+    for group in ["email", "phone", "name"] {
+        assert!(
+            hidden.iter().all(|field| field != group),
+            "{group}: {hidden:?}"
+        );
+    }
 
     support::wait_until("interpreter patient view audit context", || async {
         let exists: Option<Value> = sqlx::query_scalar(
@@ -5596,6 +5611,24 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
     assert!(detail.get("notes").is_none());
     assert!(detail.get("address_street").is_none());
     assert!(detail.get("emergency_contact_name").is_none());
+    // QA E-29: the card names what is hidden for the assistant.
+    let hidden = detail["hidden_fields"].as_array().expect("hidden_fields");
+    for group in [
+        "insurance",
+        "functional_labels",
+        "address",
+        "emergency_contact",
+        "legal_status",
+    ] {
+        assert!(
+            hidden.iter().any(|field| field == group),
+            "{group}: {hidden:?}"
+        );
+    }
+    assert!(
+        hidden.iter().all(|field| field != "languages"),
+        "{hidden:?}"
+    );
 
     support::wait_until("ceo assistant patient view audit context", || async {
         let exists: Option<Value> = sqlx::query_scalar(
@@ -13017,6 +13050,99 @@ async fn patient_timeline_includes_compliance_audit_events() {
             item["entity_type"] == "compliance" && item["title"] == "DSGVO data export"
         }),
         "expected dsgvo export event in patient timeline"
+    );
+}
+
+/// QA B-26: a phone change saved through the profile editor (which re-sends
+/// the unchanged legal status) is a "profile updated" event naming the
+/// field, never a legal-status change; the audit keeps field names only.
+#[tokio::test]
+async fn profile_edit_names_the_changed_fields_and_is_no_legal_status_change() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("profile-edit-timeline");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let unchanged_legal_status = json!({
+        "dsgvo_signed": false,
+        "confidentiality_release_signed": false,
+        "identity_verified": false,
+        "document_pack_complete": false,
+        "compliance_completed": false,
+        "contract_status": "not_started",
+        "notes": null
+    });
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "first_name": format!("First {tag}"),
+            "last_name": format!("Last {tag}"),
+            "birth_date": "1990-01-01",
+            "gender": "diverse",
+            "phone_primary": "+49 30 7654321",
+            "legal_status": unchanged_legal_status,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    support::wait_until("update_patient audit row with changed fields", || async {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log
+             WHERE action = 'update_patient' AND entity_type = 'patient' AND entity_id = $1",
+        )
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 1
+    })
+    .await;
+    let (context, old_value, new_value): (Value, Option<Value>, Option<Value>) = sqlx::query_as(
+        "SELECT context, old_value, new_value FROM audit_log
+             WHERE action = 'update_patient' AND entity_type = 'patient' AND entity_id = $1
+             ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        context["changed_fields"],
+        json!(["phone_primary"]),
+        "{context}"
+    );
+    assert_eq!(context["legal_status_updated"], false);
+    assert_eq!(context["legal_status_changed_keys"], json!([]));
+    // No copy of the patient's data in the append-only log.
+    assert!(old_value.is_none() && new_value.is_none());
+    assert!(!context.to_string().contains("7654321"));
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("timeline array");
+    assert!(
+        items.iter().any(|item| item["entity_type"] == "patient"
+            && item["category"] == "profile"
+            && item["title"] == "Profile updated: phone_primary"),
+        "{items:?}"
+    );
+    assert!(
+        items
+            .iter()
+            .all(|item| item["title"] != "Legal/compliance status updated"),
+        "{items:?}"
     );
 }
 

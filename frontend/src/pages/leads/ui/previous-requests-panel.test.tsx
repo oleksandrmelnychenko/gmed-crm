@@ -37,7 +37,7 @@ describe("PreviousRequestsPanel", () => {
     const html = render([
       request("a", "Knee pain", { order_number: "A-20260301-0001", date_from: "2026-03-02", date_to: "2026-03-06" }),
     ]);
-    expect(html).toContain("01.03.2026 · A-20260301-0001 · 02.03.2026 – 06.03.2026 · Радиология");
+    expect(html).toContain("01.03.2026 · Заказ A-20260301-0001 · 02.03.2026 – 06.03.2026 · Радиология");
     expect(html).toContain("Knee pain");
     expect(html).toContain(">Взять<");
   });

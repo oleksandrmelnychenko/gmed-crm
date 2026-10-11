@@ -365,6 +365,96 @@ export function clinicalDocumentImportAfterPrepare(
   };
 }
 
+type ClinicalImportLang = "ru" | "de";
+
+function apiErrorStatus(error: unknown): number | undefined {
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status?: unknown }).status;
+    return typeof status === "number" ? status : undefined;
+  }
+  return undefined;
+}
+
+function apiErrorText(error: unknown): string {
+  return error instanceof Error ? error.message : "";
+}
+
+/**
+ * The reason a clinical import request was refused, in the UI language.
+ * The server answers in English (`clinical_document_imports.rs`); the user
+ * never sees those texts (QA B-02/B-05, 2026-10-11).
+ */
+export function clinicalImportErrorReason(error: unknown, lang: ClinicalImportLang): string {
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
+  const status = apiErrorStatus(error);
+  const text = apiErrorText(error);
+  switch (status) {
+    case 403:
+      return tx(
+        "у вас нет доступа к распознаванию медицинских документов этого пациента (нужно назначение на пациента).",
+        "Sie haben keinen Zugriff auf die Erkennung medizinischer Dokumente dieses Patienten (Zuweisung erforderlich).",
+      );
+    case 404:
+      return tx("документ не найден.", "das Dokument wurde nicht gefunden.");
+    case 409:
+      return tx("файл документа недоступен.", "die Datei des Dokuments ist nicht verfügbar.");
+    case 423:
+      return tx(
+        "обработка данных пациента ограничена (ст. 18 DSGVO), карточку нельзя изменять.",
+        "die Verarbeitung der Patientendaten ist eingeschränkt (Art. 18 DSGVO), die Akte kann nicht geändert werden.",
+      );
+    case 413:
+      return tx(
+        "файл превышает лимит распознавания 25 МБ.",
+        "die Datei überschreitet das Erkennungslimit von 25 MB.",
+      );
+    case 422:
+      if (/medical document/i.test(text)) {
+        return tx(
+          "распознавать можно только медицинские документы.",
+          "erkannt werden können nur medizinische Dokumente.",
+        );
+      }
+      if (/belong to this patient/i.test(text)) {
+        return tx(
+          "документ относится к другому пациенту.",
+          "das Dokument gehört zu einem anderen Patienten.",
+        );
+      }
+      return tx(
+        "файл не подходит для распознавания (PDF, PNG или JPG без вредоносного содержимого).",
+        "die Datei eignet sich nicht für die Erkennung (PDF, PNG oder JPG ohne Schadinhalt).",
+      );
+    default:
+      return tx(
+        "сервис распознавания сейчас недоступен. Попробуйте позже.",
+        "der Erkennungsdienst ist gerade nicht verfügbar. Bitte später erneut versuchen.",
+      );
+  }
+}
+
+function capitalize(text: string) {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+/** A refused import or history request, as a full sentence. */
+export function clinicalImportStartErrorMessage(error: unknown, lang: ClinicalImportLang): string {
+  return lang === "de"
+    ? `Erkennung nicht gestartet: ${clinicalImportErrorReason(error, lang)}`
+    : `Распознавание не запущено: ${clinicalImportErrorReason(error, lang)}`;
+}
+
+/**
+ * The upload stored the file as a patient document, but the import itself was
+ * refused: the user has to know the file stays in the patient's documents.
+ */
+export function clinicalImportStoredDocumentMessage(error: unknown, lang: ClinicalImportLang): string {
+  const reason = capitalize(clinicalImportErrorReason(error, lang));
+  return lang === "de"
+    ? `Die Datei wurde als medizinisches Dokument in den Dokumenten des Patienten gespeichert (Quelle „Import eines medizinischen Dokuments“), die Erkennung wurde aber nicht gestartet. ${reason}`
+    : `Файл сохранён в документах пациента как медицинский документ (источник «Импорт медицинского документа»), но распознавание не запущено. ${reason}`;
+}
+
 export function fetchClinicalDocumentImports(patientId: string) {
   return apiFetch<{ items: ClinicalDocumentImportSummary[] }>(
     `/patients/${patientId}/clinical-document-imports`,

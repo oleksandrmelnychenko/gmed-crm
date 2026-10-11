@@ -54,6 +54,7 @@ import {
   revokeDocumentPreviewObjectUrl,
 } from "@/pages/documents/data/document-api";
 
+import { clinicalImportStartErrorMessage } from "../../data/clinical-document-import";
 import type {
   DocumentAlerts,
   DocumentItem,
@@ -113,7 +114,8 @@ type PatientDocumentsTabProps = {
   onResetDocumentFilters: () => void;
   canManageDocuments: boolean;
   onOpenUpload: () => void;
-  onRecognizeDocument: (documentId: string) => Promise<void>;
+  /** Absent for roles the server does not admit to the clinical import. */
+  onRecognizeDocument?: (documentId: string) => Promise<void>;
   statusColors: Record<string, string>;
   statusLabel: StatusLabelFn;
   formatDate: DateFormatter;
@@ -406,18 +408,12 @@ export function PatientDocumentsTab({
   }
 
   async function recognizePatientDocument(doc: DocumentItem) {
-    if (recognizingDocumentId) return;
+    if (recognizingDocumentId || !onRecognizeDocument) return;
     setRecognizingDocumentId(doc.id);
     try {
       await onRecognizeDocument(doc.id);
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : lang === "de"
-            ? "Dokument konnte nicht zur Erkennung gesendet werden"
-            : "Не удалось отправить документ на распознавание",
-      );
+      toast.error(clinicalImportStartErrorMessage(error, lang === "de" ? "de" : "ru"));
     } finally {
       setRecognizingDocumentId(null);
     }
@@ -688,7 +684,7 @@ export function PatientDocumentsTab({
             <>
               {canManageDocuments ? (
                 <>
-                  {canRecognizePatientDocument(doc) ? (
+                  {onRecognizeDocument && canRecognizePatientDocument(doc) ? (
                     <Button
                       type="button"
                       variant="ghost"

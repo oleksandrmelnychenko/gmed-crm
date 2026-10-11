@@ -8,6 +8,7 @@ import {
   emptySpecializationChecklist,
   isChecklistTemplate,
   isUnansweredChecklistNotation,
+  localizeChecklistAnswerText,
   parseChecklistTemplate,
   readSpecializationChecklist,
 } from "./specialization-checklist";
@@ -202,5 +203,16 @@ describe("readSpecializationChecklist", () => {
     expect(readSpecializationChecklist(null)).toBeNull();
     expect(readSpecializationChecklist({ template: 1, answers: {} })).toBeNull();
     expect(readSpecializationChecklist("text")).toBeNull();
+  });
+});
+
+describe("localizeChecklistAnswerText", () => {
+  it("shows the stored ja/nein answers in Russian and leaves German and free text alone", () => {
+    const text = "CVRF: ja\n- art. Hypertonie: ja\n- Nikotin: nein\n- Antikoagulation: ja (Apixaban)\n\nPatient: ja, kommt wieder";
+    expect(localizeChecklistAnswerText(text, "ru")).toBe(
+      "CVRF: да\n- art. Hypertonie: да\n- Nikotin: нет\n- Antikoagulation: да (Apixaban)\n\nPatient: ja, kommt wieder",
+    );
+    expect(localizeChecklistAnswerText(text, "de")).toBe(text);
+    expect(localizeChecklistAnswerText("", "ru")).toBe("");
   });
 });

@@ -350,7 +350,7 @@ export function PatientDocumentGenerateDialog({
       title={
         initialTemplateId && isFreeTextDocumentTemplate(initialTemplateId)
           ? tx("Создать документ", "Dokument erstellen")
-          : tx("Сгенерировать из шаблона", "Aus Vorlage erstellen")
+          : tx("Сгенерировать из шаблона", "Aus Vorlage generieren")
       }
       description={tx(
         "Документ создаётся для этого пациента и появится в списке.",

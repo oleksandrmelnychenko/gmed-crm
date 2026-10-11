@@ -1,3 +1,5 @@
+import { knownDocumentCodeLabel } from "./required-document-labels";
+
 type L = (key: string) => string;
 
 // Known backend entity_type codes -> localized label.
@@ -82,7 +84,46 @@ const CATEGORY_MAP: Record<string, string> = {
   legal_status: "timeline_category_legal",
   feedback: "timeline_category_feedback",
   lifecycle: "timeline_category_lifecycle",
+  // A profile edit of the patient card (`changed_fields` of `update_patient`).
+  profile: "timeline_category_profile",
 };
+
+/**
+ * The fields a profile edit names (`changed_fields` of the `update_patient`
+ * audit row): only field names, never values (QA B-26, 2026-10-11).
+ */
+const PROFILE_FIELD_KEYS: Record<string, string> = {
+  title: "timeline_profile_field_title",
+  first_name: "timeline_profile_field_first_name",
+  last_name: "timeline_profile_field_last_name",
+  birth_date: "timeline_profile_field_birth_date",
+  gender: "timeline_profile_field_gender",
+  phone_primary: "timeline_profile_field_phone_primary",
+  phone_secondary: "timeline_profile_field_phone_secondary",
+  email: "timeline_profile_field_email",
+  contacts: "timeline_profile_field_contacts",
+  nationality: "timeline_profile_field_nationality",
+  citizenships: "timeline_profile_field_citizenships",
+  residence_country: "timeline_profile_field_residence_country",
+  languages: "timeline_profile_field_languages",
+  functional_labels: "timeline_profile_field_functional_labels",
+  address_street: "timeline_profile_field_address_street",
+  address_city: "timeline_profile_field_address_city",
+  address_zip: "timeline_profile_field_address_zip",
+  address_country: "timeline_profile_field_address_country",
+  insurance_provider: "timeline_profile_field_insurance_provider",
+  insurance_number: "timeline_profile_field_insurance_number",
+  insurance_type: "timeline_profile_field_insurance_type",
+  emergency_contact_name: "timeline_profile_field_emergency_contact_name",
+  emergency_contact_phone: "timeline_profile_field_emergency_contact_phone",
+  emergency_contact_relation: "timeline_profile_field_emergency_contact_relation",
+  passport_number: "timeline_profile_field_passport_number",
+  passport_expiry: "timeline_profile_field_passport_expiry",
+  notes: "timeline_profile_field_notes",
+  clinical_warnings: "timeline_profile_field_clinical_warnings",
+};
+
+const PROFILE_UPDATED_PREFIX = "Profile updated:";
 
 // Titles the server writes for compliance and file-status events.
 const COMPLIANCE_TITLE_KEYS: Record<string, string> = {
@@ -128,6 +169,9 @@ const SOURCE_MAP: Record<string, string> = {
   payment: "timeline_source_payment",
   "medical report": "timeline_source_medical_report",
   "patient visible": "timeline_source_patient_visible",
+  // Document visibility codes (`documents.visibility`) the document rows send.
+  "released internal": "timeline_source_released_internal",
+  "released external": "timeline_source_released_external",
   "finance cost estimate": "timeline_source_finance_cost_estimate",
   "patient intake": "timeline_source_patient_intake",
   "patient custom": "timeline_source_patient_custom",
@@ -156,8 +200,12 @@ function lookupOrHumanize(
   const trimmed = value.normalize("NFKC").replace(/\s+/g, " ").trim();
   if (!trimmed) return "";
   const key = trimmed.toLowerCase();
-  const entry = map[key];
-  if (entry) return l(entry);
+  // The maps are keyed in either form: "patient_visible" and "patient visible".
+  const entry = map[key] ?? map[key.replace(/[_-]+/g, " ")] ?? map[key.replace(/[\s-]+/g, "_")];
+  if (entry) {
+    const localized = l(entry);
+    if (localized !== entry) return localized;
+  }
   // snake_case code → humanize; already-human text → leave alone
   if (/^[a-z0-9][a-z0-9_-]*$/.test(trimmed)) return humanizeFallback(trimmed);
   return trimmed;
@@ -174,7 +222,30 @@ export function localizeTimelineCategory(
   value: string | null | undefined,
   l: L,
 ): string {
+  const code = value?.trim().toLowerCase() ?? "";
+  // A document row carries its category or type code ("provider_template",
+  // "finance_cost_coverage", "visa_invitation_letter"): the document labels
+  // of the catalogs name them (QA B-26).
+  if (code && !CATEGORY_MAP[code]) {
+    const documentLabel = knownDocumentCodeLabel(code, l);
+    // An untranslated catalog key comes back as the key itself.
+    if (documentLabel && !/^[a-z0-9_]+$/.test(documentLabel)) return documentLabel;
+  }
   return lookupOrHumanize(CATEGORY_MAP, value, l);
+}
+
+/** The field names of a profile edit, in the UI language. */
+export function localizeProfileFieldList(fields: string, l: L): string {
+  return fields
+    .split(",")
+    .map((field) => field.trim())
+    .filter(Boolean)
+    .map((field) => {
+      const key = PROFILE_FIELD_KEYS[field];
+      const localized = key ? l(key) : key;
+      return key && localized !== key ? localized : humanizeFallback(field);
+    })
+    .join(", ");
 }
 
 export function localizeTimelineSource(
@@ -198,6 +269,15 @@ export function localizeTimelineTitle(
   if (/^workflow_item_[a-z0-9_]+$/.test(value)) {
     const localized = l(value);
     return localized === value ? humanizeFallback(value.replace(/^workflow_item_/, "")) : localized;
+  }
+
+  // "Profile updated: phone_primary, email" — a profile edit names the
+  // changed fields (never their values).
+  if (value.startsWith(PROFILE_UPDATED_PREFIX)) {
+    const prefix = l("timeline_title_profile_updated");
+    const fields = localizeProfileFieldList(value.slice(PROFILE_UPDATED_PREFIX.length), l);
+    const title = prefix === "timeline_title_profile_updated" ? "Profile updated" : prefix;
+    return fields ? `${title}: ${fields}` : title;
   }
 
   const complianceKey = COMPLIANCE_TITLE_KEYS[value];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  localizeTimelineCategory,
   localizeTimelineSource,
   localizeTimelineTitle,
 } from "./timeline-labels";
@@ -90,6 +91,39 @@ describe("timeline labels", () => {
     // Without a translation the server title stays readable.
     expect(localizeTimelineTitle("Privacy request approved", lc)).toBe(
       "Privacy request approved",
+    );
+  });
+
+  it("localizes raw visibility codes and document categories (QA B-26)", () => {
+    const ru: Record<string, string> = {
+      timeline_source_patient_visible: "Виден пациенту",
+      document_category_provider_template: "Памятка клиники",
+      document_category_finance_cost_coverage: "Гарантия оплаты расходов",
+      document_category_visa_invitation_letter: "Приглашение для визы",
+      document_category_administrative_appointment_confirmation: "Подтверждение записи",
+      timeline_category_profile: "Профиль",
+    };
+    const lr = (key: string) => ru[key] ?? key;
+    expect(localizeTimelineSource("patient_visible", lr)).toBe("Виден пациенту");
+    expect(localizeTimelineCategory("provider_template", lr)).toBe("Памятка клиники");
+    expect(localizeTimelineCategory("finance_cost_coverage", lr)).toBe("Гарантия оплаты расходов");
+    expect(localizeTimelineCategory("visa_invitation_letter", lr)).toBe("Приглашение для визы");
+    expect(localizeTimelineCategory("administrative_appointment_confirmation", lr)).toBe("Подтверждение записи");
+    expect(localizeTimelineCategory("profile", lr)).toBe("Профиль");
+  });
+
+  it("names the changed fields of a profile edit", () => {
+    const ru: Record<string, string> = {
+      timeline_title_profile_updated: "Профиль изменён",
+      timeline_profile_field_phone_primary: "Телефон",
+      timeline_profile_field_email: "E-mail",
+    };
+    const lr = (key: string) => ru[key] ?? key;
+    expect(localizeTimelineTitle("Profile updated: phone_primary, email", lr)).toBe(
+      "Профиль изменён: Телефон, E-mail",
+    );
+    expect(localizeTimelineTitle("Profile updated: some_new_field", lr)).toBe(
+      "Профиль изменён: Some New Field",
     );
   });
 

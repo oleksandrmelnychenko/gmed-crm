@@ -688,3 +688,63 @@ async fn medication_name_search_reports_truncation_escapes_wildcards_and_enforce
         StatusCode::FORBIDDEN
     );
 }
+
+/// Owner decision 2026-10-11: the patient manager enters medication and
+/// imports clinical documents, so it reads the name suggestions and the pair
+/// check; the catalogue page (list, create, edit, delete) stays with the CEO.
+#[tokio::test]
+async fn patient_manager_reads_name_suggestions_but_does_not_maintain_the_catalogue() {
+    let Some((suite, _, _)) = context().await else {
+        return;
+    };
+    let manager: Uuid = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, name, role)
+         VALUES ($1, 'hash', 'Mia Muster', 'patient_manager') RETURNING id",
+    )
+    .bind(format!("names-pm-{}@example.com", Uuid::new_v4()))
+    .fetch_one(&suite.pool)
+    .await
+    .unwrap();
+    let bearer = format!(
+        "Bearer {}",
+        jwt::issue_access_token(SECRET, manager, "patient_manager", Uuid::new_v4()).unwrap()
+    );
+    let (status, _) = request(
+        &suite.app,
+        "GET",
+        &search("handelsname", "Ram", ""),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = request(
+        &suite.app,
+        "GET",
+        "/api/v1/medication-name-pairs/check?handelsname=Ramipril%20DEMO&wirkstoff=Ramipril",
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["known_pair"], false);
+    for (method, path, body) in [
+        ("GET", "/api/v1/medication-name-pairs".to_string(), None),
+        (
+            "POST",
+            "/api/v1/medication-name-pairs".to_string(),
+            Some(json!({ "handelsname": "Brand", "wirkstoff": "Substance" })),
+        ),
+        (
+            "DELETE",
+            format!("/api/v1/medication-name-pairs/{}", Uuid::new_v4()),
+            Some(json!({ "version": 0 })),
+        ),
+    ] {
+        assert_eq!(
+            request(&suite.app, method, &path, &bearer, body).await.0,
+            StatusCode::FORBIDDEN,
+            "{method} {path}"
+        );
+    }
+}

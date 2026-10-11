@@ -45,6 +45,7 @@ import {
   patientTrustedContactsToPayload,
   parseLanguages,
   patientToForm,
+  patientFieldHidden,
   toOptional,
   type PatientAssignment,
   type PatientContactFormState,
@@ -121,9 +122,11 @@ function PatientOverviewSection({
         <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
           {getPatientGenderLabel(detail.gender, tr)}
         </Badge>
-        <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
-          {getPatientInsuranceLabel(detail.insurance_type, tr)}
-        </Badge>
+        {patientFieldHidden(detail, "insurance") ? null : (
+          <Badge variant="outline" className="rounded-full border-border bg-card text-foreground">
+            {getPatientInsuranceLabel(detail.insurance_type, tr)}
+          </Badge>
+        )}
         {detail.functional_labels?.map((label) => (
           <Badge
             key={`${detail.id}-${label}`}
@@ -198,9 +201,10 @@ function PatientProfileSection({
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
-  const legalStatusSummary = getPatientLegalStatusSummary(
-    normalizePatientLegalStatus(detail.legal_status),
-  );
+  // A role the server hides the legal status from sees "hidden", not "not started".
+  const legalStatusSummary = patientFieldHidden(detail, "legal_status")
+    ? t.access_hidden
+    : getPatientLegalStatusSummary(normalizePatientLegalStatus(detail.legal_status));
 
   return (
     <div className="space-y-3">

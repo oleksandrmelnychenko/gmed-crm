@@ -1,5 +1,7 @@
 import { Badge } from "@/components/ui/badge";
+import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
+import { localizeChecklistAnswerText } from "@/pages/patients/data/specialization-checklist";
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 
 import {
@@ -112,7 +114,7 @@ export function SpecializationDiagnosesSection({
                 </div>
                 {diagnosis.diagnosed_on ? (
                   <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-                    {labels.diagnosedOn}: {diagnosis.diagnosed_on}
+                    {labels.diagnosedOn}: {formatAppDate(diagnosis.diagnosed_on) || diagnosis.diagnosed_on}
                   </span>
                 ) : null}
               </div>
@@ -177,12 +179,12 @@ export function SpecializationDiagnosesSection({
                   >
                     {narrative.anamnese_at ? (
                       <p className="text-xs tabular-nums text-muted-foreground">
-                        {narrative.anamnese_at}
+                        {formatAppDateTime(narrative.anamnese_at) || narrative.anamnese_at}
                       </p>
                     ) : null}
                     {details?.narrative_text ? (
                       <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">
-                        {details.narrative_text}
+                        {localizeChecklistAnswerText(details.narrative_text, lang)}
                       </p>
                     ) : narrative.anamnese_aktuelle ? (
                       <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">

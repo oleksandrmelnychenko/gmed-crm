@@ -5717,3 +5717,180 @@ async fn clinical_routes_follow_medical_capabilities_and_patient_assignment() {
     .await;
     assert_eq!(status, StatusCode::OK);
 }
+
+/// Owner decision 2026-10-11: the patient manager imports clinical documents
+/// for the patients assigned to it, like the rest of its medical data; an
+/// unassigned patient, the interpreter and billing stay refused.
+#[tokio::test]
+async fn patient_manager_imports_clinical_documents_only_for_assigned_patients() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("pm-import");
+    let own_patient = seed_patient(&pool, admin_id, &tag).await;
+    let other_patient = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+    let manager_id = seed_user(&pool, &format!("{tag}-pm"), "patient_manager").await;
+    let interpreter_id = seed_user(&pool, &format!("{tag}-int"), "interpreter").await;
+    let billing_id = seed_user(&pool, &format!("{tag}-bill"), "billing").await;
+    seed_patient_assignment(&pool, own_patient, manager_id, admin_id).await;
+    seed_patient_assignment(&pool, own_patient, interpreter_id, admin_id).await;
+    let manager = auth_header_for(manager_id, "patient_manager");
+
+    let own_import =
+        seed_medication_review_import(&pool, own_patient, admin_id, "own-candidate", &tag).await;
+    let other_import = seed_medication_review_import(
+        &pool,
+        other_patient,
+        admin_id,
+        "other-candidate",
+        &format!("{tag}-other"),
+    )
+    .await;
+    let document_of = |import_id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "SELECT document_id FROM clinical_document_imports WHERE id = $1",
+            )
+            .bind(import_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let own_document = document_of(own_import).await;
+    let other_document = document_of(other_import).await;
+
+    // Assigned: the history, the draft and the medication import history open.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{own_patient}/clinical-document-imports"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == own_import.to_string())
+    );
+    for path in [
+        format!("/api/v1/patients/{own_patient}/clinical-document-imports/{own_import}"),
+        format!("/api/v1/patients/{own_patient}/medication-import-history"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &manager, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    // Starting an import passes the access check; the seeded document has no
+    // stored file, so the request ends at the file, not at the permission.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{own_patient}/clinical-document-imports"),
+        &manager,
+        Some(json!({ "document_id": own_document })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+
+    // Not assigned: every import route answers 403.
+    for path in [
+        format!("/api/v1/patients/{other_patient}/clinical-document-imports"),
+        format!("/api/v1/patients/{other_patient}/clinical-document-imports/{other_import}"),
+        format!("/api/v1/patients/{other_patient}/medication-import-history"),
+    ] {
+        let (status, _) = json_request(&app, "GET", &path, &manager, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "unassigned GET {path}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{other_patient}/clinical-document-imports"),
+        &manager,
+        Some(json!({ "document_id": other_document })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!(
+            "/api/v1/patients/{other_patient}/clinical-document-imports/{other_import}/abandon"
+        ),
+        &manager,
+        Some(json!({ "reason": "Nicht zuständig" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // Other roles stay outside the import, assigned or not.
+    for (user_id, role) in [(interpreter_id, "interpreter"), (billing_id, "billing")] {
+        let (status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/patients/{own_patient}/clinical-document-imports"),
+            &auth_header_for(user_id, role),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}");
+    }
+}
+
+/// Owner decision 2026-10-11: the CEO assistant reads everything and writes
+/// nothing — the clinical record and its PDFs open, a clinical save does not,
+/// and the clinical import (a write workflow) stays closed.
+#[tokio::test]
+async fn ceo_assistant_reads_the_clinical_record_but_never_writes_it() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("assistant-clinical");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let assistant_id = seed_user(&pool, &format!("{tag}-assistant"), "ceo_assistant").await;
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = raw_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical.pdf"),
+        &assistant,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    for (path, body) in [
+        (
+            format!("/api/v1/patients/{patient_id}/diagnoses"),
+            json!({ "items": [] }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/vitals"),
+            json!({ "measured_at": "2026-10-11T09:00:00Z", "heart_rate": 70 }),
+        ),
+    ] {
+        let (status, _) = json_request(&app, "POST", &path, &assistant, Some(body)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "assistant POST {path}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/clinical-document-imports"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}

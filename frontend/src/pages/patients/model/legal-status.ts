@@ -2,6 +2,7 @@ import {
   formatEnumLabelFromKeys,
   getLang,
   t as translateCatalog,
+  type Lang,
   type TranslationKey,
 } from "@/lib/i18n";
 
@@ -44,8 +45,8 @@ const PATIENT_CONTRACT_STATUS_LABEL_KEYS = {
   terminated: "patient_contract_status_terminated",
 } satisfies Partial<Record<string, TranslationKey>>;
 
-function legalStatusTranslations() {
-  return translateCatalog(getLang());
+function legalStatusTranslations(lang?: Lang) {
+  return translateCatalog(lang ?? getLang());
 }
 
 export function patientContractStatusLabel(value?: string | null) {
@@ -110,8 +111,12 @@ export function serializePatientLegalStatus(status: PatientLegalStatus) {
   };
 }
 
-export function getPatientLegalStatusChecklist(status: PatientLegalStatus) {
-  const translations = legalStatusTranslations();
+/**
+ * `lang` is the UI language of a React caller: the labels follow a language
+ * switch instead of staying in the language of the first render (QA B-22).
+ */
+export function getPatientLegalStatusChecklist(status: PatientLegalStatus, lang?: Lang) {
+  const translations = legalStatusTranslations(lang);
   return [
     { key: "dsgvo", label: translations.patient_legal_check_dsgvo, done: status.dsgvoSigned },
     {

@@ -131,6 +131,15 @@ export function useAuth() {
   return ctx;
 }
 
+/**
+ * The signed-in user, or `null` outside an `AuthProvider` (a component
+ * rendered on its own, e.g. in an isolated test harness), where `useAuth`
+ * would throw.
+ */
+export function useOptionalAuthUser() {
+  return use(AuthContext)?.user ?? null;
+}
+
 function getAccessToken() {
   return getStoredAccessToken();
 }

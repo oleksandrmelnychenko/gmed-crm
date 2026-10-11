@@ -38,6 +38,16 @@ describe("createPatientLeadOrigin", () => {
     ]);
   });
 
+  it("names the source lead by person and request date instead of its id (QA B-17)", () => {
+    const origin = createPatientLeadOrigin(patient({
+      source_lead_id: "c605453f-8212-4af8-98ef-380348b18d21",
+      lead_snapshot: { first_name: "Anna", last_name: "Muster", created_at: "2026-10-01T08:00:00Z", submitted_at: null },
+    }));
+    expect(origin.sourceLeadName).toBe("Anna Muster");
+    expect(origin.sourceLeadDate).toBe("2026-10-01T08:00:00Z");
+    expect(createPatientLeadOrigin(patient({ source_lead_id: "lead-1" })).sourceLeadName).toBe("");
+  });
+
   it("prefers normalized profile fields and keeps comments for every requested service", () => {
     const origin = createPatientLeadOrigin(patient({
       intake_profile: {

@@ -19,7 +19,6 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
-use crate::access;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::file_scan::{FileScanOutcome, scan_upload_bytes};
@@ -29,11 +28,14 @@ use crate::routes::patients::{
     normalize_patient_lab_result_payload, normalize_patient_vital_measurement_payload,
 };
 use crate::state::AppState;
+use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 
-// The first-release workspace exposes clinical imports to the CEO only.
-// Keep this route contract aligned with the global release-role gate.
-const IMPORT_ROLES: &[Role] = &[Role::Ceo];
+// Owner decision 2026-10-11: the CEO imports for every patient, the patient
+// manager for the patients assigned to it (its medical-data scope). Keep the
+// frontend mirror `CLINICAL_IMPORT_SERVER_ROLES` (patients/model/detail-model.ts)
+// aligned.
+const IMPORT_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager];
 const UNSUPPORTED_IMPORT_FILE: &str = "Clinical import supports only PDF, PNG, and JPEG documents";
 const MAX_IMPORT_FILE_BYTES: usize = 25 * 1024 * 1024;
 
@@ -1169,25 +1171,38 @@ fn normalize_imported_medication(
     Ok(medication)
 }
 
+/// Reading the imports of a patient (history, a draft, the medication import
+/// history): the import roles with the same patient access as the patient's
+/// medical data — the CEO for every patient, the patient manager for the
+/// patients assigned to it (`has_patient_access`).
 async fn ensure_access(
     state: &AppState,
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
     auth.require_any_role(IMPORT_ROLES)?;
-    if auth.role.has_full_access() || !access::requires_patient_assignment(auth.role) {
-        return Ok(());
-    }
-    match access::has_active_patient_assignment(&state.db, patient_id, auth.user_id).await {
+    match crate::routes::patients::has_patient_access(state, auth, patient_id).await {
         Ok(true) => Ok(()),
         Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
-        Err(error) => {
-            tracing::error!(error = %error, patient_id = %patient_id, "validate clinical document import access");
-            Err(err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to validate patient access",
-            ))
-        }
+        Err(response) => Err(response),
+    }
+}
+
+/// Starting, changing and applying an import writes the clinical record: the
+/// same check as saving diagnoses or medication (`patients.medical.edit` and
+/// `has_patient_edit_access`, which also refuses a restricted record, Art. 18
+/// DSGVO).
+async fn ensure_write_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    auth.require_any_role(IMPORT_ROLES)?;
+    auth.require_capability(Capability::PatientsMedicalEdit)?;
+    match crate::routes::patients::has_patient_edit_access(state, auth, patient_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),
+        Err(response) => Err(response),
     }
 }
 
@@ -1300,7 +1315,7 @@ async fn persist_imported_medication(
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
     Json(raw_body): Json<Value>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let body = match serde_json::from_value::<ImportedMedicationRequest>(raw_body.clone()) {
@@ -2152,7 +2167,7 @@ async fn create_import(
     Path(patient_id): Path<Uuid>,
     Json(body): Json<CreateImportRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
 
@@ -2326,7 +2341,7 @@ async fn delete_import(
     Extension(auth): Extension<AuthUser>,
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
 
@@ -2391,7 +2406,7 @@ async fn retry_import(
     Extension(auth): Extension<AuthUser>,
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let row = match sqlx::query(
@@ -2448,7 +2463,7 @@ async fn abandon_import(
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<AbandonImportRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let reason = body.reason.trim().to_string();
@@ -2538,7 +2553,7 @@ async fn rescan_import(
     Extension(auth): Extension<AuthUser>,
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let mut tx = match state.db.begin().await {
@@ -2925,7 +2940,7 @@ async fn prepare_import(
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<PrepareImportRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let reviewed = match validate_reviewed_draft(&body.reviewed_draft) {
@@ -3225,7 +3240,7 @@ async fn complete_import(
     Path((patient_id, import_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<CompleteImportRequest>,
 ) -> axum::response::Response {
-    if let Err(response) = ensure_access(&state, &auth, patient_id).await {
+    if let Err(response) = ensure_write_access(&state, &auth, patient_id).await {
         return response;
     }
     let reviewed = match validate_reviewed_draft(&body.reviewed_draft) {
