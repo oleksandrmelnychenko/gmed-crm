@@ -188,7 +188,7 @@ function useAppointmentConciergeSectionContent({
         endsAt: detail.time_end ? `${detail.date}T${detail.time_end.slice(0, 5)}` : "",
         currency: "EUR",
       }),
-    [conciergeStaff, detail, nonMedicalProviders],
+    [detail, nonMedicalProviders],
   );
 
   const [{ form, drafts, taxonomyNodes, submitBusy, actionBusy }, dispatchConciergeState] =

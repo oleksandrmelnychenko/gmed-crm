@@ -77,6 +77,9 @@ const EXACT_REASON_KEYS: Record<string, string> = {
   "Compliance status is not completed": "orders_blocking_compliance_incomplete",
   "DSGVO/compliance documents are not signed":
     "orders_blocking_compliance_documents_unsigned",
+  // Existing-customer re-check (patients.rs `load_patient_recheck_readiness`).
+  "Medical confidentiality release is not signed":
+    "orders_blocking_confidentiality_release_unsigned",
   "Identity is not verified": "orders_blocking_identity_unverified",
   "Valid contract documentation is missing":
     "orders_blocking_contract_documentation_missing",

@@ -174,6 +174,10 @@ struct UpsertAgencyServiceRequest {
     /// Flat fee that becomes due in full when the framework contract is
     /// terminated (e.g. the treatment-organisation Pauschale).
     due_in_full_on_termination: Option<bool>,
+    /// Russian UI name and description; the base texts are the German
+    /// document texts. Absent keeps the stored value, empty clears it.
+    name_ru: Option<String>,
+    description_ru: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -208,6 +212,9 @@ struct NormalizedAgencyServicePayload {
     valid_from: NaiveDate,
     valid_to: Option<NaiveDate>,
     due_in_full_on_termination: Option<bool>,
+    /// `None`: not sent (keep); `Some(None)`: clear.
+    name_ru: Option<Option<String>>,
+    description_ru: Option<Option<String>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -733,6 +740,29 @@ fn normalize_agency_service_payload(
         return Err("Valid-to cannot be earlier than valid-from");
     }
 
+    let optional_text = |value: Option<String>, max: usize, message: &'static str| {
+        value
+            .map(|text| {
+                let trimmed = text.trim().to_string();
+                if trimmed.chars().count() > max {
+                    Err(message)
+                } else {
+                    Ok((!trimmed.is_empty()).then_some(trimmed))
+                }
+            })
+            .transpose()
+    };
+    let name_ru = optional_text(
+        body.name_ru,
+        160,
+        "Russian service name cannot exceed 160 characters",
+    )?;
+    let description_ru = optional_text(
+        body.description_ru,
+        4000,
+        "Russian description cannot exceed 4000 characters",
+    )?;
+
     Ok(NormalizedAgencyServicePayload {
         description_items: description_items.map(|items| json!(items)),
         service_key,
@@ -746,6 +776,8 @@ fn normalize_agency_service_payload(
         valid_from,
         valid_to,
         due_in_full_on_termination: body.due_in_full_on_termination,
+        name_ru,
+        description_ru,
     })
 }
 
@@ -1064,6 +1096,76 @@ fn compute_quote_totals(items: &[QuoteLineItem]) -> QuoteTotals {
     }
 }
 
+/// Kinds of documents GMED generates for the client's signature that count as
+/// signed only with proof (owner decision 2026-10-11): the scan of the signed
+/// copy ("Подписано на бумаге", `POST /documents/{id}/paper-signature`) or a
+/// qualified electronic signature — never a one-click confirmation.
+const PROOF_REQUIRED_SIGNATURE_KINDS: [&str; 3] =
+    ["dsgvo", "confidentiality_release", "framework_contract"];
+
+/// Whether `POST /documents/{id}/mark-signed` must refuse: the document is the
+/// unsigned output of a template (`generated_template_id`) and the kind needs
+/// proof. An uploaded scan is the proof itself, and a version that is already
+/// signed (paper scan, QES result) only receives its compliance kind.
+pub(crate) fn mark_signed_needs_proof(
+    kind: &str,
+    generated_template_id: Option<&str>,
+    already_signed: bool,
+) -> bool {
+    PROOF_REQUIRED_SIGNATURE_KINDS.contains(&kind)
+        && !already_signed
+        && generated_template_id.is_some_and(|template| !template.trim().is_empty())
+}
+
+/// The refusal of [`mark_signed_needs_proof`].
+pub(crate) fn signature_proof_required_response() -> axum::response::Response {
+    coded_err(
+        StatusCode::CONFLICT,
+        "signature_evidence_required",
+        "A generated document counts as signed only with the scan of the signed copy (paper signature) or an electronic signature",
+    )
+}
+
+/// Whether a signed document of the framework contract exists (QES result or
+/// the scan of the paper copy, created after the contract): the proof a
+/// contract needs before staff may set it "signed" by hand.
+async fn framework_contract_has_signed_document(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    contract_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        r#"SELECT EXISTS (
+               SELECT 1
+               FROM framework_contracts fc
+               JOIN documents d
+                 ON (fc.patient_id IS NOT NULL AND d.patient_id = fc.patient_id)
+                 OR (fc.lead_id IS NOT NULL AND d.lead_id = fc.lead_id)
+                 OR d.order_id IN (SELECT o.id FROM orders o WHERE o.contract_id = fc.id)
+               WHERE fc.id = $1
+                 AND d.signed_at IS NOT NULL
+                 AND d.status <> 'archived'
+                 AND d.file_deleted_at IS NULL
+                 AND d.created_at >= fc.created_at
+                 AND (d.generated_template_id = 'framework_contract'
+                      OR d.art = 'framework_contract'
+                      OR d.compliance_kind = 'framework_contract')
+           )"#,
+    )
+    .bind(contract_id)
+    .fetch_one(&mut **tx)
+    .await
+}
+
+/// A refusal with a machine code the UI translates (no English server text
+/// in the RU/DE UI, QA 2026-10-11).
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
+}
+
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (
         status,
@@ -1116,6 +1218,7 @@ async fn list_agency_services(
 
     match sqlx::query(
         r#"SELECT catalog.id, catalog.service_key, catalog.service_name, catalog.description, catalog.description_items,
+                  catalog.name_ru, catalog.description_ru,
                   catalog.unit_label,
                   COALESCE(current_price.unit_price, catalog.unit_price) AS unit_price,
                   COALESCE(current_price.currency, catalog.currency) AS currency,
@@ -1189,6 +1292,10 @@ async fn list_agency_services(
                         "service_name": row.try_get::<String, _>("service_name").unwrap_or_default(),
                         "description": row.try_get::<Option<String>, _>("description").unwrap_or_default(),
                         "description_items": row.try_get::<Value, _>("description_items").unwrap_or_else(|_| json!([])),
+                        // Russian UI texts of the item; the base name and description are the
+                        // German document texts (QA 2026-10-11).
+                        "name_ru": row.try_get::<Option<String>, _>("name_ru").unwrap_or_default(),
+                        "description_ru": row.try_get::<Option<String>, _>("description_ru").unwrap_or_default(),
                         "unit_label": row.try_get::<String, _>("unit_label").unwrap_or_else(|_| "unit".to_string()),
                         "unit_price": row.try_get::<Decimal, _>("unit_price").unwrap_or(Decimal::ZERO),
                         "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
@@ -1238,11 +1345,11 @@ async fn create_agency_service(
              INSERT INTO agency_service_catalog (
                 service_key, service_name, description, unit_label, unit_price,
                 currency, vat_rate, is_active, valid_from, valid_to, created_by, updated_by, description_items,
-                due_in_full_on_termination
+                due_in_full_on_termination, name_ru, description_ru
              ) VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8, $9, $10, $11, $11, $12,
-                COALESCE($13, false)
+                COALESCE($13, false), $14, $15
              )
              RETURNING id, created_at, updated_at
            )
@@ -1267,6 +1374,8 @@ async fn create_agency_service(
     .bind(auth.user_id)
     .bind(payload.description_items)
     .bind(payload.due_in_full_on_termination)
+    .bind(payload.name_ru.flatten())
+    .bind(payload.description_ru.flatten())
     .fetch_one(&state.db)
     .await
     {
@@ -1295,7 +1404,7 @@ async fn create_agency_service(
             if e.to_string()
                 .contains("agency_service_catalog_service_key_key") =>
         {
-            err(StatusCode::CONFLICT, "Agency service key already exists")
+            coded_err(StatusCode::CONFLICT, "agency_service_key_taken", "Agency service key already exists")
         }
         Err(e) => {
             tracing::error!(error = %e, "create agency service");
@@ -1349,6 +1458,8 @@ async fn update_agency_service(
                valid_to = $11,
                updated_by = $12,
                due_in_full_on_termination = COALESCE($14, due_in_full_on_termination),
+               name_ru = CASE WHEN $15 THEN $16 ELSE name_ru END,
+               description_ru = CASE WHEN $17 THEN $18 ELSE description_ru END,
                updated_at = now()
              WHERE id = $1
              RETURNING id
@@ -1382,6 +1493,10 @@ async fn update_agency_service(
     .bind(auth.user_id)
     .bind(payload.description_items)
     .bind(payload.due_in_full_on_termination)
+    .bind(payload.name_ru.is_some())
+    .bind(payload.name_ru.flatten())
+    .bind(payload.description_ru.is_some())
+    .bind(payload.description_ru.flatten())
     .fetch_optional(&mut *tx)
     .await
     {
@@ -1390,7 +1505,11 @@ async fn update_agency_service(
             if e.to_string()
                 .contains("agency_service_catalog_service_key_key") =>
         {
-            return err(StatusCode::CONFLICT, "Agency service key already exists");
+            return coded_err(
+                StatusCode::CONFLICT,
+                "agency_service_key_taken",
+                "Agency service key already exists",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, service_id = %service_id, "update agency service");
@@ -1554,7 +1673,11 @@ async fn save_agency_service_price_version(
             Ok(Some(id)) => id,
             Ok(None) => return err(StatusCode::NOT_FOUND, "Price version not found"),
             Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
-                return err(StatusCode::CONFLICT, "A price already starts on this date");
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "price_version_date_taken",
+                    "A price already starts on this date",
+                );
             }
             Err(error) => {
                 tracing::error!(%error, %service_id, %price_version_id, "update agency service price version");
@@ -1585,7 +1708,11 @@ async fn save_agency_service_price_version(
         {
             Ok(id) => id,
             Err(sqlx::Error::Database(db_error)) if db_error.code().as_deref() == Some("23505") => {
-                return err(StatusCode::CONFLICT, "A price already starts on this date");
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "price_version_date_taken",
+                    "A price already starts on this date",
+                );
             }
             Err(error) => {
                 tracing::error!(%error, %service_id, "create agency service price version");
@@ -1749,8 +1876,9 @@ async fn delete_agency_service_price_version(
         }
     };
     if count <= 1 {
-        return err(
+        return coded_err(
             StatusCode::CONFLICT,
+            "price_version_last",
             "The only price version cannot be deleted",
         );
     }
@@ -2321,9 +2449,20 @@ async fn create_framework_contract(
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status");
     }
     if status == "terminated" {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "framework_contract_cannot_start_terminated",
             "A new framework contract cannot start terminated",
+        );
+    }
+    // Owner decision 2026-10-11: "signed" only with proof. A new contract has
+    // no signed document yet; it becomes signed through the QES or the scan of
+    // its document (see `document_signatures::effects`).
+    if status == "signed" {
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "framework_contract_signature_evidence_required",
+            "A framework contract becomes signed only through its signed document (QES or signed scan); create it as draft or sent",
         );
     }
 
@@ -2650,8 +2789,9 @@ async fn set_framework_contract_party(
     };
     let patient_id = current.try_get::<Uuid, _>("patient_id").unwrap_or_default();
     if current.try_get::<String, _>("status").unwrap_or_default() == "terminated" {
-        return err(
+        return coded_err(
             StatusCode::CONFLICT,
+            "framework_contract_terminated_locked",
             "A terminated framework contract cannot be changed",
         );
     }
@@ -2748,8 +2888,9 @@ async fn update_framework_contract_status(
     // The contract runs for an unlimited term: it never expires, and ending it
     // goes through the terminate action (reason, open-order check, audit).
     if body.status == "terminated" {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "framework_contract_use_terminate",
             "Use the terminate action to end a framework contract",
         );
     }
@@ -2770,8 +2911,9 @@ async fn update_framework_contract_status(
         .await
     {
         Ok(Some(current)) if current == "terminated" => {
-            return err(
+            return coded_err(
                 StatusCode::CONFLICT,
+                "framework_contract_terminated_locked",
                 "A terminated framework contract cannot be changed",
             );
         }
@@ -2857,6 +2999,27 @@ async fn update_framework_contract_status(
                 .await
     {
         return response;
+    }
+    // Owner decision 2026-10-11: "signed" only with proof — a signed document
+    // of this contract (QES result or the scan of the paper copy).
+    if body.status == "signed" && previous_status != "signed" {
+        match framework_contract_has_signed_document(&mut tx, contract_id).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return coded_err(
+                    StatusCode::CONFLICT,
+                    "framework_contract_signature_evidence_required",
+                    "A framework contract becomes signed only through its signed document (QES or signed scan)",
+                );
+            }
+            Err(e) => {
+                tracing::error!(error = %e, contract_id = %contract_id, "check signed framework contract document");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to update framework contract",
+                );
+            }
+        }
     }
 
     match sqlx::query(
@@ -2969,8 +3132,9 @@ async fn terminate_framework_contract(
     let reason = body.reason.as_deref().map(str::trim).unwrap_or_default();
     let reason_len = reason.chars().count();
     if !(3..=1000).contains(&reason_len) {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "termination_reason_length",
             "A termination reason of 3 to 1000 characters is required",
         );
     }
@@ -3007,8 +3171,9 @@ async fn terminate_framework_contract(
         Err(e) => return failed(e),
     };
     if !matches!(status.as_str(), "signed" | "sent") {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "framework_contract_not_terminable",
             "Only a signed or sent framework contract can be terminated",
         );
     }
@@ -3800,8 +3965,9 @@ async fn create_quote(
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
     };
     if quote_validity_passed(valid_until, crate::app_time::today()) {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "quote_valid_until_past",
             "The quote validity date cannot be in the past",
         );
     }
@@ -3870,8 +4036,9 @@ async fn create_quote(
         if normalized_quote_line_signatures(&requested)
             != normalized_quote_line_signatures(&persisted_line_items)
         {
-            return err(
+            return coded_err(
                 StatusCode::CONFLICT,
+                "quote_outdated",
                 "Quote lines do not match the current order services",
             );
         }
@@ -3994,8 +4161,9 @@ async fn create_quote(
     match updated_order {
         Ok(Some(_)) => {}
         Ok(None) => {
-            return err(
+            return coded_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
+                "prepayment_exceeds_quote_total",
                 "prepayment_amount cannot exceed the current quote total",
             );
         }
@@ -4418,8 +4586,9 @@ async fn update_quote_status(
         .try_get::<String, _>("status")
         .unwrap_or_default();
     if previous_status == "superseded" {
-        return err(
+        return coded_err(
             StatusCode::CONFLICT,
+            "quote_superseded",
             "A superseded quote is closed; use the quote that replaced it",
         );
     }
@@ -4485,8 +4654,9 @@ async fn update_quote_status(
         {
             Ok(items) if !items.is_empty() => items,
             Ok(_) => {
-                return err(
+                return coded_err(
                     StatusCode::CONFLICT,
+                    "quote_without_services",
                     "Quote cannot be accepted without current order services",
                 );
             }
@@ -4506,8 +4676,9 @@ async fn update_quote_status(
             || quote_total != current_total
             || order_total != Some(current_total)
         {
-            return err(
+            return coded_err(
                 StatusCode::CONFLICT,
+                "quote_outdated",
                 "Quote no longer matches the current order services",
             );
         }

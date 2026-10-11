@@ -167,6 +167,12 @@ export function TerminateContractDialog({
                   {tx("Отменено услуг", "Stornierte Leistungen")}: {settlement.cancelled_services}
                   {" · "}
                   {tx("Паушалы к оплате полностью", "Voll fällige Pauschalen")}: {settlement.flat_fees_due}
+                  {settlement.cancelled_appointment_ids && settlement.cancelled_appointment_ids.length > 0 ? (
+                    <>
+                      {" · "}
+                      {tx("Отменено приёмов", "Stornierte Termine")}: {settlement.cancelled_appointment_ids.length}
+                    </>
+                  ) : null}
                 </p>
               </li>
             ))}
@@ -218,8 +224,8 @@ export function TerminateContractDialog({
                 <p className="flex items-start gap-2 font-medium text-amber-900">
                   <OctagonAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
                   {tx(
-                    "Эти заказы будут остановлены: запланированные услуги отменяются, паушалы «при расторжении полностью» начисляются целиком.",
-                    "Diese Aufträge werden gestoppt: geplante Leistungen werden storniert, Pauschalen „bei Kündigung voll fällig“ werden vollständig berechnet.",
+                    "Эти заказы будут остановлены: запланированные услуги и будущие приёмы отменяются, паушалы «при расторжении полностью» начисляются целиком.",
+                    "Diese Aufträge werden gestoppt: geplante Leistungen und künftige Termine werden storniert, Pauschalen „bei Kündigung voll fällig“ werden vollständig berechnet.",
                   )}
                 </p>
                 <ul className="grid max-h-[40vh] gap-2 overflow-y-auto">
@@ -232,6 +238,7 @@ export function TerminateContractDialog({
                         {" · "}
                         {tx("Паушалы к оплате полностью", "Voll fällige Pauschalen")}: {countDueInFull(order.lines)}
                       </p>
+                      <CancelledAppointmentsNote appointments={order.cancelled_appointments ?? []} lang={lang} />
                       {order.warnings.length > 0 ? (
                         <ul className="list-disc pl-4 text-xs text-amber-800">
                           {order.warnings.map((warning) => (
@@ -318,5 +325,37 @@ export function ContractTerminationNote({
         <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{summary.reason}</p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The upcoming appointments a termination cancels with the order (QA
+ * 2026-10-11 C-15): how many and when, before staff confirm.
+ */
+export function CancelledAppointmentsNote({
+  appointments,
+  lang,
+}: {
+  appointments: NonNullable<TerminationPreviewOrder["cancelled_appointments"]>;
+  lang: Lang;
+}) {
+  const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
+  if (appointments.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground" data-testid="termination-appointments">
+        {tx("Будущих приёмов нет", "Keine künftigen Termine")}
+      </p>
+    );
+  }
+  const dates = appointments
+    .map((appointment) => {
+      const date = formatAppDate(appointment.date) || appointment.date;
+      return appointment.time_start ? `${date} ${appointment.time_start}` : date;
+    })
+    .join(", ");
+  return (
+    <p className="text-xs font-medium text-amber-900" data-testid="termination-appointments">
+      {tx("Будет отменено приёмов", "Zu stornierende Termine")}: {appointments.length} ({dates})
+    </p>
   );
 }

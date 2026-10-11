@@ -3867,6 +3867,28 @@ pub(crate) async fn cancel_upcoming_order_appointments_in_tx(
     cancel_open_appointments_in_tx(tx, &appointment_ids, cancelled_by).await
 }
 
+/// The appointments [`cancel_upcoming_order_appointments_in_tx`] would cancel
+/// for an order, read-only (id, date, start time): the contract termination
+/// preview names them before anything is cancelled.
+pub(crate) async fn upcoming_order_appointments_preview(
+    connection: &mut sqlx::PgConnection,
+    order_id: Uuid,
+) -> Result<Vec<(Uuid, chrono::NaiveDate, Option<chrono::NaiveTime>)>, sqlx::Error> {
+    sqlx::query_as::<_, (Uuid, chrono::NaiveDate, Option<chrono::NaiveTime>)>(&format!(
+        r#"SELECT a.id, a.date, a.time_start
+           FROM appointments a
+           WHERE a.order_id = $1
+             AND a.status IN ('planned', 'confirmed')
+             AND a.date >= $2
+             AND NOT {APPROVED_REPORT_BILLING_ACTIVE_SQL}
+           ORDER BY a.date, a.time_start NULLS LAST, a.id"#
+    ))
+    .bind(order_id)
+    .bind(berlin_today())
+    .fetch_all(connection)
+    .await
+}
+
 /// Cancels those of the given appointments that are still planned or
 /// confirmed, inside the caller's transaction, with the side effects of a
 /// manual cancellation (see [`cancel_upcoming_order_appointments_in_tx`]).

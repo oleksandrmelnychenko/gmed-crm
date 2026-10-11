@@ -454,6 +454,20 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
     .await;
     assert_eq!(status, StatusCode::OK, "{confirmed}");
     assert_eq!(confirmed["signed_agency"], true);
+    // "Signed" only with the contract's signed document (owner decision 2026-10-11).
+    let contract_creator: Uuid =
+        sqlx::query_scalar("SELECT created_by FROM framework_contracts WHERE id = $1")
+            .bind(contract_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    support::seed_signed_framework_contract_document(
+        app.pool(),
+        None,
+        Some(lead_id),
+        contract_creator,
+    )
+    .await;
     let (status, contract) = json_request(
         &app,
         "POST",

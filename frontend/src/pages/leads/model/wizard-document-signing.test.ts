@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSignWizardDocument } from "./wizard-document-signing";
+import { canSignWizardDocument, signatureNeedsProof } from "./wizard-document-signing";
 
 const pdf = {
   generated_template_id: null as string | null,
@@ -47,5 +47,24 @@ describe("electronic signing in the lead wizard", () => {
     expect(canSignWizardDocument({ ...contract, has_stored_file: false })).toBe(false);
     expect(canSignWizardDocument({ ...contract, file_deleted_at: "2026-09-07T12:00:00Z" })).toBe(false);
     expect(canSignWizardDocument({ ...contract, mime_type: "application/pdf; charset=binary" })).toBe(true);
+  });
+});
+
+// Owner decision 2026-10-11: a generated consent, release or contract is
+// signed only with proof (scan of the signed copy or QES), never by one click.
+describe("signature proof", () => {
+  it.each([
+    ["privacy_consents", "dsgvo"],
+    ["confidentiality_release", "confidentiality_release"],
+    ["framework_contract", "framework_contract"],
+  ])("asks for the scan of a generated %s", (generated_template_id, kind) => {
+    expect(signatureNeedsProof({ generated_template_id, signed_at: null }, kind)).toBe(true);
+  });
+
+  it("keeps the one-click confirmation of uploaded scans, signed versions and other kinds", () => {
+    expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "dsgvo")).toBe(false);
+    expect(signatureNeedsProof({ generated_template_id: "privacy_consents", signed_at: "2026-10-11T10:00:00Z" }, "dsgvo")).toBe(false);
+    expect(signatureNeedsProof({ generated_template_id: "gwg_identification", signed_at: null }, "other")).toBe(false);
+    expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "identity")).toBe(false);
   });
 });

@@ -157,7 +157,7 @@ export function ScopedOrderDetail({
                           type="button"
                           variant="outline"
                           size="sm"
-                          className="h-7 rounded-md px-2 text-xs"
+                          className="h-auto min-h-7 whitespace-normal rounded-md px-2 py-1 text-left text-xs"
                           disabled={Boolean(deliveringLineId)}
                           onClick={() => onDeliverLine?.(line.id)}
                         >

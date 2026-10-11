@@ -814,7 +814,8 @@ function moneyFormatter(currency: string) {
   const normalizedCurrency = currency || "EUR";
   const cached = moneyFormatters.get(normalizedCurrency);
   if (cached) return cached;
-  const formatter = Intl.NumberFormat("en-GB", {
+  // German money format in every UI language: "1.200,00 €" (owner rule; QA 2026-10-11 C-03).
+  const formatter = Intl.NumberFormat("de-DE", {
     style: "currency",
     currency: normalizedCurrency,
     minimumFractionDigits: 2,
@@ -1817,7 +1818,7 @@ export function servicePriceLabel(service: ServiceItem) {
   if (service.price_type === "range") {
     const from = moneyLabel(service.price_from ?? service.price, service.currency);
     const to = moneyLabel(service.price_to ?? service.price_from ?? service.price, service.currency);
-    return from === to ? from : `${from} - ${to}`;
+    return from === to ? from : `${from} – ${to}`;
   }
   return moneyLabel(service.price, service.currency);
 }

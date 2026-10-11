@@ -177,8 +177,9 @@ fn parse_create_order_prepayment(
     let maximum = rust_decimal::Decimal::new(999_999_999_999, 2);
     let amount = match amount.map(str::trim).filter(|value| !value.is_empty()) {
         None => {
-            return Err(err(
+            return Err(coded_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
+                "prepayment_amount_required",
                 "Enter the prepayment amount",
             ));
         }
@@ -187,8 +188,9 @@ fn parse_create_order_prepayment(
                 value.round_cents()
             }
             _ => {
-                return Err(err(
+                return Err(coded_err(
                     StatusCode::UNPROCESSABLE_ENTITY,
+                    "prepayment_amount_invalid",
                     "prepayment_amount must be a positive decimal",
                 ));
             }
@@ -621,8 +623,9 @@ fn validate_order_date_range(
     date_to: Option<chrono::NaiveDate>,
 ) -> Result<(), axum::response::Response> {
     if date_from.zip(date_to).is_some_and(|(from, to)| to < from) {
-        return Err(err(
+        return Err(coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "order_period_invalid",
             "date_to cannot be earlier than date_from",
         ));
     }
@@ -5290,10 +5293,7 @@ async fn update_order_commercial_basis(
     if let (Some(amount), Some(total)) = (effective_prepayment_amount, effective_total_estimated)
         && amount > total
     {
-        return err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "prepayment_amount cannot exceed the current order total",
-        );
+        return prepayment_exceeds_total_err(Some(total));
     }
 
     if let Some(contract_id) = body.contract_id {
@@ -5499,10 +5499,7 @@ async fn update_order_commercial_basis(
             }))
             .into_response()
         }
-        Ok(None) => err(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "prepayment_amount cannot exceed the current order total",
-        ),
+        Ok(None) => prepayment_exceeds_total_err(effective_total_estimated),
         Err(e) => {
             tracing::error!(error = %e, order_id = %order_id, "update order commercial basis");
             err(
@@ -9625,8 +9622,9 @@ async fn add_leistung(
     // A completed or cancelled order is closed: it takes no new planned work.
     // Its delivered lines are still approved and billed through their own routes.
     if matches!(order_status.as_str(), "completed" | "cancelled") {
-        return err(
+        return coded_err(
             StatusCode::CONFLICT,
+            "order_closed_for_new_services",
             "A completed or cancelled order cannot receive new services",
         );
     }
@@ -9688,8 +9686,9 @@ async fn add_leistung(
                     .try_get::<String, _>("currency")
                     .unwrap_or_else(|_| "EUR".to_string());
                 if currency != order_currency {
-                    return err(
+                    return coded_err(
                         StatusCode::UNPROCESSABLE_ENTITY,
+                        "agency_service_currency_mismatch",
                         "Agency service currency must match order currency",
                     );
                 }
@@ -9705,14 +9704,19 @@ async fn add_leistung(
                 ))
             }
             Ok(None) => {
-                return err(
-                    StatusCode::UNPROCESSABLE_ENTITY,
-                    if body.agency_service_price_version_id.is_some() {
-                        "Agency service price version does not belong to service"
-                    } else {
-                        "Agency service has no active price for the order date"
-                    },
-                );
+                return if body.agency_service_price_version_id.is_some() {
+                    coded_err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "agency_service_price_version_mismatch",
+                        "Agency service price version does not belong to service",
+                    )
+                } else {
+                    coded_err(
+                        StatusCode::UNPROCESSABLE_ENTITY,
+                        "agency_service_no_active_price",
+                        "Agency service has no active price for the order date",
+                    )
+                };
             }
             Err(error) => {
                 tracing::error!(%error, %agency_service_id, "validate agency service");
@@ -12973,6 +12977,23 @@ fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::R
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+/// A prepayment above the order total, with the total in German format for
+/// the translated message ("889,15 €").
+fn prepayment_exceeds_total_err(total: Option<rust_decimal::Decimal>) -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(serde_json::json!({
+            "error": "prepayment_exceeds_order_total",
+            "message": "prepayment_amount cannot exceed the current order total",
+            "order_total": total.map(|value| value.to_string()),
+            "order_total_label": total
+                .map(|value| crate::order_document_texts::format_money_de(value, "EUR"))
+                .unwrap_or_else(|| "—".to_string()),
+        })),
+    )
+        .into_response()
 }
 
 // A repeat intake may reuse only its attached patient's contract. Lead/order access

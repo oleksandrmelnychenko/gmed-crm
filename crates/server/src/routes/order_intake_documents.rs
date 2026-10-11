@@ -31,6 +31,22 @@ fn text<'a>(value: &'a Value, key: &str) -> &'a str {
     value[key].as_str().unwrap_or_default()
 }
 
+/// The price column of a German document line, "550,00 € / Stück": the
+/// catalogue stores technical or UI-language units ("item", "hour"), the
+/// document prints German ones (QA 2026-10-11).
+fn unit_fee(line: &Value, unit: &str) -> String {
+    let price = line["unit_price"]
+        .as_str()
+        .and_then(|value| value.trim().replace(',', ".").parse::<Decimal>().ok())
+        .or_else(|| line["unit_price"].as_f64().and_then(Decimal::from_f64))
+        .unwrap_or_default();
+    let currency = match text(line, "currency").trim() {
+        "" => "EUR",
+        currency => currency,
+    };
+    crate::order_document_texts::unit_price_label_de(price, currency, unit)
+}
+
 fn decimal(value: &Value) -> f64 {
     value
         .as_f64()
@@ -96,24 +112,11 @@ pub(super) fn apply(bindings: &mut DocumentBindingOverrides, data: &Value, templ
             ServiceLineInput {
                 description: text(line, "description").to_string(),
                 description_items: (!description_items.is_empty()).then_some(description_items),
-                fee: Some(format!(
-                    "{}{}",
-                    format_eur(decimal(&line["unit_price"])),
-                    if unit.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" / {unit}")
-                    }
-                )),
-                quantity: Some(format!(
-                    "{}{}",
-                    text(line, "quantity"),
-                    if unit.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" {unit}")
-                    }
-                )),
+                fee: Some(unit_fee(line, unit)),
+                quantity: Some(match crate::order_document_texts::german_unit_label(unit) {
+                    german if german.is_empty() => text(line, "quantity").to_string(),
+                    german => format!("{} {german}", text(line, "quantity")),
+                }),
                 line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_string()),
                 // Intake lines carry no pass-through flag; the estimated
@@ -258,15 +261,7 @@ pub(super) fn repeat_bindings(context: &Value, template: &str) -> DocumentBindin
                 description_items: (!description_items.is_empty()).then_some(description_items),
                 note,
                 quantity: Some(text(line, "quantity").to_owned()),
-                fee: Some(format!(
-                    "{}{}",
-                    format_eur(decimal(&line["unit_price"])),
-                    if unit.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" / {unit}")
-                    }
-                )),
+                fee: Some(unit_fee(line, unit)),
                 line_total: Some(format_eur_decimal(line_net(line))),
                 vat_rate: Some(text(line, "vat_rate").to_owned()),
                 // The repeat-order context carries no pass-through flag; the
@@ -297,6 +292,15 @@ mod tests {
         assert_eq!(
             bindings.service_lines[0].line_total.as_deref(),
             Some("1.140,00 EUR")
+        );
+        // German price per unit, never the raw catalogue unit (QA 2026-10-11).
+        assert_eq!(
+            bindings.service_lines[0].fee.as_deref(),
+            Some("60,00 € / Std.")
+        );
+        assert_eq!(
+            bindings.service_lines[0].quantity.as_deref(),
+            Some("19 Std.")
         );
         assert_eq!(bindings.specialties.as_deref(), Some("Urologie"));
         assert_eq!(bindings.estimate_total.as_deref(), Some("1.356,60 EUR"));

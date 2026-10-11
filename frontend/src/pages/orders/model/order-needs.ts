@@ -1,3 +1,39 @@
+import { t as translationsFor, type Lang } from "@/lib/i18n";
+import { localizeStoredLeadServiceLabel } from "@/pages/leads/model/leads-model";
+
+// RU/DE pairs of texts the lead wizard writes into `needs_description` in the
+// language of the staff member who saved it.
+const NEED_LABEL_PAIRS: ReadonlyArray<readonly [ru: string, de: string]> = [
+  ["Комментарий клиента", "Kundennachricht"],
+  ["Текущее местонахождение", "Aktueller Aufenthaltsort"],
+  ["Предпочитаемое место лечения", "Bevorzugter Behandlungsort"],
+  ["Желаемый срок", "Gewünschter Zeitraum"],
+  ["Может приехать", "Kann anreisen"],
+  ["Проездные документы", "Reisedokumente"],
+  ["Медицинское сопровождение", "Medizinische Betreuung"],
+  ["Организация лечения", "Behandlungsorganisation"],
+  ["Водитель", "Fahrer"],
+  ["Трансфер", "Transfer"],
+  ["Трансфер из аэропорта", "Flughafentransfer"],
+  ["Консьерж", "Concierge"],
+  ["Переводчик", "Dolmetscher"],
+];
+
+/**
+ * A requested service or fact label of an order in the UI language, whatever
+ * language it was saved in (QA 2026-10-11 C-23: "Gewünschte Leistungen" showed
+ * Russian values in the German UI). Unknown text stays as typed.
+ */
+export function localizeOrderNeedLabel(label: string, lang: Lang) {
+  const trimmed = label.trim();
+  const pair = NEED_LABEL_PAIRS.find(([ru, de]) => ru === trimmed || de === trimmed);
+  if (pair) return lang === "de" ? pair[1] : pair[0];
+  return localizeStoredLeadServiceLabel(label, translationsFor(lang), [
+    translationsFor("ru"),
+    translationsFor("de"),
+  ]);
+}
+
 export type OrderNeedService = {
   name: string;
   note: string | null;

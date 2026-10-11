@@ -214,6 +214,43 @@ async fn framework_contract_create_list_and_sign_flow_work() {
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["id"], contract_id);
 
+    // Owner decision 2026-10-11: "signed" only with proof. Neither a new
+    // contract nor a status change becomes signed without a signed document.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/framework-contracts",
+        &pm_bearer,
+        Some(json!({ "patient_id": patient_id, "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(
+        body["error"],
+        "framework_contract_signature_evidence_required"
+    );
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"],
+        "framework_contract_signature_evidence_required"
+    );
+    assert_eq!(
+        load_patient_contract_status(&pool, patient_id)
+            .await
+            .as_deref(),
+        Some("sent")
+    );
+    // The scan of the signed paper copy is the proof.
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, pm_id).await;
+
     let (status, body) = json_request(
         &app,
         "POST",
@@ -268,7 +305,7 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
         &pm_bearer,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": valid_from,
             "valid_to": valid_to
         })),
@@ -276,6 +313,17 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
     .await;
     assert_eq!(status, StatusCode::CREATED, "response: {signed_contract}");
     let signed_contract_id = signed_contract["id"].as_str().unwrap();
+    // Signed only with its signed document (owner decision 2026-10-11).
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, pm_id).await;
+    let (status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{signed_contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {signed}");
     assert_eq!(
         load_patient_contract_status(&pool, patient_id)
             .await
@@ -368,6 +416,8 @@ async fn patient_contract_status_is_derived_across_multiple_framework_contracts(
         "an actionable sent replacement must win over a terminated historical contract"
     );
 
+    // The replacement's own signed document (the first one predates it).
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, pm_id).await;
     let (status, signed_replacement) = json_request(
         &app,
         "POST",
@@ -482,6 +532,22 @@ async fn framework_contract_can_be_completed_for_lead_without_creating_patient()
     .await
     .unwrap();
 
+    // Gate passed, but "signed" still needs the signed document (owner decision 2026-10-11).
+    let (status, unproven) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &pm_bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {unproven}");
+    assert_eq!(
+        unproven["error"],
+        "framework_contract_signature_evidence_required"
+    );
+    support::seed_signed_framework_contract_document(&pool, None, Some(lead_id), pm_id).await;
+
     let (status, signed) = json_request(
         &app,
         "POST",
@@ -525,9 +591,17 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         })),
     )
     .await;
-    // A lead's contract cannot start signed by GMED before the client and payer.
-    assert_eq!(status, StatusCode::CONFLICT, "response: {contract}");
-    assert_eq!(contract["error"], "payer_gate_blocked");
+    // No contract starts signed: it is signed through its signed document
+    // (owner decision 2026-10-11), and for a lead only after client and payer.
+    assert_eq!(
+        status,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "response: {contract}"
+    );
+    assert_eq!(
+        contract["error"],
+        "framework_contract_signature_evidence_required"
+    );
     let (status, contract) = json_request(
         &app,
         "POST",
@@ -1575,6 +1649,8 @@ async fn ceo_can_manage_contracts_and_quotes_without_patient_assignment() {
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let contract_id = body["id"].as_str().unwrap().to_string();
+    // Signed only with its signed document (owner decision 2026-10-11).
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, admin_id).await;
 
     let (status, body) = json_request(
         &app,
@@ -2850,11 +2926,22 @@ async fn signed_contract_with_running_orders_cannot_go_back_and_expired_is_retir
         "POST",
         "/api/v1/framework-contracts",
         &pm,
-        Some(json!({ "patient_id": patient_id, "status": "signed" })),
+        Some(json!({ "patient_id": patient_id, "status": "sent" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{contract}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    // Signed only with its signed document (owner decision 2026-10-11).
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, pm_id).await;
+    let (status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &pm,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, created_by)
            VALUES ($1, $2, $3::uuid, 'execution', 'active', $4)

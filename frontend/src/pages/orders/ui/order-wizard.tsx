@@ -365,11 +365,9 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
               documentTitle={doc => { const label = DOC_KINDS.find(([kind]) => kind === doc.generated_template_id); return label ? label[language + 1] : doc.auto_name; }}
               onDownload={doc => void run(async () => { await downloadDocumentFile(doc.id, doc.auto_name); })}
               onReview={reviewEvidence}
-              onSigned={doc => void run(async () => {
-                const kinds: Record<string, DocumentComplianceKind> = { framework_contract: "framework_contract", enhanced_due_diligence: "enhanced_due_diligence", privacy_consents: "dsgvo", confidentiality_release: "confidentiality_release" };
-                const kind: DocumentComplianceKind = kinds[doc.generated_template_id ?? ""] ?? "other";
-                await markDocumentSigned(doc.id, kind); await persist(data, "review_documents"); await refreshDocuments();
-              })}
+              // The scan is stored as the signed version with its compliance kind;
+              // the preparation re-reads its checks.
+              onSigned={() => void run(async () => { await persist(data, "review_documents"); await refreshDocuments(); })}
             />
           </OrderWizardSection>
         </> : null}

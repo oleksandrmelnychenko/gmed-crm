@@ -55,7 +55,9 @@ import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { deNormalize } from "@/components/data-table/search";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
-  agencyServiceDescriptionLabel,
+  agencyCatalogItemDescription,
+  agencyCatalogItemName,
+  agencyServiceLineDescription,
   agencyServiceNameLabel,
   agencyServiceUnitLabel,
 } from "@/lib/agency-service-labels";
@@ -70,6 +72,7 @@ import {
   quoteStatusClassName,
 } from "./appearance/status-appearance";
 import {
+  CONTRACT_CREATE_STATUSES,
   CONTRACT_MANUAL_STATUSES,
   CONTRACT_STATUSES,
   DEFAULT_AGENCY_SERVICE_FILTERS,
@@ -915,8 +918,8 @@ function useContractsPageContent() {
     return agencyServices.filter((row) => {
       const haystack = deNormalize(
         [
-          agencyServiceNameLabel(row.service_key, row.service_name, t),
-          agencyServiceDescriptionLabel(row.service_key, row.description, t),
+          agencyCatalogItemName(row, t, lang),
+          agencyCatalogItemDescription(row, t, lang),
           agencyServiceUnitLabel(row.unit_label, t),
           row.service_key,
           row.service_name,
@@ -926,7 +929,7 @@ function useContractsPageContent() {
       );
       return haystack.includes(needle);
     });
-  }, [agencyServices, debouncedAgencyServiceSearch, t]);
+  }, [agencyServices, debouncedAgencyServiceSearch, lang, t]);
   const agencyServicesPagination = useContractTablePagination(
     filteredAgencyServices,
     JSON.stringify(agencyServiceFilters),
@@ -991,27 +994,27 @@ function useContractsPageContent() {
       {
         id: "service_name",
         label: text.serviceName,
-        accessor: (row) => agencyServiceNameLabel(row.service_key, row.service_name, t),
+        accessor: (row) => agencyCatalogItemName(row, t, lang),
         sortable: true,
         required: true,
         width: 260,
         render: (row) => (
           <span className="font-mono text-xs text-foreground">
-            {agencyServiceNameLabel(row.service_key, row.service_name, t)}
+            {agencyCatalogItemName(row, t, lang)}
           </span>
         ),
       },
       {
         id: "description",
         label: text.description,
-        accessor: (row) => agencyServiceDescriptionLabel(row.service_key, row.description, t),
+        accessor: (row) => agencyCatalogItemDescription(row, t, lang),
         width: 460,
         render: (row) => (
           <span
             className="block truncate text-xs text-foreground"
-            title={agencyServiceDescriptionLabel(row.service_key, row.description, t)}
+            title={agencyCatalogItemDescription(row, t, lang)}
           >
-            {agencyServiceDescriptionLabel(row.service_key, row.description, t)}
+            {agencyCatalogItemDescription(row, t, lang)}
           </span>
         ),
       },
@@ -1077,7 +1080,7 @@ function useContractsPageContent() {
         ),
       },
     ],
-    [locale, t, text],
+    [lang, locale, t, text],
   );
 
   const contractTableColumns = useMemo<ColumnDef<ContractItem>[]>(
@@ -1347,7 +1350,12 @@ function useContractsPageContent() {
         width: 280,
         render: (row) => (
           <span className="block max-w-[280px] truncate text-xs text-foreground">
-            {row.notes?.trim() || t.common_not_set}
+            {/* A catalogue description in the UI language (QA 2026-10-11 C-09). */}
+            {(row.notes ?? "")
+              .split("\n")
+              .map((part) => agencyServiceLineDescription(undefined, part, t))
+              .join("\n")
+              .trim() || t.common_not_set}
           </span>
         ),
       },
@@ -1836,6 +1844,9 @@ function useContractsPageContent() {
         due_in_full_on_termination: agencyServiceForm.dueInFullOnTermination,
         valid_from: agencyServiceForm.validFrom,
         valid_to: toOptional(agencyServiceForm.validTo),
+        // Russian UI texts; an empty field clears them (QA 2026-10-11).
+        name_ru: agencyServiceForm.nameRu?.trim() ?? "",
+        description_ru: agencyServiceForm.descriptionRu?.trim() ?? "",
       };
 
       await saveAgencyService(agencyServiceForm.id, payload);
@@ -1884,6 +1895,8 @@ function useContractsPageContent() {
   function handleContractTerminated(updated: ContractItem) {
     if (updated.id === selectedContractId) {
       applyContractDetail(updated);
+      // A refused status change ("signed with running orders") no longer applies.
+      setContractStatusError(null);
     }
     setContractsReloadToken((current) => current + 1);
   }
@@ -2013,7 +2026,7 @@ function useContractsPageContent() {
           actions={
             <>
               {permissions.canManageCatalog ? (
-                <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5" onClick={openNewAgencyServiceSheet}>
+                <Button type="button" variant="outline" className="h-9 rounded-lg px-3.5 max-lg:h-auto max-lg:min-h-10 max-lg:whitespace-normal max-lg:py-1.5 max-lg:text-center max-lg:leading-tight" onClick={openNewAgencyServiceSheet}>
                   <Plus className="size-4" />
                   {text.newCatalogItem}
                 </Button>
@@ -2022,7 +2035,7 @@ function useContractsPageContent() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="h-9 rounded-lg px-3.5"
+                  className="h-9 rounded-lg px-3.5 max-lg:h-auto max-lg:min-h-10 max-lg:whitespace-normal max-lg:py-1.5 max-lg:text-center max-lg:leading-tight"
                   onClick={() => {
                     setCreateContractError(null);
                     setCreateContractForm(blankContractForm(contractFilters.patientId));
@@ -2036,7 +2049,7 @@ function useContractsPageContent() {
               {permissions.canCreateQuote ? (
                 <Button
                   type="button"
-                  className="h-9 rounded-lg px-3.5"
+                  className="h-9 rounded-lg px-3.5 max-lg:h-auto max-lg:min-h-10 max-lg:whitespace-normal max-lg:py-1.5 max-lg:text-center max-lg:leading-tight"
                   onClick={() => {
                     setCreateQuoteError(null);
                     setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
@@ -2477,6 +2490,32 @@ function useContractsPageContent() {
                           setAgencyServiceForm((current) => ({ ...current, serviceName: event.target.value }))
                         }
                       />
+                      <span className="text-[11px] leading-4 text-muted-foreground">
+                        {lang === "de"
+                          ? "Deutsch: so steht die Leistung im Auftrag, im Kostenvoranschlag und auf der Rechnung."
+                          : "На немецком: так услуга печатается в заказе, смете и счёте."}
+                      </span>
+                    </Field>
+                    <Field label={lang === "de" ? "Name für die russische Oberfläche" : "Название в русском интерфейсе"} className="sm:col-span-2">
+                      <Input
+                        className={shellInputClassName}
+                        maxLength={160}
+                        value={agencyServiceForm.nameRu ?? ""}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, nameRu: event.target.value }))
+                        }
+                      />
+                    </Field>
+                    <Field label={lang === "de" ? "Beschreibung für die russische Oberfläche" : "Описание в русском интерфейсе"} className="sm:col-span-2">
+                      <textarea
+                        className={textareaClassName}
+                        maxLength={4000}
+                        rows={2}
+                        value={agencyServiceForm.descriptionRu ?? ""}
+                        onChange={(event) =>
+                          setAgencyServiceForm((current) => ({ ...current, descriptionRu: event.target.value }))
+                        }
+                      />
                     </Field>
                     <Field label={text.unitLabel}>
                       <Input
@@ -2668,12 +2707,18 @@ function useContractsPageContent() {
                         }
                         className={selectClassName}
                       >
-                        {CONTRACT_MANUAL_STATUSES.map((status) => (
+                        {CONTRACT_CREATE_STATUSES.map((status) => (
                           <option key={status} value={status}>
                             {contractStatusLabel(status)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
+                      {/* Owner decision 2026-10-11: "signed" only with a signed document. */}
+                      <span className="text-[11px] leading-4 text-muted-foreground">
+                        {lang === "de"
+                          ? "Unterschrieben wird der Vertrag über sein Dokument: elektronische Unterschrift oder „Auf Papier unterschrieben“ mit Scan."
+                          : "Подписанным договор становится через свой документ: электронная подпись или «Подписано на бумаге» со сканом."}
+                      </span>
                     </Field>
                   </div>
                 </section>
@@ -2945,7 +2990,7 @@ function useContractsPageContent() {
                       </div>
                     </div>
                     <div className="mt-5 space-y-4">
-                      {contractStatusError ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
+                      {contractStatusError && !contractClosed ? <ShellBanner tone="error">{contractStatusError}</ShellBanner> : null}
                       <div className="grid gap-4 sm:grid-cols-2">
                         <Field label={t.users_status}>
                           <NativeComboboxSelect

@@ -72,7 +72,10 @@ import { appDateKey, berlinLocalInputToIso } from "@/lib/app-time-zone";
 import { hasFormChanges } from "@/lib/form-changes";
 import { paymentStatusLabel } from "@/lib/payment-status";
 import {
-  agencyServiceDescriptionLabel,
+  agencyCatalogItemDescription,
+  agencyCatalogItemName,
+  agencyServiceLineDescription,
+  agencyServiceLineDisplayName,
   agencyServiceNameLabel,
   agencyServiceStoredName,
   agencyServiceUnitLabel,
@@ -95,8 +98,7 @@ import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { localizeWorkflowItemText } from "@/lib/workflow-labels";
-import { summarizeOrderNeeds } from "./model/order-needs";
-import { priceVersionDisplayName } from "./model/order-service-presentation";
+import { localizeOrderNeedLabel, summarizeOrderNeeds } from "./model/order-needs";
 import {
   createOrderServiceGroup,
   fetchOrderServiceGroup,
@@ -145,6 +147,8 @@ import {
   type PartnerCostAmounts,
 } from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
+import { orderLoadErrorKey } from "./model/order-load-error";
+import { priceVersionDisplayName } from "./model/order-service-presentation";
 import {
   canCancelLeistung,
   leistungCancellationNote,
@@ -2053,9 +2057,12 @@ function useOrdersPageContent() {
   }, []);
 
   const failOrderWorkspaceLoad = useCallback((error: unknown) => {
+    const translatedKey = orderLoadErrorKey(error);
     dispatchOrdersPageState(current => ({
       orderDetail: current.orderDetail?.id === current.selectedOrderId ? current.orderDetail : null,
-      detailError: error instanceof Error ? error.message : l("orders_error_load_order"),
+      detailError: translatedKey
+        ? l(translatedKey)
+        : error instanceof Error ? error.message : l("orders_error_load_order"),
     }));
   }, [l]);
 
@@ -2238,6 +2245,9 @@ function useOrdersPageContent() {
     const params = new URLSearchParams(searchParams);
     params.delete("add_service");
     setSearchParams(params, { replace: true });
+
+    // A completed or cancelled order takes no new services (the server refuses them).
+    if (orderDetail.status === "completed" || orderDetail.status === "cancelled") return;
 
     const service = agencyServices.find((item) => item.id === agencyServiceId);
     const effectivePrice = service
@@ -4355,7 +4365,7 @@ function useOrdersPageContent() {
                                       </span>
                                       <span className="min-w-0">
                                         <span className="block break-words text-sm font-semibold leading-5 text-foreground">
-                                          {service.name}
+                                          {localizeOrderNeedLabel(service.name, lang)}
                                         </span>
                                         {service.note ? (
                                           <span className="mt-0.5 block whitespace-pre-line break-words text-xs leading-5 text-muted-foreground">
@@ -4373,7 +4383,7 @@ function useOrdersPageContent() {
                               <div className="space-y-2 px-4 py-3">
                                 {orderNeedSummary.facts.map((fact) => (
                                   <div key={`${fact.label}-${fact.value}`} className="grid gap-1 text-xs sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
-                                    <span className="text-muted-foreground">{fact.label}</span>
+                                    <span className="text-muted-foreground">{localizeOrderNeedLabel(fact.label, lang)}</span>
                                     <span className="font-medium text-foreground">{fact.value}</span>
                                   </div>
                                 ))}
@@ -6849,7 +6859,8 @@ function useOrdersPageContent() {
                       title={l("orders_leistungsubersicht")}
                       description={t.orders_services_section_description}
                       action={
-                        permissions.canAddLeistung ? (
+                        // A completed or cancelled order takes no new services (QA 2026-10-11 C-19).
+                        permissions.canAddLeistung && !orderStepsLocked ? (
                           <div className="flex flex-wrap gap-2">
                             <Button
                               type="button"
@@ -7058,9 +7069,20 @@ function useOrdersPageContent() {
                                     t,
                                   )
                                 : t.orders_not_catalog_linked;
-                            const catalogDescription =
+                            // Name and catalogue description in the UI language; the line keeps
+                            // the German text for documents (QA 2026-10-11 C-09).
+                            const catalogDescription = agencyServiceLineDescription(
+                              leistung.agency_service_key,
                               leistung.agency_service_description_snapshot
-                              ?? leistung.agency_service_description;
+                                ?? leistung.agency_service_description,
+                              t,
+                            );
+                            const leistungTitle = agencyServiceLineDisplayName(
+                              normalizeLeistungDescription(leistung.description),
+                              agencyServices.find((service) => service.id === leistung.agency_service_id),
+                              t,
+                              lang,
+                            );
                             const billingStatus =
                               leistung.billing_status ?? "not_invoiced";
                             const invoiceReferences =
@@ -7081,9 +7103,7 @@ function useOrdersPageContent() {
                                       </div>
                                       <div className="min-w-0">
                                         <h3 className="min-w-0 max-w-full break-words text-sm font-semibold leading-snug text-foreground">
-                                          {normalizeLeistungDescription(
-                                            leistung.description,
-                                          )}
+                                          {leistungTitle}
                                         </h3>
                                         {catalogDescription?.trim() ? (
                                           <p className="mt-1 max-w-3xl whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">
@@ -7241,7 +7261,7 @@ function useOrdersPageContent() {
                                     leistung.status !== "cancelled" ? (
                                       <Button
                                         variant="outline"
-                                        className="mt-4 h-8 w-full rounded-lg"
+                                        className="mt-4 h-auto min-h-8 w-full whitespace-normal rounded-lg py-1.5 text-center"
                                         onClick={() =>
                                           void handleDeliverLeistung(leistung.id)
                                         }
@@ -8618,19 +8638,11 @@ function useOrdersPageContent() {
                     ) : pendingCreateAgencyService ? (
                       <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
                         <div className="font-medium text-foreground">
-                          {agencyServiceNameLabel(
-                            pendingCreateAgencyService.service_key,
-                            pendingCreateAgencyService.service_name,
-                            t,
-                          )}
+                          {agencyCatalogItemName(pendingCreateAgencyService, t, lang)}
                         </div>
                         <div className="mt-1 text-sm text-muted-foreground">
                           {pendingCreateAgencyService.description
-                            ? agencyServiceDescriptionLabel(
-                                pendingCreateAgencyService.service_key,
-                                pendingCreateAgencyService.description,
-                                t,
-                              )
+                            ? agencyCatalogItemDescription(pendingCreateAgencyService, t, lang)
                             : t.common_not_set}
                         </div>
                         <div className="mt-2 text-xs font-medium text-foreground">
@@ -9111,11 +9123,7 @@ function useOrdersPageContent() {
                       ) ?? compatiblePrices[0];
                       return (
                         <option key={service.id} value={service.id} disabled={!previewPrice}>
-                          {agencyServiceNameLabel(
-                            service.service_key,
-                            service.service_name,
-                            t,
-                          )}
+                          {agencyCatalogItemName(service, t, lang)}
                           {previewPrice
                             ? ` · ${formatMoney(previewPrice.unit_price, previewPrice.currency)} · ${agencyServiceUnitLabel(service.unit_label, t)}`
                             : " · —"}
@@ -9130,11 +9138,7 @@ function useOrdersPageContent() {
                           (item) => item.id === leistungForm.agencyServiceId,
                         );
                         return service?.description
-                          ? agencyServiceDescriptionLabel(
-                              service.service_key,
-                              service.description,
-                              t,
-                            )
+                          ? agencyCatalogItemDescription(service, t, lang)
                           : t.common_not_set;
                       })()}
                     </p>

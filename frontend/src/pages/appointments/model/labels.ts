@@ -246,6 +246,20 @@ export function appointmentText(
   return uiText(key, getLang(), values);
 }
 
+/**
+ * Interpreter report hours in the UI language: "1,5 ч" / "1,5 Std." instead of
+ * the API's "1.5" (QA 2026-10-11 C-17).
+ */
+export function reportHoursText(hours: unknown) {
+  const value = Number(String(hours ?? "").replace(",", "."));
+  const formatted = Number.isFinite(value)
+    ? new Intl.NumberFormat(getLang() === "de" ? "de-DE" : "ru-RU", {
+        maximumFractionDigits: 2,
+      }).format(value)
+    : String(hours ?? "");
+  return appointmentText("appointments_report_hours_value", { hours: formatted });
+}
+
 export function appointmentPluralText(
   key: string,
   count: number,

@@ -5,6 +5,7 @@ import { moneyLineAmounts, roundCents } from "@/lib/money";
 import { money, formatMoneyValue, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
 import { useState, type ReactNode } from "react";
 import { ArrowRight, Check, Download } from "lucide-react";
+import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
@@ -108,7 +109,8 @@ export function OrderWizardDocumentsTable({ documents, currentIds, lang, busy, d
     rowActionsWidth={340} rowActions={doc => <div className="flex flex-wrap items-center justify-end gap-1">
       <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={`${tx("Скачать PDF", "PDF herunterladen")}: ${documentTitle(doc)}`} onClick={() => onDownload(doc)}><Download className="size-3.5" />PDF</Button>
       <DocumentSignatureAction iconOnly documentId={doc.id} title={doc.auto_name} disabled={busy || !currentIds.includes(doc.id)} onDone={onReview} />
-      {!doc.signed_at && currentIds.includes(doc.id) ? <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onSigned(doc)}>{tx("Подписано на бумаге", "Auf Papier unterschrieben")}</Button> : null}
+      {/* "Signed" only with the scan of the signed copy (owner decision 2026-10-11). */}
+      {!doc.signed_at && currentIds.includes(doc.id) ? <PaperSignatureConfirmButton documentId={doc.id} title={documentTitle(doc)} lang={lang} size="sm" disabled={busy} label={tx("Подписано на бумаге", "Auf Papier unterschrieben")} onDone={() => onSigned(doc)} /> : null}
     </div>}
     emptyState={<p className="px-4 py-8 text-center text-xs text-muted-foreground">{tx("Документы ещё не созданы. Выберите документ для подготовки.", "Noch keine Dokumente erstellt. Wählen Sie ein Dokument zur Erstellung aus.")}</p>}
   />;

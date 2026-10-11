@@ -2156,7 +2156,8 @@ async fn mark_document_signed(
 
     let document = match sqlx::query(
         r#"SELECT patient_id, lead_id, generated_template_id, art, status,
-                  file_deleted_at IS NOT NULL AS file_deleted
+                  file_deleted_at IS NOT NULL AS file_deleted,
+                  signed_at IS NOT NULL AS already_signed
            FROM documents
            WHERE id = $1"#,
     )
@@ -2268,6 +2269,17 @@ async fn mark_document_signed(
             StatusCode::UNPROCESSABLE_ENTITY,
             "Document type does not satisfy the selected compliance requirement",
         );
+    }
+    // Owner decision 2026-10-11: a generated consent, confidentiality release
+    // or framework contract is signed only with proof (scan or QES).
+    if super::contracts::mark_signed_needs_proof(
+        kind,
+        generated_template_id.as_deref(),
+        document
+            .try_get::<bool, _>("already_signed")
+            .unwrap_or(false),
+    ) {
+        return super::contracts::signature_proof_required_response();
     }
 
     let mut tx = match state.db.begin().await {
@@ -16884,10 +16896,37 @@ async fn generate_document(
                 }),
                 &party_block_lines(&context.party),
             );
+            // The estimate names the prepayment set on the order (owner decision 2026-10-11).
+            let payment_terms = match order_id {
+                Some(order_uuid) if is_payer_copy || is_order_cost_estimate => {
+                    match crate::order_document_texts::load_kv_payment_terms(&state.db, order_uuid)
+                        .await
+                    {
+                        Ok(terms) => terms,
+                        Err(error) => {
+                            tracing::error!(%error, %order_uuid, "load cost estimate payment terms");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to load the order prepayment",
+                            );
+                        }
+                    }
+                }
+                _ => None,
+            };
             let pdf_result = if is_payer_copy {
-                build_payer_cost_estimate_pdf(&context, &payer_estimate_catalog, &generated_doc_id)
+                build_payer_cost_estimate_pdf_with_terms(
+                    &context,
+                    &payer_estimate_catalog,
+                    &generated_doc_id,
+                    payment_terms.as_ref(),
+                )
             } else if is_order_cost_estimate {
-                build_order_cost_estimate_pdf(&context, &generated_doc_id)
+                build_order_cost_estimate_pdf_with_terms(
+                    &context,
+                    &generated_doc_id,
+                    payment_terms.as_ref(),
+                )
             } else {
                 build_single_order_pdf(&context, &generated_doc_id)
             };
@@ -19367,9 +19406,20 @@ fn build_single_order_pdf(
     Ok(finalize_generated_pdf(document, layout))
 }
 
+#[cfg(test)]
 fn build_order_cost_estimate_pdf(
     context: &GeneratedSingleOrderContext,
     fallback_document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    build_order_cost_estimate_pdf_with_terms(context, fallback_document_reference, None)
+}
+
+/// `payment_terms`: the prepayment set on the order (owner decision
+/// 2026-10-11); `None` keeps the wording of an estimate without order data.
+fn build_order_cost_estimate_pdf_with_terms(
+    context: &GeneratedSingleOrderContext,
+    fallback_document_reference: &str,
+    payment_terms: Option<&crate::order_document_texts::KvPaymentTerms>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference =
@@ -19595,15 +19645,19 @@ fn build_order_cost_estimate_pdf(
         // leaving a single introductory line at the bottom of the table page.
         layout.ensure_space(42.0);
         layout.spacer(6.0);
-        admin_block(
-            &mut layout,
-            "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an:",
-            0.0,
-            0.8,
-        );
+        let payment_lead_in = payment_terms
+            .map(crate::order_document_texts::kv_payment_lead_in)
+            .unwrap_or_else(|| {
+                "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an:"
+                    .to_string()
+            });
+        admin_block(&mut layout, &payment_lead_in, 0.0, 0.8);
         layout.spacer(2.5);
         layout.key_value_rows_centered(&bank_rows, 10.0, 0.0, 0.4);
         layout.spacer(2.5);
+        if let Some(note) = payment_terms.and_then(crate::order_document_texts::kv_remainder_note) {
+            admin_block(&mut layout, note, 1.0, 1.0);
+        }
         admin_block(
             &mut layout,
             "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf. Überschreiten die Vorauszahlungen die endgültigen Gesamtauftragskosten, erstatten wir den Restbetrag selbstverständlich zurück.",
@@ -22765,8 +22819,17 @@ const PAYER_COST_ESTIMATE_PRIVACY_SENTENCE: &str =
 async fn load_payer_estimate_catalog(
     state: &AppState,
 ) -> Result<Vec<(String, String)>, axum::response::Response> {
+    // Order lines created before the catalogue got German names (migration
+    // 20261011213000) still carry the English demo names.
     sqlx::query_as::<_, (String, String)>(
-        "SELECT lower(btrim(service_name)), service_key FROM agency_service_catalog",
+        "SELECT lower(btrim(service_name)), service_key FROM agency_service_catalog
+         UNION ALL
+         SELECT legacy.name, legacy.service_key FROM (VALUES
+             ('treatment organization', 'treatment_organization'),
+             ('interpreter support', 'interpreter_hours'),
+             ('airport transfer coordination', 'airport_transfer'),
+             ('companion support', 'concierge_companion')
+         ) AS legacy(name, service_key)",
     )
     .fetch_all(&state.db)
     .await
@@ -22857,10 +22920,22 @@ fn payer_estimate_rows(
 /// The payer's copy of the client's Kostenvoranschlag ("Anlage zur
 /// Kostenübernahmeerklärung", phase 3b): the same totals, one row per service
 /// type instead of the client's lines, the Kostenübernehmer/in and GMED sign.
+#[cfg(test)]
 fn build_payer_cost_estimate_pdf(
     context: &GeneratedSingleOrderContext,
     catalog: &[(String, String)],
     fallback_document_reference: &str,
+) -> Result<GeneratedPdf, &'static str> {
+    build_payer_cost_estimate_pdf_with_terms(context, catalog, fallback_document_reference, None)
+}
+
+/// The payer's copy of the estimate; `payment_terms` as in
+/// [`build_order_cost_estimate_pdf_with_terms`].
+fn build_payer_cost_estimate_pdf_with_terms(
+    context: &GeneratedSingleOrderContext,
+    catalog: &[(String, String)],
+    fallback_document_reference: &str,
+    payment_terms: Option<&crate::order_document_texts::KvPaymentTerms>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let document_reference =
@@ -23076,15 +23151,18 @@ fn build_payer_cost_estimate_pdf(
     if !bank_rows.is_empty() {
         layout.ensure_space(42.0);
         layout.spacer(6.0);
-        admin_block(
-            &mut layout,
-            "Der angegebene Gesamtbetrag ist vor Auftragsbeginn zu überweisen an:",
-            0.0,
-            0.8,
-        );
+        let payment_lead_in = payment_terms
+            .map(crate::order_document_texts::kv_payment_lead_in)
+            .unwrap_or_else(|| {
+                "Der angegebene Gesamtbetrag ist vor Auftragsbeginn zu überweisen an:".to_string()
+            });
+        admin_block(&mut layout, &payment_lead_in, 0.0, 0.8);
         layout.spacer(2.5);
         layout.key_value_rows_centered(&bank_rows, 10.0, 0.0, 0.4);
         layout.spacer(2.5);
+        if let Some(note) = payment_terms.and_then(crate::order_document_texts::kv_remainder_note) {
+            admin_block(&mut layout, note, 1.0, 1.0);
+        }
         admin_block(
             &mut layout,
             "Ggf. fordern wir während der Durchführung des Auftrages zu weiteren Vorauszahlungen auf. Überschreiten die Vorauszahlungen die endgültigen Gesamtauftragskosten, erstatten wir den Restbetrag selbstverständlich zurück.",

@@ -767,7 +767,25 @@ pub(crate) async fn preview_open_orders(
     let mut previews = Vec::with_capacity(order_ids.len());
     for order_id in order_ids {
         if let Some(settlement) = compute_order_settlement(&mut transaction, order_id).await? {
-            previews.push(settlement.preview_json());
+            let mut preview = settlement.preview_json();
+            // The termination cancels the order's upcoming appointments too
+            // (QA 2026-10-11 C-15): the preview names them beforehand.
+            let appointments = crate::routes::appointments::upcoming_order_appointments_preview(
+                &mut transaction,
+                order_id,
+            )
+            .await?;
+            preview["cancelled_appointments"] = json!(
+                appointments
+                    .into_iter()
+                    .map(|(id, date, time_start)| json!({
+                        "id": id,
+                        "date": date,
+                        "time_start": time_start.map(|time| time.format("%H:%M").to_string()),
+                    }))
+                    .collect::<Vec<_>>()
+            );
+            previews.push(preview);
         }
     }
     transaction.commit().await?;

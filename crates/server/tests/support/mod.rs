@@ -120,6 +120,40 @@ pub async fn suite_context(test_secret: &str) -> Option<TestSuiteContext> {
     })
 }
 
+/// The signed document a framework contract needs before staff may set it
+/// "signed" (owner decision 2026-10-11): here the scan of the paper copy of
+/// the generated contract, signed now. Pass the contract's patient or lead.
+#[allow(dead_code)]
+pub async fn seed_signed_framework_contract_document(
+    pool: &PgPool,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+    uploaded_by: Uuid,
+) -> Uuid {
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+               id, patient_id, lead_id, auto_name, original_filename, art, category,
+               status, visibility, is_medical, mime_type, generated_template_id, ursprung,
+               version_root_document_id, version_number, uploaded_by,
+               signed_at, signed_by, compliance_kind
+           ) VALUES (
+               $1, $2, $3, 'Rahmenvertrag (unterschrieben)', 'rahmenvertrag-scan.pdf',
+               'framework_contract', 'administrative', 'active', 'internal', false,
+               'application/pdf', 'framework_contract', 'paper_signature',
+               $1, 1, $4, now(), $4, 'framework_contract'
+           )"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(lead_id)
+    .bind(uploaded_by)
+    .execute(pool)
+    .await
+    .expect("seed signed framework contract document");
+    document_id
+}
+
 #[allow(dead_code)]
 pub async fn wait_until<F, Fut>(description: &str, mut predicate: F)
 where

@@ -211,7 +211,8 @@ function ContractCreateDialog({
             onChange={(event) => onContractCreateStatusChange(event.target.value ?? contractCreateForm.status)}
             className={selectClass}
           >
-              {contractStatusOptions.map((status) => (
+              {/* A new contract is signed only through its signed document (owner decision 2026-10-11). */}
+              {contractStatusOptions.filter((status) => status !== "signed").map((status) => (
                 <option key={status} value={status}>
                   {patientDetailStatusLabel(status)}
                 </option>

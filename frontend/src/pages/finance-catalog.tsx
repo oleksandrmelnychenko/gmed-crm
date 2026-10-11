@@ -58,6 +58,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
+import { priceVersionDisplayName } from "@/pages/orders/model/order-service-presentation";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import {
   agencyServiceDescriptionLabel,
@@ -87,6 +88,11 @@ import type {
 } from "@/pages/contracts/model/types";
 import { cn } from "@/lib/utils";
 import { formatMoneyAmount, moneyLineAmounts } from "@/lib/money";
+
+/** A catalogue date as DD.MM.YYYY (owner rule), e.g. a price version period. */
+function catalogDate(value: string | null | undefined) {
+  return formatAppDate(value ?? "") || (value ?? "");
+}
 
 type TaxProfile = {
   id: string;
@@ -2170,7 +2176,7 @@ function useFinanceCatalogPageContent() {
       versionId: version?.id ?? "",
       title: agencyServiceNameLabel(service.service_key, service.service_name, t),
       name: version
-        ? version.name?.trim() || `${service.service_name} · ${version.valid_from}`
+        ? priceVersionDisplayName(version) || `${service.service_name} · ${catalogDate(version.valid_from)}`
         : "",
       netPrice: valueToInput(version?.unit_price ?? service.unit_price),
       currency: version?.currency ?? service.currency ?? "EUR",
@@ -2195,7 +2201,7 @@ function useFinanceCatalogPageContent() {
       versionId: version?.id ?? "",
       title: servicePackage.name,
       name: version
-        ? version.name?.trim() || `${servicePackage.name} · ${version.valid_from}`
+        ? priceVersionDisplayName(version) || `${servicePackage.name} · ${catalogDate(version.valid_from)}`
         : "",
       netPrice: version?.base_price_net ?? servicePackage.base_price_net,
       currency: version?.currency ?? servicePackage.currency ?? "EUR",
@@ -4144,12 +4150,12 @@ function useFinanceCatalogPageContent() {
                                     )?.id === version.id;
                                   return (
                                     <option key={version.id} value={version.id}>
-                                      {version.name?.trim() || t.finance_catalog_price_name} ·{" "}
+                                      {priceVersionDisplayName(version) || t.finance_catalog_price_name} ·{" "}
                                       {formatMoney(
                                         version.unit_price as string | number,
                                         version.currency,
-                                      )} · {version.valid_from} —{" "}
-                                      {version.valid_to || t.finance_catalog_open_ended}
+                                      )} · {catalogDate(version.valid_from)} —{" "}
+                                      {version.valid_to ? catalogDate(version.valid_to) : t.finance_catalog_open_ended}
                                       {isRecommended
                                         ? ` · ${t.finance_catalog_package_item_recommended}`
                                         : ""}

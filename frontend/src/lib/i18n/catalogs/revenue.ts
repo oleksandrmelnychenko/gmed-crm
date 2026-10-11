@@ -1460,7 +1460,7 @@ export const revenueDe: RevenueTranslations = {
     "Verwenden Sie stabile Service-Keys wie `interpreter_hours` für künftige Automatisierungen.",
   revenue_agency_service_service_key: "Service-Key",
   revenue_agency_service_service_name: "Leistungsname",
-  revenue_agency_service_catalog_treatment_organization: "Behandlungsorganisation",
+  revenue_agency_service_catalog_treatment_organization: "Organisation der Behandlung",
   revenue_agency_service_catalog_treatment_organization_description:
     "Agenturkoordination und Behandlungsplanung.",
   revenue_agency_service_catalog_interpreter_hours: "Dolmetscherbetreuung",

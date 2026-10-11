@@ -1,4 +1,5 @@
 ﻿import { uiText } from "@/lib/i18n";
+import { ORDER_API_ERROR_KEYS } from "@/lib/order-api-errors";
 
 import {
   clearPersistedAuthTokens,
@@ -509,19 +510,30 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   erasure_blocked_by_retention: "api_erasure_blocked_by_retention",
   // Portal release of an archived or file-less document (documents.rs).
   document_archived_not_releasable: "api_document_archived_not_releasable",
+  // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
+  ...ORDER_API_ERROR_KEYS,
 };
 
-/** The text fields of an error body, as placeholders of its localized message. */
-function apiErrorValues(body: ApiErrorBody | null): Record<string, string> {
-  const values: Record<string, string> = { countries_label: "" };
+/** The text and number fields of an error body, as placeholders of its localized message (e.g. {order_total_label}). */
+function apiErrorValues(body: ApiErrorBody | null): Record<string, string | number> {
+  const values: Record<string, string | number> = { countries_label: "" };
   for (const [key, value] of Object.entries(body ?? {})) {
-    if (typeof value === "string") values[key] = value;
+    if (typeof value === "string" || typeof value === "number") values[key] = value;
   }
   return values;
 }
 
+function localizedApiErrorKey(body: ApiErrorBody | null | undefined) {
+  return body?.error ? LOCALIZED_API_ERRORS[body.error] : undefined;
+}
+
+/** Whether the error's message is already the translated text of its server code. */
+export function isLocalizedApiError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError && Boolean(localizedApiErrorKey(error.body));
+}
+
 function apiErrorMessage(body: ApiErrorBody | null, res: Response) {
-  const localized = body?.error ? LOCALIZED_API_ERRORS[body.error] : undefined;
+  const localized = localizedApiErrorKey(body);
   if (localized) {
     return uiText(localized, undefined, apiErrorValues(body));
   }

@@ -1,4 +1,5 @@
 import type { Lead, LeadDetail } from "@/lib/api/types";
+import { isLocalizedApiError } from "@/lib/api";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import {
   formatEnumLabelFromKeys,
@@ -239,6 +240,9 @@ export function leadErrorMessage(
     "Не удалось выполнить действие. Повторите попытку",
     "Aktion konnte nicht abgeschlossen werden. Bitte erneut versuchen",
   );
+  // A server code with its own translation (e.g. a prepayment above the order
+  // total) says more than the generic "check your input".
+  if (isLocalizedApiError(error) && error.message.trim()) return error.message.trim();
   const message = error instanceof Error
     ? error.message.trim()
     : error && typeof error === "object" && "message" in error && typeof (error as { message?: unknown }).message === "string"
@@ -965,6 +969,29 @@ export function updateLeadServiceSelection(
     ...normalizedCurrent.filter((item) => !LEAD_EXCLUSIVE_SERVICE_OPTIONS.has(item)),
     normalizedValue,
   ]));
+}
+
+/**
+ * A requested service of an order is stored as its label in the language of
+ * the staff member who saved it ("Поддержка переводчика"). Shown in another
+ * language, a known label becomes the label of that language (QA 2026-10-11
+ * C-23: Russian services in the German UI). Unknown text stays as typed.
+ */
+export function localizeStoredLeadServiceLabel(
+  label: string,
+  translations: Translations,
+  storedIn: Translations[],
+) {
+  const normalized = label.trim().toLocaleLowerCase("de-DE");
+  if (!normalized) return label;
+  for (const labelKey of Object.values(LEAD_PROGRAM_SERVICE_LABEL_KEYS) as TranslationKey[]) {
+    const matches = storedIn.some((catalog) => {
+      const stored = catalog[labelKey];
+      return typeof stored === "string" && stored.trim().toLocaleLowerCase("de-DE") === normalized;
+    });
+    if (matches) return translations[labelKey];
+  }
+  return label;
 }
 
 export function knownLeadProgramServiceLabel(

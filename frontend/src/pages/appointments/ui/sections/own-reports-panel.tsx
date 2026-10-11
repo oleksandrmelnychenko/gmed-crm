@@ -15,13 +15,12 @@ import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
-  appointmentText,
   reportApprovalLabel,
+  reportHoursText,
 } from "@/pages/appointments/model/labels";
 import {
   formatAppointmentDateTimeLabel,
   formatAppointmentSlotLabel,
-  formatInterpreterHours,
 } from "@/pages/appointments/model/runtime-formatters";
 import type { OwnInterpreterReport } from "@/pages/appointments/model/types";
 
@@ -64,7 +63,7 @@ export function OwnInterpreterReportsList({
                 })}
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
-                {appointmentText("appointments_report_hours_value", { hours: formatInterpreterHours(report.hours) })}
+                {reportHoursText(report.hours)}
                 {" · "}
                 {t.appointments_report_submitted_prefix}{" "}
                 {formatAppointmentDateTimeLabel(report.created_at)}

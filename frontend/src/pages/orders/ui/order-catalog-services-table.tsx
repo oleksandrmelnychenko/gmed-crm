@@ -7,7 +7,8 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Trash2 } from "lucide-react";
 import { roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import type { Lang } from "@/lib/i18n";
+import { t as translationsFor, type Lang } from "@/lib/i18n";
+import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } from "@/lib/agency-service-labels";
 import { listAgencyServicePriceChoices } from "@/pages/contracts/model/contracts-model";
 import type { AgencyServiceItem } from "@/pages/contracts/model/types";
 import type { ServiceLine } from "../model/order-service-line";
@@ -23,6 +24,13 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
   onDelete: (line: ServiceLine) => void;
   totals: { net: number; vat: number; gross: number };
 }) {
+  // Names and descriptions in the UI language; the line keeps the catalogue's
+  // German text for the documents (QA 2026-10-11).
+  const translations = translationsFor(lang);
+  const lineService = (line: ServiceLine) => (line.agencyServiceId ? catalogById.get(line.agencyServiceId) : undefined);
+  const displayName = (line: ServiceLine) => agencyServiceLineDisplayName(line.description, lineService(line), translations, lang);
+  const displayDescription = (line: ServiceLine) =>
+    agencyServiceLineDisplayDescription(describe(line), line.catalogDescription, lineService(line), translations, lang);
   const servicePriceChoiceLabel = (price: ReturnType<typeof listAgencyServicePriceChoices>[number]) => [
     `${formatMoneyValue(money(price.unit_price), lang)} ${price.currency}`, priceVersionDisplayName(price),
     `${germanDateLabel(price.valid_from)} — ${price.valid_to ? germanDateLabel(price.valid_to) : tx("бессрочно", "unbefristet")}`,
@@ -32,7 +40,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
     {
       id: "service",
       label: tx("Услуга", "Leistung"),
-      accessor: (line) => line.description,
+      accessor: (line) => displayName(line),
       sortable: false,
       required: true,
       pinned: "left",
@@ -44,7 +52,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
         const rawUnit = line.catalogUnitLabel || catalogService?.unit_label;
         return (
           <div className="min-w-0">
-            <div className="truncate font-medium text-foreground">{line.description}</div>
+            <div className="truncate font-medium text-foreground">{displayName(line)}</div>
             {rawUnit ? (
               <Badge
                 variant="outline"
@@ -110,11 +118,11 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
     {
       id: "description",
       label: tx("Описание", "Beschreibung"),
-      accessor: (line) => describe(line),
+      accessor: (line) => displayDescription(line),
       sortable: false,
       searchable: true,
       render: (line) => {
-        const description = describe(line);
+        const description = displayDescription(line);
         return (
           <span
             className="line-clamp-2 whitespace-normal text-xs text-muted-foreground"

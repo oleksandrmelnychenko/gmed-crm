@@ -42,10 +42,10 @@ import {
   appointmentText,
   interpreterReportBillingSyncLabel,
   reportApprovalLabel,
+  reportHoursText,
 } from "@/pages/appointments/model/labels";
 import {
   formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatInterpreterHours,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   parseValidInterpreterReportHours,
@@ -278,7 +278,7 @@ function useAppointmentReportSectionContent({
         width: 110,
         render: (report) => (
           <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {appointmentText("appointments_report_hours_value", { hours: formatInterpreterHours(report.hours) })}
+            {reportHoursText(report.hours)}
           </span>
         ),
       },
@@ -638,9 +638,7 @@ function useAppointmentReportSectionContent({
                     data-testid="report-review-hours"
                     className="mt-2 font-mono text-sm tabular-nums text-foreground"
                   >
-                    {appointmentText("appointments_report_hours_value", {
-                      hours: formatInterpreterHours(detailReport.hours),
-                    })}
+                    {reportHoursText(detailReport.hours)}
                   </p>
                   <p className={cn(tokens.text.label, "mt-4")}>
                     {appointmentText("appointments_report")}

@@ -1,3 +1,4 @@
+import { isLocalizedApiError } from "@/lib/api";
 import {
   appDateKey,
   formatAppDate,
@@ -57,6 +58,12 @@ export const CONTRACT_STATUSES: ContractStatus[] = [
 
 /** Statuses staff may set by hand. Termination has its own action. */
 export const CONTRACT_MANUAL_STATUSES: ContractStatus[] = ["draft", "sent", "signed"];
+/**
+ * A new contract starts as draft or sent: it becomes signed only through its
+ * signed document, a QES or the scan of the paper copy (owner decision
+ * 2026-10-11; the server refuses "signed" on create).
+ */
+export const CONTRACT_CREATE_STATUSES: ContractStatus[] = ["draft", "sent"];
 
 /** Only signed or sent contracts can be terminated. */
 export function canTerminateContractStatus(status: string) {
@@ -306,6 +313,7 @@ export function contractActionErrorMessage(
   messages: ContractFormValidationMessages,
   fallback: string,
 ) {
+  if (isLocalizedApiError(error) && error.message.trim()) return error.message.trim();
   const message = errorMessage(error);
   if (message.includes("Invalid or expired token")) {
     return messages.sessionExpired || fallback;
@@ -398,6 +406,8 @@ export function blankAgencyServiceForm(unitLabel = ""): AgencyServiceFormState {
     dueInFullOnTermination: false,
     validFrom: "",
     validTo: "",
+    nameRu: "",
+    descriptionRu: "",
   };
 }
 
@@ -432,6 +442,8 @@ export function agencyServiceToForm(service: AgencyServiceItem): AgencyServiceFo
     dueInFullOnTermination: service.due_in_full_on_termination ?? false,
     validFrom: service.valid_from ?? "",
     validTo: service.valid_to ?? "",
+    nameRu: service.name_ru ?? "",
+    descriptionRu: service.description_ru ?? "",
   };
 }
 

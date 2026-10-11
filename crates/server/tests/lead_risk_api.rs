@@ -587,7 +587,11 @@ async fn the_gate_never_holds_the_consent_or_the_identity_document() {
     let consent =
         insert_lead_document(&app, lead_id, "privacy_consents", Some("privacy_consents")).await;
     let response = mark_signed(&app, consent, "dsgvo").await;
-    assert_eq!(response.0, StatusCode::OK, "{}", response.1);
+    // Not held by the gate: the handler wants the signed scan or a QES of the
+    // generated consent as proof (owner decision 2026-10-11).
+    assert!(!held(&response), "{}", response.1);
+    assert_eq!(response.0, StatusCode::CONFLICT, "{}", response.1);
+    assert_eq!(response.1["error"], "signature_evidence_required");
     let identity = insert_lead_document(&app, lead_id, "passport", None).await;
     let response = mark_signed(&app, identity, "identity").await;
     assert_eq!(response.0, StatusCode::OK, "{}", response.1);

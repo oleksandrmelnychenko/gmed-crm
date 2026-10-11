@@ -4,6 +4,7 @@ import { auditActivityUiTextDe } from "./catalogs/audit-activity";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
 import { clinicalDe } from "./catalogs/clinical";
 import { extractedUiDe } from "./catalogs/extracted-ui";
+import { ordersUiDe } from "./catalogs/orders-ui";
 import { financeBalancesDe } from "./catalogs/finance-balances";
 import { gwgTrainingDe } from "./catalogs/gwg-training";
 import { operationsDe } from "./catalogs/operations";
@@ -16,7 +17,7 @@ import { staffAccessDe } from "./catalogs/staff-access";
 
 export const de = {
   // Audit labels first: a label already in the extracted catalog wins.
-  uiText: { ...auditActivityUiTextDe, ...extractedUiDe },
+  uiText: { ...auditActivityUiTextDe, ...extractedUiDe, ...ordersUiDe },
   staffAccess: staffAccessDe,
   app_name: "GMED CONSOLE",
   app_subtitle: "Medizintourismus-Management",

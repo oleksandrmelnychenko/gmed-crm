@@ -5795,7 +5795,7 @@ async fn create_service(
 
     let service = match normalize_service_payload(body) {
         Ok(payload) => payload,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        Err(message) => return service_payload_err(message),
     };
     let provider_type = match load_provider_type(&state, provider_id).await {
         Ok(value) => value,
@@ -5903,7 +5903,7 @@ async fn update_service(
 
     let service = match normalize_service_payload(body) {
         Ok(payload) => payload,
-        Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+        Err(message) => return service_payload_err(message),
     };
     let provider_type = match load_provider_type(&state, provider_id).await {
         Ok(value) => value,
@@ -6434,6 +6434,25 @@ fn normalize_doctor_payload(body: UpsertDoctorRequest) -> Result<DoctorPayload, 
         licensing_valid_until,
         notes: normalize_optional(body.notes),
     })
+}
+
+/// A refused provider service with a code the UI translates (QA 2026-10-11:
+/// no raw "Service price_to must be …" in the RU UI).
+fn service_payload_err(message: &'static str) -> axum::response::Response {
+    let code = match message {
+        "Service price_to must be greater than or equal to price_from" => {
+            "provider_service_price_range_invalid"
+        }
+        "Service price_from is required for price range" => "provider_service_price_from_required",
+        "Service name is required (max 255)" => "provider_service_name_required",
+        "valid_to must be on or after valid_from" => "provider_service_validity_invalid",
+        _ => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({ "error": code, "message": message })),
+    )
+        .into_response()
 }
 
 fn normalize_service_payload(body: UpsertServiceRequest) -> Result<ServicePayload, &'static str> {

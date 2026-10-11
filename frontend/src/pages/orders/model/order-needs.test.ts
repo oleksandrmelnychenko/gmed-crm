@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { summarizeOrderNeeds } from "./order-needs";
+import { localizeOrderNeedLabel, summarizeOrderNeeds } from "./order-needs";
+
+describe("localizeOrderNeedLabel", () => {
+  // QA 2026-10-11 C-23: services saved from the Russian UI showed in Russian in the German UI.
+  it("shows a known service or fact label in the UI language, whatever language stored it", () => {
+    expect(localizeOrderNeedLabel("Поддержка переводчика", "de")).toBe("Dolmetscherbegleitung");
+    expect(localizeOrderNeedLabel("Dolmetscherbegleitung", "ru")).toBe("Поддержка переводчика");
+    expect(localizeOrderNeedLabel("Услуги водителя и трансфер", "de")).toBe("Limousinenservice und privater Fahrer");
+    expect(localizeOrderNeedLabel("Желаемый срок", "de")).toBe("Gewünschter Zeitraum");
+    expect(localizeOrderNeedLabel("Kann anreisen", "ru")).toBe("Может приехать");
+  });
+
+  it("keeps text typed by staff as it is", () => {
+    expect(localizeOrderNeedLabel("Begleitung zur Reha", "ru")).toBe("Begleitung zur Reha");
+  });
+});
 
 describe("summarizeOrderNeeds", () => {
   it("separates the concern, requested services, comments and interpreter need", () => {

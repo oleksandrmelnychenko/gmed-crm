@@ -193,9 +193,11 @@ import {
 } from "@/pages/documents/model/asset-origin-evidence";
 import { AssetOriginEvidenceField } from "@/pages/documents/ui/asset-origin-evidence-field";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
+import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
+import { agencyCatalogItemName, agencyServiceLineDisplayName, germanDocumentUnitLabel } from "@/lib/agency-service-labels";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
-import { canSignWizardDocument } from "../model/wizard-document-signing";
+import { canSignWizardDocument, signatureNeedsProof } from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
   retentionCountdownHint,
@@ -2295,6 +2297,13 @@ function frameworkContractSignErrorText(error: unknown, tx: Tx): string | null {
   );
 }
 
+/** Why a paper signature of a wizard document was refused, when the wizard knows better than the generic text. */
+function wizardSignatureErrorText(error: unknown, tx: Tx): string | null {
+  return frameworkContractSignErrorText(error, tx)
+    ?? payerGateErrorText(error, tx)
+    ?? riskGateErrorText(error, tx);
+}
+
 function errorText(error: unknown, tx: Tx): string {
   const payerGate = payerGateErrorText(error, tx) ?? riskGateErrorText(error, tx);
   if (payerGate) return payerGate;
@@ -2900,6 +2909,20 @@ function WizardDocumentRows({
               <Badge variant="outline" className="font-mono text-[11px]">
                 {tx("Версия", "Version")} {document.version_number}
               </Badge>
+            ) : complianceKind && !signed && onSign && signatureNeedsProof(document, complianceKind) ? (
+              // Owner decision 2026-10-11: "signed" only with proof — the scan of the
+              // signed copy (or a QES through the signature action), never one click.
+              <PaperSignatureConfirmButton
+                documentId={document.id}
+                title={wizardDocumentFilename(document)}
+                lang={lang}
+                disabled={disabled}
+                errorText={(error) => wizardSignatureErrorText(error, tx)}
+                onDone={() => {
+                  setProtectedDocumentIds((current) => new Set(current).add(document.id));
+                  onChanged?.();
+                }}
+              />
             ) : complianceKind && !signed && onSign ? (
               <Button
                 type="button"
@@ -3108,6 +3131,11 @@ export function LeadWizard({
   const [guardianPatientsLoading, setGuardianPatientsLoading] = useState(false);
   const [guardianPatientsError, setGuardianPatientsError] = useState("");
   const [step, setStep] = useState<StepId>("master_data");
+  // The step "Обновить" keeps (QA 2026-10-11 C-07: refreshing jumped back to step 1).
+  const currentStepRef = useRef<StepId>("master_data");
+  useEffect(() => {
+    currentStepRef.current = step;
+  }, [step]);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [, setCases] = useState<CaseListItem[]>([]);
   const [contracts, setContracts] = useState<ContractItem[]>([]);
@@ -3568,6 +3596,7 @@ export function LeadWizard({
     hydrateDraft: boolean,
     hydrateCommercial = false,
     readOnly = false,
+    keepStep = false,
   ) => {
     if (!leadId) return;
     const reloadVersion = reloadVersionRef.current + 1;
@@ -3693,7 +3722,10 @@ export function LeadWizard({
       const nextDraft = prospectClinical && prospectCaseId
         ? hydrateClinicalDraft(caseDraft, prospectClinical, prospectCaseId)
         : caseDraft;
-      const nextStep: StepId = "master_data";
+      // A refresh of the open wizard stays on its step; opening a lead starts at step 1.
+      const nextStep: StepId = keepStep && hydrated.current === leadId
+        ? currentStepRef.current
+        : "master_data";
       const nextLines = preferPersistedCommercialLines(
         storedCommercialDraft?.lines ?? [],
         nextOrderDetail?.leistungen,
@@ -3780,14 +3812,27 @@ export function LeadWizard({
 
   const refreshDocumentsState = useCallback(async () => {
     if (!leadId) return;
-    const [nextLead, nextDocuments] = await Promise.all([
+    const commercialVersions = { ...commercialFlagRequestVersionRef.current };
+    const [nextLead, nextDocuments, nextOrders] = await Promise.all([
       fetchLeadDetail(leadId),
       fetchDocuments("/documents?lead_id=" + encodeURIComponent(leadId) + "&include_archived_versions=true"),
+      fetchOrders("/orders?lead_id=" + encodeURIComponent(leadId)).catch(() => null),
       patientReview.refresh(),
     ]);
+    // A paper or electronic signature also signs the framework contract or the
+    // order on the server: their chips follow without reopening the wizard
+    // (QA 2026-10-11 C-07).
+    const nextContracts = await fetchWizardContracts(nextLead).catch(() => null);
     if (hydrated.current !== leadId) return;
     setLead(nextLead);
     setDocuments(nextDocuments);
+    if (nextContracts) setContracts(nextContracts);
+    if (nextOrders) {
+      setOrders(nextOrders);
+      const nextOrder = nextOrders[0] ?? null;
+      if (commercialVersions.signed_patient === commercialFlagRequestVersionRef.current.signed_patient) setSignedPatient(Boolean(nextOrder?.signed_patient));
+      if (commercialVersions.signed_agency === commercialFlagRequestVersionRef.current.signed_agency) setSignedAgency(Boolean(nextOrder?.signed_agency));
+    }
   }, [leadId, patientReview.refresh]);
 
   // Patient portal (owner decision 2026-10-03): the patient's step-1 changes
@@ -5947,8 +5992,10 @@ ${serviceCommentLines.join("\n")}`
     setCommercialDocumentErrors((current) => ({ ...current, framework_contract: "" }));
     try {
       const result = await ensureCommercial();
-      await updateContractStatus(result.contractId, { status: "signed" });
+      // The signed document is the proof the contract status needs (owner
+      // decision 2026-10-11); both steps check the payer gate of a lead.
       await markDocumentSigned(documentId, "framework_contract");
+      await updateContractStatus(result.contractId, { status: "signed" });
       if (fromPreview) await refreshCommercialState();
       else await reload(false, true);
     } catch (nextError) {
@@ -6045,7 +6092,10 @@ ${serviceCommentLines.join("\n")}`
           if (key === "prepayment_required" && typeof rollback === "boolean") {
             setPrepayment(rollback);
           }
-          if (key === "prepayment_amount" && typeof rollback === "string") {
+          // A refused amount (e.g. above the order total) stays in the field next
+          // to the server's reason so it can be corrected (QA 2026-10-11 C-07).
+          const refusedInput = nextError instanceof ApiRequestError && nextError.status === 422;
+          if (key === "prepayment_amount" && typeof rollback === "string" && !refusedInput) {
             setPrepaymentAmount(rollback);
           }
           if (key === "prepayment_due_at" && typeof rollback === "string") {
@@ -6638,8 +6688,11 @@ ${serviceCommentLines.join("\n")}`
     const catalogService = line.agencyServiceId
       ? agencyServiceById.get(line.agencyServiceId)
       : undefined;
-    const unit = line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim();
-    return `${formatMoneyValue(money(line.price), "de")} ${line.currency || "EUR"}${unit ? `/${unit}` : ""}`;
+    const unit = germanDocumentUnitLabel(line.catalogUnitLabel.trim() || catalogService?.unit_label?.trim());
+    // German document: "550,00 € / Stück", never the raw catalogue unit "EUR/item" (QA 2026-10-11).
+    const currency = (line.currency || "EUR").toUpperCase();
+    const amount = `${formatMoneyValue(money(line.price), "de")} ${currency === "EUR" ? "€" : currency}`;
+    return unit ? `${amount} / ${unit}` : amount;
   }
 
   const isBusy = busy !== null || commercialFlagsBusyCount > 0;
@@ -6919,7 +6972,7 @@ ${serviceCommentLines.join("\n")}`
               </Button>
             ) : null}
             {leadId ? (
-              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true), patientReview.refresh()]).catch(showWizardError)}>
+              <Button type="button" variant="outline" size="icon-sm" title={tx("Обновить", "Aktualisieren")} aria-label={tx("Обновить", "Aktualisieren")} disabled={loading || isBusy} onClick={() => void Promise.all([reload(true, false, false, true), patientReview.refresh()]).catch(showWizardError)}>
                 <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
               </Button>
             ) : null}
@@ -9034,7 +9087,7 @@ ${serviceCommentLines.join("\n")}`
                         (line) => line.agencyServiceId === service.id,
                       );
                       return (
-                        <optgroup key={service.id} label={service.service_name}>
+                        <optgroup key={service.id} label={agencyCatalogItemName(service, t, lang)}>
                           {priceChoices.map((price) => (
                             <option
                               key={price.id || `${service.id}-catalog-price`}
@@ -10247,7 +10300,7 @@ ${serviceCommentLines.join("\n")}`
                         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted/35 px-4 py-3">
                           <div className="flex min-w-0 items-start gap-2.5">
                             <div className="min-w-0">
-                              <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{line.description}</h4>
+                              <h4 className="break-words text-sm font-semibold leading-5 text-foreground">{agencyServiceLineDisplayName(line.description, catalogService, t, lang)}</h4>
                               {rawUnit ? (
                                 <Badge
                                   variant="outline"
@@ -10512,7 +10565,23 @@ ${serviceCommentLines.join("\n")}`
               <Button type="button" variant="outline" size="sm" onClick={() => replaceDocumentPreview(null)}>
                 {tx("К документам", "Zur Dokumentenliste")}
               </Button>
-              {previewedDocument && previewComplianceKind && !previewDocumentSigned ? (
+              {previewedDocument && previewComplianceKind && !previewDocumentSigned
+                && signatureNeedsProof(previewedDocument, previewComplianceKind) ? (
+                // "Signed" only with the scan of the signed copy (owner decision 2026-10-11).
+                <PaperSignatureConfirmButton
+                  documentId={previewedDocument.id}
+                  title={wizardDocumentFilename(previewedDocument)}
+                  lang={lang}
+                  size="sm"
+                  disabled={isBusy}
+                  errorText={(error) => wizardSignatureErrorText(error, tx)}
+                  onDone={() => {
+                    // The scan is a new version of the document: back to the list.
+                    replaceDocumentPreview(null);
+                    void refreshDocumentsState();
+                  }}
+                />
+              ) : previewedDocument && previewComplianceKind && !previewDocumentSigned ? (
                 <Button
                   type="button"
                   size="sm"

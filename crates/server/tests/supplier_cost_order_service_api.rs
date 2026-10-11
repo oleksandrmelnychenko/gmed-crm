@@ -174,13 +174,25 @@ async fn fixture(tag_prefix: &str) -> Option<Fixture> {
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    // Signed only with its signed document (owner decision 2026-10-11).
+    support::seed_signed_framework_contract_document(&pool, Some(patient_id), None, manager_id)
+        .await;
+    let (status, signed) = json_request(
+        &context.app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        &manager,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sign contract: {signed:?}");
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (
                order_number, patient_id, contract_id, phase, status, currency, created_by,

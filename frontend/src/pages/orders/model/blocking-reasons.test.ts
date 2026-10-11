@@ -19,6 +19,30 @@ describe("isOrderReadinessGateApplicable", () => {
 });
 
 describe("resolveOrderBlockingReason", () => {
+  // Every reason of the existing-customer re-check (crates/server/src/routes/
+  // patients.rs, "blocking_reasons.push"): none may show "Неизвестное значение"
+  // in the create-order sheet (QA 2026-10-11 C-06, D-67).
+  it("translates every existing-customer re-check reason", () => {
+    for (const reason of [
+      "Primary contact is missing",
+      "Residence or address country is missing",
+      "Preferred language is missing",
+      "Compliance status is not completed",
+      "DSGVO/compliance documents are not signed",
+      "Medical confidentiality release is not signed",
+      "Identity is not verified",
+      "3 required patient document(s) are missing",
+      "Valid contract documentation is missing",
+      "Patient is still in debt-management hold",
+      "2 overdue invoice(s) keep the patient in debt-management hold",
+    ]) {
+      expect(resolveOrderBlockingReason(reason), reason).not.toBeNull();
+    }
+    expect(resolveOrderBlockingReason("Medical confidentiality release is not signed")).toEqual({
+      key: "orders_blocking_confidentiality_release_unsigned",
+    });
+  });
+
   it("maps every workflow blocker family to an i18n key", () => {
     expect(
       resolveOrderBlockingReason(

@@ -47,6 +47,8 @@ export type TerminationPreviewOrder = TerminationFigures & {
   currency: string;
   lines: TerminationSettlementLine[];
   cancelled_lines: TerminationSettlementLine[];
+  /** Upcoming appointments the termination cancels with the order (date YYYY-MM-DD, time HH:MM). */
+  cancelled_appointments?: { id: string; date: string; time_start: string | null }[];
   warnings: string[];
 };
 
@@ -67,6 +69,7 @@ export type TerminationResultSettlement = {
   uninvoiced_gross: DecimalString;
   cancelled_services: number;
   flat_fees_due: number;
+  cancelled_appointment_ids?: string[];
 };
 
 export type TerminationSettlementStatus = "open" | "settled";

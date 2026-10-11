@@ -23,6 +23,28 @@ type SigningDocument = Pick<DocumentItem,
 // the order, the patient form and both consents are signed inside it, not one by one.
 const LEAD_INTAKE_PACKAGE_MEMBERS = new Set(["single_order", "confidentiality_release", "lead_self_disclosure"]);
 
+// Kinds GMED generates for the client's signature that count as signed only
+// with proof (owner decision 2026-10-11): the scan of the signed copy or a QES.
+// Mirrors `mark_signed_needs_proof` in crates/server/src/routes/contracts.rs.
+const PROOF_REQUIRED_SIGNATURE_KINDS = new Set(["dsgvo", "confidentiality_release", "framework_contract"]);
+
+/**
+ * Whether confirming the signature of this document needs the signed scan
+ * ("Подписано на бумаге") instead of a one-click confirmation: an unsigned
+ * document GMED generated. An uploaded scan is the proof itself.
+ */
+export function signatureNeedsProof(
+  document: Pick<DocumentItem, "generated_template_id" | "signed_at">,
+  kind: string | null | undefined,
+): boolean {
+  return Boolean(
+    kind
+    && PROOF_REQUIRED_SIGNATURE_KINDS.has(kind)
+    && !document.signed_at
+    && document.generated_template_id?.trim(),
+  );
+}
+
 // A wizard action policy, not a replacement for the signing API's permissions.
 // Use document types, not translated titles or filenames (e.g. privacy notices).
 export function canSignWizardDocument(document: SigningDocument): boolean {

@@ -44,6 +44,34 @@ fn auth_header(user_id: Uuid, role: &str) -> String {
     format!("Bearer {token}")
 }
 
+/// A contract becomes "signed" only with its signed document (owner decision
+/// 2026-10-11): record the scan, then set the status.
+async fn sign_framework_contract(
+    app: &axum::Router,
+    pool: &PgPool,
+    bearer: &str,
+    contract_id: &str,
+    patient_id: Uuid,
+) {
+    let uploaded_by: Uuid =
+        sqlx::query_scalar("SELECT created_by FROM framework_contracts WHERE id = $1::uuid")
+            .bind(contract_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    support::seed_signed_framework_contract_document(pool, Some(patient_id), None, uploaded_by)
+        .await;
+    let (status, signed) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/framework-contracts/{contract_id}/status"),
+        bearer,
+        Some(json!({ "status": "signed" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "sign contract: {signed:?}");
+}
+
 fn money(value: &Value) -> Decimal {
     value
         .as_str()
@@ -178,13 +206,14 @@ async fn contract_termination_stops_open_orders_and_settles_what_accrued() {
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
 
     let flat_fee_catalog_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO agency_service_catalog (
@@ -685,13 +714,14 @@ async fn terminating_a_contract_without_activity_closes_the_empty_settlement() {
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, status, currency, created_by)
            VALUES ($1, $2, $3::uuid, 'paused', 'EUR', $4)
@@ -760,11 +790,12 @@ async fn contract_termination_cancels_upcoming_appointments_and_pending_amendmen
         "POST",
         "/api/v1/framework-contracts",
         &manager,
-        Some(json!({ "patient_id": patient_id, "status": "signed" })),
+        Some(json!({ "patient_id": patient_id, "status": "sent" })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, status, phase, currency, created_by)
            VALUES ($1, $2, $3::uuid, 'active', 'execution', 'EUR', $4)
@@ -809,6 +840,27 @@ async fn contract_termination_cancels_upcoming_appointments_and_pending_amendmen
     .fetch_one(&pool)
     .await
     .unwrap();
+
+    // The preview names the upcoming appointment the termination cancels,
+    // not the past one (QA 2026-10-11 C-15).
+    let (status, preview) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/framework-contracts/{contract_id}/termination-preview"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "preview: {preview:?}");
+    let previewed = preview["open_orders"][0]["cancelled_appointments"]
+        .as_array()
+        .expect("cancelled appointments in the preview");
+    assert_eq!(previewed.len(), 1, "preview: {preview:?}");
+    assert_eq!(previewed[0]["id"], upcoming.to_string());
+    assert_eq!(
+        previewed[0]["date"],
+        (today + chrono::Duration::days(7)).to_string()
+    );
 
     let (status, terminated) = json_request(
         &app,
@@ -881,13 +933,14 @@ async fn contract_termination_leaves_completed_orders_untouched() {
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
 
     let seed_order = |number: String, phase: &'static str, status: &'static str| {
         let pool = pool.clone();
@@ -1054,13 +1107,14 @@ async fn contract_termination_detaches_unconfirmed_drafts_without_settling_them(
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
 
     let running_order: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, status, currency, created_by)
@@ -1235,13 +1289,14 @@ async fn termination_settlement_matches_legacy_invoice_lines_and_the_patient_bal
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, currency, created_by)
            VALUES ($1, $2, $3::uuid, 'execution', 'active', 'EUR', $4)
@@ -1530,13 +1585,14 @@ async fn termination_credits_services_invoiced_in_advance_but_not_delivered() {
         &manager,
         Some(json!({
             "patient_id": patient_id,
-            "status": "signed",
+            "status": "sent",
             "valid_from": gmed_server::app_time::today().to_string(),
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "contract: {contract:?}");
     let contract_id = contract["id"].as_str().unwrap().to_string();
+    sign_framework_contract(&app, &pool, &manager, &contract_id, patient_id).await;
     let order_id: Uuid = sqlx::query_scalar(
         r#"INSERT INTO orders (order_number, patient_id, contract_id, phase, status, currency, created_by)
            VALUES ($1, $2, $3::uuid, 'execution', 'active', 'EUR', $4)

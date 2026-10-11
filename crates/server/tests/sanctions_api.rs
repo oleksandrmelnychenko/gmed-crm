@@ -685,7 +685,17 @@ async fn assert_consent_and_identity_free(app: &TestApp, lead_id: Uuid) {
         .await;
         assert!(not_a_gate_block(&body), "{kind}: {body}");
         assert_ne!(body["error"], "risk_review_required", "{kind}: {body}");
-        assert_eq!(code, StatusCode::OK, "{kind}: {body}");
+        if kind == "dsgvo" {
+            // The generated consent reaches the handler, which wants the signed
+            // scan or a QES as proof (owner decision 2026-10-11).
+            assert_eq!(code, StatusCode::CONFLICT, "{kind}: {body}");
+            assert_eq!(
+                body["error"], "signature_evidence_required",
+                "{kind}: {body}"
+            );
+        } else {
+            assert_eq!(code, StatusCode::OK, "{kind}: {body}");
+        }
     }
 }
 

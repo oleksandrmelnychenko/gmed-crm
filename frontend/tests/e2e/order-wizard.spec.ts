@@ -68,6 +68,12 @@ async function setup(page: Page, language: "ru" | "de", resume = false, failLoad
       doc.signed_at = "2026-09-10T12:00:00Z"; state.signed.push(doc.id);
       return route.fulfill({ json: { ok: true } });
     }
+    // "Подписано на бумаге" stores the scan (owner decision 2026-10-11: signed only with proof).
+    if (path.endsWith("/paper-signature")) {
+      const doc = documents.find(item => path === `/documents/${item.id}/paper-signature`)!;
+      doc.signed_at = "2026-09-10T12:00:00Z"; state.signed.push(doc.id);
+      return route.fulfill({ json: { ok: true, document_id: doc.id, replaced_document_id: doc.id, signed_at: doc.signed_at } });
+    }
     return route.fulfill({ json: [] });
   });
   await page.route("**/__order-wizard-qa*", route => route.fulfill({ contentType: "text/html", body: `<html><meta name="viewport" content="width=device-width, initial-scale=1"><div id="root"></div><script type="module">
@@ -268,6 +274,10 @@ for (const lang of ["ru", "de"] as const) {
     await expect(outdated.getByRole("button", { name: /Privacy QA/ })).toBeDisabled();
     await expect(outdated.getByRole("button", { name: tx("Подписано на бумаге", "Auf Papier unterschrieben") })).toHaveCount(0);
     await docs.getByRole("button", { name: tx("Подписано на бумаге", "Auf Papier unterschrieben"), exact: true }).click();
+    const paperDialog = page.getByRole("dialog", { name: tx("Подтверждение подписи", "Unterschrift bestätigen") });
+    await paperDialog.locator('input[type="file"]').setInputFiles({ name: "signed-order.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed") });
+    await paperDialog.getByRole("checkbox").check();
+    await paperDialog.getByRole("button", { name: tx("Сохранить как подписанный", "Als unterschrieben speichern") }).click();
     await expect.poll(() => state.signed).toEqual(["doc-current"]);
     await expect(docs.getByText("10.09.2026", { exact: true })).toBeVisible();
     await dialog.getByRole("combobox", { name: tx("Документ для подготовки", "Dokument zur Erstellung"), exact: true }).click();

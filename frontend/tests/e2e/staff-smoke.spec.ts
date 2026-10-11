@@ -2627,12 +2627,18 @@ test.describe("lead wizard UX", () => {
       }
       return route.fulfill({ status: 200, contentType: "application/pdf", body: previewPdf });
     });
+    // Owner decision 2026-10-11: a generated consent is signed only with the
+    // scan of the signed copy, never by one click (no mark-signed request).
+    let oneClickAttempts = 0;
     await page.route(`**/api/v1/documents/${documentId}/mark-signed`, (route) => {
-      expect(route.request().postDataJSON()).toEqual({ compliance_kind: "dsgvo" });
+      oneClickAttempts += 1;
+      return json(route, { error: "signature_evidence_required" }, 409);
+    });
+    await page.route(`**/api/v1/documents/${documentId}/paper-signature`, (route) => {
       signAttempts += 1;
       if (signAttempts === 1) return json(route, { error: "Confirmation temporarily unavailable" }, 503);
       signed = true;
-      return json(route, { ok: true });
+      return json(route, { ok: true, document_id: documentId, replaced_document_id: documentId, signed_at: "2026-09-05T11:00:00Z" });
     });
     await page.goto(`/leads?lead=${leadId}&view=wizard`);
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
@@ -2653,18 +2659,22 @@ test.describe("lead wizard UX", () => {
     await expect(preview.getByRole("alert")).toHaveCount(0);
 
     await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
-    await expect(preview.getByRole("alert")).toContainText("Serverfehler. Bitte erneut versuchen");
-    await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
-    await expect(preview.getByRole("status")).toHaveText("Unterzeichnet");
-    await expect(preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true })).toHaveCount(0);
-    await expect(preview.getByRole("alert")).toHaveCount(0);
+    const paper = page.getByRole("dialog", { name: "Unterschrift bestätigen", exact: true });
+    await expect(paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true })).toBeDisabled();
+    await paper.locator('input[type="file"]').setInputFiles({ name: "consent-signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed") });
+    await paper.getByRole("checkbox").check();
+    await paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true }).click();
+    await expect(paper.getByRole("alert")).toBeVisible();
+    await paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true }).click();
+    await expect(paper).toBeHidden();
     expect(signAttempts).toBe(2);
-    await preview.getByRole("button", { name: "Zur Dokumentenliste", exact: true }).click();
+    expect(oneClickAttempts).toBe(0);
+    // The scan is a new version of the document: the preview closes and the list shows it signed.
     await expect(preview).toBeHidden();
     await expect(wizard.getByText("Unterzeichnet", { exact: true })).toBeVisible();
   });
 
-  test("framework signature updates the preview without closing it or requesting a second signature", async ({ page }) => {
+  test("framework signature needs the signed scan and updates the contract chip without reopening the wizard", async ({ page }) => {
     const leadId = "00000000-0000-0000-0000-000000000902";
     const documentId = "00000000-0000-0000-0000-000000000977";
     const contractId = "00000000-0000-0000-0000-000000000976";
@@ -2700,27 +2710,35 @@ test.describe("lead wizard UX", () => {
       downloads += 1;
       return route.fulfill({ status: 200, contentType: "application/pdf", body: previewPdf });
     });
+    // Owner decision 2026-10-11: the scan of the paper copy signs the contract
+    // on the server; the wizard sets no status and marks nothing by one click.
+    let statusOrMarkRequests = 0;
     await page.route(`**/api/v1/documents/${documentId}/mark-signed`, (route) => {
-      expect(route.request().postDataJSON()).toEqual({ compliance_kind: "framework_contract" });
+      statusOrMarkRequests += 1;
+      return json(route, { error: "signature_evidence_required" }, 409);
+    });
+    await page.route(`**/api/v1/documents/${documentId}/paper-signature`, (route) => {
       signed = true;
-      return json(route, { ok: true });
+      return json(route, { ok: true, document_id: documentId, replaced_document_id: documentId, signed_at: "2026-09-05T11:00:00Z" });
     });
     await page.goto(`/leads?lead=${leadId}&view=wizard`);
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await wizard.locator('[data-step="commercial"]').click();
+    await expect(wizard.getByRole("heading", { name: "Rahmenvertrag Unterschrift offen", exact: true })).toBeVisible();
     await wizard.getByRole("button", { name: "framework.pdf", exact: true }).click();
     const preview = page.getByRole("dialog", { name: "framework.pdf", exact: true });
-    const renderedPage = preview.getByRole("img", { name: "PDF, Seite 1" });
-    await expect(renderedPage).toBeVisible();
-    const previewDownloads = downloads;
+    await expect(preview.getByRole("img", { name: "PDF, Seite 1" })).toBeVisible();
+    expect(downloads).toBeGreaterThan(0);
     await preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
-    await expect(preview.getByRole("status")).toHaveText("Unterzeichnet");
-    // The rendered PDF stays in place: signing neither closes nor reloads the preview.
-    await expect(renderedPage).toBeVisible();
-    expect(downloads).toBe(previewDownloads);
-    await expect(preview.getByRole("button", { name: "Unterschrift bestätigen", exact: true })).toHaveCount(0);
-    await preview.getByRole("button", { name: "Zur Dokumentenliste", exact: true }).click();
+    const paper = page.getByRole("dialog", { name: "Unterschrift bestätigen", exact: true });
+    await paper.locator('input[type="file"]').setInputFiles({ name: "framework-signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed") });
+    await paper.getByRole("checkbox").check();
+    await paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true }).click();
+    await expect(paper).toBeHidden();
+    await expect(preview).toBeHidden();
+    // QA 2026-10-11 C-07: the contract chip follows the signature without "Aktualisieren".
     await expect(wizard.getByRole("heading", { name: "Rahmenvertrag Unterzeichnet", exact: true })).toBeVisible();
+    expect(statusOrMarkRequests).toBe(0);
   });
 
   test("document preview keeps mobile actions visible and omits signing for information sheets", async ({ page }) => {

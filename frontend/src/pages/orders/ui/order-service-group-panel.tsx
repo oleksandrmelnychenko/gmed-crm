@@ -28,6 +28,7 @@ import { doctorSpecialtyLabel } from "@/pages/providers/model/specialization-lab
 import type { ProviderTaxonomyNode, SpecializationItem } from "@/pages/providers/model/types";
 import { ProviderSelectWithTaxonomyFilter } from "@/pages/providers/ui/provider-select-with-taxonomy-filter";
 import { fetchAgencyServices } from "@/pages/contracts/data/contracts-api";
+import { priceVersionDisplayName } from "../model/order-service-presentation";
 import {
   listAgencyServicePriceChoices,
   type AgencyServicePriceChoice,
@@ -188,7 +189,8 @@ export function serviceGroupPriceChoiceLabel(
   }`;
   return [
     price,
-    choice.name?.trim() || null,
+    // The automatic name "2026-04-14 · 180 EUR" repeats price and start date in ISO form.
+    priceVersionDisplayName(choice),
     period,
     choice.is_effective ? recommendedLabel : null,
   ].filter(Boolean).join(" · ");

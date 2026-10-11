@@ -233,6 +233,10 @@
 
 Кожна зміна пише версію кошторису (`initial_snapshot` Снимок, `status_update` Обновление статуса, `superseded` Заменено новым предложением, `order_cancelled` Закрыто при отмене заказа). «Оплачен» / «Дата оплаты» кошторису — гроші рахунків саме цього кошторису (`quote_recorded_cash_paid`, з 2026-10-11; раніше — усього замовлення, тож новий кошторис виглядав оплаченим, QA D-23); дата показується без часу. Рахунок можна створити з `draft`/`sent`/`accepted`, не з `rejected`/`expired`/`superseded`. Розірвання договору кошториси **не** закриває: вони — основа фінального рахунку.
 
+**Умови оплати в PDF кошторису** (Kostenvoranschlag клієнта й копія платника; рішення власника 2026-10-11): якщо в замовленні задана передоплата, менша за суму, — «Vor Behandlungs-/Auftragsbeginn ist die vereinbarte Vorauszahlung in Höhe von … € [bis zum …] zu überweisen an:» і після банківських даних «Der verbleibende Betrag wird mit der Endabrechnung in Rechnung gestellt.»; передоплата на всю суму — «Der angegebene Gesamtbetrag ist als Vorauszahlung … vor Behandlungs-/Auftragsbeginn zu überweisen an:»; без передоплати — «Eine Vorauszahlung … ist nicht vereinbart. Die Leistungen werden mit der Endabrechnung in Rechnung gestellt …». Ціни за одиницю в Einzelauftrag/KV — німецькою: «550,00 € / Stück», «95,00 € / Std.» (`order_document_texts.rs`).
+
+**Назви каталогу агентства.** `service_name` і `description` позиції — німецькі тексти, які друкуються в замовленні, кошторисі й рахунку; `name_ru`/`description_ru` — необов'язкові назва й опис для російського інтерфейсу (міграція `20261011213000` замінила англійські демо-тексти чотирьох базових позицій на німецькі й заповнила російські; власні тексти агентства не змінювались). Інтерфейс показує назву мовою інтерфейсу, рядки замовлень зберігають текст, з яким їх створено.
+
 **VKS (voraussichtliche Kostenschätzung, `VKS-…`)** — лише документ (шаблон `cost_estimate`) з медичними видами робіт; окремого статусу немає. Статус документа: `draft`/`active`/`archived`; перегляд пацієнтом: `sent` → `acknowledged`.
 
 ---
@@ -250,12 +254,16 @@
 
 | З → У | Хто | Як |
 |---|---|---|
-| — → `draft`/`sent`/`signed` | `contracts.edit` (CEO, PM, Billing) | створення; `terminated` недоступний |
-| між `draft`/`sent`/`signed` | `contracts.edit` | `POST /framework-contracts/{id}/status`. **`signed` → `draft`/`sent` заборонено (409), поки під договором є замовлення `active`/`paused`**. Аудит у транзакції з попереднім статусом |
-| `draft`/`sent` → `signed` | авто | інтейк «Документи» знаходить підписаний PDF договору; аудит у транзакції (`source = order_intake_signed_document`) |
+| — → `draft`/`sent` | `contracts.edit` (CEO, PM, Billing) | створення; `terminated` недоступний. **Створити одразу `signed` не можна** (422 `framework_contract_signature_evidence_required`, рішення власника 2026-10-11 «підписано лише з доказом»): у договору ще немає підписаного документа |
+| між `draft`/`sent`/`signed` | `contracts.edit` | `POST /framework-contracts/{id}/status`. **`signed` → `draft`/`sent` заборонено (409), поки під договором є замовлення `active`/`paused`**. **`draft`/`sent` → `signed` вручну — лише якщо є підписаний документ цього договору** (результат QES або скан паперового екземпляра, створений після договору; інакше 409 `framework_contract_signature_evidence_required`). Аудит у транзакції з попереднім статусом |
+| `draft`/`sent` → `signed` | авто | електронний підпис або «Подписано на бумаге» (скан + підтвердження звірки) документа договору; інтейк «Документи» знаходить підписаний PDF договору; аудит у транзакції (`source = order_intake_signed_document`) |
 | `sent`/`signed` → `terminated` | `contracts.terminate` (CEO, PM) | «Расторгнуть», причина 3–1000 символів, попередній перегляд. Див. 7.2 |
 
 Статус договору в картці пацієнта (`legal_status.contract_status`) синхронізується при створенні, зміні й розірванні.
+
+**Підписано лише з доказом (рішення власника 2026-10-11).** Згенеровані GMED документи видів `dsgvo` (згода/Einverständniserklärung), `confidentiality_release` (Schweigepflichtsentbindung) і `framework_contract` не позначаються підписаними одним кліком: `POST /documents/{id}/mark-signed` для непідписаного згенерованого документа повертає 409 `signature_evidence_required`. Підпис фіксується електронно (QES) або через «Подписано на бумаге» (`POST /documents/{id}/paper-signature`: скан, дата, підтвердження звірки); у майстрі ліда й у підготовці повторного замовлення кнопка «Подтвердить подпись» / «Подписано на бумаге» відкриває саме цей діалог. Завантажений скан (не згенерований документ) і вже підписана версія, як і раніше, позначаються через `mark-signed`. Галочки «Правовой статус» у картці пацієнта цим правилом не змінювались (відкрите питання до власника).
+
+Попередній перегляд розірвання (`GET /framework-contracts/{id}/termination-preview`) для кожного замовлення повертає `cancelled_appointments` — майбутні прийоми (`planned`/`confirmed`, від сьогодні, без затвердженого звіту перекладача), які скасуються разом із замовленням; діалог показує їх кількість і дати.
 
 ---
 

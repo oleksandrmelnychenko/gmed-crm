@@ -160,6 +160,9 @@ export type AgencyServiceItem = {
   service_key: string;
   service_name: string;
   description: string | null;
+  /** Russian UI name and description; `service_name` and `description` are the German document texts. */
+  name_ru?: string | null;
+  description_ru?: string | null;
   unit_label: string;
   unit_price: unknown;
   currency: string;
@@ -205,6 +208,9 @@ export type AgencyServiceFormState = {
   dueInFullOnTermination: boolean;
   validFrom: string;
   validTo: string;
+  /** Russian UI name and description (optional). */
+  nameRu?: string;
+  descriptionRu?: string;
 };
 
 export type ContractsPermissions = {

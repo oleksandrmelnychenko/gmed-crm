@@ -6130,6 +6130,16 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
     let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
     let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
     let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
+    // Owner decision 2026-10-11: the estimate names the prepayment set on the
+    // order as due before the start; the rest follows with the final invoice.
+    sqlx::query(
+        "UPDATE orders SET prepayment_required = true, prepayment_amount = 300,
+                total_estimated = 892.50 WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let bindings = json!({
         "party_sign_place": "Paris-signature",
@@ -6244,9 +6254,19 @@ async fn single_order_and_order_cost_estimate_are_generated_as_separate_document
         estimate_text.contains("Configured account holder"),
         "{estimate_text:?}"
     );
-    assert!(estimate_text.contains(
-        "Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn zu überweisen an"
-    ));
+    assert!(
+        estimate_text.contains("Vor Behandlungs-/Auftragsbeginn ist die vereinbarte Vorauszahlung"),
+        "{estimate_text:?}"
+    );
+    assert!(estimate_text.contains("300,00"), "{estimate_text:?}");
+    assert!(
+        estimate_text
+            .contains("Der verbleibende Betrag wird mit der Endabrechnung in Rechnung gestellt."),
+        "{estimate_text:?}"
+    );
+    assert!(
+        !estimate_text.contains("Der angegebene Gesamtbetrag ist vor Behandlungs-/Auftragsbeginn")
+    );
     assert!(estimate_text.contains("Ggf. fordern wir während der Durchführung des Auftrages"));
     assert!(estimate_text.contains(
         "Die in der Endabrechnung angegebenen, angefallenen Kosten für von uns erbrachte Leistungen und Auslagen sind nach Zugang der Rechnung binnen 14 Tagen"
@@ -8039,7 +8059,9 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
             _ => unreachable!(),
         }
 
-        let (status, signed) = json_request(
+        // Owner decision 2026-10-11: the generated consent is signed only with
+        // proof, never by a one-click confirmation.
+        let (status, refused) = json_request(
             &app,
             "POST",
             &format!("/api/v1/documents/{document_id}/mark-signed"),
@@ -8047,12 +8069,26 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
             Some(json!({ "compliance_kind": compliance_kind })),
         )
         .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["error"], "signature_evidence_required");
+        // The scan of the signed copy ("Подписано на бумаге") is the proof.
+        let (status, signed) = multipart_upload(
+            &app,
+            &format!("/api/v1/documents/{document_id}/paper-signature"),
+            &admin_bearer,
+            &[],
+            "signed-scan.pdf",
+            "application/pdf",
+            b"%PDF-1.4 signed scan",
+        )
+        .await;
         assert_eq!(status, StatusCode::OK, "{signed}");
+        let signed_version = Uuid::parse_str(signed["document_id"].as_str().unwrap()).unwrap();
 
         let row: (String, Option<String>, bool) = sqlx::query_as(
             "SELECT status, compliance_kind, signed_at IS NOT NULL FROM documents WHERE id = $1",
         )
-        .bind(document_id)
+        .bind(signed_version)
         .fetch_one(&pool)
         .await
         .unwrap();
