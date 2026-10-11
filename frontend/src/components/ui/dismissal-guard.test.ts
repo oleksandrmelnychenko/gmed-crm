@@ -96,6 +96,25 @@ describe("dismissal guard", () => {
     expect(isAuxiliaryOverlayEscape("escape-key", undefined)).toBe(false)
   })
 
+  it("keeps the dialog open on Escape in a combobox input whose list is open", () => {
+    class FakeElement {
+      expanded: boolean
+      constructor(expanded: boolean) {
+        this.expanded = expanded
+      }
+      closest(selector: string) {
+        return this.expanded && selector.includes("[aria-expanded='true']") ? this : null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    const openList = { target: new FakeElement(true) } as unknown as Event
+    const closedList = { target: new FakeElement(false) } as unknown as Event
+
+    expect(isAuxiliaryOverlayEscape("escape-key", openList)).toBe(true)
+    expect(isAuxiliaryOverlayEscape("escape-key", closedList)).toBe(false)
+  })
+
   it("uses controlled dirty as the source of truth when provided", () => {
     expect(isOverlayDirty(false, true)).toBe(false)
     expect(isOverlayDirty(false, false)).toBe(false)

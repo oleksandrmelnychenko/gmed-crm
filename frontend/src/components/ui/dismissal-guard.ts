@@ -24,6 +24,7 @@ const AUXILIARY_OVERLAY_SELECTOR = [
   ".MuiDialog-root",
   ".MuiModal-root",
 ].join(", ")
+const EXPANDED_CONTROL_SELECTOR = "[aria-expanded='true'][role='combobox'], [aria-expanded='true'][aria-haspopup]"
 const OVERLAY_CONTENT_SELECTOR =
   "[data-slot='sheet-content'], [data-slot='dialog-content']"
 
@@ -80,7 +81,12 @@ export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefine
 
   return (
     isElementInside(event.target, AUXILIARY_OVERLAY_SELECTOR) ||
-    isElementInside(activeElement, AUXILIARY_OVERLAY_SELECTOR)
+    isElementInside(activeElement, AUXILIARY_OVERLAY_SELECTOR) ||
+    // The input of a combobox whose list is open: the list is portaled, the key
+    // goes to the input inside the dialog (DEV check 2026-10-11: Escape closed
+    // the whole lead wizard instead of the specialization list).
+    isElementInside(event.target, EXPANDED_CONTROL_SELECTOR) ||
+    isElementInside(activeElement, EXPANDED_CONTROL_SELECTOR)
   )
 }
 
