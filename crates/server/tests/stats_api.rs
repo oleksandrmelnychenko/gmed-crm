@@ -1976,6 +1976,10 @@ async fn reports_workspace_returns_role_scoped_sections() {
             .any(|row| row["country"] == "UA")
     );
     assert_eq!(sales_body["service_types"][0]["gross_total"], Value::Null);
+    // Provider revenue is an amount like any other (QA E-24, 2026-10-11).
+    for row in sales_body["medical_providers"].as_array().unwrap() {
+        assert_eq!(row["gross_service_volume"], Value::Null, "{row}");
+    }
     let non_medical_sales_row = sales_body["non_medical_providers"]
         .as_array()
         .unwrap()
@@ -2752,7 +2756,7 @@ async fn provider_cost_report_tracks_historical_price_changes() {
 }
 
 #[tokio::test]
-async fn sales_medical_provider_report_exposes_partner_revenue_without_restricted_exports() {
+async fn sales_medical_provider_report_hides_partner_revenue_and_restricted_exports() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
@@ -2823,10 +2827,8 @@ async fn sales_medical_provider_report_exposes_partner_revenue_without_restricte
     assert_eq!(row["active_orders"], 1);
     assert_eq!(row["delivered_items"], 2);
     assert_eq!(row["doctor_count"], 1);
-    assert_eq!(
-        row["gross_service_volume"].as_str().unwrap_or_default(),
-        "3213"
-    );
+    // Sales sees no amounts, provider revenue included (QA E-24, 2026-10-11).
+    assert_eq!(row["gross_service_volume"], Value::Null, "{row}");
     assert_eq!(row["taxonomy_node_code"], "medical_reha_clinics");
     assert!(
         row["doctor_specialties"]
@@ -2860,7 +2862,7 @@ async fn sales_medical_provider_report_exposes_partner_revenue_without_restricte
     assert!(export_body.contains(&format!("Clinic {tag}")));
     assert!(export_body.contains("gross_service_volume"));
     assert!(export_body.contains("medical_reha_clinics"));
-    assert!(export_body.contains("3213"));
+    assert!(!export_body.contains("3213"), "{export_body}");
     assert!(export_body.contains("Cardiology"));
 }
 

@@ -134,6 +134,145 @@ async fn settings_list_ok_for_it_admin() {
         arr.iter()
             .any(|s| s["key"] == "clinical_case_retention_years")
     );
+    // The IT admin changes only the technical settings (QA E-31).
+    let editable = |key: &str| {
+        arr.iter()
+            .find(|s| s["key"] == key)
+            .map(|s| s["editable"].clone())
+    };
+    assert_eq!(editable("access_token_minutes"), Some(json!(true)));
+    assert_eq!(editable("agency_bank_iban"), Some(json!(false)));
+    assert_eq!(
+        editable("clinical_case_retention_years"),
+        Some(json!(false))
+    );
+    assert_eq!(
+        editable("interpreter_booking_access_days"),
+        Some(json!(false))
+    );
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/settings",
+        &auth_header_for("ceo", app.suite.admin_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .all(|s| s["editable"] == json!(true)),
+        "{body}"
+    );
+}
+
+/// QA E-31 (2026-10-11): the agency bank account printed on invoices, tax
+/// data, retention and access periods are the CEO's; the IT admin keeps the
+/// technical settings.
+#[tokio::test]
+async fn it_admin_cannot_change_business_or_legal_settings() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let admin = auth_header_for("it_admin", app.it_admin_id);
+    for (key, value) in [
+        ("agency_bank_iban", "DE89 3704 0044 0532 0130 00"),
+        ("agency_bank_swift", "COBADEFFXXX"),
+        ("agency_bank_holder", "Beispiel GmbH"),
+        ("agency_vat_id", "DE123456789"),
+        ("agency_tax_number", "143/123/12345"),
+        ("agency_name", "Beispiel GmbH"),
+        ("clinical_case_retention_years", "35"),
+        ("patient_file_retention_days", "30"),
+        ("interpreter_booking_access_days", "30"),
+        ("unqualified_lead_retention_days", "30"),
+        ("required_patient_documents", "[]"),
+    ] {
+        let before: Option<String> =
+            sqlx::query_scalar("SELECT value::TEXT FROM system_settings WHERE key = $1")
+                .bind(key)
+                .fetch_optional(&app.suite.pool)
+                .await
+                .unwrap();
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/settings/{key}"),
+            &admin,
+            Some(json!({ "value": value })),
+        )
+        .await;
+        if before.is_none() {
+            assert_eq!(status, StatusCode::NOT_FOUND, "{key}: {body}");
+            continue;
+        }
+        assert_eq!(status, StatusCode::FORBIDDEN, "{key}: {body}");
+        assert_eq!(body["error"], "business_setting_ceo_only", "{key}");
+        let after: Option<String> =
+            sqlx::query_scalar("SELECT value::TEXT FROM system_settings WHERE key = $1")
+                .bind(key)
+                .fetch_optional(&app.suite.pool)
+                .await
+                .unwrap();
+        assert_eq!(before, after, "{key}");
+    }
+
+    // A technical setting stays with the IT admin.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/max_failed_login_attempts",
+        &admin,
+        Some(json!({ "value": "5" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn agency_bank_account_is_validated() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let ceo = auth_header_for("ceo", app.suite.admin_id);
+    for (key, value) in [
+        ("agency_bank_iban", "DE00 0000 0000 0000 0000 00"),
+        ("agency_bank_iban", "DE89 3704 0044 0532 0130 01"),
+        ("agency_bank_swift", "MUSTERBIC"),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/settings/{key}"),
+            &ceo,
+            Some(json!({ "value": value })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{key}={value}: {body}"
+        );
+    }
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/admin/settings/agency_bank_iban",
+        &ceo,
+        Some(json!({ "value": "de89370400440532013000" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored: String = sqlx::query_scalar(
+        "SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_bank_iban'",
+    )
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(stored, "DE89 3704 0044 0532 0130 00");
 }
 
 #[tokio::test]
@@ -221,7 +360,8 @@ async fn settings_update_accepts_agency_profile_values() {
     let Some(app) = test_context().await else {
         return;
     };
-    let admin = auth_header_for("it_admin", app.it_admin_id);
+    // Business settings belong to the CEO (QA E-31).
+    let admin = auth_header_for("ceo", app.suite.admin_id);
 
     let (status, body) = json_request(
         &app,
@@ -245,8 +385,8 @@ async fn settings_update_accepts_agency_profile_values() {
         ),
         ("agency_bank_holder", "GMED Operations"),
         ("agency_bank_name", "Musterbank"),
-        ("agency_bank_swift", "MUSTERBIC"),
-        ("agency_bank_iban", "DE00 0000 0000 0000 0000 00"),
+        ("agency_bank_swift", "COBADEFFXXX"),
+        ("agency_bank_iban", "DE89 3704 0044 0532 0130 00"),
     ] {
         let (status, body) = json_request(
             &app,
@@ -304,7 +444,7 @@ async fn settings_update_rejects_invalid_agency_email() {
         &app,
         "POST",
         "/api/v1/admin/settings/agency_email",
-        &auth_header(&app, "it_admin").await,
+        &auth_header_for("ceo", app.suite.admin_id),
         Some(json!({"value": "invalid-email"})),
     )
     .await;
@@ -318,7 +458,7 @@ async fn settings_update_rejects_invalid_required_patient_documents_json() {
         &app,
         "POST",
         "/api/v1/admin/settings/required_patient_documents",
-        &auth_header(&app, "it_admin").await,
+        &auth_header_for("ceo", app.suite.admin_id),
         Some(json!({"value": r#"{"key":"passport"}"#})),
     )
     .await;

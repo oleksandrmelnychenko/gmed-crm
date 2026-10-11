@@ -93,18 +93,19 @@ export type AdminUserRoleKey = (typeof ADMIN_USER_ROLE_KEYS)[number];
 /**
  * Roles the signed-in administrator may assign. Only `users.manage_ceo`
  * (the CEO) may hand out the `ceo` role; the technical admin sees every
- * other role. The `patient` role is never offered: portal accounts come only
- * from the patient portal activation (server: `reject_patient_role`). An
- * existing patient account keeps its role in the edit form (`currentRole`).
+ * other staff role. The `patient` role is never offered: portal accounts come
+ * only from the patient portal activation (server: `reject_patient_role`).
+ * A portal account (patient or lead) keeps its role: it never becomes a staff
+ * account and a staff account never becomes a portal account (server:
+ * `portal_role_change_forbidden`, QA E-30).
  */
 export function getAssignableAdminUserRoles(
   canManageCeo: boolean,
   currentRole?: string | null,
 ): AdminUserRoleKey[] {
+  if (currentRole === "patient") return ["patient"];
   return ADMIN_USER_ROLE_KEYS.filter(
-    (role) =>
-      (canManageCeo || role !== "ceo") &&
-      (role !== "patient" || currentRole === "patient"),
+    (role) => (canManageCeo || role !== "ceo") && role !== "patient",
   );
 }
 
@@ -119,6 +120,8 @@ export type AdminUserActionTarget = {
 
 export type AdminUserActionContext = {
   canManageCeo: boolean;
+  /** `users.manage` with `patients.edit` (the CEO): portal accounts of patients and leads. */
+  canManagePortalAccounts?: boolean;
   currentUserId: string | null;
   now?: number;
 };
@@ -156,7 +159,14 @@ export function isAdminUserLocked(
  * rule covers the security actions of the settings page (sign-out, pending
  * login approval) — the server answers 403 otherwise.
  */
-export function canManageAdminAccount(targetRole: string, canManageCeo: boolean) {
+export function canManageAdminAccount(
+  targetRole: string,
+  canManageCeo: boolean,
+  canManagePortalAccounts = false,
+) {
+  // Portal accounts of patients and leads are managed in the lead or patient
+  // record; the technical admin does not touch them (QA E-05).
+  if (targetRole === "patient") return canManagePortalAccounts;
   return canManageCeo || targetRole !== "ceo";
 }
 
@@ -164,7 +174,11 @@ export function getAdminUserActions(
   user: AdminUserActionTarget,
   context: AdminUserActionContext,
 ): AdminUserActions {
-  const canManage = canManageAdminAccount(user.role, context.canManageCeo);
+  const canManage = canManageAdminAccount(
+    user.role,
+    context.canManageCeo,
+    context.canManagePortalAccounts ?? false,
+  );
   const isLocked = isAdminUserLocked(user, context.now);
   return {
     canManage,
@@ -182,6 +196,8 @@ type AdminUserErrorMessages = {
   users_last_ceo_protected: string;
   users_ceo_managed_by_ceo_only: string;
   users_cannot_deactivate_self: string;
+  users_portal_account_managed_elsewhere?: string;
+  users_portal_role_change_forbidden?: string;
 };
 
 /**
@@ -201,6 +217,15 @@ export function describeAdminUserError(
   };
   if (details.code === "last_ceo_protected") {
     return messages.users_last_ceo_protected;
+  }
+  if (details.code === "portal_account_managed_elsewhere" && messages.users_portal_account_managed_elsewhere) {
+    return messages.users_portal_account_managed_elsewhere;
+  }
+  if (
+    (details.code === "portal_role_change_forbidden" || details.code === "portal_role_not_assignable") &&
+    messages.users_portal_role_change_forbidden
+  ) {
+    return messages.users_portal_role_change_forbidden;
   }
   if (details.status === 403 && targetRole === "ceo") {
     return messages.users_ceo_managed_by_ceo_only;

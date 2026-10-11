@@ -123,9 +123,12 @@ async fn credentials_are_encrypted_callbacks_bound_and_accounting_writes_unavail
         };
         // Billing may read published DATEV data (datev.read) but never administer
         // the connection; the read attempt passes authorization and fails on
-        // the missing confirmation instead.
+        // the missing confirmation instead. The connection state and the
+        // history are readable for it (QA E-39: no 403 page).
         let expected = if path == "read" {
             StatusCode::UNPROCESSABLE_ENTITY
+        } else if method == "GET" {
+            StatusCode::OK
         } else {
             StatusCode::FORBIDDEN
         };

@@ -960,6 +960,142 @@ async fn generic_user_administration_cannot_create_patient_accounts() {
     assert_eq!(role, "billing");
 }
 
+/// QA E-05 / E-30 (2026-10-11): the IT admin manages staff accounts only. A
+/// patient or lead portal login is neither listed nor changed by it — no
+/// password reset (which handed it a one-time password to the patient's
+/// medical documents), no 2FA reset, role change, block, edit or sign-out.
+/// Nobody turns a portal login into a staff login or back.
+#[tokio::test]
+async fn portal_accounts_stay_outside_the_technical_user_administration() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("users-api-portal-{}", Uuid::new_v4().simple());
+    let it_admin = auth_header_for(seed_user(&pool, &tag, "it_admin").await, "it_admin");
+    let ceo = auth_header_for(admin_id, "ceo");
+    let portal_id = seed_user(&pool, &tag, "patient").await;
+    sqlx::query(
+        "UPDATE users SET failed_login_attempts = 5, locked_until = now() + interval '1 hour' WHERE id = $1",
+    )
+    .bind(portal_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let pending = seed_pending_login(&pool, portal_id).await;
+
+    // Not listed, not readable for the IT admin; the CEO still sees it.
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users?search={tag}"),
+        &it_admin,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|user| user["role"] != "patient"),
+        "{listed}"
+    );
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users/{portal_id}"),
+        &it_admin,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, listed) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/users?search={tag}"),
+        &ceo,
+        json!(null),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|user| user["id"] == portal_id.to_string()),
+        "{listed}"
+    );
+
+    // Every account action is refused to the IT admin.
+    let mut requests: Vec<(String, Value)> = vec![
+        (
+            format!("/api/v1/users/{portal_id}/reset-password"),
+            json!({ "generate": true }),
+        ),
+        (format!("/api/v1/users/{portal_id}/totp/reset"), json!(null)),
+        (
+            format!("/api/v1/users/{portal_id}/update"),
+            json!({ "role": "sales" }),
+        ),
+        (
+            format!("/api/v1/users/{portal_id}/update"),
+            json!({ "name": "Anna Muster" }),
+        ),
+        (format!("/api/v1/users/{portal_id}/deactivate"), json!(null)),
+        (format!("/api/v1/users/{portal_id}/activate"), json!(null)),
+        (format!("/api/v1/users/{portal_id}/unlock"), json!(null)),
+    ];
+    requests.extend(account_security_requests(portal_id, pending, pending));
+    for (path, body) in requests {
+        let (status, response) = json_request(&app, "POST", &path, &it_admin, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
+        assert_eq!(
+            response["error"], "portal_account_managed_elsewhere",
+            "{path}: {response}"
+        );
+    }
+    let (role, locked, reset_required): (String, bool, bool) = sqlx::query_as(
+        "SELECT role, locked_until IS NOT NULL, password_reset_required FROM users WHERE id = $1",
+    )
+    .bind(portal_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role, "patient");
+    assert!(locked && !reset_required);
+
+    // Even the CEO cannot move a portal login to a staff role or back.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{portal_id}/update"),
+        &ceo,
+        json!({ "role": "sales" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "portal_role_change_forbidden");
+    let staff_id = seed_user(&pool, &tag, "billing").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/users/{staff_id}/update"),
+        &ceo,
+        json!({ "role": "patient" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "portal_role_change_forbidden");
+    let role: String = sqlx::query_scalar("SELECT role FROM users WHERE id = $1")
+        .bind(portal_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(role, "patient");
+}
+
 /// Owner decision 2026-09-28 (Q12): e-mail addresses are unique regardless of
 /// case, so an edit cannot create a login collision.
 #[tokio::test]

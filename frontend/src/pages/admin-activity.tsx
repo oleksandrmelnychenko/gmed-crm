@@ -63,11 +63,25 @@ interface ActivityRow {
   user_id: string;
   user_name: string;
   user_email: string;
+  /** Role of the actor; a patient or lead login is anonymous without patient access. */
+  actor_role?: string | null;
   action: string;
   entity_type: string | null;
   entity_id: unknown;
   context: Record<string, unknown> | null;
   created_at: string;
+}
+
+/** The server redacts business payloads for readers without full access (QA E-45). */
+function isRedactedContext(context: Record<string, unknown> | null): boolean {
+  return Boolean(context && context.redacted === true);
+}
+
+function actorLabel(activity: Pick<ActivityRow, "user_name" | "actor_role">, translations: Translations): string {
+  if (activity.user_name) return activity.user_name;
+  return activity.actor_role === "patient"
+    ? translations.activity_portal_actor
+    : translations.activity_anonymous_actor;
 }
 
 const ADMIN_ACTIVITY_REALTIME_EVENTS = [
@@ -490,6 +504,7 @@ function contextSummary(
   translations: Translations,
 ): string {
   if (!context || typeof context !== "object") return "\u2014";
+  if (isRedactedContext(context)) return translations.activity_context_redacted;
   const method = typeof context.method === "string" ? context.method : "";
   const route = typeof context.route === "string" ? context.route : "";
   const status = typeof context.status === "number" ? context.status : null;
@@ -672,7 +687,7 @@ function AdminActivityDetailSheet({
                   <div className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5">
                     <p className="text-[11.5px] text-muted-foreground">{t.activity_user}</p>
                     <p className="mt-1 text-sm font-medium text-foreground">
-                      {selectedActivity.user_name || t.activity_anonymous_actor}
+                      {actorLabel(selectedActivity, t)}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">
                       {selectedActivity.user_email || "-"}
@@ -708,7 +723,9 @@ function AdminActivityDetailSheet({
                   <span>{t.activity_payload}</span>
                 </h3>
                 <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
-                  {prettyContext(selectedActivity.context)}
+                  {isRedactedContext(selectedActivity.context)
+                    ? t.activity_context_redacted
+                    : prettyContext(selectedActivity.context)}
                 </pre>
               </section>
             </>
@@ -1178,11 +1195,11 @@ export function AdminActivityPage() {
       render: (activity) => (
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-muted text-[11px] font-medium text-foreground">
-            {activityInitials(activity.user_name || t.activity_anonymous_actor)}
+            {activityInitials(actorLabel(activity, t))}
           </div>
           <div className="min-w-0">
             <div className="truncate text-xs font-medium text-foreground">
-              {activity.user_name || t.activity_anonymous_actor}
+              {actorLabel(activity, t)}
             </div>
             <div className="truncate text-[11px] text-foreground">
               {activity.user_email || "—"}

@@ -138,7 +138,9 @@ async fn load(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Json<Value>, Response> {
-    auth.require_capability(Capability::DatevAdmin)?;
+    // Billing reads the company profile it reads DATEV data for (QA E-39);
+    // saving it stays with `datev.admin`.
+    auth.require_any_capability(&[Capability::DatevAdmin, Capability::DatevRead])?;
     let row = sqlx::query(
         "SELECT profile, revision, updated_at FROM datev_integration_setup WHERE singleton",
     )

@@ -266,6 +266,7 @@ const SALES: readonly KnownCapability[] = [
 
 const IT_ADMIN: readonly KnownCapability[] = [
   "sops.view",
+  "chat.use",
   "users.view",
   "users.manage",
   "admin.settings",

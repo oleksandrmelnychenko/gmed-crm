@@ -27,6 +27,9 @@ pub struct TokenPair {
     pub expires_in: i64,
     /// The account must replace its password before using the workspace.
     pub password_change_required: bool,
+    /// The role must use a second factor and none is enrolled: the session
+    /// reaches only the two-factor setup (`auth::mfa_policy`).
+    pub totp_enrolment_required: bool,
 }
 
 struct CreatedSession {
@@ -157,6 +160,10 @@ pub fn spawn_session_sweeper(state: crate::state::AppState) {
                 }
                 Err(error) => tracing::warn!(%error, "Session sweep failed"),
             }
+            // Old sign-in counts and ended holds are forgotten (QA E-19).
+            if let Err(error) = super::login_throttle::purge_stale(&state.db).await {
+                tracing::warn!(%error, "Sign-in throttle sweep failed");
+            }
         }
     });
 }
@@ -222,6 +229,14 @@ async fn create_session_record(
         settings.password_expire_days,
     );
 
+    let totp_enrolment_required =
+        super::mfa_policy::totp_enrolment_pending(&mut **tx, user_id, role)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, %user_id, "Failed to check the second-factor requirement");
+                TokenError::Internal
+            })?;
+
     let evicted_families = evict_sessions_over_limit(tx, user_id, settings)
         .await
         .map_err(|error| {
@@ -259,12 +274,13 @@ async fn create_session_record(
         TokenError::Internal
     })?;
 
-    let access_token = jwt::issue_access_token_with_duration(
+    let access_token = jwt::issue_session_access_token(
         jwt_secret,
         user_id,
         role,
         family.id,
         settings.access_token_minutes,
+        totp_enrolment_required,
     )
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to issue access token");
@@ -279,6 +295,7 @@ async fn create_session_record(
             refresh_token: raw_refresh,
             expires_in: settings.access_token_minutes * 60,
             password_change_required,
+            totp_enrolment_required,
         },
     })
 }
@@ -509,6 +526,17 @@ pub async fn rotate_refresh_token(
         return Err(TokenError::TheftDetected);
     }
 
+    // A refreshed session of a role that must use a second factor stays
+    // confined to the setup until a factor is confirmed; after the enrolment
+    // the refresh lifts the confinement.
+    let totp_enrolment_required =
+        super::mfa_policy::totp_enrolment_pending(&mut *tx, row.user_id, &row.role)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "Failed to check the second-factor requirement");
+                TokenError::Internal
+            })?;
+
     let (new_raw, new_hash) = generate_refresh_token();
     let new_expires = Utc::now() + Duration::days(settings.refresh_token_days);
 
@@ -536,12 +564,13 @@ pub async fn rotate_refresh_token(
         TokenError::Internal
     })?;
 
-    let access_token = jwt::issue_access_token_with_duration(
+    let access_token = jwt::issue_session_access_token(
         jwt_secret,
         row.user_id,
         &row.role,
         row.family_id,
         settings.access_token_minutes,
+        totp_enrolment_required,
     )
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to issue access token on refresh");
@@ -562,6 +591,7 @@ pub async fn rotate_refresh_token(
             row.password_changed_at,
             settings.password_expire_days,
         ),
+        totp_enrolment_required,
     })
 }
 

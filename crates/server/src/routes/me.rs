@@ -42,7 +42,10 @@ pub fn router() -> Router<AppState> {
 async fn get_me(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
+    scope: Option<Extension<crate::auth::middleware::SessionScope>>,
 ) -> impl IntoResponse {
+    let totp_enrolment_required =
+        scope.is_some_and(|Extension(scope)| scope.totp_enrolment_required);
     let settings = state.settings.get().await;
     match sqlx::query(
         "SELECT id, email, name, role, created_at, phone, preferred_language,
@@ -80,6 +83,9 @@ async fn get_me(
                     .ok()
                     .flatten(),
                 "password_change_required": password_change_required,
+                // The session reaches only the two-factor setup until a factor
+                // is enrolled (mandatory for CEO, IT Admin and PM).
+                "totp_enrolment_required": totp_enrolment_required,
                 "has_personnel_file": has_personnel_file,
                 // Patient logins: `lead` while the login reaches only requests
                 // (the lead cabinet), else `patient`; null for staff. The

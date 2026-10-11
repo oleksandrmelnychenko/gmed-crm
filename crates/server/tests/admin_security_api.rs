@@ -514,6 +514,161 @@ async fn activity_access_category_returns_only_account_and_permission_events() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// QA E-45 (2026-10-11): the activity log does not hand the IT admin
+/// sanctions decisions, lead e-mails or other patient data; the CEO reads
+/// everything.
+#[tokio::test]
+async fn activity_log_redacts_business_payloads_for_the_it_admin() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let ceo_id = seed_user(&pool, "admin_security_api", "ceo").await;
+    let portal_id = seed_user(&pool, "admin_security_api", "patient").await;
+    let marker = format!("Synthetik-{}", Uuid::new_v4().simple());
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, created_at)
+           VALUES
+                ($1, 'sanctions_hit_decided', 'sanctions_hit', gen_random_uuid(),
+                 jsonb_build_object('decision', 'false_positive', 'reason', $3::text), now() - interval '1 minute'),
+                ($1, 'create_lead_portal_account', 'lead', gen_random_uuid(),
+                 jsonb_build_object('email', $3::text || '@example.com'), now() - interval '2 minute'),
+                ($1, 'reset_password', 'user', $2,
+                 jsonb_build_object('note', $3::text), now() - interval '3 minute'),
+                ($2, 'lead_portal_update_step1', 'lead', gen_random_uuid(),
+                 jsonb_build_object('field', $3::text), now() - interval '4 minute'),
+                ($1, 'update_setting', 'system_settings', NULL,
+                 jsonb_build_object('key', 'access_token_minutes', 'marker', $3::text), now() - interval '5 minute')"#,
+    )
+    .bind(ceo_id)
+    .bind(portal_id)
+    .bind(&marker)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let it_admin = auth_header_for("it_admin", app.it_admin_id);
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/activity?limit=200",
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("items");
+    let by_action = |action: &str| {
+        items
+            .iter()
+            .find(|item| item["action"] == action)
+            .unwrap_or_else(|| panic!("{action} missing: {body}"))
+    };
+    for action in [
+        "sanctions_hit_decided",
+        "create_lead_portal_account",
+        "reset_password",
+        "lead_portal_update_step1",
+    ] {
+        assert_eq!(
+            by_action(action)["context"],
+            json!({ "redacted": true }),
+            "{action}"
+        );
+    }
+    // A portal login acting in its cabinet stays anonymous.
+    let portal_row = by_action("lead_portal_update_step1");
+    assert_eq!(portal_row["user_name"], "");
+    assert_eq!(portal_row["user_email"], "");
+    // Technical settings keep their context.
+    assert_eq!(
+        by_action("update_setting")["context"]["key"],
+        "access_token_minutes"
+    );
+    // The search does not find what is hidden … apart from technical rows.
+    let (status, found) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?search={marker}&limit=200"),
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let found_actions: Vec<&str> = found["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|item| item["action"].as_str())
+        .collect();
+    assert_eq!(found_actions, ["update_setting"], "{found}");
+
+    // The CEO reads every payload.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?search={marker}&limit=200"),
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let decided = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["action"] == "sanctions_hit_decided")
+        .expect("ceo sees the decision");
+    assert_eq!(decided["context"]["reason"], json!(marker));
+    assert_eq!(body["total"], 5, "{body}");
+}
+
+/// QA E-42 (2026-10-11): interpreters never get the clinical record; the
+/// matrix shows those fields locked and nobody can open them.
+#[tokio::test]
+async fn interpreter_clinical_fields_are_locked_hidden() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let ceo_id = seed_user(&app.suite.pool, "admin_security_api", "ceo").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/access-policies?entity_type=patient",
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for role in ["interpreter", "teamlead_interpreter"] {
+        for field in ["diagnosis", "medications", "allergies", "vitals"] {
+            let policy = body
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|policy| policy["role"] == role && policy["field_name"] == field)
+                .unwrap_or_else(|| panic!("{role} {field}"));
+            assert_eq!(policy["access_level"], "hidden", "{policy}");
+            assert_eq!(policy["is_system_locked"], true, "{policy}");
+            let (status, response) = json_request(
+                &app,
+                "POST",
+                "/api/v1/access-policies/update",
+                &auth_header_for("ceo", ceo_id),
+                Some(json!({
+                    "role": role,
+                    "entity_type": "patient",
+                    "field_name": field,
+                    "access_level": "conditional",
+                    "condition_type": "assigned_appointment"
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{role} {field}: {response}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn access_policy_matrix_exposes_it_admin_as_locked_hidden() {
     let Some(app) = test_context().await else {

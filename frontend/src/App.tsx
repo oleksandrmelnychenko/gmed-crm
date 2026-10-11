@@ -303,6 +303,11 @@ const AccountPasswordRequiredPage = lazy(() =>
     default: module.AccountPasswordRequiredPage,
   })),
 );
+const AccountTwoFactorRequiredPage = lazy(() =>
+  import("@/pages/account-two-factor-required").then((module) => ({
+    default: module.AccountTwoFactorRequiredPage,
+  })),
+);
 const IncidentReportPage = lazy(() =>
   import("@/pages/incident-report").then((module) => ({ default: module.IncidentReportPage })),
 );
@@ -428,6 +433,7 @@ function AppRoutes() {
             <Route index element={<LegalNoticePage />} />
           </Route>
           <Route path="/account/password-required" element={<AccountPasswordRequiredPage />} />
+          <Route path="/account/two-factor-required" element={<AccountTwoFactorRequiredPage />} />
           <Route path="/payer" element={<PayerLinkPage />} />
           <Route element={<AppLayout />}>
             <Route index element={<DashboardPage />} />

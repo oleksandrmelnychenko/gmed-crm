@@ -7,6 +7,7 @@ import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm
 import { PageHeader } from "@/components/ui-shell";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { hasCapability } from "@/lib/permissions";
 import { useLang, type Lang } from "@/lib/i18n";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
 
@@ -169,18 +170,25 @@ export function ConciergeTaskManagerPage() {
               role: user.role,
               is_active: true,
             }] : []),
-          apiFetch<PatientSummary[]>("/patients?active_only=true", {
-            cacheTtlMs: 30_000,
-            forceFresh: version > 0,
-          }).catch(() => []),
-          apiFetch<ConciergeProvider[]>("/providers?active_only=true", {
-            cacheTtlMs: 30_000,
-            forceFresh: version > 0,
-          }).catch(() => []),
-          apiFetch<ConciergeService[]>(user?.role === "ceo" ? "/concierge-services" : "/concierge-services?mine_only=true", {
-            cacheTtlMs: 30_000,
-            forceFresh: version > 0,
-          }).catch(() => []),
+          // Only what the role may read: no 403 calls for the pickers (QA E-41).
+          hasCapability(user, "patients.view")
+            ? apiFetch<PatientSummary[]>("/patients?active_only=true", {
+                cacheTtlMs: 30_000,
+                forceFresh: version > 0,
+              }).catch(() => [])
+            : Promise.resolve<PatientSummary[]>([]),
+          hasCapability(user, "providers.view")
+            ? apiFetch<ConciergeProvider[]>("/providers?active_only=true", {
+                cacheTtlMs: 30_000,
+                forceFresh: version > 0,
+              }).catch(() => [])
+            : Promise.resolve<ConciergeProvider[]>([]),
+          hasCapability(user, "services.view")
+            ? apiFetch<ConciergeService[]>(user?.role === "ceo" ? "/concierge-services" : "/concierge-services?mine_only=true", {
+                cacheTtlMs: 30_000,
+                forceFresh: version > 0,
+              }).catch(() => [])
+            : Promise.resolve<ConciergeService[]>([]),
           apiFetch<TaskProjectOption[]>("/projects", {
             cacheTtlMs: 30_000,
             forceFresh: version > 0,

@@ -50,7 +50,7 @@ async fn list_settings(
         return e;
     }
 
-    match settings::list_all(&state.db).await {
+    match settings::list_all(&state.db, can_change_business_settings(&auth)).await {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => {
             tracing::error!(error = %e, "list settings");
@@ -64,6 +64,13 @@ struct UpdateSettingRequest {
     value: String,
 }
 
+/// Business and legal settings (agency profile and bank account, tax data,
+/// retention and access periods, document rules) belong to the CEO; the IT
+/// admin changes the technical ones (`settings::TECHNICAL_SETTING_KEYS`).
+fn can_change_business_settings(auth: &AuthUser) -> bool {
+    auth.role.has_full_access()
+}
+
 async fn update_setting(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -72,6 +79,27 @@ async fn update_setting(
 ) -> axum::response::Response {
     if let Err(e) = auth.require_capability(Capability::AdminSettings) {
         return e;
+    }
+    match settings::is_listed_setting(&state.db, &key).await {
+        Ok(true) => {}
+        Ok(false) => return err(StatusCode::NOT_FOUND, "Setting not found"),
+        Err(e) => {
+            tracing::error!(error = %e, "look up setting");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update setting",
+            );
+        }
+    }
+    if !settings::is_technical_setting(&key) && !can_change_business_settings(&auth) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({
+                "error": "business_setting_ceo_only",
+                "message": "Business and legal settings are changed by the CEO",
+            })),
+        )
+            .into_response();
     }
 
     match settings::update_setting(&state.db, &key, &body.value, auth.user_id).await {
@@ -114,16 +142,20 @@ async fn list_all_sessions(
         return e;
     }
 
-    match sqlx::query!(
+    // Sessions of patient and lead portal logins are patient data: only a role
+    // that sees patients lists them (QA E-05).
+    match sqlx::query(
         r#"SELECT tf.id AS family_id, tf.user_id, u.name AS user_name, u.email AS user_email, u.role,
                   tf.device_fingerprint, tf.ip_address, tf.user_agent,
                   tf.created_at, tf.last_activity_at
            FROM token_families tf
            JOIN users u ON u.id = tf.user_id
            WHERE NOT tf.is_revoked
+             AND ($1::bool OR u.role <> 'patient')
            ORDER BY tf.last_activity_at DESC
-           LIMIT 200"#
+           LIMIT 200"#,
     )
+    .bind(super::users::can_see_portal_accounts(&auth))
     .fetch_all(&state.db)
     .await
     {
@@ -132,16 +164,16 @@ async fn list_all_sessions(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "family_id": r.family_id,
-                        "user_id": r.user_id,
-                        "user_name": r.user_name,
-                        "user_email": r.user_email,
-                        "role": r.role,
-                        "device_fingerprint": r.device_fingerprint,
-                        "ip_address": r.ip_address,
-                        "user_agent": r.user_agent,
-                        "created_at": r.created_at,
-                        "last_activity_at": r.last_activity_at,
+                        "family_id": r.try_get::<Uuid, _>("family_id").unwrap_or_default(),
+                        "user_id": r.try_get::<Uuid, _>("user_id").unwrap_or_default(),
+                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
+                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "role": r.try_get::<String, _>("role").unwrap_or_default(),
+                        "device_fingerprint": r.try_get::<Option<String>, _>("device_fingerprint").unwrap_or_default(),
+                        "ip_address": r.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
+                        "user_agent": r.try_get::<Option<String>, _>("user_agent").unwrap_or_default(),
+                        "created_at": r.try_get::<DateTime<Utc>, _>("created_at").ok(),
+                        "last_activity_at": r.try_get::<DateTime<Utc>, _>("last_activity_at").ok(),
                     })
                 })
                 .collect();
@@ -259,6 +291,55 @@ pub const ACCESS_AUDIT_ACTIONS: &[&str] = &[
     "clone_staff_access_profile",
     "update_staff_user_access",
 ];
+
+/// Entity types whose audit context is technical (accounts, sessions,
+/// settings, integrations, incidents). For a reader without full access (the
+/// IT admin) every other context is redacted: it can carry patient, lead,
+/// medical, financial or AML details — e-mails of leads, sanctions decisions
+/// with their reasons (QA E-45, 2026-10-11). The CEO sees everything.
+pub const TECHNICAL_AUDIT_ENTITY_TYPES: &[&str] = &[
+    "http",
+    "auth",
+    "security",
+    "session",
+    "token_family",
+    "user",
+    "pending_login",
+    "system",
+    "system_settings",
+    "ip_whitelist",
+    "announcement",
+    "custom_field",
+    "notification_channel",
+    "mail_connection",
+    "signature_connection",
+    "signature_settings",
+    "datev_connection",
+    "datev_setup",
+    "field_access_policy",
+    "access_policy",
+    "staff_access_profile",
+    "security_incident",
+];
+
+/// The audit context a reader gets: unchanged with full access, otherwise
+/// only for technical entity types and never for a portal account.
+pub(crate) fn visible_activity_context(
+    full_access: bool,
+    entity_type: Option<&str>,
+    target_is_portal_account: bool,
+    context: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    if full_access {
+        return context;
+    }
+    let technical = entity_type.is_some_and(|value| TECHNICAL_AUDIT_ENTITY_TYPES.contains(&value));
+    if technical && !target_is_portal_account {
+        context
+    } else {
+        context.map(|_| serde_json::json!({ "redacted": true }))
+    }
+}
 
 fn normalize_activity_view(value: Option<String>) -> Result<String, &'static str> {
     let view = value.unwrap_or_else(|| "activity".to_string());
@@ -398,10 +479,19 @@ async fn list_activity(
         );
     }
 
+    // Without full access the search must not find what the reader cannot
+    // see: redacted contexts and the names of patient and lead logins.
+    let full_access = auth.role.has_full_access();
+    let technical_entity_types: Vec<String> = TECHNICAL_AUDIT_ENTITY_TYPES
+        .iter()
+        .map(|value| value.to_string())
+        .collect();
+
     let total = match sqlx::query(
         r#"SELECT COUNT(*) AS count
            FROM audit_log al
            LEFT JOIN users u ON u.id = al.user_id
+           LEFT JOIN users target ON al.entity_type = 'user' AND target.id = al.entity_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
              AND ($2::TEXT IS NULL OR al.action = $2)
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
@@ -427,12 +517,20 @@ async fn list_activity(
              )
              AND (
                  $6::TEXT IS NULL
-                 OR u.name ILIKE '%' || $6 || '%'
-                 OR u.email ILIKE '%' || $6 || '%'
+                 OR (
+                     ($8::bool OR COALESCE(u.role, '') <> 'patient')
+                     AND (u.name ILIKE '%' || $6 || '%' OR u.email ILIKE '%' || $6 || '%')
+                 )
                  OR al.action ILIKE '%' || $6 || '%'
                  OR al.entity_type ILIKE '%' || $6 || '%'
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
-                 OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR (
+                     (
+                         $8::bool
+                         OR (al.entity_type = ANY($9) AND COALESCE(target.role, '') <> 'patient')
+                     )
+                     AND COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+                 )
              )
              AND ($7::TEXT[] IS NULL OR al.action = ANY($7))"#,
     )
@@ -443,6 +541,8 @@ async fn list_activity(
     .bind(&view)
     .bind(search)
     .bind(&category_actions)
+    .bind(full_access)
+    .bind(&technical_entity_types)
     .fetch_one(&state.db)
     .await
     {
@@ -455,9 +555,11 @@ async fn list_activity(
 
     match sqlx::query(
         r#"SELECT al.id, al.user_id, u.name AS user_name, u.email AS user_email,
+                  u.role AS actor_role, COALESCE(target.role = 'patient', false) AS target_is_portal,
                   al.action, al.entity_type, al.entity_id, al.context, al.created_at
            FROM audit_log al
            LEFT JOIN users u ON u.id = al.user_id
+           LEFT JOIN users target ON al.entity_type = 'user' AND target.id = al.entity_id
            WHERE ($1::UUID IS NULL OR al.user_id = $1)
              AND ($2::TEXT IS NULL OR al.action = $2)
              AND ($3::TIMESTAMPTZ IS NULL OR al.created_at >= $3)
@@ -483,12 +585,20 @@ async fn list_activity(
              )
              AND (
                  $6::TEXT IS NULL
-                 OR u.name ILIKE '%' || $6 || '%'
-                 OR u.email ILIKE '%' || $6 || '%'
+                 OR (
+                     ($10::bool OR COALESCE(u.role, '') <> 'patient')
+                     AND (u.name ILIKE '%' || $6 || '%' OR u.email ILIKE '%' || $6 || '%')
+                 )
                  OR al.action ILIKE '%' || $6 || '%'
                  OR al.entity_type ILIKE '%' || $6 || '%'
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
-                 OR COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+                 OR (
+                     (
+                         $10::bool
+                         OR (al.entity_type = ANY($11) AND COALESCE(target.role, '') <> 'patient')
+                     )
+                     AND COALESCE(al.context::TEXT, '') ILIKE '%' || $6 || '%'
+                 )
              )
              AND ($9::TEXT[] IS NULL OR al.action = ANY($9))
            ORDER BY al.created_at DESC LIMIT $7 OFFSET $8"#,
@@ -502,6 +612,8 @@ async fn list_activity(
     .bind(limit)
     .bind(offset)
     .bind(&category_actions)
+    .bind(full_access)
+    .bind(&technical_entity_types)
     .fetch_all(&state.db)
     .await
     {
@@ -564,15 +676,29 @@ async fn list_activity(
             let data: Vec<serde_json::Value> = rows
                 .into_iter()
                 .map(|r| {
+                    let entity_type: Option<String> =
+                        r.try_get("entity_type").unwrap_or_default();
+                    let actor_role: Option<String> = r.try_get("actor_role").unwrap_or_default();
+                    // A patient or lead login acting in its portal stays
+                    // anonymous for a reader without patient access.
+                    let actor_hidden = !full_access && actor_role.as_deref() == Some("patient");
+                    let context = visible_activity_context(
+                        full_access,
+                        entity_type.as_deref(),
+                        r.try_get::<bool, _>("target_is_portal").unwrap_or(false),
+                        r.try_get::<Option<serde_json::Value>, _>("context")
+                            .unwrap_or_default(),
+                    );
                     serde_json::json!({
                         "id": r.try_get::<i64, _>("id").unwrap_or_default().to_string(),
-                        "user_id": r.try_get::<Uuid, _>("user_id").unwrap_or_default(),
-                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
-                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "user_id": if actor_hidden { Uuid::nil() } else { r.try_get::<Uuid, _>("user_id").unwrap_or_default() },
+                        "user_name": if actor_hidden { String::new() } else { r.try_get::<String, _>("user_name").unwrap_or_default() },
+                        "user_email": if actor_hidden { String::new() } else { r.try_get::<String, _>("user_email").unwrap_or_default() },
+                        "actor_role": actor_role,
                         "action": r.try_get::<String, _>("action").unwrap_or_default(),
-                        "entity_type": r.try_get::<Option<String>, _>("entity_type").unwrap_or_default(),
+                        "entity_type": entity_type,
                         "entity_id": r.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
-                        "context": r.try_get::<Option<serde_json::Value>, _>("context").unwrap_or_default(),
+                        "context": context,
                         "created_at": r.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
                     })
                 })
@@ -614,8 +740,10 @@ async fn list_pending_logins(
            FROM pending_logins pl
            JOIN users u ON u.id = pl.user_id
            WHERE pl.status = 'pending' AND pl.expires_at > now()
+             AND ($1::bool OR u.role <> 'patient')
            ORDER BY pl.created_at DESC"#,
     )
+    .bind(super::users::can_see_portal_accounts(&auth))
     .fetch_all(&state.db)
     .await
     {
@@ -838,7 +966,38 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{activity_category_actions, normalize_activity_view};
+    use super::{activity_category_actions, normalize_activity_view, visible_activity_context};
+    use serde_json::json;
+
+    #[test]
+    fn activity_context_is_redacted_outside_technical_entities_without_full_access() {
+        let reason = json!({ "decision": "false_positive", "reason": "anderer Geburtsort" });
+        assert_eq!(
+            visible_activity_context(true, Some("sanctions_hit"), false, Some(reason.clone())),
+            Some(reason.clone())
+        );
+        for entity in ["sanctions_hit", "lead", "patient", "invoice", "document"] {
+            assert_eq!(
+                visible_activity_context(false, Some(entity), false, Some(reason.clone())),
+                Some(json!({ "redacted": true })),
+                "{entity}"
+            );
+        }
+        let login = json!({ "reason": "wrong_password" });
+        assert_eq!(
+            visible_activity_context(false, Some("auth"), false, Some(login.clone())),
+            Some(login.clone())
+        );
+        // An account event about a patient or lead login is patient data.
+        assert_eq!(
+            visible_activity_context(false, Some("user"), true, Some(login.clone())),
+            Some(json!({ "redacted": true }))
+        );
+        assert_eq!(
+            visible_activity_context(false, Some("lead"), false, None),
+            None
+        );
+    }
 
     #[test]
     fn activity_view_defaults_to_meaningful_activity() {

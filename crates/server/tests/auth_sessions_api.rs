@@ -430,7 +430,7 @@ async fn login_rejects_inactive_user() {
 }
 
 #[tokio::test]
-async fn login_rejects_account_locked_until_expires() {
+async fn login_answers_a_locked_account_like_a_wrong_password() {
     let Some((app, pool)) = test_context().await else {
         return;
     };
@@ -449,6 +449,7 @@ async fn login_rejects_account_locked_until_expires() {
     )
     .await;
 
+    // QA E-19: the lock does not reveal itself (nor the account).
     let (status, body) = json_request(
         &app,
         "POST",
@@ -457,19 +458,58 @@ async fn login_rejects_account_locked_until_expires() {
         Some(json!({ "email": email, "password": "still-secret" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["error"], "account_locked");
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "unauthorized");
+    let (unknown_status, unknown_body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": format!("nobody-{tag}@example.com"), "password": "still-secret" })),
+    )
+    .await;
+    assert_eq!(unknown_status, status);
+    assert_eq!(unknown_body, body);
 }
 
+async fn login_from(
+    app: &axum::Router,
+    client_ip: &str,
+    email: &str,
+    password: &str,
+) -> (StatusCode, Value) {
+    let request = Request::builder()
+        .method("POST")
+        .uri("/api/v1/auth/login")
+        .header("Content-Type", "application/json")
+        .header("X-Forwarded-For", client_ip)
+        .body(Body::from(
+            serde_json::to_vec(&json!({ "email": email, "password": password })).unwrap(),
+        ))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(json!(null)),
+    )
+}
+
+/// QA E-19 (2026-10-11): failures hold the account only for the address they
+/// came from; nobody locks out an account (the CEO's included) with a few
+/// anonymous requests, and the answer never differs from a wrong password.
 #[tokio::test]
-async fn login_locks_after_max_failed_password_attempts() {
+async fn failed_sign_ins_hold_the_account_only_for_their_address() {
     let Some((app, pool)) = test_context().await else {
         return;
     };
 
     let tag = Uuid::new_v4().simple();
     let email = format!("auth-lockout-{tag}@example.com");
-    let _ = seed_user_with_password_and_flags(
+    let user_id = seed_user_with_password_and_flags(
         &pool,
         &email,
         "billing",
@@ -480,40 +520,44 @@ async fn login_locks_after_max_failed_password_attempts() {
     )
     .await;
 
-    for _ in 0..4 {
-        let (status, body) = json_request(
-            &app,
-            "POST",
-            "/api/v1/auth/login",
-            None,
-            Some(json!({ "email": email.clone(), "password": "bad-pass" })),
-        )
-        .await;
+    for _ in 0..5 {
+        let (status, body) = login_from(&app, "198.51.100.7", &email, "bad-pass").await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         assert_eq!(body["error"], "unauthorized");
     }
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        "/api/v1/auth/login",
-        None,
-        Some(json!({ "email": email.clone(), "password": "bad-pass" })),
-    )
-    .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["error"], "account_locked");
+    // The address that guessed is held, even with the right password …
+    let (status, body) = login_from(&app, "198.51.100.7", &email, "real-password-only").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"], "unauthorized");
 
-    let (status, body) = json_request(
+    // … the account itself is not locked: the owner signs in elsewhere.
+    let (status, body) = login_from(&app, "203.0.113.20", &email, "real-password-only").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let locked: bool =
+        sqlx::query_scalar("SELECT locked_until IS NOT NULL FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!locked);
+
+    // An administrator's unlock lifts the hold of the guessing address too.
+    let admin_id: Uuid = sqlx::query_scalar("SELECT id FROM users WHERE email = 'admin@gmed.de'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let (status, _) = json_request(
         &app,
         "POST",
-        "/api/v1/auth/login",
+        &format!("/api/v1/users/{user_id}/unlock"),
+        Some(&ceo_admin_bearer(admin_id)),
         None,
-        Some(json!({ "email": email, "password": "real-password-only" })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
-    assert_eq!(body["error"], "account_locked");
+    assert!(status.is_success(), "{status}");
+    let (status, body) = login_from(&app, "198.51.100.7", &email, "real-password-only").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
 }
 
 #[tokio::test]
@@ -1412,6 +1456,108 @@ async fn totp_enrolment_adds_a_second_step_to_login_and_refuses_replayed_codes()
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+/// Owner decision 2026-10-11 (QA E-17): the CEO, the IT admin and the Patient
+/// Manager sign in with a second factor. Without one the session reaches only
+/// the two-factor setup; the enrolment and a refresh open the workspace.
+#[tokio::test]
+async fn mandatory_second_factor_confines_the_session_until_enrolment() {
+    let Some((app, pool)) = test_context().await else {
+        return;
+    };
+    let email = format!("totp-gate-{}@example.com", Uuid::new_v4().simple());
+    seed_user_with_password_and_flags(
+        &pool,
+        &email,
+        "patient_manager",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+
+    let (status, login) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "Str0ng!Passw0rd" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    assert_eq!(login["totp_enrolment_required"], true);
+    let access = bearer(login["access_token"].as_str().unwrap());
+
+    for path in ["/api/v1/patients", "/api/v1/leads", "/api/v1/me/profile"] {
+        let (status, body) = json_request(&app, "GET", path, Some(&access), None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body}");
+        assert_eq!(body["error"], "totp_enrolment_required", "{path}");
+    }
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&access), None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["totp_enrolment_required"], true);
+
+    let (status, setup) =
+        json_request(&app, "POST", "/api/v1/me/totp/setup", Some(&access), None).await;
+    assert_eq!(status, StatusCode::OK, "{setup}");
+    let secret = base32_decode(setup["secret"].as_str().unwrap());
+    let now = u64::try_from(Utc::now().timestamp()).unwrap();
+    let code = format!(
+        "{:06}",
+        gmed_server::auth::totp::code_at_step(&secret, gmed_server::auth::totp::step_for(now))
+    );
+    let (status, confirmed) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/totp/confirm",
+        Some(&access),
+        Some(json!({ "code": code })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{confirmed}");
+    assert_eq!(confirmed["session_refresh_required"], true);
+
+    let (status, refreshed) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/refresh",
+        None,
+        Some(json!({ "refresh_token": login["refresh_token"] })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    assert_eq!(refreshed["totp_enrolment_required"], false);
+    let access = bearer(refreshed["access_token"].as_str().unwrap());
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&access), None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["totp_enrolment_required"], false);
+    let (status, body) = json_request(&app, "GET", "/api/v1/patients", Some(&access), None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A role without the duty signs in as before.
+    let billing_email = format!("totp-free-{}@example.com", Uuid::new_v4().simple());
+    seed_user_with_password_and_flags(
+        &pool,
+        &billing_email,
+        "billing",
+        "Str0ng!Passw0rd",
+        true,
+        false,
+        None,
+    )
+    .await;
+    let (status, login) = json_request(
+        &app,
+        "POST",
+        "/api/v1/auth/login",
+        None,
+        Some(json!({ "email": billing_email, "password": "Str0ng!Passw0rd" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{login}");
+    assert_eq!(login["totp_enrolment_required"], false);
 }
 
 fn base32_decode(value: &str) -> Vec<u8> {

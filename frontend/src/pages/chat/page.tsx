@@ -638,13 +638,13 @@ function useChatPageContent() {
 
     const fromConversation = conversations.find((item) => item.user_id === peer);
     const fromUserList = allUsers.find((item) => item.id === peer);
+    // The URL carries only the peer id: names and roles stay out of browser
+    // history and proxy logs (QA E-22).
     const name =
-      searchParams.get("name") ||
       fromConversation?.name ||
       fromUserList?.name ||
       activeName;
     const role =
-      searchParams.get("role") ||
       fromConversation?.role ||
       fromUserList?.role ||
       activeRole;
@@ -693,11 +693,14 @@ function useChatPageContent() {
   }, [location.state, myId, searchParams, setSearchParams]);
 
   useEffect(() => {
-    if (!searchParams.has("draft")) return;
+    if (!searchParams.has("draft") && !searchParams.has("name") && !searchParams.has("role")) return;
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
         next.delete("draft");
+        // Old links named the peer in the URL; keep only the id (QA E-22).
+        next.delete("name");
+        next.delete("role");
         return next;
       },
       { replace: true },
@@ -856,8 +859,8 @@ function useChatPageContent() {
       (current) => {
         const next = new URLSearchParams(current);
         next.set("peer", userId);
-        next.set("name", name);
-        next.set("role", role);
+        next.delete("name");
+        next.delete("role");
         next.delete("draft");
         return next;
       },

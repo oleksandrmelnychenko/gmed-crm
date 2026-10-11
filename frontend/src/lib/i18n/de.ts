@@ -1,4 +1,5 @@
 import type { TranslationShape as Translations } from "./translations-shape";
+import { accessSecurityDe } from "./catalogs/access-security";
 import { adminSystemDe } from "./catalogs/admin-system";
 import { auditActivityUiTextDe } from "./catalogs/audit-activity";
 import { casesClinicalDe } from "./catalogs/cases-clinical";
@@ -1825,6 +1826,7 @@ export const de = {
   chat_hours_ago: "Std. her",
   chat_yesterday: "Gestern",
   nav_chat: "Chat",
+  ...accessSecurityDe,
   ...adminSystemDe,
   ...casesClinicalDe,
   ...clinicalDe,

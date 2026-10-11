@@ -8,6 +8,10 @@ type MockOptions = {
   gatedPaths?: string[];
   /** Skip the stored access token so the login form is exercised. */
   anonymous?: boolean;
+  /** The role must enrol a second factor (session confined to the setup). */
+  totpEnrolmentRequired?: boolean;
+  /** The stored session no longer works until the next sign-in. */
+  expiredSession?: boolean;
 };
 
 async function setup(page: Page, options: MockOptions = {}) {
@@ -19,6 +23,10 @@ async function setup(page: Page, options: MockOptions = {}) {
     profileWrites: [] as Record<string, unknown>[],
     revoked: [] as string[],
     rejectCurrentPassword: false,
+    totpEnrolmentRequired: options.totpEnrolmentRequired ?? false,
+    totpConfirmed: [] as string[],
+    refreshed: 0,
+    sessionExpired: options.expiredSession ?? false,
     profile: {
       id: "actor",
       email: "actor@example.com",
@@ -65,6 +73,7 @@ async function setup(page: Page, options: MockOptions = {}) {
     }
 
     if (path === "/auth/login" && method === "POST") {
+      state.sessionExpired = false;
       return route.fulfill({
         json: {
           access_token: "account-test-token",
@@ -72,8 +81,28 @@ async function setup(page: Page, options: MockOptions = {}) {
           token_type: "Bearer",
           expires_in: 900,
           password_change_required: state.passwordChangeRequired,
+          totp_enrolment_required: state.totpEnrolmentRequired,
         },
       });
+    }
+    if (path === "/auth/refresh" && method === "POST") {
+      if (state.sessionExpired) {
+        return route.fulfill({ status: 401, json: { error: "invalid_token", message: "Refresh token is invalid or expired" } });
+      }
+      state.refreshed += 1;
+      return route.fulfill({
+        json: {
+          access_token: "account-test-token",
+          refresh_token: "account-test-refresh",
+          token_type: "Bearer",
+          expires_in: 900,
+          password_change_required: state.passwordChangeRequired,
+          totp_enrolment_required: state.totpEnrolmentRequired,
+        },
+      });
+    }
+    if (state.sessionExpired) {
+      return route.fulfill({ status: 401, json: { error: "unauthorized", message: "Invalid or expired token" } });
     }
     if (path === "/me") {
       return route.fulfill({
@@ -86,8 +115,27 @@ async function setup(page: Page, options: MockOptions = {}) {
           phone: state.profile.phone,
           preferred_language: state.profile.preferred_language,
           password_change_required: state.passwordChangeRequired,
+          totp_enrolment_required: state.totpEnrolmentRequired,
         },
       });
+    }
+    if (path === "/me/totp/setup" && method === "POST") {
+      return route.fulfill({
+        json: {
+          secret: "JBSWY3DPEHPK3PXP",
+          otpauth_uri: "otpauth://totp/GMED%20Console:actor%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=GMED%20Console&algorithm=SHA1&digits=6&period=30",
+          issuer: "GMED Console",
+          account: "actor@example.com",
+        },
+      });
+    }
+    if (path === "/me/totp/confirm" && method === "POST") {
+      state.totpConfirmed.push(String((request.postDataJSON() as { code?: string }).code));
+      state.totpEnrolmentRequired = false;
+      return route.fulfill({ json: { enrolled: true, session_refresh_required: true, other_sessions_ended: 0 } });
+    }
+    if (state.totpEnrolmentRequired && !["/me/totp", "/auth/logout", "/auth/sessions"].includes(path)) {
+      return route.fulfill({ status: 403, json: { error: "totp_enrolment_required", message: "Set up two-factor authentication before continuing" } });
     }
     if (path === "/me/profile") {
       if (method === "PUT") {
@@ -106,7 +154,11 @@ async function setup(page: Page, options: MockOptions = {}) {
       state.passwordChangeRequired = false;
       return route.fulfill({ json: { status: "ok", other_sessions_revoked: 1 } });
     }
-    if (path === "/me/totp") return route.fulfill({ json: { enrolled: false, required: false } });
+    if (path === "/me/totp") {
+      return route.fulfill({
+        json: { enrolled: state.totpConfirmed.length > 0, required: options.totpEnrolmentRequired ?? false },
+      });
+    }
     if (path === "/auth/sessions") return route.fulfill({ json: state.sessions });
     const revokeMatch = path.match(/^\/auth\/sessions\/([^/]+)\/revoke$/);
     if (revokeMatch) {
@@ -204,4 +256,63 @@ test("a 403 password_change_required from any API redirects to the gate", async 
   await page.goto("/account");
   await expect(page).toHaveURL(/\/account\/password-required$/);
   await expect(page.getByTestId("password-required-page")).toBeVisible();
+});
+
+test("a role that must use 2FA gets only the setup with a QR code until it is enrolled", async ({ page }) => {
+  // QA E-17 / E-28 (2026-10-11): mandatory second factor for CEO, IT Admin and PM.
+  const state = await setup(page, { role: "patient_manager", totpEnrolmentRequired: true, anonymous: true });
+  await page.goto("/login");
+  await page.getByLabel("Электронная почта").fill("actor@example.com");
+  await page.getByLabel("Пароль", { exact: true }).fill("Old-password-1!");
+  await page.getByRole("button", { name: "Войти", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/account\/two-factor-required$/);
+  const gate = page.getByTestId("two-factor-required-page");
+  await expect(gate).toContainText("Настройте двухфакторный вход");
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+
+  await gate.getByRole("button", { name: "Начать настройку", exact: true }).click();
+  const qr = gate.getByTestId("qr-code");
+  await expect(qr).toBeVisible();
+  await expect(qr).toHaveAttribute("aria-label", "QR-код для приложения-аутентификатора");
+  await expect(gate).toContainText("JBSW Y3DP EHPK 3PXP");
+
+  // Any staff page bounces back to the setup while the factor is missing.
+  await page.goto("/patients");
+  await expect(page).toHaveURL(/\/account\/two-factor-required$/);
+
+  await page.getByRole("button", { name: "Начать настройку", exact: true }).click();
+  await page.getByLabel("Код из приложения").fill("123456");
+  await page.getByRole("button", { name: "Подтвердить", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  expect(state.totpConfirmed).toEqual(["123456"]);
+  expect(state.refreshed).toBeGreaterThan(0);
+});
+
+test("an explicit sign-out forgets the page for the next sign-in", async ({ page }) => {
+  // QA E-24 (2026-10-11): the next person at the browser starts on the dashboard.
+  await setup(page);
+  await page.goto("/account");
+  await expect(page.getByTestId("account-profile-form")).toBeVisible();
+  await page.getByRole("button", { name: "Выход" }).first().click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByTestId("login-session-ended")).toHaveCount(0);
+
+  await page.getByLabel("Электронная почта").fill("actor@example.com");
+  await page.getByLabel("Пароль", { exact: true }).fill("Old-password-1!");
+  await page.getByRole("button", { name: "Войти", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+});
+
+test("an expired session says so and returns to the page after sign-in", async ({ page }) => {
+  // QA E-37 (2026-10-11).
+  await setup(page, { expiredSession: true });
+  await page.goto("/account");
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByTestId("login-session-ended")).toContainText("Сессия истекла");
+
+  await page.getByLabel("Электронная почта").fill("actor@example.com");
+  await page.getByLabel("Пароль", { exact: true }).fill("Old-password-1!");
+  await page.getByRole("button", { name: "Войти", exact: true }).click();
+  await expect(page).toHaveURL(/\/account$/);
 });

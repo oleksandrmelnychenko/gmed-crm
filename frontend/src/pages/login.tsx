@@ -17,7 +17,8 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { AuthLoginError, useAuth, PendingLoginError, TotpRequiredError } from "@/lib/auth";
+import { AuthLoginError, useAuth, PendingLoginError, TotpRequiredError, type User } from "@/lib/auth";
+import { resolveLoginRedirect, signOutReasonOf } from "@/lib/login-redirect";
 import { useLang } from "@/lib/i18n";
 import { getBuildLoginDefaults } from "@/pages/login-defaults";
 import { resolveRequestedLoginLanguage } from "@/pages/login-language";
@@ -104,13 +105,15 @@ export function LoginPage() {
     }));
   };
 
-  const redirectTo =
-    typeof location.state === "object" &&
-    location.state &&
-    "from" in location.state &&
-    typeof location.state.from === "string"
-      ? location.state.from
-      : "/";
+  // The page to open after sign-in: the gate pages first, then the page the
+  // session was on — only for the same account (QA E-24).
+  const destinationFor = (me: Pick<User, "id" | "password_change_required" | "totp_enrolment_required">) =>
+    me.password_change_required
+      ? "/account/password-required"
+      : me.totp_enrolment_required
+        ? "/account/two-factor-required"
+        : resolveLoginRedirect(location.state, me.id);
+  const endedSession = signOutReasonOf(location.state);
 
   const requestedLanguage = new URLSearchParams(location.search).get("lang");
 
@@ -168,7 +171,7 @@ export function LoginPage() {
     dispatchLoginState({ loading: true });
     try {
       const me = await login(email.trim(), password);
-      navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
+      navigate(destinationFor(me), { replace: true });
     } catch (err) {
       if (err instanceof TotpRequiredError) {
         dispatchLoginState({ totpChallenge: err.challengeId, totpCode: "" });
@@ -181,7 +184,7 @@ export function LoginPage() {
           err instanceof AuthLoginError && err.code === "account_locked"
             ? tr.login_error_account_locked
             : err instanceof AuthLoginError && err.code === "unauthorized"
-              ? tr.login_error_invalid
+              ? tr.login_error_invalid_or_held
               : err instanceof AuthLoginError &&
                   err.code === "forbidden" &&
                   err.message === "Account is deactivated"
@@ -204,7 +207,7 @@ export function LoginPage() {
     dispatchLoginState({ loading: true, error: "" });
     try {
       const me = await completeTotp(totpChallenge, totpCode);
-      navigate(me.password_change_required ? "/account/password-required" : redirectTo, { replace: true });
+      navigate(destinationFor(me), { replace: true });
     } catch (err) {
       // The code was right; the account also needs admin approval.
       if (err instanceof PendingLoginError) {
@@ -242,8 +245,9 @@ export function LoginPage() {
       const status = await checkPending(pendingLogin.id);
       if (!cancelled) {
         if (status === "approved") {
+          // The signed-in user is now in the auth state; the redirect below
+          // picks the destination for that account.
           dispatchLoginState({ pendingLogin: null });
-          navigate(redirectTo, { replace: true });
         } else if (status === "rejected") {
           dispatchLoginState((current) => ({
             pendingLogin: current.pendingLogin
@@ -268,10 +272,10 @@ export function LoginPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [pendingLogin, checkPending, navigate, redirectTo, tr.login_error_unknown]);
+  }, [pendingLogin, checkPending, tr.login_error_unknown]);
 
   if (user) {
-    return <Navigate to={redirectTo} replace />;
+    return <Navigate to={destinationFor(user)} replace />;
   }
 
   return (
@@ -340,6 +344,15 @@ export function LoginPage() {
               </div>
               <FieldError id="login-password-error" message={fieldErrors.password} />
             </div>
+
+            {!error && (endedSession === "expired" || endedSession === "idle") ? (
+              <div className="gmed-login-notice" role="status" data-testid="login-session-ended">
+                <Clock aria-hidden="true" />
+                <span>
+                  {endedSession === "idle" ? tr.login_session_idle : tr.login_session_expired}
+                </span>
+              </div>
+            ) : null}
 
             {error ? (
               <div className="gmed-login-error" role="alert">

@@ -48,6 +48,7 @@ import {
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import {
   createPatientPrivacyRequest,
@@ -504,10 +505,15 @@ function useAdminCompliancePageContent() {
     Array<{ id: string; label: string }>
   >([]);
   const [patientOptionsLoaded, setPatientOptionsLoaded] = useState(false);
+  // A compliance handler without patient access (IT Admin) picks the patient
+  // from the number-and-name lookup of the DSGVO page (QA E-41).
+  const patientPickerPath = hasCapability(user, "patients.view")
+    ? "/patients"
+    : "/admin/compliance/patient-lookup";
   useEffect(() => {
     let cancelled = false;
     void apiFetch<Array<{ id: string; patient_id: string; first_name: string | null; last_name: string | null }>>(
-      "/patients",
+      patientPickerPath,
     )
       .then((rows) => {
         if (cancelled) return;
@@ -525,7 +531,7 @@ function useAdminCompliancePageContent() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [patientPickerPath]);
 
   // A patient missing from the picker (and without requests yet) is named
   // from the patient record, so the page never shows the raw record id.

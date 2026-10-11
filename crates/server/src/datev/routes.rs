@@ -78,6 +78,11 @@ fn db(_: sqlx::Error) -> Response {
 fn admin(auth: &AuthUser) -> Result<()> {
     auth.require_capability(Capability::DatevAdmin)
 }
+/// Viewing the connection state and the operation history: the technical
+/// admin and, read-only, the roles that read DATEV data (Billing, QA E-39).
+fn viewer(auth: &AuthUser) -> Result<()> {
+    auth.require_any_capability(&[Capability::DatevAdmin, Capability::DatevRead])
+}
 fn output(value: Value) -> Response {
     ([(header::CACHE_CONTROL, "no-store")], Json(value)).into_response()
 }
@@ -167,7 +172,7 @@ async fn status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Response> {
-    admin(&auth)?;
+    viewer(&auth)?;
     let row = sqlx::query("SELECT * FROM datev_read_connection WHERE singleton")
         .fetch_optional(&state.db)
         .await
@@ -769,7 +774,7 @@ async fn events(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> Result<Response> {
-    admin(&auth)?;
+    viewer(&auth)?;
     let rows = sqlx::query("SELECT operation,outcome,record_count,created_at FROM datev_read_events ORDER BY created_at DESC LIMIT 50").fetch_all(&state.db).await.map_err(db)?;
     Ok(output(json!(rows.iter().map(|r|json!({"operation":r.get::<String,_>("operation"),"outcome":r.get::<String,_>("outcome"),"record_count":r.get::<i32,_>("record_count"),"created_at":r.get::<DateTime<Utc>,_>("created_at").to_rfc3339()})).collect::<Vec<_>>())))
 }

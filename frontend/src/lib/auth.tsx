@@ -3,10 +3,12 @@ import { createContext, use, useCallback, useEffect, useReducer, type ReactNode 
 import {
   AUTH_PASSWORD_CHANGE_REQUIRED_EVENT,
   AUTH_SESSION_EXPIRED_EVENT,
+  AUTH_TOTP_ENROLMENT_REQUIRED_EVENT,
   buildApiUrl,
   clearApiCache,
   fetchWithApiTimeout,
   getAccessTokenExpiresAtMs,
+  getAccessTokenSubject,
   refreshAuthSession,
 } from "@/lib/api";
 import {
@@ -32,6 +34,12 @@ export interface User {
   preferred_language?: Lang | null;
   /// Set after an admin-forced reset or password expiry: only /account/password-required is usable.
   password_change_required?: boolean;
+  /**
+   * The role must use a second factor (CEO, IT Admin, Patient Manager) and none
+   * is set up yet: the session reaches only the two-factor setup
+   * (`/account/two-factor-required`) until it is enrolled.
+   */
+  totp_enrolment_required?: boolean;
   /** The user is linked to an employee record: "my personnel file" is available. */
   has_personnel_file?: boolean;
   /**
@@ -43,9 +51,20 @@ export interface User {
   lead_portal?: { requests: number } | null;
 }
 
+/** Why the last session ended in this tab (null: never signed out here). */
+export type SignOutReason = "explicit" | "idle" | "expired";
+
+export interface SignOut {
+  reason: SignOutReason;
+  /** The account that was signed in; a later sign-in of another account does not get its last page. */
+  userId: string | null;
+}
+
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  /** Set when the session ended (logout, idle timeout, expiry) until the next sign-in. */
+  signOut?: SignOut | null;
   login: (email: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   completeTotp: (challengeId: string, code: string) => Promise<User>;
@@ -110,6 +129,7 @@ interface ApiErrorBody {
 type AuthState = {
   user: User | null;
   loading: boolean;
+  signOut: SignOut | null;
 };
 
 type AuthStatePatch =
@@ -213,6 +233,7 @@ function createAuthState(): AuthState {
   return {
     user: null,
     loading: true,
+    signOut: null,
   };
 }
 
@@ -229,7 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     undefined,
     createAuthState,
   );
-  const { user, loading } = authState;
+  const { user, loading, signOut } = authState;
   const { setLang } = useLang();
 
   // The language saved on the profile wins over the browser default once the
@@ -258,6 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       let nextUser: User | null = null;
+      const storedUserId = getAccessTokenSubject(accessToken);
 
       try {
         nextUser = await fetchMe(accessToken);
@@ -276,7 +298,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (!cancelled) {
         applyPreferredLanguage(nextUser);
-        dispatchAuthState({ user: nextUser, loading: false });
+        // A stored session that no longer works ended while the tab was closed.
+        dispatchAuthState({
+          user: nextUser,
+          loading: false,
+          signOut: nextUser ? null : { reason: "expired", userId: storedUserId },
+        });
       }
     }
 
@@ -296,9 +323,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       );
     };
 
+    const handleTotpEnrolmentRequired = () => {
+      dispatchAuthState((current) =>
+        current.user && !current.user.totp_enrolment_required
+          ? { user: { ...current.user, totp_enrolment_required: true } }
+          : {},
+      );
+    };
+
     window.addEventListener(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
+    window.addEventListener(AUTH_TOTP_ENROLMENT_REQUIRED_EVENT, handleTotpEnrolmentRequired);
     return () => {
       window.removeEventListener(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT, handlePasswordChangeRequired);
+      window.removeEventListener(AUTH_TOTP_ENROLMENT_REQUIRED_EVENT, handleTotpEnrolmentRequired);
     };
   }, []);
 
@@ -307,7 +344,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       void clearTokens().catch(() => {
         // The in-memory native session is already gone; keep the UI logged out.
       });
-      dispatchAuthState({ user: null, loading: false });
+      // Only a session that was in use expires; after an explicit sign-out the
+      // reason stays.
+      dispatchAuthState((current) => ({
+        user: null,
+        loading: false,
+        signOut: current.user
+          ? { reason: "expired", userId: current.user.id }
+          : current.signOut,
+      }));
     };
 
     window.addEventListener(AUTH_SESSION_EXPIRED_EVENT, handleSessionExpired);
@@ -428,7 +473,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
     applyPreferredLanguage(me);
-    dispatchAuthState({ user: me });
+    dispatchAuthState({ user: me, signOut: null });
     return me;
   };
 
@@ -445,7 +490,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await saveTokens(result);
     const me = await fetchMe(result.access_token);
     applyPreferredLanguage(me);
-    dispatchAuthState({ user: me });
+    dispatchAuthState({ user: me, signOut: null });
     return me;
   };
 
@@ -468,7 +513,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await saveTokens({ access_token: result.access_token, refresh_token: result.refresh_token, token_type: "Bearer", expires_in: 900 });
         const me = await fetchMe(result.access_token);
         applyPreferredLanguage(me);
-        dispatchAuthState({ user: me });
+        dispatchAuthState({ user: me, signOut: null });
         return "approved";
       }
       if (result.status === "rejected") return "rejected";
@@ -478,7 +523,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const logout = async () => {
+  const endSession = async (reason: SignOutReason) => {
+    const signedOutUserId = user?.id ?? null;
     const accessToken = getAccessToken();
 
     try {
@@ -494,19 +540,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await clearTokens();
       } finally {
-        dispatchAuthState({ user: null });
+        dispatchAuthState({ user: null, signOut: { reason, userId: signedOutUserId } });
       }
     }
   };
 
+  // Signing out on purpose forgets the page the session was on: the next
+  // person at this browser starts on their own dashboard (QA E-24).
+  const logout = () => endSession("explicit");
+
   useIdleLogout(
     Boolean(user),
-    () => void logout(),
+    () => void endSession("idle"),
     resolveIdleLogoutMinutes(import.meta.env.VITE_IDLE_LOGOUT_MINUTES),
   );
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, completeTotp, checkPending, refreshUser }}>
+    <AuthContext.Provider value={{ user, loading, signOut, login, logout, completeTotp, checkPending, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

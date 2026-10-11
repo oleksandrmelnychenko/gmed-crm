@@ -151,7 +151,8 @@ async fn totp_status(
         .ok()
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_default();
-    let required = required_roles(&state).await.iter().any(|r| r == &role);
+    let required =
+        crate::auth::mfa_policy::role_requires_totp(&role, &required_roles(&state).await);
     Json(json!({ "enrolled": enrolled, "required": required })).into_response()
 }
 
@@ -270,14 +271,24 @@ async fn confirm_enrolment(
         tracing::error!(error = %e, "confirm totp");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to confirm enrolment");
     }
+    // Sessions opened before the factor existed end; the current one stays and
+    // is refreshed by the client, which lifts an enrolment-only confinement.
+    let other_sessions_ended =
+        tokens::revoke_other_families(&state.db, auth.user_id, auth.family_id, "totp_enrolled")
+            .await;
     state.audit_sender.try_send(audit::domain_event(
         "totp_enrolled",
         Some(auth.user_id),
         "user",
         Some(auth.user_id),
-        json!({}),
+        json!({ "other_sessions_ended": other_sessions_ended }),
     ));
-    Json(json!({ "enrolled": true })).into_response()
+    Json(json!({
+        "enrolled": true,
+        "session_refresh_required": true,
+        "other_sessions_ended": other_sessions_ended,
+    }))
+    .into_response()
 }
 
 async fn disable_totp(
@@ -541,6 +552,7 @@ async fn complete_totp_login(
         "token_type": "Bearer",
         "expires_in": pair.expires_in,
         "password_change_required": pair.password_change_required,
+        "totp_enrolment_required": pair.totp_enrolment_required,
     }))
     .into_response()
 }

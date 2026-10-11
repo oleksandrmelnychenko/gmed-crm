@@ -156,6 +156,7 @@ async fn unlock_user(
     )
     .execute(&state.db)
     .await;
+    super::users::clear_login_holds(&state, user_id).await;
 
     state.audit_sender.try_send(audit::domain_event(
         "unlock_user",
@@ -637,14 +638,18 @@ async fn login_geo_history(
         return e;
     }
 
-    match sqlx::query!(
-        r#"SELECT tf.id, tf.user_id, u.name AS "user_name!", u.email AS "user_email!",
+    // Sign-ins of patient and lead portal logins are patient data: only a
+    // role that sees patients lists them (QA E-05).
+    match sqlx::query(
+        r#"SELECT tf.id, tf.user_id, u.name AS user_name, u.email AS user_email,
                   tf.ip_address, tf.user_agent, tf.geo_data,
                   tf.created_at, tf.last_activity_at, tf.is_revoked
            FROM token_families tf
            JOIN users u ON u.id = tf.user_id
-           ORDER BY tf.created_at DESC LIMIT 100"#
+           WHERE ($1::bool OR u.role <> 'patient')
+           ORDER BY tf.created_at DESC LIMIT 100"#,
     )
+    .bind(super::users::can_see_portal_accounts(&auth))
     .fetch_all(&state.db)
     .await
     {
@@ -653,16 +658,16 @@ async fn login_geo_history(
                 .into_iter()
                 .map(|r| {
                     serde_json::json!({
-                        "id": r.id,
-                        "user_id": r.user_id,
-                        "user_name": r.user_name,
-                        "user_email": r.user_email,
-                        "ip_address": r.ip_address,
-                        "user_agent": r.user_agent,
-                        "geo_data": r.geo_data,
-                        "created_at": r.created_at,
-                        "last_activity_at": r.last_activity_at,
-                        "is_revoked": r.is_revoked,
+                        "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "user_id": r.try_get::<Uuid, _>("user_id").unwrap_or_default(),
+                        "user_name": r.try_get::<String, _>("user_name").unwrap_or_default(),
+                        "user_email": r.try_get::<String, _>("user_email").unwrap_or_default(),
+                        "ip_address": r.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
+                        "user_agent": r.try_get::<Option<String>, _>("user_agent").unwrap_or_default(),
+                        "geo_data": r.try_get::<Option<serde_json::Value>, _>("geo_data").unwrap_or_default(),
+                        "created_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
+                        "last_activity_at": r.try_get::<chrono::DateTime<chrono::Utc>, _>("last_activity_at").ok(),
+                        "is_revoked": r.try_get::<bool, _>("is_revoked").unwrap_or(false),
                     })
                 })
                 .collect();
@@ -757,10 +762,36 @@ async fn audit_analytics(
             .into_iter()
             .map(|row| {
                 let action = row.try_get::<String, _>("action").unwrap_or_default();
-                let context = row
+                let full_access = auth.role.has_full_access();
+                let entity_type = row.try_get::<String, _>("entity_type").unwrap_or_default();
+                let user_role = row
+                    .try_get::<Option<String>, _>("user_role")
+                    .unwrap_or_default();
+                // Patient and lead logins stay anonymous and non-technical
+                // contexts stay redacted without full access (QA E-45).
+                let actor_hidden = !full_access && user_role.as_deref() == Some("patient");
+                let raw_context = row
                     .try_get::<Option<serde_json::Value>, _>("context")
                     .unwrap_or_default()
                     .unwrap_or_else(|| serde_json::json!({}));
+                let route = raw_context
+                    .get("route")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let status = raw_context
+                    .get("status")
+                    .and_then(serde_json::Value::as_i64);
+                let is_ceo_access = raw_context
+                    .get("is_ceo_access")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false);
+                let context = super::admin_settings::visible_activity_context(
+                    full_access,
+                    Some(entity_type.as_str()),
+                    false,
+                    Some(raw_context),
+                )
+                .unwrap_or_else(|| serde_json::json!({}));
                 // `reason_code` is what the UI translates; `reason` stays the
                 // English fallback for older clients.
                 let (reason_code, reason) = if action == "refresh_token_theft" {
@@ -774,11 +805,7 @@ async fn audit_analytics(
                         "revoked_session_refresh",
                         "Refresh attempted on revoked session family",
                     )
-                } else if context
-                    .get("is_ceo_access")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false)
-                {
+                } else if is_ceo_access {
                     (
                         "executive_access",
                         "Executive access to sensitive communication surface",
@@ -789,16 +816,16 @@ async fn audit_analytics(
 
                 serde_json::json!({
                     "id": row.try_get::<i64, _>("id").unwrap_or_default(),
-                    "user_id": row.try_get::<Option<Uuid>, _>("user_id").unwrap_or_default(),
-                    "user_name": row.try_get::<Option<String>, _>("user_name").unwrap_or_default(),
-                    "user_role": row.try_get::<Option<String>, _>("user_role").unwrap_or_default(),
+                    "user_id": if actor_hidden { None } else { row.try_get::<Option<Uuid>, _>("user_id").unwrap_or_default() },
+                    "user_name": if actor_hidden { None } else { row.try_get::<Option<String>, _>("user_name").unwrap_or_default() },
+                    "user_role": user_role,
                     "action": action,
-                    "entity_type": row.try_get::<String, _>("entity_type").unwrap_or_default(),
+                    "entity_type": entity_type,
                     "entity_id": row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
                     "reason_code": reason_code,
                     "reason": reason,
-                    "route": context.get("route").and_then(serde_json::Value::as_str),
-                    "status": context.get("status").and_then(serde_json::Value::as_i64),
+                    "route": route,
+                    "status": status,
                     "ip_hash": row.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
                     "created_at": row
                         .try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")

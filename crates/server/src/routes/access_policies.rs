@@ -52,6 +52,25 @@ struct ResetRequest {
 }
 
 const VALID_ACCESS_LEVELS: &[&str] = &["full", "masked", "hidden", "conditional"];
+
+/// Clinical fields of the patient record that interpreters never see, under
+/// any assignment (owner rule 2026-09-28; QA E-42 2026-10-11).
+const INTERPRETER_CLOSED_CLINICAL_FIELDS: &[&str] =
+    &["diagnosis", "medications", "allergies", "vitals"];
+
+/// Whether a policy change would open a clinical field to an interpreter role.
+/// Refused regardless of the row's lock flag.
+fn opens_clinical_record_to_interpreters(
+    role: &str,
+    entity_type: &str,
+    field_name: &str,
+    access_level: &str,
+) -> bool {
+    matches!(role, "interpreter" | "teamlead_interpreter")
+        && entity_type == "patient"
+        && INTERPRETER_CLOSED_CLINICAL_FIELDS.contains(&field_name)
+        && access_level != "hidden"
+}
 const VALID_CONDITIONS: &[&str] = &["assigned_appointment", "freigegeben", "own_data"];
 
 type DefaultPatientPolicy = (
@@ -84,10 +103,12 @@ const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
     ("teamlead_interpreter", "nationality", "full", None, false),
     ("teamlead_interpreter", "languages", "full", None, false),
     ("teamlead_interpreter", "insurance", "hidden", None, false),
-    ("teamlead_interpreter", "diagnosis", "hidden", None, false),
-    ("teamlead_interpreter", "medications", "hidden", None, false),
-    ("teamlead_interpreter", "allergies", "hidden", None, false),
-    ("teamlead_interpreter", "vitals", "hidden", None, false),
+    // The clinical record is closed to interpreters under any assignment
+    // (owner rule 2026-09-28): hidden and system locked (QA E-42).
+    ("teamlead_interpreter", "diagnosis", "hidden", None, true),
+    ("teamlead_interpreter", "medications", "hidden", None, true),
+    ("teamlead_interpreter", "allergies", "hidden", None, true),
+    ("teamlead_interpreter", "vitals", "hidden", None, true),
     (
         "teamlead_interpreter",
         "internal_notes",
@@ -110,28 +131,10 @@ const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
     ("interpreter", "nationality", "full", None, false),
     ("interpreter", "languages", "full", None, false),
     ("interpreter", "insurance", "hidden", None, false),
-    (
-        "interpreter",
-        "diagnosis",
-        "conditional",
-        Some("assigned_appointment"),
-        false,
-    ),
-    (
-        "interpreter",
-        "medications",
-        "conditional",
-        Some("assigned_appointment"),
-        false,
-    ),
-    (
-        "interpreter",
-        "allergies",
-        "conditional",
-        Some("assigned_appointment"),
-        false,
-    ),
-    ("interpreter", "vitals", "hidden", None, false),
+    ("interpreter", "diagnosis", "hidden", None, true),
+    ("interpreter", "medications", "hidden", None, true),
+    ("interpreter", "allergies", "hidden", None, true),
+    ("interpreter", "vitals", "hidden", None, true),
     ("interpreter", "internal_notes", "hidden", None, false),
     ("interpreter", "travel_data", "hidden", None, false),
     ("interpreter", "functional_labels", "full", None, false),
@@ -444,6 +447,18 @@ async fn update_policy(
         ));
     }
 
+    if opens_clinical_record_to_interpreters(
+        &body.role,
+        &body.entity_type,
+        &body.field_name,
+        &body.access_level,
+    ) {
+        return Err(err(
+            StatusCode::FORBIDDEN,
+            "This field is locked by a system rule and cannot be changed",
+        ));
+    }
+
     let locked = sqlx::query_scalar!(
         r#"SELECT is_system_locked AS "locked!" FROM field_access_policies
          WHERE role = $1 AND entity_type = $2 AND field_name = $3"#,
@@ -629,8 +644,45 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::DEFAULT_PATIENT_POLICIES;
+    use super::{
+        DEFAULT_PATIENT_POLICIES, INTERPRETER_CLOSED_CLINICAL_FIELDS,
+        opens_clinical_record_to_interpreters,
+    };
     use std::collections::{BTreeSet, HashSet};
+
+    #[test]
+    fn interpreters_never_get_the_clinical_record() {
+        for role in ["interpreter", "teamlead_interpreter"] {
+            for field in INTERPRETER_CLOSED_CLINICAL_FIELDS {
+                let policy = DEFAULT_PATIENT_POLICIES
+                    .iter()
+                    .find(|p| p.0 == role && p.1 == *field)
+                    .expect("default policy");
+                assert_eq!(policy.2, "hidden", "{policy:?}");
+                assert!(policy.4, "must be system locked: {policy:?}");
+                for level in ["full", "masked", "conditional"] {
+                    assert!(opens_clinical_record_to_interpreters(
+                        role, "patient", field, level
+                    ));
+                }
+                assert!(!opens_clinical_record_to_interpreters(
+                    role, "patient", field, "hidden"
+                ));
+            }
+        }
+        assert!(!opens_clinical_record_to_interpreters(
+            "patient_manager",
+            "patient",
+            "diagnosis",
+            "full"
+        ));
+        assert!(!opens_clinical_record_to_interpreters(
+            "interpreter",
+            "patient",
+            "languages",
+            "full"
+        ));
+    }
 
     const PATIENT_FIELDS: &[&str] = &[
         "name",

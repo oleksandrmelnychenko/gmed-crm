@@ -404,6 +404,9 @@ const SALES: &[Capability] = &[
 
 const IT_ADMIN: &[Capability] = &[
     C::SopsView,
+    // Matrix column «Комунікація»: with PM, billing and the CEO only — never
+    // with patients (peer rule in `routes/messages.rs`, QA E-03 2026-10-11).
+    C::ChatUse,
     C::UsersView,
     C::UsersManage,
     C::AdminSettings,
@@ -585,14 +588,18 @@ mod tests {
         for capability in Role::ItAdmin.capabilities() {
             let module = capability.module();
             assert!(
-                matches!(module, "users" | "admin" | "datev" | "incidents" | "sops"),
+                matches!(
+                    module,
+                    "users" | "admin" | "datev" | "incidents" | "sops" | "chat"
+                ),
                 "it_admin must stay technical, found {capability}"
             );
             assert_ne!(*capability, C::DatevRead);
             assert_ne!(*capability, C::UsersManageCeo);
         }
         assert!(!Role::ItAdmin.can(C::PatientsView));
-        assert!(!Role::ItAdmin.can(C::ChatUse));
+        // Chat with PM, billing and the CEO (matrix «Комунікація»).
+        assert!(Role::ItAdmin.can(C::ChatUse));
         assert!(!Role::ItAdmin.can(C::TasksUse));
         assert!(!Role::ItAdmin.can(C::AppointmentsView));
         assert!(!Role::ItAdmin.can(C::DocumentsView));
@@ -725,6 +732,7 @@ mod tests {
                 Role::ItAdmin,
                 &[
                     "sops.view",
+                    "chat.use",
                     "users.view",
                     "users.manage",
                     "admin.settings",

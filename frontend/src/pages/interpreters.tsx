@@ -42,7 +42,7 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
-import { apiFetch, downloadApiFile } from "@/lib/api";
+import { ApiRequestError, apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { reportApprovalLabel } from "@/pages/appointments/model/labels";
@@ -215,6 +215,21 @@ function displayNumber(value: unknown, suffix = "") {
 
 type StaffPageCopy = ReturnType<typeof staffPageCopy>;
 
+/**
+ * A load failure in the user's language: network and timeout errors are
+ * already translated by the API client; a server answer ("Failed to load
+ * interpreter profiles") is replaced by the page's own text (QA E-34).
+ */
+function translatedLoadError(error: unknown, fallback: string) {
+  if (
+    error instanceof ApiRequestError &&
+    (error.code === "network" || error.code === "timeout")
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 function staffPageCopy(lang: "de" | "ru") {
   if (lang === "de") {
     return {
@@ -252,6 +267,7 @@ function staffPageCopy(lang: "de" | "ru") {
       temporaryPassword: "Temporäres Passwort",
       role: "Rolle",
       loadFailed: "Laden fehlgeschlagen",
+      listLoadFailed: "Die Mitarbeiterliste konnte nicht geladen werden. Bitte laden Sie die Seite neu.",
       saveFailed: "Speichern fehlgeschlagen",
       uploadSavedNotice: "Dokument hochgeladen. Speichern Sie das Profil, um den Link zu behalten.",
       uploadFailed: "Hochladen fehlgeschlagen",
@@ -431,6 +447,7 @@ function staffPageCopy(lang: "de" | "ru") {
     temporaryPassword: "Временный пароль",
     role: "Роль",
     loadFailed: "Не удалось загрузить",
+    listLoadFailed: "Не удалось загрузить список сотрудников. Обновите страницу.",
     saveFailed: "Не удалось сохранить",
     uploadSavedNotice: "Документ загружен. Сохраните профиль, чтобы закрепить ссылку.",
     uploadFailed: "Не удалось загрузить документ",
@@ -934,11 +951,12 @@ export function InterpretersPage() {
         return "";
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
+      setItems([]);
+      setError(translatedLoadError(loadError, copy.listLoadFailed));
     } finally {
       setLoading(false);
     }
-  }, [contractFilter, copy.loadFailed, deferredSearch, interpreterId, statusFilter]);
+  }, [contractFilter, copy.listLoadFailed, deferredSearch, interpreterId, statusFilter]);
 
   const loadOperations = useCallback(async (id: string) => {
     setOperationsLoading(true);
@@ -948,7 +966,7 @@ export function InterpretersPage() {
       );
       setOperations(data);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
+      setError(translatedLoadError(loadError, copy.loadFailed));
     } finally {
       setOperationsLoading(false);
     }
@@ -966,7 +984,7 @@ export function InterpretersPage() {
           .map(interpreterLanguageRecordToForm),
       );
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : copy.loadFailed);
+      setError(translatedLoadError(loadError, copy.loadFailed));
       setLanguages([]);
     } finally {
       setLanguagesLoading(false);

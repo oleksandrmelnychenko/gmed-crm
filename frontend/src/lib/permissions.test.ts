@@ -53,7 +53,7 @@ describe("capability mirror", () => {
     expect(hasCapability({ role: "ceo", capabilities: [] }, "patients.view")).toBe(false);
     expect(hasCapability(null, "patients.view")).toBe(false);
     expect(hasAnyCapability({ role: "billing" }, ["datev.admin", "datev.read"])).toBe(true);
-    expect(hasAnyCapability({ role: "it_admin" }, ["patients.view", "chat.use"])).toBe(false);
+    expect(hasAnyCapability({ role: "it_admin" }, ["patients.view", "tasks.use"])).toBe(false);
   });
 
   it("accepts a bare role code and resolves it through the mirror", () => {

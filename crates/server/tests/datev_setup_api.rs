@@ -94,7 +94,8 @@ async fn datev_setup_authorization_validation_persistence_and_conflicts() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(initial["profile"]["modules"].as_array().unwrap().len(), 6);
     assert_eq!(initial["accounting_writes_enabled"], false);
-    for method in ["GET", "PUT"] {
+    // Billing (datev.read) reads the profile but never saves it (QA E-39).
+    for (method, expected) in [("GET", StatusCode::OK), ("PUT", StatusCode::FORBIDDEN)] {
         assert_eq!(
             request(
                 &ctx.app,
@@ -105,7 +106,8 @@ async fn datev_setup_authorization_validation_persistence_and_conflicts() {
             )
             .await
             .0,
-            StatusCode::FORBIDDEN
+            expected,
+            "{method}"
         );
     }
     let mut profile = initial["profile"].clone();

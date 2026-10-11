@@ -17,6 +17,9 @@ export const AUTH_SESSION_EXPIRED_EVENT = "gmed:auth-session-expired";
 // Raised when the API answers 403 `password_change_required`: the session is
 // valid but confined to the password-change endpoints (see auth middleware).
 export const AUTH_PASSWORD_CHANGE_REQUIRED_EVENT = "gmed:auth-password-change-required";
+// Raised when the API answers 403 `totp_enrolment_required`: the role must use
+// a second factor and the session reaches only the two-factor setup.
+export const AUTH_TOTP_ENROLMENT_REQUIRED_EVENT = "gmed:auth-totp-enrolment-required";
 export const DEFAULT_API_TIMEOUT_MS = 20_000;
 
 type ApiErrorBody = {
@@ -102,6 +105,13 @@ function parseJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+/** The account (`sub`) an access token belongs to, without verifying it. */
+export function getAccessTokenSubject(token = getAccessToken()): string | null {
+  if (!token) return null;
+  const sub = parseJwtPayload(token)?.sub;
+  return typeof sub === "string" && sub ? sub : null;
+}
+
 export function getAccessTokenExpiresAtMs(token = getAccessToken()) {
   if (!token) return null;
   const exp = parseJwtPayload(token)?.exp;
@@ -116,6 +126,13 @@ function dispatchPasswordChangeRequired() {
     return;
   }
   window.dispatchEvent(new Event(AUTH_PASSWORD_CHANGE_REQUIRED_EVENT));
+}
+
+function dispatchTotpEnrolmentRequired() {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") {
+    return;
+  }
+  window.dispatchEvent(new Event(AUTH_TOTP_ENROLMENT_REQUIRED_EVENT));
 }
 
 function dispatchAuthSessionExpired() {
@@ -546,6 +563,9 @@ async function readApiJsonResponse<T>(res: Response): Promise<T> {
     const message = apiErrorMessage(body, res);
     if (res.status === 403 && body?.error === "password_change_required") {
       dispatchPasswordChangeRequired();
+    }
+    if (res.status === 403 && body?.error === "totp_enrolment_required") {
+      dispatchTotpEnrolmentRequired();
     }
     if (res.status === 429) {
       throw new ApiRequestError(

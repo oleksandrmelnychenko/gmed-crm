@@ -108,12 +108,16 @@ async fn list_patient_recommendations(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    // it_admin can open the clinical profile, which surfaces this read-only
-    // panel; keep the read gate aligned with PATIENT_CLINICAL_ROLES.
-    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::ItAdmin]) {
+    // Recommendations are part of the clinical record: the CEO, the assigned
+    // Patient Manager and, read-only, the CEO Assistant (reads everything,
+    // QA E-41 2026-10-11). The technical admin has no patient data.
+    if let Err(resp) = auth.require_any_role(&[Role::Ceo, Role::CeoAssistant, Role::PatientManager])
+    {
         return resp;
     }
-    if let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await {
+    if auth.role != Role::CeoAssistant
+        && let Err(resp) = ensure_patient_access(&state, &auth, patient_id).await
+    {
         return resp;
     }
 

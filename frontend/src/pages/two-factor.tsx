@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { QrCodeImage } from "@/components/qr-code-image";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Banner, PageHeader, Section } from "@/components/ui-shell";
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { apiFetch, clearApiCache, refreshAuthSession } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 
 type TotpStatus = { enrolled: boolean; required: boolean };
@@ -28,11 +30,15 @@ export function TwoFactorPage() {
 }
 
 /**
- * Self-service enrolment of an authenticator app. No QR library is bundled;
- * the otpauth link opens the app directly and the manual key covers the rest.
+ * Self-service enrolment of an authenticator app: a QR code drawn in the
+ * browser (the otpauth URI carries the secret and is never sent elsewhere),
+ * the otpauth link for the app on the same device and the manual key.
+ * After a change the session is refreshed, so a role that must use a second
+ * factor leaves (or enters) the enrolment-only session at once.
  */
-export function TwoFactorSection() {
+export function TwoFactorSection({ onEnrolled }: { onEnrolled?: () => void } = {}) {
   const { t } = useLang();
+  const { refreshUser } = useAuth();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
   const [status, setStatus] = useState<TotpStatus | null>(null);
   const [enrolment, setEnrolment] = useState<Enrolment | null>(null);
@@ -81,12 +87,19 @@ export function TwoFactorSection() {
       setEnrolment(null);
       setCode("");
       setNotice(l("twofactor_confirmed"));
+      // A new access token without the enrolment-only restriction.
+      await refreshAuthSession();
+      await refreshUser().catch(() => null);
+      onEnrolled?.();
     });
 
   const disable = () =>
     run(async () => {
       await apiFetch("/me/totp/disable", { method: "POST", body: JSON.stringify({ code }) });
       setCode("");
+      // A role that must use a factor is sent to the setup at once.
+      await refreshAuthSession();
+      await refreshUser().catch(() => null);
     });
 
   const codeInput = (
@@ -126,6 +139,10 @@ export function TwoFactorSection() {
         ) : enrolment ? (
           <div className="space-y-4" data-testid="twofactor-enrolment">
             <p className="text-sm">{l("twofactor_step_scan")}</p>
+            <div className="flex flex-wrap items-start gap-4">
+              <QrCodeImage value={enrolment.otpauth_uri} label={t.twofactor_qr_alt} />
+              <p className="max-w-xs text-xs text-muted-foreground">{t.twofactor_qr_hint}</p>
+            </div>
             <a
               className="inline-block rounded-lg border border-border bg-card px-3 py-2 text-sm underline"
               href={enrolment.otpauth_uri}

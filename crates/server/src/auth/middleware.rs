@@ -124,23 +124,70 @@ pub async fn require_auth(State(state): State<AppState>, mut req: Request, next:
         return unauthorized();
     };
 
-    let (auth_user, password_change_required) =
-        match auth_user_status_from_access_token(&state, token).await {
-            Ok(value) => value,
-            Err(response) => return response,
-        };
+    let (auth_user, gates) = match auth_user_status_from_access_token(&state, token).await {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
 
     // Forced password change (Stage 1 of the role cabinets plan): the session
     // is valid but confined to the self-service password endpoints until the
     // password is replaced. Checked before the workspace policy so the answer
     // is the same for every role. Kept separate from the capability model.
-    if password_change_required && !is_password_change_allowed_path(req.uri().path()) {
+    if gates.password_change_required && !is_password_change_allowed_path(req.uri().path()) {
         return password_change_required_response();
     }
 
+    // Mandatory second factor (owner decision 2026-10-11): a session of a
+    // role that must use one, without an enrolled factor, reaches only the
+    // two-factor setup (`auth::mfa_policy`).
+    if gates.totp_enrolment_required
+        && !super::mfa_policy::is_totp_enrolment_allowed_path(req.uri().path())
+    {
+        return totp_enrolment_required_response();
+    }
+
+    touch_session_activity(&state, auth_user.family_id);
+    req.extensions_mut().insert(SessionScope {
+        totp_enrolment_required: gates.totp_enrolment_required,
+    });
     req.extensions_mut().insert(auth_user);
 
     next.run(req).await
+}
+
+/// What the current session may reach beyond its capabilities; read by `/me`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SessionScope {
+    /// Only the two-factor setup, identity and sign-out (`mfa_enrol` claim).
+    pub totp_enrolment_required: bool,
+}
+
+/// Gates of a valid session that confine it to a few self-service endpoints.
+#[derive(Debug, Clone, Copy, Default)]
+struct SessionGates {
+    password_change_required: bool,
+    totp_enrolment_required: bool,
+}
+
+/// Keeps "last activity" of the session current for every request, not only
+/// for token refreshes, so "my sessions" shows when the session was really
+/// used (QA E-18). At most one write per session and minute, off the request
+/// path.
+fn touch_session_activity(state: &AppState, family_id: Uuid) {
+    let db = state.db.clone();
+    tokio::spawn(async move {
+        if let Err(error) = sqlx::query(
+            "UPDATE token_families SET last_activity_at = now()
+             WHERE id = $1 AND NOT is_revoked
+               AND last_activity_at < now() - interval '1 minute'",
+        )
+        .bind(family_id)
+        .execute(&db)
+        .await
+        {
+            tracing::debug!(%error, %family_id, "touch session activity");
+        }
+    });
 }
 
 #[allow(clippy::result_large_err)]
@@ -148,24 +195,26 @@ pub async fn auth_user_from_access_token(
     state: &AppState,
     token: &str,
 ) -> Result<AuthUser, Response> {
-    let (auth, password_change_required) = auth_user_status_from_access_token(state, token).await?;
-    if password_change_required {
+    let (auth, gates) = auth_user_status_from_access_token(state, token).await?;
+    if gates.password_change_required || gates.totp_enrolment_required {
         return Err(unauthorized());
     }
     Ok(auth)
 }
 
 /// Like [`auth_user_from_access_token`], but a pending forced password change
-/// is reported as a flag instead of rejecting the token. Only the HTTP
-/// middleware uses this; WebSocket transports keep rejecting such sessions.
+/// or second-factor enrolment is reported instead of rejecting the token.
+/// Only the HTTP middleware uses this; WebSocket transports keep rejecting
+/// such sessions.
 #[allow(clippy::result_large_err)]
 async fn auth_user_status_from_access_token(
     state: &AppState,
     token: &str,
-) -> Result<(AuthUser, bool), Response> {
+) -> Result<(AuthUser, SessionGates), Response> {
     let Ok(data) = jwt::verify_access_token(state.jwt_secret(), token) else {
         return Err(unauthorized());
     };
+    let totp_enrolment_required = data.claims.mfa_enrol;
 
     let Some(role) = parse_role(&data.claims.role) else {
         tracing::warn!(role = %data.claims.role, user_id = %data.claims.sub, "Unknown role in JWT");
@@ -182,7 +231,7 @@ async fn auth_user_status_from_access_token(
         return Err(unauthorized());
     };
 
-    revalidate_auth_user_status(
+    let (auth, password_change_required) = revalidate_auth_user_status(
         state,
         &AuthUser {
             user_id: data.claims.sub,
@@ -192,7 +241,14 @@ async fn auth_user_status_from_access_token(
             access_token_expires_at,
         },
     )
-    .await
+    .await?;
+    Ok((
+        auth,
+        SessionGates {
+            password_change_required,
+            totp_enrolment_required,
+        },
+    ))
 }
 
 /// Whether the account must replace its password before using the workspace:
@@ -226,6 +282,17 @@ fn password_change_required_response() -> Response {
         Json(json!({
             "error": "password_change_required",
             "message": "Password must be changed before continuing"
+        })),
+    )
+        .into_response()
+}
+
+fn totp_enrolment_required_response() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": "totp_enrolment_required",
+            "message": "Set up two-factor authentication before continuing"
         })),
     )
         .into_response()
@@ -564,13 +631,13 @@ mod tests {
         assert!(!u.can(Capability::UsersManageCeo));
         assert!(!u.can(Capability::PatientsView));
         assert!(u.require_capability(Capability::AdminSecurity).is_ok());
-        assert!(u.require_capability(Capability::ChatUse).is_err());
+        assert!(u.require_capability(Capability::TasksUse).is_err());
         assert!(
             u.require_any_capability(&[Capability::PatientsView, Capability::AdminSettings])
                 .is_ok()
         );
         assert!(
-            u.require_any_capability(&[Capability::PatientsView, Capability::ChatUse])
+            u.require_any_capability(&[Capability::PatientsView, Capability::TasksUse])
                 .is_err()
         );
 
@@ -635,6 +702,7 @@ mod tests {
             Role::TeamleadInterpreter,
             Role::Interpreter,
             Role::Sales,
+            Role::ItAdmin,
             Role::Patient,
         ] {
             assert!(
@@ -644,11 +712,6 @@ mod tests {
             assert!(release_workspace_allows_path(role, "/api/v1/messages/ws"));
             assert!(release_workspace_allows_path(role, "/events/ws"));
         }
-        assert!(!release_workspace_allows_path(
-            Role::ItAdmin,
-            "/messages/ws"
-        ));
-        assert!(release_workspace_allows_path(Role::ItAdmin, "/events/ws"));
     }
 
     #[test]
@@ -715,13 +778,17 @@ mod tests {
             "lead.created",
             "document.updated",
             "appointment.created",
-            "messages.new",
         ] {
             assert!(
                 !release_workspace_allows_realtime_event(Role::ItAdmin, event),
                 "{event}"
             );
         }
+        // Chat with PM, Billing and the CEO (matrix «Комунікація»).
+        assert!(release_workspace_allows_realtime_event(
+            Role::ItAdmin,
+            "messages.new"
+        ));
         assert!(release_workspace_allows_realtime_event(
             Role::ItAdmin,
             "user.created"

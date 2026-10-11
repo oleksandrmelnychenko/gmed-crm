@@ -3383,7 +3383,7 @@ function usePatientInvoicesTabContent({
                   className="h-8 shrink-0 rounded-lg gap-1.5"
                   onClick={() =>
                     staffGo(
-                      `/chat?peer=${encodeURIComponent(portalAccountUserId)}&name=${encodeURIComponent(patientName)}&role=patient`,
+                      `/chat?peer=${encodeURIComponent(portalAccountUserId)}`,
                     )
                   }
                 >

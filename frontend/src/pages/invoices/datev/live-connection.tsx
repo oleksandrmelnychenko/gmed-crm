@@ -17,7 +17,8 @@ import { liveDe, liveError, liveRu } from "./live-text";
 
 const selectClass = "h-9 w-full min-w-0 rounded-md border border-input bg-background px-2 text-sm";
 
-export function DatevLiveConnection() {
+/** `canAdmin` (`datev.admin`): connect, check, disconnect and the API keys. Without it (Billing, `datev.read`) the connection is shown read-only and DATEV data can still be read. */
+export function DatevLiveConnection({ canAdmin = true }: { canAdmin?: boolean } = {}) {
   const { canStaffPath } = useStaffNavigate();
   const { lang } = useDatevText(); const de = lang === "de"; const t = de ? liveDe : liveRu;
   const [ready, setReady] = useState(false);
@@ -108,11 +109,13 @@ export function DatevLiveConnection() {
       {!connection && !error ? <p role="status" className="text-sm">{t.loading}</p> : null}
       <div className="flex flex-wrap gap-2">
         {connection?.configured ? <Badge variant="secondary">{connection.mode === "production" ? "Production" : "Sandbox"}</Badge> : null}
+        {canAdmin ? <>
         <DatevActionButton title={t.connect} description={describe("connect")} context={connectionContext} contextKey={identity} size="sm" disabled={!here || blocked || !connection?.configured || connection.has_tokens || connection.status === "revocation_pending"} onConfirm={() => run(async (current) => { const response = await authorizeDatev(connectionTarget()); if (current()) window.location.assign(safeAuthorizationUrl(response.authorization_url)); })}><Link2 className="size-4" />{t.connect}</DatevActionButton>
         <DatevActionButton title={t.connectLong} description={describe("connectLong")} context={<>{connectionContext}{context}</>} contextKey={identity} size="sm" disabled={!canLongTerm} onConfirm={() => run(async (current) => { const response = await authorizeDatev(connectionTarget(), true); if (current()) window.location.assign(safeAuthorizationUrl(response.authorization_url)); })}><Link2 className="size-4" />{t.connectLong}</DatevActionButton>
         <DatevActionButton title={t.check} description={describe("check")} context={context} contextKey={identity} size="sm" disabled={blocked || requiresReconnect || !hasCompany || connection?.status !== "connected"} onConfirm={() => run(async (current) => { clearRead(); const value = await checkDatev(confirmedTarget()); value.clients.forEach((client) => matchesCompany({ ...client, mode: value.mode })); if (current()) setAccess(value); })}>{t.check}</DatevActionButton>
         <DatevActionButton title={t.disconnect} description={describe("disconnect")} context={connectionContext} contextKey={identity} size="sm" disabled={blocked || !connection?.configured || connection.status === "disconnected"} onConfirm={() => run(async () => { clearRead(); setConnection(await disconnectDatev(connectionTarget())); })}><Unplug className="size-4" />{t.disconnect}</DatevActionButton>
         {connection?.status === "revocation_pending" ? <DatevActionButton title={t.forceDisconnect} description={describe("forceDisconnect")} context={connectionContext} contextKey={identity} size="sm" disabled={blocked} onConfirm={() => run(async () => { clearRead(); const value = await disconnectDatev(connectionTarget(), true); setConnection(value); if (value.revocation_confirmed === false) setNotice(t.forcedNotice); })}><Unplug className="size-4" />{t.forceDisconnect}</DatevActionButton> : null}
+        </> : null}
         <DatevActionButton title={t.refresh} description={describe("refresh")} size="sm" disabled={busy} onConfirm={() => { clearRead(); setError(""); setReady(false); epoch.current += 1; setReload((n) => n + 1); }}><RefreshCw className="size-4" />{t.refresh}</DatevActionButton>
       </div>
       {connection?.configured && !here ? <p role="note" className="break-words text-xs text-amber-700 dark:text-amber-400">{t.otherSite} {connection.redirect_uri ? `${new URL(connection.redirect_uri).origin}/admin/datev` : ""}</p> : null}
@@ -120,6 +123,7 @@ export function DatevLiveConnection() {
       <p className="text-xs text-muted-foreground">{t.numbersHint}</p><div className="text-xs text-muted-foreground">{context}</div>
       {connection?.configured ? <dl className="grid gap-2 text-xs sm:grid-cols-2"><div><dt className="text-muted-foreground">{t.checked}</dt><dd>{date(connection.checked_at)}{connection.checked_at && connection.checked_consultant ? ` · ${connection.checked_consultant} / ${connection.checked_client}` : ""}</dd></div><div><dt className="text-muted-foreground">{t.expires}</dt><dd>{date(connection.expires_at)}</dd></div>{connection.long_term ? <div><dt className="text-muted-foreground">{t.longTermFor}</dt><dd>{connection.bound_consultant} / {connection.bound_client}</dd></div> : connection.session_expires_at ? <div><dt className="text-muted-foreground">{t.session}</dt><dd>{date(connection.session_expires_at)}</dd></div> : null}</dl> : null}
       {connection?.configured && !connection.long_term ? <p className="text-xs text-muted-foreground">{t.sessionHint}{!connection.has_tokens && !canLongTerm ? ` ${t.longTermNeedsCheck}` : ""}</p> : null}
+      {canAdmin ? <>
       <DatevActionButton title={t.revokeLink} description={describe("portal")} size="sm" onConfirm={() => { window.open("https://apps.datev.de/tokrevui", "_blank", "noopener,noreferrer"); }}>{t.revokeLink}</DatevActionButton>
       <details className="rounded-md border p-3" open={!connection?.configured}>
         <summary className="cursor-pointer text-sm font-medium">{t.settings}</summary>
@@ -138,6 +142,7 @@ export function DatevLiveConnection() {
           </fieldset>
         </form>
       </details>
+      </> : null}
       {access ? <section className="space-y-2 rounded-md border p-3" aria-label={t.services}>
         <h3 className="text-sm font-medium">{t.services}</h3><p className="text-xs text-muted-foreground">{t.servicesHint}</p>
         {access.clients.map((company) => <div key={company.id} className="space-y-2"><p className="text-sm font-medium">{company.name}</p><p className="text-xs">Beraternummer: {company.consultant_number} · Mandantennummer: {company.client_number}</p><ul className="space-y-1 text-sm">{company.services.map((service, index) => <li key={`${service.name}-${index}`}>{service.name}</li>)}</ul>{company.services.length === 0 ? <p className="text-sm">{t.noServices}</p> : null}</div>)}

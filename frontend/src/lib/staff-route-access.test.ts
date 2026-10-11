@@ -241,7 +241,6 @@ describe("staff route access by capability", () => {
     for (const path of [
       "/patients",
       "/patients/patient-1",
-      "/chat",
       "/appointments",
       "/documents",
       "/leads",
@@ -264,7 +263,9 @@ describe("staff route access by capability", () => {
       expect(itAdmin, path).toContain(path);
     }
     expect(itAdmin).not.toContain("/patients");
-    expect(itAdmin).not.toContain("/chat");
+    // Chat with PM, Billing and the CEO (RBAC matrix «Комунікація», QA E-03).
+    expect(canAccessStaffRoute("it_admin", "/chat")).toBe(true);
+    expect(itAdmin).toContain("/chat");
     expect(itAdmin).not.toContain("/appointments");
     expect(staffHrefIfAllowed("it_admin", "/patients")).toBe("/");
     expect(staffHrefIfAllowed("it_admin", "/admin/users")).toBe("/admin/users");
@@ -384,9 +385,14 @@ describe("staff route access by capability", () => {
       "patients",
       "reports",
     ]);
-    // `/interpreters` and `/appointments?focus=reports` have no nav entry, so
-    // the teamlead and interpreter cabinets lead with the rest of their list.
-    expect(leading("teamlead_interpreter", 3)).toEqual(["appointments", "documents", "task-manager"]);
+    // The teamlead's team list is a menu entry (QA E-34); `/appointments?focus=reports`
+    // has none, so the interpreter cabinet leads with the rest of its list.
+    expect(leading("teamlead_interpreter", 4)).toEqual([
+      "appointments",
+      "interpreters",
+      "documents",
+      "task-manager",
+    ]);
     expect(leading("interpreter", 3)).toEqual(["appointments", "documents", "task-manager"]);
     expect(leading("it_admin", 8)).toEqual([
       "admin/users",
@@ -433,6 +439,12 @@ describe("staff route access by capability", () => {
     expect(canAccessStaffRoute("patient_manager", "/interpreters/staff-1")).toBe(true);
     expect(canAccessStaffRoute("interpreter", "/interpreters")).toBe(false);
     expect(canAccessStaffRoute("concierge", "/interpreters")).toBe(false);
+    // The team list is a menu entry for the teamlead; the CEO keeps one entry
+    // ("employees") for the same people (QA E-34).
+    expect(nav("teamlead_interpreter")).toContain("/interpreters");
+    expect(nav("ceo")).not.toContain("/interpreters");
+    expect(nav("ceo")).toContain("/employees");
+    expect(nav("interpreter")).not.toContain("/interpreters");
   });
 
   it("prefers the capabilities reported by /me over the role mirror", () => {

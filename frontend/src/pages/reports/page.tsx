@@ -1096,7 +1096,7 @@ function useReportsPageContent() {
         width: 180,
         render: (row) => (
           <span className="text-xs text-foreground">
-            {formatMoney(row.gross_service_volume ?? "0", locale)}
+            {row.gross_service_volume ? formatMoney(row.gross_service_volume, locale) : text.countsOnly}
           </span>
         ),
       },

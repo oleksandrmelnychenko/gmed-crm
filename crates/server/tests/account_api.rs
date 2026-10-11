@@ -214,13 +214,10 @@ async fn forced_password_change_confines_the_session_until_the_password_is_repla
     let Some((app, pool, admin_id)) = test_context().await else {
         return;
     };
-    let (user_id, email) = seed_user_with_password(
-        &pool,
-        "account-forced",
-        "patient_manager",
-        "Original-pass-1!",
-    )
-    .await;
+    // A role without the mandatory second factor, so only the password gate
+    // applies (CEO, IT Admin and PM are also confined to the 2FA setup).
+    let (user_id, email) =
+        seed_user_with_password(&pool, "account-forced", "billing", "Original-pass-1!").await;
     let admin = ceo_bearer(admin_id);
     let (status, _) = json_request(
         &app,

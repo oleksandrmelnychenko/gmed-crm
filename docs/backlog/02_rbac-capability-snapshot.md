@@ -63,7 +63,7 @@
 | `reports.market` | x |   |   |   |   |   |   | x |   |
 | `tasks.use` | x | x | x | x | x | x | x | x |   |
 | `tasks.assign_any` | x |   |   |   |   |   |   |   |   |
-| `chat.use` | x | x | x | x | x | x | x | x |   |
+| `chat.use` | x | x | x | x | x | x | x | x | x |
 | `users.view` | x |   |   |   |   |   |   |   | x |
 | `users.manage` | x |   |   |   |   |   |   |   | x |
 | `users.manage_ceo` | x |   |   |   |   |   |   |   |   |

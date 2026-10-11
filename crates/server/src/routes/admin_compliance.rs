@@ -51,6 +51,7 @@ pub fn router() -> Router<AppState> {
             "/admin/compliance/patient/{patient_id}/privacy-requests",
             get(list_patient_privacy_requests).post(create_patient_privacy_request),
         )
+        .route("/admin/compliance/patient-lookup", get(patient_lookup))
         .route("/admin/compliance/consents", get(consent_dashboard))
         .route("/admin/compliance/consents/expired", get(expired_consents))
         .route(
@@ -1796,6 +1797,62 @@ async fn list_patient_privacy_requests(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to load privacy requests",
             )
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PatientLookupQuery {
+    search: Option<String>,
+}
+
+/// The patient picker of the DSGVO page for a compliance handler without
+/// patient access (the IT admin handles data-subject requests, role-cabinets
+/// plan § 2, «Compliance / DSGVO-запити: IT Admin W»): patient number and
+/// name only, nothing else of the record (QA E-41, 2026-10-11).
+async fn patient_lookup(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Query(query): Query<PatientLookupQuery>,
+) -> axum::response::Response {
+    if let Err(e) = auth.require_capability(Capability::AdminCompliance) {
+        return e;
+    }
+    let search = query
+        .search
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("%{}%", value.replace('%', "\\%").replace('_', "\\_")));
+    match sqlx::query(
+        r#"SELECT p.id, p.patient_id, p.first_name, p.last_name
+           FROM patients p
+           WHERE $1::text IS NULL
+              OR p.patient_id ILIKE $1
+              OR concat_ws(' ', p.first_name, p.last_name) ILIKE $1
+           ORDER BY p.patient_id
+           LIMIT 500"#,
+    )
+    .bind(search)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(rows) => Json(
+            rows.iter()
+                .map(|row| {
+                    json!({
+                        "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
+                        "patient_id": row.try_get::<String, _>("patient_id").unwrap_or_default(),
+                        "first_name": row.try_get::<Option<String>, _>("first_name").unwrap_or_default(),
+                        "last_name": row.try_get::<Option<String>, _>("last_name").unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(e) => {
+            tracing::error!(error = %e, "compliance patient lookup");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load patients")
         }
     }
 }

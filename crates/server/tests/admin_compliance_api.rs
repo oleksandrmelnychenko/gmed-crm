@@ -1288,6 +1288,53 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
 }
 
 #[tokio::test]
+async fn it_admin_picks_dsgvo_patients_by_number_and_name_only() {
+    // QA E-41 (2026-10-11): the IT admin handles data-subject requests but
+    // has no patient access; its picker gets the number and the name only.
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("dsgvo-lookup");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let it_admin = auth_header_for(seed_user(&pool, &tag, "it_admin").await, "it_admin");
+
+    let (status, _) = json_request(&app, "GET", "/api/v1/patients", &it_admin, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, rows) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient-lookup?search={tag}"),
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{rows}");
+    let rows = rows.as_array().expect("rows");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    let row = rows[0].as_object().expect("row");
+    assert_eq!(row["id"], json!(patient_id));
+    assert_eq!(row["patient_id"], json!(format!("PT-{tag}")));
+    let mut keys: Vec<&str> = row.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["first_name", "id", "last_name", "patient_id"]);
+
+    let sales = auth_header_for(
+        seed_user(&pool, &format!("{tag}-s"), "sales").await,
+        "sales",
+    );
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/compliance/patient-lookup",
+        &sales,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn direct_patient_delete_is_blocked_in_favor_of_compliance_workflow() {
     let Some((app, pool, admin_id)) = test_context().await else {
         return;

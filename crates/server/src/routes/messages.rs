@@ -3606,6 +3606,21 @@ fn can_message_internal_staff(role: Role) -> bool {
     role.can(Capability::ChatUse)
 }
 
+/// Whether two staff roles may exchange messages. The technical admin talks
+/// with the Patient Manager, Billing and the CEO only (RBAC matrix, column
+/// «Комунікація», QA E-03 2026-10-11); every other chat role talks with
+/// every other one.
+fn staff_roles_may_chat(a: Role, b: Role) -> bool {
+    const IT_ADMIN_PEERS: [Role; 3] = [Role::Ceo, Role::PatientManager, Role::Billing];
+    if !can_message_internal_staff(a) || !can_message_internal_staff(b) {
+        return false;
+    }
+    match (a, b) {
+        (Role::ItAdmin, other) | (other, Role::ItAdmin) => IT_ADMIN_PEERS.contains(&other),
+        _ => true,
+    }
+}
+
 #[allow(clippy::result_large_err)]
 fn ensure_chat_workspace_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
     if can_access_chat_workspace(auth.role) {
@@ -3739,7 +3754,7 @@ async fn can_message_known_peer(
             });
     }
 
-    Ok(can_message_internal_staff(auth.role) && can_message_internal_staff(peer_role))
+    Ok(staff_roles_may_chat(auth.role, peer_role))
 }
 
 async fn ensure_message_peer_access(
@@ -3810,7 +3825,7 @@ async fn load_allowed_peer_rows(
     let chat_roles: Vec<String> = gmed_domain::access::capabilities::STAFF_ROLES
         .iter()
         .copied()
-        .filter(|role| role.can(Capability::ChatUse))
+        .filter(|role| staff_roles_may_chat(auth.role, *role))
         .filter_map(crate::access::role_db_name)
         .map(str::to_string)
         .collect();
@@ -3929,6 +3944,28 @@ mod tests {
         assert!(!is_valid_message_key_fingerprint(&"A".repeat(64)));
         assert!(!is_valid_message_key_fingerprint(&"a".repeat(63)));
         assert!(!is_valid_message_key_fingerprint(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn it_admin_chats_with_patient_manager_billing_and_ceo_only() {
+        for peer in [Role::Ceo, Role::PatientManager, Role::Billing] {
+            assert!(staff_roles_may_chat(Role::ItAdmin, peer), "{peer:?}");
+            assert!(staff_roles_may_chat(peer, Role::ItAdmin), "{peer:?}");
+        }
+        for peer in [
+            Role::CeoAssistant,
+            Role::TeamleadInterpreter,
+            Role::Interpreter,
+            Role::Concierge,
+            Role::Sales,
+            Role::ItAdmin,
+            Role::Patient,
+        ] {
+            assert!(!staff_roles_may_chat(Role::ItAdmin, peer), "{peer:?}");
+            assert!(!staff_roles_may_chat(peer, Role::ItAdmin), "{peer:?}");
+        }
+        assert!(staff_roles_may_chat(Role::Sales, Role::Interpreter));
+        assert!(!can_have_patient_chat(Role::ItAdmin));
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { de } from "./de";
 import { ru } from "./ru";
 import { resolveDefaultLanguage } from "./default-language";
+import type { AccessSecurityTranslations } from "./catalogs/access-security";
 import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
@@ -18,6 +19,7 @@ import type { StaffAccessTranslations } from "./catalogs/staff-access";
 
 export interface Translations
   extends SharedCoreTranslations,
+    AccessSecurityTranslations,
     AdminSystemTranslations,
     CasesClinicalTranslations,
     ClinicalTranslations,

@@ -2547,8 +2547,11 @@ async fn list_interpreters(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> impl IntoResponse {
+    // The CEO Assistant reads everything (read-only), including the people
+    // the appointment filters name (QA E-41, 2026-10-11).
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -2592,8 +2595,11 @@ async fn list_staff(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> impl IntoResponse {
+    // The CEO Assistant reads everything (read-only), including the people
+    // the appointment filters name (QA E-41, 2026-10-11).
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,

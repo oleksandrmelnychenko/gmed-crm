@@ -5529,6 +5529,57 @@ async fn patient_detail_view_audit_logs_visible_fields_for_role_filtered_payload
 }
 
 #[tokio::test]
+async fn ceo_assistant_reads_the_catalogues_and_tabs_its_pages_use() {
+    // QA E-41 (2026-10-11): the read-only assistant opened pages whose filters
+    // and tabs stayed empty because the catalogue/meta reads answered 403.
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("ceo-assistant-reads");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let assistant = auth_header_for(
+        seed_user(&pool, &tag, "ceo_assistant").await,
+        "ceo_assistant",
+    );
+    for path in [
+        "/api/v1/providers/taxonomy".to_string(),
+        "/api/v1/providers/specializations".to_string(),
+        "/api/v1/providers/insurance-providers".to_string(),
+        "/api/v1/providers/staff-roles".to_string(),
+        "/api/v1/appointments/meta/interpreters".to_string(),
+        "/api/v1/appointments/meta/staff".to_string(),
+        format!("/api/v1/patients/{patient_id}/relations"),
+        format!("/api/v1/patients/{patient_id}/recommendations"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    // Interpreters read the provider catalogues of the provider page too.
+    for role in ["interpreter", "teamlead_interpreter"] {
+        let bearer = auth_header_for(seed_user(&pool, &format!("{tag}-{role}"), role).await, role);
+        for path in [
+            "/api/v1/providers/specializations",
+            "/api/v1/providers/insurance-providers",
+            "/api/v1/providers/staff-roles",
+        ] {
+            let (status, body) = json_request(&app, "GET", path, &bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{role} {path}: {body}");
+        }
+    }
+    // Recommendations are clinical: the technical admin gets none of them.
+    let it_admin = auth_header_for(seed_user(&pool, &tag, "it_admin").await, "it_admin");
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/recommendations"),
+        &it_admin,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;

@@ -1,5 +1,7 @@
 pub mod blacklist;
 pub mod jwt;
+pub mod login_throttle;
+pub mod mfa_policy;
 pub mod middleware;
 pub mod password;
 pub mod password_policy;

@@ -36,7 +36,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { useSheetDirtyGuard } from "@/hooks/use-sheet-dirty-guard";
-import { formatEnumLabelFromKeys, useLang, type TranslationKey } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
 import {
   formatAdminDateTime,
   normalizeAdminSettingValue,
@@ -78,6 +78,18 @@ interface SettingRow {
   value: string;
   description: string | null;
   updated_at: string;
+  /** The signed-in administrator may change it (business and legal settings: CEO only). */
+  editable?: boolean;
+}
+
+/** Readable text for a refused setting change (QA E-31). */
+function describeSettingError(error: unknown, t: Translations): string {
+  const details = (error ?? {}) as { code?: unknown; message?: unknown };
+  const message = typeof details.message === "string" ? details.message : String(error);
+  if (details.code === "business_setting_ceo_only") return t.settings_ceo_only_hint;
+  if (message.startsWith("IBAN")) return t.settings_iban_invalid;
+  if (message.startsWith("BIC")) return t.settings_bic_invalid;
+  return message || t.common_error;
 }
 
 interface SessionRow {
@@ -386,6 +398,9 @@ function useAdminSettingsPageContent() {
   // pending login is a change to the CEO account, so it needs
   // `users.manage_ceo` (the CEO).
   const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
+  // Portal logins of patients and leads: only the CEO acts on them (QA E-05).
+  const canManagePortalAccounts =
+    hasCapability(currentUser, "users.manage") && hasCapability(currentUser, "patients.edit");
   const canReviewSanctions = hasCapability(currentUser, "sanctions.review");
   const tr = t as unknown as Record<string, string>;
   const [settingsState, dispatchSettingsState] = useReducer(
@@ -588,7 +603,7 @@ function useAdminSettingsPageContent() {
     } catch (saveError) {
       setSheetState({
         saving: false,
-        error: saveError instanceof Error ? saveError.message : t.common_error,
+        error: describeSettingError(saveError, t),
         warning: "",
       });
       return;
@@ -813,7 +828,7 @@ function useAdminSettingsPageContent() {
       render: (entry) => {
         const approveBusy = actionBusyKey === `mfa:approve:${entry.id}`;
         const rejectBusy = actionBusyKey === `mfa:reject:${entry.id}`;
-        const canDecide = canManageAdminAccount(entry.role, canManageCeo);
+        const canDecide = canManageAdminAccount(entry.role, canManageCeo, canManagePortalAccounts);
         const lockedTitle = canDecide ? undefined : t.users_ceo_managed_by_ceo_only;
         return (
           <div className="flex items-center gap-1.5">
@@ -854,6 +869,7 @@ function useAdminSettingsPageContent() {
     actionBusyKey,
     approvePending,
     canManageCeo,
+    canManagePortalAccounts,
     lang,
     rejectPending,
     t.activity_time,
@@ -940,7 +956,7 @@ function useAdminSettingsPageContent() {
       width: 170,
       render: (session) => {
         const busy = actionBusyKey === `session:${session.user_id}`;
-        const canSignOut = canManageAdminAccount(session.role, canManageCeo);
+        const canSignOut = canManageAdminAccount(session.role, canManageCeo, canManagePortalAccounts);
         return (
           <Button
             type="button"
@@ -963,6 +979,7 @@ function useAdminSettingsPageContent() {
   ], [
     actionBusyKey,
     canManageCeo,
+    canManagePortalAccounts,
     lang,
     logoutUser,
     t.common_device,
@@ -1198,6 +1215,9 @@ function useAdminSettingsPageContent() {
           >
             {sheetState.error ? <Banner tone="error">{sheetState.error}</Banner> : null}
             {sheetState.warning ? <Banner tone="warning">{sheetState.warning}</Banner> : null}
+            {selectedGroup?.fields.some((field) => settingsMap[field.key]?.editable === false) ? (
+              <Banner tone="warning">{t.settings_ceo_only_hint}</Banner>
+            ) : null}
 
             {selectedGroup ? (
               <>
@@ -1244,6 +1264,7 @@ function useAdminSettingsPageContent() {
                                 rows={field.rows ?? 4}
                                 maxLength={field.maxLength}
                                 value={editValues[field.key] ?? ""}
+                                disabled={settingsMap[field.key]?.editable === false}
                                 onChange={(event) => updateEditValue(field.key, event.target.value)}
                                 className={inputClassName}
                               />
@@ -1254,6 +1275,7 @@ function useAdminSettingsPageContent() {
                                 min={field.min}
                                 maxLength={field.maxLength}
                                 value={editValues[field.key] ?? ""}
+                                disabled={settingsMap[field.key]?.editable === false}
                                 onChange={(event) => updateEditValue(field.key, event.target.value)}
                                 className={inputClassName}
                               />

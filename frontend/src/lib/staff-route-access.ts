@@ -188,6 +188,8 @@ type RouteRule = {
     after?: string;
     /** Shown only when the signed-in user has this property (see `StaffNavContext`). */
     requires?: keyof StaffNavContext;
+    /** Hidden when the user may open the route rule with this id (no duplicate entries). */
+    unlessAllowed?: string;
   };
 };
 
@@ -433,12 +435,20 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     roles: ROLES_EMPLOYEES,
     nav: { section: "medicine", labelKey: "nav_interpreters" },
   },
+  // The team list of the teamlead (and the PM, `interpreters.view`); the CEO
+  // reaches the same people through "employees" (QA E-34).
   {
     id: "interpreters",
     match: "prefix",
     path: "/interpreters",
     roles: ROLES_INTERPRETERS,
     capability: "interpreters.view",
+    nav: {
+      section: "medicine",
+      labelKey: "nav_interpreters",
+      after: "appointments",
+      unlessAllowed: "employees",
+    },
   },
   {
     id: "specializations",
@@ -808,6 +818,13 @@ export function listStaffNavItems(
     }
     if (rule.nav.requires && !context[rule.nav.requires]) {
       continue;
+    }
+    const unlessAllowed = rule.nav.unlessAllowed;
+    if (unlessAllowed) {
+      const other = STAFF_ROUTE_RULES.find((candidate) => candidate.id === unlessAllowed);
+      if (other && ruleAllows(other, role, capabilities)) {
+        continue;
+      }
     }
     items.push({
       id: rule.id,

@@ -12,7 +12,7 @@ use uuid::Uuid;
 use serde_json::json;
 
 use crate::audit;
-use crate::auth::{blacklist, middleware::AuthUser, password, tokens};
+use crate::auth::{blacklist, login_throttle, middleware::AuthUser, password, tokens};
 use crate::business_metrics::LOGIN_ATTEMPTS_TOTAL;
 use crate::state::AppState;
 
@@ -70,6 +70,9 @@ struct AuthResponse {
     expires_in: i64,
     /// The account must replace its password before using the workspace.
     password_change_required: bool,
+    /// The role must use a second factor and none is enrolled yet: the
+    /// session reaches only the two-factor setup.
+    totp_enrolment_required: bool,
 }
 
 #[derive(Serialize)]
@@ -190,10 +193,55 @@ async fn login(
         }
     };
 
+    // Failed sign-ins are throttled per account (as typed) and client
+    // address (`auth::login_throttle`); every refusal before the password
+    // proved the account answers like a wrong password, so the response
+    // reveals neither which addresses exist nor which are held (QA E-19).
+    let ip_hash_value = ip_hash_opt(&state, ip.as_deref()).unwrap_or_default();
+    let subject = login_throttle::subject_hash(&body.email);
+    let (max_attempts, lockout_min) = login_lockout_settings(&state).await;
+
+    let held = match login_throttle::is_held(&state.db, &subject, &ip_hash_value).await {
+        Ok(value) => value,
+        Err(e) => {
+            tracing::error!(error = %e, "Failed to read the sign-in throttle");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                "An internal error occurred",
+            );
+        }
+    };
+    let account_locked = user.as_ref().is_some_and(|user| {
+        user.locked_until
+            .is_some_and(|locked_until| locked_until > chrono::Utc::now())
+    });
+    if held || account_locked {
+        // Same work and answer as a wrong password.
+        let _ = password::hash_password("dummy-for-timing");
+        state.audit_sender.try_send(audit::auth_event(
+            "login_blocked",
+            user.as_ref().map(|user| user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({
+                "reason": if account_locked { "account_locked" } else { "throttled" },
+                "locked_until": user.as_ref().and_then(|user| user.locked_until),
+            }),
+        ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "blocked",
+            "reason" => if account_locked { "account_locked" } else { "throttled" },
+        )
+        .increment(1);
+        return invalid_credentials();
+    }
+
     let user = match user {
         Some(u) => u,
         None => {
             let _ = password::hash_password("dummy-for-timing");
+            record_login_failure(&state, &subject, &ip_hash_value, max_attempts, lockout_min).await;
             state.audit_sender.try_send(audit::auth_event(
                 "login_failure",
                 None,
@@ -206,14 +254,99 @@ async fn login(
                 "reason" => "unknown_email",
             )
             .increment(1);
-            return err(
-                StatusCode::UNAUTHORIZED,
-                "unauthorized",
-                "Invalid email or password",
-            );
+            return invalid_credentials();
         }
     };
 
+    let password_valid = if user.password_hash.starts_with("$argon2") {
+        password::verify_password(&body.password, &user.password_hash).unwrap_or(false)
+    } else {
+        sqlx::query_scalar!(
+            "SELECT ($1::text = crypt($2::text, $1::text)) AS \"valid!\"",
+            user.password_hash,
+            body.password
+        )
+        .fetch_one(&state.db)
+        .await
+        .unwrap_or(false)
+    };
+
+    if !password_valid {
+        record_login_failure(&state, &subject, &ip_hash_value, max_attempts, lockout_min).await;
+        // Once a lock has run out the account starts over with the full
+        // number of attempts; otherwise the next typo would lock it again.
+        let lock_expired = user
+            .locked_until
+            .is_some_and(|locked_until| locked_until <= chrono::Utc::now());
+        let previous_attempts = if lock_expired {
+            0
+        } else {
+            user.failed_login_attempts
+        };
+        let new_attempts = previous_attempts + 1;
+        // The account-wide lock is a temporary safety net against guessing
+        // spread over many addresses; one address is held long before.
+        let account_threshold = max_attempts
+            .max(1)
+            .saturating_mul(login_throttle::ACCOUNT_LOCK_FACTOR);
+
+        if new_attempts >= account_threshold {
+            let lock_until = chrono::Utc::now() + chrono::Duration::minutes(lockout_min.max(1));
+            let _ = sqlx::query(
+                "UPDATE users SET failed_login_attempts = $2, locked_until = $3 WHERE id = $1",
+            )
+            .bind(user.id)
+            .bind(new_attempts)
+            .bind(lock_until)
+            .execute(&state.db)
+            .await;
+            tracing::warn!(user_id = %user.id, attempts = new_attempts, "Account locked");
+            state.audit_sender.try_send(audit::auth_event(
+                "login_blocked",
+                Some(user.id),
+                ip_hash_opt(&state, ip.as_deref()),
+                json!({
+                    "reason": "auto_locked",
+                    "failed_attempts": new_attempts,
+                    "locked_until": lock_until,
+                }),
+            ));
+            metrics::counter!(
+                LOGIN_ATTEMPTS_TOTAL,
+                "outcome" => "blocked",
+                "reason" => "auto_locked",
+            )
+            .increment(1);
+            return invalid_credentials();
+        } else {
+            let _ = sqlx::query(
+                "UPDATE users SET failed_login_attempts = $2,
+                        locked_until = CASE WHEN locked_until <= now() THEN NULL ELSE locked_until END
+                 WHERE id = $1",
+            )
+            .bind(user.id)
+            .bind(new_attempts)
+            .execute(&state.db)
+            .await;
+        }
+
+        state.audit_sender.try_send(audit::auth_event(
+            "login_failure",
+            Some(user.id),
+            ip_hash_opt(&state, ip.as_deref()),
+            json!({ "reason": "wrong_password", "failed_attempts": new_attempts }),
+        ));
+        metrics::counter!(
+            LOGIN_ATTEMPTS_TOTAL,
+            "outcome" => "failure",
+            "reason" => "wrong_password",
+        )
+        .increment(1);
+        return invalid_credentials();
+    }
+
+    // Only someone who knows the password learns that the account is
+    // deactivated or not permitted to sign in.
     if !user.is_active {
         state.audit_sender.try_send(audit::auth_event(
             "login_blocked",
@@ -252,123 +385,8 @@ async fn login(
         );
     }
 
-    if let Some(locked_until) = user.locked_until
-        && locked_until > chrono::Utc::now()
-    {
-        state.audit_sender.try_send(audit::auth_event(
-            "login_blocked",
-            Some(user.id),
-            ip_hash_opt(&state, ip.as_deref()),
-            json!({ "reason": "account_locked", "locked_until": locked_until }),
-        ));
-        metrics::counter!(
-            LOGIN_ATTEMPTS_TOTAL,
-            "outcome" => "blocked",
-            "reason" => "account_locked",
-        )
-        .increment(1);
-        return err(
-            StatusCode::FORBIDDEN,
-            "account_locked",
-            "Account is temporarily locked due to too many failed attempts",
-        );
-    }
-
-    let password_valid = if user.password_hash.starts_with("$argon2") {
-        password::verify_password(&body.password, &user.password_hash).unwrap_or(false)
-    } else {
-        sqlx::query_scalar!(
-            "SELECT ($1::text = crypt($2::text, $1::text)) AS \"valid!\"",
-            user.password_hash,
-            body.password
-        )
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(false)
-    };
-
-    if !password_valid {
-        // Once a lock has run out the account starts over with the full
-        // number of attempts; otherwise the next typo would lock it again.
-        let lock_expired = user
-            .locked_until
-            .is_some_and(|locked_until| locked_until <= chrono::Utc::now());
-        let previous_attempts = if lock_expired {
-            0
-        } else {
-            user.failed_login_attempts
-        };
-        let new_attempts = previous_attempts + 1;
-        let max_attempts: i32 = sqlx::query_scalar!(
-            r#"SELECT value::TEXT AS "v!" FROM system_settings WHERE key = 'max_failed_login_attempts'"#
-        ).fetch_optional(&state.db).await.ok().flatten()
-            .and_then(|v| v.trim_matches('"').parse().ok()).unwrap_or(5);
-        let lockout_min: i64 = sqlx::query_scalar!(
-            r#"SELECT value::TEXT AS "v!" FROM system_settings WHERE key = 'lockout_duration_minutes'"#
-        ).fetch_optional(&state.db).await.ok().flatten()
-            .and_then(|v| v.trim_matches('"').parse().ok()).unwrap_or(30);
-
-        if new_attempts >= max_attempts {
-            let lock_until = chrono::Utc::now() + chrono::Duration::minutes(lockout_min);
-            let _ = sqlx::query!(
-                "UPDATE users SET failed_login_attempts = $2, locked_until = $3 WHERE id = $1",
-                user.id,
-                new_attempts,
-                lock_until
-            )
-            .execute(&state.db)
-            .await;
-            tracing::warn!(user_id = %user.id, attempts = new_attempts, "Account locked");
-            state.audit_sender.try_send(audit::auth_event(
-                "login_blocked",
-                Some(user.id),
-                ip_hash_opt(&state, ip.as_deref()),
-                json!({
-                    "reason": "auto_locked",
-                    "failed_attempts": new_attempts,
-                    "locked_until": lock_until,
-                }),
-            ));
-            metrics::counter!(
-                LOGIN_ATTEMPTS_TOTAL,
-                "outcome" => "blocked",
-                "reason" => "auto_locked",
-            )
-            .increment(1);
-            return err(
-                StatusCode::FORBIDDEN,
-                "account_locked",
-                "Account locked due to too many failed attempts",
-            );
-        } else {
-            let _ = sqlx::query(
-                "UPDATE users SET failed_login_attempts = $2,
-                        locked_until = CASE WHEN locked_until <= now() THEN NULL ELSE locked_until END
-                 WHERE id = $1",
-            )
-            .bind(user.id)
-            .bind(new_attempts)
-            .execute(&state.db)
-            .await;
-        }
-
-        state.audit_sender.try_send(audit::auth_event(
-            "login_failure",
-            Some(user.id),
-            ip_hash_opt(&state, ip.as_deref()),
-            json!({ "reason": "wrong_password", "failed_attempts": new_attempts }),
-        ));
-        metrics::counter!(
-            LOGIN_ATTEMPTS_TOTAL,
-            "outcome" => "failure",
-            "reason" => "wrong_password",
-        )
-        .increment(1);
-        return err(
-            StatusCode::UNAUTHORIZED,
-            "unauthorized",
-            "Invalid email or password",
-        );
+    if let Err(e) = login_throttle::clear_pair(&state.db, &subject, &ip_hash_value).await {
+        tracing::warn!(error = %e, "Failed to clear the sign-in throttle");
     }
 
     // A forced reset (`password_reset_required`) or an expired password no
@@ -534,6 +552,7 @@ async fn login(
         token_type: "Bearer",
         expires_in: pair.expires_in,
         password_change_required: pair.password_change_required,
+        totp_enrolment_required: pair.totp_enrolment_required,
     })
     .into_response()
 }
@@ -567,6 +586,7 @@ async fn refresh(
             token_type: "Bearer",
             expires_in: pair.expires_in,
             password_change_required: pair.password_change_required,
+            totp_enrolment_required: pair.totp_enrolment_required,
         })
         .into_response(),
 
@@ -868,8 +888,59 @@ async fn check_pending(
         "token_type": "Bearer",
         "expires_in": pair.expires_in,
         "password_change_required": pair.password_change_required,
+        "totp_enrolment_required": pair.totp_enrolment_required,
     }))
     .into_response()
+}
+
+/// The one answer for an unknown e-mail, a wrong password and a held
+/// account (QA E-19).
+fn invalid_credentials() -> axum::response::Response {
+    err(
+        StatusCode::UNAUTHORIZED,
+        "unauthorized",
+        "Invalid email or password",
+    )
+}
+
+/// `max_failed_login_attempts` and `lockout_duration_minutes` from the
+/// system settings (defaults 5 and 30).
+async fn login_lockout_settings(state: &AppState) -> (i32, i64) {
+    async fn setting(pool: &sqlx::PgPool, key: &str) -> Option<String> {
+        sqlx::query_scalar::<_, String>("SELECT value::TEXT FROM system_settings WHERE key = $1")
+            .bind(key)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+    }
+    let max_attempts = setting(&state.db, "max_failed_login_attempts")
+        .await
+        .and_then(|v| v.trim_matches('"').parse::<i32>().ok())
+        .unwrap_or(5);
+    let lockout_minutes = setting(&state.db, "lockout_duration_minutes")
+        .await
+        .and_then(|v| v.trim_matches('"').parse::<i64>().ok())
+        .unwrap_or(30);
+    (max_attempts, lockout_minutes)
+}
+
+async fn record_login_failure(
+    state: &AppState,
+    subject: &str,
+    ip_hash: &str,
+    max_attempts: i32,
+    lockout_minutes: i64,
+) {
+    match login_throttle::record_failure(&state.db, subject, ip_hash, max_attempts, lockout_minutes)
+        .await
+    {
+        Ok(Some(until)) => {
+            tracing::warn!(locked_until = %until, "Sign-ins of an account from one address are held");
+        }
+        Ok(None) => {}
+        Err(e) => tracing::error!(error = %e, "Failed to record a failed sign-in"),
+    }
 }
 
 fn err(status: StatusCode, error: &str, message: &str) -> axum::response::Response {

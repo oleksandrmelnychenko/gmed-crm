@@ -135,10 +135,43 @@ describe("admin users page model", () => {
     );
   });
 
-  it("never offers the patient role except to keep an existing portal account", () => {
+  it("never offers the patient role and keeps a portal account on its role", () => {
     expect(getAssignableAdminUserRoles(true)).not.toContain("patient");
     expect(getAssignableAdminUserRoles(false, "billing")).not.toContain("patient");
-    expect(getAssignableAdminUserRoles(false, "patient")).toContain("patient");
+    // QA E-30: a portal login never becomes a staff login.
+    expect(getAssignableAdminUserRoles(true, "patient")).toEqual(["patient"]);
+    expect(getAssignableAdminUserRoles(false, "patient")).toEqual(["patient"]);
+  });
+
+  it("leaves portal accounts of patients and leads to the CEO (QA E-05)", () => {
+    const portalRow = user({ role: "patient", locked_until: "2999-01-01T00:00:00Z", active_sessions: 1, totp_enrolled: true });
+    expect(getAdminUserActions(portalRow, { canManageCeo: false, currentUserId: "it-admin" })).toMatchObject({
+      canManage: false,
+      canEdit: false,
+      canUnlock: false,
+      canRevokeSessions: false,
+      canResetTotp: false,
+      canDeactivate: false,
+    });
+    expect(
+      getAdminUserActions(portalRow, { canManageCeo: true, canManagePortalAccounts: true, currentUserId: "ceo" }),
+    ).toMatchObject({ canManage: true, canEdit: true, canUnlock: true });
+    expect(canManageAdminAccount("patient", false)).toBe(false);
+    expect(canManageAdminAccount("patient", true, true)).toBe(true);
+    expect(
+      describeAdminUserError({ code: "portal_account_managed_elsewhere", status: 403 }, {
+        ...guardMessages,
+        users_portal_account_managed_elsewhere: "Managed in the record",
+        users_portal_role_change_forbidden: "No portal to staff",
+      }),
+    ).toBe("Managed in the record");
+    expect(
+      describeAdminUserError({ code: "portal_role_change_forbidden", status: 422 }, {
+        ...guardMessages,
+        users_portal_account_managed_elsewhere: "Managed in the record",
+        users_portal_role_change_forbidden: "No portal to staff",
+      }),
+    ).toBe("No portal to staff");
   });
 
   it("keeps CEO rows read-only for the technical admin", () => {
@@ -169,7 +202,7 @@ describe("admin users page model", () => {
   it("leaves the CEO's sessions and pending logins to the CEO on the settings page", () => {
     expect(canManageAdminAccount("ceo", false)).toBe(false);
     expect(canManageAdminAccount("ceo", true)).toBe(true);
-    for (const role of ADMIN_USER_ROLE_KEYS.filter((key) => key !== "ceo")) {
+    for (const role of ADMIN_USER_ROLE_KEYS.filter((key) => key !== "ceo" && key !== "patient")) {
       expect(canManageAdminAccount(role, false), role).toBe(true);
     }
   });

@@ -459,10 +459,14 @@ function useAdminUsersPageContent() {
   // existing CEO account; the technical admin manages every other account.
   const { user: currentUser } = useAuth();
   const canManageCeo = hasCapability(currentUser, "users.manage_ceo");
+  // Portal logins of patients and leads belong to the lead or patient record;
+  // only the CEO (`users.manage` with `patients.edit`) acts on them here.
+  const canManagePortalAccounts =
+    hasCapability(currentUser, "users.manage") && hasCapability(currentUser, "patients.edit");
   const currentUserId = currentUser?.id ?? null;
   const actionsFor = useCallback(
-    (u: User) => getAdminUserActions(u, { canManageCeo, currentUserId }),
-    [canManageCeo, currentUserId],
+    (u: User) => getAdminUserActions(u, { canManageCeo, canManagePortalAccounts, currentUserId }),
+    [canManageCeo, canManagePortalAccounts, currentUserId],
   );
   const assignableRoles = useMemo(
     () => getAssignableAdminUserRoles(canManageCeo),
@@ -1288,6 +1292,7 @@ function useAdminUsersPageContent() {
                   <NativeComboboxSelect
                     value={euRole}
                     aria-label={t.users_role}
+                    disabled={editUser?.role === "patient"}
                     onChange={(event) => setEuRole(event.target.value ?? "")}
                     className="h-9 w-full rounded-lg bg-field"
                   >
@@ -1295,6 +1300,9 @@ function useAdminUsersPageContent() {
                       <option key={key} value={key}>{roleLabel(key)}</option>
                     ))}
                   </NativeComboboxSelect>
+                  {editUser?.role === "patient" ? (
+                    <p className="text-xs text-muted-foreground">{t.users_portal_role_locked}</p>
+                  ) : null}
                 </div>
               </DotSection>
               <DotSection title={t.users_sessions}>

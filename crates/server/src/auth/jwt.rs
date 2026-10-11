@@ -21,6 +21,12 @@ pub struct Claims {
     pub exp: i64,
     /// JWT ID (unique per token, for audit trail)
     pub jti: Uuid,
+    /// The role must use a second factor and the account has none yet: the
+    /// session reaches only the two-factor setup, identity and sign-out
+    /// (`auth::middleware`). Set when the session is created or refreshed;
+    /// absent (false) in every other token.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mfa_enrol: bool,
 }
 
 pub const DEFAULT_ACCESS_TOKEN_MINUTES: i64 = 15;
@@ -47,6 +53,19 @@ pub fn issue_access_token_with_duration(
     family_id: Uuid,
     duration_minutes: i64,
 ) -> Result<String, jsonwebtoken::errors::Error> {
+    issue_session_access_token(secret, user_id, role, family_id, duration_minutes, false)
+}
+
+/// An access token of a session; `mfa_enrol` confines it to the two-factor
+/// setup (see [`Claims::mfa_enrol`]).
+pub fn issue_session_access_token(
+    secret: &str,
+    user_id: Uuid,
+    role: &str,
+    family_id: Uuid,
+    duration_minutes: i64,
+    mfa_enrol: bool,
+) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let claims = Claims {
         sub: user_id,
@@ -55,6 +74,7 @@ pub fn issue_access_token_with_duration(
         iat: now.timestamp(),
         exp: (now + Duration::minutes(duration_minutes)).timestamp(),
         jti: Uuid::new_v4(),
+        mfa_enrol,
     };
 
     jsonwebtoken::encode(
@@ -94,6 +114,21 @@ mod tests {
         assert_eq!(decoded.claims.sub, user_id);
         assert_eq!(decoded.claims.role, "ceo");
         assert_eq!(decoded.claims.fam, family_id);
+        assert!(!decoded.claims.mfa_enrol);
+    }
+
+    #[test]
+    fn enrolment_only_sessions_carry_the_flag() {
+        let secret = "test-secret-at-least-32-chars-long!!";
+        let token =
+            issue_session_access_token(secret, Uuid::new_v4(), "ceo", Uuid::new_v4(), 15, true)
+                .unwrap();
+        assert!(
+            verify_access_token(secret, &token)
+                .unwrap()
+                .claims
+                .mfa_enrol
+        );
     }
 
     #[test]

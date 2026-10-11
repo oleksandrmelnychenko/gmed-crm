@@ -8936,6 +8936,8 @@ async fn list_relations(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
+        // Read-only, like every patient tab of the CEO Assistant (QA E-41).
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,

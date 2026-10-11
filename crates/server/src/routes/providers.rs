@@ -2034,20 +2034,32 @@ async fn list_providers_by_specializations(
     Json(providers).into_response()
 }
 
+/// The reference catalogues of the provider registry (specializations,
+/// insurance companies, taxonomy, staff roles) are read by every role that
+/// opens providers (`providers.view`), so filters and forms of read-only
+/// roles (CEO Assistant, interpreters) are not empty (QA E-41, 2026-10-11).
+/// `portal_and_admin`: the patient portal and the technical admin read the
+/// first three as before.
+#[allow(clippy::result_large_err)]
+fn require_provider_catalog_read(
+    auth: &AuthUser,
+    portal_and_admin: bool,
+) -> Result<(), axum::response::Response> {
+    if auth.can(Capability::ProvidersView)
+        || (portal_and_admin && matches!(auth.role, Role::Patient | Role::ItAdmin))
+    {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
 async fn list_specializations(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListSpecializationsQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-        Role::Patient,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = require_provider_catalog_read(&auth, true) {
         return e;
     }
 
@@ -2062,15 +2074,7 @@ async fn list_insurance_providers(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListInsuranceProvidersQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-        Role::Patient,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = require_provider_catalog_read(&auth, true) {
         return e;
     }
 
@@ -2085,17 +2089,7 @@ async fn list_provider_taxonomy(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListProviderTaxonomyQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::TeamleadInterpreter,
-        Role::Interpreter,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-        Role::Patient,
-        Role::ItAdmin,
-    ]) {
+    if let Err(e) = require_provider_catalog_read(&auth, true) {
         return e;
     }
 
@@ -2893,13 +2887,7 @@ async fn list_provider_staff_roles(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListStaffRolesQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[
-        Role::Ceo,
-        Role::PatientManager,
-        Role::Concierge,
-        Role::Billing,
-        Role::Sales,
-    ]) {
+    if let Err(e) = require_provider_catalog_read(&auth, false) {
         return e;
     }
 

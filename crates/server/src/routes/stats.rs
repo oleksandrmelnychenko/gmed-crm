@@ -545,7 +545,7 @@ async fn reports_workspace(
         Vec::new()
     };
     let medical_providers = if include_medical_providers {
-        match load_report_medical_providers(&state, &taxonomy_filter).await {
+        match load_report_medical_providers(&state, can_see_financial, &taxonomy_filter).await {
             Ok(value) => value,
             Err(e) => {
                 tracing::error!(error = %e, "load report medical providers");
@@ -755,7 +755,7 @@ async fn reports_export(
         {
             (
                 "medical-provider-report.csv",
-                load_report_medical_providers(&state, &taxonomy_filter)
+                load_report_medical_providers(&state, can_see_financial, &taxonomy_filter)
                     .await
                     .map(export_medical_providers_csv),
             )
@@ -2867,8 +2867,11 @@ async fn load_report_service_types(
         .collect())
 }
 
+/// `can_see_financial`: without it (Sales) the provider's service volume is
+/// `null` like every other amount of the reports (QA E-24, 2026-10-11).
 async fn load_report_medical_providers(
     state: &AppState,
+    can_see_financial: bool,
     taxonomy_filter: &ReportTaxonomyFilter,
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
@@ -3071,9 +3074,9 @@ async fn load_report_medical_providers(
                 "active_orders": row.try_get::<i64, _>("active_orders").unwrap_or_default(),
                 "delivered_items": row.try_get::<i64, _>("delivered_items").unwrap_or_default(),
                 "doctor_count": row.try_get::<i64, _>("doctor_count").unwrap_or_default(),
-                "gross_service_volume": decimal_to_string(
+                "gross_service_volume": can_see_financial.then(|| decimal_to_string(
                     row.try_get::<Decimal, _>("gross_service_volume").unwrap_or(Decimal::ZERO)
-                ),
+                )),
                 "doctor_specialties": row.try_get::<Value, _>("doctor_specialties").unwrap_or_else(|_| json!([])),
                 "service_focus": row.try_get::<Value, _>("service_focus").unwrap_or_else(|_| json!([])),
                 "patient_country_mix": row.try_get::<Value, _>("patient_country_mix").unwrap_or_else(|_| json!([])),

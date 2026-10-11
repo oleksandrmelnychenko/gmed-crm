@@ -283,7 +283,8 @@ async fn any_role_can_list_conversations() {
         assert!(body.is_array(), "role {role} should get array");
     }
 
-    // The technical admin has no chat workspace (no `chat.use` capability).
+    // The technical admin chats with PM, Billing and the CEO only (RBAC
+    // matrix «Комунікація», QA E-03 2026-10-11).
     let (status, _) = json_request(
         &app,
         "GET",
@@ -292,7 +293,61 @@ async fn any_role_can_list_conversations() {
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn it_admin_chats_only_with_patient_manager_billing_and_ceo() {
+    let Some(app) = test_app().await else { return };
+    let tag = unique_tag("messages-it-admin");
+    let it_admin = seed_user(app.pool(), &tag, "it_admin").await;
+    let pm = seed_user(app.pool(), &tag, "patient_manager").await;
+    let billing = seed_user(app.pool(), &tag, "billing").await;
+    let sales = seed_user(app.pool(), &tag, "sales").await;
+    let interpreter = seed_user(app.pool(), &tag, "interpreter").await;
+    let it_admin_auth = auth_header_with_id("it_admin", it_admin);
+
+    let (status, peers) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/messages/allowed-peers?search={tag}"),
+        &it_admin_auth,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{peers}");
+    let ids: Vec<String> = peers
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|peer| peer["id"].as_str().map(str::to_string))
+        .collect();
+    assert!(ids.contains(&pm.to_string()), "{peers}");
+    assert!(ids.contains(&billing.to_string()), "{peers}");
+    assert!(!ids.contains(&sales.to_string()), "{peers}");
+    assert!(!ids.contains(&interpreter.to_string()), "{peers}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/messages/{pm}"),
+        &it_admin_auth,
+        Some(json!({ "message": "Wartungsfenster heute 22 Uhr" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    for (role, peer) in [("sales", sales), ("interpreter", interpreter)] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/messages/{it_admin}"),
+            &auth_header_with_id(role, peer),
+            Some(json!({ "message": "Hallo" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {body}");
+    }
 }
 
 #[tokio::test]

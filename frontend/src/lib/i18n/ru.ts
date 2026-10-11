@@ -1,4 +1,5 @@
 import type { TranslationShape as Translations } from "./translations-shape";
+import { accessSecurityRu } from "./catalogs/access-security";
 import { adminSystemRu } from "./catalogs/admin-system";
 import { auditActivityUiTextRu } from "./catalogs/audit-activity";
 import { casesClinicalRu } from "./catalogs/cases-clinical";
@@ -1816,6 +1817,7 @@ export const ru = {
   chat_hours_ago: "ч. назад",
   chat_yesterday: "Вчера",
   nav_chat: "Чат",
+  ...accessSecurityRu,
   ...adminSystemRu,
   ...casesClinicalRu,
   ...clinicalRu,

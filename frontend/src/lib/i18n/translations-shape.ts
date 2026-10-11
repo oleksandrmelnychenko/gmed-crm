@@ -1,3 +1,4 @@
+import type { AccessSecurityTranslations } from "./catalogs/access-security";
 import type { AdminSystemTranslations } from "./catalogs/admin-system";
 import type { CasesClinicalTranslations } from "./catalogs/cases-clinical";
 import type { ClinicalTranslations } from "./catalogs/clinical";
@@ -13,6 +14,7 @@ import type { SharedCoreTranslations } from "./catalogs/shared";
 import type { StaffAccessTranslations } from "./catalogs/staff-access";
 
 export type TranslationShape = SharedCoreTranslations &
+  AccessSecurityTranslations &
   AdminSystemTranslations &
   CasesClinicalTranslations &
   ClinicalTranslations &

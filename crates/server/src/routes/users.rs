@@ -200,19 +200,68 @@ fn last_ceo_protected() -> axum::response::Response {
         .into_response()
 }
 
+/// The role of a portal login: every patient and every lead (a lead gets a
+/// `patient` account at creation) signs in with it.
+pub(crate) const PORTAL_ROLE: &str = "patient";
+
 /// Patient portal accounts are created and linked only by the CEO/PM portal
 /// activation (`POST /patients/{id}/portal-account/activate`), never by the
 /// generic user administration (owner decision 2026-09-28, Q14).
 #[allow(clippy::result_large_err)]
 fn reject_patient_role(role: &str) -> Result<(), axum::response::Response> {
-    if role == "patient" {
-        Err(err(
+    if role == PORTAL_ROLE {
+        Err(err_code(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "portal_role_not_assignable",
             "Patient accounts are created through the patient portal activation",
         ))
     } else {
         Ok(())
     }
+}
+
+/// A role change never crosses the line between a portal login (patient or
+/// lead) and a staff login, for any administrator: an external person must
+/// not get a staff workspace, and a staff account must not become a portal
+/// login (QA E-30, 2026-10-11).
+#[allow(clippy::result_large_err)]
+pub(crate) fn ensure_role_change_stays_on_its_side(
+    current_role: &str,
+    new_role: &str,
+) -> Result<(), axum::response::Response> {
+    if (current_role == PORTAL_ROLE) != (new_role == PORTAL_ROLE) {
+        Err(err_code(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "portal_role_change_forbidden",
+            "Portal accounts (patients and leads) and staff accounts cannot be converted into each other",
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+/// Portal accounts belong to the patient or lead record: the generic user
+/// administration (`users.manage`, i.e. the IT admin) neither sees nor
+/// changes them. They are managed through the lead row and the patient card
+/// by the roles that issue them (CEO, Patient Manager); the CEO
+/// (`patients.edit` together with `users.manage`) keeps every action here
+/// (QA E-05, 2026-10-11).
+pub(crate) fn can_manage_portal_accounts(auth: &AuthUser) -> bool {
+    auth.can(Capability::UsersManage) && auth.can(Capability::PatientsEdit)
+}
+
+/// Whether portal accounts appear in the user administration lists (users,
+/// sessions, pending logins) of the signed-in administrator.
+pub(crate) fn can_see_portal_accounts(auth: &AuthUser) -> bool {
+    auth.can(Capability::PatientsView)
+}
+
+fn portal_account_managed_elsewhere() -> axum::response::Response {
+    err_code(
+        StatusCode::FORBIDDEN,
+        "portal_account_managed_elsewhere",
+        "Portal accounts of patients and leads are managed in the lead or patient record",
+    )
 }
 
 /// Whether another account already uses `email`, compared case-insensitively
@@ -268,8 +317,10 @@ pub(crate) async fn ensure_can_manage_target(
 /// existing account that another capability admits (`admin.security`,
 /// `admin.sessions`: unlock, forced password change, the admin-approval MFA
 /// flag, forced logout, pending logins). The technical admin runs them for
-/// every account but an existing CEO's, which only the CEO
-/// (`users.manage_ceo`) changes. Answers 404 for an unknown account.
+/// every staff account but an existing CEO's, which only the CEO
+/// (`users.manage_ceo`) changes; portal accounts of patients and leads stay
+/// with the lead and patient record ([`can_manage_portal_accounts`]).
+/// Answers 404 for an unknown account.
 #[allow(clippy::result_large_err)]
 pub(crate) async fn ensure_can_act_on_account(
     state: &AppState,
@@ -286,6 +337,13 @@ pub(crate) async fn ensure_can_act_on_account(
         })?;
     match target_role {
         None => Err(err(StatusCode::NOT_FOUND, "User not found")),
+        Some(role) if role == PORTAL_ROLE => {
+            if can_manage_portal_accounts(auth) {
+                Ok(())
+            } else {
+                Err(portal_account_managed_elsewhere())
+            }
+        }
         Some(role) => ensure_can_assign_role(auth, &role),
     }
 }
@@ -340,6 +398,9 @@ async fn list_users(
                     'concierge'
                 )
              )
+             -- Portal accounts of patients and leads are patient data: only a
+             -- role that sees patients lists them (QA E-05).
+             AND ($5::bool OR role <> 'patient')
              -- Hide external/unspecified provider staff (Внешний / не указано):
              -- they must not appear in the Users & Roles table. External
              -- interpreter profiles follow the same rule.
@@ -389,6 +450,7 @@ async fn list_users(
         .bind(query.role)
         .bind(active_only)
         .bind(assignable_only)
+        .bind(can_see_portal_accounts(&auth))
         .fetch_all(&state.db)
         .await
     {
@@ -453,9 +515,12 @@ async fn get_user(
 ) -> impl IntoResponse {
     auth.require_capability(Capability::UsersView)?;
 
-    let detail_sql = format!("SELECT {USER_SELECT_COLUMNS} FROM users WHERE users.id = $1");
+    let detail_sql = format!(
+        "SELECT {USER_SELECT_COLUMNS} FROM users WHERE users.id = $1 AND ($2::bool OR users.role <> 'patient')"
+    );
     match sqlx::query(&detail_sql)
         .bind(user_id)
+        .bind(can_see_portal_accounts(&auth))
         .fetch_optional(&state.db)
         .await
     {
@@ -643,7 +708,7 @@ async fn update_user(
     let new_email = body.email.as_deref().unwrap_or(&current_email);
     let role_changed = new_role != current_role.as_str();
     if role_changed {
-        reject_patient_role(new_role)?;
+        ensure_role_change_stays_on_its_side(&current_role, new_role)?;
     }
     if new_email != current_email.as_str() {
         match email_taken(&mut *tx, new_email, Some(user_id)).await {
@@ -1047,12 +1112,30 @@ async fn activate_user(
     }
 }
 
+/// Lifts every sign-in hold of the account (per address and account-wide
+/// counts in `login_attempt_throttle`, QA E-19) after an administrator's
+/// unlock or password reset.
+pub(crate) async fn clear_login_holds(state: &AppState, user_id: Uuid) {
+    let email: Option<String> = sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+    if let Some(email) = email
+        && let Err(error) = crate::auth::login_throttle::clear_account(&state.db, &email).await
+    {
+        tracing::warn!(%error, target = %user_id, "Failed to clear sign-in holds");
+    }
+}
+
 async fn unlock_user(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
     ensure_can_manage_target(&state, &auth, user_id).await?;
+    clear_login_holds(&state, user_id).await;
 
     let result = sqlx::query(
         r#"UPDATE users
@@ -1143,6 +1226,7 @@ async fn reset_password(
     .bind(user_id)
     .execute(&state.db)
     .await;
+    clear_login_holds(&state, user_id).await;
     crate::auth::tokens::revoke_all_families(&state.db, user_id, "password_reset").await;
     state.audit_sender.try_send(audit::domain_event(
         "reset_password",
@@ -1250,10 +1334,32 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
 }
 
+/// An error with a stable machine-readable code the UI translates.
+fn err_code(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{ResetPasswordRequest, resolve_reset_password, would_remove_last_ceo};
+    use super::{
+        ResetPasswordRequest, ensure_role_change_stays_on_its_side, resolve_reset_password,
+        would_remove_last_ceo,
+    };
     use crate::auth::password_policy::validate_password_policy;
+
+    #[test]
+    fn role_changes_never_cross_between_portal_and_staff_logins() {
+        for staff in ["ceo", "sales", "it_admin", "patient_manager"] {
+            assert!(ensure_role_change_stays_on_its_side("patient", staff).is_err());
+            assert!(ensure_role_change_stays_on_its_side(staff, "patient").is_err());
+        }
+        assert!(ensure_role_change_stays_on_its_side("sales", "billing").is_ok());
+        assert!(ensure_role_change_stays_on_its_side("patient", "patient").is_ok());
+    }
 
     #[test]
     fn last_ceo_guard_only_fires_for_the_only_active_ceo() {

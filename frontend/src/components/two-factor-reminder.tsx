@@ -8,8 +8,10 @@ import { fetchTotpStatus } from "@/pages/two-factor";
 
 /**
  * Shown on every staff page until a role that must use a second factor has
- * enrolled one. It nags rather than locks: locking would leave nobody able to
- * reach the enrolment page.
+ * enrolled one. CEO, IT Admin and Patient Manager never see it: their session
+ * is confined to the setup page (`/account/two-factor-required`) until they
+ * enrol; the banner remains for roles added through the settings while their
+ * current session lasts.
  */
 export function TwoFactorReminder() {
   const { user } = useAuth();

@@ -83,8 +83,59 @@ pub async fn load_from_db(pool: &PgPool) -> Result<TokenSettings, sqlx::Error> {
 /// Settings owned by the personnel file module.
 pub const PERSONNEL_SETTING_PREFIX: &str = "personnel_";
 
-/// List all settings as key-value pairs (for admin UI).
-pub async fn list_all(pool: &PgPool) -> Result<Vec<SettingRow>, sqlx::Error> {
+/// Technical settings the IT admin (`admin.settings`) changes: sessions,
+/// passwords, lockout, maintenance and technical housekeeping. Every other
+/// key is a business or legal decision — the agency profile with the bank
+/// account printed on invoices, VAT and tax numbers, retention periods,
+/// access periods, document rules, dunning and service lead times — and is
+/// changed by the CEO only (QA E-31, 2026-10-11). New keys are CEO-only until
+/// they are listed here.
+pub const TECHNICAL_SETTING_KEYS: &[&str] = &[
+    "access_token_minutes",
+    "refresh_token_days",
+    "max_sessions_per_user",
+    "session_idle_days",
+    "password_expire_days",
+    "password_min_length",
+    "password_require_number",
+    "password_require_uppercase",
+    "max_failed_login_attempts",
+    "lockout_duration_minutes",
+    "ip_whitelist_enabled",
+    "maintenance_mode",
+    "maintenance_message",
+    "mfa_totp_required_roles",
+    "cleanup_expired_tokens_days",
+    "cleanup_audit_http_days",
+    crate::document_signatures::closure::STUCK_DAYS_SETTING,
+];
+
+/// Whether the IT admin may change `key` (see [`TECHNICAL_SETTING_KEYS`]).
+pub fn is_technical_setting(key: &str) -> bool {
+    TECHNICAL_SETTING_KEYS.contains(&key)
+}
+
+/// Whether `key` exists for the settings page: personnel settings and the
+/// blocked countries have their own CEO pages and are not part of it.
+pub async fn is_listed_setting(pool: &PgPool, key: &str) -> Result<bool, sqlx::Error> {
+    if key.starts_with(PERSONNEL_SETTING_PREFIX)
+        || key == crate::sanctions::policy::BLOCKED_COUNTRIES_SETTING
+    {
+        return Ok(false);
+    }
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM system_settings WHERE key = $1)")
+        .bind(key)
+        .fetch_one(pool)
+        .await
+}
+
+/// List all settings as key-value pairs (for admin UI). `business_editable`:
+/// the caller may change business and legal settings too (the CEO); every
+/// row says whether this caller may change it.
+pub async fn list_all(
+    pool: &PgPool,
+    business_editable: bool,
+) -> Result<Vec<SettingRow>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT key, value::TEXT AS value_text, description, updated_at
            FROM system_settings
@@ -96,11 +147,14 @@ pub async fn list_all(pool: &PgPool) -> Result<Vec<SettingRow>, sqlx::Error> {
 
     let mut settings = Vec::with_capacity(rows.len());
     for row in rows {
+        let key: String = row.try_get("key")?;
+        let editable = business_editable || is_technical_setting(&key);
         settings.push(SettingRow {
-            key: row.try_get("key")?,
+            key,
             value: row.try_get("value_text")?,
             description: row.try_get("description")?,
             updated_at: row.try_get("updated_at")?,
+            editable,
         });
     }
     Ok(settings)
@@ -148,8 +202,8 @@ pub async fn update_setting(
             validate_string_setting(value, 160, true, "Agency bank account holder")?
         }
         "agency_bank_name" => validate_string_setting(value, 160, true, "Agency bank name")?,
-        "agency_bank_swift" => validate_string_setting(value, 32, true, "Agency SWIFT/BIC")?,
-        "agency_bank_iban" => validate_string_setting(value, 64, true, "Agency IBAN")?,
+        "agency_bank_swift" => validate_bic_setting(value)?,
+        "agency_bank_iban" => validate_iban_setting(value)?,
         "agency_vat_id" => validate_string_setting(value, 32, true, "Agency VAT ID")?,
         "agency_tax_number" => validate_string_setting(value, 32, true, "Agency tax number")?,
         "agency_country_code" => validate_string_setting(value, 2, false, "Agency country code")?,
@@ -197,6 +251,146 @@ pub struct SettingRow {
     pub value: String,
     pub description: Option<String>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
+    /// The signed-in administrator may change this setting.
+    pub editable: bool,
+}
+
+/// Length of an IBAN per country (ISO 13616 registry, SEPA countries and the
+/// usual non-SEPA partners). An unknown country falls back to the generic
+/// 15–34 character rule; the checksum is always verified.
+const IBAN_LENGTHS: &[(&str, usize)] = &[
+    ("AD", 24),
+    ("AE", 23),
+    ("AT", 20),
+    ("BE", 16),
+    ("BG", 22),
+    ("CH", 21),
+    ("CY", 28),
+    ("CZ", 24),
+    ("DE", 22),
+    ("DK", 18),
+    ("EE", 20),
+    ("ES", 24),
+    ("FI", 18),
+    ("FR", 27),
+    ("GB", 22),
+    ("GI", 23),
+    ("GR", 27),
+    ("HR", 21),
+    ("HU", 28),
+    ("IE", 22),
+    ("IS", 26),
+    ("IT", 27),
+    ("LI", 21),
+    ("LT", 20),
+    ("LU", 20),
+    ("LV", 21),
+    ("MC", 27),
+    ("MT", 31),
+    ("NL", 18),
+    ("NO", 15),
+    ("PL", 28),
+    ("PT", 25),
+    ("RO", 24),
+    ("SA", 24),
+    ("SE", 24),
+    ("SI", 19),
+    ("SK", 24),
+    ("SM", 27),
+    ("TR", 26),
+    ("UA", 29),
+    ("VA", 22),
+];
+
+/// Validates an IBAN (country code, length, ISO 7064 mod 97-10 checksum).
+/// Spaces are allowed for readability; the value is stored in the usual
+/// printed form: upper case, groups of four.
+pub fn normalize_iban(value: &str) -> Result<String, &'static str> {
+    let compact: String = value
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    if compact.len() < 15 || compact.len() > 34 {
+        return Err("IBAN must have 15 to 34 characters");
+    }
+    if !compact.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return Err("IBAN may contain only letters and digits");
+    }
+    let bytes = compact.as_bytes();
+    if !bytes[0].is_ascii_uppercase()
+        || !bytes[1].is_ascii_uppercase()
+        || !bytes[2].is_ascii_digit()
+        || !bytes[3].is_ascii_digit()
+    {
+        return Err("IBAN must start with a country code and two check digits");
+    }
+    let country = &compact[..2];
+    if let Some((_, expected)) = IBAN_LENGTHS.iter().find(|(code, _)| *code == country)
+        && compact.len() != *expected
+    {
+        return Err("IBAN has the wrong length for its country");
+    }
+    let rearranged = format!("{}{}", &compact[4..], &compact[..4]);
+    let mut remainder: u32 = 0;
+    for ch in rearranged.chars() {
+        let digits = match ch.to_digit(36) {
+            Some(value) => value,
+            None => return Err("IBAN may contain only letters and digits"),
+        };
+        remainder = if digits >= 10 {
+            (remainder * 100 + digits) % 97
+        } else {
+            (remainder * 10 + digits) % 97
+        };
+    }
+    if remainder != 1 {
+        return Err("IBAN check digits are wrong");
+    }
+    let grouped = compact
+        .as_bytes()
+        .chunks(4)
+        .map(|chunk| String::from_utf8_lossy(chunk).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ");
+    Ok(grouped)
+}
+
+/// Validates a BIC (ISO 9362): 4 letters bank code, 2 letters country,
+/// 2 letters or digits location, optionally 3 letters or digits branch.
+pub fn normalize_bic(value: &str) -> Result<String, &'static str> {
+    let compact: String = value
+        .chars()
+        .filter(|ch| !ch.is_whitespace())
+        .map(|ch| ch.to_ascii_uppercase())
+        .collect();
+    let bytes = compact.as_bytes();
+    let valid = (bytes.len() == 8 || bytes.len() == 11)
+        && bytes[..6].iter().all(u8::is_ascii_uppercase)
+        && bytes[6..].iter().all(u8::is_ascii_alphanumeric);
+    if valid {
+        Ok(compact)
+    } else {
+        Err("BIC must have 8 or 11 characters: bank code, country, location and optional branch")
+    }
+}
+
+fn validate_iban_setting(value: &str) -> Result<Value, UpdateError> {
+    if value.trim().is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    normalize_iban(value)
+        .map(Value::String)
+        .map_err(|message| UpdateError::InvalidValue(message.into()))
+}
+
+fn validate_bic_setting(value: &str) -> Result<Value, UpdateError> {
+    if value.trim().is_empty() {
+        return Ok(Value::String(String::new()));
+    }
+    normalize_bic(value)
+        .map(Value::String)
+        .map_err(|message| UpdateError::InvalidValue(message.into()))
 }
 
 #[derive(Debug)]
@@ -495,7 +689,8 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
 #[cfg(test)]
 mod tests {
     use super::{
-        UpdateError, validate_optional_website_setting, validate_positive_integer_setting,
+        UpdateError, is_technical_setting, normalize_bic, normalize_iban,
+        validate_optional_website_setting, validate_positive_integer_setting,
         validate_required_patient_documents_setting,
     };
     use serde_json::{Value, json};
@@ -524,6 +719,77 @@ mod tests {
             ),
             Err(UpdateError::InvalidValue(_))
         ));
+    }
+
+    #[test]
+    fn iban_needs_a_valid_country_length_and_checksum() {
+        assert_eq!(
+            normalize_iban("de89370400440532013000").unwrap(),
+            "DE89 3704 0044 0532 0130 00"
+        );
+        assert_eq!(
+            normalize_iban("DE02 1203 0000 0000 2020 51").unwrap(),
+            "DE02 1203 0000 0000 2020 51"
+        );
+        assert_eq!(
+            normalize_iban("AT61 1904 3002 3457 3201").unwrap(),
+            "AT61 1904 3002 3457 3201"
+        );
+        for invalid in [
+            "DE00 0000 0000 0000 0000 00",
+            "DE89 3704 0044 0532 0130 01",
+            "DE89 3704 0044 0532 0130",
+            "8937 0400 4405 3201 3000",
+            "DE89-3704-0044-0532-0130-00",
+        ] {
+            assert!(normalize_iban(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn bic_has_eight_or_eleven_characters_in_the_iso_layout() {
+        assert_eq!(normalize_bic("cobadeffxxx").unwrap(), "COBADEFFXXX");
+        assert_eq!(normalize_bic("MARK DE F1 100").unwrap(), "MARKDEF1100");
+        assert_eq!(normalize_bic("BYLADEM1").unwrap(), "BYLADEM1");
+        for invalid in [
+            "MUSTERBIC",
+            "COBA1EFF",
+            "COBADEF",
+            "COBADEFFXX",
+            "COBADE-FXXX",
+        ] {
+            assert!(normalize_bic(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn only_technical_settings_are_left_to_the_it_admin() {
+        for key in [
+            "access_token_minutes",
+            "max_failed_login_attempts",
+            "lockout_duration_minutes",
+            "signature_stuck_request_days",
+        ] {
+            assert!(is_technical_setting(key), "{key}");
+        }
+        for key in [
+            "agency_bank_iban",
+            "agency_bank_swift",
+            "agency_vat_id",
+            "agency_tax_number",
+            "agency_name",
+            "clinical_case_retention_years",
+            "patient_file_retention_days",
+            "unqualified_lead_retention_days",
+            "interpreter_booking_access_days",
+            "required_patient_documents",
+            "auto_dunning_grace_days",
+            "signature_provider_deletion_days",
+            "cleanup_audit_log_days",
+            "some_future_setting",
+        ] {
+            assert!(!is_technical_setting(key), "{key}");
+        }
     }
 
     #[test]

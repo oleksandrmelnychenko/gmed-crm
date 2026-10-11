@@ -1,6 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 
 import { useAuth } from "@/lib/auth";
+import { loginRedirectState } from "@/lib/login-redirect";
 import { useLang } from "@/lib/i18n";
 import { NavStateProvider } from "@/lib/nav-state";
 import {
@@ -15,7 +16,7 @@ import { resolveWorkspaceRailKind } from "./workspace-rail-resolver";
 import { TwoFactorReminder } from "@/components/two-factor-reminder";
 
 export function AuthenticatedAppShell() {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const { t } = useLang();
   const location = useLocation();
 
@@ -28,19 +29,19 @@ export function AuthenticatedAppShell() {
   }
 
   if (!user) {
-    return (
-      <Navigate
-        to="/login"
-        replace
-        state={{ from: `${location.pathname}${location.search}${location.hash}` }}
-      />
-    );
+    return <Navigate to="/login" replace state={loginRedirectState(signOut, location)} />;
   }
 
   // A forced password change confines the session to the gate page; every
   // other API call would answer 403 `password_change_required` anyway.
   if (user.password_change_required) {
     return <Navigate to="/account/password-required" replace />;
+  }
+
+  // A role that must use a second factor reaches only its setup until one is
+  // enrolled; the server answers 403 `totp_enrolment_required` otherwise.
+  if (user.totp_enrolment_required) {
+    return <Navigate to="/account/two-factor-required" replace />;
   }
 
   const leadCabinet = isLeadPortalUser(user);
