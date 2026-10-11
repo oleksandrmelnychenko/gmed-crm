@@ -15,6 +15,14 @@
 //!   stated through its own link (`lead_payer_statements`: the habitual
 //!   residence and, once sent, an organisation's representative and
 //!   beneficial owners) — see [`payer_subjects`];
+//! * the bank the lead will be paid from (`lead_bank`, owner decision
+//!   2026-10-11): the bank named in the payment route of the declaration
+//!   (`bank_name`, with the account country as its country), whoever answered
+//!   it — the patient in the cabinet, a paying parent, the third-party payer
+//!   through its own link or staff. Screened against list entities only with
+//!   [`SanctionsIndex::screen_bank`](super::matching::SanctionsIndex::screen_bank);
+//!   `patient-bank` while the patient pays, `payer-bank` while a third party
+//!   pays — see [`bank_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
 //!
@@ -52,6 +60,8 @@ pub enum SubjectKind {
     LeadPatient,
     LeadGuardian,
     LeadPayer,
+    /// The bank of the lead's payment route.
+    LeadBank,
     Patient,
 }
 
@@ -61,10 +71,18 @@ impl SubjectKind {
             Self::LeadPatient => "lead_patient",
             Self::LeadGuardian => "lead_guardian",
             Self::LeadPayer => "lead_payer",
+            Self::LeadBank => "lead_bank",
             Self::Patient => "patient",
         }
     }
 }
+
+/// `subject_ref` of the bank the patient pays through (the patient or nobody
+/// else declared as payer).
+pub const PATIENT_BANK_REF: &str = "patient-bank";
+/// `subject_ref` of the bank a third party (a paying parent included) pays
+/// through.
+pub const PAYER_BANK_REF: &str = "payer-bank";
 
 /// One screened person or organisation and whose record it belongs to.
 #[derive(Debug, Clone, Serialize)]
@@ -83,7 +101,12 @@ pub struct SubjectRecord {
 
 impl SubjectRecord {
     /// Citizenships and residence, the countries the country policy checks.
+    /// A bank has none: the policy is about people, the account country is
+    /// only a hint for the CEO's review.
     pub fn countries(&self) -> Vec<String> {
+        if self.kind == SubjectKind::LeadBank {
+            return Vec::new();
+        }
         let mut countries = self.subject.citizenships.clone();
         for code in &self.residence {
             if !countries.contains(code) {
@@ -433,6 +456,7 @@ fn lead_subjects_from_row(
     }
 
     subjects.extend(payer_subjects(lead_id, payer_rows));
+    subjects.extend(bank_subjects(lead_id, payer_rows));
 
     Some(LeadSubjects {
         lead_id,
@@ -628,6 +652,73 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
     subjects
 }
 
+/// The bank of the payment route among a lead's declarations (owner decision
+/// 2026-10-11, after the compliance consultant's note that the EU list names
+/// banks as well).
+///
+/// Section 8 of the declaration is one payment route per lead, whoever
+/// answered it: the patient in the cabinet, a paying parent in the own login,
+/// the third-party payer through its own link (written to the same columns)
+/// or staff. A non-empty `bank_name` is a subject of its own: an organisation
+/// by its name (in `last_name`, like an organisation payer), with the
+/// `account_country` as its country — shown to the CEO, never part of the
+/// country policy ([`SubjectRecord::countries`]). The reference says whose
+/// payment it is: [`PAYER_BANK_REF`] while a third party pays,
+/// [`PATIENT_BANK_REF`] otherwise; the risk assessment counts a hit for that
+/// subject (T16).
+pub fn bank_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
+    let mut subjects = Vec::new();
+    for row in rows {
+        let bank_name = json_text(row, "bank_name");
+        if bank_name.is_empty() {
+            continue;
+        }
+        let third_party = json_text(row, "payer_kind") == "third_party";
+        let (subject_ref, relation) = if third_party {
+            (PAYER_BANK_REF, "payer_bank")
+        } else {
+            (PATIENT_BANK_REF, "patient_bank")
+        };
+        if subjects
+            .iter()
+            .any(|record: &SubjectRecord| record.subject_ref == subject_ref)
+        {
+            continue;
+        }
+        subjects.push(SubjectRecord {
+            kind: SubjectKind::LeadBank,
+            lead_id: Some(lead_id),
+            patient_id: None,
+            subject_ref: subject_ref.to_string(),
+            subject: Subject {
+                first_name: String::new(),
+                middle_name: None,
+                last_name: bank_name,
+                date_of_birth: None,
+                citizenships: Vec::new(),
+                organisation: true,
+            },
+            residence: json_codes(row, "account_country"),
+            relation: Some(relation.to_string()),
+        });
+    }
+    subjects
+}
+
+/// Possible matches of one subject: a bank against the listed entities by
+/// the distinctive words of its name, everybody else by the person or
+/// organisation matcher.
+pub fn screen_subject(
+    index: &super::matching::SanctionsIndex,
+    record: &SubjectRecord,
+) -> Vec<Match> {
+    if record.kind == SubjectKind::LeadBank {
+        index.screen_bank(&record.subject)
+    } else {
+        index.screen(&record.subject)
+    }
+}
+
 /// A patient as a subject; `None` for missing, prospective, deleted or
 /// anonymised records.
 pub async fn load_patient_subject(
@@ -781,8 +872,7 @@ async fn compute_matches(
         subjects
             .into_iter()
             .map(|record| {
-                let matches = index
-                    .screen(&record.subject)
+                let matches = screen_subject(&index, &record)
                     .into_iter()
                     .map(|found| (index.entry(found.entry_index).clone(), found))
                     .collect();
@@ -1565,6 +1655,110 @@ mod tests {
             })],
         );
         assert_eq!(plain[0].residence, ["AT"]);
+    }
+
+    #[test]
+    fn the_bank_of_the_payment_route_is_an_organisation_subject_of_whoever_pays() {
+        let lead_id = Uuid::new_v4();
+        // The patient pays: the patient's bank, the account country as hint.
+        let own = bank_subjects(
+            lead_id,
+            &[json!({
+                "payer_kind": "self",
+                "payment_method": "bank_transfer",
+                "bank_name": " Testgrad Commerce Bank ",
+                "account_country": "RU",
+            })],
+        );
+        assert_eq!(own.len(), 1);
+        let bank = &own[0];
+        assert_eq!(bank.kind, SubjectKind::LeadBank);
+        assert_eq!(bank.kind.as_str(), "lead_bank");
+        assert_eq!(bank.lead_id, Some(lead_id));
+        assert_eq!(bank.subject_ref, PATIENT_BANK_REF);
+        assert_eq!(bank.relation.as_deref(), Some("patient_bank"));
+        assert!(bank.subject.organisation);
+        assert_eq!(bank.subject.first_name, "");
+        assert_eq!(bank.subject.last_name, "Testgrad Commerce Bank");
+        assert_eq!(bank.residence, ["RU"]);
+        // The account country is no citizenship or residence of a person.
+        assert!(bank.countries().is_empty());
+        assert_eq!(bank.snapshot()["organisation"], true);
+
+        // A third party (a paying parent included) pays: the payer's bank.
+        let payer = bank_subjects(
+            lead_id,
+            &[json!({
+                "payer_kind": "third_party",
+                "payer_type": "person",
+                "first_name": "Viktor",
+                "last_name": "Zahler",
+                "bank_name": "Severoprom Bank",
+                "account_country": "BY",
+                "payer_statement": null,
+            })],
+        );
+        assert_eq!(payer.len(), 1);
+        assert_eq!(payer[0].subject_ref, PAYER_BANK_REF);
+        assert_eq!(payer[0].relation.as_deref(), Some("payer_bank"));
+        // The payer itself stays a subject of its own.
+        assert_eq!(
+            payer_subjects(
+                lead_id,
+                &[json!({
+                    "payer_kind": "third_party",
+                    "first_name": "Viktor",
+                    "last_name": "Zahler",
+                    "bank_name": "Severoprom Bank",
+                })]
+            )
+            .len(),
+            1
+        );
+        // No bank named, no subject.
+        for row in [
+            json!({ "payer_kind": "self", "payment_method": "cash" }),
+            json!({ "payer_kind": "self", "bank_name": "   " }),
+            json!({ "payer_kind": "third_party", "bank_name": null }),
+        ] {
+            assert!(
+                bank_subjects(lead_id, std::slice::from_ref(&row)).is_empty(),
+                "{row}"
+            );
+        }
+        assert_ne!(
+            subject_fingerprint(&own[0].subject),
+            subject_fingerprint(&payer[0].subject)
+        );
+    }
+
+    #[test]
+    fn a_bank_is_screened_by_the_bank_matcher() {
+        let index = crate::sanctions::matching::SanctionsIndex::build(
+            crate::sanctions::fsf::parse_fsf_xml(include_bytes!(
+                "testdata/synthetic_fsf_1_1_banks.xml"
+            ))
+            .unwrap()
+            .entries,
+        );
+        let lead_id = Uuid::new_v4();
+        let record = |name: &str| {
+            bank_subjects(
+                lead_id,
+                &[json!({ "payer_kind": "self", "bank_name": name, "account_country": "DE" })],
+            )
+            .remove(0)
+        };
+        assert_eq!(
+            screen_subject(&index, &record("Testgrad Commerce Bank")).len(),
+            1
+        );
+        assert!(screen_subject(&index, &record("Deutsche Bank")).is_empty());
+        // Word order and the generic word do not matter; the word alone
+        // matches nothing.
+        let generic = record("Bank Testgrad Commerce");
+        assert_eq!(screen_subject(&index, &generic).len(), 1);
+        assert!(screen_subject(&index, &record("Bank")).is_empty());
     }
 
     #[test]

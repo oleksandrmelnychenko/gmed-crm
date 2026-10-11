@@ -66,8 +66,45 @@ const hit = (status: "open" | "false_positive" | "confirmed" = "open") => ({
   created_at: "2026-10-03T08:00:00Z",
 });
 
-async function setup(page: Page, lang = "ru") {
-  let current = hit();
+/** A possible match of the bank a third-party payer pays through (owner decision 2026-10-11). */
+const bankHit = (status: "open" | "false_positive" | "confirmed" = "open") => {
+  const bank = {
+    first_name: "",
+    middle_name: null,
+    last_name: "Testgrad Commerce Bank",
+    date_of_birth: null,
+    citizenships: [],
+    residence: ["RU"],
+    organisation: true,
+    relation: "payer_bank",
+  };
+  return {
+    ...hit(status),
+    subject_kind: "lead_bank",
+    subject_ref: "payer-bank",
+    owner_name: "Anna Muster",
+    subject_snapshot: bank,
+    current_subject: { ...bank },
+    list_logical_id: "900301",
+    list_entry: {
+      logical_id: "900301",
+      eu_reference: "EU.9003.01",
+      subject_type: "entity",
+      names: [{ whole_name: "Testgrad Commerce Bank PJSC" }, { whole_name: "PAO Testgradkommerzbank" }],
+      birth_dates: [],
+      citizenships: [],
+      regulations: [{ programme: "RUS", number_title: "2099/4 (OJ L 4)", publication_date: "2099-04-01" }],
+      remark: "Synthetic test bank",
+    },
+    score: 1,
+    match_details: { score: 1, name_score: 1, matched_name: "Testgrad Commerce Bank PJSC", dob: "unknown", citizenship: "unknown" },
+  };
+};
+
+type HitFactory = (status?: "open" | "false_positive" | "confirmed") => ReturnType<typeof hit> | ReturnType<typeof bankHit>;
+
+async function setup(page: Page, lang = "ru", make: HitFactory = hit) {
+  let current = make();
   const calls: { method: string; path: string; payload: unknown }[] = [];
   await page.addInitScript((value) => {
     localStorage.setItem("gmed_access_token", "sanctions-ui-test");
@@ -102,7 +139,7 @@ async function setup(page: Page, lang = "ru") {
     }
     if (path === `/sanctions/hits/${HIT_ID}/decision`) {
       const payload = route.request().postDataJSON() as { decision: "false_positive" | "confirmed" };
-      current = hit(payload.decision);
+      current = make(payload.decision);
       body = current;
     }
     await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
@@ -158,6 +195,50 @@ test("FiSaLis opens without any data in the URL and the name goes to the clipboa
   expect(popup.url()).toBe("https://www.finanz-sanktionsliste.de/fisalis/");
   await expect(card.getByRole("status")).toContainText("Testomir Korneev");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Testomir Korneev");
+});
+
+test("a hit on the payer's bank says whose bank it is and FiSaLis gets the bank's name", async ({
+  page,
+  context,
+  baseURL,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(baseURL!).origin });
+  const { calls } = await setup(page, "ru", bankHit);
+  const card = page.getByTestId("sanctions-hit");
+  await expect(card.getByTestId("sanctions-hit-kind")).toHaveText("Банк плательщика");
+  await expect(card).toContainText("Testgrad Commerce Bank PJSC");
+  await expect(card).toContainText("Страна счёта");
+  // A bank has no birth date or citizenship of ours.
+  await expect(card).not.toContainText("Дата рождения");
+  await page.screenshot({ path: "../tmp/sanctions-review-bank.png", fullPage: true });
+
+  const popupPromise = context.waitForEvent("page");
+  await card.getByRole("button", { name: "Проверить в FiSaLis" }).click();
+  const popup = await popupPromise;
+  await popup.waitForLoadState();
+  expect(popup.url()).toBe("https://www.finanz-sanktionsliste.de/fisalis/");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("Testgrad Commerce Bank");
+
+  // Decided like any other hit.
+  await card.getByRole("button", { name: "Ложное совпадение" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Причина").fill("Other bank, BIC and seat checked");
+  await dialog.getByRole("button", { name: "Ложное совпадение" }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(calls).toEqual([
+    {
+      method: "POST",
+      path: `/sanctions/hits/${HIT_ID}/decision`,
+      payload: { decision: "false_positive", reason: "Other bank, BIC and seat checked" },
+    },
+  ]);
+});
+
+test("a hit on the patient's bank in German", async ({ page }) => {
+  await setup(page, "de", (status) => ({ ...bankHit(status), subject_ref: "patient-bank" }));
+  const card = page.getByTestId("sanctions-hit");
+  await expect(card.getByTestId("sanctions-hit-kind")).toHaveText("Bank des Patienten");
+  await expect(card).toContainText("Kontoland");
 });
 
 test("confirming warns that the stop is final (German, phone width)", async ({ page }) => {

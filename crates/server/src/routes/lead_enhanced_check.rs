@@ -243,21 +243,30 @@ pub(crate) async fn load_subjects(
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
            LEFT JOIN LATERAL (
                SELECT COUNT(*) FILTER (
-                          WHERE h.subject_kind IN ('lead_patient', 'patient')
+                          WHERE h.subject_kind IN ('lead_patient', 'patient', 'lead_bank')
+                            AND h.subject_ref <> 'payer-bank'
                             AND h.status = 'confirmed'
                       ) AS patient_confirmed,
                       COUNT(*) FILTER (
-                          WHERE h.subject_kind IN ('lead_patient', 'patient')
+                          WHERE h.subject_kind IN ('lead_patient', 'patient', 'lead_bank')
+                            AND h.subject_ref <> 'payer-bank'
                             AND h.status = 'open'
                       ) AS patient_open,
                       COUNT(*) FILTER (
-                          WHERE h.subject_kind = 'lead_payer' AND h.status = 'confirmed'
+                          WHERE (h.subject_kind = 'lead_payer'
+                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
+                            AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
-                          WHERE h.subject_kind = 'lead_payer' AND h.status = 'open'
+                          WHERE (h.subject_kind = 'lead_payer'
+                                 OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
+                            AND h.status = 'open'
                       ) AS payer_open
                FROM sanctions_hits h
-               WHERE (h.lead_id = l.id AND h.subject_kind IN ('lead_patient', 'lead_payer'))
+               -- A hit on the bank counts for whoever pays through it (owner
+               -- decision 2026-10-11).
+               WHERE (h.lead_id = l.id
+                      AND h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank'))
                   -- The patient record of a repeat intake or of the converted lead.
                   OR (h.subject_kind = 'patient'
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))

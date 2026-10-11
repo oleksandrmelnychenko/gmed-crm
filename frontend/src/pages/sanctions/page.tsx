@@ -55,12 +55,23 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function SubjectDetails({ subject, t, lang }: { subject: SubjectData; t: Translations; lang: "ru" | "de" }) {
+function SubjectDetails({
+  subject,
+  bank,
+  t,
+  lang,
+}: {
+  subject: SubjectData;
+  bank: boolean;
+  t: Translations;
+  lang: "ru" | "de";
+}) {
   // An organisation has no birth date and no citizenship (QA 2026-10-10): its country is the seat.
+  // A bank's country is the country of the account (owner decision 2026-10-11).
   const organisation = subject.organisation;
   return (
     <dl className="space-y-2">
-      <Row label={organisation ? t.sanctions_field_entity : t.sanctions_field_names}>
+      <Row label={bank ? t.sanctions_field_bank : organisation ? t.sanctions_field_entity : t.sanctions_field_names}>
         {fisalisSearchText(subject)}
       </Row>
       {organisation ? null : (
@@ -70,9 +81,19 @@ function SubjectDetails({ subject, t, lang }: { subject: SubjectData; t: Transla
         </>
       )}
       {subject.residence && subject.residence.length > 0 ? (
-        <Row label={organisation ? t.sanctions_field_seat : t.sanctions_field_residence}>{countryList(subject.residence, lang)}</Row>
+        <Row
+          label={
+            bank
+              ? t.sanctions_field_account_country
+              : organisation
+                ? t.sanctions_field_seat
+                : t.sanctions_field_residence
+          }
+        >
+          {countryList(subject.residence, lang)}
+        </Row>
       ) : null}
-      {subject.relation && subject.relation !== "payer" ? (
+      {subject.relation && subject.relation !== "payer" && !bank ? (
         <Row label={t.sanctions_field_relation}>{subject.relation}</Row>
       ) : null}
     </dl>
@@ -94,7 +115,9 @@ function HitCard({
   const subject = hit.current_subject ?? hit.subject_snapshot;
   const changed = subjectChanged(hit);
   const entry = hit.list_entry;
+  // For a bank FiSaLis is searched by the bank's name as well.
   const name = fisalisSearchText(subject);
+  const bank = hit.subject_kind === "lead_bank";
 
   const openFisalis = () => {
     // The name goes to the clipboard, never into the URL; FiSaLis opens empty.
@@ -124,7 +147,9 @@ function HitCard({
             <StatusBadge tone={hit.status === "confirmed" ? "error" : hit.status === "open" ? "warning" : "neutral"}>
               {hitStatusLabel(hit.status, t)}
             </StatusBadge>
-            <span className="text-sm font-semibold">{subjectKindLabel(hit.subject_kind, t)}</span>
+            <span className="text-sm font-semibold" data-testid="sanctions-hit-kind">
+              {subjectKindLabel(hit.subject_kind, t, hit.subject_ref)}
+            </span>
             {hit.owner_name ? <span className="text-sm text-muted-foreground">· {hit.owner_name}</span> : null}
             {hit.patient_number ? <span className="font-mono text-xs text-muted-foreground">{hit.patient_number}</span> : null}
           </div>
@@ -145,11 +170,11 @@ function HitCard({
       <div className="grid gap-4 lg:grid-cols-2">
         <section className={cn("space-y-3 rounded-lg p-3", tokens.surface.mutedCard)}>
           <h3 className="text-sm font-semibold">{t.sanctions_our_person}</h3>
-          <SubjectDetails subject={subject} t={t} lang={lang} />
+          <SubjectDetails subject={subject} bank={bank} t={t} lang={lang} />
           {changed ? (
             <div className="space-y-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
               <p>{t.sanctions_snapshot_differs}</p>
-              <SubjectDetails subject={hit.subject_snapshot} t={t} lang={lang} />
+              <SubjectDetails subject={hit.subject_snapshot} bank={bank} t={t} lang={lang} />
             </div>
           ) : null}
         </section>

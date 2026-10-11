@@ -19,6 +19,13 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
     'name:' || lower(NULLIF(btrim(o.payer_contact_name), ''))
 )"#;
 
+/// A sanctions hit (`h`) on the payer's side: the third-party payer and the
+/// people behind it, and the bank the payer pays through (owner decision
+/// 2026-10-11). Every other hit of the lead — the patient, a guardian, the
+/// bank the patient pays through — is the patient's side (T16).
+pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind = 'lead_payer' \
+     OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))";
+
 /// The inputs of a lead; `None` when the lead does not exist.
 pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Inputs>, sqlx::Error> {
     let Some(subjects) = lead_enhanced_check::load_subjects(conn, lead_id).await? else {
@@ -63,8 +70,8 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
            LEFT JOIN lead_payer_statements s ON s.lead_id = l.id
            LEFT JOIN LATERAL (
-               SELECT bool_or(h.subject_kind <> 'lead_payer') AS patient_hit,
-                      bool_or(h.subject_kind = 'lead_payer') AS payer_hit
+               SELECT bool_or(NOT {PAYER_SIDE_HIT_SQL}) AS patient_hit,
+                      bool_or({PAYER_SIDE_HIT_SQL}) AS payer_hit
                FROM sanctions_hits h
                WHERE h.status IN ('open', 'confirmed')
                  AND ((h.lead_id = l.id AND h.subject_kind <> 'patient')

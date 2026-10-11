@@ -6,6 +6,7 @@ import { ALL_STAFF_ROLES, canAccessStaffRoute, listStaffNavItems } from "@/lib/s
 import type { LeadSanctionsStatus, SanctionsHit } from "./api";
 import {
   FISALIS_URL,
+  PAYER_BANK_REF,
   fisalisSearchText,
   formatListBirthDate,
   isSanctionsGateError,
@@ -18,6 +19,7 @@ import {
   safeLegalActUrl,
   scorePercent,
   subjectChanged,
+  subjectKindLabel,
 } from "./model";
 
 const ru = t("ru");
@@ -82,6 +84,31 @@ describe("FiSaLis manual check", () => {
     expect(fisalisSearchText({ first_name: " Anna ", middle_name: null, last_name: "Beispiel" })).toBe("Anna Beispiel");
     expect(FISALIS_URL).toBe("https://www.finanz-sanktionsliste.de/fisalis/");
     expect(new URL(FISALIS_URL).search).toBe("");
+  });
+
+  it("copies a bank's name for the search like an organisation's", () => {
+    expect(fisalisSearchText({ first_name: "", middle_name: null, last_name: "Testgrad Commerce Bank" })).toBe(
+      "Testgrad Commerce Bank",
+    );
+  });
+});
+
+describe("hit subject labels", () => {
+  it("says whose bank a bank hit is about", () => {
+    expect(subjectKindLabel("lead_bank", ru, "payer-bank")).toBe("Банк плательщика");
+    expect(subjectKindLabel("lead_bank", de, "payer-bank")).toBe("Bank des Zahlers");
+    expect(subjectKindLabel("lead_bank", ru, "patient-bank")).toBe("Банк пациента");
+    expect(subjectKindLabel("lead_bank", de, "patient-bank")).toBe("Bank des Patienten");
+    // An unknown or missing reference is the patient's own bank.
+    expect(subjectKindLabel("lead_bank", ru)).toBe("Банк пациента");
+    expect(PAYER_BANK_REF).toBe("payer-bank");
+  });
+
+  it("keeps the labels of persons and payers", () => {
+    expect(subjectKindLabel("lead_payer", ru)).toBe(ru.sanctions_kind_lead_payer);
+    expect(subjectKindLabel("lead_patient", de, "")).toBe(de.sanctions_kind_lead_patient);
+    expect(subjectKindLabel("lead_guardian", ru, "contact-1")).toBe(ru.sanctions_kind_lead_guardian);
+    expect(subjectKindLabel("patient", de)).toBe(de.sanctions_kind_patient);
   });
 });
 

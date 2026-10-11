@@ -305,6 +305,72 @@ pub fn organisation_tokens(value: &str) -> Vec<NameToken> {
         .collect()
 }
 
+/// Words of a bank's name that say "a bank" or "a joint-stock company" and
+/// nothing about which one (owner decision 2026-10-11): bank names consist
+/// largely of them (`PJSC Sberbank`, `AO Testgrad Commerce Bank`), so they
+/// never decide a match on their own. Legal forms are dropped already by
+/// [`organisation_tokens`]. Written as typed; compared in canonical form.
+const BANK_GENERIC_WORDS: &[&str] = &[
+    "bank",
+    "banks",
+    "banka",
+    "banca",
+    "banco",
+    "banque",
+    "banken",
+    "bankas",
+    "bankasi",
+    "банк",
+    "банка",
+    "public",
+    "joint",
+    "stock",
+    "open",
+    "closed",
+    "company",
+    "commercial",
+    "публичное",
+    "акционерное",
+    "общество",
+    "открытое",
+    "закрытое",
+    "коммерческий",
+    "акціонерне",
+    "товариство",
+];
+
+fn bank_generic_canons() -> &'static std::collections::HashSet<String> {
+    static CANONS: std::sync::OnceLock<std::collections::HashSet<String>> =
+        std::sync::OnceLock::new();
+    CANONS.get_or_init(|| {
+        BANK_GENERIC_WORDS
+            .iter()
+            .flat_map(|word| name_tokens(word))
+            .map(|token| token.canon)
+            .collect()
+    })
+}
+
+/// Whether a canonical token is a generic word of a bank's name.
+pub fn is_bank_generic(canon: &str) -> bool {
+    bank_generic_canons().contains(canon)
+}
+
+/// Whether a dictionary token of a bank's name tells nothing: a generic bank
+/// word or a single letter (`S.p.A.` splits into letters).
+pub fn is_bank_noise(canon: &str) -> bool {
+    canon.chars().count() < 2 || is_bank_generic(canon)
+}
+
+/// The tokens that tell one bank from another: the organisation tokens
+/// without the generic bank words (`Deutsche Bank AG` → `deutsche`).
+pub fn bank_distinctive_tokens(value: &str) -> Vec<NameToken> {
+    organisation_tokens(value)
+        .into_iter()
+        .filter(|token| !is_bank_noise(&token.canon))
+        .collect()
+}
+
 /// Normalises a stored country value to an ISO 3166-1 alpha-2 code. Accepts
 /// codes and the country names and demonyms older records hold (English,
 /// German, Russian, Ukrainian). Returns `None` when the value is unknown.
@@ -451,6 +517,38 @@ mod tests {
             .map(|token| token.canon)
             .collect();
         assert_eq!(tokens, vec!["romashka", "trading"]);
+    }
+
+    #[test]
+    fn bank_names_keep_only_their_distinctive_words() {
+        let distinctive = |value: &str| -> Vec<String> {
+            bank_distinctive_tokens(value)
+                .into_iter()
+                .map(|token| token.canon)
+                .collect()
+        };
+        assert_eq!(distinctive("Deutsche Bank AG"), canon("Deutsche"));
+        assert_eq!(distinctive("VTB Bank (PJSC)"), canon("VTB"));
+        assert_eq!(distinctive("Sberbank of Russia"), canon("Sberbank Russia"));
+        assert_eq!(distinctive("ПАО Сбербанк"), canon("Sberbank"));
+        assert_eq!(
+            distinctive("Public Joint Stock Company Testgrad Commerce Bank"),
+            canon("Testgrad Commerce")
+        );
+        assert_eq!(distinctive("Banca Esempio S.p.A."), canon("Esempio"));
+        // Nothing but generic words and legal forms.
+        for generic in [
+            "Bank",
+            "PJSC Bank",
+            "AO Банк",
+            "OOO",
+            "JSC Bank Ltd",
+            "Bank GmbH",
+        ] {
+            assert!(distinctive(generic).is_empty(), "{generic}");
+        }
+        assert!(is_bank_generic("bank"));
+        assert!(!is_bank_generic("sberbank"));
     }
 
     #[test]

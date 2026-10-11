@@ -19,6 +19,8 @@ export interface SanctionsTranslations {
   sanctions_kind_lead_guardian: string;
   sanctions_kind_lead_payer: string;
   sanctions_kind_patient: string;
+  sanctions_kind_patient_bank: string;
+  sanctions_kind_payer_bank: string;
   sanctions_our_person: string;
   sanctions_list_entry: string;
   sanctions_field_names: string;
@@ -26,6 +28,8 @@ export interface SanctionsTranslations {
   sanctions_field_citizenships: string;
   sanctions_field_residence: string;
   sanctions_field_seat: string;
+  sanctions_field_bank: string;
+  sanctions_field_account_country: string;
   sanctions_field_relation: string;
   sanctions_field_regulation: string;
   sanctions_field_eu_reference: string;
@@ -159,6 +163,8 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_kind_lead_guardian: "Родитель / опекун",
   sanctions_kind_lead_payer: "Плательщик",
   sanctions_kind_patient: "Пациент",
+  sanctions_kind_patient_bank: "Банк пациента",
+  sanctions_kind_payer_bank: "Банк плательщика",
   sanctions_our_person: "Наши данные",
   sanctions_list_entry: "Запись в списке ЕС",
   sanctions_field_names: "Имена",
@@ -166,6 +172,8 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_field_citizenships: "Гражданство",
   sanctions_field_residence: "Страна проживания",
   sanctions_field_seat: "Страна регистрации",
+  sanctions_field_bank: "Банк",
+  sanctions_field_account_country: "Страна счёта",
   sanctions_field_relation: "Отношение",
   sanctions_field_regulation: "Правовой акт / программа",
   sanctions_field_eu_reference: "Номер ЕС",
@@ -309,6 +317,8 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_kind_lead_guardian: "Elternteil / Vormund",
   sanctions_kind_lead_payer: "Zahler",
   sanctions_kind_patient: "Patient",
+  sanctions_kind_patient_bank: "Bank des Patienten",
+  sanctions_kind_payer_bank: "Bank des Zahlers",
   sanctions_our_person: "Unsere Daten",
   sanctions_list_entry: "Eintrag der EU-Liste",
   sanctions_field_names: "Namen",
@@ -316,6 +326,8 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_field_citizenships: "Staatsangehörigkeit",
   sanctions_field_residence: "Wohnsitzland",
   sanctions_field_seat: "Sitzland",
+  sanctions_field_bank: "Bank",
+  sanctions_field_account_country: "Kontoland",
   sanctions_field_relation: "Beziehung",
   sanctions_field_regulation: "Rechtsakt / Programm",
   sanctions_field_eu_reference: "EU-Referenz",

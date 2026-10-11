@@ -70,7 +70,17 @@ export function fisalisSearchText(subject: Pick<SubjectData, "first_name" | "mid
     .join(" ");
 }
 
-export function subjectKindLabel(kind: SubjectKind, t: Translations): string {
+/** `subject_ref` of the bank a third party pays through. */
+export const PAYER_BANK_REF = "payer-bank";
+
+/**
+ * What the hit is about. A bank says whose payment route it is: the payer's
+ * bank (`subject_ref` "payer-bank") or the patient's.
+ */
+export function subjectKindLabel(kind: SubjectKind, t: Translations, subjectRef?: string | null): string {
+  if (kind === "lead_bank") {
+    return subjectRef === PAYER_BANK_REF ? t.sanctions_kind_payer_bank : t.sanctions_kind_patient_bank;
+  }
   return {
     lead_patient: t.sanctions_kind_lead_patient,
     lead_guardian: t.sanctions_kind_lead_guardian,

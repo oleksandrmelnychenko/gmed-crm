@@ -22,7 +22,9 @@ use chrono::{Datelike, NaiveDate};
 use serde::Serialize;
 
 use super::fsf::{ListBirthDate, ListEntry, SubjectType};
-use super::normalize::{NameToken, name_tokens, organisation_tokens};
+use super::normalize::{
+    NameToken, bank_distinctive_tokens, is_bank_noise, name_tokens, organisation_tokens,
+};
 
 /// A token pair below this similarity does not count as matched.
 pub const TOKEN_MATCH_MIN: f64 = 0.85;
@@ -46,6 +48,9 @@ pub const EXTRA_SUBJECT_TOKEN_PENALTY: f64 = 0.02;
 pub const EXTRA_LIST_TOKEN_PENALTY: f64 = 0.01;
 /// A single-word organisation name needs at least this many letters.
 pub const MIN_SINGLE_ORGANISATION_TOKEN_CHARS: usize = 4;
+/// A bank's single distinctive word needs at least this many letters
+/// (`VTB`); words of up to [`SHORT_TOKEN_MAX_CHARS`] letters must be equal.
+pub const MIN_BANK_TOKEN_CHARS: usize = 3;
 
 /// Jaro-Winkler similarity (prefix scale 0.1, at most four prefix letters).
 pub fn jaro_winkler(left: &str, right: &str) -> f64 {
@@ -195,6 +200,9 @@ struct IndexedEntry {
 /// once, so one subject is compared against each spelling only once.
 pub struct SanctionsIndex {
     dictionary: Vec<NameToken>,
+    /// Per dictionary token: a generic word of a bank's name
+    /// ([`is_bank_noise`]), left out when a bank is screened.
+    bank_noise: Vec<bool>,
     entries: Vec<IndexedEntry>,
 }
 
@@ -232,8 +240,13 @@ impl SanctionsIndex {
             }
             indexed.push(IndexedEntry { entry, variants });
         }
+        let bank_noise = dictionary
+            .iter()
+            .map(|token| is_bank_noise(&token.canon))
+            .collect();
         Self {
             dictionary,
+            bank_noise,
             entries: indexed,
         }
     }
@@ -256,10 +269,57 @@ impl SanctionsIndex {
             return Vec::new();
         }
         let prepared = PreparedSubject::new(subject);
-        let similarities: Vec<Vec<f64>> = prepared
-            .tokens
-            .iter()
-            .map(|(token, _)| {
+        let similarities = self.similarities(prepared.tokens.iter().map(|(token, _)| token));
+        let wanted = if subject.organisation {
+            SubjectType::Entity
+        } else {
+            SubjectType::Person
+        };
+        self.collect_matches(subject, wanted, |token_ids| {
+            if subject.organisation {
+                organisation_name_score(&prepared, &similarities, token_ids)
+            } else {
+                person_name_score(&prepared, &similarities, token_ids)
+            }
+        })
+    }
+
+    /// Possible matches of a bank (owner decision 2026-10-11): list entities
+    /// only, by the distinctive words of the name on both sides
+    /// ([`bank_distinctive_tokens`]), so `Deutsche Bank` never matches
+    /// `VTB Bank` through the word "bank", and a name of generic words alone
+    /// matches nothing. Either side's distinctive words must all be found in
+    /// the other (`Sberbank` / `Sberbank of Russia`), every word left over
+    /// costs [`EXTRA_SUBJECT_TOKEN_PENALTY`]; the threshold is the
+    /// organisation's. The bank's name is `subject.last_name`.
+    pub fn screen_bank(&self, subject: &Subject) -> Vec<Match> {
+        let tokens = bank_distinctive_tokens(&subject.last_name);
+        if !bank_tokens_screenable(tokens.iter().map(|token| token.canon.as_str())) {
+            return Vec::new();
+        }
+        let similarities = self.similarities(tokens.iter());
+        self.collect_matches(subject, SubjectType::Entity, |token_ids| {
+            let distinctive: Vec<u32> = token_ids
+                .iter()
+                .copied()
+                .filter(|token_id| !self.bank_noise[*token_id as usize])
+                .collect();
+            if !bank_tokens_screenable(
+                distinctive
+                    .iter()
+                    .map(|token_id| self.dictionary[*token_id as usize].canon.as_str()),
+            ) {
+                return None;
+            }
+            bank_name_score(&similarities, &distinctive)
+        })
+    }
+
+    /// Similarity of each of our tokens to each dictionary token (0 below
+    /// [`TOKEN_MATCH_MIN`]).
+    fn similarities<'a>(&self, tokens: impl Iterator<Item = &'a NameToken>) -> Vec<Vec<f64>> {
+        tokens
+            .map(|token| {
                 self.dictionary
                     .iter()
                     .map(|candidate| {
@@ -272,13 +332,17 @@ impl SanctionsIndex {
                     })
                     .collect()
             })
-            .collect();
-        let wanted = if subject.organisation {
-            SubjectType::Entity
-        } else {
-            SubjectType::Person
-        };
+            .collect()
+    }
 
+    /// The entries of type `wanted` whose best name variant (`score_variant`)
+    /// reaches the threshold after the birth-date and citizenship signals.
+    fn collect_matches(
+        &self,
+        subject: &Subject,
+        wanted: SubjectType,
+        score_variant: impl Fn(&[u32]) -> Option<f64>,
+    ) -> Vec<Match> {
         let mut matches = Vec::new();
         for (entry_index, indexed) in self.entries.iter().enumerate() {
             if indexed.entry.subject_type != wanted {
@@ -286,11 +350,7 @@ impl SanctionsIndex {
             }
             let mut best: Option<(f64, &str)> = None;
             for (display, token_ids) in &indexed.variants {
-                let score = if subject.organisation {
-                    organisation_name_score(&prepared, &similarities, token_ids)
-                } else {
-                    person_name_score(&prepared, &similarities, token_ids)
-                };
+                let score = score_variant(token_ids);
                 if let Some(score) = score
                     && best.is_none_or(|(current, _)| score > current)
                 {
@@ -458,6 +518,45 @@ fn organisation_name_score(
     }
     let weakest = scores.iter().copied().fold(1.0, f64::min);
     Some(weakest - unused_variant_tokens as f64 * EXTRA_SUBJECT_TOKEN_PENALTY)
+}
+
+/// Enough of a bank's distinctive name to compare: one word of at least
+/// [`MIN_BANK_TOKEN_CHARS`] letters (`VTB`; short words must be equal), or
+/// several.
+fn bank_tokens_screenable<'a>(mut canons: impl Iterator<Item = &'a str>) -> bool {
+    match (canons.next(), canons.next()) {
+        (None, _) => false,
+        (Some(single), None) => single.chars().count() >= MIN_BANK_TOKEN_CHARS,
+        (Some(_), Some(_)) => true,
+    }
+}
+
+/// Score of a bank's distinctive words against a variant's distinctive
+/// words: all of ours found in the variant, or all of the variant's found in
+/// ours; each word left over on either side costs a little.
+fn bank_name_score(similarities: &[Vec<f64>], token_ids: &[u32]) -> Option<f64> {
+    if similarities.is_empty() || token_ids.is_empty() {
+        return None;
+    }
+    let (scores, unused_variant_tokens) = assign(similarities, token_ids);
+    let matched: Vec<f64> = scores
+        .iter()
+        .copied()
+        .filter(|score| *score > 0.0)
+        .collect();
+    if matched.is_empty() {
+        return None;
+    }
+    let unmatched_subject_tokens = scores.len() - matched.len();
+    if unmatched_subject_tokens > 0 && unused_variant_tokens > 0 {
+        return None;
+    }
+    let weakest = matched.iter().copied().fold(1.0, f64::min);
+    Some(
+        weakest
+            - (unmatched_subject_tokens + unused_variant_tokens) as f64
+                * EXTRA_SUBJECT_TOKEN_PENALTY,
+    )
 }
 
 pub fn dob_signal(subject: Option<NaiveDate>, list: &[ListBirthDate]) -> DobSignal {
@@ -773,6 +872,129 @@ mod tests {
             ..Subject::default()
         };
         assert!(!short_organisation.is_screenable());
+    }
+
+    fn bank(name: &str) -> Subject {
+        Subject {
+            last_name: name.to_string(),
+            organisation: true,
+            ..Subject::default()
+        }
+    }
+
+    /// Banks as the EU list writes them. `Sberbank` and `VTB` stand for the
+    /// shape of real listed bank names; the others are invented.
+    fn bank_index() -> SanctionsIndex {
+        SanctionsIndex::build(vec![
+            entity(
+                "3001",
+                &["PJSC Sberbank", "Sberbank of Russia", "ПАО Сбербанк"],
+            ),
+            entity("3002", &["VTB Bank (PJSC)", "Bank VTB"]),
+            entity(
+                "3003",
+                &["Testgrad Commerce Bank PJSC", "PAO Testgradkommerzbank"],
+            ),
+            // A listed person whose name has a bank's word in it.
+            person("3004", &["Viktor SBERBANKOV"], None, None, &[]),
+            entity("3005", &["OOO Polartek Shipping Ltd"]),
+        ])
+    }
+
+    fn bank_ids(index: &SanctionsIndex, name: &str) -> Vec<String> {
+        index
+            .screen_bank(&bank(name))
+            .iter()
+            .map(|found| index.entry(found.entry_index).logical_id.clone())
+            .collect()
+    }
+
+    #[test]
+    fn a_listed_bank_matches_in_its_spellings_and_longer_or_shorter_names() {
+        let index = bank_index();
+        for name in [
+            "Sberbank",
+            "SBERBANK",
+            "Sberbank of Russia",
+            "Сбербанк",
+            "ПАО Сбербанк России",
+            "PAO Sberbank",
+            "Sberbank Europe AG",
+        ] {
+            assert_eq!(bank_ids(&index, name), vec!["3001"], "{name}");
+        }
+        for name in ["VTB Bank", "VTB", "Bank VTB (PJSC)"] {
+            assert_eq!(bank_ids(&index, name), vec!["3002"], "{name}");
+        }
+        for name in [
+            "Testgrad Commerce Bank",
+            "AO Testgrad Commerce Bank",
+            "Testgradkommerzbank",
+        ] {
+            assert_eq!(bank_ids(&index, name), vec!["3003"], "{name}");
+        }
+        let found = index.screen_bank(&bank("Sberbank of Russia"));
+        assert_eq!(found[0].matched_name, "Sberbank of Russia");
+        assert_eq!(found[0].score, 1.0);
+        // One word more on either side costs a little, still a possible match.
+        let shorter = index.screen_bank(&bank("Sberbank Rossii"));
+        assert!(shorter[0].score < 1.0 && shorter[0].score >= POSSIBLE_MATCH_THRESHOLD);
+    }
+
+    #[test]
+    fn generic_bank_words_and_legal_forms_never_match_alone() {
+        let index = bank_index();
+        for name in [
+            "Deutsche Bank",
+            "Deutsche Bank AG",
+            "Commerzbank AG",
+            "Musterbank",
+            "Beispiel Sparkasse",
+            "Bank",
+            "PJSC Bank",
+            "AO Bank",
+            "OAO Банк",
+            "ZAO Bank",
+            "OOO Bank",
+            "JSC Bank",
+            "Bank GmbH",
+            "Bank Ltd",
+            "Banca",
+            "Банк",
+            "Public Joint Stock Company Bank",
+            "",
+        ] {
+            assert!(bank_ids(&index, name).is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_bank_is_compared_with_entities_only() {
+        let index = bank_index();
+        // The listed person "Viktor Sberbankov" is no bank.
+        assert_eq!(bank_ids(&index, "Sberbank"), vec!["3001"]);
+        assert!(!bank_ids(&index, "Viktor Sberbankov").contains(&"3004".to_string()));
+        // A listed company that is not a bank is still an entity of the list.
+        assert_eq!(bank_ids(&index, "Polartek Shipping"), vec!["3005"]);
+    }
+
+    #[test]
+    fn the_synthetic_bank_list_file_lists_its_banks() {
+        let parsed = crate::sanctions::fsf::parse_fsf_xml(include_bytes!(
+            "testdata/synthetic_fsf_1_1_banks.xml"
+        ))
+        .unwrap();
+        assert_eq!(parsed.entries.len(), 5);
+        let index = SanctionsIndex::build(parsed.entries);
+        let ids = |name: &str| bank_ids(&index, name);
+        assert_eq!(ids("Testgrad Commerce Bank"), vec!["900301"]);
+        assert_eq!(ids("Тестградкоммерцбанк"), vec!["900301"]);
+        assert_eq!(ids("Severoprom Bank"), vec!["900302"]);
+        assert_eq!(ids("JSC Severoprom"), vec!["900302"]);
+        assert!(ids("Deutsche Bank").is_empty());
+        assert!(ids("Musterbank").is_empty());
+        // Persons of the list are never a bank's match.
+        assert!(ids("Testomir Korneev").is_empty());
     }
 
     #[test]

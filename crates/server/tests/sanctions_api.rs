@@ -17,6 +17,9 @@ use gmed_server::auth::jwt;
 
 const TEST_SECRET: &str = "test-secret-at-least-32-characters-long!!";
 const SYNTHETIC_LIST: &str = include_str!("../src/sanctions/testdata/synthetic_fsf_1_1.xml");
+/// The next list version: the same entries and two invented listed banks.
+const SYNTHETIC_BANK_LIST: &str =
+    include_str!("../src/sanctions/testdata/synthetic_fsf_1_1_banks.xml");
 
 struct TestApp {
     suite: support::TestSuiteContext,
@@ -1416,4 +1419,256 @@ async fn an_open_hit_is_a_knockout_and_only_a_false_positive_withdraws_it() {
         .unwrap_or_else(|| panic!("no withdrawal: {after}"));
     assert_eq!(withdrawn["cause"], "hit_decision");
     assert_eq!(withdrawn["actor"], json!(app.ceo_id));
+}
+
+/// Section 8 as any writer stores it (the cabinet, the payer's own link,
+/// staff): the bank and the account country of a transfer.
+async fn set_payment_route(app: &TestApp, lead_id: Uuid, bank_name: &str, account_country: &str) {
+    let updated = sqlx::query(
+        r#"UPDATE lead_payer_declarations
+           SET payment_method = 'bank_transfer', bank_name = $2, account_country = $3,
+               updated_at = now()
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .bind(bank_name)
+    .bind(account_country)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(updated.rows_affected(), 1);
+}
+
+async fn declare_payer(app: &TestApp, lead_id: Uuid, body: Value) {
+    let (code, response) = request(
+        app,
+        "POST",
+        &format!("/leads/{lead_id}/payer-declaration"),
+        &app.pm(),
+        Some(body),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{response}");
+}
+
+/// T16 of the risk assessment after a restart by the CEO, by subject.
+async fn t16_subjects(app: &TestApp, lead_id: Uuid) -> Vec<String> {
+    let (code, body) = request(
+        app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    let mut subjects: Vec<String> = body["triggers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|trigger| trigger["key"] == "T16")
+        .map(|trigger| trigger["subject"].as_str().unwrap_or_default().to_string())
+        .collect();
+    subjects.sort();
+    subjects
+}
+
+async fn qualify(app: &TestApp, lead_id: Uuid) -> (StatusCode, Value) {
+    request(
+        app,
+        "POST",
+        &format!("/leads/{lead_id}/qualify"),
+        &app.pm(),
+        Some(json!({ "status": "qualified" })),
+    )
+    .await
+}
+
+async fn decide(app: &TestApp, hit_id: &str, decision: &str, reason: &str) {
+    let (code, body) = request(
+        app,
+        "POST",
+        &format!("/sanctions/hits/{hit_id}/decision"),
+        &app.ceo(),
+        Some(json!({ "decision": decision, "reason": reason })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+
+    // The patient pays from a bank that is not listed yet.
+    let own = insert_lead(
+        &app,
+        "Anna",
+        "Muster",
+        Some("1990-02-02"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    declare_payer(
+        &app,
+        own,
+        json!({ "payer_kind": "self", "source_of_funds": "employment" }),
+    )
+    .await;
+    lead_status(&app, own).await;
+    set_payment_route(&app, own, "Testgrad Commerce Bank", "RU").await;
+    assert!(
+        lead_is_queued(&app, own).await,
+        "a change of the bank queues the lead"
+    );
+    let status = lead_status(&app, own).await;
+    assert_eq!(status["screening"], "clear", "{status}");
+    // The account country is no citizenship or residence: no country block.
+    assert_eq!(status["country"]["found"], json!([]), "{status}");
+
+    // A third party pays from a bank that is not on any list.
+    let paid = insert_lead(
+        &app,
+        "Ben",
+        "Muster",
+        Some("1985-03-03"),
+        &["DE"],
+        json!([]),
+    )
+    .await;
+    declare_payer(
+        &app,
+        paid,
+        json!({
+            "payer_kind": "third_party",
+            "first_name": "Viktor",
+            "last_name": "Zahler",
+            "source_of_funds": "savings"
+        }),
+    )
+    .await;
+    set_payment_route(&app, paid, "Deutsche Bank AG", "DE").await;
+    assert_eq!(lead_status(&app, paid).await["screening"], "clear");
+
+    // The next list version names the bank: the re-screening of every open
+    // lead finds it.
+    let (code, body) = upload_list(&app, &app.ceo(), SYNTHETIC_BANK_LIST).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["outcome"]["result"], "imported", "{body}");
+    assert_eq!(body["outcome"]["entries"], 5);
+    assert_eq!(body["rescreen"]["new_hits"], 1, "{body}");
+    let status = lead_status(&app, own).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    assert_eq!(
+        status["sanctions_block"]["code"],
+        "sanctions_review_pending"
+    );
+    assert_eq!(lead_status(&app, paid).await["screening"], "clear");
+    let hits = open_hits(&app).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let own_hit = hits[0].clone();
+    assert_eq!(own_hit["subject_kind"], "lead_bank", "{own_hit}");
+    assert_eq!(own_hit["subject_ref"], "patient-bank", "{own_hit}");
+    assert_eq!(own_hit["lead_id"], json!(own));
+    assert_eq!(own_hit["owner_name"], "Anna Muster");
+    assert_eq!(own_hit["list_logical_id"], "900301");
+    assert_eq!(own_hit["list_entry"]["subject_type"], "entity");
+    let subject = &own_hit["current_subject"];
+    assert_eq!(subject["organisation"], true, "{own_hit}");
+    assert_eq!(subject["last_name"], "Testgrad Commerce Bank", "{own_hit}");
+    assert_eq!(subject["residence"], json!(["RU"]), "{own_hit}");
+    assert_eq!(subject["relation"], "patient_bank", "{own_hit}");
+    assert_eq!(
+        own_hit["subject_snapshot"]["last_name"],
+        "Testgrad Commerce Bank"
+    );
+    // The CEO is told without the bank's or the patient's name.
+    let notifications: Vec<(String, String)> = sqlx::query_as(
+        "SELECT title, COALESCE(body, '') FROM user_notifications WHERE user_id = $1 AND kind = 'sanctions_possible_match'",
+    )
+    .bind(app.ceo_id)
+    .fetch_all(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(notifications.len(), 1);
+    for (title, body) in &notifications {
+        for name in ["Testgrad", "Muster"] {
+            assert!(
+                !title.contains(name) && !body.contains(name),
+                "{title} {body}"
+            );
+        }
+    }
+
+    // The payer names the listed bank in another spelling: re-screened at
+    // once, the payer's bank.
+    set_payment_route(&app, paid, "PAO Testgradkommerzbank", "RU").await;
+    assert!(lead_is_queued(&app, paid).await);
+    assert_eq!(lead_status(&app, paid).await["screening"], "review_pending");
+    let payer_hit = open_hits(&app)
+        .await
+        .into_iter()
+        .find(|hit| hit["lead_id"] == json!(paid))
+        .unwrap();
+    assert_eq!(payer_hit["subject_kind"], "lead_bank");
+    assert_eq!(payer_hit["subject_ref"], "payer-bank");
+    assert_eq!(payer_hit["current_subject"]["relation"], "payer_bank");
+    // The payer itself is no match.
+    assert!(
+        open_hits(&app)
+            .await
+            .iter()
+            .all(|hit| hit["subject_kind"] == "lead_bank")
+    );
+
+    // The hold is the one of any open hit.
+    for lead in [own, paid] {
+        let (code, body) = qualify(&app, lead).await;
+        assert_eq!(code, StatusCode::CONFLICT, "{body}");
+        assert_eq!(body["error"], "sanctions_review_pending");
+    }
+
+    // T16 belongs to whoever pays through the bank.
+    assert_eq!(t16_subjects(&app, own).await, vec!["patient"]);
+    assert_eq!(t16_subjects(&app, paid).await, vec!["payer"]);
+
+    // The CEO decides: the patient's bank is another bank, the payer's bank
+    // is the listed one.
+    decide(
+        &app,
+        own_hit["id"].as_str().unwrap(),
+        "false_positive",
+        "Other bank: BIC and seat in Germany checked",
+    )
+    .await;
+    let status = lead_status(&app, own).await;
+    assert_eq!(status["screening"], "clear", "{status}");
+    assert!(t16_subjects(&app, own).await.is_empty());
+    let (_, body) = qualify(&app, own).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    // The same bank screened again keeps the decision.
+    set_payment_route(&app, own, "Testgrad Commerce Bank", "RU").await;
+    assert_eq!(lead_status(&app, own).await["screening"], "clear");
+
+    decide(
+        &app,
+        payer_hit["id"].as_str().unwrap(),
+        "confirmed",
+        "Listed bank, same name and seat as the EU entry",
+    )
+    .await;
+    let status = lead_status(&app, paid).await;
+    assert_eq!(status["screening"], "confirmed", "{status}");
+    let (code, body) = qualify(&app, paid).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_confirmed");
+    assert_eq!(t16_subjects(&app, paid).await, vec!["payer"]);
+
+    // Another bank later does not undo the confirmation.
+    set_payment_route(&app, paid, "Deutsche Bank AG", "DE").await;
+    assert_eq!(lead_status(&app, paid).await["screening"], "confirmed");
 }
