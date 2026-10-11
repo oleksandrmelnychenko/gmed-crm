@@ -11,7 +11,7 @@ import type {
   RecipientType,
   RepresentativeSlot,
 } from "./lead-request-api";
-import { recipientFieldOf, type PayerChoice, type RecipientDraft } from "./lead-request-recipient-model";
+import { recipientFieldOf, type PayerChoice, type PayerParty, type RecipientDraft } from "./lead-request-recipient-model";
 import {
   BILLING_SUBMIT_FIELDS,
   INVOICE_FIELDS,
@@ -215,7 +215,18 @@ export type LeadRequestText = {
     paymentReason: string;
     email: string;
     phone: string;
-    isPayerQuestion: string;
+    /** The box "the invoice recipient is also the payer", ticked by default (owner 2026-10-11). */
+    isPayer: string;
+    /**
+     * Unticked with a third-party recipient: the patient pays, or another
+     * person or organisation (owner 2026-10-11). A parent's login reads the
+     * first answer as "I pay (as a parent)". With the patient side as
+     * recipient only the second is left, shown as a note.
+     */
+    payerParty: Record<PayerParty, string>;
+    payerPartyGuardian: Record<PayerParty, string>;
+    /** "The payer is" a private person or an organisation: the payer's data follow. */
+    payerTypeQuestion: string;
     /** "Who pays" when the recipient does not: one answer of a list. */
     payerSection: string;
     payerQuestion: string;
@@ -535,7 +546,7 @@ export function recipientFieldLabel(text: LeadRequestText, field: keyof Recipien
     case "recipient":
       return text.recipient.question;
     case "is_payer":
-      return text.recipient.isPayerQuestion;
+      return text.recipient.isPayer;
     case "type":
       return text.recipient.typeQuestion;
     case "first_name":
@@ -707,7 +718,7 @@ export function submitFieldLabel(
   if (field in text.fields) return text.fields[field as PersonalField];
   // Step 3: the two questions stand alone, a field of the third party carries the recipient.
   if (field === "invoice_recipient") return text.recipient.question;
-  if (field === "invoice_recipient_is_payer") return text.recipient.isPayerQuestion;
+  if (field === "invoice_recipient_is_payer") return text.recipient.isPayer;
   const recipientField = recipientFieldOf(field);
   if (recipientField) return `${text.recipient.missingPrefix}: ${recipientFieldLabel(text, recipientField)}`;
   if (field === "payer_kind" || field === "payer_own_account" || field === "payer_beneficial_owner") {
@@ -941,7 +952,16 @@ const de: LeadRequestText = {
     paymentReason: "Warum erfolgt die Zahlung über die Organisation?",
     email: "E-Mail",
     phone: "Telefon",
-    isPayerQuestion: "Ist der Rechnungsempfänger auch der Zahler?",
+    isPayer: "Der Rechnungsempfänger ist auch der Zahler",
+    payerParty: {
+      patient: "Zahler ist die Patientin / der Patient",
+      other: "Zahler ist eine andere Person oder Organisation",
+    },
+    payerPartyGuardian: {
+      patient: "Zahler bin ich (als Elternteil)",
+      other: "Zahler ist eine andere Person oder Organisation",
+    },
+    payerTypeQuestion: "Zahler ist",
     payerSection: "Zahler",
     payerQuestion: "Wer ist der Zahler?",
     payerOptions: {
@@ -1122,14 +1142,14 @@ const de: LeadRequestText = {
   sectionPaymentRoute: "Zahlungsweg",
   sectionBillingSummary: "Rechnung und Zahlung",
   billingFields: {
-    invoice_to: "Wohin soll die Rechnung gehen?",
+    invoice_to: "Wer ist Rechnungsempfänger?",
     invoice_name: "Name auf der Rechnung",
     invoice_street: "Straße und Hausnummer",
     invoice_zip: "PLZ",
     invoice_city: "Ort",
     invoice_country: "Land",
     invoice_email: "E-Mail für Rechnungen (optional)",
-    payment_method: "Wie werden Sie bezahlen?",
+    payment_method: "Welche Zahlungsart für Rechnungen bevorzugen Sie?",
     payment_method_details: "Bitte beschreiben",
     account_country: "Land des Kontos",
     account_holder: "Kontoinhaber/in",
@@ -1138,16 +1158,16 @@ const de: LeadRequestText = {
     via_third_party_details: "Bitte beschreiben (wer, welcher Dienst)",
   },
   invoiceToOptions: {
-    self: "An mich",
-    payer: "An die zahlende Person / Organisation",
-    other: "An eine andere Adresse",
+    self: "Ich",
+    payer: "Die zahlende Person / Organisation",
+    other: "Eine andere Person (andere Anschrift)",
   },
   invoiceToOptionsGuardian: {
-    self: "An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)",
-    payer: "An die zahlende Person / Organisation",
-    other: "An eine andere Adresse",
+    self: "Die Patientin / der Patient (bei Minderjährigen die gesetzlichen Vertreter)",
+    payer: "Die zahlende Person / Organisation",
+    other: "Eine andere Person (andere Anschrift)",
   },
-  invoiceToMeAsPayer: "An mich (ich zahle)",
+  invoiceToMeAsPayer: "Ich (ich zahle)",
   invoiceEmailHint: "Wenn leer, verwenden wir Ihre Kontaktadresse.",
   vatHint: "USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.",
   paymentMethodOptions: {
@@ -1430,7 +1450,16 @@ const ru: LeadRequestText = {
     paymentReason: "Почему оплата через организацию?",
     email: "E-mail",
     phone: "Телефон",
-    isPayerQuestion: "Получатель счёта является плательщиком?",
+    isPayer: "Получатель счёта является плательщиком",
+    payerParty: {
+      patient: "Плательщиком счёта является пациент",
+      other: "Плательщиком счёта является другое лицо или организация",
+    },
+    payerPartyGuardian: {
+      patient: "Плательщиком счёта являюсь я (как родитель)",
+      other: "Плательщиком счёта является другое лицо или организация",
+    },
+    payerTypeQuestion: "Плательщиком является",
     payerSection: "Плательщик",
     payerQuestion: "Кто является плательщиком?",
     payerOptions: {
@@ -1611,14 +1640,14 @@ const ru: LeadRequestText = {
   sectionPaymentRoute: "Способ оплаты",
   sectionBillingSummary: "Счёт и оплата",
   billingFields: {
-    invoice_to: "Куда направить счёт?",
+    invoice_to: "Кто является получателем счёта?",
     invoice_name: "Имя или название на счёте",
     invoice_street: "Улица и дом",
     invoice_zip: "Почтовый индекс",
     invoice_city: "Город",
     invoice_country: "Страна",
     invoice_email: "E-mail для счетов (необязательно)",
-    payment_method: "Как вы будете платить?",
+    payment_method: "Какой способ оплаты счетов вы предпочитаете?",
     payment_method_details: "Опишите, пожалуйста",
     account_country: "Страна счёта",
     account_holder: "Владелец счёта",
@@ -1627,16 +1656,16 @@ const ru: LeadRequestText = {
     via_third_party_details: "Опишите, пожалуйста (кто, какой сервис)",
   },
   invoiceToOptions: {
-    self: "Мне",
-    payer: "Плательщику (лицу или организации, которая платит)",
-    other: "На другой адрес",
+    self: "Я",
+    payer: "Плательщик (лицо или организация, которая платит)",
+    other: "Другое лицо (другой адрес)",
   },
   invoiceToOptionsGuardian: {
-    self: "Пациенту (для несовершеннолетних — законным представителям)",
-    payer: "Плательщику (лицу или организации, которая платит)",
-    other: "На другой адрес",
+    self: "Пациент (для несовершеннолетних — законные представители)",
+    payer: "Плательщик (лицо или организация, которая платит)",
+    other: "Другое лицо (другой адрес)",
   },
-  invoiceToMeAsPayer: "Мне (я плачу)",
+  invoiceToMeAsPayer: "Я (я плачу)",
   invoiceEmailHint: "Если пусто, мы используем ваш контактный адрес.",
   vatHint: "USt-IdNr. или налоговый номер при необходимости вносит GMED.",
   paymentMethodOptions: {
@@ -1763,7 +1792,7 @@ const uk: LeadRequestText = {
     country: "Країна проживання",
     phone: "Телефон",
     primary_language: "Бажана мова",
-    has_insurance: "Чи є у вас медичне страхування?",
+    has_insurance: "Чи є у вас медична страховка?",
     insurance_type: "Тип страхування",
     insurance_provider: "Страхова компанія",
     insurance_number: "Номер поліса",
@@ -1901,7 +1930,7 @@ const uk: LeadRequestText = {
   payerBlockPerson: "Дані платника",
   payerBlockContact: "Контакти",
   payerBlockConsent: "Згоди",
-  hasInsuranceGuardian: "Чи є в пацієнта медичне страхування?",
+  hasInsuranceGuardian: "Чи є в пацієнта медична страховка?",
   recipient: {
     section: "Отримувач рахунку",
     question: "Хто є отримувачем рахунку?",
@@ -1920,7 +1949,16 @@ const uk: LeadRequestText = {
     paymentReason: "Чому оплата через організацію?",
     email: "E-mail",
     phone: "Телефон",
-    isPayerQuestion: "Отримувач рахунку є платником?",
+    isPayer: "Отримувач рахунку є платником",
+    payerParty: {
+      patient: "Платником рахунку є пацієнт",
+      other: "Платником рахунку є інша особа або організація",
+    },
+    payerPartyGuardian: {
+      patient: "Платником рахунку є я (як один із батьків)",
+      other: "Платником рахунку є інша особа або організація",
+    },
+    payerTypeQuestion: "Платником є",
     payerSection: "Платник",
     payerQuestion: "Хто є платником?",
     payerOptions: {
@@ -2101,14 +2139,14 @@ const uk: LeadRequestText = {
   sectionPaymentRoute: "Спосіб оплати",
   sectionBillingSummary: "Рахунок і оплата",
   billingFields: {
-    invoice_to: "Куди надсилати рахунок?",
+    invoice_to: "Хто є отримувачем рахунку?",
     invoice_name: "Ім'я або назва на рахунку",
     invoice_street: "Вулиця і будинок",
     invoice_zip: "Поштовий індекс",
     invoice_city: "Місто",
     invoice_country: "Країна",
     invoice_email: "E-mail для рахунків (необов'язково)",
-    payment_method: "Як ви будете платити?",
+    payment_method: "Якому способу оплати рахунків ви надаєте перевагу?",
     payment_method_details: "Опишіть, будь ласка",
     account_country: "Країна рахунку",
     account_holder: "Власник рахунку",
@@ -2117,16 +2155,16 @@ const uk: LeadRequestText = {
     via_third_party_details: "Опишіть, будь ласка (хто, який сервіс)",
   },
   invoiceToOptions: {
-    self: "Мені",
-    payer: "Платнику (особі або організації, яка платить)",
-    other: "На іншу адресу",
+    self: "Я",
+    payer: "Платник (особа або організація, яка платить)",
+    other: "Інша особа (інша адреса)",
   },
   invoiceToOptionsGuardian: {
-    self: "Пацієнту (для неповнолітніх — законним представникам)",
-    payer: "Платнику (особі або організації, яка платить)",
-    other: "На іншу адресу",
+    self: "Пацієнт (для неповнолітніх — законні представники)",
+    payer: "Платник (особа або організація, яка платить)",
+    other: "Інша особа (інша адреса)",
   },
-  invoiceToMeAsPayer: "Мені (я плачу)",
+  invoiceToMeAsPayer: "Я (я плачу)",
   invoiceEmailHint: "Якщо порожньо, ми використаємо вашу контактну адресу.",
   vatHint: "USt-IdNr. або податковий номер за потреби вносить GMED.",
   paymentMethodOptions: {
@@ -2410,7 +2448,16 @@ const en: LeadRequestText = {
     paymentReason: "Why is the payment made through the organisation?",
     email: "E-mail",
     phone: "Phone",
-    isPayerQuestion: "Is the invoice recipient also the payer?",
+    isPayer: "The invoice recipient is also the payer",
+    payerParty: {
+      patient: "The payer is the patient",
+      other: "The payer is another person or organisation",
+    },
+    payerPartyGuardian: {
+      patient: "The payer is me (as a parent)",
+      other: "The payer is another person or organisation",
+    },
+    payerTypeQuestion: "The payer is",
     payerSection: "Payer",
     payerQuestion: "Who is the payer?",
     payerOptions: {
@@ -2584,14 +2631,14 @@ const en: LeadRequestText = {
   sectionPaymentRoute: "Payment",
   sectionBillingSummary: "Invoice and payment",
   billingFields: {
-    invoice_to: "Where should the invoice go?",
+    invoice_to: "Who is the invoice recipient?",
     invoice_name: "Name on the invoice",
     invoice_street: "Street and number",
     invoice_zip: "Postcode",
     invoice_city: "City",
     invoice_country: "Country",
     invoice_email: "E-mail for invoices (optional)",
-    payment_method: "How will you pay?",
+    payment_method: "Which payment method do you prefer for invoices?",
     payment_method_details: "Please describe",
     account_country: "Country of the account",
     account_holder: "Account holder",
@@ -2600,16 +2647,16 @@ const en: LeadRequestText = {
     via_third_party_details: "Please describe (who, which service)",
   },
   invoiceToOptions: {
-    self: "To me",
-    payer: "To the paying person / organisation",
-    other: "To another address",
+    self: "Me",
+    payer: "The paying person / organisation",
+    other: "Another person (another address)",
   },
   invoiceToOptionsGuardian: {
-    self: "To the patient (for minors: to the legal representatives)",
-    payer: "To the paying person / organisation",
-    other: "To another address",
+    self: "The patient (for minors: the legal representatives)",
+    payer: "The paying person / organisation",
+    other: "Another person (another address)",
   },
-  invoiceToMeAsPayer: "To me (I pay)",
+  invoiceToMeAsPayer: "Me (I pay)",
   invoiceEmailHint: "If empty, we use your contact address.",
   vatHint: "GMED enters a VAT ID or tax number if needed.",
   paymentMethodOptions: {

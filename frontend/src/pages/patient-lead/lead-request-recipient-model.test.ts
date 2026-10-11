@@ -10,10 +10,13 @@ import {
   withPayerChoice,
 } from "./lead-request-model";
 import {
+  OTHER_PAYER_CHOICES,
+  PAYER_PARTIES,
   draftFromRecipient,
   flowOf,
   payerChoices,
   payerFitsFlow,
+  payerPartyOf,
   recipientFieldOf,
   recipientKey,
   recipientPatch,
@@ -85,6 +88,24 @@ describe("step 3: the invoice recipient first (owner spec 2026-10-11)", () => {
     expect(recipientFieldOf("recipient_country")).toBe("country");
     expect(recipientFieldOf("invoice_recipient")).toBe("recipient");
     expect(recipientFieldOf("payer_country")).toBeNull();
+  });
+
+  it("ticks 'the recipient is also the payer' as soon as a recipient is chosen (owner 2026-10-11)", () => {
+    const saved = draftFromRecipient(billing());
+    const own = withRecipientAnswer(saved, "self");
+    expect(own.is_payer).toBe("yes");
+    expect(recipientPatch(saved, own)).toEqual({ invoice_recipient: "self", invoice_recipient_is_payer: true });
+    // An answer given before stays with another recipient; no recipient, no answer.
+    const unticked = { ...own, is_payer: "no" };
+    expect(withRecipientAnswer(unticked, "third_party").is_payer).toBe("no");
+    expect(withRecipientAnswer(unticked, "").is_payer).toBe("");
+    // Who pays instead: the patient side or another person or organisation.
+    expect(payerPartyOf(null, false)).toBe("");
+    expect(payerPartyOf({ ...viktor, payer_kind: "self" }, false)).toBe("patient");
+    expect(payerPartyOf(viktor, false)).toBe("other");
+    expect(payerPartyOf(viktor, true)).toBe("patient");
+    expect(PAYER_PARTIES).toEqual(["patient", "other"]);
+    expect(OTHER_PAYER_CHOICES).toEqual(["person", "organisation"]);
   });
 
   it("drops what belongs to another answer", () => {

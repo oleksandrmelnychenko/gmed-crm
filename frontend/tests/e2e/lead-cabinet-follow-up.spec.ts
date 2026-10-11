@@ -621,7 +621,7 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await expect(page.getByTestId("lead-request-follow-up-A")).toHaveCount(0);
 
     const blockC = page.getByTestId("lead-request-follow-up-C");
-    await choose(page, blockC.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }), "Bar");
+    await choose(page, blockC.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugen Sie?" }), "Bar");
     await choose(page, blockC.getByRole("combobox", { name: /Erfolgt die Zahlung über eine dritte Person/ }), "Ja");
     await blockC.getByRole("textbox", { name: "Bitte beschreiben (wer, welcher Dienst)" }).fill("Mein Bruder");
     await choose(page, blockC.getByRole("combobox", { name: "Über wen erfolgt die Zahlung?" }), "Über eine andere Person");

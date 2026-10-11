@@ -24272,8 +24272,10 @@ fn build_lead_self_disclosure_pdf(
     let mut rows: Vec<(&str, Option<String>)> = Vec::new();
     if let Some(recipient) = data.invoice_recipient.as_ref() {
         let name = recipient.name.clone().unwrap_or_default();
+        // The cabinet's words (owner 2026-10-11): "Wer ist Rechnungsempfänger?"
+        // and the box "Der Rechnungsempfänger ist auch der Zahler".
         rows.push((
-            "Rechnungsempfänger",
+            "Wer ist Rechnungsempfänger?",
             Some(if !recipient.third_party {
                 if minor {
                     "Die gesetzlichen Vertreter der Patientin / des Patienten".to_string()
@@ -24287,7 +24289,7 @@ fn build_lead_self_disclosure_pdf(
             }),
         ));
         rows.push((
-            "Rechnungsempfänger ist zugleich Zahler",
+            "Der Rechnungsempfänger ist auch der Zahler",
             recipient
                 .is_payer
                 .map(|_| payer_yes_no(recipient.is_payer, None)),
@@ -24405,7 +24407,12 @@ fn build_lead_self_disclosure_pdf(
         // B5); the GwG sheet refers to this section. Only the answers, never
         // whether a method is checked separately.
         if let Some(route) = data.payment_route.as_ref() {
-            rows.push(("Zahlungsweg", route.method.as_ref().map(|_| route.line())));
+            // "Welche Zahlungsart für Rechnungen bevorzugen Sie?" (owner
+            // 2026-10-11).
+            rows.push((
+                "Bevorzugte Zahlungsart für Rechnungen",
+                route.method.as_ref().map(|_| route.line()),
+            ));
             rows.push((
                 "Zahlung über Dritte / Zahlungsdienstleister",
                 route.via_third_party.map(|_| route.third_party_line()),
@@ -34681,8 +34688,8 @@ mod tests {
             "ja – Ben Muster",
             "(rechtliche Betreuung) nein",
             "4. Wer zahlt?",
-            "Rechnungsempfänger Ich selbst",
-            "Rechnungsempfänger ist zugleich Zahler nein",
+            "Wer ist Rechnungsempfänger? Ich selbst",
+            "Der Rechnungsempfänger ist auch der Zahler nein",
             "E-Mail für Rechnungen rechnung.anna@example.com",
             "Eine andere Person",
             "Viktor Zahler",
@@ -34882,7 +34889,7 @@ mod tests {
         for expected in [
             "4. Wer zahlt?",
             "Ich zahle selbst.",
-            "Zahlungsweg Barzahlung",
+            "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
             "Zahlung über Dritte / Zahlungsdienstleister nein",
             "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
         ] {
@@ -34928,7 +34935,7 @@ mod tests {
             "A-20261010-0001",
             "Ein Elternteil (gesetzliche Vertretung)",
             "Name Sofia Muster",
-            "Zahlungsweg Überweisung",
+            "Bevorzugte Zahlungsart für Rechnungen Überweisung",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }

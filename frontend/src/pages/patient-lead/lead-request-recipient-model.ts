@@ -15,8 +15,12 @@ import type {
 //
 //   "Кто является получателем счёта?"            я / третье лицо или организация
 //   a third party: физлицо / организация, with its data
-//   "Получатель счёта является плательщиком?"    да / нет
-//   only with "нет": "Кто является плательщиком?" and the payer's data
+//   [x] "Получатель счёта является плательщиком"  a box, ticked by default
+//   unticked, a third-party recipient:  "Плательщиком счёта является пациент"
+//     (a parent's login: "…являюсь я (как родитель)") / "…другое лицо или
+//     организация" with the payer's data
+//   unticked, the patient side as recipient: only "другое лицо или
+//     организация", shown at once
 //
 // The answers are stored apart (billing route, `invoice_recipient*` and
 // `recipient_*`); the payer stays the payer declaration (`POST …/payer`).
@@ -167,10 +171,15 @@ function withoutParty(draft: RecipientDraft): RecipientDraft {
   };
 }
 
-/** The draft after "who receives the invoice?": another recipient keeps nothing of the one before. */
+/**
+ * The draft after "who receives the invoice?": another recipient keeps
+ * nothing of the one before. "The recipient is also the payer" is ticked as
+ * soon as a recipient is chosen (owner 2026-10-11; the server stores the same
+ * default) and keeps an answer given before.
+ */
 export function withRecipientAnswer(draft: RecipientDraft, answer: string): RecipientDraft {
   if (answer === draft.recipient) return draft;
-  return { ...withoutParty(draft), recipient: answer, email: "", is_payer: answer ? draft.is_payer : "" };
+  return { ...withoutParty(draft), recipient: answer, email: "", is_payer: answer ? draft.is_payer || "yes" : "" };
 }
 
 /** The draft after "the recipient is": a person has no organisation's data and the other way round. */
@@ -220,6 +229,28 @@ export function payerChoices(
   }
   choices.push("person", "organisation");
   return choices;
+}
+
+/**
+ * Who pays when a third-party recipient does not (owner 2026-10-11): "the
+ * patient" — the patient himself or, for a parent's login, the paying parent
+ * — or "another person or organisation", whose data follow.
+ */
+export type PayerParty = "patient" | "other";
+
+export const PAYER_PARTIES = ["patient", "other"] as const satisfies readonly PayerParty[];
+
+/** The answers of "another person or organisation": what the payer is. */
+export const OTHER_PAYER_CHOICES = ["person", "organisation"] as const satisfies readonly PayerChoice[];
+
+/**
+ * The answer the stored payer gives: the patient (or the paying parent,
+ * `parentPays`) or another person or organisation; "" without a payer.
+ */
+export function payerPartyOf(payer: LeadRequestPayer | null | undefined, parentPays: boolean): PayerParty | "" {
+  if (!payer) return "";
+  if (payer.payer_kind === "self" || parentPays) return "patient";
+  return payer.payer_kind === "third_party" ? "other" : "";
 }
 
 /** "First Last" or the organisation's name of a recipient draft; "" without one. */

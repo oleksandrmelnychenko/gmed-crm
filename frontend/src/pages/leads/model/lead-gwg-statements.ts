@@ -660,7 +660,7 @@ export function billingStatements(
   const payment: BillingStatement[] = [];
   if (!byPayer || payerAnswered) {
     payment.push(
-      statement("payment_method", tx("Способ оплаты", "Zahlungsweg"), paymentMethodLabel(method, tx), {
+      statement("payment_method", tx("Предпочитаемый способ оплаты счетов", "Bevorzugte Zahlungsart für Rechnungen"), paymentMethodLabel(method, tx), {
         details: method === "other" ? billing.payment_method_details : null,
         warning: method !== null && FLAGGED_METHODS.includes(method),
       }),

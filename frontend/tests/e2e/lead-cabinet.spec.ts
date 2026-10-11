@@ -809,11 +809,11 @@ test.describe("lead cabinet", () => {
     // Who pays is part of step 3 since 2026-10-11.
     await expect(missing.getByTestId("lead-request-missing-payer")).toHaveCount(0);
     await expect(missing.getByTestId("lead-request-missing-billing")).toContainText(WHO_PAYS);
-    await expect(missing.getByTestId("lead-request-missing-billing")).toContainText("Wohin soll die Rechnung gehen?");
+    await expect(missing.getByTestId("lead-request-missing-billing")).toContainText("Wer ist Rechnungsempfänger?");
     await expect(missing.getByTestId("lead-request-missing-documents")).toContainText("Grund der Anfrage");
     // The identity document's data are staff's; the payment route is asked later if at all.
     await expect(missing).not.toContainText("Art des Dokuments");
-    await expect(missing).not.toContainText("Wie werden Sie bezahlen?");
+    await expect(missing).not.toContainText("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
 
     // "Angaben ändern" opens the first step that misses something.
     await page.getByRole("button", { name: "Angaben ändern" }).click();
@@ -862,7 +862,7 @@ test.describe("lead cabinet", () => {
     await expect(payer.getByRole("combobox", { name: "Handeln Sie im eigenen wirtschaftlichen Interesse?" })).toHaveCount(0);
 
     // The invoice goes to the patient; the payment route is no question of the base form any more.
-    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "An mich", exact: true }).check();
+    await page.getByTestId("lead-request-billing").getByRole("radio", { name: "Ich", exact: true }).check();
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_to: "self" });
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
 
@@ -1711,7 +1711,7 @@ test.describe("lead cabinet", () => {
     await expect(page.getByTestId("lead-request-summary-payer")).toContainText("Ich selbst");
     const billing = page.getByTestId("lead-request-summary-billing");
     await expect(billing).toContainText("Rechnung und Zahlung");
-    await expect(billing).toContainText("An mich");
+    await expect(billing).toContainText("Ich");
     const legal = page.getByTestId("lead-request-summary-legal");
     await expect(legal).toContainText("Üben Sie ein hochrangiges öffentliches Amt aus");
     await expect(legal.locator("dd")).toHaveText(["Nein", "Ja", "Nein"]);
@@ -1827,7 +1827,7 @@ test.describe("lead cabinet", () => {
     await page.goto("/");
     await step(page, "billing");
     const paymentRoute = page.getByTestId("lead-request-payment-route");
-    await choose(page, paymentRoute.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }), "Bar");
+    await choose(page, paymentRoute.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugen Sie?" }), "Bar");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "cash" });
     // Its extras exist with the follow-up only.
     await expect(page.getByTestId("lead-request-payment-route-extras")).toHaveCount(0);

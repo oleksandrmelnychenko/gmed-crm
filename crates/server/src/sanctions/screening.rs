@@ -745,7 +745,8 @@ pub fn bank_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
 ///
 /// A recipient pays by the server's own rule
 /// ([`SectionSeven::of_recipient`](crate::routes::lead_invoice_recipient::SectionSeven::of_recipient)):
-/// the lead answered "Ist der Rechnungsempfänger der Zahler?" with yes and
+/// the box "Der Rechnungsempfänger ist auch der Zahler" is ticked (the default
+/// once a recipient is chosen) and
 /// the declaration names a third party as payer. That recipient is the payer
 /// and screened as `lead_payer`; it is no subject here, so nobody is reviewed
 /// twice. Until a third party is declared as payer (or with "nein", or before

@@ -243,7 +243,7 @@ describe("paying parent's questionnaire: what is missing, and where", () => {
     expect(payerQuestionnaireFieldLabel(de, "pep_self")).toBe("Gesetzliche Fragen: Öffentliches Amt");
     expect(payerQuestionnaireFieldLabel(de, "pep_self_details")).toBe("Gesetzliche Fragen: Amt, Land und Zeitraum");
     expect(payerQuestionnaireFieldLabel(de, "high_risk_country_code")).toBe("Gesetzliche Fragen: Welches Land?");
-    expect(payerQuestionnaireFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
+    expect(payerQuestionnaireFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     expect(payerQuestionnaireFieldLabel(de, "relationship")).toBe("Beziehung zur Patientin / zum Patienten – In welcher Beziehung genau?");
     expect(de.payerElsewhere(de.sectionLegalRepresentatives)).toBe("Bitte im Abschnitt „Gesetzliche Vertreter“ ergänzen:");
     for (const option of LEAD_CABINET_LANGS) {

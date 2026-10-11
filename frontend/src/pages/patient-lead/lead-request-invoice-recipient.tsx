@@ -32,7 +32,6 @@ import {
   CabinetSection as Section,
   LabeledField,
   RequiredMark,
-  YesNoSelect,
   errorBody,
   useAutosave,
   type RequestQueue,
@@ -46,18 +45,21 @@ import {
   usePayerAutosave,
 } from "./lead-request-payer-section";
 import {
+  OTHER_PAYER_CHOICES,
+  PAYER_PARTIES,
   RECIPIENT_ANSWERS,
   RECIPIENT_TYPES,
   draftFromRecipient,
   flowOf,
-  payerChoices,
   payerFitsFlow,
+  payerPartyOf,
   recipientFieldOf,
   recipientPatch,
   recipientValue,
   withRecipientAnswer,
   withRecipientRelationship,
   withRecipientType,
+  type PayerParty,
   type RecipientDraft,
   type RecipientField,
 } from "./lead-request-recipient-model";
@@ -75,10 +77,13 @@ type Refused = Partial<Record<keyof RecipientDraft, string>>;
  *    data (a person: name, address, contact, relationship to the patient;
  *    an organisation: name, legal form, seat, contact person, why the
  *    payment goes through it).
- * 2. "Получатель счёта является плательщиком?" — "yes": the patient (or the
- *    paying parent) pays, or the third-party recipient is the payer with a
- *    few more of its data and the consents; "no": "who pays" and the payer's
- *    data (`PayerSection`).
+ * 2. The box "Получатель счёта является плательщиком", ticked by default
+ *    (owner 2026-10-11): the patient (or the paying parent) pays, or the
+ *    third-party recipient is the payer with a few more of its data and the
+ *    consents. Unticked, a third-party recipient: "Плательщиком счёта
+ *    является пациент" (a parent's login: "…являюсь я (как родитель)") or
+ *    "…другое лицо или организация" with the payer's data (`PayerSection`);
+ *    the patient side as recipient: only the latter, shown at once.
  *
  * The recipient saves on the billing route on its own; the payer stays the
  * payer declaration (`POST …/payer`), which the risk triggers, the payer link
@@ -148,6 +153,15 @@ export function InvoiceRecipientSection({
   // Once the payer answered on the own link, only GMED changes who pays: the answers that decide it stay.
   const locked = answered;
   const lockedParty = answered && third && recipientPays;
+  // Who pays when a third-party recipient does not: the answer chosen here, else what the stored payer says.
+  const parentPays =
+    payerAnswer(request.payer, template) === "guardian" || request.billing?.payment_route_by === "guardian";
+  const [partyChoice, setPartyChoice] = useState<PayerParty | null>(null);
+  const storedParty =
+    third && flow.isPayer === "no" && payerFitsFlow(flow, request.payer, draft, parentPays)
+      ? payerPartyOf(request.payer, parentPays)
+      : "";
+  const party = partyChoice ?? storedParty;
 
   const update = (change: (current: RecipientDraft) => RecipientDraft) => setDraft(change);
   const set = (field: RecipientField, value: string) => update((current) => ({ ...current, [field]: value }));
@@ -178,9 +192,10 @@ export function InvoiceRecipientSection({
     />
   );
 
-  /** "Is the recipient the payer?": an organisation's reason moves with it (the payer's is `payment_background`). */
+  /** "The recipient is also the payer": an organisation's reason moves with it (the payer's is `payment_background`). */
   const answerIsPayer = (answer: string) => {
     if (answer === draft.is_payer) return;
+    setPartyChoice(null);
     if (third && organisation && identification) {
       if (answer === "yes") {
         if (draft.payment_reason.trim() && !identification.draft.payment_background.trim()) {
@@ -232,7 +247,10 @@ export function InvoiceRecipientSection({
                       className={cn(checkboxClass, "mt-0.5 rounded-full")}
                       checked={checked}
                       disabled={locked}
-                      onChange={() => update((current) => withRecipientAnswer(current, answer))}
+                      onChange={() => {
+                        setPartyChoice(null);
+                        update((current) => withRecipientAnswer(current, answer));
+                      }}
                     />
                     <span className="min-w-0">{options[answer]}</span>
                   </label>
@@ -357,18 +375,72 @@ export function InvoiceRecipientSection({
           ) : null}
 
           {flow.recipient ? (
-            <LabeledField {...labeled("is_payer", true)} question>
-              <YesNoSelect
-                id="lead-request-recipient_is_payer"
-                className="sm:max-w-[calc(50%-0.5rem)]"
-                value={draft.is_payer}
-                text={text}
-                invalid={Boolean(errorFor("is_payer"))}
-                onChange={(answer) => {
-                  if (!locked) answerIsPayer(answer);
-                }}
-              />
-            </LabeledField>
+            <div className="space-y-1.5" data-testid="lead-request-recipient-is-payer">
+              {/* A box, ticked as soon as a recipient is chosen (owner 2026-10-11). */}
+              <label
+                className={cn(
+                  "flex cursor-pointer items-start gap-2.5 text-sm leading-snug",
+                  locked && "cursor-not-allowed opacity-70",
+                )}
+              >
+                <input
+                  {...control("is_payer")}
+                  type="checkbox"
+                  className={cn(checkboxClass, "mt-0.5")}
+                  checked={draft.is_payer === "yes"}
+                  disabled={locked}
+                  onChange={(event) => answerIsPayer(event.target.checked ? "yes" : "no")}
+                />
+                <span className="min-w-0">{text.recipient.isPayer}</span>
+              </label>
+              {errorFor("is_payer") ? (
+                <p id="lead-request-recipient_is_payer-error" role="alert" className="text-xs text-destructive">
+                  {errorFor("is_payer")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Unticked: who pays. A third-party recipient leaves the patient or another party. */}
+          {!answered && third && flow.isPayer === "no" ? (
+            <div
+              role="radiogroup"
+              aria-label={text.recipient.payerQuestion}
+              className="flex flex-col gap-2"
+              data-testid="lead-request-payer-party"
+            >
+              {PAYER_PARTIES.map((value) => {
+                const checked = party === value;
+                return (
+                  <label
+                    key={value}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 text-sm leading-snug",
+                      checked ? "border-[var(--brand)] bg-muted/40" : "border-border",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      id={`lead-request-payer_party-${value}`}
+                      name="lead-request-payer_party"
+                      value={value}
+                      className={cn(checkboxClass, "mt-0.5 rounded-full")}
+                      checked={checked}
+                      onChange={() => setPartyChoice(value)}
+                    />
+                    <span className="min-w-0">
+                      {(guardian ? text.recipient.payerPartyGuardian : text.recipient.payerParty)[value]}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
+          {/* The patient side as recipient: only another person or organisation can pay instead. */}
+          {!answered && flow.recipient === "self" && flow.isPayer === "no" ? (
+            <p className="text-sm leading-snug" data-testid="lead-request-payer-party-other">
+              {text.recipient.payerParty.other}
+            </p>
           ) : null}
         </div>
       </Section>
@@ -384,10 +456,10 @@ export function InvoiceRecipientSection({
           onChange={onChange}
           onSaveState={partState("payer")}
         />
-      ) : flow.isPayer === "no" ? (
+      ) : flow.isPayer === "no" && (flow.recipient === "self" || party === "other") ? (
         <PayerSection
           // Another flow: the payer form starts anew with what fits it.
-          key={`payer-${flow.recipient}`}
+          key={`payer-other-${flow.recipient}`}
           request={request}
           text={text}
           lang={lang}
@@ -395,11 +467,24 @@ export function InvoiceRecipientSection({
           enqueue={enqueue}
           onChange={onChange}
           onSaveState={partState("payer")}
-          choices={payerChoices(flow, request, template)}
+          choices={OTHER_PAYER_CHOICES}
           flow={flow}
           recipient={draft}
+          question={text.recipient.payerTypeQuestion}
         />
-      ) : flow.isPayer === "yes" && third ? (
+      ) : flow.isPayer === "no" && third && party === "patient" ? (
+        <PatientSidePayer
+          key="payer-patient"
+          request={request}
+          text={text}
+          lang={lang}
+          identification={identification}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={partState("payer")}
+        />
+      ) : flow.isPayer === "yes" && third && !draft.type ? null : flow.isPayer === "yes" && third ? (
+        // Ticked by default: the recipient is named as payer once it is a person or an organisation.
         <RecipientPayer
           request={request}
           text={text}
@@ -410,31 +495,61 @@ export function InvoiceRecipientSection({
           onSaveState={partState("payer")}
         />
       ) : flow.isPayer === "yes" && flow.recipient === "self" ? (
-        guardian && !template ? (
-          // A parent's login without own data on file names the parent who pays.
-          <PayerSection
-            key="payer-parent"
-            request={request}
-            text={text}
-            lang={lang}
-            identification={identification}
-            enqueue={enqueue}
-            onChange={onChange}
-            onSaveState={partState("payer")}
-            choices={["person"]}
-          />
-        ) : (
-          <OwnPayer
-            key="payer-own"
-            request={request}
-            enqueue={enqueue}
-            onChange={onChange}
-            onSaveState={partState("payer")}
-          />
-        )
+        <PatientSidePayer
+          key="payer-own"
+          request={request}
+          text={text}
+          lang={lang}
+          identification={identification}
+          enqueue={enqueue}
+          onChange={onChange}
+          onSaveState={partState("payer")}
+        />
       ) : null}
     </>
   );
+}
+
+/**
+ * The patient side pays: the patient himself, or — a parent's login — the
+ * parent: with the own data on file at once, otherwise the parent names
+ * himself as a person.
+ */
+function PatientSidePayer({
+  request,
+  text,
+  lang,
+  identification,
+  enqueue,
+  onChange,
+  onSaveState,
+}: {
+  request: LeadRequest;
+  text: LeadRequestText;
+  lang: string;
+  identification?: IdentificationForm;
+  enqueue: RequestQueue;
+  onChange: (request: LeadRequest) => void;
+  onSaveState: (state: SaveState) => void;
+}) {
+  const guardian = request.access_kind === "guardian";
+  const template = guardian ? (request.payer_self_template ?? null) : null;
+  if (guardian && !template) {
+    // A parent's login without own data on file names the parent who pays.
+    return (
+      <PayerSection
+        request={request}
+        text={text}
+        lang={lang}
+        identification={identification}
+        enqueue={enqueue}
+        onChange={onChange}
+        onSaveState={onSaveState}
+        choices={["person"]}
+      />
+    );
+  }
+  return <OwnPayer request={request} enqueue={enqueue} onChange={onChange} onSaveState={onSaveState} />;
 }
 
 /**

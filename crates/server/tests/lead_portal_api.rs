@@ -3716,11 +3716,26 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
     }
 
     // A third party receives the invoice: answered before anybody pays.
+    // "The recipient is also the payer" is ticked by default (owner
+    // 2026-10-11): a recipient who pays is the payer, so who pays is asked.
     let body = save(json!({ "invoice_recipient": "third_party" })).await;
     assert_eq!(
         body["billing"]["invoice_recipient"], "third_party",
         "{body}"
     );
+    assert_eq!(
+        body["billing"]["invoice_recipient_is_payer"], true,
+        "{body}"
+    );
+    assert_eq!(missing_for_step_three(&body), ["payer_kind"], "{body}");
+    // Clearing the answer keeps the default while a recipient is chosen.
+    let body = save(json!({ "invoice_recipient_is_payer": null })).await;
+    assert_eq!(
+        body["billing"]["invoice_recipient_is_payer"], true,
+        "{body}"
+    );
+    // Unticked: the third party's data count.
+    let body = save(json!({ "invoice_recipient_is_payer": false })).await;
     assert_eq!(
         missing_for_step_three(&body),
         [
@@ -3729,7 +3744,7 @@ async fn step_three_asks_the_invoice_recipient_first_and_derives_section_seven()
             "recipient_zip",
             "recipient_city",
             "recipient_country",
-            "invoice_recipient_is_payer"
+            "payer_kind"
         ],
         "{body}"
     );

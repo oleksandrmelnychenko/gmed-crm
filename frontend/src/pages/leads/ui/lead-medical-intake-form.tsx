@@ -87,7 +87,7 @@ export function LeadMedicalIntakeForm({
             { label: tx("Риск для поездки", "Gesundheitsrisiko für die Reise"), value: yesNoValue(lead.has_health_risk_for_travel, tx) },
             { label: tx("Есть медицинские документы", "Medizinische Unterlagen vorhanden"), value: optionValue(lead.has_medical_records, tx) },
             { label: tx("Документы на принятом языке", "Unterlagen in akzeptierter Sprache"), value: yesNoValue(lead.records_in_accepted_language, tx) },
-            { label: tx("Есть страховка", "Krankenversicherung vorhanden"), value: yesNoValue(lead.has_insurance, tx) },
+            { label: tx("Есть медицинская страховка", "Krankenversicherung vorhanden"), value: yesNoValue(lead.has_insurance, tx) },
             { label: tx("Страховка покрывает лечение в Германии", "Versicherungsschutz in Deutschland"), value: optionValue(lead.insurance_covers_germany, tx) },
           ]}
         />

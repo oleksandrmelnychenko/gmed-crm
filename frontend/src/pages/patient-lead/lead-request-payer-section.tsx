@@ -179,6 +179,7 @@ export function PayerSection({
   choices = ["person", "organisation"],
   flow = null,
   recipient = null,
+  question,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -198,6 +199,8 @@ export function PayerSection({
   /** Step 3's answers: a stored payer that does not fit them is shown unanswered. */
   flow?: RecipientFlow | null;
   recipient?: RecipientDraft | null;
+  /** The label of the list instead of "who is the payer?" ("the payer is", owner 2026-10-11). */
+  question?: string;
 }) {
   const guardian = request.access_kind === "guardian";
   const typed = knowsPayerType(request);
@@ -326,7 +329,10 @@ export function PayerSection({
     <div className="space-y-4" data-testid="lead-request-payer">
       <Section title={text.recipient.payerSection}>
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
-          <LabeledField {...field("payer_kind", true, "sm:col-span-2 lg:col-span-3")}>
+          <LabeledField
+            {...field("payer_kind", true, "sm:col-span-2 lg:col-span-3")}
+            label={question ?? payerFieldLabel(text, "payer_kind", guardian, payerType)}
+          >
             <NativeComboboxSelect
               {...fieldProps("payer_kind")}
               className={cn(selectClass, "sm:max-w-[calc(50%-0.5rem)]")}

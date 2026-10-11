@@ -322,7 +322,7 @@ const de: PayerLinkText = {
     high_risk_country_code: "Welches Land?",
     sanctions_links: "Bestehen Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
     sanctions_links_details: "Zu wem besteht die Verbindung und welcher Art ist sie?",
-    payment_method: "Wie werden Sie bezahlen?",
+    payment_method: "Welche Zahlungsart für Rechnungen bevorzugen Sie?",
     payment_method_details: "Bitte beschreiben",
     account_country: "Land des Kontos",
     account_holder: "Kontoinhaber/in",
@@ -340,7 +340,7 @@ const de: PayerLinkText = {
       "Haben die Organisation, die vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Sitz oder Wohnsitz in einem Land, das die EU-Kommission als Drittstaat mit hohem Risiko führt?",
     sanctions_links:
       "Bestehen bei der Organisation, den vertretungsberechtigten Personen oder wirtschaftlich Berechtigten Verbindungen zu Personen oder Unternehmen, die Sanktionen unterliegen?",
-    payment_method: "Wie erfolgt die Zahlung?",
+    payment_method: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?",
   },
   missing: {
     privacy_ack: "Bestätigung der Datenschutzhinweise",
@@ -602,7 +602,7 @@ const en: PayerLinkText = {
     high_risk_country_code: "Which country?",
     sanctions_links: "Are there any links to persons or companies that are subject to sanctions?",
     sanctions_links_details: "Who is the link to, and what kind of link is it?",
-    payment_method: "How will you pay?",
+    payment_method: "Which payment method do you prefer for invoices?",
     payment_method_details: "Please describe",
     account_country: "Country of the account",
     account_holder: "Account holder",
@@ -620,7 +620,7 @@ const en: PayerLinkText = {
       "Do the organisation, the persons authorised to represent it or its beneficial owners have their registered office or residence in a country that the EU Commission lists as a high-risk third country?",
     sanctions_links:
       "Do the organisation, the persons authorised to represent it or its beneficial owners have links to persons or companies that are subject to sanctions?",
-    payment_method: "How will the payment be made?",
+    payment_method: "Which payment method does the organisation prefer for invoices?",
   },
   missing: {
     privacy_ack: "Confirmation of the privacy information",
@@ -881,7 +881,7 @@ const uk: PayerLinkText = {
     high_risk_country_code: "Яка країна?",
     sanctions_links: "Чи є зв'язки з особами або компаніями, на які накладено санкції?",
     sanctions_links_details: "З ким є зв'язок і який саме?",
-    payment_method: "Як ви будете платити?",
+    payment_method: "Якому способу оплати рахунків ви надаєте перевагу?",
     payment_method_details: "Опишіть, будь ласка",
     account_country: "Країна рахунку",
     account_holder: "Власник рахунку",
@@ -899,7 +899,7 @@ const uk: PayerLinkText = {
       "Чи зареєстровані організація, її уповноважені представники або кінцеві бенефіціари чи проживають вони в країні, яку Європейська комісія відносить до третіх країн високого ризику?",
     sanctions_links:
       "Чи мають організація, її уповноважені представники або кінцеві бенефіціари зв'язки з особами або компаніями, на які накладено санкції?",
-    payment_method: "Як буде здійснено оплату?",
+    payment_method: "Якому способу оплати рахунків надає перевагу організація?",
   },
   missing: {
     privacy_ack: "Підтвердження інформації про захист даних",
@@ -1163,7 +1163,7 @@ const ru: PayerLinkText = {
     high_risk_country_code: "Какая страна?",
     sanctions_links: "Есть ли связи с лицами или компаниями, на которые наложены санкции?",
     sanctions_links_details: "С кем есть связь и какая именно?",
-    payment_method: "Как вы будете платить?",
+    payment_method: "Какой способ оплаты счетов вы предпочитаете?",
     payment_method_details: "Опишите, пожалуйста",
     account_country: "Страна счёта",
     account_holder: "Владелец счёта",
@@ -1181,7 +1181,7 @@ const ru: PayerLinkText = {
       "Зарегистрированы ли организация, её уполномоченные представители или конечные бенефициары или проживают ли они в стране, которую Европейская комиссия относит к третьим странам высокого риска?",
     sanctions_links:
       "Есть ли у организации, её уполномоченных представителей или конечных бенефициаров связи с лицами или компаниями, на которые наложены санкции?",
-    payment_method: "Как будет произведена оплата?",
+    payment_method: "Какой способ оплаты счетов предпочитает организация?",
   },
   missing: {
     privacy_ack: "Подтверждение информации о защите данных",

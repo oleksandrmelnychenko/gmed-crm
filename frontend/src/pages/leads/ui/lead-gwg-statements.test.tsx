@@ -659,7 +659,7 @@ describe("LeadGwgStatements: invoice recipient and payment route", () => {
       "Beispielstraße 2, 10117 Berlin, Deutschland",
       "E-Mail für Rechnungen",
       "USt-IdNr. / Steuernummer",
-      "Zahlungsweg",
+      "Bevorzugte Zahlungsart für Rechnungen",
       "Bar",
       "Zahlung über Dritte / Zahlungsdienstleister",
       "Compliance-Prüfung erforderlich: Barzahlung, Zahlung über Dritte",

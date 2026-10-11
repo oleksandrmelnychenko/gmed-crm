@@ -10716,7 +10716,7 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         "Ich zahle selbst.",
         // The payment route of the base form and the expected total (QA
         // 2026-10-10 B5).
-        "Zahlungsweg Barzahlung",
+        "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
         "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
         "Herkunft der Mittel Ersparnisse",
         "Ersparnisse aus dem Gehalt",

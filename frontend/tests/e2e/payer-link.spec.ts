@@ -914,7 +914,7 @@ test.describe("payer link", () => {
     // 6 Payment route: phase 2's fields, the holder offered.
     await expect(stepTitle(page)).toHaveText("Zahlungsweg");
     const payment = page.getByTestId("payer-link-step-payment");
-    await choose(page, payment.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }), "Überweisung");
+    await choose(page, payment.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugen Sie?" }), "Überweisung");
     await expect(payment.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveValue("Viktor Zahler");
     await choose(page, payment.getByRole("combobox", { name: "Land des Kontos" }), "Österreich");
     await payment.getByRole("textbox", { name: "Name der Bank" }).fill("Musterbank");
@@ -1051,7 +1051,7 @@ test.describe("payer link", () => {
     await expect.poll(() => q.answers.funds_sources).toEqual(["business_revenue", "loan"]);
     await next(page);
     await expect(stepTitle(page)).toHaveText("Zahlungsweg");
-    await expect(page.getByTestId("payer-link-step-payment").getByRole("combobox", { name: "Wie erfolgt die Zahlung?" })).toBeVisible();
+    await expect(page.getByTestId("payer-link-step-payment").getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?" })).toBeVisible();
     await next(page);
     // The declarations of an organisation are about its representatives and beneficial owners.
     await expect(stepTitle(page)).toHaveText("Erklärungen");
@@ -1344,7 +1344,7 @@ test.describe("payer link", () => {
       await expect(stepTitle(page)).toHaveText("Zahlungsweg");
       await expect(page.getByTestId("payer-link-payment-method-note")).toBeVisible();
       // A company is asked how the payment is made.
-      await page.getByRole("combobox", { name: "Wie erfolgt die Zahlung?" }).click();
+      await page.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?" }).click();
       const edge = await page.getByRole("option", { name: "Kryptowährung" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(edge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");

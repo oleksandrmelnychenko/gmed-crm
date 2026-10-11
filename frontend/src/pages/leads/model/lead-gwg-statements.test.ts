@@ -894,7 +894,7 @@ describe("sections 7–8 as the group shows them", () => {
       ["E-Mail für Rechnungen", ""],
     ]);
     expect(statements.payment.map((row) => [row.label, row.value, row.details, row.warning])).toEqual([
-      ["Zahlungsweg", "Überweisung", "", false],
+      ["Bevorzugte Zahlungsart für Rechnungen", "Überweisung", "", false],
       ["Land des Kontos", "Österreich", "", false],
       ["Kontoinhaber/in", "", "", false],
       ["Bank", "", "", false],

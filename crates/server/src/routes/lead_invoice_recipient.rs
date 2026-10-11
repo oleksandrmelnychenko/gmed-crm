@@ -7,9 +7,13 @@
 //!    its data: a person's name, address, contact and relationship to the
 //!    patient; an organisation's name, legal form, seat, contact person and
 //!    why the invoice goes through it.
-//! 3. "Ist der Rechnungsempfänger der Zahler?" (`recipient_is_payer`).
-//! 4. Only with "nein": the payer — the patient himself (where it makes
-//!    sense), the paying parent, a person or an organisation.
+//! 3. "Der Rechnungsempfänger ist auch der Zahler" (`recipient_is_payer`), a
+//!    checkbox ticked by default (owner 2026-10-11): choosing a recipient
+//!    stores `true` unless the body says `false`.
+//! 4. Only when unticked: the payer. A third-party recipient: "Zahler ist
+//!    die Patientin / der Patient" (for a parent's login the paying parent)
+//!    or "Zahler ist eine andere Person oder Organisation" with its data; the
+//!    patient side as recipient: only another person or organisation.
 //!
 //! The answers live in `lead_invoice_recipients`; the payer stays the payer
 //! declaration (`lead_payer_declarations`), which the risk triggers, the payer
@@ -68,7 +72,8 @@ pub(crate) const RECIPIENT_KEYS: [&str; 17] = [
 pub(crate) struct Recipient {
     /// [`RECIPIENT_SELF`] or [`RECIPIENT_THIRD_PARTY`]; `None` until answered.
     pub(crate) recipient: Option<String>,
-    /// "Ist der Rechnungsempfänger der Zahler?"
+    /// "Der Rechnungsempfänger ist auch der Zahler" (a checkbox, `true` by
+    /// default once a recipient is chosen).
     pub(crate) is_payer: Option<bool>,
     /// A third party: [`RECIPIENT_TYPE_PERSON`] or [`RECIPIENT_TYPE_ORGANISATION`].
     pub(crate) recipient_type: Option<String>,
@@ -438,8 +443,13 @@ pub(crate) fn apply(
     if next.recipient != current.recipient && !body.contains_key("recipient_email") {
         next.email = None;
     }
+    // "Der Rechnungsempfänger ist auch der Zahler" is a checkbox, ticked as
+    // soon as a recipient is chosen (owner 2026-10-11): a recipient without
+    // an answer pays, also when the body clears the answer.
     if next.recipient.is_none() {
         next.is_payer = None;
+    } else if next.is_payer.is_none() {
+        next.is_payer = Some(true);
     }
     if !next.is_third_party() {
         let email = next.email.take();
@@ -700,10 +710,12 @@ pub(crate) async fn sync_section_seven(
 /// Whether the payer named in the declaration answers step 3 as the lead
 /// answered it: with the patient side as recipient who pays, the patient
 /// himself or a minor's paying parent (`paying_parent`); as recipient who
-/// does not pay, a third party; a third-party recipient who pays, a third
-/// party; a third-party recipient who does not pay, the patient or a third
-/// party other than the recipient. Until then the cabinet asks "who pays"
-/// (`payer_kind`) and none of the payer's keys.
+/// does not pay, "another person or organisation" (a third party); a
+/// third-party recipient who pays, a third party; a third-party recipient who
+/// does not pay, "the patient" (the patient himself or, for a parent's login,
+/// the paying parent) or "another person or organisation" other than the
+/// recipient. Until then the cabinet asks "who pays" (`payer_kind`) and none
+/// of the payer's keys.
 pub(crate) fn payer_fits(
     recipient: &Recipient,
     declaration: Option<&Declaration>,
@@ -850,6 +862,22 @@ mod tests {
         assert_eq!(person.country.as_deref(), Some("DE"));
         assert_eq!(person.relationship, None);
         assert_eq!(person.name().as_deref(), Some("Viktor Zahler"));
+        // The recipient pays unless the lead unticks it (owner 2026-10-11).
+        assert_eq!(person.is_payer, Some(true));
+        let unticked = apply(
+            &person,
+            &body(json!({ "invoice_recipient_is_payer": false })),
+        )
+        .unwrap();
+        assert_eq!(unticked.is_payer, Some(false));
+        let cleared = apply(
+            &unticked,
+            &body(json!({ "invoice_recipient_is_payer": null })),
+        )
+        .unwrap();
+        assert_eq!(cleared.is_payer, Some(true));
+        let none = apply(&person, &body(json!({ "invoice_recipient": null }))).unwrap();
+        assert_eq!(none.is_payer, None);
 
         // An organisation has no person's data.
         let organisation = apply(
@@ -873,12 +901,14 @@ mod tests {
         .unwrap();
         assert_eq!(paying.payment_reason, None);
 
-        // The patient side as recipient: the third party goes, and so does its e-mail.
+        // The patient side as recipient: the third party goes, and so does its
+        // e-mail; the answer whether the recipient pays stays.
         let own = apply(&organisation, &body(json!({ "invoice_recipient": "self" }))).unwrap();
         assert_eq!(
             own,
             Recipient {
                 recipient: Some("self".into()),
+                is_payer: Some(true),
                 ..Recipient::default()
             }
         );

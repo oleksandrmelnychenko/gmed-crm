@@ -463,12 +463,12 @@ describe("lead request summary", () => {
       Land: "Deutschland",
       "E-Mail": "rechnung@example.com",
       "Warum erfolgt die Zahlung über die Organisation?": "Der Arbeitgeber erhält die Rechnung.",
-      "Ist der Rechnungsempfänger auch der Zahler?": "Nein",
+      "Der Rechnungsempfänger ist auch der Zahler": "Nein",
     });
     // Who pays: one answer, no type row; section 7 is not listed again.
     expect(rows(groups, "payer")).toMatchObject({ "Wer ist der Zahler?": "Ich selbst" });
     expect(rows(groups, "payer")).not.toHaveProperty("Art des Zahlers");
-    expect(rows(groups, "payment")).toEqual({ "Wie werden Sie bezahlen?": "Überweisung" });
+    expect(rows(groups, "payment")).toEqual({ "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Überweisung" });
     // The recipient who pays is the payer: its data are listed there.
     const paying = request({
       billing: { ...billing, invoice_recipient_is_payer: true },
@@ -485,7 +485,7 @@ describe("lead request summary", () => {
     expect(rows(payingGroups, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
       "Rechnungsempfänger ist": "eine Organisation",
-      "Ist der Rechnungsempfänger auch der Zahler?": "Ja",
+      "Der Rechnungsempfänger ist auch der Zahler": "Ja",
     });
     expect(rows(payingGroups, "payer")).toMatchObject({
       "Wer ist der Zahler?": "Eine Organisation",
@@ -721,14 +721,14 @@ describe("lead request summary", () => {
     expect(groups.map((group) => group.id).slice(5, 8)).toEqual(["payer", "billing", "legal"]);
     expect(groups.find((group) => group.id === "billing")?.title).toBe("Rechnung und Zahlung");
     expect(rows(groups, "billing")).toEqual({
-      "Wohin soll die Rechnung gehen?": "An eine andere Adresse",
+      "Wer ist Rechnungsempfänger?": "Eine andere Person (andere Anschrift)",
       "Name auf der Rechnung": "Beispiel GmbH",
       "Straße und Hausnummer": "Musterstraße 2",
       PLZ: "10115",
       Ort: "Berlin",
       Land: "Deutschland",
       "E-Mail für Rechnungen (optional)": "rechnung@example.com",
-      "Wie werden Sie bezahlen?": "Überweisung",
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Überweisung",
       "Land des Kontos": "Deutschland",
       "Kontoinhaber/in": "Anna Muster",
       "Name der Bank": "Musterbank",
@@ -743,9 +743,9 @@ describe("lead request summary", () => {
       "de",
     );
     expect(rows(self, "billing")).toEqual({
-      "Wohin soll die Rechnung gehen?": "An mich",
+      "Wer ist Rechnungsempfänger?": "Ich",
       "E-Mail für Rechnungen (optional)": "rechnung@example.com",
-      "Wie werden Sie bezahlen?": "Bar",
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Bar",
       "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?": "Nein",
     });
     // The base form asks only the method: the account holder offered from the
@@ -758,9 +758,9 @@ describe("lead request summary", () => {
       via_third_party_details: null,
     });
     expect(rows(requestSummary(request({ billing: baseOnly }), de, "de"), "billing")).toEqual({
-      "Wohin soll die Rechnung gehen?": "An mich",
+      "Wer ist Rechnungsempfänger?": "Ich",
       "E-Mail für Rechnungen (optional)": "rechnung@example.com",
-      "Wie werden Sie bezahlen?": "Überweisung",
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Überweisung",
     });
     // While block C is open the account is its question.
     expect(
@@ -779,7 +779,7 @@ describe("lead request summary", () => {
     ).toMatchObject({ "Kontoinhaber/in": "Anna Muster" });
     // "Other" shows its details.
     expect(rows(requestSummary(request({ billing: billing({ payment_method: "other", payment_method_details: "Scheck" }) }), de, "de"), "billing")).toMatchObject({
-      "Wie werden Sie bezahlen?": "Sonstiges",
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?": "Sonstiges",
       "Bitte beschreiben": "Scheck",
     });
 
@@ -790,7 +790,7 @@ describe("lead request summary", () => {
       "de",
     );
     expect(rows(payer, "billing")).toEqual({
-      "Wohin soll die Rechnung gehen?": "An die zahlende Person / Organisation",
+      "Wer ist Rechnungsempfänger?": "Die zahlende Person / Organisation",
       Zahlungsweg: "gibt die zahlende Person an",
     });
     // A paying parent reads "to me (I pay)"; a parent reads "to me" as "to the patient".
@@ -799,16 +799,16 @@ describe("lead request summary", () => {
       de,
       "de",
     );
-    expect(rows(parent, "billing")["Wohin soll die Rechnung gehen?"]).toBe("An mich (ich zahle)");
+    expect(rows(parent, "billing")["Wer ist Rechnungsempfänger?"]).toBe("Ich (ich zahle)");
     expect(
       rows(requestSummary(request({ access_kind: "guardian", billing: billing({ invoice_to: "self" }) }), de, "de"), "billing")[
-        "Wohin soll die Rechnung gehen?"
+        "Wer ist Rechnungsempfänger?"
       ],
-    ).toBe("An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)");
+    ).toBe("Die Patientin / der Patient (bei Minderjährigen die gesetzlichen Vertreter)");
     expect(rows(requestSummary(request({ billing: billing({ invoice_to: "other" }) }), leadRequestText("en"), "en"), "billing")).toMatchObject({
-      "Where should the invoice go?": "To another address",
+      "Who is the invoice recipient?": "Another person (another address)",
       Country: "Germany",
-      "How will you pay?": "Bank transfer",
+      "Which payment method do you prefer for invoices?": "Bank transfer",
     });
 
     // Nothing answered yet: no group (QA 2026-10-10).

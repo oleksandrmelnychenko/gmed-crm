@@ -424,10 +424,10 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
   return { request, calls };
 }
 
-const INVOICE_QUESTION = "Wohin soll die Rechnung gehen?";
-const METHOD_QUESTION = "Wie werden Sie bezahlen?";
+const INVOICE_QUESTION = "Wer ist Rechnungsempfänger?";
+const METHOD_QUESTION = "Welche Zahlungsart für Rechnungen bevorzugen Sie?";
 const VIA_QUESTION = /Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister\?/;
-const TO_PATIENT = "An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)";
+const TO_PATIENT = "Die Patientin / der Patient (bei Minderjährigen die gesetzlichen Vertreter)";
 
 test.describe("lead cabinet: invoice recipient and payment route", () => {
   test("an adult who pays himself answers both sections, and the request can be sent", async ({ page }) => {
@@ -450,8 +450,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     expect(order).toEqual(["Versicherung", "Zahler", "Rechnungsempfänger", "Zahlungsweg"]);
     // Nobody else pays: the invoice goes to the patient or to another address.
     await expect(billing.getByRole("radio")).toHaveCount(2);
-    await expect(billing.getByRole("radio", { name: "An mich", exact: true })).not.toBeChecked();
-    await expect(billing.getByRole("radio", { name: "An eine andere Adresse" })).toBeVisible();
+    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).not.toBeChecked();
+    await expect(billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" })).toBeVisible();
     await expect(billing.getByRole("textbox", { name: /E-Mail für Rechnungen/ })).toHaveCount(0);
     await expect(billing).not.toContainText("USt-IdNr. oder Steuernummer trägt GMED bei Bedarf ein.");
     await expect(route).toContainText("Den voraussichtlichen Gesamtbetrag trägt GMED ein.");
@@ -470,7 +470,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
 
     // "To me" asks for an e-mail for invoices, which is optional.
     await step(page, "billing");
-    await billing.getByRole("radio", { name: "An mich", exact: true }).check();
+    await billing.getByRole("radio", { name: "Ich", exact: true }).check();
     await expect.poll(() => calls.billing).toEqual([{ invoice_to: "self" }]);
     const email = billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" });
     await expect(email).toBeVisible();
@@ -517,7 +517,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       "Name der Bank",
       "Erfolgt die Zahlung über eine dritte Person oder einen Zahlungsdienstleister?",
     ]);
-    await expect(summary.locator("dd")).toHaveText(["An mich", "rechnung@example.com", "Überweisung", "Deutschland", "Anna Muster", "Musterbank", "Nein"]);
+    await expect(summary.locator("dd")).toHaveText(["Ich", "rechnung@example.com", "Überweisung", "Deutschland", "Anna Muster", "Musterbank", "Nein"]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
     await page.getByTestId("lead-request-submit").click();
     await expect(page.getByTestId("lead-request-sent")).toContainText("05.10.2026");
@@ -536,7 +536,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
 
     // Another address: name and address, and the e-mail for invoices.
     await expect(address).toHaveCount(0);
-    await billing.getByRole("radio", { name: "An eine andere Adresse" }).check();
+    await billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" }).check();
     await expect(address).toBeVisible();
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_to: "other" });
     await page.locator('[data-step="send"]').click();
@@ -606,7 +606,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     const summary = page.getByTestId("lead-request-summary-billing");
-    await expect(summary).toContainText("An eine andere Adresse");
+    await expect(summary).toContainText("Eine andere Person (andere Anschrift)");
     await expect(summary).toContainText("Beispiel GmbH");
     await expect(summary).toContainText("Karte");
     await expect(summary).toContainText("Mein Bruder zahlt über PayPal.");
@@ -622,9 +622,9 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await step(page, "billing");
     const billing = page.getByTestId("lead-request-billing");
     const missing = page.getByTestId("lead-request-missing");
-    const toPayer = billing.getByRole("radio", { name: "An die zahlende Person / Organisation" });
+    const toPayer = billing.getByRole("radio", { name: "Die zahlende Person / Organisation" });
 
-    await expect(answers(billing)).toHaveText(["An mich", "An die zahlende Person / Organisation", "An eine andere Adresse"]);
+    await expect(answers(billing)).toHaveText(["Ich", "Die zahlende Person / Organisation", "Eine andere Person (andere Anschrift)"]);
     // Section 8 asks nothing: the payer says how the treatment is paid.
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveText(
@@ -643,7 +643,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await page.locator('[data-step="send"]').click();
     await expect(missing).toHaveCount(0);
     await expect(page.getByTestId("lead-request-summary-billing").locator("dd")).toHaveText([
-      "An die zahlende Person / Organisation",
+      "Die zahlende Person / Organisation",
       "gibt die zahlende Person an",
     ]);
     await page.getByTestId("lead-request-declaration").getByRole("checkbox").check();
@@ -656,8 +656,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await step(page, "billing");
     await choose(page, page.getByTestId("lead-request-payer").getByRole("combobox", { name: "Wer ist der Zahler?" }), "Ich selbst");
     await expect.poll(() => calls.payer.at(-1)).toMatchObject({ payer_kind: "self" });
-    await expect(answers(billing)).toHaveText(["An mich", "An eine andere Adresse"]);
-    await expect(billing.getByRole("radio", { name: "An mich", exact: true })).not.toBeChecked();
+    await expect(answers(billing)).toHaveText(["Ich", "Eine andere Person (andere Anschrift)"]);
+    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).not.toBeChecked();
     const route = page.getByTestId("lead-request-payment-route");
     await expect(route).toBeVisible();
     await expect(route.getByRole("combobox", { name: METHOD_QUESTION })).toContainText("Auswählen");
@@ -685,10 +685,10 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     const billing = page.getByTestId("lead-request-billing");
     const route = page.getByTestId("lead-request-payment-route");
 
-    await expect(answers(billing)).toHaveText([TO_PATIENT, "An mich (ich zahle)", "An eine andere Adresse"]);
+    await expect(answers(billing)).toHaveText([TO_PATIENT, "Ich (ich zahle)", "Eine andere Person (andere Anschrift)"]);
     await expect(route).toBeVisible();
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toHaveCount(0);
-    await billing.getByRole("radio", { name: "An mich (ich zahle)" }).check();
+    await billing.getByRole("radio", { name: "Ich (ich zahle)" }).check();
     await expect.poll(() => calls.billing).toEqual([{ invoice_to: "payer" }]);
     await expect(billing.getByRole("textbox", { name: /E-Mail für Rechnungen/ })).toHaveCount(0);
 
@@ -705,7 +705,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
 
     await page.locator('[data-step="send"]').click();
     const summary = page.getByTestId("lead-request-summary-billing");
-    await expect(summary).toContainText("An mich (ich zahle)");
+    await expect(summary).toContainText("Ich (ich zahle)");
     await expect(summary).toContainText("Karte");
     const missing = page.getByTestId("lead-request-missing");
     await expect(missing).toContainText("Zahlungsweg: Land des Kontos");
@@ -724,7 +724,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     const billing = page.getByTestId("lead-request-billing");
     const missing = page.getByTestId("lead-request-missing");
 
-    await expect(answers(billing)).toHaveText([TO_PATIENT, "An die zahlende Person / Organisation", "An eine andere Adresse"]);
+    await expect(answers(billing)).toHaveText([TO_PATIENT, "Die zahlende Person / Organisation", "Eine andere Person (andere Anschrift)"]);
     await expect(page.getByTestId("lead-request-payment-route")).toHaveCount(0);
     await expect(page.getByTestId("lead-request-payment-route-by-payer")).toBeVisible();
     await billing.getByRole("radio", { name: TO_PATIENT }).check();
@@ -787,8 +787,8 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect.poll(() => calls.loads).toBe(loadsBefore + 1);
     expect(calls.billing).toEqual([{ payment_method: "bank_transfer", account_holder: "Anna Muster" }]);
     // The fresh request names the payer: "to the payer" is offered now, and the sections stay usable.
-    await expect(billing.getByRole("radio", { name: "An die zahlende Person / Organisation" })).toBeVisible();
-    await expect(billing.getByRole("radio", { name: "An mich", exact: true })).toBeChecked();
+    await expect(billing.getByRole("radio", { name: "Die zahlende Person / Organisation" })).toBeVisible();
+    await expect(billing.getByRole("radio", { name: "Ich", exact: true })).toBeChecked();
     await billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" }).fill("rechnung@example.com");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_email: "rechnung@example.com" });
     await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
@@ -817,7 +817,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       await page.setViewportSize({ width, height: 900 });
       await page.goto("/");
       await step(page, "billing");
-      await expect(billing.getByRole("radio", { name: "An eine andere Adresse" })).toBeChecked();
+      await expect(billing.getByRole("radio", { name: "Eine andere Person (andere Anschrift)" })).toBeChecked();
       await expect(page.getByTestId("lead-request-payment-method-note")).toBeVisible();
       await expect(route.getByRole("textbox", { name: "Bitte beschreiben (wer, welcher Dienst)" })).toBeVisible();
       expect(await overflow(page), `${width}px`).toBeLessThanOrEqual(1);

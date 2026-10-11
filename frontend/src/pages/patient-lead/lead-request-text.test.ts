@@ -252,7 +252,7 @@ describe("lead cabinet languages", () => {
     expect(followUpFieldLabel(de, "relationship_since")).toBe("Seit wann besteht die Beziehung?");
     expect(followUpFieldLabel(de, "relationship_proof_upload")).toBe("Nachweis der Beziehung");
     expect(followUpFieldLabel(de, "expected_total_eur")).toBe("Voraussichtlicher Gesamtbetrag (EUR)");
-    expect(followUpFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
+    expect(followUpFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     expect(followUpFieldLabel(de, "pep_wealth_origin")).toBe("Herkunft des Vermögens");
     expect(followUpFieldLabel(de, "sanctions_link_kind")).toBe("Art der Verbindung");
     expect(followUpFieldLabel(de, "id_document_upload")).toBe("Foto oder Scan des Ausweises");
@@ -272,11 +272,11 @@ describe("lead cabinet languages", () => {
   it("names what is still missing about invoice and payment, with the section where a label alone would not do", () => {
     const de = leadRequestText("de");
     // The questions stand alone; "Ort" or "Land" alone would be the address's.
-    expect(submitFieldLabel(de, "invoice_to")).toBe("Wohin soll die Rechnung gehen?");
+    expect(submitFieldLabel(de, "invoice_to")).toBe("Wer ist Rechnungsempfänger?");
     expect(submitFieldLabel(de, "invoice_name")).toBe("Rechnungsempfänger: Name auf der Rechnung");
     expect(submitFieldLabel(de, "invoice_city")).toBe("Rechnungsempfänger: Ort");
     expect(submitFieldLabel(de, "invoice_country")).toBe("Rechnungsempfänger: Land");
-    expect(submitFieldLabel(de, "payment_method")).toBe("Wie werden Sie bezahlen?");
+    expect(submitFieldLabel(de, "payment_method")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     expect(submitFieldLabel(de, "payment_method_details")).toBe("Zahlungsweg: Sonstiges – Bitte beschreiben");
     expect(submitFieldLabel(de, "account_country")).toBe("Zahlungsweg: Land des Kontos");
     expect(submitFieldLabel(de, "account_holder")).toBe("Zahlungsweg: Kontoinhaber/in");
@@ -292,15 +292,15 @@ describe("lead cabinet languages", () => {
 
   it("names where the invoice goes per login: a parent reads 'to the patient', a paying parent 'to me (I pay)'", () => {
     const de = leadRequestText("de");
-    expect(invoiceToLabel(de, "self")).toBe("An mich");
-    expect(invoiceToLabel(de, "payer")).toBe("An die zahlende Person / Organisation");
-    expect(invoiceToLabel(de, "other")).toBe("An eine andere Adresse");
+    expect(invoiceToLabel(de, "self")).toBe("Ich");
+    expect(invoiceToLabel(de, "payer")).toBe("Die zahlende Person / Organisation");
+    expect(invoiceToLabel(de, "other")).toBe("Eine andere Person (andere Anschrift)");
     expect(invoiceToLabel(de, "self", true)).toBe(
-      "An die Patientin / den Patienten (bei Minderjährigen an die gesetzlichen Vertreter)",
+      "Die Patientin / der Patient (bei Minderjährigen die gesetzlichen Vertreter)",
     );
-    expect(invoiceToLabel(de, "payer", true, "patient")).toBe("An die zahlende Person / Organisation");
-    expect(invoiceToLabel(de, "payer", true, "guardian")).toBe("An mich (ich zahle)");
-    expect(invoiceToLabel(leadRequestText("en"), "payer", true, "guardian")).toBe("To me (I pay)");
+    expect(invoiceToLabel(de, "payer", true, "patient")).toBe("Die zahlende Person / Organisation");
+    expect(invoiceToLabel(de, "payer", true, "guardian")).toBe("Ich (ich zahle)");
+    expect(invoiceToLabel(leadRequestText("en"), "payer", true, "guardian")).toBe("Me (I pay)");
     for (const option of LEAD_CABINET_LANGS) {
       const text = leadRequestText(option.value);
       expect(text.invoiceToOptionsGuardian.self).not.toBe(text.invoiceToOptions.self);
@@ -372,7 +372,7 @@ describe("lead cabinet languages", () => {
     expect(LEAD_CABINET_LANGS.map((option) => leadRequestText(option.value).fields.has_insurance)).toEqual([
       "Haben Sie eine Krankenversicherung?",
       "Do you have health insurance?",
-      "Чи є у вас медичне страхування?",
+      "Чи є у вас медична страховка?",
       "Есть ли у вас медицинская страховка?",
     ]);
     const ru = leadRequestText("ru");
@@ -381,11 +381,11 @@ describe("lead cabinet languages", () => {
     expect(ru.recipient.typeOptions).toEqual({ person: "физическое лицо", organisation: "организация" });
     expect(ru.recipient.relationship).toBe("Кем приходится пациенту?");
     expect(ru.recipient.paymentReason).toBe("Почему оплата через организацию?");
-    expect(ru.recipient.isPayerQuestion).toBe("Получатель счёта является плательщиком?");
+    expect(ru.recipient.isPayer).toBe("Получатель счёта является плательщиком");
     expect(ru.hasRepresentativeQuestion).toBe("Действует ли кто-то от вашего имени?");
     // Insurance is no answer of the cabinet: a person or an organisation.
     expect(Object.keys(ru.recipient.payerOptions)).toEqual(["self", "guardian", "person", "organisation"]);
-    expect(submitFieldLabel(ru, "invoice_recipient_is_payer")).toBe("Получатель счёта является плательщиком?");
+    expect(submitFieldLabel(ru, "invoice_recipient_is_payer")).toBe("Получатель счёта является плательщиком");
     expect(submitFieldLabel(ru, "recipient_relationship_kind")).toBe("Получатель счёта: Кем приходится пациенту?");
     expect(submitFieldLabel(leadRequestText("de"), "recipient_city")).toBe("Rechnungsempfänger: Ort");
     expect(submitFieldLabel(leadRequestText("de"), "payer_payment_reason")).toBe(
@@ -406,6 +406,44 @@ describe("lead cabinet languages", () => {
         ...Object.values(text.recipient).flatMap((value) => (typeof value === "string" ? [value] : Object.values(value))),
       ];
       for (const word of words) expect(word, option.value).not.toMatch(treatment);
+    }
+  });
+
+  it("words the billing questions as the owner asked (2026-10-11)", () => {
+    const ask = (pick: (text: ReturnType<typeof leadRequestText>) => string) =>
+      LEAD_CABINET_LANGS.map((option) => pick(leadRequestText(option.value)));
+    // de, en, uk, ru
+    expect(ask((text) => text.billingFields.payment_method)).toEqual([
+      "Welche Zahlungsart für Rechnungen bevorzugen Sie?",
+      "Which payment method do you prefer for invoices?",
+      "Якому способу оплати рахунків ви надаєте перевагу?",
+      "Какой способ оплаты счетов вы предпочитаете?",
+    ]);
+    expect(ask((text) => text.recipient.question)).toEqual(ask((text) => text.billingFields.invoice_to));
+    expect(ask((text) => text.recipient.isPayer)).toEqual([
+      "Der Rechnungsempfänger ist auch der Zahler",
+      "The invoice recipient is also the payer",
+      "Отримувач рахунку є платником",
+      "Получатель счёта является плательщиком",
+    ]);
+    const ru = leadRequestText("ru");
+    expect(ru.recipient.payerParty).toEqual({
+      patient: "Плательщиком счёта является пациент",
+      other: "Плательщиком счёта является другое лицо или организация",
+    });
+    expect(leadRequestText("de").recipient.payerParty).toEqual({
+      patient: "Zahler ist die Patientin / der Patient",
+      other: "Zahler ist eine andere Person oder Organisation",
+    });
+    // A parent's login reads the first answer as the parent who pays.
+    for (const option of LEAD_CABINET_LANGS) {
+      const text = leadRequestText(option.value);
+      expect(text.recipient.payerPartyGuardian.other).toBe(text.recipient.payerParty.other);
+      expect(text.recipient.payerPartyGuardian.patient).not.toBe(text.recipient.payerParty.patient);
+      const words = [text.billingFields.payment_method, text.billingFields.invoice_to, text.fields.has_insurance];
+      for (const word of words) {
+        expect(word, option.value).not.toMatch(/wohin|where should|куда|куди|wie werden sie bezahlen|будете платить|будете платити|how will you pay|страхування\?/i);
+      }
     }
   });
 

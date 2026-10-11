@@ -3,8 +3,9 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 // Lead cabinet, step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the
 // invoice recipient comes first and absorbs "who pays". "Wer ist
 // Rechnungsempfänger?" (ich / eine andere Person oder Organisation), the third
-// party's data, "Ist der Rechnungsempfänger auch der Zahler?", and only with
-// "Nein" the payer. Mocked API that behaves like the server
+// party's data, the box "Der Rechnungsempfänger ist auch der Zahler" (ticked by
+// default), and only unticked the payer: the patient or another person or
+// organisation. Mocked API that behaves like the server
 // (`routes/lead_invoice_recipient.rs`), synthetic data.
 
 type Party = {
@@ -363,7 +364,9 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
           (billing as Record<string, unknown>)[key] = value === "" ? null : value;
         }
       }
-      // Like the server: what belongs to another answer goes.
+      // Like the server: a chosen recipient pays unless unticked; what belongs to another answer goes.
+      if (!billing.invoice_recipient) billing.invoice_recipient_is_payer = null;
+      else if (billing.invoice_recipient_is_payer === null) billing.invoice_recipient_is_payer = true;
       if (billing.invoice_recipient !== before && !("recipient_email" in patch)) party.email = null;
       if (billing.invoice_recipient !== "third_party") {
         for (const key of PARTY_KEYS) if (key !== "email") party[key] = null;
@@ -435,8 +438,12 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
 
 const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 const RECIPIENT = "Wer ist Rechnungsempfänger?";
-const IS_PAYER = "Ist der Rechnungsempfänger auch der Zahler?";
+const IS_PAYER = "Der Rechnungsempfänger ist auch der Zahler";
 const WHO_PAYS = "Wer ist der Zahler?";
+const PAYER_TYPE = "Zahler ist";
+const PATIENT_PAYS = "Zahler ist die Patientin / der Patient";
+const OTHER_PAYS = "Zahler ist eine andere Person oder Organisation";
+const METHOD = "Welche Zahlungsart für Rechnungen bevorzugen Sie?";
 
 test.describe("lead cabinet: step 3, the invoice recipient first", () => {
   test("the steps: who pays is part of step 3, in the owner's words", async ({ page }) => {
@@ -454,26 +461,30 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(stepBox.getByText(RECIPIENT)).toBeVisible();
     await expect(stepBox).not.toContainText("Behandlung");
     // Before an answer nobody is asked who pays.
-    await expect(stepBox.getByRole("combobox", { name: IS_PAYER })).toHaveCount(0);
+    await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toHaveCount(0);
     await expect(stepBox.getByRole("combobox", { name: WHO_PAYS })).toHaveCount(0);
+    // The owner's words (2026-10-11), never the old ones.
+    await expect(stepBox).not.toContainText("Wohin soll die Rechnung");
+    await expect(stepBox).not.toContainText("Wie werden Sie bezahlen");
   });
 
-  test("an adult receives and pays the invoice: the patient is the payer at once", async ({ page }) => {
+  test("an adult receives and pays the invoice: the box is ticked and the patient is the payer at once", async ({ page }) => {
     const { calls } = await setup(page);
     await page.goto("/");
     await step(page, "billing");
     const stepBox = page.getByTestId("lead-request-step-billing");
     await stepBox.getByRole("radio", { name: "Ich", exact: true }).check();
-    await expect.poll(() => calls.billing).toEqual([{ invoice_recipient: "self" }]);
+    // "The recipient is also the payer" is ticked by default and saved as an answer.
+    await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
+    await expect.poll(() => calls.billing).toEqual([{ invoice_recipient: "self", invoice_recipient_is_payer: true }]);
+    await expect.poll(() => calls.payer).toEqual([{ payer_kind: "self" }]);
     // The e-mail for invoices is optional.
     await expect(stepBox.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
-    await choose(page, stepBox.getByRole("combobox", { name: IS_PAYER }), "Ja");
-    await expect.poll(() => calls.billing.at(-1)).toEqual({ invoice_recipient_is_payer: true });
-    await expect.poll(() => calls.payer).toEqual([{ payer_kind: "self" }]);
     // Nobody else is asked about; the bare payment method follows.
     await expect(stepBox.getByRole("combobox", { name: WHO_PAYS })).toHaveCount(0);
+    await expect(stepBox.getByTestId("lead-request-payer-party")).toHaveCount(0);
     const methodBox = page.getByTestId("lead-request-payment-method-base");
-    await choose(page, methodBox.getByRole("combobox", { name: "Wie werden Sie bezahlen?" }), "Überweisung");
+    await choose(page, methodBox.getByRole("combobox", { name: METHOD }), "Überweisung");
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "bank_transfer" });
     await page.locator('[data-step="send"]').click();
     await expect(page.getByTestId("lead-request-missing")).toHaveCount(0);
@@ -490,6 +501,11 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     const stepBox = page.getByTestId("lead-request-step-billing");
     const party = page.getByTestId("lead-request-recipient-party");
     await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+    // Unticked: the organisation receives the invoice without paying it.
+    const isPayer = stepBox.getByRole("checkbox", { name: IS_PAYER });
+    await expect(isPayer).toBeChecked();
+    await isPayer.uncheck();
+    await expect.poll(() => request.billing.invoice_recipient_is_payer).toBe(false);
     const type = party.getByRole("combobox", { name: "Rechnungsempfänger ist" });
     await type.click();
     // Insurance is no answer of the cabinet.
@@ -517,16 +533,22 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
         recipient_country: "DE",
         recipient_payment_reason: "Der Arbeitgeber erhält die Rechnung.",
       });
-    await choose(page, stepBox.getByRole("combobox", { name: IS_PAYER }), "Nein");
-    // Who pays: the patient is an answer now, an insurer is not.
-    const whoPays = stepBox.getByRole("combobox", { name: WHO_PAYS });
-    await whoPays.click();
-    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Ich selbst", "Eine Privatperson", "Eine Organisation"]);
-    await page.getByRole("option", { name: "Ich selbst", exact: true }).click();
+    // Who pays: the patient, or another person or organisation.
+    const parties = stepBox.getByTestId("lead-request-payer-party").getByRole("radio");
+    await expect(parties).toHaveCount(2);
+    await expect(stepBox.getByTestId("lead-request-payer-party")).toContainText(PATIENT_PAYS);
+    await expect(stepBox.getByTestId("lead-request-payer-party")).toContainText(OTHER_PAYS);
+    // "Another person or organisation" asks what the payer is, an insurer is no answer.
+    await stepBox.getByRole("radio", { name: OTHER_PAYS }).check();
+    await stepBox.getByRole("combobox", { name: PAYER_TYPE }).click();
+    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Eine Privatperson", "Eine Organisation"]);
+    await page.keyboard.press("Escape");
+    await stepBox.getByRole("radio", { name: PATIENT_PAYS }).check();
+    await expect(stepBox.getByRole("combobox", { name: PAYER_TYPE })).toHaveCount(0);
     await expect.poll(() => calls.payer.at(-1)).toEqual({ payer_kind: "self" });
     await expect.poll(() => request.billing.invoice_to).toBe("other");
     await page.locator('[data-step="send"]').click();
-    await expect(page.getByTestId("lead-request-missing")).toContainText("Wie werden Sie bezahlen?");
+    await expect(page.getByTestId("lead-request-missing")).toContainText(METHOD);
     const summary = page.getByTestId("lead-request-summary-billing");
     await expect(summary).toContainText("Eine andere Person oder Organisation");
     await expect(summary).toContainText("Beispiel GmbH");
@@ -550,8 +572,8 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await choose(page, party.getByRole("combobox", { name: "Land" }), "Österreich");
     await party.getByRole("textbox", { name: "E-Mail" }).fill("viktor.zahler@example.com");
     await party.getByRole("textbox", { name: "Telefon" }).fill("+43 1 234567");
-    await choose(page, stepBox.getByRole("combobox", { name: IS_PAYER }), "Ja");
-    // The payer is the recipient: saved with its data, nothing typed twice.
+    // Ticked by default: the payer is the recipient, saved with its data, nothing typed twice.
+    await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect
       .poll(() => calls.payer.at(-1))
       .toMatchObject({
@@ -587,22 +609,50 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     const stepBox = page.getByTestId("lead-request-step-billing");
     await expect(stepBox.getByRole("combobox", { name: "Hat die Patientin / der Patient eine Krankenversicherung?" })).toBeVisible();
     await stepBox.getByRole("radio", { name: "Ich (als Elternteil / gesetzliche Vertretung)" }).check();
-    await choose(page, stepBox.getByRole("combobox", { name: IS_PAYER }), "Ja");
+    await expect(stepBox.getByRole("checkbox", { name: IS_PAYER })).toBeChecked();
     await expect
       .poll(() => calls.payer.at(-1))
       .toMatchObject({ payer_kind: "third_party", payer_type: "person", first_name: "Maria", last_name: "Muster", relationship_kind: "parent" });
-    // A child does not pay: with "Nein" the patient is no answer.
-    await choose(page, stepBox.getByRole("combobox", { name: IS_PAYER }), "Nein");
-    const whoPays = stepBox.getByRole("combobox", { name: WHO_PAYS });
-    await whoPays.click();
+    // Unticked with the patient side as recipient: only another person or organisation, at once.
+    await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
+    await expect(stepBox.getByTestId("lead-request-payer-party")).toHaveCount(0);
+    await expect(stepBox.getByTestId("lead-request-payer-party-other")).toHaveText(OTHER_PAYS);
+    await stepBox.getByRole("combobox", { name: PAYER_TYPE }).click();
     await expect(page.getByRole("option")).toHaveText(["Auswählen", "Eine Privatperson", "Eine Organisation"]);
     await page.keyboard.press("Escape");
+  });
+
+  test("a parent names a third party as recipient and pays: 'I pay (as a parent)'", async ({ page }) => {
+    const { calls, request } = await setup(page, { minor: true });
+    await page.goto("/");
+    await step(page, "billing");
+    const stepBox = page.getByTestId("lead-request-step-billing");
+    const party = page.getByTestId("lead-request-recipient-party");
+    await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
+    await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
+    await expect.poll(() => request.billing.invoice_recipient_is_payer).toBe(false);
+    await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "eine Privatperson");
+    await party.getByRole("textbox", { name: "Vorname" }).fill("Ben");
+    await party.getByRole("textbox", { name: "Nachname" }).fill("Muster");
+    // A parent's login reads the patient's answer as the parent who pays.
+    const parties = stepBox.getByTestId("lead-request-payer-party");
+    await expect(parties.getByRole("radio")).toHaveCount(2);
+    await expect(parties).not.toContainText(PATIENT_PAYS);
+    await parties.getByRole("radio", { name: "Zahler bin ich (als Elternteil)" }).check();
+    await expect
+      .poll(() => calls.payer.at(-1))
+      .toMatchObject({ payer_kind: "third_party", payer_type: "person", first_name: "Maria", last_name: "Muster", relationship_kind: "parent" });
+    await expect(stepBox.getByRole("combobox", { name: PAYER_TYPE })).toHaveCount(0);
+    // Back to "another person or organisation": the payer form starts empty.
+    await parties.getByRole("radio", { name: OTHER_PAYS }).check();
+    await expect(stepBox.getByRole("combobox", { name: PAYER_TYPE })).toBeVisible();
   });
 
   test("a refused e-mail of the recipient is marked and not sent again", async ({ page }) => {
     const { calls } = await setup(page, {
       prepare: (request) => {
         request.billing.invoice_recipient = "self";
+        request.billing.invoice_recipient_is_payer = true;
       },
     });
     await page.goto("/");

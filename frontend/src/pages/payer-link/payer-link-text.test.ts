@@ -150,12 +150,12 @@ describe("payer page texts", () => {
         expect(fieldLabel(de, question, type)).toContain("vertretungsberechtigten Personen oder wirtschaftlich Berechtigten");
         expect(fieldLabel(de, question, type)).not.toMatch(/\b(Sie|Ihnen|Ihre?)\b/);
       }
-      expect(fieldLabel(de, "payment_method", type)).toBe("Wie erfolgt die Zahlung?");
+      expect(fieldLabel(de, "payment_method", type)).toBe("Welche Zahlungsart für Rechnungen bevorzugt die Organisation?");
     }
     // A private person is asked as before.
     expect(fieldLabel(de, "pep_self", "person")).toBe(de.fields.pep_self);
     expect(fieldLabel(de, "high_risk_country", "person")).toMatch(/^Haben Sie/);
-    expect(fieldLabel(de, "payment_method", "person")).toBe("Wie werden Sie bezahlen?");
+    expect(fieldLabel(de, "payment_method", "person")).toBe("Welche Zahlungsart für Rechnungen bevorzugen Sie?");
     // Every language words the organisation's questions on their own.
     for (const lang of LANGS) {
       const text = payerLinkText(lang);

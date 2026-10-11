@@ -7465,7 +7465,7 @@ ${serviceCommentLines.join("\n")}`
               ) : null}
               <Section title={tx("Страхование", "Versicherung")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Есть страхование", "Versicherung vorhanden")} portalField="has_insurance">
+                <Field label={tx("Есть ли медицинская страховка", "Krankenversicherung vorhanden")} portalField="has_insurance">
                   <NativeComboboxSelect
                     name="has_insurance"
                     value={draft.hasInsurance}
