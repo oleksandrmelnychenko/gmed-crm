@@ -151,6 +151,62 @@ export function formatListBirthDate(birth: ListBirthDate, t: Translations): stri
     .join(" ");
 }
 
+/** How our birth date compares with the list's, e.g. "(дата совпадает)". */
+export function dobMatchLabel(dob: SanctionsHit["match_details"]["dob"], t: Translations): string {
+  if (!dob) return "";
+  const label = {
+    exact: t.sanctions_dob_exact,
+    year: t.sanctions_dob_year,
+    conflict: t.sanctions_dob_conflict,
+    unknown: t.sanctions_dob_unknown,
+  }[dob];
+  return label ? `(${label})` : "";
+}
+
+/** A tab label with its count; no count (or zero) leaves the bare label. */
+export function labelWithCount(label: string, count: number | null | undefined): string {
+  return typeof count === "number" && count > 0 ? `${label} (${count})` : label;
+}
+
+/**
+ * Whose data a live check's possible match is about: a lead that does not
+ * exist yet, screened fields of a lead that are not saved yet, or the lead's
+ * saved data.
+ */
+export type LiveMatchSubject = "new_lead" | "unsaved" | "saved";
+
+export type LivePossibleMatch = {
+  text: string;
+  tone: "pending" | "confirmed" | "cleared";
+};
+
+/**
+ * The live check's line for a possible match (QA 2026-10-11 N-14, A-39b). The
+ * check itself stores nothing: a lead not created yet, or screened data not
+ * saved yet, reach the CEO only after the save. For saved data the lead's
+ * stored screening says whether the CEO still has to decide or already
+ * decided; a false positive leaves the screening `clear`. `screening` is null
+ * when the stored state is unknown.
+ */
+export function livePossibleMatch(
+  subject: LiveMatchSubject,
+  screening: LeadSanctionsStatus["screening"] | null,
+  t: Translations,
+): LivePossibleMatch {
+  if (subject === "new_lead") return { text: t.sanctions_live_possible_new_lead, tone: "pending" };
+  if (subject === "unsaved") return { text: t.sanctions_live_possible_unsaved, tone: "pending" };
+  switch (screening) {
+    case "review_pending":
+      return { text: t.sanctions_live_possible_review, tone: "pending" };
+    case "confirmed":
+      return { text: t.sanctions_live_confirmed, tone: "confirmed" };
+    case "clear":
+      return { text: t.sanctions_live_false_positive, tone: "cleared" };
+    default:
+      return { text: t.sanctions_live_possible, tone: "pending" };
+  }
+}
+
 export function regulationLabel(regulation: ListRegulation): string {
   return [regulation.number_title, regulation.programme ? `[${regulation.programme}]` : ""]
     .filter(Boolean)

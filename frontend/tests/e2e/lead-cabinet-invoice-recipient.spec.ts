@@ -509,8 +509,8 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     const type = party.getByRole("combobox", { name: "Rechnungsempfänger ist" });
     await type.click();
     // Insurance is no answer of the cabinet.
-    await expect(page.getByRole("option")).toHaveText(["Auswählen", "eine Privatperson", "eine Organisation"]);
-    await page.getByRole("option", { name: "eine Organisation", exact: true }).click();
+    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Eine Privatperson", "Eine Organisation"]);
+    await page.getByRole("option", { name: "Eine Organisation", exact: true }).click();
     await party.getByRole("textbox", { name: "Name der Organisation" }).fill("Beispiel GmbH");
     await party.getByRole("textbox", { name: "Rechtsform" }).fill("GmbH");
     await party.getByRole("textbox", { name: "Ansprechperson" }).fill("Ben Muster");
@@ -562,7 +562,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     const stepBox = page.getByTestId("lead-request-step-billing");
     const party = page.getByTestId("lead-request-recipient-party");
     await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
-    await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "eine Privatperson");
+    await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
     await party.getByRole("textbox", { name: "Vorname" }).fill("Viktor");
     await party.getByRole("textbox", { name: "Nachname" }).fill("Zahler");
     await choose(page, party.getByRole("combobox", { name: "Beziehung zur Patientin / zum Patienten" }), "Freund/in");
@@ -631,7 +631,7 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await stepBox.getByRole("radio", { name: "Eine andere Person oder Organisation" }).check();
     await stepBox.getByRole("checkbox", { name: IS_PAYER }).uncheck();
     await expect.poll(() => request.billing.invoice_recipient_is_payer).toBe(false);
-    await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "eine Privatperson");
+    await choose(page, party.getByRole("combobox", { name: "Rechnungsempfänger ist" }), "Eine Privatperson");
     await party.getByRole("textbox", { name: "Vorname" }).fill("Ben");
     await party.getByRole("textbox", { name: "Nachname" }).fill("Muster");
     // A parent's login reads the patient's answer as the parent who pays.

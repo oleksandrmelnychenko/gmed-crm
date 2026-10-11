@@ -188,7 +188,15 @@ struct CreateLeadRequest {
 #[derive(Deserialize)]
 struct QualifyRequest {
     status: String,
+    /// Why a lead is "not qualified" (QA 2026-10-11, A-39a): a reason code of
+    /// the staff dialog or a free text, stored as `failed_reason` so the
+    /// failed-lead workflow starts with it. Ignored for the other statuses.
+    #[serde(default)]
+    reason: Option<String>,
 }
+
+/// The longest reason a status change to "not qualified" stores.
+const NOT_QUALIFIED_REASON_MAX_CHARS: usize = 500;
 
 #[derive(Deserialize)]
 struct FailedLeadResolutionRequest {
@@ -4465,6 +4473,20 @@ async fn qualify_lead(
         "new" | "in_progress" | "qualified" | "not_qualified" => {}
         _ => return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid status"),
     }
+    let not_qualified_reason = if body.status == "not_qualified" {
+        body.reason
+            .as_deref()
+            .map(|reason| reason.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|reason| !reason.is_empty())
+    } else {
+        None
+    };
+    if not_qualified_reason
+        .as_ref()
+        .is_some_and(|reason| reason.chars().count() > NOT_QUALIFIED_REASON_MAX_CHARS)
+    {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Reason is too long");
+    }
 
     let current = match sqlx::query(
         r#"SELECT qualification_status, converted_patient_id, failed_outcome_status
@@ -4533,12 +4555,20 @@ async fn qualify_lead(
         "UPDATE leads
          SET qualification_status = $2,
              status_changed_at = CASE WHEN qualification_status <> $2 THEN now() ELSE status_changed_at END,
-             failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END
+             failed_outcome_status = CASE WHEN $2 IN ('new', 'in_progress', 'qualified') THEN 'none' ELSE failed_outcome_status END,
+             -- The reason of not_qualified starts the failed-lead workflow;
+             -- an archived or deleted lead keeps the reason it was processed with.
+             failed_reason = CASE
+                 WHEN $2 = 'not_qualified' AND $4::text IS NOT NULL
+                      AND failed_outcome_status = 'none' THEN $4
+                 ELSE failed_reason
+             END
          WHERE id = $1 AND qualification_status = $3",
     )
     .bind(lead_id)
     .bind(&body.status)
     .bind(&current_status)
+    .bind(&not_qualified_reason)
     .execute(&mut *tx)
     .await
     {
@@ -4569,6 +4599,7 @@ async fn qualify_lead(
                     json!({
                         "status": body.status.clone(),
                         "previous_status": current_status.clone(),
+                        "reason": not_qualified_reason.clone(),
                     }),
                 ),
             )
@@ -4587,7 +4618,7 @@ async fn qualify_lead(
                         to_stage: &body.status,
                         transition_kind: "status_change",
                         changed_by: Some(auth.user_id),
-                        note: None,
+                        note: not_qualified_reason.as_deref(),
                         metadata: json!({
                             "status": body.status.clone(),
                         }),

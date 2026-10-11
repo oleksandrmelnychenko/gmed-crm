@@ -15,9 +15,11 @@
 //! * a citizenship of the third-party payer is on the black list
 //!   (`payer_citizenship_blacklist`; a person only);
 //! * the sanctions screening has a confirmed match for the patient
-//!   (`patient_sanctioned`) or for the third-party payer (`payer_sanctioned`;
-//!   also the bank the payer pays through and the third-party invoice
-//!   recipient who does not pay, owner decisions 2026-10-11).
+//!   (`patient_sanctioned`; also the bank the patient pays through), for the
+//!   third-party payer (`payer_sanctioned`; also the bank the payer pays
+//!   through) or for the third-party invoice recipient who does not pay
+//!   (`recipient_sanctioned`, the payer's side; owner decisions 2026-10-11,
+//!   its own key since QA 2026-10-11 N-08 so staff are not told "payer").
 //!
 //! The black list is [`BLACK_LIST_COUNTRY_CODES`], the FATF "call for
 //! action" countries — not the longer list of high-risk third countries and
@@ -64,6 +66,8 @@ pub const REASON_PAYER_RESIDENCE_BLACKLIST: &str = "payer_residence_blacklist";
 pub const REASON_PAYER_CITIZENSHIP_BLACKLIST: &str = "payer_citizenship_blacklist";
 pub const REASON_PATIENT_SANCTIONED: &str = "patient_sanctioned";
 pub const REASON_PAYER_SANCTIONED: &str = "payer_sanctioned";
+/// A confirmed match of the third-party invoice recipient who does not pay.
+pub const REASON_RECIPIENT_SANCTIONED: &str = "recipient_sanctioned";
 /// Information only: a possible match waits for the CEO's decision.
 pub const REASON_SANCTIONS_REVIEW_PENDING: &str = "sanctions_review_pending";
 /// The stored risk assessment of the lead is at level 2 or 3 (see
@@ -130,9 +134,12 @@ pub(crate) struct Subjects {
     pub payer_residence: Vec<String>,
     pub payer_citizenships: Vec<String>,
     pub patient_screening: Screening,
+    /// The third-party payer and the bank it pays through.
     pub payer_screening: Screening,
-    /// Possible matches still open for the patient or the payer (also next
-    /// to a confirmed one).
+    /// The third-party invoice recipient who does not pay.
+    pub recipient_screening: Screening,
+    /// Possible matches still open for the patient, the payer or the
+    /// recipient (also next to a confirmed one).
     pub review_pending: bool,
 }
 
@@ -195,6 +202,9 @@ pub(crate) fn evaluate(subjects: &Subjects) -> EnhancedCheck {
     if subjects.payer_screening == Screening::Confirmed {
         check.reasons.push(REASON_PAYER_SANCTIONED);
     }
+    if subjects.recipient_screening == Screening::Confirmed {
+        check.reasons.push(REASON_RECIPIENT_SANCTIONED);
+    }
     check.required = !check.reasons.is_empty();
     if subjects.review_pending {
         check.reasons.push(REASON_SANCTIONS_REVIEW_PENDING);
@@ -238,7 +248,9 @@ pub(crate) async fn load_subjects(
                   hits.patient_confirmed,
                   hits.patient_open,
                   hits.payer_confirmed,
-                  hits.payer_open
+                  hits.payer_open,
+                  hits.recipient_confirmed,
+                  hits.recipient_open
            FROM leads l
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
            LEFT JOIN lead_payer_declarations d ON d.lead_id = l.id
@@ -255,15 +267,21 @@ pub(crate) async fn load_subjects(
                             AND h.status = 'open'
                       ) AS patient_open,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind IN ('lead_payer', 'lead_recipient')
+                          WHERE (h.subject_kind = 'lead_payer'
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind IN ('lead_payer', 'lead_recipient')
+                          WHERE (h.subject_kind = 'lead_payer'
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'open'
-                      ) AS payer_open
+                      ) AS payer_open,
+                      COUNT(*) FILTER (
+                          WHERE h.subject_kind = 'lead_recipient' AND h.status = 'confirmed'
+                      ) AS recipient_confirmed,
+                      COUNT(*) FILTER (
+                          WHERE h.subject_kind = 'lead_recipient' AND h.status = 'open'
+                      ) AS recipient_open
                FROM sanctions_hits h
                -- A hit on the bank counts for whoever pays through it; a hit
                -- on the third-party invoice recipient who does not pay counts
@@ -302,7 +320,13 @@ pub(crate) async fn load_subjects(
             count("patient_open"),
         ),
         payer_screening: Screening::from_counts(count("payer_confirmed"), count("payer_open")),
-        review_pending: count("patient_open") > 0 || count("payer_open") > 0,
+        recipient_screening: Screening::from_counts(
+            count("recipient_confirmed"),
+            count("recipient_open"),
+        ),
+        review_pending: count("patient_open") > 0
+            || count("payer_open") > 0
+            || count("recipient_open") > 0,
         ..Subjects::default()
     };
     push_text(&mut subjects.patient_residence, text("country"));
@@ -444,7 +468,7 @@ mod tests {
 
     #[test]
     fn each_trigger_alone_requires_the_check() {
-        let cases: [(Subjects, &str); 6] = [
+        let cases: [(Subjects, &str); 7] = [
             (
                 Subjects {
                     patient_residence: codes(&["IR"]),
@@ -486,6 +510,13 @@ mod tests {
                     ..Subjects::default()
                 },
                 REASON_PAYER_SANCTIONED,
+            ),
+            (
+                Subjects {
+                    recipient_screening: Screening::Confirmed,
+                    ..Subjects::default()
+                },
+                REASON_RECIPIENT_SANCTIONED,
             ),
         ];
         for (subjects, reason) in cases {
@@ -571,6 +602,7 @@ mod tests {
             payer_citizenships: codes(&["ir"]),
             patient_screening: Screening::Confirmed,
             payer_screening: Screening::Confirmed,
+            recipient_screening: Screening::Confirmed,
             review_pending: false,
         });
         assert!(all.required);
@@ -583,6 +615,7 @@ mod tests {
                 REASON_PAYER_CITIZENSHIP_BLACKLIST,
                 REASON_PATIENT_SANCTIONED,
                 REASON_PAYER_SANCTIONED,
+                REASON_RECIPIENT_SANCTIONED,
             ]
         );
         assert_eq!(all.countries, ["IR", "KP", "MM"]);

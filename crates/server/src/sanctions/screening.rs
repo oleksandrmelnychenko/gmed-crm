@@ -722,8 +722,8 @@ pub fn payer_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
 /// `account_country` as its country — shown to the CEO, never part of the
 /// country policy ([`SubjectRecord::countries`]). The reference says whose
 /// payment it is: [`PAYER_BANK_REF`] while a third party pays,
-/// [`PATIENT_BANK_REF`] otherwise; the risk assessment counts a hit for that
-/// subject (T16).
+/// [`PATIENT_BANK_REF`] otherwise; the risk assessment counts a confirmed hit
+/// for that subject (T16; an open one only holds).
 pub fn bank_subjects(lead_id: Uuid, rows: &[Value]) -> Vec<SubjectRecord> {
     let mut subjects = Vec::new();
     for row in rows {
@@ -1195,7 +1195,8 @@ pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport
         .map(|lead| lead.subjects)
         .unwrap_or_default();
     let report = screen_owner(state, &index, Owner::Lead(lead_id), subjects).await?;
-    // A new open hit is T16 of the risk assessment (sticky, P3).
+    // The risk assessment follows the stored data; a new open hit is no
+    // trigger (only a confirmed one is T16), it holds through the gate.
     let mut tx = state.db.begin().await?;
     crate::risk::store::reassess(&mut tx, lead_id, crate::risk::store::Cause::Screening, None)
         .await?;

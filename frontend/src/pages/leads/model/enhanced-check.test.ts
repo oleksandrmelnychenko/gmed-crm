@@ -76,8 +76,10 @@ describe("the enhanced check of the owner's rule (2026-10-07)", () => {
     );
     expect(enhancedCheckReasonLabel("patient_residence_blacklist", ru)).toBe("страна проживания пациента в чёрном списке");
     expect(enhancedCheckReasonsText(["patient_sanctioned", SANCTIONS_REVIEW_PENDING], de)).toBe(
-      "Patient auf einer Sanktionsliste (bestätigt), möglicher Sanktionstreffer wartet auf die Entscheidung",
+      "Patient oder seine Bank auf einer Sanktionsliste (bestätigt), möglicher Sanktionstreffer wartet auf die Entscheidung",
     );
+    // The non-paying invoice recipient is named as such, not as the payer (QA 2026-10-11 N-08).
+    expect(enhancedCheckReasonLabel("recipient_sanctioned", ru)).toBe("получатель счёта в санкционном списке (подтверждено)");
     expect(enhancedCheckReasonLabel("unknown_key", de)).toBe("unknown_key");
     expect(pepEnhancedCheckHint(de)).toBe(
       "PEP: nach § 15 GwG ist in der Regel eine verstärkte Prüfung erforderlich – Entscheidung des Mitarbeiters",

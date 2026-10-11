@@ -4,10 +4,13 @@ import { useRealtimeSubscription, type RealtimeEvent } from "@/lib/realtime";
 
 import {
   fetchLeadPortalIntake,
+  type LeadGuardianCandidate,
+  type LeadGuardianLink,
   type LeadPortalIntake,
   type PatientFieldMarker,
   type Step1FillMode,
 } from "../data/lead-portal-intake-api";
+import { pluralDe, pluralRu } from "./plural";
 
 /**
  * Wizard step-1 keys and the lead columns the patient fills in the portal
@@ -112,6 +115,37 @@ export function patientMarkerFor(
 
 type Tx = (ru: string, de: string) => string;
 
+/**
+ * The portal's document counter (list row and wizard banner) counts the
+ * lead's medical files only (QA 2026-10-11, A-11): identity scans and other
+ * GwG files are not part of it, so both places name it so.
+ */
+export function medicalDocumentsText(count: number, tx: Tx): string {
+  return tx(
+    `${count} ${pluralRu(count, { one: "медицинский документ", few: "медицинских документа", many: "медицинских документов" })}`,
+    `${count} ${pluralDe(count, "medizinisches Dokument", "medizinische Dokumente")}`,
+  );
+}
+
+/** Caption of the counter in the lead row. */
+export function medicalDocumentsFactLabel(tx: Tx): string {
+  return tx("Мед. документы", "Med. Unterlagen");
+}
+
+/**
+ * The relation of a parent who already has a login, from the trusted
+ * contact the login was issued for (the login itself does not carry it).
+ */
+export function guardianLinkRelation(
+  link: Pick<LeadGuardianLink, "access_id" | "trusted_contact_id">,
+  candidates: readonly Pick<LeadGuardianCandidate, "access_id" | "trusted_contact_id" | "relation">[],
+): string | null {
+  const candidate =
+    candidates.find((item) => item.access_id && item.access_id === link.access_id)
+    ?? candidates.find((item) => link.trusted_contact_id && item.trusted_contact_id === link.trusted_contact_id);
+  return candidate?.relation?.trim() || null;
+}
+
 export function portalProgressText(
   progress: { filled: number; total: number; documents: number; submitted_at: string | null },
   tx: Tx,
@@ -119,7 +153,7 @@ export function portalProgressText(
 ): string[] {
   const parts = [
     tx(`заполнено ${progress.filled} из ${progress.total} полей`, `${progress.filled} von ${progress.total} Feldern ausgefüllt`),
-    tx(`${progress.documents} документов`, `${progress.documents} Dokumente`),
+    medicalDocumentsText(progress.documents, tx),
   ];
   if (progress.submitted_at) {
     parts.push(

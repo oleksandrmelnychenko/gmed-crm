@@ -128,7 +128,7 @@ export function PayerCodeStep({
       <div className="space-y-2">
         <h1 className="text-xl font-semibold leading-tight">{text.pageTitle}</h1>
         <p className="text-sm leading-6" data-testid="payer-link-named">
-          {text.namedYou(info.patient_name)}
+          {text.namedYou(info.patient_name, info.payer_type !== "person")}
         </p>
       </div>
       {notice ? (

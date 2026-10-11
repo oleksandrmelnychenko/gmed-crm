@@ -25,6 +25,13 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// recipient is a third party on the money side). Every other hit of the
 /// lead — the patient, a guardian, the bank the patient pays through — is the
 /// patient's side (T16).
+///
+/// Only a CONFIRMED hit counts (owner decision 2026-10-07, QA 2026-10-11
+/// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed. An
+/// open, undecided hit is the internal hold `sanctions_review_pending` of
+/// [`crate::sanctions::gate`] only — it never raises the risk level, so it
+/// never opens a follow-up block, the enhanced check or the payer's proof of
+/// funds, and nothing the lead, the payer or the recipient sees changes.
 pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient') \
      OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))";
 
@@ -78,7 +85,7 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                           AS payer_hit,
                       bool_or(h.subject_kind = 'lead_recipient') AS recipient_hit
                FROM sanctions_hits h
-               WHERE h.status IN ('open', 'confirmed')
+               WHERE h.status = 'confirmed'
                  AND ((h.lead_id = l.id AND h.subject_kind <> 'patient')
                       OR (h.subject_kind = 'patient'
                           AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id)))
@@ -199,6 +206,10 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         // A hit of the invoice recipient is the payer's side even while the
         // patient pays: the recipient is a third party on the money side.
         payer_hit: (third_party && flag("payer_hit")) || flag("recipient_hit"),
+        // A confirmation is final: its T16 stays even when the subject no
+        // longer fires (e.g. the patient took over the payment).
+        confirmed_hit_patient: flag("patient_hit"),
+        confirmed_hit_payer: flag("payer_hit") || flag("recipient_hit"),
         today: Some(today),
     };
     Ok(Some(inputs))

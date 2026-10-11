@@ -641,7 +641,7 @@ export function payerRelationshipKindLabel(value: PayerRelationshipKind, tx: Tx)
     child: tx("Сын / дочь", "Kind"),
     sibling: tx("Брат / сестра", "Bruder / Schwester"),
     grandparent: tx("Бабушка / дедушка", "Großmutter / Großvater"),
-    relative: tx("Другой родственник", "anderer Verwandter"),
+    relative: tx("Другой родственник", "Anderer Verwandter"),
     employer: tx("Работодатель", "Arbeitgeber"),
     friend: tx("Друг / подруга", "Freund/in"),
     business_partner: tx("Деловой партнёр", "Geschäftspartner/in"),

@@ -5049,14 +5049,6 @@ async fn get_lead_portal_intake(
         uploads_of(UploadKind::Identity),
         uploads_of(UploadKind::Medical),
     );
-    let cabinet_upload_count = all_uploads
-        .iter()
-        .filter(|upload| {
-            upload
-                .try_get::<String, _>("kind")
-                .is_ok_and(|kind| !PAYER_UPLOAD_KINDS.contains(&kind.as_str()))
-        })
-        .count();
     // The lead's own GwG statements (PEP, identity document, …) are for the
     // roles that read the payer declaration; the concierge gets none of it.
     let statements_visible = lead_payer::may_view(&auth);
@@ -5329,11 +5321,10 @@ async fn get_lead_portal_intake(
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
-            // Every file the lead's cabinet uploaded — identity copy, proofs,
-            // a representative's files, medical documents (QA 2026-10-10: "0
-            // documents" after two uploads); the payer's own files are the
-            // payer's.
-            "documents": cabinet_upload_count,
+            // The medical documents only, as the leads list and the submit
+            // notification count them (one definition, QA 2026-10-11 A-11);
+            // the UI names them "medical documents".
+            "documents": uploads.len(),
             "submitted_at": time(&row, "portal_submitted_at"),
         },
         "submitted_at": time(&row, "portal_submitted_at"),

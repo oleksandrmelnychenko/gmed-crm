@@ -158,6 +158,19 @@ import {
   type LeadPortalStatus,
 } from "./model/lead-portal-access";
 import { LeadPortalAccessDetail, PortalCredentialsDialog, type PortalCredentials } from "./ui/lead-portal-access";
+import { LeadConfirmDialog } from "./ui/lead-confirm-dialog";
+import { deletedLeadLabel, isAnonymizedLead, leadDisplayName } from "./model/lead-display-name";
+import {
+  LEAD_FAILURE_REASONS,
+  LEAD_FAILURE_REASON_MAX_LENGTH,
+  LEAD_FAILURE_REASON_OTHER,
+  leadFailureReasonDraft,
+  leadFailureReasonError,
+  leadFailureReasonLabel,
+  leadFailureReasonOtherLabel,
+  leadFailureReasonValue,
+  type LeadFailureReasonDraft,
+} from "./model/lead-failure-reasons";
 import { LeadSanctionsBadge, useLeadSanctionsFlags } from "@/pages/sanctions/components";
 const PORTAL_STATUS_DOT: Record<LeadPortalStatus, string> = {
   none: "bg-transparent",
@@ -343,6 +356,17 @@ type LeadsDetailPatch =
   | Partial<LeadsDetailState>
   | ((current: LeadsDetailState) => Partial<LeadsDetailState>);
 
+/**
+ * The failed-flow form: `reason` holds the chosen entry of
+ * `LEAD_FAILURE_REASONS` ("" while none, "other" for «Другое») and
+ * `reasonText` the text of «Другое» (QA 2026-10-11, A-39a).
+ */
+type FailedLeadForm = FailedLeadResolutionForm & { reasonText: string };
+
+function blankFailedLeadForm(): FailedLeadForm {
+  return { ...blankFailedLeadResolutionForm(), reasonText: "" };
+}
+
 type LeadsUiState = {
   successMessage: string;
   pendingConvertLead: LeadListItem | null;
@@ -353,7 +377,7 @@ type LeadsUiState = {
   paneTab: LeadPaneTab;
   gateForm: LeadGateForm | null;
   gateBusy: boolean;
-  failedLeadForm: FailedLeadResolutionForm;
+  failedLeadForm: FailedLeadForm;
   failedLeadBusy: boolean;
   actionBusy: string | null;
 };
@@ -409,6 +433,7 @@ function useLeadsPageContent() {
   const { user } = useAuth();
   const { t, lang } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
+  const tx = useCallback((ru: string, de: string) => (lang === "de" ? de : ru), [lang]);
   const localizeLeadError = useCallback(
     (error: unknown, fallback = "") => leadErrorMessage(
       error,
@@ -426,6 +451,11 @@ function useLeadsPageContent() {
       lifecycle: t.lead_column_group_lifecycle,
     }),
     [t],
+  );
+  // The columns carry the translated group name (see `leadColumns`); the columns menu looks it up by that name.
+  const leadColumnGroupLabelsByName = useMemo(
+    () => Object.fromEntries(Object.values(leadColumnGroupLabels).map((label) => [label, label])),
+    [leadColumnGroupLabels],
   );
   const { staffGo } = useStaffNavigate();
   const [wizardLeadId, setWizardLeadId] = useState<string | null>(null);
@@ -538,7 +568,7 @@ function useLeadsPageContent() {
       paneTab: "overview",
       gateForm: null,
       gateBusy: false,
-      failedLeadForm: blankFailedLeadResolutionForm(),
+      failedLeadForm: blankFailedLeadForm(),
       failedLeadBusy: false,
       actionBusy: null,
     }),
@@ -622,7 +652,7 @@ function useLeadsPageContent() {
     setLeadUiField("gateForm", value);
   const setGateBusy = (value: SetStateAction<boolean>) =>
     setLeadUiField("gateBusy", value);
-  const setFailedLeadForm = (value: SetStateAction<FailedLeadResolutionForm>) =>
+  const setFailedLeadForm = (value: SetStateAction<FailedLeadForm>) =>
     setLeadUiField("failedLeadForm", value);
   const setFailedLeadBusy = (value: SetStateAction<boolean>) =>
     setLeadUiField("failedLeadBusy", value);
@@ -702,6 +732,9 @@ function useLeadsPageContent() {
   }
   // One-time password of a login created from the "new lead" sheet.
   const [issuedPortalAccess, setIssuedPortalAccess] = useState<PortalCredentials | null>(null);
+  // The failed-flow form: why the chosen reason cannot be saved, and the delete confirmation.
+  const [failedReasonError, setFailedReasonError] = useState("");
+  const [failedDeleteConfirmOpen, setFailedDeleteConfirmOpen] = useState(false);
   // Rows opened with the chevron before the name show the patient login.
   const [expandedLeadIds, setExpandedLeadIds] = useState<ReadonlySet<string>>(() => new Set());
   const toggleLeadExpanded = useCallback((leadId: string) => {
@@ -729,11 +762,11 @@ function useLeadsPageContent() {
   );
   const leadColumns = useMemo<ColumnDef<LeadListItem>[]>(
     () => {
-      const columns: ColumnDef<LeadListItem>[] = [
+      const keyedColumns: ColumnDef<LeadListItem>[] = [
       {
         id: "lead",
         label: t.leads_title,
-        accessor: (row) => `${row.first_name} ${row.last_name}`.trim(),
+        accessor: (row) => leadDisplayName(row, tx),
         filterType: "text",
         group: "identity",
         sortable: true,
@@ -764,7 +797,7 @@ function useLeadsPageContent() {
                 />
               </button>
               <span className="truncate font-mono text-xs text-foreground">
-                {`${row.first_name} ${row.last_name}`.trim()}
+                {leadDisplayName(row, tx)}
               </span>
               {row.portal_account ? (
                 <span
@@ -992,6 +1025,14 @@ function useLeadsPageContent() {
           ),
       },
       ];
+      // The shared filter picker prints a column's group as it is, so the
+      // group is its name in the UI language, not the key (QA 2026-10-11, N-17).
+      const columns = keyedColumns.map((column) => ({
+        ...column,
+        group: column.group
+          ? leadColumnGroupLabels[column.group as keyof typeof leadColumnGroupLabels] ?? column.group
+          : column.group,
+      }));
       if (permissions.canOpen) return columns;
       const conciergeColumns = new Set([
         "lead",
@@ -1011,11 +1052,13 @@ function useLeadsPageContent() {
     [
       expandedLeadIds,
       lang,
+      leadColumnGroupLabels,
       locale,
       permissions.canOpen,
       sanctionsFlags,
       t,
       toggleLeadExpanded,
+      tx,
     ]
   );
 
@@ -1146,10 +1189,13 @@ function useLeadsPageContent() {
     if (!detail) {
       dispatchUiState({
         gateForm: null,
-        failedLeadForm: blankFailedLeadResolutionForm(),
+        failedLeadForm: blankFailedLeadForm(),
       });
       return;
     }
+    // The reason chosen with «Не подходит» comes back while the outcome is still "none".
+    const storedReason = leadFailureReasonDraft(detail.failed_outcome?.reason);
+    setFailedReasonError("");
     dispatchUiState((current) => ({
       gateForm: leadToGateForm(detail),
       failedLeadForm: {
@@ -1159,7 +1205,8 @@ function useLeadsPageContent() {
           user?.role !== "ceo"
             ? "archive"
             : current.failedLeadForm.resolution,
-        reason: detail.failed_outcome?.reason ?? "",
+        reason: storedReason.choice,
+        reasonText: storedReason.text,
         note: detail.failed_outcome?.note ?? "",
       },
     }));
@@ -1379,9 +1426,31 @@ function useLeadsPageContent() {
     }
   }
 
-  async function handleResolveFailedLead(event: FormEvent<HTMLFormElement>) {
+  function failedLeadReasonDraft(): LeadFailureReasonDraft {
+    return {
+      choice: failedLeadForm.reason as LeadFailureReasonDraft["choice"],
+      text: failedLeadForm.reasonText,
+    };
+  }
+
+  function handleResolveFailedLead(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!permissions.canEdit || !selectedLeadId) return;
+    const reasonError = leadFailureReasonError(failedLeadReasonDraft(), tx);
+    setFailedReasonError(reasonError ?? "");
+    if (reasonError) return;
+    // Deleting removes personal data and attachments for good: it is confirmed first (QA 2026-10-11, A-41).
+    if (failedLeadForm.resolution === "delete") {
+      setFailedDeleteConfirmOpen(true);
+      return;
+    }
+    void submitFailedLeadResolution();
+  }
+
+  async function submitFailedLeadResolution() {
+    if (!permissions.canEdit || !selectedLeadId) return;
+    const reason = leadFailureReasonValue(failedLeadReasonDraft());
+    if (!reason) return;
 
     setFailedLeadBusy(true);
     setDetailError("");
@@ -1389,11 +1458,13 @@ function useLeadsPageContent() {
     try {
       await resolveFailedLead(selectedLeadId, {
         resolution: failedLeadForm.resolution,
-        reason: failedLeadForm.reason.trim(),
+        reason,
         note: nonempty(failedLeadForm.note),
       });
+      setFailedDeleteConfirmOpen(false);
       reload();
     } catch (resolveError) {
+      setFailedDeleteConfirmOpen(false);
       setDetailError(localizeLeadError(resolveError, t.common_failed_update));
     } finally {
       setFailedLeadBusy(false);
@@ -1494,7 +1565,7 @@ function useLeadsPageContent() {
       <div className="shrink-0 border-b border-border px-4 pt-3 pb-2 pr-12">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <h2 className="min-w-0 text-base font-medium text-foreground">
-            {detail ? `${detail.first_name} ${detail.last_name}` : t.leads_title}
+            {detail ? leadDisplayName(detail, tx) : t.leads_title}
           </h2>
           <div className="flex shrink-0 items-center gap-2">
             {isConciergeReadOnly ? (
@@ -1656,7 +1727,7 @@ function useLeadsPageContent() {
                     ) : null}
                   </div>
                   <h2 className="mt-4 text-2xl font-semibold text-slate-950">
-                    {detail.first_name} {detail.last_name}
+                    {leadDisplayName(detail, tx)}
                   </h2>
                 </section>
 
@@ -1665,7 +1736,7 @@ function useLeadsPageContent() {
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard
                       label={t.lead_full_name}
-                      value={dashOrValue(
+                      value={isAnonymizedLead(detail) ? deletedLeadLabel(tx) : dashOrValue(
                         [
                           detail.first_name,
                           detail.middle_name,
@@ -1898,7 +1969,7 @@ function useLeadsPageContent() {
                     ) : null}
                   </div>
                   <h2 className="mt-4 text-2xl font-semibold text-slate-950">
-                    {detail.first_name} {detail.last_name}
+                    {leadDisplayName(detail, tx)}
                   </h2>
                   <p className="mt-2 text-sm text-slate-600">
                     {t.users_created} {formatDate(detail.created_at, locale, t.common_not_set)}
@@ -1962,7 +2033,7 @@ function useLeadsPageContent() {
                   <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
                     <DetailCard
                       label={t.lead_full_name}
-                      value={dashOrValue(
+                      value={isAnonymizedLead(detail) ? deletedLeadLabel(tx) : dashOrValue(
                         [
                           detail.first_name,
                           detail.middle_name,
@@ -2612,16 +2683,29 @@ function useLeadsPageContent() {
                         />
                         <DetailCard
                           label={t.lead_failure_reason}
-                          value={detail.failed_outcome.reason || t.common_not_set}
+                          value={leadFailureReasonLabel(detail.failed_outcome.reason, tx) ?? t.common_not_set}
+                        />
+                      </div>
+                    ) : null}
+
+                    {/* «Не подходит» stores its reason before the outcome; who cannot edit still reads it. */}
+                    {detail.failed_outcome.status === "none"
+                      && !permissions.canEdit
+                      && leadFailureReasonLabel(detail.failed_outcome.reason, tx) ? (
+                      <div className="mt-4 grid gap-x-8 gap-y-1 md:grid-cols-2">
+                        <DetailCard
+                          label={t.lead_failure_reason}
+                          value={leadFailureReasonLabel(detail.failed_outcome.reason, tx) ?? t.common_not_set}
                         />
                       </div>
                     ) : null}
 
                     {detail.failed_outcome.status === "none" && permissions.canEdit ? (
-                      <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead}>
+                      <form className="mt-4 space-y-4" onSubmit={handleResolveFailedLead} noValidate>
                         <div className="grid gap-4 md:grid-cols-2">
                           <LeadField label={t.lead_resolution} htmlFor="lead-failed-resolution">
                             <NativeComboboxSelect
+                              id="lead-failed-resolution"
                               value={failedLeadForm.resolution}
                               onChange={(event) =>
                                 setFailedLeadForm((current) => ({
@@ -2637,21 +2721,51 @@ function useLeadsPageContent() {
                             ) : null}
                           </NativeComboboxSelect>
                           </LeadField>
+                          {/* A reason from the list, or «Другое» with an own text (QA 2026-10-11, A-39a). */}
                           <LeadField label={t.lead_failure_reason} htmlFor="lead-failed-reason">
-                            <Input
+                            <NativeComboboxSelect
                               id="lead-failed-reason"
-                              className={shellInputClassName}
                               value={failedLeadForm.reason}
-                              onChange={(event) =>
-                                setFailedLeadForm((current) => ({
-                                  ...current,
-                                  reason: event.target.value,
-                                }))
-                              }
                               required
-                            />
+                              aria-invalid={Boolean(failedReasonError) && !failedLeadForm.reason}
+                              onChange={(event) => {
+                                const reason = event.target.value;
+                                setFailedReasonError("");
+                                setFailedLeadForm((current) => ({ ...current, reason }));
+                              }}
+                              className={selectClassName}
+                            >
+                              <option value="">{tx("Выберите причину", "Grund auswählen")}</option>
+                              {LEAD_FAILURE_REASONS.map((reason) => (
+                                <option key={reason.code} value={reason.code}>{tx(reason.ru, reason.de)}</option>
+                              ))}
+                              <option value={LEAD_FAILURE_REASON_OTHER}>{leadFailureReasonOtherLabel(tx)}</option>
+                            </NativeComboboxSelect>
                           </LeadField>
                         </div>
+
+                        {failedLeadForm.reason === LEAD_FAILURE_REASON_OTHER ? (
+                          <LeadField label={tx("Опишите причину", "Grund beschreiben")} htmlFor="lead-failed-reason-text">
+                            <Input
+                              id="lead-failed-reason-text"
+                              className={shellInputClassName}
+                              value={failedLeadForm.reasonText}
+                              maxLength={LEAD_FAILURE_REASON_MAX_LENGTH}
+                              required
+                              aria-invalid={Boolean(failedReasonError)}
+                              onChange={(event) => {
+                                const reasonText = event.target.value;
+                                setFailedReasonError("");
+                                setFailedLeadForm((current) => ({ ...current, reasonText }));
+                              }}
+                            />
+                          </LeadField>
+                        ) : null}
+                        {failedReasonError ? (
+                          <p role="alert" className="text-xs text-destructive" data-testid="lead-failed-reason-error">
+                            {failedReasonError}
+                          </p>
+                        ) : null}
 
                         <LeadField label={t.lead_internal_note} htmlFor="lead-failed-note">
                           <textarea
@@ -2682,6 +2796,21 @@ function useLeadsPageContent() {
                         </div>
                       </form>
                     ) : null}
+                    <LeadConfirmDialog
+                      open={failedDeleteConfirmOpen}
+                      testId="lead-delete-anonymize-dialog"
+                      title={tx("Удалить и анонимизировать лид?", "Lead löschen und anonymisieren?")}
+                      description={tx(
+                        "Это необратимо: персональные данные лида и все вложения будут удалены, вход в портал закрыт. В журнале аудита лид останется.",
+                        "Das kann nicht rückgängig gemacht werden: Die personenbezogenen Daten des Leads und alle Anhänge werden gelöscht, der Portalzugang wird geschlossen. Im Audit-Protokoll bleibt der Lead erhalten.",
+                      )}
+                      confirmLabel={tx("Удалить безвозвратно", "Endgültig löschen")}
+                      cancelLabel={tx("Отмена", "Abbrechen")}
+                      destructive
+                      busy={failedLeadBusy}
+                      onConfirm={() => void submitFailedLeadResolution()}
+                      onCancel={() => setFailedDeleteConfirmOpen(false)}
+                    />
                   </section>
                 )}
               </>
@@ -2917,7 +3046,7 @@ function useLeadsPageContent() {
             defaultDensity="comfortable"
             defaultFrozenColumns={LEAD_DEFAULT_FROZEN_COLUMNS}
             dictionary={t as unknown as Record<string, string>}
-            groupLabels={leadColumnGroupLabels}
+            groupLabels={leadColumnGroupLabelsByName}
             loading={loading}
             maxFrozenColumns={LEAD_MAX_FROZEN_COLUMNS}
             toolbarStart={
@@ -3068,7 +3197,7 @@ function useLeadsPageContent() {
             <DialogContent className="flex h-[90dvh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,52rem)] sm:w-[91vw] sm:max-w-[91vw]">
               <DialogTitle className="sr-only">
                 {detail
-                  ? `${detail.first_name} ${detail.last_name}`
+                  ? leadDisplayName(detail, tx)
                   : t.leads_title}
               </DialogTitle>
               {detailPaneNode}

@@ -263,7 +263,8 @@ function recompute(request: ReturnType<typeof leadRequest>) {
                 ...(payer.organisation_name ? [] : ["payer_organisation_name"]),
                 ...(mask && !payer.organisation_legal_form ? ["payer_legal_form"] : []),
                 ...(mask && !payer.organisation_contact_name ? ["payer_contact_name"] : []),
-                ...(mask && !payer.email && !payer.phone ? ["payer_email_or_phone"] : []),
+                // The e-mail is required (its own link goes there, QA 2026-10-11 A-35); the phone is not.
+                ...(mask && !payer.email ? ["payer_email"] : []),
                 ...(payer.country ? [] : ["payer_country"]),
               ]
             : [
@@ -1045,7 +1046,7 @@ test.describe("lead cabinet", () => {
     await expect(missing).toContainText("Zahler: Name der Organisation");
     await expect(missing).toContainText("Zahler: Rechtsform");
     await expect(missing).toContainText("Zahler: Ansprechperson");
-    await expect(missing).toContainText("Zahler: E-Mail oder Telefon");
+    await expect(missing).toContainText("Zahler: E-Mail");
     await expect(missing).toContainText("Zahler: Land des Sitzes");
     await expect(missing).toContainText("Warum erfolgt die Zahlung über die Organisation?");
     await expect(missing).not.toContainText("Beziehung zur Patientin / zum Patienten");
@@ -1076,7 +1077,7 @@ test.describe("lead cabinet", () => {
     await step(page, "send");
     await expect(missing).not.toContainText("Name der Organisation");
     await expect(missing).not.toContainText("Land des Sitzes");
-    await expect(missing).not.toContainText("E-Mail oder Telefon");
+    await expect(missing).not.toContainText("Zahler: E-Mail");
     await expect(missing).not.toContainText("Warum erfolgt die Zahlung");
     const paying = page.getByTestId("lead-request-summary-payer");
     await expect(paying).toContainText("Beispiel GmbH");

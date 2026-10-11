@@ -809,8 +809,22 @@ pub struct LeadFlag {
     pub flag: &'static str,
 }
 
-/// Flags of all open leads with a sanctions or country block.
+/// Flags of all open leads with a sanctions or country block, one per lead
+/// for the leads list (a sanctions flag wins over the country's).
 pub async fn lead_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error> {
+    let mut flags = sanctions_flags(state).await?;
+    let flagged: Vec<Uuid> = flags.iter().map(|flag| flag.lead_id).collect();
+    flags.extend(
+        country_flags(state)
+            .await?
+            .into_iter()
+            .filter(|flag| !flagged.contains(&flag.lead_id)),
+    );
+    Ok(flags)
+}
+
+/// The sanctions flag of every lead with an open or confirmed hit.
+async fn sanctions_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error> {
     let mut flags: Vec<LeadFlag> = Vec::new();
     let rows = sqlx::query(
         r#"SELECT h.lead_id,
@@ -836,7 +850,15 @@ pub async fn lead_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error> 
             },
         });
     }
+    Ok(flags)
+}
 
+/// The country flag (`blocked_country` / `country_lifted`) of every open
+/// lead a blocked country concerns — also of a lead with a sanctions hit:
+/// the CEO's «Страны» tab lists it and the country block is lifted on its
+/// own (QA 2026-10-11 A-38a).
+pub async fn country_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error> {
+    let mut flags: Vec<LeadFlag> = Vec::new();
     let blocked = policy::blocked_countries(&state.db).await?;
     if blocked.is_empty() {
         return Ok(flags);
@@ -852,9 +874,6 @@ pub async fn lead_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Error> 
     let lead_ids: Vec<Uuid> = leads.iter().map(|lead| lead.lead_id).collect();
     let overrides = policy::active_overrides(&state.db, &lead_ids, &[]).await?;
     for lead in leads {
-        if flags.iter().any(|flag| flag.lead_id == lead.lead_id) {
-            continue;
-        }
         let mut countries: Vec<String> = Vec::new();
         for subject in &lead.subjects {
             for code in subject.countries() {

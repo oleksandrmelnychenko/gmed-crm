@@ -834,10 +834,11 @@ async fn an_adult_names_the_person_who_acts_for_him() {
         1,
         "{intake}"
     );
-    // The representative's files are not the lead's identity document; "N
-    // documents" counts every file of the cabinet (QA 2026-10-10).
+    // The representative's files are not the lead's identity document, and
+    // "N documents" counts the medical files only, as the leads list does (QA
+    // 2026-10-11 A-11: one definition, "medical documents" in the UI).
     assert_eq!(intake["identity_documents"], json!([]), "{intake}");
-    assert_eq!(intake["progress"]["documents"], 2, "{intake}");
+    assert_eq!(intake["progress"]["documents"], 0, "{intake}");
     let (status, intake) = json_request(
         router,
         "GET",

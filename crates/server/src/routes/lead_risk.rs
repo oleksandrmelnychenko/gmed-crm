@@ -122,6 +122,7 @@ fn trigger_json(trigger: &Sticky) -> Value {
         "active": trigger.active,
         "first_fired_at": trigger.first_fired_at,
         "last_fired_at": trigger.last_fired_at,
+        "inactive_since": trigger.inactive_since,
         "blocks": blocks,
     })
 }
@@ -238,7 +239,7 @@ async fn assessment_json(
     } else {
         let fired = risk::evaluate(&inputs, &config);
         let score = risk::score_fired(&fired, &config);
-        let triggers = risk::merge(&[], &fired, Utc::now(), false).triggers;
+        let triggers = risk::merge(&[], &fired, Utc::now(), &[]).triggers;
         json!({
             "level": score.level,
             "points": score.points,
@@ -315,6 +316,9 @@ async fn assessment_json(
         "can_confirm": can_confirm,
         "can_restart": reviewer && !started,
         "four_eyes_required": started && score.level >= 3,
+        // A confirmed sanctions match is final (the sanctions gate holds for
+        // good): the panel offers no release then (QA 2026-10-11 N-09).
+        "sanctions_confirmed": inputs.confirmed_hit_patient || inputs.confirmed_hit_payer,
         // Everybody who may decide, split into CEO accounts and named deputies.
         "reviewers_available": reviewers.total(),
         "reviewers_ceo": reviewers.ceo,

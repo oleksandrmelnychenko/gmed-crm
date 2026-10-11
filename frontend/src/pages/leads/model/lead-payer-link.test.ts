@@ -370,7 +370,7 @@ describe("payer link: expected total", () => {
 describe("payer link: check level", () => {
   it("names level and the reasons of the enhanced check (owner rule 2026-10-07)", () => {
     expect(payerCheckLevelLine(2, ["payer_residence_blacklist", "patient_sanctioned"], de)).toBe(
-      "Prüfstufe: 2 — Wohnsitzland des Zahlers auf der Blacklist, Patient auf einer Sanktionsliste (bestätigt)",
+      "Prüfstufe: 2 — Wohnsitzland des Zahlers auf der Blacklist, Patient oder seine Bank auf einer Sanktionsliste (bestätigt)",
     );
     expect(payerCheckLevelLine(2, ["payer_citizenship_blacklist"], ru)).toBe(
       "Уровень проверки: 2 — гражданство плательщика в чёрном списке",

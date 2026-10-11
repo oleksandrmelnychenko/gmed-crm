@@ -75,6 +75,8 @@ export type RiskTrigger = {
   /** Still true in the latest live evaluation; a fired trigger stays (sticky) either way. */
   active: boolean;
   first_fired_at: string | null;
+  /** When it stopped firing (the data changed, e.g. a PEP "yes" corrected to "no"); null while active or unknown. */
+  inactive_since: string | null;
   /** The follow-up blocks this trigger asks for. */
   blocks: string[];
   /** K.o. (T14–T16): level 3 whatever the points. */
@@ -166,6 +168,8 @@ export type LeadRiskAssessment = RiskScore & {
   can_restart: boolean | null;
   four_eyes_required: boolean;
   reviewers_available: number;
+  /** The lead has a confirmed (final) sanctions match: no release is offered. */
+  sanctions_confirmed: boolean;
 };
 
 const record = (value: unknown): Record<string, unknown> | null =>
@@ -209,6 +213,7 @@ function normalizeTrigger(value: unknown): RiskTrigger | null {
     points: count(raw.points),
     active: raw.active !== false,
     first_fired_at: text(raw.first_fired_at),
+    inactive_since: raw.active === false ? text(raw.inactive_since) : null,
     blocks: letters(raw.blocks),
     knockout: raw.knockout === true || RISK_KNOCKOUT_TRIGGERS.includes(key.toUpperCase()),
   };
@@ -352,6 +357,7 @@ export function normalizeLeadRiskAssessment(value: unknown): LeadRiskAssessment 
     can_restart: typeof raw.can_restart === "boolean" ? raw.can_restart : null,
     four_eyes_required: raw.four_eyes_required === true || score.level === 3,
     reviewers_available: count(raw.reviewers_available),
+    sanctions_confirmed: raw.sanctions_confirmed === true,
   };
 }
 
@@ -409,6 +415,8 @@ export function riskAvailableDecisions(assessment: LeadRiskAssessment): RiskDeci
   return RISK_DECISIONS.filter((decision) => {
     // Level 1 needs no release, unless staff rejected it before (a release may follow a reject).
     if (decision === "release") {
+      // A confirmed sanctions match blocks for good: a release would decide nothing (QA 2026-10-11 N-09).
+      if (assessment.sanctions_confirmed) return false;
       return (assessment.level > 1 || assessment.status === "rejected") && assessment.status !== "released";
     }
     if (decision === "reject") return assessment.status !== "rejected";
@@ -468,10 +476,35 @@ export function riskTriggerLabel(key: string, tx: Tx): string {
     case "T15":
       return tx("Связи с санкционными лицами: ответ «да»", "Verbindung zu sanktionierten Personen: „ja“");
     case "T16":
-      return tx("Совпадение с санкционным списком (открыто или подтверждено)", "Sanktionstreffer (offen oder bestätigt)");
+      // Only a confirmed match (owner 2026-10-07); an open one holds through the sanctions gate only.
+      return tx("Подтверждённое совпадение с санкционным списком", "Bestätigter Sanktionstreffer");
     default:
       return key;
   }
+}
+
+/** The answer triggers: a "yes" of the patient or the payer (PEP, links to sanctioned persons). */
+const ANSWER_TRIGGERS: readonly string[] = ["T14", "T15"];
+
+/**
+ * The state of a trigger in the panel. A sticky trigger whose condition no
+ * longer holds says since when; for an answer trigger (T14/T15) that the
+ * answer was changed to "no" (owner 2026-10-11: T14 stays, QA A-51).
+ */
+export function riskTriggerStateLabel(
+  trigger: Pick<RiskTrigger, "key" | "active" | "inactive_since">,
+  tx: Tx,
+  formatDate: (value: string) => string,
+): string {
+  if (trigger.active) return tx("действует", "aktiv");
+  const date = trigger.inactive_since ? formatDate(trigger.inactive_since) : "";
+  if (ANSWER_TRIGGERS.includes(trigger.key)) {
+    const changed = tx("ответ изменён на «Нет»", "Antwort auf „Nein“ geändert");
+    const kept = tx("триггер сохраняется", "Auslöser bleibt bestehen");
+    return date ? `${changed} ${date} · ${kept}` : `${changed} · ${kept}`;
+  }
+  const fixed = tx("зафиксирован (данные изменились)", "festgehalten (Daten geändert)");
+  return date ? `${fixed} ${date}` : fixed;
 }
 
 export function riskSubjectLabel(subject: string, tx: Tx): string {
@@ -630,8 +663,8 @@ export function riskEventLabel(event: RiskHistoryEvent, tx: Tx): string {
     case "follow_up_answered":
       return tx("Пациент отправил доп. сведения", "Ergänzende Angaben gesendet");
     case "trigger_withdrawn":
-      // T16 after a false-positive decision; T12 once a valid identity document is on file,
-      // T13 once nobody acts for the adult any more (owner 2026-10-10).
+      // T16 after a false-positive decision (or set by an open hit before 2026-10-11); T12 once a valid
+      // identity document is on file, T13 once nobody acts for the adult any more (owner 2026-10-10).
       return event.cause === "hit_decision"
         ? tx("Триггер снят (ложное совпадение)", "Auslöser zurückgenommen (falsch positiv)")
         : tx("Триггер снят (условие больше не выполняется)", "Auslöser zurückgenommen (Voraussetzung entfallen)");

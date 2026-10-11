@@ -70,7 +70,8 @@ export type PayerLinkText = {
   sessionExpired: string;
   privacyFirst: string;
   alreadySubmitted: string;
-  namedYou: (patient: string) => string;
+  /** `organisation`: a company, organisation or insurer pays — "your organisation", as the invitation (QA 2026-10-11 A-36a). */
+  namedYou: (patient: string, organisation?: boolean) => string;
   codeWillBeSent: (email: string) => string;
   codeSentTo: (email: string) => string;
   submittedCodeNote: string;
@@ -100,7 +101,7 @@ export type PayerLinkText = {
   choose: string;
   invalidField: string;
   idDocumentExpired: string;
-  privacyNotice: (patient: string) => readonly string[];
+  privacyNotice: (patient: string, organisation?: boolean) => readonly string[];
   privacyLink: string;
   privacyAck: string;
   privacyAckedAt: (dateTime: string) => string;
@@ -148,6 +149,8 @@ export type PayerLinkText = {
   noOwners: string;
   ownersLimit: string;
   relationshipKinds: Record<RelationshipKind, string>;
+  /** The list of a company, organisation or insurer (QA 2026-10-11 A-36c). */
+  organisationRelationshipKinds: Record<"employer" | "business_partner" | "other", string>;
   fundsSources: Record<FundsSource, string>;
   fundsDescriptionHint: string;
   fundsProof: string;
@@ -204,7 +207,10 @@ const de: PayerLinkText = {
   sessionExpired: "Ihre Sitzung ist abgelaufen. Bitte fordern Sie einen neuen Code an. Ihre Angaben bleiben gespeichert.",
   privacyFirst: "Bitte bestätigen Sie zuerst die Datenschutzhinweise.",
   alreadySubmitted: "Ihre Angaben sind bereits bei GMED eingegangen.",
-  namedYou: (patient) => `${patient} hat Sie als zahlende Person für eine Anfrage bei GMED benannt.`,
+  namedYou: (patient, organisation) =>
+    organisation
+      ? `${patient} hat Ihre Organisation als zahlende Partei für eine Anfrage bei GMED benannt.`
+      : `${patient} hat Sie als zahlende Person für eine Anfrage bei GMED benannt.`,
   codeWillBeSent: (email) => `Wir senden einen Bestätigungscode an ${email}.`,
   codeSentTo: (email) => `Wir haben einen Code an ${email} gesendet. Er ist 15 Minuten gültig.`,
   submittedCodeNote: "Ihre Angaben sind bereits bei GMED eingegangen. Mit einem Code können Sie sie ansehen.",
@@ -255,8 +261,10 @@ const de: PayerLinkText = {
   choose: "Auswählen",
   invalidField: "Bitte prüfen Sie diese Angabe.",
   idDocumentExpired: "Das Dokument ist abgelaufen. Bitte geben Sie ein gültiges Dokument an.",
-  privacyNotice: (patient) => [
-    `${patient} hat Sie als zahlende Person benannt und uns dafür Ihren Namen und Ihre Kontaktdaten mitgeteilt.`,
+  privacyNotice: (patient, organisation) => [
+    organisation
+      ? `${patient} hat Ihre Organisation als zahlende Partei benannt und uns dafür ihren Namen und ihre Kontaktdaten mitgeteilt.`
+      : `${patient} hat Sie als zahlende Person benannt und uns dafür Ihren Namen und Ihre Kontaktdaten mitgeteilt.`,
     "Verantwortlich für die Verarbeitung Ihrer Daten ist GMED. Wir verarbeiten Ihre Angaben, um Sie nach dem Geldwäschegesetz zu identifizieren (§§ 10–12 GwG), die Kostenübernahme zu klären und Rechnungen zu stellen. Rechtsgrundlage ist Art. 6 Abs. 1 lit. b und c DSGVO.",
     "Wir speichern die Angaben fünf Jahre nach dem Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG). Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung und Widerspruch sowie das Recht, sich bei einer Datenschutz-Aufsichtsbehörde zu beschweren.",
   ],
@@ -380,7 +388,7 @@ const de: PayerLinkText = {
   removeFailed: "Die Datei konnte nicht entfernt werden.",
   ownersIntro:
     "Bitte nennen Sie jede natürliche Person, die mehr als 25 % der Anteile oder Stimmrechte hält oder die Organisation auf andere Weise kontrolliert.",
-  ownersOptional: "Für Organisationen und Versicherungen ist diese Angabe freiwillig.",
+  ownersOptional: "Für Versicherungen ist diese Angabe freiwillig.",
   ownerHeading: (index) => `Person ${index}`,
   ownerFields: {
     first_name: "Vorname",
@@ -407,11 +415,16 @@ const de: PayerLinkText = {
     child: "Kind",
     sibling: "Bruder / Schwester",
     grandparent: "Großmutter / Großvater",
-    relative: "anderer Verwandter",
+    relative: "Anderer Verwandter",
     employer: "Arbeitgeber",
     friend: "Freund/in",
     business_partner: "Geschäftspartner/in",
     other: "Sonstige",
+  },
+  organisationRelationshipKinds: {
+    employer: "Arbeitgeber der Patientin / des Patienten",
+    business_partner: "Geschäftspartner",
+    other: "Sonstiges (z. B. Stiftung, Verein, Versicherung)",
   },
   fundsSources: {
     employment: "Gehalt / nichtselbständige Arbeit",
@@ -484,7 +497,10 @@ const en: PayerLinkText = {
   sessionExpired: "Your session has expired. Please request a new code. Your details remain saved.",
   privacyFirst: "Please confirm the privacy information first.",
   alreadySubmitted: "GMED has already received your details.",
-  namedYou: (patient) => `${patient} has named you as the paying person for a request at GMED.`,
+  namedYou: (patient, organisation) =>
+    organisation
+      ? `${patient} has named your organisation as the paying party for a request at GMED.`
+      : `${patient} has named you as the paying person for a request at GMED.`,
   codeWillBeSent: (email) => `We will send a confirmation code to ${email}.`,
   codeSentTo: (email) => `We have sent a code to ${email}. It is valid for 15 minutes.`,
   submittedCodeNote: "GMED has already received your details. You can view them with a code.",
@@ -535,8 +551,10 @@ const en: PayerLinkText = {
   choose: "Select",
   invalidField: "Please check this entry.",
   idDocumentExpired: "The document has expired. Please enter a valid document.",
-  privacyNotice: (patient) => [
-    `${patient} has named you as the paying person and gave us your name and contact details for this purpose.`,
+  privacyNotice: (patient, organisation) => [
+    organisation
+      ? `${patient} has named your organisation as the paying party and gave us its name and contact details for this purpose.`
+      : `${patient} has named you as the paying person and gave us your name and contact details for this purpose.`,
     "GMED is responsible for processing your data. We process your details to identify you under the German Money Laundering Act (Sections 10–12 GwG), to arrange the covering of the costs and to issue invoices. The legal basis is Art. 6(1)(b) and (c) GDPR.",
     "We keep the details for five years after the end of the business relationship (Section 8(4) GwG). You have the right of access, rectification, erasure, restriction of processing and objection, and the right to lodge a complaint with a data protection supervisory authority.",
   ],
@@ -660,7 +678,7 @@ const en: PayerLinkText = {
   removeFailed: "The file could not be removed.",
   ownersIntro:
     "Please name every natural person who holds more than 25 % of the shares or voting rights or who controls the organisation in another way.",
-  ownersOptional: "For organisations and insurers this is optional.",
+  ownersOptional: "For insurers this is optional.",
   ownerHeading: (index) => `Person ${index}`,
   ownerFields: {
     first_name: "First name",
@@ -687,11 +705,16 @@ const en: PayerLinkText = {
     child: "Child",
     sibling: "Brother / sister",
     grandparent: "Grandparent",
-    relative: "other relative",
+    relative: "Other relative",
     employer: "Employer",
     friend: "Friend",
     business_partner: "Business partner",
     other: "Other",
+  },
+  organisationRelationshipKinds: {
+    employer: "The patient's employer",
+    business_partner: "Business partner",
+    other: "Other (e.g. foundation, association, insurer)",
   },
   fundsSources: {
     employment: "Salary / employment",
@@ -764,7 +787,10 @@ const uk: PayerLinkText = {
   sessionExpired: "Ваш сеанс завершився. Будь ласка, запросіть новий код. Ваші дані збережено.",
   privacyFirst: "Будь ласка, спершу підтвердьте інформацію про захист даних.",
   alreadySubmitted: "Ваші дані вже надійшли до GMED.",
-  namedYou: (patient) => `${patient} вказав(ла) вас платником за заявкою в GMED.`,
+  namedYou: (patient, organisation) =>
+    organisation
+      ? `${patient} вказав(ла) вашу організацію як платника за заявкою в GMED.`
+      : `${patient} вказав(ла) вас платником за заявкою в GMED.`,
   codeWillBeSent: (email) => `Ми надішлемо код підтвердження на ${email}.`,
   codeSentTo: (email) => `Ми надіслали код на ${email}. Він дійсний 15 хвилин.`,
   submittedCodeNote: "Ваші дані вже надійшли до GMED. Переглянути їх можна за допомогою коду.",
@@ -813,8 +839,10 @@ const uk: PayerLinkText = {
   choose: "Виберіть",
   invalidField: "Будь ласка, перевірте це поле.",
   idDocumentExpired: "Термін дії документа минув. Будь ласка, вкажіть дійсний документ.",
-  privacyNotice: (patient) => [
-    `${patient} вказав(ла) вас платником і для цього повідомив(ла) нам ваше ім'я та контактні дані.`,
+  privacyNotice: (patient, organisation) => [
+    organisation
+      ? `${patient} вказав(ла) вашу організацію як платника і для цього повідомив(ла) нам її назву та контактні дані.`
+      : `${patient} вказав(ла) вас платником і для цього повідомив(ла) нам ваше ім'я та контактні дані.`,
     "Відповідальна за обробку ваших даних — GMED. Ми обробляємо ваші дані, щоб ідентифікувати вас відповідно до німецького закону про запобігання відмиванню коштів (§§ 10–12 GwG), узгодити оплату витрат і виставляти рахунки. Правова підстава — ст. 6 абз. 1 літ. b і c GDPR (DSGVO).",
     "Ми зберігаємо дані п'ять років після завершення ділових відносин (§ 8 абз. 4 GwG). Ви маєте право на доступ до даних, їх виправлення, видалення, обмеження обробки та заперечення, а також право подати скаргу до наглядового органу із захисту даних.",
   ],
@@ -943,7 +971,7 @@ const uk: PayerLinkText = {
   removeFailed: "Не вдалося видалити файл.",
   ownersIntro:
     "Будь ласка, вкажіть кожну фізичну особу, якій належить понад 25 % часток або голосів чи яка іншим чином контролює організацію.",
-  ownersOptional: "Для організацій і страхових компаній ці дані необов'язкові.",
+  ownersOptional: "Для страхових компаній ці дані необов'язкові.",
   ownerHeading: (index) => `Особа ${index}`,
   ownerFields: {
     first_name: "Ім'я",
@@ -970,11 +998,16 @@ const uk: PayerLinkText = {
     child: "Син / донька",
     sibling: "Брат / сестра",
     grandparent: "Бабуся / дідусь",
-    relative: "інший родич",
+    relative: "Інший родич",
     employer: "Роботодавець",
     friend: "Друг / подруга",
     business_partner: "Діловий партнер",
     other: "Інше",
+  },
+  organisationRelationshipKinds: {
+    employer: "Роботодавець пацієнта",
+    business_partner: "Діловий партнер",
+    other: "Інше (напр. фонд, об'єднання, страхова компанія)",
   },
   fundsSources: {
     employment: "Заробітна плата / робота за наймом",
@@ -1046,7 +1079,10 @@ const ru: PayerLinkText = {
   sessionExpired: "Ваш сеанс истёк. Пожалуйста, запросите новый код. Ваши данные сохранены.",
   privacyFirst: "Пожалуйста, сначала подтвердите информацию о защите данных.",
   alreadySubmitted: "Ваши данные уже поступили в GMED.",
-  namedYou: (patient) => `${patient} указал(а) вас плательщиком по заявке в GMED.`,
+  namedYou: (patient, organisation) =>
+    organisation
+      ? `${patient} указал(а) вашу организацию как плательщика по заявке в GMED.`
+      : `${patient} указал(а) вас плательщиком по заявке в GMED.`,
   codeWillBeSent: (email) => `Мы отправим код подтверждения на ${email}.`,
   codeSentTo: (email) => `Мы отправили код на ${email}. Он действует 15 минут.`,
   submittedCodeNote: "Ваши данные уже поступили в GMED. Просмотреть их можно с помощью кода.",
@@ -1095,8 +1131,10 @@ const ru: PayerLinkText = {
   choose: "Выберите",
   invalidField: "Пожалуйста, проверьте это поле.",
   idDocumentExpired: "Срок действия документа истёк. Пожалуйста, укажите действующий документ.",
-  privacyNotice: (patient) => [
-    `${patient} указал(а) вас плательщиком и для этого сообщил(а) нам ваше имя и контактные данные.`,
+  privacyNotice: (patient, organisation) => [
+    organisation
+      ? `${patient} указал(а) вашу организацию как плательщика и для этого сообщил(а) нам её название и контактные данные.`
+      : `${patient} указал(а) вас плательщиком и для этого сообщил(а) нам ваше имя и контактные данные.`,
     "Ответственная за обработку ваших данных — GMED. Мы обрабатываем ваши данные, чтобы идентифицировать вас по немецкому закону о противодействии отмыванию денег (§§ 10–12 GwG), согласовать оплату расходов и выставлять счета. Правовое основание — ст. 6 абз. 1 лит. b и c GDPR (DSGVO).",
     "Мы храним данные пять лет после окончания деловых отношений (§ 8 абз. 4 GwG). Вы имеете право на доступ к данным, их исправление, удаление, ограничение обработки и возражение, а также право подать жалобу в надзорный орган по защите данных.",
   ],
@@ -1225,7 +1263,7 @@ const ru: PayerLinkText = {
   removeFailed: "Не удалось удалить файл.",
   ownersIntro:
     "Пожалуйста, укажите каждое физическое лицо, которому принадлежит более 25 % долей или голосов либо которое иным образом контролирует организацию.",
-  ownersOptional: "Для организаций и страховых компаний эти данные необязательны.",
+  ownersOptional: "Для страховых компаний эти данные необязательны.",
   ownerHeading: (index) => `Лицо ${index}`,
   ownerFields: {
     first_name: "Имя",
@@ -1252,11 +1290,16 @@ const ru: PayerLinkText = {
     child: "Сын / дочь",
     sibling: "Брат / сестра",
     grandparent: "Бабушка / дедушка",
-    relative: "другой родственник",
+    relative: "Другой родственник",
     employer: "Работодатель",
     friend: "Друг / подруга",
     business_partner: "Деловой партнёр",
     other: "Другое",
+  },
+  organisationRelationshipKinds: {
+    employer: "Работодатель пациента",
+    business_partner: "Деловой партнёр",
+    other: "Другое (напр. фонд, объединение, страховая компания)",
   },
   fundsSources: {
     employment: "Заработная плата / работа по найму",

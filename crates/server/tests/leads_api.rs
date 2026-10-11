@@ -1182,6 +1182,63 @@ async fn qualify_lead_flow() {
 }
 
 #[tokio::test]
+async fn not_qualified_keeps_the_reason_for_the_failed_lead_workflow() {
+    let Some(app) = test_app().await else { return };
+    let pm = app.auth_header("patient_manager");
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id = insert_status_lead(&app, &tag, "in_progress").await;
+
+    // QA 2026-10-11 (A-39a): "not suitable" asks for a reason; it is stored
+    // as the failure reason, also before the lead is archived.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "not_qualified", "reason": "  no_response " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(detail["qualification_status"], "not_qualified", "{detail}");
+    assert_eq!(detail["failed_outcome"]["status"], "none", "{detail}");
+    assert_eq!(
+        detail["failed_outcome"]["reason"], "no_response",
+        "{detail}"
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'qualify_lead' AND entity_id = $1 AND context->>'reason' = 'no_response'",
+    )
+    .bind(lead_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+
+    // Archiving takes it over; a too long reason is refused.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "archive", "reason": "no_response" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let other = insert_status_lead(&app, &format!("{tag}-x"), "in_progress").await;
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{other}/qualify"),
+        &pm,
+        Some(json!({ "status": "not_qualified", "reason": "x".repeat(501) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn qualify_lead_invalid_status_rejected() {
     let Some(app) = test_app().await else { return };
 

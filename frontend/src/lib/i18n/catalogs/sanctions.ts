@@ -101,6 +101,14 @@ export interface SanctionsTranslations {
   sanctions_live_checking: string;
   sanctions_live_clear: string;
   sanctions_live_possible: string;
+  // The live check stores nothing; the line says what happens to a possible
+  // match before the lead exists, before a save and after the CEO's decision
+  // (QA 2026-10-11 N-14, A-39b).
+  sanctions_live_possible_new_lead: string;
+  sanctions_live_possible_unsaved: string;
+  sanctions_live_possible_review: string;
+  sanctions_live_false_positive: string;
+  sanctions_live_confirmed: string;
   sanctions_live_unavailable: string;
   sanctions_live_error: string;
   sanctions_banner_review: string;
@@ -255,7 +263,12 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_settings_hint: "Санкционный список ЕС и политика по странам. Изменяет только CEO.",
   sanctions_live_checking: "Проверка по санкционному списку ЕС…",
   sanctions_live_clear: "Санкционный список ЕС ({date}): совпадений нет",
-  sanctions_live_possible: "Возможное совпадение — передано CEO на проверку",
+  sanctions_live_possible: "Возможное совпадение — решение принимает CEO",
+  sanctions_live_possible_new_lead: "Возможное совпадение — после создания лида CEO проверит его",
+  sanctions_live_possible_unsaved: "Возможное совпадение — после сохранения изменений CEO проверит его",
+  sanctions_live_possible_review: "Возможное совпадение — ждёт решения CEO",
+  sanctions_live_false_positive: "Совпадение проверено CEO: ложное совпадение",
+  sanctions_live_confirmed: "Совпадение подтверждено CEO",
   sanctions_live_unavailable: "Санкционный список ЕС не загружен — проверка невозможна",
   sanctions_live_error: "Проверка по санкционному списку сейчас недоступна",
   sanctions_banner_review:
@@ -414,7 +427,12 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_settings_hint: "EU-Sanktionsliste und Länderregel. Änderungen nur durch den CEO.",
   sanctions_live_checking: "Prüfung gegen die EU-Sanktionsliste…",
   sanctions_live_clear: "EU-Sanktionsliste ({date}): kein Treffer",
-  sanctions_live_possible: "Möglicher Treffer – an den CEO zur Prüfung übergeben",
+  sanctions_live_possible: "Möglicher Treffer – die Entscheidung trifft der CEO",
+  sanctions_live_possible_new_lead: "Möglicher Treffer – nach dem Anlegen des Leads prüft ihn der CEO",
+  sanctions_live_possible_unsaved: "Möglicher Treffer – nach dem Speichern der Änderungen prüft ihn der CEO",
+  sanctions_live_possible_review: "Möglicher Treffer – wartet auf die Entscheidung des CEO",
+  sanctions_live_false_positive: "Treffer vom CEO geprüft: falsch positiv",
+  sanctions_live_confirmed: "Treffer vom CEO bestätigt",
   sanctions_live_unavailable: "EU-Sanktionsliste nicht geladen – keine Prüfung möglich",
   sanctions_live_error: "Die Sanktionsprüfung ist gerade nicht verfügbar",
   sanctions_banner_review:

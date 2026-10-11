@@ -73,7 +73,7 @@ export function PrivacyStep({
   return (
     <div className="space-y-5" data-testid="payer-link-step-privacy">
       <div className="space-y-2 text-sm leading-6 text-foreground" data-testid="payer-link-privacy-notice">
-        {text.privacyNotice(questionnaire.patient_name).map((paragraph) => (
+        {text.privacyNotice(questionnaire.patient_name, questionnaire.payer_type !== "person").map((paragraph) => (
           <p key={paragraph}>{paragraph}</p>
         ))}
         <a href="/legal#privacy" target="_blank" rel="noreferrer" className="inline-block text-sm text-[var(--brand)] underline">

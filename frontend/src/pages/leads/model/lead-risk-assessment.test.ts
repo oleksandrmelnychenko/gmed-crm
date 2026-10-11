@@ -25,6 +25,7 @@ import {
   riskStatusLabel,
   riskSuggestedBlocks,
   riskTriggerLabel,
+  riskTriggerStateLabel,
 } from "./lead-risk-assessment";
 import { normalizeFollowUpAnswers, normalizeRequestReason, normalizeStaffIdDataMarks } from "./lead-risk-intake";
 
@@ -135,6 +136,35 @@ describe("the risk assessment of a lead (staff)", () => {
       levelTwo({ level: 3, status: "proposed", pending_proposal: { id: "d1", decision: "release", reason: "Herkunft geprüft", decided_by_name: "Test CEO", decided_at: "2026-10-07T09:00:00Z" } }),
     )!;
     expect(riskAvailableDecisions(proposed)).toEqual([]);
+    // A confirmed sanctions match is final: no release (QA 2026-10-11 N-09).
+    const sanctioned = normalizeLeadRiskAssessment(levelTwo({ level: 3, sanctions_confirmed: true }))!;
+    expect(sanctioned.sanctions_confirmed).toBe(true);
+    expect(riskAvailableDecisions(sanctioned)).toEqual(["request_more", "reject"]);
+    expect(normalizeLeadRiskAssessment(levelTwo())!.sanctions_confirmed).toBe(false);
+  });
+
+  it("says since when a sticky trigger no longer holds, a corrected answer as such (QA 2026-10-11 A-51)", () => {
+    const assessment = normalizeLeadRiskAssessment(
+      levelTwo({
+        level: 3,
+        triggers: [
+          { key: "T14", subject: "patient", points: 0, active: false, first_fired_at: "2026-10-11T19:07:58Z", inactive_since: "2026-10-11T19:08:10Z", blocks: ["H"] },
+          { key: "T2", subject: "patient", variant: "list_1", points: 2, active: false, first_fired_at: "2026-10-07T08:00:00Z", inactive_since: "2026-10-09T08:00:00Z", blocks: ["F"] },
+          { key: "T9", subject: "patient", points: 4, active: true, first_fired_at: "2026-10-11T19:00:00Z", inactive_since: "2026-10-09T08:00:00Z", blocks: ["C"] },
+        ],
+      }),
+    )!;
+    const date = (value: string) => value.slice(0, 10).split("-").reverse().join(".");
+    const [pep, residence, cash] = assessment.triggers;
+    expect(pep.inactive_since).toBe("2026-10-11T19:08:10Z");
+    expect(riskTriggerStateLabel(pep, ru, date)).toBe("ответ изменён на «Нет» 11.10.2026 · триггер сохраняется");
+    expect(riskTriggerStateLabel(pep, de, date)).toBe("Antwort auf „Nein“ geändert 11.10.2026 · Auslöser bleibt bestehen");
+    expect(riskTriggerStateLabel({ ...pep, inactive_since: null }, ru, date)).toBe("ответ изменён на «Нет» · триггер сохраняется");
+    expect(riskTriggerStateLabel(residence, ru, date)).toBe("зафиксирован (данные изменились) 09.10.2026");
+    // An active trigger has no "since": the date is ignored.
+    expect(cash.inactive_since).toBeNull();
+    expect(riskTriggerStateLabel(cash, ru, date)).toBe("действует");
+    expect(riskTriggerLabel("T16", ru)).toBe("Подтверждённое совпадение с санкционным списком");
   });
 
   it("needs a second reviewer for a release or a reject at level 3", () => {

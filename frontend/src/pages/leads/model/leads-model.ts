@@ -814,6 +814,8 @@ export function leadSourceLabel(
   translations?: Translations,
 ) {
   const normalizedSource = normalizeLeadOrigin(source);
+  // An anonymised lead keeps the placeholder source "Deleted" (QA 2026-10-11 N-17): no source to name.
+  if (normalizedSource === "deleted") return runtimeTranslations(translations).common_not_set;
   return formatEnumLabelFromKeys(
     normalizedSource,
     LEAD_SOURCE_LABEL_KEYS,

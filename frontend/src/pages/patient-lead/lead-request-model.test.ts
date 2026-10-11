@@ -17,6 +17,7 @@ import {
   missingForSubmit,
   organisationPayerType,
   payerAnswer,
+  payerAnswerSavable,
   payerInput,
   payerSelfOffered,
   payerTypeOf,
@@ -24,6 +25,7 @@ import {
   personalDataPatch,
   rejectedValue,
   stillRejectedIdentification,
+  thirdPartyPayerNamed,
   withContactChannel,
   withInsuranceAnswer,
   withLegalAnswer,
@@ -300,6 +302,23 @@ describe("lead request send step", () => {
     };
     expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T09:00:00Z" }] })).toBe(false);
     expect(changedSinceSubmit({ ...sent, documents: [{ ...document, uploaded_at: "2026-10-03T10:00:00Z" }] })).toBe(true);
+  });
+
+  it("never stores an unnamed third party in place of the patient who pays (QA 2026-10-11 A-08a)", () => {
+    const self = { ...draftFromPayer(null), payer_kind: "self" };
+    const unnamed = { ...draftFromPayer(null), payer_kind: "third_party", payer_type: "person" };
+    expect(payerAnswerSavable(self, unnamed)).toBe(false);
+    expect(payerAnswerSavable(self, { ...unnamed, last_name: " Zahler " })).toBe(true);
+    // An organisation counts by its name.
+    const organisation = { ...unnamed, payer_type: "organisation", first_name: "Viktor" };
+    expect(thirdPartyPayerNamed(organisation)).toBe(false);
+    expect(payerAnswerSavable(self, organisation)).toBe(false);
+    expect(payerAnswerSavable(self, { ...organisation, organisation_name: "Beispiel GmbH" })).toBe(true);
+    // Nothing stored yet, or a third party stored: as before.
+    expect(payerAnswerSavable(draftFromPayer(null), unnamed)).toBe(true);
+    expect(payerAnswerSavable({ ...unnamed, last_name: "Zahler" }, unnamed)).toBe(true);
+    // Back to "I pay" is always sent.
+    expect(payerAnswerSavable({ ...unnamed, last_name: "Zahler" }, self)).toBe(true);
   });
 
   it("sends who pays as a whole answer", () => {

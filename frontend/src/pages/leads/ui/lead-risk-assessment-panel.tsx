@@ -33,6 +33,7 @@ import {
   riskSubjectLabel,
   riskSuggestedBlocks,
   riskTriggerLabel,
+  riskTriggerStateLabel,
   riskVariantLabel,
   type LeadRiskAssessment,
   type RiskBlockState,
@@ -95,10 +96,8 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
                 <td className="py-1.5 pr-3 text-right align-top font-semibold tabular-nums">
                   {knockout ? <span className="text-rose-700 dark:text-rose-300">K.o.</span> : trigger.points}
                 </td>
-                <td className="py-1.5 pr-3 align-top">
-                  {trigger.active
-                    ? tx("действует", "aktiv")
-                    : tx("зафиксирован (данные изменились)", "festgehalten (Daten geändert)")}
+                <td className="py-1.5 pr-3 align-top" data-testid={`lead-risk-trigger-${trigger.key}-state`}>
+                  {riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value))}
                 </td>
                 <td className="py-1.5 align-top tabular-nums">{formatAppDate(trigger.first_fired_at) || "—"}</td>
               </tr>
@@ -329,6 +328,15 @@ export function LeadRiskAssessmentPanel({
         ) : null}
 
         <TriggerTable assessment={assessment} tx={tx} />
+
+        {started && assessment.sanctions_confirmed ? (
+          <p className={cn("text-xs leading-5", WARNING_TEXT)} data-testid="lead-risk-sanctions-confirmed">
+            {tx(
+              "Подтверждённое совпадение с санкционным списком: блокировка окончательная, разрешение по оценке риска её не снимает.",
+              "Bestätigter Sanktionstreffer: Die Sperre ist endgültig, eine Freigabe der Risikobewertung hebt sie nicht auf.",
+            )}
+          </p>
+        ) : null}
 
         {started && blocksShown.length > 0 ? (
           <div className="space-y-1.5" data-testid="lead-risk-blocks">

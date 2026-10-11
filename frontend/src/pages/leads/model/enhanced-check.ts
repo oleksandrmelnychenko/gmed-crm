@@ -22,6 +22,7 @@ export const ENHANCED_CHECK_TRIGGER_REASONS = [
   "payer_citizenship_blacklist",
   "patient_sanctioned",
   "payer_sanctioned",
+  "recipient_sanctioned",
 ] as const;
 
 /** Information only: a possible sanctions match waits for the CEO's decision. */
@@ -102,9 +103,21 @@ export function enhancedCheckReasonLabel(reason: string, tx: Tx): string {
     case "payer_citizenship_blacklist":
       return tx("гражданство плательщика в чёрном списке", "Staatsangehörigkeit des Zahlers auf der Blacklist");
     case "patient_sanctioned":
-      return tx("пациент в санкционном списке (подтверждено)", "Patient auf einer Sanktionsliste (bestätigt)");
+      return tx(
+        "пациент или его банк в санкционном списке (подтверждено)",
+        "Patient oder seine Bank auf einer Sanktionsliste (bestätigt)",
+      );
     case "payer_sanctioned":
-      return tx("плательщик в санкционном списке (подтверждено)", "Zahler auf einer Sanktionsliste (bestätigt)");
+      return tx(
+        "плательщик или его банк в санкционном списке (подтверждено)",
+        "Zahler oder seine Bank auf einer Sanktionsliste (bestätigt)",
+      );
+    case "recipient_sanctioned":
+      // The third-party invoice recipient who does not pay (QA 2026-10-11 N-08).
+      return tx(
+        "получатель счёта в санкционном списке (подтверждено)",
+        "Rechnungsempfänger auf einer Sanktionsliste (bestätigt)",
+      );
     case RISK_ASSESSMENT_REASON:
       return tx("уровень оценки риска 2 или выше", "Risikobewertung Stufe 2 oder höher");
     case SANCTIONS_REVIEW_PENDING:

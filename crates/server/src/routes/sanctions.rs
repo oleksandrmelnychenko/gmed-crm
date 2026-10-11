@@ -337,12 +337,11 @@ async fn country_blocks(
         return response;
     }
     let result = async {
-        let flags = gate::lead_flags(&state).await?;
+        // Every lead a blocked country concerns, also one with a sanctions
+        // hit (QA 2026-10-11 A-38a: it was missing while the hit was open).
+        let flags = gate::country_flags(&state).await?;
         let mut items = Vec::new();
-        for flag in flags
-            .iter()
-            .filter(|flag| matches!(flag.flag, "blocked_country" | "country_lifted"))
-        {
+        for flag in &flags {
             let status = gate::lead_status(&state, flag.lead_id).await?;
             let name: Option<(String, String)> =
                 sqlx::query_as("SELECT first_name, last_name FROM leads WHERE id = $1")
@@ -620,8 +619,9 @@ async fn decide_hit(
             ),
         )
         .await?;
-        // The risk assessment of the leads concerned: a false positive that
-        // leaves no open or confirmed hit withdraws T16 (the only way down, P3).
+        // The risk assessment of the leads concerned: a confirmation fires
+        // T16 (only a confirmed hit does), a false positive that leaves no
+        // confirmed hit withdraws it.
         let affected: Vec<Uuid> = sqlx::query_scalar(
             r#"SELECT id FROM leads
                WHERE id = $1

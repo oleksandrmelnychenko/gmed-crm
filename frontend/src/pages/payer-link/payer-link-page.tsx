@@ -332,7 +332,7 @@ export function PayerLinkPage() {
         <div className="space-y-5">
           <div className="space-y-1">
             <h1 className="text-xl font-semibold leading-tight">{text.pageTitle}</h1>
-            <p className="text-sm leading-6 text-muted-foreground">{text.namedYou(view.questionnaire.patient_name)}</p>
+            <p className="text-sm leading-6 text-muted-foreground">{text.namedYou(view.questionnaire.patient_name, view.questionnaire.payer_type !== "person")}</p>
           </div>
           <PayerLinkForm
             questionnaire={view.questionnaire}

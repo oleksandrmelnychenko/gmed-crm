@@ -166,7 +166,8 @@ function recompute(request: LeadRequestMock) {
     if (!payer.organisation_legal_form) byStep.payer.push("payer_legal_form");
     if (!payer.country) byStep.payer.push("payer_country");
     if (!payer.organisation_contact_name) byStep.payer.push("payer_contact_name");
-    if (!payer.email && !payer.phone) byStep.payer.push("payer_email_or_phone");
+    // The e-mail is required (its own link goes there, QA 2026-10-11 A-35); the phone is not.
+    if (!payer.email) byStep.payer.push("payer_email");
   }
   const reason = id.request_reason ? [] : ["request_reason"];
   request.progress.missing_by_step = byStep;
@@ -493,7 +494,8 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await payer.getByRole("textbox", { name: "Rechtsform" }).fill("GmbH");
     await payer.getByRole("textbox", { name: "Registernummer (falls vorhanden)" }).fill("HRB 12345");
     await payer.getByRole("textbox", { name: "Ansprechperson" }).fill("Ben Muster");
-    await expect(payer.getByTestId("lead-request-payer-email-or-phone")).toContainText("E-Mail oder Telefon");
+    // The e-mail is required of an organisation (its own link goes there), the phone is not (QA 2026-10-11 A-35).
+    await expect(payer.getByTestId("lead-request-payer-email-or-phone")).toHaveCount(0);
     await expect.poll(() => calls.payer.at(-1)).toMatchObject({
       payer_kind: "third_party",
       payer_type: "organisation",
@@ -506,10 +508,12 @@ test.describe("lead cabinet stepper and follow-up", () => {
     // What is missing shows after "Weiter" (owner 2026-10-09).
     await expect(stepMissing).toHaveCount(0);
     await page.getByTestId("lead-request-step-billing").getByRole("button", { name: "Weiter" }).click();
-    await expect(stepMissing).toContainText("Zahler: E-Mail oder Telefon");
+    await expect(stepMissing).toContainText("Zahler: E-Mail");
     await expect(stepMissing).toContainText("Zahler: Land des Sitzes");
     await payer.getByRole("textbox", { name: "Telefon" }).fill("+49 30 1234567");
-    await expect(stepMissing).not.toContainText("E-Mail oder Telefon");
+    await expect(stepMissing).toContainText("Zahler: E-Mail");
+    await payer.getByRole("textbox", { name: "E-Mail" }).fill("buchhaltung@example.com");
+    await expect(stepMissing).not.toContainText("Zahler: E-Mail");
 
     // Back to a private person: the organisation mask goes with what was typed in it.
     await choose(page, payer.getByRole("combobox", { name: "Wer ist der Zahler?" }), "Eine Privatperson");

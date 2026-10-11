@@ -2131,8 +2131,8 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
 
     // Staff: the copy of the identity document is listed with the lead's
     // statements also for Sales (it is not medical); "N documents" counts
-    // every file of the cabinet (QA 2026-10-10: "0 documents" after two
-    // non-medical uploads).
+    // the medical files only, as the leads list does (QA 2026-10-11, A-11:
+    // one definition; the UI says "medical documents").
     let (status, intake) = json_request(
         router,
         "GET",
@@ -2143,7 +2143,7 @@ async fn the_identity_document_needs_the_request_consent_and_is_not_a_medical_do
     .await;
     assert_eq!(status, StatusCode::OK, "{intake}");
     assert_eq!(intake["uploads_hidden"], true, "{intake}");
-    assert_eq!(intake["progress"]["documents"], 2, "{intake}");
+    assert_eq!(intake["progress"]["documents"], 1, "{intake}");
     assert_eq!(
         intake["identity_documents"],
         json!([{

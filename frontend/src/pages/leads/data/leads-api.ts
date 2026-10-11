@@ -173,8 +173,13 @@ export function createLead(payload: CreateLeadBody) {
   return postJson<CreateLeadResponse>("/leads", payload as unknown as JsonPayload);
 }
 
-export function updateLeadStatus(leadId: string, status: string) {
-  return postJson<void>(`/leads/${leadId}/qualify`, { status });
+/**
+ * Changes the qualification status. With `not_qualified` the reason (a code
+ * of `LEAD_FAILURE_REASONS` or a free text) is stored as the lead's failure
+ * reason and comes back as `failed_outcome.reason`.
+ */
+export function updateLeadStatus(leadId: string, status: string, reason?: string) {
+  return postJson<void>(`/leads/${leadId}/qualify`, reason ? { status, reason } : { status });
 }
 
 export function updateLeadGate(leadId: string, payload: JsonPayload) {

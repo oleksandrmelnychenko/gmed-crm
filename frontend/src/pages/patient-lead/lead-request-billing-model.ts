@@ -239,6 +239,48 @@ export function changedOnServer(saved: BillingDraft, incoming: BillingDraft): Bi
   return BILLING_FIELDS.filter((field) => incoming[field] !== saved[field]);
 }
 
+/** Section 8 of a draft: the payment route fields only. */
+export function paymentRouteOf(draft: BillingDraft): Partial<BillingDraft> {
+  const route: Partial<BillingDraft> = {};
+  for (const field of PAYMENT_ROUTE_FIELDS) route[field] = draft[field];
+  return route;
+}
+
+/** Whether section 8 holds an answer. */
+export function hasPaymentRoute(draft: BillingDraft): boolean {
+  return PAYMENT_ROUTE_FIELDS.some((field) => draft[field].trim() !== "");
+}
+
+/**
+ * The patient's own payment route set aside while another payer was named
+ * (QA 2026-10-11 A-08a): naming a third party clears section 8 on the server
+ * (it belongs to the payer named when it was answered). `previous` is the
+ * route as saved before, `incoming` what the server sends now; the route is
+ * kept when the patient side answered it and the server cleared it.
+ */
+export function clearedOwnRoute(
+  previous: BillingDraft,
+  previousRouteBy: PaymentRouteBy,
+  incoming: BillingDraft,
+): Partial<BillingDraft> | null {
+  if (!asksPaymentRoute(previousRouteBy) || !hasPaymentRoute(previous) || hasPaymentRoute(incoming)) return null;
+  return paymentRouteOf(previous);
+}
+
+/**
+ * The route to give back once the same side pays again with an empty section
+ * 8; null when nothing is kept, another side answers it now, or the patient
+ * already answered it anew.
+ */
+export function ownRouteToRestore(
+  kept: { routeBy: PaymentRouteBy; route: Partial<BillingDraft> } | null | undefined,
+  routeBy: PaymentRouteBy,
+  incoming: BillingDraft,
+): Partial<BillingDraft> | null {
+  if (!kept || kept.routeBy !== routeBy || hasPaymentRoute(incoming)) return null;
+  return kept.route;
+}
+
 /** Keys of the two sections in `progress.missing_for_submit`: the e-mail for invoices is never missing. */
 export type BillingSubmitField = Exclude<BillingField, "invoice_email">;
 

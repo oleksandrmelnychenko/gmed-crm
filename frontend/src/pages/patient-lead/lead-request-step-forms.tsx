@@ -458,7 +458,7 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
               onChange={(event) => set("primary_language", event.target.value)}
             >
               <option value="">{text.choose}</option>
-              {cabinetLanguageOptions(lang).map((option) => (
+              {cabinetLanguageOptions(lang, draft.primary_language).map((option) => (
                 <option key={option.value} value={option.value}>
                   {languageName(option.value, lang)}
                 </option>
@@ -562,7 +562,7 @@ export function ContactStep({ request, text, lang, enqueue, onChange, missing, n
               onChange={(event) => set("primary_language", event.target.value)}
             >
               <option value="">{text.choose}</option>
-              {cabinetLanguageOptions(lang).map((option) => (
+              {cabinetLanguageOptions(lang, draft.primary_language).map((option) => (
                 <option key={option.value} value={option.value}>
                   {languageName(option.value, lang)}
                 </option>
@@ -915,10 +915,17 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
 
 /**
  * The languages the cabinet offers: only those the browser can name in the
- * cabinet language (no raw codes such as "Aa"), sorted by that name.
+ * cabinet language (no raw codes such as "Aa"), each name once (QA 2026-10-11
+ * N-02: Akan and Twi are both «Акан» in Russian; the first code stays, the
+ * chosen one always), sorted by that name.
  */
-function cabinetLanguageOptions(lang: string) {
-  return LANGUAGE_OPTIONS.filter((option) => languageName(option.value, lang).toLowerCase() !== option.value.toLowerCase()).sort((left, right) =>
-    languageName(left.value, lang).localeCompare(languageName(right.value, lang), lang),
-  );
+function cabinetLanguageOptions(lang: string, current = "") {
+  const seen = new Set<string>();
+  return LANGUAGE_OPTIONS.filter((option) => {
+    const name = languageName(option.value, lang).toLowerCase();
+    if (name === option.value.toLowerCase()) return false;
+    if (seen.has(name) && option.value !== current) return false;
+    seen.add(name);
+    return true;
+  }).sort((left, right) => languageName(left.value, lang).localeCompare(languageName(right.value, lang), lang));
 }

@@ -47,6 +47,19 @@ export const RELATIONSHIP_KINDS = [
 ] as const;
 export type RelationshipKind = (typeof RELATIONSHIP_KINDS)[number];
 
+/**
+ * What a company, an organisation or an insurer can be to the patient (QA
+ * 2026-10-11 A-36c: it was offered spouse, parent, child …). The same stored
+ * values as a person's list — a foundation, an association or an insurer is
+ * "other" with words.
+ */
+export const ORGANISATION_RELATIONSHIP_KINDS = ["employer", "business_partner", "other"] as const satisfies readonly RelationshipKind[];
+
+/** The relationship list for the payer type. */
+export function relationshipKindsFor(payerType: PayerType): readonly RelationshipKind[] {
+  return isOrganisation(payerType) ? ORGANISATION_RELATIONSHIP_KINDS : RELATIONSHIP_KINDS;
+}
+
 /** Where a person's money comes from (the declaration's SOURCE_OF_FUNDS). */
 export const FUNDS_SOURCES = ["employment", "business_income", "savings", "asset_sale", "inheritance_gift", "other"] as const;
 /** Where the money of a company, an organisation or an insurer comes from (QA 2026-10-06). */
@@ -709,9 +722,16 @@ export function requiredFields(payerType: PayerType): ReadonlySet<string> {
   if (payerType !== "company") {
     required.delete("register_court");
     required.delete("register_number");
-    required.delete("beneficial_owners");
   }
+  // Every legal entity states its beneficial owners (or that nobody holds more than 25 %); an insurer
+  // need not (QA 2026-10-11 A-36b: the cabinet names every company an organisation).
+  if (!beneficialOwnersRequired(payerType)) required.delete("beneficial_owners");
   return required;
+}
+
+/** Whether the beneficial owners are required: a company or an organisation, not an insurer or a person. */
+export function beneficialOwnersRequired(payerType: PayerType): boolean {
+  return payerType === "company" || payerType === "organisation";
 }
 
 /** The missing keys grouped by the step that asks them, in the order of the steps. */

@@ -129,7 +129,9 @@ fn dropped(key: &str) -> bool {
 /// What the base form needs besides the stored keys.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct BaseExtra {
-    /// An organisation pays: its mask replaces e-mail and phone by one key.
+    /// An organisation pays: its phone is optional; its e-mail stays required
+    /// — it answers on its own link, which goes to that address (QA
+    /// 2026-10-11 A-35: "e-mail or phone" led to `payer_email_missing`).
     pub organisation: bool,
     /// The organisation mask's keys still open.
     pub organisation_missing: Vec<&'static str>,
@@ -143,9 +145,7 @@ pub fn reshape_missing(missing: Vec<String>, extra: &BaseExtra) -> Vec<String> {
     let mut reshaped: Vec<String> = missing
         .into_iter()
         .filter(|key| !dropped(key))
-        .filter(|key| {
-            !(extra.organisation && matches!(key.as_str(), "payer_email" | "payer_phone"))
-        })
+        .filter(|key| !(extra.organisation && key == "payer_phone"))
         .collect();
     if !extra.organisation_missing.is_empty() {
         let at = reshaped
@@ -234,20 +234,14 @@ pub async fn base_extra(
     };
     let organisation = payer.is_some_and(Declaration::is_organisation);
     let mut organisation_missing = Vec::new();
-    if let Some(payer) = payer.filter(|payer| payer.is_organisation()) {
+    // The organisation's e-mail is the generic `payer_email` (its own link
+    // goes there), the phone is optional.
+    if organisation {
         if text("organisation_legal_form").is_none() {
             organisation_missing.push("payer_legal_form");
         }
         if text("organisation_contact_name").is_none() {
             organisation_missing.push("payer_contact_name");
-        }
-        let filled = |value: &Option<String>| {
-            value
-                .as_deref()
-                .is_some_and(|value| !value.trim().is_empty())
-        };
-        if !filled(&payer.email) && !filled(&payer.phone) {
-            organisation_missing.push("payer_email_or_phone");
         }
     }
     Ok(BaseExtra {
@@ -1292,21 +1286,19 @@ mod tests {
                 missing,
                 &BaseExtra {
                     organisation: true,
-                    organisation_missing: vec![
-                        "payer_legal_form",
-                        "payer_contact_name",
-                        "payer_email_or_phone"
-                    ],
+                    organisation_missing: vec!["payer_legal_form", "payer_contact_name"],
                     request_reason_missing: false,
                 }
             ),
+            // The e-mail stays required (its own link goes there, QA
+            // 2026-10-11 A-35); the phone is optional.
             keys(&[
                 "payer_organisation_name",
                 "payer_country",
+                "payer_email",
                 "payer_contact_consent",
                 "payer_legal_form",
                 "payer_contact_name",
-                "payer_email_or_phone",
             ])
         );
     }

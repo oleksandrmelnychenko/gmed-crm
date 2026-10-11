@@ -685,6 +685,32 @@ export function payerInput(draft: PayerDraft, typed = true, withConsent = true):
 }
 
 /**
+ * Whether a third party of the draft has a name yet: a person's first or last
+ * name, an organisation's name.
+ */
+export function thirdPartyPayerNamed(draft: PayerDraft, typed = true): boolean {
+  if (draft.payer_kind !== "third_party") return false;
+  if (draft.guardian_pays) return true;
+  const type = typed ? payerTypeOf(draft) : "person";
+  return type === "person"
+    ? Boolean(oneLine(draft.first_name) || oneLine(draft.last_name))
+    : Boolean(oneLine(draft.organisation_name));
+}
+
+/**
+ * Whether the autosave sends the payer answer (`saved` is the stored one):
+ * never an unnamed third party in place of the patient who pays (QA
+ * 2026-10-11 A-08a). Only choosing "a person" while trying the "recipient is
+ * the payer" box stored an empty third party, and the server cleared the
+ * patient's own payment method and source of funds with it. Once a name is
+ * typed, the third party is stored as before.
+ */
+export function payerAnswerSavable(saved: PayerDraft, draft: PayerDraft, typed = true): boolean {
+  if (draft.payer_kind !== "third_party" || saved.payer_kind !== "self") return true;
+  return thirdPartyPayerNamed(draft, typed);
+}
+
+/**
  * The legal yes/no questions (GwG, trigger flow 2026-10-07), in form order.
  * Only the answer is asked here; the details of a "yes" are follow-up blocks
  * H (public office) and J (sanctions), asked when GMED needs them.

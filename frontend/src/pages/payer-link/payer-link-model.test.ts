@@ -17,6 +17,7 @@ import {
   payerSteps,
   reconcileDraft,
   refusedField,
+  relationshipKindsFor,
   requiredFields,
   sortMissing,
   stepOfMissing,
@@ -401,14 +402,23 @@ describe("what is missing", () => {
     expect(stepOfMissing("habitual_residence_country")).toBe("details");
   });
 
-  it("marks as required what can be missing, the register and the owners for a company only", () => {
+  it("marks as required what can be missing, the register for a company, the owners for every legal entity", () => {
     expect(requiredFields("person").has("birth_place")).toBe(true);
     expect(requiredFields("person").has("phone")).toBe(false);
     expect(requiredFields("person").has("id_issued_on")).toBe(false);
     expect(requiredFields("company").has("register_number")).toBe(true);
     expect(requiredFields("company").has("beneficial_owners")).toBe(true);
     expect(requiredFields("organisation").has("register_number")).toBe(false);
+    // The cabinet names every company an organisation (QA 2026-10-11 A-36b).
+    expect(requiredFields("organisation").has("beneficial_owners")).toBe(true);
     expect(requiredFields("insurance").has("beneficial_owners")).toBe(false);
+  });
+
+  it("offers an organisation its own relationships, not the family (QA 2026-10-11 A-36c)", () => {
+    expect(relationshipKindsFor("person")).toContain("spouse");
+    for (const type of ["company", "organisation", "insurance"] as const) {
+      expect(relationshipKindsFor(type)).toEqual(["employer", "business_partner", "other"]);
+    }
   });
 });
 

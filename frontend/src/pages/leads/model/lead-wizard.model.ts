@@ -746,9 +746,14 @@ export function namedLanguageOptions<Option extends { value: string; labelDe: st
   options: readonly Option[],
   lang: "de" | "ru",
 ): Option[] {
+  // Each name once (QA 2026-10-11 N-02: Akan and Twi are both «Акан»); the
+  // wizard adds the stored value itself when its option is not offered.
+  const seen = new Set<string>();
   return options.filter((option) => {
     const label = (lang === "de" ? option.labelDe : option.labelRu).trim().toLowerCase();
-    return label !== "" && label !== option.value.trim().toLowerCase();
+    if (label === "" || label === option.value.trim().toLowerCase() || seen.has(label)) return false;
+    seen.add(label);
+    return true;
   });
 }
 

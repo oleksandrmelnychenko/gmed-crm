@@ -279,6 +279,19 @@ import {
   useStep1PortalField,
 } from "./lead-wizard-portal-intake";
 import { useLeadStep1Portal } from "../model/use-lead-step1-portal";
+import { leadDisplayName } from "../model/lead-display-name";
+import {
+  LEAD_FAILURE_REASONS,
+  LEAD_FAILURE_REASON_MAX_LENGTH,
+  LEAD_FAILURE_REASON_OTHER,
+  leadFailureReasonDraft,
+  leadFailureReasonError,
+  leadFailureReasonLabel,
+  leadFailureReasonOtherLabel,
+  leadFailureReasonValue,
+  type LeadFailureReasonDraft,
+} from "../model/lead-failure-reasons";
+import { filterPatientsBySearch, patientSearchText } from "../model/lead-referrer-search";
 import {
   PATIENT_FILLED_KEYS,
   PORTAL_FIELD_BY_DRAFT_KEY,
@@ -809,6 +822,20 @@ const MASTER_FIELD_IDS: Record<MasterFieldKey, string> = {
   insuranceProvider: "lead-wizard-insurance-provider",
   insuranceNumber: "lead-wizard-insurance-number",
 };
+
+/** Ids of the other step-1 controls, for their `<label for>` (QA 2026-10-11, N-01). */
+const STEP1_CONTROL_IDS = {
+  discoverySource: "lead-wizard-discovery-source",
+  discoverySourceOther: "lead-wizard-discovery-source-other",
+  middleName: "lead-wizard-middle-name",
+  suffix: "lead-wizard-name-suffix",
+  whatsapp: "lead-wizard-whatsapp",
+  language: "lead-wizard-language",
+  region: "lead-wizard-region",
+  citizenships: "lead-wizard-citizenships",
+  hasInsurance: "lead-wizard-has-insurance",
+  insuranceCoversGermany: "lead-wizard-insurance-covers-germany",
+} as const;
 
 /** Error ids of the step-1 fields the patient portal knows (see `Step1PortalProvider`). */
 const STEP1_PORTAL_ERROR_IDS: Record<string, string> = {
@@ -2719,6 +2746,7 @@ function Field({
   errorId,
   required = false,
   portalField,
+  htmlFor,
 }: {
   label: ReactNode;
   children: ReactNode;
@@ -2728,17 +2756,31 @@ function Field({
   required?: boolean;
   /** Lead column the patient fills in the portal (step 1), for fields without an error id. */
   portalField?: string;
+  /**
+   * Id of the control: the caption becomes its `<label for>`, so the control
+   * is named by the caption alone, without the patient's marker or the error
+   * (QA 2026-10-11, N-01).
+   */
+  htmlFor?: string;
 }) {
-  // In "the patient fills it in" mode the field is optional and says so.
+  // In "the patient fills it in" mode the field is optional and says so —
+  // unless the check still asks for it.
   const { patientFills } = useStep1PortalField(errorId, portalField);
+  const caption = (
+    <>
+      {label}
+      {required && (!patientFills || Boolean(error)) ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
+    </>
+  );
   // The patient's marker and hint sit on the label's line, at its right end (wrapping only when narrow).
-  return (
-    <label className={cn("min-w-0 space-y-1.5", className)}>
+  const content = (
+    <>
       <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-        <span className={cn(tokens.text.label, "block")}>
-          {label}
-          {required && !patientFills ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
-        </span>
+        {htmlFor ? (
+          <label htmlFor={htmlFor} className={cn(tokens.text.label, "block")}>{caption}</label>
+        ) : (
+          <span className={cn(tokens.text.label, "block")}>{caption}</span>
+        )}
         <span className="ml-auto flex min-w-0 justify-end">
           <Step1PortalFieldNote errorId={errorId} portalField={portalField} />
         </span>
@@ -2749,7 +2791,12 @@ function Field({
           {error}
         </span>
       ) : null}
-    </label>
+    </>
+  );
+  return htmlFor ? (
+    <div className={cn("min-w-0 space-y-1.5", className)}>{content}</div>
+  ) : (
+    <label className={cn("min-w-0 space-y-1.5", className)}>{content}</label>
   );
 }
 
@@ -3103,6 +3150,9 @@ export function LeadWizard({
   const [autosaveError, setAutosaveError] = useState("");
   const [autosaveErrorDetail, setAutosaveErrorDetail] = useState("");
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
+  // «Не подходит» asks for a reason first (QA 2026-10-11, A-39a); null while the dialog is closed.
+  const [notQualifiedReason, setNotQualifiedReason] = useState<LeadFailureReasonDraft | null>(null);
+  const [notQualifiedError, setNotQualifiedError] = useState("");
   const [serviceReportOpen, setServiceReportOpen] = useState(false);
   const [collapsedWorkTypeSpecializationIds, setCollapsedWorkTypeSpecializationIds] = useState<Set<string>>(
     () => new Set(),
@@ -6302,13 +6352,46 @@ ${serviceCommentLines.join("\n")}`
     try {
       await resolveFailedLead(leadId, {
         resolution: "archive",
-        reason: "not_our_lead",
+        // The reason chosen with «Не подходит»; without one the lead does not fit the service.
+        reason: lead?.failed_outcome?.reason?.trim() || "not_our_lead",
       });
       setArchiveConfirmOpen(false);
       if (onArchived) onArchived();
       else onOpenChange(false);
     } catch (nextError) {
       showWizardError(nextError);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function openNotQualified() {
+    setNotQualifiedError("");
+    setNotQualifiedReason(leadFailureReasonDraft(lead?.failed_outcome?.reason));
+  }
+
+  /** «Не подходит» with the chosen reason; the server keeps it as the lead's failure reason. */
+  async function markNotQualified() {
+    if (!leadId || !notQualifiedReason) return;
+    const reason = leadFailureReasonValue(notQualifiedReason);
+    if (!reason) {
+      setNotQualifiedError(leadFailureReasonError(notQualifiedReason, tx) ?? "");
+      return;
+    }
+    setBusy("not_qualified");
+    setNotQualifiedError("");
+    try {
+      await updateLeadStatus(leadId, "not_qualified", reason);
+    } catch (nextError) {
+      setNotQualifiedError(errorText(nextError, tx));
+      setBusy(null);
+      return;
+    }
+    setNotQualifiedReason(null);
+    try {
+      await refreshLeadState();
+    } catch (nextError) {
+      setError(errorText(nextError, tx));
     } finally {
       setBusy(null);
     }
@@ -6741,7 +6824,7 @@ ${serviceCommentLines.join("\n")}`
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <h2 className="truncate text-base font-semibold text-foreground">
                 {lead
-                  ? [lead.first_name, lead.last_name].filter(Boolean).join(" ")
+                  ? leadDisplayName(lead, tx)
                   : existingPatient
                     ? [existingPatient.first_name, existingPatient.last_name].filter(Boolean).join(" ")
                   : createMode
@@ -6782,12 +6865,7 @@ ${serviceCommentLines.join("\n")}`
                 size="sm"
                 className="h-8 rounded-lg border-destructive/35 bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
                 disabled={loading || isBusy}
-                onClick={() => {
-                  if (!leadId) return;
-                  void updateLeadStatus(leadId, "not_qualified")
-                    .then(() => refreshLeadState())
-                    .catch((error) => setError(errorText(error, tx)));
-                }}
+                onClick={openNotQualified}
               >
                 {tx("Не подходит", "Nicht geeignet")}
               </Button>
@@ -6809,7 +6887,11 @@ ${serviceCommentLines.join("\n")}`
                 {tx("Вернуть в работу", "Zurück in Bearbeitung")}
               </Button>
             ) : null}
-            {leadId ? (
+            {/* An archived or deleted lead cannot be archived again (QA 2026-10-11, N-17). */}
+            {leadId && !(lead && (
+              ["archived", "deleted"].includes(lead.qualification_status)
+              || (lead.failed_outcome?.status ?? "none") !== "none"
+            )) ? (
               <Button
                 type="button"
                 variant="ghost"
@@ -7001,8 +7083,9 @@ ${serviceCommentLines.join("\n")}`
               <div className="grid gap-4 md:grid-cols-2">
                 {intakeAsksDiscoverySource(isRepeatIntake) ? (
                 <div className="space-y-4">
-                  <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}>
+                  <Field label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")} htmlFor={STEP1_CONTROL_IDS.discoverySource}>
                     <NativeComboboxSelect
+                      id={STEP1_CONTROL_IDS.discoverySource}
                       aria-label={tx("Откуда вы о нас узнали?", "Wie sind Sie auf uns aufmerksam geworden?")}
                       name="discovery_source"
                       value={draft.discoverySource}
@@ -7028,6 +7111,7 @@ ${serviceCommentLines.join("\n")}`
                       required
                       error={visibleMasterError("referrerPatientId")}
                       errorId={`${MASTER_FIELD_IDS.referrerPatientId}-error`}
+                      htmlFor={MASTER_FIELD_IDS.referrerPatientId}
                     >
                       <NativeComboboxSelect
                         id={MASTER_FIELD_IDS.referrerPatientId}
@@ -7046,8 +7130,9 @@ ${serviceCommentLines.join("\n")}`
                         onChange={(event) => changeReferrerPatient(event.target.value)}
                       >
                         <option value="">{tx("Выберите клиента", "Kunden auswählen")}</option>
-                        {referrerPatients.map((patient) => (
-                          <option key={patient.id} value={patient.id}>
+                        {/* Filtered by what is typed now, whatever the server answered last (QA 2026-10-11, N-16). */}
+                        {filterPatientsBySearch(referrerPatients, referrerSearch).map((patient) => (
+                          <option key={patient.id} value={patient.id} data-search-text={patientSearchText(patient)}>
                             {referrerPatientOptionLabel(patient)}
                           </option>
                         ))}
@@ -7067,8 +7152,9 @@ ${serviceCommentLines.join("\n")}`
                     </Field>
                   ) : null}
                   {draft.discoverySource === "other" ? (
-                    <Field label={tx("Укажите источник", "Andere Quelle angeben")}>
+                    <Field label={tx("Укажите источник", "Andere Quelle angeben")} htmlFor={STEP1_CONTROL_IDS.discoverySourceOther}>
                       <Input
+                        id={STEP1_CONTROL_IDS.discoverySourceOther}
                         name="discovery_source_other"
                         autoComplete="off"
                         className={inputClass}
@@ -7085,6 +7171,7 @@ ${serviceCommentLines.join("\n")}`
                   required
                   error={visibleMasterError("firstName")}
                   errorId={`${MASTER_FIELD_IDS.firstName}-error`}
+                  htmlFor={MASTER_FIELD_IDS.firstName}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.firstName}
@@ -7099,8 +7186,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("firstName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name">
+                <Field label={tx("Отчество / второе имя", "Zweiter Vorname")} portalField="middle_name" htmlFor={STEP1_CONTROL_IDS.middleName}>
                   <Input
+                    id={STEP1_CONTROL_IDS.middleName}
                     className={inputClass}
                     name="middle_name"
                     autoComplete="additional-name"
@@ -7113,6 +7201,7 @@ ${serviceCommentLines.join("\n")}`
                   required
                   error={visibleMasterError("lastName")}
                   errorId={`${MASTER_FIELD_IDS.lastName}-error`}
+                  htmlFor={MASTER_FIELD_IDS.lastName}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.lastName}
@@ -7127,8 +7216,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("lastName", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Дополнение к имени", "Namenszusatz")}>
+                <Field label={tx("Дополнение к имени", "Namenszusatz")} htmlFor={STEP1_CONTROL_IDS.suffix}>
                   <Input
+                    id={STEP1_CONTROL_IDS.suffix}
                     className={inputClass}
                     name="name_suffix"
                     value={draft.suffix}
@@ -7145,6 +7235,7 @@ ${serviceCommentLines.join("\n")}`
                     citizenships: draft.citizenships,
                     leadId,
                   })}
+                  saved={!autosaveIsDirty}
                 />
 
                 <Field
@@ -7152,6 +7243,7 @@ ${serviceCommentLines.join("\n")}`
                   required
                   error={visibleMasterError("birthDate")}
                   errorId={`${MASTER_FIELD_IDS.birthDate}-error`}
+                  htmlFor={MASTER_FIELD_IDS.birthDate}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.birthDate}
@@ -7173,6 +7265,7 @@ ${serviceCommentLines.join("\n")}`
                   required
                   error={visibleMasterError("legalSex")}
                   errorId={`${MASTER_FIELD_IDS.legalSex}-error`}
+                  htmlFor={MASTER_FIELD_IDS.legalSex}
                 >
                   <NativeComboboxSelect
                     id={MASTER_FIELD_IDS.legalSex}
@@ -7197,6 +7290,7 @@ ${serviceCommentLines.join("\n")}`
                   required={isRepeatIntake ? !draft.phone.trim() : !minorEmailOptional(draft)}
                   error={visibleMasterError("email")}
                   errorId={`${MASTER_FIELD_IDS.email}-error`}
+                  htmlFor={MASTER_FIELD_IDS.email}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.email}
@@ -7235,6 +7329,7 @@ ${serviceCommentLines.join("\n")}`
                   required={!draft.email.trim()}
                   error={visibleMasterError("phone")}
                   errorId={`${MASTER_FIELD_IDS.phone}-error`}
+                  htmlFor={MASTER_FIELD_IDS.phone}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.phone}
@@ -7250,8 +7345,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("phone", event.target.value)}
                   />
                 </Field>
-                <Field label="WhatsApp">
+                <Field label="WhatsApp" htmlFor={STEP1_CONTROL_IDS.whatsapp}>
                   <Input
+                    id={STEP1_CONTROL_IDS.whatsapp}
                     className={inputClass}
                     name="whatsapp_number"
                     autoComplete="tel"
@@ -7260,8 +7356,8 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("whatsappNumber", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")} portalField="primary_language">
-                  <NativeComboboxSelect name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
+                <Field label={tx("Предпочитаемый язык", "Bevorzugte Sprache")} portalField="primary_language" htmlFor={STEP1_CONTROL_IDS.language}>
+                  <NativeComboboxSelect id={STEP1_CONTROL_IDS.language} name="primary_language" value={draft.language} className={selectClass} onChange={(event) => patch("language", event.target.value)}>
                     <option value="">{tx("Выберите", "Auswählen")}</option>
                     {/* Only languages with a name in the UI language; a stored code without one stays visible. */}
                     {draft.language && !namedLanguageOptions(LANGUAGE_OPTIONS, lang).some((item) => item.value === draft.language) ? <option value={draft.language}>{draft.language}</option> : null}
@@ -7273,6 +7369,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.healthcareConsent}
                   error={visibleMasterError("street")}
                   errorId={`${MASTER_FIELD_IDS.street}-error`}
+                  htmlFor={MASTER_FIELD_IDS.street}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.street}
@@ -7292,6 +7389,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.healthcareConsent}
                   error={visibleMasterError("city")}
                   errorId={`${MASTER_FIELD_IDS.city}-error`}
+                  htmlFor={MASTER_FIELD_IDS.city}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.city}
@@ -7306,8 +7404,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("city", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Регион / область", "Region / Bundesland")}>
+                <Field label={tx("Регион / область", "Region / Bundesland")} htmlFor={STEP1_CONTROL_IDS.region}>
                   <Input
+                    id={STEP1_CONTROL_IDS.region}
                     className={inputClass}
                     name="address_region"
                     autoComplete="address-level1"
@@ -7320,6 +7419,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.healthcareConsent}
                   error={visibleMasterError("zip")}
                   errorId={`${MASTER_FIELD_IDS.zip}-error`}
+                  htmlFor={MASTER_FIELD_IDS.zip}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.zip}
@@ -7343,9 +7443,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(value) => handleAmlCountryChange({ country: value })}
                   />
                 </Field>
-                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")} portalField="citizenships">
+                <Field label={tx("Гражданство (можно несколько)", "Staatsangehörigkeiten (mehrere möglich)")} portalField="citizenships" htmlFor={STEP1_CONTROL_IDS.citizenships}>
                   <CitizenshipMultiSelect
-                    id="lead-wizard-citizenships"
+                    id={STEP1_CONTROL_IDS.citizenships}
                     value={draft.citizenships}
                     className={selectClass}
                     placeholder={tx("Гражданство", "Staatsangehörigkeit")}
@@ -7454,7 +7554,6 @@ ${serviceCommentLines.join("\n")}`
                 </div>
               ) : null}
               </Section>
-              </Step1PortalProvider>
               {isMinor(draft.birthDate, new Date()) ? (
                 <Section
                   title={tx("Родитель или законный представитель", "Elternteil oder gesetzlicher Vertreter")}
@@ -7520,10 +7619,13 @@ ${serviceCommentLines.join("\n")}`
                   </div>
                 </Section>
               ) : null}
+              {/* Inside the portal state too: the lead fills the insurance in the cabinet, its
+                  fields carry the «от пациента» marker like the personal ones (QA 2026-10-11, N-03). */}
               <Section title={tx("Страхование", "Versicherung")}>
               <div className="grid gap-4 md:grid-cols-2">
-                <Field label={tx("Есть ли медицинская страховка", "Krankenversicherung vorhanden")} portalField="has_insurance">
+                <Field label={tx("Есть ли медицинская страховка", "Krankenversicherung vorhanden")} portalField="has_insurance" htmlFor={STEP1_CONTROL_IDS.hasInsurance}>
                   <NativeComboboxSelect
+                    id={STEP1_CONTROL_IDS.hasInsurance}
                     name="has_insurance"
                     value={draft.hasInsurance}
                     className={selectClass}
@@ -7553,6 +7655,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceType")}
                   errorId={`${MASTER_FIELD_IDS.insuranceType}-error`}
+                  htmlFor={MASTER_FIELD_IDS.insuranceType}
                 >
                   <NativeComboboxSelect
                     id={MASTER_FIELD_IDS.insuranceType}
@@ -7578,6 +7681,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceProvider")}
                   errorId={`${MASTER_FIELD_IDS.insuranceProvider}-error`}
+                  htmlFor={MASTER_FIELD_IDS.insuranceProvider}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.insuranceProvider}
@@ -7597,6 +7701,7 @@ ${serviceCommentLines.join("\n")}`
                   required={draft.hasInsurance === "yes"}
                   error={visibleMasterError("insuranceNumber")}
                   errorId={`${MASTER_FIELD_IDS.insuranceNumber}-error`}
+                  htmlFor={MASTER_FIELD_IDS.insuranceNumber}
                 >
                   <Input
                     id={MASTER_FIELD_IDS.insuranceNumber}
@@ -7611,8 +7716,9 @@ ${serviceCommentLines.join("\n")}`
                     onChange={(event) => patch("insuranceNumber", event.target.value)}
                   />
                 </Field>
-                <Field label={tx("Покрывает лечение в Германии", "Deckung in Deutschland")} portalField="insurance_covers_germany">
+                <Field label={tx("Покрывает лечение в Германии", "Deckung in Deutschland")} portalField="insurance_covers_germany" htmlFor={STEP1_CONTROL_IDS.insuranceCoversGermany}>
                   <NativeComboboxSelect
+                    id={STEP1_CONTROL_IDS.insuranceCoversGermany}
                     name="insurance_covers_germany"
                     value={draft.insuranceCoversGermany}
                     className={selectClass}
@@ -7627,6 +7733,7 @@ ${serviceCommentLines.join("\n")}`
                 </Field>
               </div>
               </Section>
+              </Step1PortalProvider>
             </section>
           ) : null}
 
@@ -9902,8 +10009,8 @@ ${serviceCommentLines.join("\n")}`
                       onChange={(event) => changeGuardianPatient(event.target.value)}
                     >
                       <option value="">{tx("Внести данные вручную", "Daten manuell eingeben")}</option>
-                      {guardianPatients.map((patient) => (
-                        <option key={patient.id} value={patient.id}>
+                      {filterPatientsBySearch(guardianPatients, guardianSearch).map((patient) => (
+                        <option key={patient.id} value={patient.id} data-search-text={patientSearchText(patient)}>
                           {referrerPatientOptionLabel(patient)}
                         </option>
                       ))}
@@ -10506,6 +10613,85 @@ ${serviceCommentLines.join("\n")}`
         }}
         onCancel={() => setGwgDataRemoval(null)}
       />
+      <Dialog
+        open={notQualifiedReason !== null}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen && busy !== "not_qualified") setNotQualifiedReason(null);
+        }}
+      >
+        <DialogContent className="max-w-md" data-testid="lead-not-qualified-dialog">
+          <DialogHeader>
+            <DialogTitle>{tx("Обращение не подходит?", "Lead nicht geeignet?")}</DialogTitle>
+            <DialogDescription>
+              {tx(
+                "Обращение получит статус «Не подходит». Причина сохранится и будет указана при архивировании.",
+                "Der Lead erhält den Status „Nicht geeignet“. Der Grund wird gespeichert und beim Archivieren übernommen.",
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {notQualifiedReason ? (
+            <div className="space-y-3">
+              <Field label={tx("Причина", "Grund")} required htmlFor="lead-not-qualified-reason">
+                <NativeComboboxSelect
+                  id="lead-not-qualified-reason"
+                  value={notQualifiedReason.choice}
+                  className={selectClass}
+                  disabled={busy === "not_qualified"}
+                  onChange={(event) => {
+                    const choice = event.target.value as LeadFailureReasonDraft["choice"];
+                    setNotQualifiedError("");
+                    setNotQualifiedReason((current) => (current ? { ...current, choice } : current));
+                  }}
+                >
+                  <option value="">{tx("Выберите причину", "Grund auswählen")}</option>
+                  {LEAD_FAILURE_REASONS.map((reason) => (
+                    <option key={reason.code} value={reason.code}>{tx(reason.ru, reason.de)}</option>
+                  ))}
+                  <option value={LEAD_FAILURE_REASON_OTHER}>{leadFailureReasonOtherLabel(tx)}</option>
+                </NativeComboboxSelect>
+              </Field>
+              {notQualifiedReason.choice === LEAD_FAILURE_REASON_OTHER ? (
+                <Field label={tx("Опишите причину", "Grund beschreiben")} required htmlFor="lead-not-qualified-reason-text">
+                  <textarea
+                    id="lead-not-qualified-reason-text"
+                    className={cn(textareaClass, "min-h-20")}
+                    maxLength={LEAD_FAILURE_REASON_MAX_LENGTH}
+                    disabled={busy === "not_qualified"}
+                    value={notQualifiedReason.text}
+                    onChange={(event) => {
+                      const text = event.target.value;
+                      setNotQualifiedError("");
+                      setNotQualifiedReason((current) => (current ? { ...current, text } : current));
+                    }}
+                  />
+                </Field>
+              ) : null}
+              {notQualifiedError ? (
+                <p role="alert" className="text-xs leading-4 text-destructive">{notQualifiedError}</p>
+              ) : null}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy === "not_qualified"}
+              onClick={() => setNotQualifiedReason(null)}
+            >
+              {tx("Отмена", "Abbrechen")}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              disabled={busy === "not_qualified"}
+              onClick={() => void markNotQualified()}
+            >
+              {busy === "not_qualified" ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
+              {tx("Не подходит", "Nicht geeignet")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog open={archiveConfirmOpen} onOpenChange={setArchiveConfirmOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -10515,6 +10701,11 @@ ${serviceCommentLines.join("\n")}`
                 "Обращение исчезнет из активного списка, но останется доступным в архиве.",
                 "Der Lead wird aus der aktiven Liste entfernt und bleibt im Archiv verfügbar.",
               )}
+              {leadFailureReasonLabel(lead?.failed_outcome?.reason, tx) ? (
+                <span className="mt-2 block" data-testid="lead-archive-reason">
+                  {`${tx("Причина", "Grund")}: ${leadFailureReasonLabel(lead?.failed_outcome?.reason, tx)}`}
+                </span>
+              ) : null}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

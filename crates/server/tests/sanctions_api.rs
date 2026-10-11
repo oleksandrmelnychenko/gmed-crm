@@ -1346,8 +1346,83 @@ async fn risk_assessment(app: &TestApp, lead_id: Uuid) -> Value {
     body
 }
 
+/// What an OPEN (undecided) hit must leave as it is (owner decision
+/// 2026-10-07, QA 2026-10-11 A-15/A-21/A-33): no T16, the level of the
+/// other triggers, no follow-up block of the enhanced check for the lead's
+/// cabinet (A source of funds, K birth data, L legal questions) and the
+/// enhanced check optional — which keeps the payer's proof of funds optional
+/// on the payer's own link (its check level is 2 only when the check is
+/// required). The hit is named for staff as `sanctions_review_pending` and
+/// holds qualification through the sanctions gate.
+async fn assert_an_open_hit_changes_nothing(app: &TestApp, lead_id: Uuid) {
+    let assessment = risk_assessment(app, lead_id).await;
+    assert!(
+        assessment["triggers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|trigger| trigger["key"] != "T16"),
+        "{assessment}"
+    );
+    assert_eq!(assessment["knockout"], false, "{assessment}");
+    assert_eq!(assessment["level"], 1, "{assessment}");
+    for block in ["A", "K", "L"] {
+        assert_eq!(
+            assessment["blocks"][block]["open"], false,
+            "{block}: {assessment}"
+        );
+    }
+    let check = enhanced_check(app, lead_id).await;
+    assert_eq!(check["required"], false, "{check}");
+    assert_eq!(
+        check["reasons"],
+        json!(["sanctions_review_pending"]),
+        "{check}"
+    );
+    let (code, body) = qualify(app, lead_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending", "{body}");
+}
+
+/// After a CONFIRMED hit: T16 of `subject`, a knock-out (level 3), the
+/// enhanced check required with `reason`, its blocks open for the cabinet.
+async fn assert_a_confirmed_hit_is_a_knockout(
+    app: &TestApp,
+    lead_id: Uuid,
+    subject: &str,
+    reason: &str,
+) {
+    let assessment = risk_assessment(app, lead_id).await;
+    assert!(
+        assessment["triggers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|trigger| trigger["key"] == "T16" && trigger["subject"] == subject),
+        "{assessment}"
+    );
+    assert_eq!(assessment["knockout"], true, "{assessment}");
+    assert_eq!(assessment["level"], 3, "{assessment}");
+    for block in ["A", "K", "L"] {
+        assert_eq!(
+            assessment["blocks"][block]["open"], true,
+            "{block}: {assessment}"
+        );
+    }
+    let check = enhanced_check(app, lead_id).await;
+    assert_eq!(check["required"], true, "{check}");
+    assert!(
+        check["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|known| known == reason),
+        "{check}"
+    );
+}
+
 #[tokio::test]
-async fn an_open_hit_is_a_knockout_and_only_a_false_positive_withdraws_it() {
+async fn an_open_hit_only_holds_and_only_a_confirmed_hit_is_a_knockout() {
     let Some(app) = test_app().await else {
         return;
     };
@@ -1364,7 +1439,7 @@ async fn an_open_hit_is_a_knockout_and_only_a_false_positive_withdraws_it() {
     let status = lead_status(&app, lead_id).await;
     assert_eq!(status["open_hits"], 1, "{status}");
 
-    // The CEO starts the assessment: the open hit is T16, a knock-out.
+    // The CEO starts the assessment: the open hit is no trigger.
     let (code, started) = request(
         &app,
         "POST",
@@ -1374,51 +1449,129 @@ async fn an_open_hit_is_a_knockout_and_only_a_false_positive_withdraws_it() {
     )
     .await;
     assert_eq!(code, StatusCode::OK, "{started}");
-    assert_eq!(started["level"], 3, "{started}");
-    assert_eq!(started["knockout"], true);
-    let has_t16 = |body: &Value| {
-        body["triggers"]
+    assert_an_open_hit_changes_nothing(&app, lead_id).await;
+
+    // A T16 an open hit set before 2026-10-11 goes at the next reassessment.
+    sqlx::query(
+        r#"UPDATE lead_risk_assessments
+           SET triggers = triggers || jsonb_build_array(jsonb_build_object(
+                   'key', 'T16', 'subject', 'patient', 'variant', NULL, 'points', 0,
+                   'knockout', true, 'first_fired_at', now(), 'last_fired_at', now(),
+                   'active', true)),
+               knockout = true, level = 3
+           WHERE lead_id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert_an_open_hit_changes_nothing(&app, lead_id).await;
+    let after = risk_assessment(&app, lead_id).await;
+    assert!(
+        after["history"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|trigger| trigger["key"] == "T16" && trigger["subject"] == "patient")
-    };
-    assert!(has_t16(&started), "{started}");
-    // Level 3 requires the enhanced check, next to the pending match.
-    assert_eq!(
-        enhanced_check(&app, lead_id).await,
-        json!({
-            "required": true,
-            "reasons": ["risk_assessment", "sanctions_review_pending"],
-            "countries": []
-        })
+            .any(|event| event["kind"] == "trigger_withdrawn"),
+        "{after}"
     );
 
-    // A false positive leaves no open or confirmed hit: T16 is withdrawn,
-    // with the CEO as actor; the other triggers stay.
-    let hit_id = open_hits(&app).await[0]["id"].as_str().unwrap().to_string();
-    let (code, body) = request(
+    // The CEO confirms the match: now T16 of the patient, a knock-out.
+    let hit_id = open_hits(&app)
+        .await
+        .into_iter()
+        .find(|hit| hit["lead_id"] == json!(lead_id))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    decide(
         &app,
-        "POST",
-        &format!("/sanctions/hits/{hit_id}/decision"),
-        &app.ceo(),
-        Some(json!({ "decision": "false_positive", "reason": "Born in another city, passport checked" })),
+        &hit_id,
+        "confirmed",
+        "Same name, date and place of birth as the EU entry",
     )
     .await;
-    assert_eq!(code, StatusCode::OK, "{body}");
-    let after = risk_assessment(&app, lead_id).await;
-    assert!(!has_t16(&after), "{after}");
-    assert_eq!(after["knockout"], false, "{after}");
-    assert_eq!(after["level"], 1, "{after}");
-    let withdrawn = after["history"]
+    assert_a_confirmed_hit_is_a_knockout(&app, lead_id, "patient", "patient_sanctioned").await;
+    let confirmed = risk_assessment(&app, lead_id).await;
+    let raised = confirmed["history"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|event| event["kind"] == "trigger_withdrawn")
+        .rfind(|event| event["kind"] == "raised")
         .cloned()
-        .unwrap_or_else(|| panic!("no withdrawal: {after}"));
-    assert_eq!(withdrawn["cause"], "hit_decision");
-    assert_eq!(withdrawn["actor"], json!(app.ceo_id));
+        .unwrap_or_else(|| panic!("no raise: {confirmed}"));
+    assert_eq!(raised["cause"], "hit_decision");
+    assert_eq!(raised["actor"], json!(app.ceo_id));
+    assert_eq!(confirmed["sanctions_confirmed"], true, "{confirmed}");
+}
+
+/// QA 2026-10-11 (A-38a): a lead with a sanctions hit AND a blocked country
+/// is listed in the CEO's «Страны» tab; the country block is lifted on its
+/// own while the hit still waits. The leads list keeps one flag per lead
+/// (the sanctions flag).
+#[tokio::test]
+async fn a_lead_with_a_hit_is_listed_under_blocked_countries_too() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let lead_id = insert_lead(
+        &app,
+        "Testomir",
+        "Korneev",
+        Some("1961-11-30"),
+        &["RU"],
+        json!([]),
+    )
+    .await;
+    let status = lead_status(&app, lead_id).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    assert_eq!(status["country"]["blocking"], json!(["RU"]), "{status}");
+
+    // `{ "leads": [...] }` of the CEO's «Страны» tab.
+    let listed = |items: &Value| {
+        items["leads"]
+            .as_array()
+            .unwrap_or_else(|| panic!("no list: {items}"))
+            .iter()
+            .find(|item| item["lead_id"] == json!(lead_id))
+            .cloned()
+    };
+    let (code, blocks) = request(&app, "GET", "/sanctions/country-blocks", &app.ceo(), None).await;
+    assert_eq!(code, StatusCode::OK, "{blocks}");
+    let item = listed(&blocks).unwrap_or_else(|| panic!("not listed: {blocks}"));
+    assert_eq!(item["flag"], "blocked_country", "{item}");
+    assert_eq!(item["blocking"], json!(["RU"]), "{item}");
+
+    // The CEO lifts the country block while the hit is still open.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/sanctions/leads/{lead_id}/country-override"),
+        &app.ceo(),
+        Some(json!({ "reason": "Resident in Germany since 2001, checked" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED, "{body}");
+    let (_, blocks) = request(&app, "GET", "/sanctions/country-blocks", &app.ceo(), None).await;
+    assert_eq!(listed(&blocks).unwrap()["flag"], "country_lifted");
+    // The hit still holds.
+    let (code, body) = qualify(&app, lead_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+
+    // The leads list: one flag, the sanctions one.
+    let (code, flags) = request(&app, "GET", "/sanctions/leads/flags", &app.pm(), None).await;
+    assert_eq!(code, StatusCode::OK, "{flags}");
+    let mine: Vec<&Value> = flags
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|flag| flag["lead_id"] == json!(lead_id))
+        .collect();
+    assert_eq!(mine.len(), 1, "{flags}");
+    assert_eq!(mine[0]["flag"], "review_pending");
 }
 
 /// Section 8 as any writer stores it (the cabinet, the payer's own link,
@@ -1632,9 +1785,13 @@ async fn the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit
         assert_eq!(body["error"], "sanctions_review_pending");
     }
 
-    // T16 belongs to whoever pays through the bank.
-    assert_eq!(t16_subjects(&app, own).await, vec!["patient"]);
-    assert_eq!(t16_subjects(&app, paid).await, vec!["payer"]);
+    // An open bank hit only holds (QA 2026-10-11 A-15, A-33): no T16, no
+    // change of the level, no follow-up block, the proof of funds stays
+    // optional — for the patient's bank and for the payer's bank.
+    for lead in [own, paid] {
+        assert!(t16_subjects(&app, lead).await.is_empty());
+        assert_an_open_hit_changes_nothing(&app, lead).await;
+    }
 
     // The CEO decides: the patient's bank is another bank, the payer's bank
     // is the listed one.
@@ -1666,7 +1823,9 @@ async fn the_bank_of_the_payment_route_is_screened_held_and_decided_like_any_hit
     let (code, body) = qualify(&app, paid).await;
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "sanctions_confirmed");
+    // Confirmed: T16 of the payer, who pays through the bank — as before.
     assert_eq!(t16_subjects(&app, paid).await, vec!["payer"]);
+    assert_a_confirmed_hit_is_a_knockout(&app, paid, "payer", "payer_sanctioned").await;
 
     // Another bank later does not undo the confirmation.
     set_payment_route(&app, paid, "Deutsche Bank AG", "DE").await;
@@ -1776,12 +1935,14 @@ async fn a_third_party_invoice_recipient_who_does_not_pay_is_screened_like_a_pay
             );
         }
     }
-    // The hold of any open hit; T16 of the payer's side although the
-    // patient pays (the recipient is a third party on the money side).
+    // The hold of any open hit, nothing else (QA 2026-10-11 A-21): no T16,
+    // no level, no follow-up block for the lead — the extra questions must
+    // not appear right when the recipient was named.
     let (code, body) = qualify(&app, person_lead).await;
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "sanctions_review_pending");
-    assert_eq!(t16_subjects(&app, person_lead).await, vec!["payer"]);
+    assert!(t16_subjects(&app, person_lead).await.is_empty());
+    assert_an_open_hit_changes_nothing(&app, person_lead).await;
 
     // An organisation receives the invoice: screened against the listed
     // entities by its name, its seat as residence.
@@ -1825,7 +1986,8 @@ async fn a_third_party_invoice_recipient_who_does_not_pay_is_screened_like_a_pay
     assert_eq!(subject["residence"], json!(["CY"]), "{organisation_hit}");
 
     // A confirmed recipient match: the enhanced check is required (the
-    // payer's side) and the gates hold.
+    // payer's side, named as the recipient's: QA 2026-10-11 N-08) and the
+    // gates hold.
     decide(
         &app,
         organisation_hit["id"].as_str().unwrap(),
@@ -1847,10 +2009,14 @@ async fn a_third_party_invoice_recipient_who_does_not_pay_is_screened_like_a_pay
             .as_array()
             .unwrap()
             .iter()
-            .any(|reason| reason == "payer_sanctioned"),
+            .any(|reason| reason == "recipient_sanctioned"),
         "{check}"
     );
+    // Confirmed: T16 of the payer's side although the patient pays (the
+    // recipient is a third party on the money side) — as before.
     assert_eq!(t16_subjects(&app, organisation_lead).await, vec!["payer"]);
+    assert_a_confirmed_hit_is_a_knockout(&app, organisation_lead, "payer", "recipient_sanctioned")
+        .await;
 
     // A recipient who pays is the third-party payer: screened once, as the
     // payer, never as the recipient besides.
@@ -1935,7 +2101,7 @@ async fn a_third_party_invoice_recipient_who_does_not_pay_is_screened_like_a_pay
         .await
         .unwrap();
     assert!(lead_is_queued(&app, person_lead).await);
-    // The CEO's false positive withdraws T16 like any hit.
+    // The CEO's false positive ends the hold; there never was a T16.
     decide(
         &app,
         person_hit["id"].as_str().unwrap(),

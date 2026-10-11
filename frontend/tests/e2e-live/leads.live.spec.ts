@@ -4,6 +4,7 @@ import { pickerSection } from "../e2e/helpers";
 import {
   authenticateApiClient,
   bootstrapAndLogin,
+  chooseComboboxOption,
   setGermanLanguage,
 } from "./support/live-helpers";
 
@@ -551,7 +552,9 @@ test.describe("lead live workflows", () => {
       scenario.leads.ready.id,
     );
 
-    await detailSheet.getByLabel(/Fehlergrund|Failure reason/i).fill("No medical fit for current program");
+    // The reason is chosen from a list; «Andere» takes an own text (QA 2026-10-11, A-39a).
+    await chooseComboboxOption(page, detailSheet.getByLabel(/^Fehlergrund$/), /^Andere$/);
+    await detailSheet.getByLabel(/^Grund beschreiben$/).fill("No medical fit for current program");
     await detailSheet.getByLabel(/Interne Notiz|Internal note/i).fill(
       "Archived after PM review in live E2E flow.",
     );

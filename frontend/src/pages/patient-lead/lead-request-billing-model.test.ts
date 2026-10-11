@@ -9,8 +9,12 @@ import {
   asksBillingField,
   billingPatch,
   changedOnServer,
+  clearedOwnRoute,
   draftFromBilling,
+  hasPaymentRoute,
   invoiceTargets,
+  ownRouteToRestore,
+  paymentRouteOf,
   requiresBillingField,
   stillRejectedBilling,
   withInvoiceTo,
@@ -282,5 +286,27 @@ describe("lead request billing autosave patch", () => {
   it("knows every field of both sections", () => {
     const all: BillingField[] = [...INVOICE_FIELDS, ...PAYMENT_ROUTE_FIELDS];
     expect(all).toEqual(BILLING_FIELDS);
+  });
+
+  it("keeps the patient's own payment method aside while another payer is named (QA 2026-10-11 A-08a)", () => {
+    const own = draftFromBilling(billing({ invoice_to: "self", payment_method: "bank_transfer" }));
+    const cleared = draftFromBilling(billing({ invoice_to: "self", payment_route_by: "payer" }));
+    expect(hasPaymentRoute(own)).toBe(true);
+    expect(hasPaymentRoute(cleared)).toBe(false);
+    // A third party was named: the server cleared section 8 the patient had answered.
+    const kept = clearedOwnRoute(own, "patient", cleared);
+    expect(kept).toMatchObject({ payment_method: "bank_transfer", bank_name: "" });
+    expect(Object.keys(kept ?? {})).toEqual([...PAYMENT_ROUTE_FIELDS]);
+    expect(paymentRouteOf(own)).toEqual(kept);
+    // The payer's own answer, or nothing answered, is not kept.
+    expect(clearedOwnRoute(own, "payer", cleared)).toBeNull();
+    expect(clearedOwnRoute(cleared, "patient", cleared)).toBeNull();
+    // Back to "I pay": given back while section 8 is empty, for the same side only.
+    const back = draftFromBilling(billing({ invoice_to: "self" }));
+    expect(ownRouteToRestore({ routeBy: "patient", route: kept! }, "patient", back)).toEqual(kept);
+    expect(ownRouteToRestore({ routeBy: "patient", route: kept! }, "payer", back)).toBeNull();
+    expect(ownRouteToRestore({ routeBy: "patient", route: kept! }, "guardian", back)).toBeNull();
+    expect(ownRouteToRestore({ routeBy: "patient", route: kept! }, "patient", own)).toBeNull();
+    expect(ownRouteToRestore(null, "patient", back)).toBeNull();
   });
 });

@@ -8,14 +8,17 @@ import {
   FISALIS_URL,
   PATIENT_RELATION_ROLES,
   PAYER_BANK_REF,
+  dobMatchLabel,
   fisalisSearchText,
   formatListBirthDate,
   isSanctionsGateError,
+  labelWithCount,
   leadBanners,
   leadFlagBadge,
   listEntryNames,
   liveCheckInput,
   liveCheckKey,
+  livePossibleMatch,
   reasonIsValid,
   safeLegalActUrl,
   scorePercent,
@@ -74,6 +77,70 @@ describe("live check input", () => {
     expect(liveCheckKey(base)).toBe(liveCheckKey(sameOtherCase));
     expect(liveCheckKey(base)).not.toBe(liveCheckKey(otherDate));
     expect(liveCheckKey(null)).toBe("");
+  });
+});
+
+describe("live check possible match (QA 2026-10-11 N-14, A-39b)", () => {
+  it("does not claim a hand-over to the CEO before the lead exists or is saved", () => {
+    const fresh = livePossibleMatch("new_lead", null, ru);
+    expect(fresh).toEqual({
+      text: "Возможное совпадение — после создания лида CEO проверит его",
+      tone: "pending",
+    });
+    expect(livePossibleMatch("new_lead", null, de).text).toBe(
+      "Möglicher Treffer – nach dem Anlegen des Leads prüft ihn der CEO",
+    );
+    // Unsaved screened data: the stored screening is about the old data.
+    expect(livePossibleMatch("unsaved", "clear", ru).text).toBe(
+      "Возможное совпадение — после сохранения изменений CEO проверит его",
+    );
+    expect(livePossibleMatch("unsaved", "confirmed", de).tone).toBe("pending");
+    for (const translations of [ru, de]) {
+      for (const subject of ["new_lead", "unsaved", "saved"] as const) {
+        for (const screening of [null, "not_screened", "clear", "review_pending", "confirmed"] as const) {
+          expect(livePossibleMatch(subject, screening, translations).text).not.toMatch(/передано|übergeben/);
+        }
+      }
+    }
+  });
+
+  it("shows the CEO's decision from the stored screening of a saved lead", () => {
+    expect(livePossibleMatch("saved", "review_pending", ru)).toEqual({
+      text: "Возможное совпадение — ждёт решения CEO",
+      tone: "pending",
+    });
+    expect(livePossibleMatch("saved", "review_pending", de).text).toBe(
+      "Möglicher Treffer – wartet auf die Entscheidung des CEO",
+    );
+    // A false positive leaves the stored screening clear.
+    expect(livePossibleMatch("saved", "clear", ru)).toEqual({
+      text: "Совпадение проверено CEO: ложное совпадение",
+      tone: "cleared",
+    });
+    expect(livePossibleMatch("saved", "clear", de).text).toBe("Treffer vom CEO geprüft: falsch positiv");
+    expect(livePossibleMatch("saved", "confirmed", ru)).toEqual({
+      text: "Совпадение подтверждено CEO",
+      tone: "confirmed",
+    });
+    expect(livePossibleMatch("saved", "confirmed", de).text).toBe("Treffer vom CEO bestätigt");
+    // Unknown stored state: neutral wording.
+    expect(livePossibleMatch("saved", null, ru).text).toBe(ru.sanctions_live_possible);
+    expect(livePossibleMatch("saved", "not_screened", de).text).toBe(de.sanctions_live_possible);
+  });
+});
+
+describe("CEO review page", () => {
+  it("counts only what is open, so a decided last hit clears the tab count (QA N-05)", () => {
+    expect(labelWithCount(ru.sanctions_tab_open, 2)).toBe("Открытые (2)");
+    expect(labelWithCount(de.sanctions_tab_open, 1)).toBe("Offen (1)");
+    expect(labelWithCount(ru.sanctions_tab_open, 0)).toBe("Открытые");
+    expect(labelWithCount(ru.sanctions_tab_open, null)).toBe("Открытые");
+  });
+
+  it("words the birth date comparison in brackets", () => {
+    expect(dobMatchLabel("exact", ru)).toBe("(дата совпадает)");
+    expect(dobMatchLabel("unknown", de)).toBe("(kein Datum zum Vergleich)");
+    expect(dobMatchLabel(undefined, ru)).toBe("");
   });
 });
 

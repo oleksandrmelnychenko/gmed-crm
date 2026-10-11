@@ -923,6 +923,11 @@ struct OrganisationMask {
     legal_form: Option<String>,
     register_number: Option<String>,
     contact_name: Option<String>,
+    /// Why the payment goes through the organisation, as the lead answered it
+    /// in the cabinet (`lead_gwg_declarations.payment_background`): the
+    /// default of the organisation's own "why do you pay" (QA 2026-10-11
+    /// A-36c: the organisation answered the same question again).
+    payment_reason: Option<String>,
 }
 
 async fn load_organisation_mask(
@@ -930,8 +935,11 @@ async fn load_organisation_mask(
     lead_id: Uuid,
 ) -> Result<OrganisationMask, sqlx::Error> {
     let row = sqlx::query(
-        r#"SELECT organisation_legal_form, organisation_register_number, organisation_contact_name
-           FROM lead_payer_declarations WHERE lead_id = $1"#,
+        r#"SELECT d.organisation_legal_form, d.organisation_register_number,
+                  d.organisation_contact_name, g.payment_background
+           FROM lead_payer_declarations d
+           LEFT JOIN lead_gwg_declarations g ON g.lead_id = d.lead_id
+           WHERE d.lead_id = $1"#,
     )
     .bind(lead_id)
     .fetch_optional(&mut *conn)
@@ -945,6 +953,7 @@ async fn load_organisation_mask(
         legal_form: text("organisation_legal_form"),
         register_number: text("organisation_register_number"),
         contact_name: text("organisation_contact_name"),
+        payment_reason: text("payment_background"),
     })
 }
 
@@ -1090,6 +1099,11 @@ fn effective_answers(
                 ),
                 (&mut answers.representative_first_name, first.as_ref(), 100),
                 (&mut answers.representative_last_name, last.as_ref(), 100),
+                (
+                    &mut answers.payment_reason,
+                    mask.payment_reason.as_ref(),
+                    STATEMENT_TEXT_MAX,
+                ),
             ] {
                 fill(target, fallback, max);
             }
@@ -1152,6 +1166,11 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
     };
     let organisation = required.payer_type != lead_payer::PAYER_TYPE_PERSON;
     let company = required.payer_type == "company";
+    // The beneficial owners (or "nobody holds more than 25 %") of every legal
+    // entity: a company and an organisation (QA 2026-10-11 A-36b: the cabinet
+    // names every company an organisation, so a GmbH skipped them); an insurer
+    // stays optional (supervised, § 14 GwG).
+    let owners_required = company || required.payer_type == "organisation";
     let id_valid = answers
         .id_valid_until
         .is_some_and(|date| date >= required.today);
@@ -1195,7 +1214,7 @@ fn missing_for_submit(answers: &Answers, required: &Requirements<'_>) -> Vec<&'s
             filled(&answers.representative_last_name),
         ));
         checks.extend(identity_document);
-        if company {
+        if owners_required {
             checks.push((
                 "beneficial_owners",
                 answers.beneficial_owners_none == Some(true)
@@ -5731,10 +5750,16 @@ mod tests {
             legal_form: Some("GmbH".into()),
             register_number: Some("HRB 12345".into()),
             contact_name: Some("Anna Maria Muster".into()),
+            payment_reason: Some("Der Arbeitgeber übernimmt die Kosten.".into()),
         };
         let answers = effective_answers(&Answers::default(), &company, None, &mask);
         assert_eq!(answers.organisation_name.as_deref(), Some("Beispiel GmbH"));
         assert_eq!(answers.legal_form.as_deref(), Some("GmbH"));
+        // Why it pays, as the lead answered it (QA 2026-10-11 A-36c).
+        assert_eq!(
+            answers.payment_reason.as_deref(),
+            Some("Der Arbeitgeber übernimmt die Kosten.")
+        );
         assert_eq!(answers.register_number.as_deref(), Some("HRB 12345"));
         assert_eq!(
             answers.representative_first_name.as_deref(),
@@ -5955,6 +5980,42 @@ mod tests {
             },
         );
         assert!(!missing.contains(&"legal_form") && !missing.contains(&"payment_reason"));
+        // An organisation (the cabinet names every company so, QA 2026-10-11
+        // A-36b) states its beneficial owners too, without the register; an
+        // insurer does not have to.
+        let organisation = missing_for_submit(
+            &answers,
+            &Requirements {
+                payer_type: "organisation",
+                ..required
+            },
+        );
+        assert!(organisation.contains(&"beneficial_owners"));
+        assert!(
+            !organisation.contains(&"register_court") && !organisation.contains(&"register_number")
+        );
+        let none = Answers {
+            beneficial_owners_none: Some(true),
+            ..answers.clone()
+        };
+        assert!(
+            !missing_for_submit(
+                &none,
+                &Requirements {
+                    payer_type: "organisation",
+                    ..required
+                },
+            )
+            .contains(&"beneficial_owners")
+        );
+        let insurer = missing_for_submit(
+            &answers,
+            &Requirements {
+                payer_type: "insurance",
+                ..required
+            },
+        );
+        assert!(!insurer.contains(&"beneficial_owners"));
     }
 
     #[test]

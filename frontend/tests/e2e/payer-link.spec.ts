@@ -343,7 +343,8 @@ async function setup(page: Page, options: Options = {}) {
     }
     need("id_document_type", "id_document_number", "id_issuing_authority", "id_issuing_country", "id_valid_until");
     if (q.identity_documents.length === 0) missing.push("id_document_upload");
-    if (payerType === "company" && a.beneficial_owners_none !== true && a.beneficial_owners.length === 0) missing.push("beneficial_owners");
+    // Every legal entity names its beneficial owners, an insurer need not (QA 2026-10-11 A-36b).
+    if ((payerType === "company" || payerType === "organisation") && a.beneficial_owners_none !== true && a.beneficial_owners.length === 0) missing.push("beneficial_owners");
     need("relationship_kind");
     if (a.relationship_kind === "other") need("relationship");
     need(organisation ? "industry" : "occupation");

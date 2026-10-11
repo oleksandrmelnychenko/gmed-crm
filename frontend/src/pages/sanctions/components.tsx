@@ -32,6 +32,7 @@ import {
   leadBanners,
   leadFlagBadge,
   liveCheckKey,
+  livePossibleMatch,
   reasonIsValid,
 } from "./model";
 
@@ -192,22 +193,67 @@ export function useSanctionsLiveCheck(input: LiveCheckInput | null): LiveCheckSt
   return state;
 }
 
-/** One line under the name fields of wizard step 1. */
+type StoredScreening = { key: string; screening: LeadSanctionsStatus["screening"] | null };
+
+/**
+ * One line under the name fields of wizard step 1. The check itself stores
+ * nothing; for a lead that exists and whose screened data are saved, a
+ * possible match shows the stored screening, so the line says what the CEO
+ * decided (QA 2026-10-11 N-14, A-39b). `saved` is false while the wizard has
+ * unsaved changes.
+ */
 export function SanctionsLiveCheckNotice({
   input,
+  saved = true,
   className,
 }: {
   input: LiveCheckInput | null;
+  saved?: boolean;
   className?: string;
 }) {
   const { t } = useLang();
   const state = useSanctionsLiveCheck(input);
+  const key = liveCheckKey(input);
+  const leadId = input?.lead_id ?? null;
   const possible = state.phase === "done" && state.result.status === "possible_match";
+  // The lead and screened data of the shown result.
+  const resultKey = leadId && state.phase === "done" ? `${leadId}|${state.key}` : "";
+  // A result for the current data with nothing pending is about saved data;
+  // remembered, so that a later edit of an unscreened field keeps it.
+  const savedNow = Boolean(saved && resultKey && state.phase === "done" && state.key === key);
+  const [savedKey, setSavedKey] = useState("");
+  const storedKey = possible && resultKey && (savedNow || savedKey === resultKey) ? resultKey : "";
+  const [stored, setStored] = useState<StoredScreening | null>(null);
 
   useEffect(() => {
-    // The server screened the saved lead with the check; the banner reloads.
-    if (possible) announceSanctionsChange();
-  }, [possible]);
+    if (savedNow) setSavedKey(resultKey);
+  }, [savedNow, resultKey]);
+
+  useEffect(() => {
+    if (!storedKey || !leadId) return undefined;
+    let cancelled = false;
+    sanctionsApi
+      .leadStatus(leadId)
+      .then((status) => {
+        if (!cancelled) setStored({ key: storedKey, screening: status.screening });
+      })
+      .catch(() => {
+        if (!cancelled) setStored({ key: storedKey, screening: null });
+      })
+      .finally(() => {
+        // The status call screened the saved data; the banner reloads after
+        // it, not at the same time.
+        if (!cancelled) announceSanctionsChange();
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [storedKey]);
+
+  useEffect(() => {
+    // The server screened the lead's saved data with the check; the banner reloads.
+    if (possible && leadId && !storedKey) announceSanctionsChange();
+  }, [possible, leadId, storedKey]);
 
   if (state.phase === "idle") return null;
   let tone = "text-muted-foreground";
@@ -224,9 +270,26 @@ export function SanctionsLiveCheckNotice({
         date: state.result.list_version_date ? formatAppDate(state.result.list_version_date) : "—",
       });
     } else if (state.result.status === "possible_match") {
-      tone = "rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800";
-      icon = <ShieldAlert className="size-3.5" aria-hidden />;
-      text = t.sanctions_live_possible;
+      // While the stored screening loads, the spinner stays.
+      if (!storedKey || stored?.key === storedKey) {
+        const match = livePossibleMatch(
+          !leadId ? "new_lead" : storedKey ? "saved" : "unsaved",
+          stored?.key === storedKey ? stored.screening : null,
+          t,
+        );
+        icon =
+          match.tone === "cleared" ? (
+            <CircleCheck className="size-3.5" aria-hidden />
+          ) : (
+            <ShieldAlert className="size-3.5" aria-hidden />
+          );
+        tone = {
+          pending: "rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800",
+          confirmed: "rounded-md border border-red-200 bg-red-50 px-2 py-1 text-red-800",
+          cleared: "text-emerald-700",
+        }[match.tone];
+        text = match.text;
+      }
     } else {
       tone = "text-amber-700";
       icon = <ShieldAlert className="size-3.5" aria-hidden />;

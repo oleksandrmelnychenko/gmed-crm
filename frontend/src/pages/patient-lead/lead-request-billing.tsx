@@ -36,7 +36,10 @@ import {
   billingPatch,
   billingValue,
   changedOnServer,
+  clearedOwnRoute,
   draftFromBilling,
+  hasPaymentRoute,
+  ownRouteToRestore,
   invoiceTargets,
   requiresBillingField,
   stillRejectedBilling,
@@ -69,6 +72,13 @@ type BillingForm = {
 };
 
 type RefusedValues = { values: RejectedBilling; codes: Partial<Record<BillingField, string>> };
+
+/**
+ * Per lead, for this page: the patient side's own section 8 the server
+ * cleared when another payer was named (QA 2026-10-11 A-08a). Module state,
+ * so it survives the step's sections being mounted anew.
+ */
+const OWN_ROUTE_SET_ASIDE = new Map<string, { routeBy: PaymentRouteBy; route: Partial<BillingDraft> }>();
 
 /**
  * Autosave of the two sections, like the statements for the identification:
@@ -106,17 +116,36 @@ function useBillingForm({
 
   // What "who pays" changed on the server (section 8 cleared, "to the payer"
   // taken back) replaces the draft's values; the fields being typed stay.
+  // Section 8 the server cleared because another payer was named is kept
+  // aside and given back when the patient side pays again (QA 2026-10-11
+  // A-08a: re-ticking "the recipient is the payer" wiped the payment method).
+  const lastRouteByRef = useRef<PaymentRouteBy>(billing.payment_route_by);
   useEffect(() => {
     const incoming = draftFromBilling(billing);
     const changed = changedOnServer(savedRef.current, incoming);
-    if (changed.length === 0) return;
-    savedRef.current = incoming;
-    setDraft((current) => {
-      const next = { ...current };
-      for (const field of changed) next[field] = incoming[field];
-      return next;
-    });
-  }, [billing]);
+    if (changed.length > 0) {
+      const cleared = clearedOwnRoute(savedRef.current, lastRouteByRef.current, incoming);
+      if (cleared) OWN_ROUTE_SET_ASIDE.set(request.lead_id, { routeBy: lastRouteByRef.current, route: cleared });
+      savedRef.current = incoming;
+      setDraft((current) => {
+        const next = { ...current };
+        for (const field of changed) next[field] = incoming[field];
+        return next;
+      });
+    }
+    lastRouteByRef.current = billing.payment_route_by;
+    const kept = OWN_ROUTE_SET_ASIDE.get(request.lead_id);
+    if (kept && hasPaymentRoute(incoming)) {
+      // Answered anew: nothing to give back any more.
+      OWN_ROUTE_SET_ASIDE.delete(request.lead_id);
+      return;
+    }
+    const restore = ownRouteToRestore(kept, billing.payment_route_by, incoming);
+    if (!restore) return;
+    OWN_ROUTE_SET_ASIDE.delete(request.lead_id);
+    // The autosave sends it as the patient's answer again.
+    setDraft((current) => ({ ...current, ...restore }));
+  }, [billing, request.lead_id]);
 
   const save = useCallback(
     (snapshot: BillingDraft) => {

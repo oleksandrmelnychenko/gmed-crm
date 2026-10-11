@@ -964,7 +964,10 @@ async fn evaluate_and_store(
     } else {
         stored.triggers.clone()
     };
-    let merged = merge(&previous_triggers, &live, now, cause == Cause::HitDecision);
+    // A stored T16 goes once its side has no confirmed hit (only a confirmed
+    // hit fires it; QA 2026-10-11 A-15/A-21/A-33): also the T16 an open hit
+    // set before, at the next reassessment of any cause.
+    let merged = merge(&previous_triggers, &live, now, &inputs.t16_kept_for());
     let score = score(&merged.triggers, &config);
     let print = fingerprint(&merged.triggers);
     let answers = load_block_answers(conn, lead_id, &inputs, None).await?;
@@ -1507,9 +1510,9 @@ pub async fn withdraw(
     Ok(id)
 }
 
-/// Withdraws T16 after a false-positive decision that left no open or
-/// confirmed hit (the only "down" path, P3): a reassessment with the
-/// decision as cause.
+/// Reassesses after the CEO decided a hit, with the decision as cause: a
+/// confirmation fires T16, a false positive that leaves the side without a
+/// confirmed hit withdraws a stored T16 (see [`super::merge`]).
 pub async fn after_hit_decision(
     conn: &mut PgConnection,
     lead_id: Uuid,

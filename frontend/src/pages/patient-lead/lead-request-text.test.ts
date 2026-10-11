@@ -378,7 +378,9 @@ describe("lead cabinet languages", () => {
     const ru = leadRequestText("ru");
     expect(ru.recipient.question).toBe("Кто является получателем счёта?");
     expect(ru.recipient.options).toEqual({ self: "Я", third_party: "Третье лицо или организация" });
-    expect(ru.recipient.typeOptions).toEqual({ person: "физическое лицо", organisation: "организация" });
+    // Written like the payer's list (QA 2026-10-11 N-12).
+    expect(ru.recipient.typeOptions).toEqual({ person: "Физическое лицо", organisation: "Организация" });
+    expect(ru.recipient.payerOptions.person).toBe(ru.recipient.typeOptions.person);
     expect(ru.recipient.relationship).toBe("Кем приходится пациенту?");
     expect(ru.recipient.paymentReason).toBe("Почему оплата через организацию?");
     expect(ru.recipient.isPayer).toBe("Получатель счёта является плательщиком");

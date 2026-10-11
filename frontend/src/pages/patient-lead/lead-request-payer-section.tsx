@@ -33,6 +33,7 @@ import {
   knowsOrganisationMask,
   knowsPayerType,
   payerAnswer,
+  payerAnswerSavable,
   payerChoiceOf,
   payerInput,
   payerTypeOf,
@@ -111,6 +112,9 @@ export function usePayerAutosave({
           return;
         }
         if (!input || key === rejectedRef.current) return;
+        // A third party is stored once it has a name, never empty in place of the
+        // patient (QA 2026-10-11 A-08a: that cleared the patient's payment method).
+        if (!payerAnswerSavable(savedRef.current, snapshot, typed)) return;
         onSaveState("saving");
         try {
           const next = await saveLeadPayer(request.lead_id, input);
@@ -507,19 +511,9 @@ export function PayerSection({
           <Section title={text.payerBlockContact}>
             <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
               {/* Contact (owner request 2026-10-07): e-mail and phone are required of a third person, the
-                  messenger is not; an organisation needs one of the two. */}
-              {organisation && orgMask ? (
-                <p
-                  id="lead-request-payer_email_or_phone-hint"
-                  className="text-xs leading-5 text-muted-foreground sm:col-span-2 lg:col-span-3"
-                  data-testid="lead-request-payer-email-or-phone"
-                >
-                  {text.payerEmailOrPhone}
-                  <RequiredMark />
-                  {` – ${text.payerEmailOrPhoneHint}`}
-                </p>
-              ) : null}
-              <LabeledField {...field("payer_email", !organisation && contactRequired("payer_email"))}>
+                  messenger is not. An organisation needs the e-mail (QA 2026-10-11 A-35: it answers on its
+                  own link, which goes there); its phone is optional. */}
+              <LabeledField {...field("payer_email", organisation ? orgMask : contactRequired("payer_email"))}>
                 <Input
                   {...fieldProps("payer_email")}
                   className={inputClass}

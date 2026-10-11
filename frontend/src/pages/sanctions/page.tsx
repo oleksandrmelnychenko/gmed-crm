@@ -19,6 +19,7 @@ import {
   sanctionsApi,
   type CountryBlocksResponse,
   type HitStatus,
+  type HitsResponse,
   type SanctionsHit,
   type SubjectData,
 } from "./api";
@@ -29,9 +30,11 @@ import {
   FISALIS_URL,
   PATIENT_RELATION_ROLES,
   countryList,
+  dobMatchLabel,
   fisalisSearchText,
   formatListBirthDate,
   hitStatusLabel,
+  labelWithCount,
   listEntryNames,
   regulationLabel,
   safeLegalActUrl,
@@ -104,7 +107,7 @@ function SubjectDetails({
   );
 }
 
-function HitCard({
+export function HitCard({
   hit,
   onDecided,
 }: {
@@ -122,6 +125,11 @@ function HitCard({
   // For a bank FiSaLis is searched by the bank's name as well.
   const name = fisalisSearchText(subject);
   const bank = hit.subject_kind === "lead_bank";
+  const listBirthDates = entry.birth_dates
+    .map((birth) => formatListBirthDate(birth, t))
+    .filter(Boolean)
+    .join("; ");
+  const dobMatch = dobMatchLabel(hit.match_details.dob, t);
 
   const openFisalis = () => {
     // The name goes to the clipboard, never into the URL; FiSaLis opens empty.
@@ -196,21 +204,16 @@ function HitCard({
               </ul>
             </Row>
             {entry.subject_type === "entity" ? null : (
-            <Row label={t.sanctions_field_dob}>
-              {entry.birth_dates.map((birth) => formatListBirthDate(birth, t)).filter(Boolean).join("; ")}
-              {hit.match_details.dob ? (
-                <span className="ml-1 text-xs text-muted-foreground">
-                  ({
-                    {
-                      exact: t.sanctions_dob_exact,
-                      year: t.sanctions_dob_year,
-                      conflict: t.sanctions_dob_conflict,
-                      unknown: t.sanctions_dob_unknown,
-                    }[hit.match_details.dob]
-                  })
-                </span>
-              ) : null}
-            </Row>
+              <Row label={t.sanctions_field_dob}>
+                {listBirthDates}
+                {/* A real space, not a margin: copied or read text must not run together (QA N-07). */}
+                {dobMatch ? (
+                  <>
+                    {listBirthDates ? " " : null}
+                    <span className="text-xs text-muted-foreground">{dobMatch}</span>
+                  </>
+                ) : null}
+              </Row>
             )}
             {entry.subject_type === "entity" ? null : (
               <Row label={t.sanctions_field_citizenships}>{countryList(entry.citizenships, lang)}</Row>
@@ -272,8 +275,8 @@ function HitCard({
           </div>
           {fisalisNote ? (
             <p className="text-xs text-muted-foreground" role="status">
-              {fisalisNote.ok ? t.sanctions_fisalis_copied : t.sanctions_fisalis_copy_failed}
-              <span ref={nameRef} className="ml-1 rounded bg-muted px-1 font-mono text-foreground">
+              {fisalisNote.ok ? t.sanctions_fisalis_copied : t.sanctions_fisalis_copy_failed}{" "}
+              <span ref={nameRef} className="rounded bg-muted px-1 font-mono text-foreground">
                 {fisalisNote.name}
               </span>
             </p>
@@ -306,7 +309,17 @@ function HitCard({
   );
 }
 
-function HitsTab({ status }: { status: HitStatus | "decided" }) {
+/**
+ * The hits of one tab. Every load (also the one after a decision) reports the
+ * counts, so the tab label never shows a stale number (QA 2026-10-11 N-05).
+ */
+function HitsTab({
+  status,
+  onCounts,
+}: {
+  status: HitStatus | "decided";
+  onCounts: (counts: HitsResponse["counts"]) => void;
+}) {
   const { t } = useLang();
   const [hits, setHits] = useState<SanctionsHit[] | null>(null);
   const [error, setError] = useState("");
@@ -324,14 +337,17 @@ function HitsTab({ status }: { status: HitStatus | "decided" }) {
             (right.decided_at ?? "").localeCompare(left.decided_at ?? ""),
           ),
         );
+        onCounts(confirmed.counts);
       } else {
-        setHits((await sanctionsApi.hits(status)).hits);
+        const response = await sanctionsApi.hits(status);
+        setHits(response.hits);
+        onCounts(response.counts);
       }
     } catch (loadError) {
       setError(errorText(loadError, t.common_error));
       setHits([]);
     }
-  }, [status, t.common_error]);
+  }, [status, t.common_error, onCounts]);
 
   useEffect(() => {
     void load();
@@ -453,16 +469,28 @@ export function SanctionsPage() {
   const requested = params.get("tab") as Tab | null;
   const tab: Tab = requested && TABS.includes(requested) ? requested : "open";
   const [openCount, setOpenCount] = useState<number | null>(null);
+  const showsHits = tab === "open" || tab === "decided";
+  const updateCounts = useCallback((counts: HitsResponse["counts"]) => setOpenCount(counts.open), []);
 
   useEffect(() => {
+    // The hit tabs report the counts with every load of their list.
+    if (showsHits) return undefined;
+    let cancelled = false;
     sanctionsApi
       .hits("open")
-      .then((response) => setOpenCount(response.counts.open))
-      .catch(() => setOpenCount(null));
-  }, [tab]);
+      .then((response) => {
+        if (!cancelled) setOpenCount(response.counts.open);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenCount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, showsHits]);
 
   const labels: Record<Tab, string> = {
-    open: openCount ? `${t.sanctions_tab_open} (${openCount})` : t.sanctions_tab_open,
+    open: labelWithCount(t.sanctions_tab_open, openCount),
     decided: t.sanctions_tab_decided,
     countries: t.sanctions_tab_countries,
     list: t.sanctions_tab_list,
@@ -498,8 +526,8 @@ export function SanctionsPage() {
           </Button>
         ))}
       </nav>
-      {tab === "open" ? <HitsTab status="open" /> : null}
-      {tab === "decided" ? <HitsTab status="decided" /> : null}
+      {tab === "open" ? <HitsTab status="open" onCounts={updateCounts} /> : null}
+      {tab === "decided" ? <HitsTab status="decided" onCounts={updateCounts} /> : null}
       {tab === "countries" ? <CountriesTab /> : null}
       {tab === "list" ? <SanctionsListSettings /> : null}
       {tab === "risk" ? <RiskSettingsTab /> : null}

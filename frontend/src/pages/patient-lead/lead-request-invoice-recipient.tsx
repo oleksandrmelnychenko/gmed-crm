@@ -215,8 +215,10 @@ export function InvoiceRecipientSection({
   };
 
   const options = guardian ? text.recipient.optionsGuardian : text.recipient.options;
-  // The data a payer needs are required of the recipient who pays (owner request 2026-10-07).
-  const contactRequired = third && recipientPays && !organisation;
+  // The data a payer needs are required of the recipient who pays (owner request 2026-10-07): the
+  // e-mail also of an organisation, which answers on its own link (QA 2026-10-11 A-35), the phone of a person.
+  const emailRequired = third && recipientPays;
+  const phoneRequired = third && recipientPays && !organisation;
 
   return (
     <>
@@ -336,8 +338,8 @@ export function InvoiceRecipientSection({
                       onChange={(code) => set("country", code ?? "")}
                     />
                   </LabeledField>
-                  <LabeledField {...labeled("email", contactRequired)}>{textInput("email", 254, "email")}</LabeledField>
-                  <LabeledField {...labeled("phone", contactRequired)}>{textInput("phone", 40, "tel")}</LabeledField>
+                  <LabeledField {...labeled("email", emailRequired)}>{textInput("email", 254, "email")}</LabeledField>
+                  <LabeledField {...labeled("phone", phoneRequired)}>{textInput("phone", 40, "tel")}</LabeledField>
                   {organisation ? (
                     // An organisation that pays states the reason as the payer's (`payment_background`).
                     recipientPays && identification ? (

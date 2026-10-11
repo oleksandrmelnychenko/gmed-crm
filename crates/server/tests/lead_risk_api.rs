@@ -355,6 +355,51 @@ async fn staff_see_the_preview_then_the_assessment_decide_and_the_gate_follows()
     assert!(rewrite.is_err());
 }
 
+/// QA 2026-10-11 (A-51), owner: a PEP "yes" corrected to "no" keeps T14 (K.o.)
+/// for good; staff see that the answer was changed and since when.
+#[tokio::test]
+async fn a_pep_answer_taken_back_keeps_t14_and_says_since_when() {
+    let Some(app) = test_app().await else { return };
+    let lead_id = insert_lead(&app, "Nora", &["DE"]).await;
+    sqlx::query("INSERT INTO lead_gwg_declarations (lead_id, pep_self) VALUES ($1, true)")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let (status, started) = request(
+        &app,
+        "POST",
+        &format!("/leads/{lead_id}/risk-assessment/restart"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let t14 = trigger(&started, "T14", "patient").cloned().unwrap();
+    assert_eq!(t14["active"], true, "{started}");
+    assert_eq!(t14["inactive_since"], Value::Null, "{started}");
+
+    sqlx::query("UPDATE lead_gwg_declarations SET pep_self = false WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let after = assessment(&app, lead_id).await;
+    let t14 = trigger(&after, "T14", "patient")
+        .cloned()
+        .unwrap_or_else(|| panic!("T14 stays: {after}"));
+    assert_eq!(t14["active"], false, "{after}");
+    assert!(t14["inactive_since"].is_string(), "{after}");
+    assert_eq!(after["level"], 3, "{after}");
+    assert_eq!(after["knockout"], true, "{after}");
+    // A later read keeps the date of the change.
+    let again = assessment(&app, lead_id).await;
+    assert_eq!(
+        trigger(&again, "T14", "patient").unwrap()["inactive_since"],
+        t14["inactive_since"]
+    );
+}
+
 /// Owner 2026-10-10 (QA): staff qualified the lead before the passport was
 /// uploaded, so the assessment started with T12 — the upload withdraws it
 /// (the only exception to the ratchet besides T16), records

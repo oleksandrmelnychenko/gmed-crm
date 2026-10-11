@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  guardianLinkRelation,
   isPatientPortalEvent,
+  medicalDocumentsFactLabel,
+  medicalDocumentsText,
   mergePatientUpdates,
   patientDataPending,
   patientDataPendingFields,
@@ -68,7 +71,21 @@ describe("portal state labels", () => {
         tx,
         () => "03.10.2026 11:30",
       ),
-    ).toEqual(["заполнено 9 из 11 полей", "2 документов", "данные отправлены 03.10.2026 11:30"]);
+    ).toEqual(["заполнено 9 из 11 полей", "2 медицинских документа", "данные отправлены 03.10.2026 11:30"]);
+  });
+
+  it("counts medical documents with the right plural form (QA 2026-10-11, A-11)", () => {
+    const de = (_ru: string, text: string) => text;
+    expect(medicalDocumentsText(0, tx)).toBe("0 медицинских документов");
+    expect(medicalDocumentsText(1, tx)).toBe("1 медицинский документ");
+    expect(medicalDocumentsText(2, tx)).toBe("2 медицинских документа");
+    expect(medicalDocumentsText(5, tx)).toBe("5 медицинских документов");
+    expect(medicalDocumentsText(11, tx)).toBe("11 медицинских документов");
+    expect(medicalDocumentsText(21, tx)).toBe("21 медицинский документ");
+    expect(medicalDocumentsText(1, de)).toBe("1 medizinisches Dokument");
+    expect(medicalDocumentsText(2, de)).toBe("2 medizinische Dokumente");
+    expect(medicalDocumentsFactLabel(tx)).toBe("Мед. документы");
+    expect(medicalDocumentsFactLabel(de)).toBe("Med. Unterlagen");
   });
 
   it("finds the marker of a wizard field through its lead column", () => {
@@ -76,6 +93,18 @@ describe("portal state labels", () => {
     expect(patientMarkerFor(intake, "birthDate")?.access_kind).toBe("self");
     expect(patientMarkerFor(intake, "city")).toBeNull();
     expect(patientMarkerFor(null, "birthDate")).toBeNull();
+  });
+
+  it("keeps the relation of a parent after the login was issued (QA 2026-10-11, N-10)", () => {
+    const candidates = [
+      { trusted_contact_id: "c-1", access_id: "a-1", relation: "parent" },
+      { trusted_contact_id: "c-2", access_id: null, relation: "guardian" },
+    ];
+    expect(guardianLinkRelation({ access_id: "a-1", trusted_contact_id: "c-1" }, candidates)).toBe("parent");
+    // A renewed login: the access id changed, the contact is the same.
+    expect(guardianLinkRelation({ access_id: "a-9", trusted_contact_id: "c-2" }, candidates)).toBe("guardian");
+    expect(guardianLinkRelation({ access_id: "a-7", trusted_contact_id: null }, candidates)).toBeNull();
+    expect(guardianLinkRelation({ access_id: "a-1", trusted_contact_id: "c-1" }, [])).toBeNull();
   });
 
   it("recognises events caused by the patient", () => {

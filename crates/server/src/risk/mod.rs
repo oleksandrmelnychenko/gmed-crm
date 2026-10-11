@@ -340,12 +340,20 @@ pub struct Inputs {
     pub payer_pep: bool,
     pub patient_sanctions_links: bool,
     pub payer_sanctions_links: bool,
-    /// An open or confirmed sanctions hit of the patient or a representative.
+    /// A CONFIRMED sanctions hit of the patient's side: the patient, a
+    /// representative, the bank the patient pays through. An open hit is no
+    /// input (owner 2026-10-07: only a confirmed match is "under sanctions";
+    /// QA 2026-10-11 A-15/A-21/A-33).
     pub patient_hit: bool,
-    /// An open or confirmed sanctions hit of the payer's side: the
-    /// third-party payer, its bank, or the third-party invoice recipient who
-    /// does not pay (owner decision 2026-10-11).
+    /// A CONFIRMED sanctions hit of the payer's side: the third-party payer,
+    /// its bank, or the third-party invoice recipient who does not pay (owner
+    /// decision 2026-10-11).
     pub payer_hit: bool,
+    /// A confirmed hit of the patient's side, whatever fires now: its stored
+    /// T16 stays (a confirmation is final, see [`merge`]).
+    pub confirmed_hit_patient: bool,
+    /// A confirmed hit of the payer's side, also of a payer no longer named.
+    pub confirmed_hit_payer: bool,
     /// Today in Europe/Berlin.
     pub today: Option<NaiveDate>,
 }
@@ -375,6 +383,19 @@ impl Inputs {
                 (self.id_valid_until, self.today),
                 (Some(valid_until), Some(today)) if valid_until < today
             )
+    }
+
+    /// The subjects whose stored T16 stays although it no longer fires: a
+    /// confirmed hit on that side (for [`merge`]).
+    pub fn t16_kept_for(&self) -> Vec<&'static str> {
+        let mut kept = Vec::new();
+        if self.confirmed_hit_patient {
+            kept.push(SUBJECT_PATIENT);
+        }
+        if self.confirmed_hit_payer {
+            kept.push(SUBJECT_PAYER);
+        }
+        kept
     }
 }
 
@@ -505,7 +526,8 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     if inputs.payer_sanctions_links {
         fire("T15", SUBJECT_PAYER, None);
     }
-    // T16: an open or confirmed sanctions hit.
+    // T16: a confirmed sanctions hit (an open one is only the internal hold
+    // of the sanctions gate).
     if inputs.patient_hit {
         fire("T16", SUBJECT_PATIENT, None);
     }
@@ -532,6 +554,12 @@ pub struct Sticky {
     pub last_fired_at: DateTime<Utc>,
     /// Still true in the latest live evaluation (information only).
     pub active: bool,
+    /// When the live evaluation stopped firing it (the data changed, e.g. a
+    /// PEP "yes" corrected to "no"; QA 2026-10-11 A-51): the trigger stays,
+    /// staff see since when its condition no longer holds. `None` while it
+    /// fires, and for a trigger that went inactive before this was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inactive_since: Option<DateTime<Utc>>,
 }
 
 impl Sticky {
@@ -546,35 +574,44 @@ pub struct Merged {
     pub triggers: Vec<Sticky>,
     /// A new trigger or more points than stored.
     pub raised: bool,
-    /// Keys withdrawn: T12 once a valid identity document is on file, T16
-    /// after a false-positive decision.
+    /// Keys withdrawn: T12 once a valid identity document is on file, T13
+    /// once nobody acts for an adult, T16 once no confirmed hit is left.
     pub withdrawn: Vec<String>,
 }
 
 /// A stored trigger the ratchet drops once it no longer fires: T12 always
 /// (owner 2026-10-10: a valid identity document on file — uploaded, readable,
 /// validity not in the past — withdraws it, so a lead qualified before the
-/// upload does not keep it), T16 only with `withdraw_t16`.
-fn withdrawable(key: &str, withdraw_t16: bool) -> bool {
+/// upload does not keep it), T16 unless its subject is in `t16_kept_for`.
+fn withdrawable(entry: &Sticky, t16_kept_for: &[&str]) -> bool {
     // T13 too (owner 2026-10-10): a "yes" to the representative or guardianship
     // question taken back left a point for good.
-    matches!(key, "T12" | "T13") || (withdraw_t16 && key == "T16")
+    matches!(entry.key.as_str(), "T12" | "T13")
+        || (entry.key == "T16" && !t16_kept_for.contains(&entry.subject.as_str()))
 }
 
 /// The ratchet (P3): every stored trigger stays at its highest points; the
 /// live evaluation adds new ones and raises points. A stored trigger that no
-/// longer fires stays, marked inactive. The only ways down: a stored T12 that
-/// no longer fires (the identity document is now valid) is removed, so is a
-/// stored T13 once nobody acts for an adult lead any more, and with
-/// `withdraw_t16` — a false-positive decision left no open or confirmed hit —
-/// a stored T16 that no longer fires is removed.
-pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16: bool) -> Merged {
+/// longer fires stays, marked inactive (since `now`). The only ways down: a
+/// stored T12 that no longer fires (the identity document is now valid) is
+/// removed, so is a stored T13 once nobody acts for an adult lead any more,
+/// and a stored T16 that no longer fires unless its side has a confirmed hit
+/// (`t16_kept_for`; a confirmation is final): T16 fires only on a confirmed
+/// hit since 2026-10-11, so this removes a T16 an open hit set before, and
+/// the one a false positive leaves without a hit.
+pub fn merge(
+    stored: &[Sticky],
+    live: &[Fired],
+    now: DateTime<Utc>,
+    t16_kept_for: &[&str],
+) -> Merged {
     let mut merged = Merged::default();
     for entry in stored {
         let mut entry = entry.clone();
         match live.iter().find(|fired| entry.same(fired)) {
             Some(fired) => {
                 entry.active = true;
+                entry.inactive_since = None;
                 entry.last_fired_at = now;
                 entry.knockout = entry.knockout || fired.knockout;
                 if fired.points > entry.points {
@@ -585,11 +622,16 @@ pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16
                     entry.variant = fired.variant.map(str::to_string);
                 }
             }
-            None if withdrawable(&entry.key, withdraw_t16) => {
+            None if withdrawable(&entry, t16_kept_for) => {
                 merged.withdrawn.push(entry.key.clone());
                 continue;
             }
-            None => entry.active = false,
+            None => {
+                if entry.active {
+                    entry.inactive_since = Some(now);
+                }
+                entry.active = false;
+            }
         }
         merged.triggers.push(entry);
     }
@@ -608,6 +650,7 @@ pub fn merge(stored: &[Sticky], live: &[Fired], now: DateTime<Utc>, withdraw_t16
             first_fired_at: now,
             last_fired_at: now,
             active: true,
+            inactive_since: None,
         });
         merged.raised = true;
     }
@@ -657,7 +700,7 @@ pub fn score(triggers: &[Sticky], config: &RiskConfig) -> Score {
 /// Score of a live evaluation (the preview before the start).
 pub fn score_fired(fired: &[Fired], config: &RiskConfig) -> Score {
     let now = Utc::now();
-    let triggers: Vec<Sticky> = merge(&[], fired, now, false).triggers;
+    let triggers: Vec<Sticky> = merge(&[], fired, now, &[]).triggers;
     score(&triggers, config)
 }
 
@@ -1022,6 +1065,7 @@ mod tests {
                 first_fired_at: now,
                 last_fired_at: now,
                 active: true,
+                inactive_since: None,
             };
             score(
                 &[
@@ -1081,12 +1125,12 @@ mod tests {
                 &config,
             ),
             t0,
-            false,
+            &[],
         );
         assert!(raised.raised);
         assert_eq!(score(&raised.triggers, &config).level, 2);
         // The citizenship is corrected: the trigger stays, inactive, at 4.
-        let corrected = merge(&raised.triggers, &evaluate(&clean(), &config), t0, false);
+        let corrected = merge(&raised.triggers, &evaluate(&clean(), &config), t0, &[]);
         assert!(!corrected.raised);
         assert_eq!(corrected.triggers.len(), 1);
         assert!(!corrected.triggers[0].active);
@@ -1103,42 +1147,134 @@ mod tests {
                 &config,
             ),
             t0,
-            false,
+            &[],
         );
         assert!(!lower.raised);
         assert_eq!(lower.triggers[0].points, 4);
         assert_eq!(lower.triggers[0].variant.as_deref(), Some("list_2"));
         assert!(lower.triggers[0].active);
-        // Only a withdrawal removes T16, and only when it no longer fires.
-        let hit = merge(
-            &[],
-            &evaluate(
-                &Inputs {
-                    patient_hit: true,
-                    ..clean()
-                },
-                &config,
-            ),
-            t0,
-            false,
+        // T16 (a confirmed hit) stays while its side has a confirmed hit, also
+        // when it no longer fires; without one it goes (a T16 an open hit set
+        // before 2026-10-11, or one a false positive left without a hit).
+        let confirmed = Inputs {
+            patient_hit: true,
+            confirmed_hit_patient: true,
+            ..clean()
+        };
+        let hit = merge(&[], &evaluate(&confirmed, &config), t0, &[]);
+        assert_eq!(
+            merge(&hit.triggers, &[], t0, &confirmed.t16_kept_for())
+                .triggers
+                .len(),
+            1
         );
-        assert_eq!(merge(&hit.triggers, &[], t0, false).triggers.len(), 1);
-        let withdrawn = merge(&hit.triggers, &[], t0, true);
+        let withdrawn = merge(&hit.triggers, &[], t0, &clean().t16_kept_for());
         assert!(withdrawn.triggers.is_empty());
         assert_eq!(withdrawn.withdrawn, vec!["T16".to_string()]);
         let still = merge(
             &hit.triggers,
+            &evaluate(&confirmed, &config),
+            t0,
+            &clean().t16_kept_for(),
+        );
+        assert_eq!(still.triggers.len(), 1);
+        // A confirmed payer hit keeps the payer's T16 after the patient took
+        // over the payment; the patient's side does not keep it.
+        let payer = Inputs {
+            payer_hit: true,
+            confirmed_hit_payer: true,
+            ..third_party_person("spouse")
+        };
+        let paid = merge(&[], &evaluate(&payer, &config), t0, &[]);
+        let taken_over = Inputs {
+            confirmed_hit_payer: true,
+            ..clean()
+        };
+        let kept = merge(
+            &paid.triggers,
+            &evaluate(&taken_over, &config),
+            t0,
+            &taken_over.t16_kept_for(),
+        );
+        assert!(
+            kept.triggers
+                .iter()
+                .any(|trigger| trigger.key == "T16" && trigger.subject == SUBJECT_PAYER)
+        );
+        assert_eq!(score(&kept.triggers, &config).level, 3);
+    }
+
+    #[test]
+    fn only_a_confirmed_hit_fires_t16() {
+        // Owner 2026-10-07 (QA 2026-10-11 A-15/A-21/A-33): an open hit of any
+        // subject is no input, so the level stays where the rest puts it.
+        assert!(fire(clean()).is_empty());
+        let open_only = Inputs {
+            patient_hit: false,
+            payer_hit: false,
+            ..third_party_person("spouse")
+        };
+        assert_eq!(fire(open_only), vec![("T4", "payer", None, 1)]);
+        assert_eq!(
+            score_fired(&evaluate(&clean(), &config()), &config()).level,
+            1
+        );
+    }
+
+    #[test]
+    fn a_trigger_that_stops_firing_records_since_when() {
+        // QA 2026-10-11 (A-51): a PEP "yes" corrected to "no" keeps T14 (owner:
+        // sticky), staff see since when the answer no longer holds.
+        let config = config();
+        let t0 = Utc::now();
+        let t1 = t0 + chrono::Duration::minutes(5);
+        let pep = merge(
+            &[],
             &evaluate(
                 &Inputs {
-                    patient_hit: true,
+                    patient_pep: true,
                     ..clean()
                 },
                 &config,
             ),
             t0,
-            true,
+            &[],
         );
-        assert_eq!(still.triggers.len(), 1);
+        assert_eq!(pep.triggers[0].inactive_since, None);
+        let corrected = merge(&pep.triggers, &evaluate(&clean(), &config), t1, &[]);
+        assert_eq!(corrected.triggers.len(), 1);
+        assert!(!corrected.triggers[0].active);
+        assert_eq!(corrected.triggers[0].inactive_since, Some(t1));
+        assert_eq!(score(&corrected.triggers, &config).level, 3);
+        // A later reassessment keeps the first date; firing again clears it.
+        let later = merge(
+            &corrected.triggers,
+            &evaluate(&clean(), &config),
+            t1 + chrono::Duration::days(1),
+            &[],
+        );
+        assert_eq!(later.triggers[0].inactive_since, Some(t1));
+        let again = merge(
+            &later.triggers,
+            &evaluate(
+                &Inputs {
+                    patient_pep: true,
+                    ..clean()
+                },
+                &config,
+            ),
+            t1,
+            &[],
+        );
+        assert!(again.triggers[0].active);
+        assert_eq!(again.triggers[0].inactive_since, None);
+        // Stored before the field existed: it reads as unknown.
+        let stored: Sticky = serde_json::from_value(serde_json::json!({
+            "key": "T14", "subject": "patient", "variant": null, "points": 0,
+            "knockout": true, "first_fired_at": t0, "last_fired_at": t0, "active": false
+        }))
+        .unwrap();
+        assert_eq!(stored.inactive_since, None);
     }
 
     #[test]
@@ -1155,11 +1291,11 @@ mod tests {
                 &config,
             ),
             t0,
-            false,
+            &[],
         );
         assert!(started.triggers.iter().any(|trigger| trigger.key == "T13"));
         // The answer taken back: T13 goes without a decision.
-        let back = merge(&started.triggers, &evaluate(&clean(), &config), t0, false);
+        let back = merge(&started.triggers, &evaluate(&clean(), &config), t0, &[]);
         assert!(back.triggers.iter().all(|trigger| trigger.key != "T13"));
         assert!(!back.withdrawn.is_empty());
         // A minor keeps it.
@@ -1173,7 +1309,7 @@ mod tests {
                 &config,
             ),
             t0,
-            false,
+            &[],
         );
         assert!(minor.triggers.iter().any(|trigger| trigger.key == "T13"));
     }
@@ -1194,7 +1330,7 @@ mod tests {
                 &config,
             ),
             t0,
-            false,
+            &[],
         );
         assert_eq!(score(&started.triggers, &config).points, 6);
         // Still no document, or unreadable, or expired: T12 stays.
@@ -1212,7 +1348,7 @@ mod tests {
                 ..clean()
             },
         ] {
-            let kept = merge(&started.triggers, &evaluate(&inputs, &config), t0, false);
+            let kept = merge(&started.triggers, &evaluate(&inputs, &config), t0, &[]);
             assert!(kept.withdrawn.is_empty());
             assert!(kept.triggers.iter().any(|trigger| trigger.key == "T12"));
         }
@@ -1229,7 +1365,7 @@ mod tests {
                     &config,
                 ),
                 t0,
-                false,
+                &[],
             );
             assert_eq!(uploaded.withdrawn, vec!["T12".to_string()]);
             assert!(!uploaded.raised);
@@ -1251,7 +1387,7 @@ mod tests {
                     &config,
                 ),
                 t0,
-                false,
+                &[],
             );
             assert!(expired.raised);
             assert!(expired.triggers.iter().any(|trigger| trigger.key == "T12"));
@@ -1266,7 +1402,7 @@ mod tests {
             &[],
             &evaluate(&third_party_person("friend"), &config),
             now,
-            false,
+            &[],
         );
         let print = fingerprint(&first.triggers);
         assert_eq!(print, "T4:payer:1,T5:payer:2");
@@ -1292,7 +1428,7 @@ mod tests {
                 &config(),
             ),
             now,
-            false,
+            &[],
         );
         // F (T1), A B C D (T4), A B (T5), J (T15 patient); no H for the payer's PEP.
         assert_eq!(

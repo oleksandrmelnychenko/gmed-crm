@@ -494,6 +494,23 @@ describe("LeadGwgStatements: who acts for the lead", () => {
     expect(html).not.toContain("lead-gwg-representative-");
   });
 
+  it("leaves out the guardianship question after «Нет», as the cabinet never asks it then (QA 2026-10-11, N-04)", () => {
+    const html = render(
+      portalState({
+        representation: { has_representative: false, under_guardianship: null, custody: null, custody_stated: false, representatives: [] },
+      }),
+    );
+    expect(statement(html, "lead-gwg-has-representative")).toContain("Нет");
+    expect(html).not.toContain("lead-gwg-under-guardianship");
+    // An older answer given before the question moved stays visible.
+    const older = render(
+      portalState({
+        representation: { has_representative: false, under_guardianship: true, custody: null, custody_stated: false, representatives: [] },
+      }),
+    );
+    expect(statement(older, "lead-gwg-under-guardianship")).toContain("Да");
+  });
+
   it("shows nothing of it to a role the server keeps it from", () => {
     const html = render(portalState({ minor: true, representation: null }));
     expect(html).not.toContain("lead-gwg-representation");

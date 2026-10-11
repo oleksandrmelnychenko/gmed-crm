@@ -4155,6 +4155,26 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+/// File name of a generated document, made from its name: the words joined by
+/// one `_`. Spaces, the separators " – " and " · ", brackets, slashes and
+/// underscores never leave a run of underscores, and a lone "-" or "." between
+/// them is dropped (QA 2026-10-11): "Patientenformular – Angaben und
+/// Erklärungen · Anna Muster · 2026-10-11" becomes
+/// `Patientenformular_Angaben_und_Erklärungen_Anna_Muster_2026-10-11.pdf`.
+fn generated_document_file_name(name: &str, extension: &str) -> String {
+    let stem = name
+        .split(|c: char| !(c.is_alphanumeric() || c == '.' || c == '-'))
+        .map(|word| word.trim_matches(['.', '-']))
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    if stem.is_empty() {
+        format!("Dokument.{extension}")
+    } else {
+        format!("{stem}.{extension}")
+    }
+}
+
 fn compact_storage_filename(name: &str, max_len: usize) -> String {
     let sanitized = sanitize_filename(name);
     if sanitized.len() <= max_len {
@@ -14958,10 +14978,7 @@ async fn generate_provider_document_from_template_internal(
         Err(message) => return Err(err(StatusCode::INTERNAL_SERVER_ERROR, message)),
     };
 
-    let original_filename = format!(
-        "{}.pdf",
-        sanitize_filename(&auto_name.replace([' ', '/', '\\'], "_"))
-    );
+    let original_filename = generated_document_file_name(&auto_name, "pdf");
     let ursprung = body
         .ursprung
         .as_deref()
@@ -15942,6 +15959,8 @@ async fn generate_document(
     } else {
         template.id
     };
+    // The person a GwG identification sheet is for, which names the document.
+    let mut gwg_sheet_person: Option<String> = None;
     let (preview_html, pdf_bytes) = match template_match_id {
         "__manual_generated_text" => {
             let manual_text = manual_text
@@ -17294,6 +17313,15 @@ async fn generate_document(
                     "Required enhanced due diligence fields are missing",
                 );
             }
+            // A lead's check required by the rule or the risk assessment is no
+            // voluntary individual check, whatever tier the form sends.
+            let check_required = match lead_id {
+                Some(lead_uuid) => match lead_enhanced_check_required(&state, lead_uuid).await {
+                    Ok(required) => required,
+                    Err(resp) => return resp,
+                },
+                None => false,
+            };
             let preview = admin_preview_html(
                 "Durchführung verstärkter Sorgfaltspflichten",
                 &[patient_party.name.clone(), generated_doc_id.clone()],
@@ -17302,6 +17330,7 @@ async fn generate_document(
                 &patient_party,
                 &agency,
                 aml,
+                check_required,
                 generated_order_reference(
                     bindings.order_number.as_deref(),
                     order_number.as_deref(),
@@ -17352,15 +17381,14 @@ async fn generate_document(
                     Ok(sheet) => sheet,
                     Err(resp) => return resp,
                 };
+            let person = format!("{} {}", sheet.first_name.trim(), sheet.last_name.trim())
+                .trim()
+                .to_string();
             let preview = admin_preview_html(
                 "Dokumentationsbogen natürliche Personen (GwG)",
-                &[
-                    format!("{} {}", sheet.first_name, sheet.last_name)
-                        .trim()
-                        .to_string(),
-                    generated_doc_id.clone(),
-                ],
+                &[person.clone(), generated_doc_id.clone()],
             );
+            gwg_sheet_person = Some(person);
             let pdf_bytes = match build_gwg_identification_pdf(
                 &sheet,
                 &agency,
@@ -17613,11 +17641,14 @@ async fn generate_document(
             );
         }
     };
-    let original_filename = format!(
-        "{}.{}",
-        sanitize_filename(&auto_name.replace([' ', '/', '\\'], "_")),
-        template.file_extension
-    );
+    // The GwG sheet is named after the person on it — the patient, the payer
+    // or a person who acts for the lead —, like every lead document "title ·
+    // name · date" (QA 2026-10-11).
+    let auto_name = match gwg_sheet_person.filter(|person| !person.is_empty()) {
+        Some(person) => default_generated_document_name(template, &person, generated_at, language),
+        None => auto_name,
+    };
+    let original_filename = generated_document_file_name(&auto_name, template.file_extension);
     let ursprung = body
         .ursprung
         .as_deref()
@@ -21564,10 +21595,52 @@ fn aml_asset_origin_evidence_line(number: usize, evidence: &AmlAssetOriginEviden
     }
 }
 
+/// The two boxes of section 1 of the EDD sheet: (internal risk analysis,
+/// individual review of the case). They follow the form, except for a
+/// voluntary check (risk tier `individual`, printed as "Einzelfallprüfung",
+/// while neither the owner's rule nor the risk assessment requires the check):
+/// no rule of the internal risk analysis applies there, so the risk is the
+/// finding of the individual review — never of the internal risk analysis,
+/// which the form ticks by default (QA 2026-10-11).
+fn aml_risk_finding_boxes(
+    aml: &AmlEnhancedDueDiligenceBindings,
+    check_required: bool,
+) -> (bool, bool) {
+    if aml.risk_tier.as_deref() == Some("individual") && !check_required {
+        (false, true)
+    } else {
+        (aml.internal_risk_analysis, aml.individual_review)
+    }
+}
+
+/// Whether the enhanced check of a lead is required now: by the owner's rule
+/// or by the stored risk assessment ([`super::lead_enhanced_check`]).
+async fn lead_enhanced_check_required(
+    state: &AppState,
+    lead_id: Uuid,
+) -> Result<bool, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %lead_id, "load enhanced check for the EDD sheet");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load the enhanced check",
+        )
+    };
+    let mut conn = state.db.acquire().await.map_err(failed)?;
+    super::lead_enhanced_check::enhanced_check_triggers(&mut conn, lead_id)
+        .await
+        .map(|check| check.required)
+        .map_err(failed)
+}
+
+/// The EDD sheet ("Durchführung verstärkter Sorgfaltspflichten").
+/// `check_required`: the owner's rule or the stored risk assessment requires
+/// the check, so a risk tier without a list trigger is no voluntary check.
 fn build_enhanced_due_diligence_pdf(
     party: &DocPartyBlock,
     agency: &AgencyContractSettings,
     aml: &AmlEnhancedDueDiligenceBindings,
+    check_required: bool,
     order_number: Option<&str>,
     document_reference: &str,
 ) -> Result<GeneratedPdf, &'static str> {
@@ -21585,6 +21658,9 @@ fn build_enhanced_due_diligence_pdf(
         // Owner rule 2026-10-07: a confirmed sanctions match requires the
         // check; staff may also carry it out without any trigger.
         Some("sanctions") => "Bestätigter Treffer auf einer Sanktionsliste",
+        // Without a list trigger only the risk assessment (level 2 or 3) can
+        // require the check: that is no individual check (QA 2026-10-11).
+        Some("individual") if check_required => "Risikobewertung Stufe 2 oder höher",
         Some("individual") => "Einzelfallprüfung",
         _ => "Drittstaat mit hohem Risiko",
     };
@@ -21639,14 +21715,15 @@ fn build_enhanced_due_diligence_pdf(
         &mut layout,
         "1. Feststellung eines erhöhten Geldwäscherisikos",
     );
+    let (internal_risk_analysis, individual_review) = aml_risk_finding_boxes(aml, check_required);
     aml_checkbox_line(
         &mut layout,
-        aml.internal_risk_analysis,
+        internal_risk_analysis,
         "Feststellung aufgrund der internen Risikoanalyse",
     );
     aml_checkbox_line(
         &mut layout,
-        aml.individual_review,
+        individual_review,
         "Feststellung aufgrund der individuellen Prüfung des konkreten Einzelfalls",
     );
     aml_labeled_value(&mut layout, "Begründung", aml.risk_reason.as_deref());
@@ -34461,6 +34538,7 @@ mod tests {
             &legal_test_party("IR"),
             &legal_test_agency(),
             &aml,
+            true,
             Some("A-20260801-0001"),
             "AML-20260801-UNITTEST0001",
         )
@@ -34481,6 +34559,105 @@ mod tests {
         assert!(text.contains("Nachweise zur Herkunft der Vermögenswerte"));
         assert!(text.contains("1. Kaufvertrag.pdf (hochgeladen am 30.07.2026)"));
         assert!(text.contains("2. Dokument"));
+        // A check of a trigger ticks the boxes of section 1 the form ticked.
+        assert!(text.contains("[X] Feststellung aufgrund der internen Risikoanalyse"));
+        assert!(text.contains("[ ] Feststellung aufgrund der individuellen Prüfung"));
+    }
+
+    #[test]
+    fn enhanced_due_diligence_pdf_of_a_voluntary_check_names_the_individual_review() {
+        // QA 2026-10-11: "Risikostufe: Einzelfallprüfung" came with the box of
+        // the internal risk analysis, which the form ticks by default.
+        let voluntary = AmlEnhancedDueDiligenceBindings {
+            risk_tier: Some("individual".to_string()),
+            internal_risk_analysis: true,
+            risk_reason: Some("Ungewöhnlich hohe Vorauszahlung".to_string()),
+            manager_approval_name: Some("Leitung Beispiel".to_string()),
+            continuous_monitoring: Some("Prüfung jeder Zahlung".to_string()),
+            reviewer_name: Some("Bearbeiter Beispiel".to_string()),
+            review_date: NaiveDate::from_ymd_opt(2026, 10, 11),
+            ..Default::default()
+        };
+        let boxes = super::aml_risk_finding_boxes(&voluntary, false);
+        assert_eq!(boxes, (false, true));
+        let bytes = build_enhanced_due_diligence_pdf(
+            &legal_test_party("DE"),
+            &legal_test_agency(),
+            &voluntary,
+            false,
+            None,
+            "AML-20261011-UNITTEST0002",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&bytes);
+        assert!(text.contains("Einzelfallprüfung"));
+        assert!(text.contains("[ ] Feststellung aufgrund der internen Risikoanalyse"));
+        assert!(text.contains("[X] Feststellung aufgrund der individuellen Prüfung"));
+
+        // Required by the risk assessment (level 2 or 3) without a list
+        // trigger: the tier names the assessment, the boxes follow the form.
+        let bytes = build_enhanced_due_diligence_pdf(
+            &legal_test_party("DE"),
+            &legal_test_agency(),
+            &voluntary,
+            true,
+            None,
+            "AML-20261011-UNITTEST0003",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&bytes);
+        assert!(text.contains("Risikobewertung Stufe 2 oder höher"));
+        assert!(!text.contains("Einzelfallprüfung"));
+        assert!(text.contains("[X] Feststellung aufgrund der internen Risikoanalyse"));
+        assert!(text.contains("[ ] Feststellung aufgrund der individuellen Prüfung"));
+
+        // A check of a trigger keeps what staff ticked and adds nothing.
+        for (internal, individual) in [(true, false), (false, true), (false, false)] {
+            let triggered = AmlEnhancedDueDiligenceBindings {
+                risk_tier: Some("blacklist".to_string()),
+                internal_risk_analysis: internal,
+                individual_review: individual,
+                ..voluntary.clone()
+            };
+            let boxes = super::aml_risk_finding_boxes(&triggered, true);
+            assert_eq!(boxes, (internal, individual));
+        }
+    }
+
+    #[test]
+    fn generated_document_file_name_joins_the_words_with_one_underscore() {
+        // QA 2026-10-11: the separators " – " and " · " became "___".
+        let name = "Patientenformular – Angaben und Erklärungen · Anna MusterA · 2026-10-11";
+        let file = super::generated_document_file_name(name, "pdf");
+        assert_eq!(
+            file,
+            "Patientenformular_Angaben_und_Erklärungen_Anna_MusterA_2026-10-11.pdf"
+        );
+
+        // The GwG sheet of a person who acts for the lead is named like every
+        // lead document: title, name, date.
+        let template = document_template_by_id("gwg_identification").unwrap();
+        let at = Utc.with_ymd_and_hms(2026, 10, 11, 9, 30, 0).unwrap();
+        let name = super::default_generated_document_name(template, "Maria MusterA", at, "de");
+        assert_eq!(
+            name,
+            "Dokumentationsbogen natürliche Personen · Maria MusterA · 2026-10-11"
+        );
+        assert_eq!(
+            super::generated_document_file_name(&name, "pdf"),
+            "Dokumentationsbogen_natürliche_Personen_Maria_MusterA_2026-10-11.pdf"
+        );
+
+        // Brackets, slashes, underscores and a lone dash leave one "_".
+        let name = " Einladungsschreiben (Visum) - Ben__Muster / Kopie ";
+        assert_eq!(
+            super::generated_document_file_name(name, "docx"),
+            "Einladungsschreiben_Visum_Ben_Muster_Kopie.docx"
+        );
+        assert_eq!(
+            super::generated_document_file_name(" – · ", "pdf"),
+            "Dokument.pdf"
+        );
     }
 
     #[test]

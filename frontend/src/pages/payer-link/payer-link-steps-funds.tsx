@@ -29,10 +29,11 @@ import {
 } from "./payer-link-fields";
 import {
   MAX_OWNERS,
-  RELATIONSHIP_KINDS,
+  beneficialOwnersRequired,
   emptyOwner,
   isOrganisation,
   ownerProblems,
+  relationshipKindsFor,
   routeDraft,
   withFundsSource,
   withOwnersNone,
@@ -155,7 +156,7 @@ export function OwnersStep({ context }: { context: StepContext }) {
   return (
     <div className="space-y-4" data-testid="payer-link-step-owners">
       <p className="text-sm leading-6 text-muted-foreground">{text.ownersIntro}</p>
-      {context.payerType !== "company" ? <p className="text-xs text-muted-foreground">{text.ownersOptional}</p> : null}
+      {beneficialOwnersRequired(context.payerType) ? null : <p className="text-xs text-muted-foreground">{text.ownersOptional}</p>}
       <label className="flex items-start gap-3 rounded-lg border border-border bg-muted/10 px-3 py-3 text-sm">
         <input
           type="checkbox"
@@ -230,8 +231,9 @@ export function FundsStep({
           <ChoiceInput
             context={context}
             field="relationship_kind"
-            options={RELATIONSHIP_KINDS}
-            labels={text.relationshipKinds}
+            options={relationshipKindsFor(context.payerType)}
+            // An organisation: employer, business partner or other (a foundation, an association …), QA 2026-10-11 A-36c.
+            labels={organisation ? { ...text.relationshipKinds, ...text.organisationRelationshipKinds } : text.relationshipKinds}
             onChange={(kind) => form.update((draft) => withRelationshipKind(draft, kind))}
           />
         </Field>

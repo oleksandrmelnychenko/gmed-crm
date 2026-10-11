@@ -82,6 +82,16 @@ describe("payer page texts", () => {
     const de = payerLinkText("de");
     expect(de.pageTitle).toBe("Angaben zur Kostenübernahme");
     expect(de.namedYou("Mia Muster")).toBe("Mia Muster hat Sie als zahlende Person für eine Anfrage bei GMED benannt.");
+    // An organisation is addressed as the invitation does (QA 2026-10-11 A-36a), in every language.
+    expect(de.namedYou("Mia Muster", true)).toBe(
+      "Mia Muster hat Ihre Organisation als zahlende Partei für eine Anfrage bei GMED benannt.",
+    );
+    expect(de.privacyNotice("Mia Muster", true)[0]).toContain("Ihre Organisation als zahlende Partei");
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      const text = payerLinkText(lang);
+      expect(text.namedYou("Mia Muster", true)).not.toBe(text.namedYou("Mia Muster"));
+      expect(text.privacyNotice("Mia Muster", true)[0]).not.toBe(text.privacyNotice("Mia Muster")[0]);
+    }
     expect(de.codeWillBeSent("v***r@example.com")).toBe("Wir senden einen Bestätigungscode an v***r@example.com.");
     expect(de.sendCode).toBe("Code senden");
     expect(de.confirmCode).toBe("Bestätigen");

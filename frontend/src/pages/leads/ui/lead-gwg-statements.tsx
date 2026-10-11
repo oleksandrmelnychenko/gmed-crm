@@ -259,15 +259,19 @@ function RepresentationGroup({
             >
               {answerLabel(statements.hasRepresentative, tx)}
             </Statement>
-            {/* The cabinet asks it again (owner 2026-10-10): an open answer shows as "not answered". */}
-            <Statement
-              label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
-              sentence
-              warning={statements.underGuardianship === true}
-              testId="lead-gwg-under-guardianship"
-            >
-              {answerLabel(statements.underGuardianship, tx)}
-            </Statement>
+            {/* The cabinet asks it again (owner 2026-10-10): an open answer shows as "not answered".
+                It is asked only after "yes" to the first question (2026-10-11): after "no" it was
+                never asked, so it is left out (QA 2026-10-11, N-04) — unless an older answer exists. */}
+            {statements.hasRepresentative === false && statements.underGuardianship === null ? null : (
+              <Statement
+                label={tx("Находится под законной опекой (rechtliche Betreuung)", "Steht unter rechtlicher Betreuung")}
+                sentence
+                warning={statements.underGuardianship === true}
+                testId="lead-gwg-under-guardianship"
+              >
+                {answerLabel(statements.underGuardianship, tx)}
+              </Statement>
+            )}
           </>
         )}
       </dl>

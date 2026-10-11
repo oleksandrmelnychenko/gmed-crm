@@ -453,7 +453,7 @@ describe("lead request summary", () => {
     expect(ids.indexOf("payer")).toBe(ids.indexOf("billing") + 1);
     expect(rows(groups, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
-      "Rechnungsempfänger ist": "eine Organisation",
+      "Rechnungsempfänger ist": "Eine Organisation",
       "Name der Organisation": "Beispiel GmbH",
       Rechtsform: "GmbH",
       Ansprechperson: "Ben Muster",
@@ -484,7 +484,7 @@ describe("lead request summary", () => {
     const payingGroups = requestSummary(paying, de, "de");
     expect(rows(payingGroups, "billing")).toEqual({
       "Wer ist Rechnungsempfänger?": "Eine andere Person oder Organisation",
-      "Rechnungsempfänger ist": "eine Organisation",
+      "Rechnungsempfänger ist": "Eine Organisation",
       "Der Rechnungsempfänger ist auch der Zahler": "Ja",
     });
     expect(rows(payingGroups, "payer")).toMatchObject({

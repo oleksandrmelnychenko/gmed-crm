@@ -39,6 +39,7 @@ import {
   type PortalCredentialsAudience,
 } from "../model/lead-portal-access";
 import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gwg-identification";
+import { guardianLinkRelation, medicalDocumentsFactLabel } from "../model/lead-portal-intake";
 import { leadErrorMessage } from "../model/leads-model";
 import { trustedContactRelationLabel } from "../model/lead-trusted-contacts";
 import {
@@ -334,7 +335,13 @@ export function LeadPortalAccessDetail({
                   />
                 </span>
               </PortalFact>
-              <PortalFact label={de ? "Dokumente" : "Документы"}>{intake.documents}</PortalFact>
+              {/* Medical files only, as the wizard banner counts them (QA 2026-10-11, A-11). */}
+              <PortalFact
+                label={medicalDocumentsFactLabel((ru, deText) => (de ? deText : ru))}
+                testId="lead-portal-medical-documents"
+              >
+                {intake.documents}
+              </PortalFact>
               <PortalFact label={de ? "Gesendet" : "Отправлено"}>
                 {intake.submitted_at ? formatAppDateTime(intake.submitted_at) : de ? "noch nicht" : "ещё нет"}
               </PortalFact>
@@ -849,7 +856,8 @@ export function LeadGuardianAccess({
   }
 
   const links = intake?.guardians.links.filter((link) => !link.revoked_at) ?? [];
-  const candidates = intake?.guardians.candidates.filter((candidate) => !candidate.access_id) ?? [];
+  const allCandidates = intake?.guardians.candidates ?? [];
+  const candidates = allCandidates.filter((candidate) => !candidate.access_id);
   if (!intake || (!intake.minor && links.length === 0)) return null;
 
   return (
@@ -857,45 +865,54 @@ export function LeadGuardianAccess({
       <p className="font-medium text-foreground">
         {tx("Доступ родителей (несовершеннолетний)", "Zugang der Eltern (minderjährig)")}
       </p>
-      {links.map((link) => (
-        <div key={link.access_id} className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <span>
-            {link.name ?? "—"} <span className="text-muted-foreground">{link.email ?? ""}</span>
-          </span>
-          <span className="text-muted-foreground">
-            {tx("Последний вход: ", "Letzte Anmeldung: ")}
-            {link.last_login_at ? formatAppDateTime(link.last_login_at) : "—"}
-          </span>
-          {canIssue ? (
-            <span className="ml-auto flex gap-1.5">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-7 gap-1.5 rounded-md text-xs"
-                disabled={busy !== null}
-                onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
-              >
-                <KeyRound className="size-3.5" />
-                {tx("Новый пароль", "Neues Passwort")}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 rounded-md text-xs text-rose-700"
-                disabled={busy !== null}
-                onClick={() => {
-                  if (!window.confirm(tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?"))) return;
-                  void run(`revoke-${link.access_id}`, () => revokeLeadGuardianAccess(lead.id, link.access_id));
-                }}
-              >
-                {tx("Отозвать", "Widerrufen")}
-              </Button>
+      {links.map((link) => {
+        // The relation stays beside the name once the login exists (QA 2026-10-11, N-10).
+        const relation = guardianLinkRelation(link, allCandidates);
+        return (
+          <div key={link.access_id} className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <span>
+              {link.name ?? "—"}{" "}
+              <span className="text-muted-foreground">
+                {[relation ? trustedContactRelationLabel(relation, tx) : null, link.email]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
             </span>
-          ) : null}
-        </div>
-      ))}
+            <span className="text-muted-foreground">
+              {tx("Последний вход: ", "Letzte Anmeldung: ")}
+              {link.last_login_at ? formatAppDateTime(link.last_login_at) : "—"}
+            </span>
+            {canIssue ? (
+              <span className="ml-auto flex gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 rounded-md text-xs"
+                  disabled={busy !== null}
+                  onClick={() => void run(`reset-${link.access_id}`, () => resetLeadGuardianPassword(lead.id, link.access_id), link.name)}
+                >
+                  <KeyRound className="size-3.5" />
+                  {tx("Новый пароль", "Neues Passwort")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 rounded-md text-xs text-rose-700"
+                  disabled={busy !== null}
+                  onClick={() => {
+                    if (!window.confirm(tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?"))) return;
+                    void run(`revoke-${link.access_id}`, () => revokeLeadGuardianAccess(lead.id, link.access_id));
+                  }}
+                >
+                  {tx("Отозвать", "Widerrufen")}
+                </Button>
+              </span>
+            ) : null}
+          </div>
+        );
+      })}
       {candidates.map((candidate) => {
         const contactId = candidate.trusted_contact_id;
         return (
