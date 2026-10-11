@@ -466,13 +466,27 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
                     .into(),
             ));
         }
+        // `signed`: only a signed document fulfils the rule (the consent form).
+        let signed = match object.get("signed") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Err(UpdateError::InvalidValue(
+                    "Required patient document field 'signed' must be true or false".into(),
+                ));
+            }
+        };
 
-        normalized.push(serde_json::json!({
+        let mut rule = serde_json::json!({
             "key": key,
             "label": label,
             "art": art,
             "category": category,
-        }));
+        });
+        if signed {
+            rule["signed"] = Value::Bool(true);
+        }
+        normalized.push(rule);
     }
 
     Ok(Value::Array(normalized))
@@ -482,8 +496,35 @@ fn validate_required_patient_documents_setting(value: &str) -> Result<Value, Upd
 mod tests {
     use super::{
         UpdateError, validate_optional_website_setting, validate_positive_integer_setting,
+        validate_required_patient_documents_setting,
     };
-    use serde_json::Value;
+    use serde_json::{Value, json};
+
+    /// The consent form asks for a signed document (QA 2026-10-11 B-06); the
+    /// flag survives an administrator's save and must be a boolean.
+    #[test]
+    fn required_patient_documents_keep_the_signed_flag() {
+        let saved = validate_required_patient_documents_setting(
+            r#"[
+              {"key":"passport","label":"Reisepass","art":["Passport-Scan"],"category":["personal_passport"]},
+              {"key":"consent_form","label":"Einverständniserklärung","art":["privacy_consents"],"signed":true}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            saved,
+            json!([
+                {"key":"passport","label":"Reisepass","art":["passport_scan"],"category":["personal_passport"]},
+                {"key":"consent_form","label":"Einverständniserklärung","art":["privacy_consents"],"category":[],"signed":true}
+            ])
+        );
+        assert!(matches!(
+            validate_required_patient_documents_setting(
+                r#"[{"key":"consent_form","label":"Consent","art":["consent"],"signed":"yes"}]"#
+            ),
+            Err(UpdateError::InvalidValue(_))
+        ));
+    }
 
     #[test]
     fn agency_website_accepts_optional_http_urls_and_rejects_invalid_values() {

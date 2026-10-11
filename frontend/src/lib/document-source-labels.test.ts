@@ -20,10 +20,20 @@ describe("formatDocumentSourceLabel", () => {
       "questionnaire",
       "interpreter_profile",
       "concierge_expense_receipt",
+      "paper_signature",
+      "lead_portal",
+      "payer_link",
+      "patient_portal",
+      "legacy_import",
     ]) {
       expect(formatDocumentSourceLabel(origin, ru), origin).not.toBe(origin);
       expect(formatDocumentSourceLabel(origin, de), origin).not.toBe(origin);
     }
+    expect(formatDocumentSourceLabel("paper_signature", ru)).toBe("Подписан на бумаге (скан)");
+    // A known template is named (QA 2026-10-11).
+    expect(formatDocumentSourceLabel("template:confidentiality_release", ru)).toBe(
+      `${ru.documents_generate_from_template}: Освобождение от врачебной тайны`,
+    );
     expect(formatDocumentSourceLabel("template:discharge_letter", ru)).toBe(
       ru.documents_generate_from_template,
     );

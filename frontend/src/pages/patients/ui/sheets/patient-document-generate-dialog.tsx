@@ -22,9 +22,9 @@ import {
   DOCUMENT_BINDING_FIELDS,
   documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
-  formatCostEstimateGenerationError,
-  formatEnhancedDueDiligenceError,
+  formatDocumentGenerationError,
   isDesignedAgencyDocumentTemplate,
+  isLeadOnlyDocumentTemplate,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
 } from "@/pages/documents/model/document-bindings";
@@ -118,7 +118,11 @@ export function PatientDocumentGenerateDialog({
     apiFetch<TemplateCatalogResponse>("/documents/templates")
       .then((res) => {
         if (!active) return;
-        setTemplates(res.templates ?? []);
+        // A patient's dialog: the lead's own templates (GwG sheet, patient
+        // form, payer package) are never offered (QA 2026-10-11 B-19).
+        setTemplates(
+          (res.templates ?? []).filter((template) => !isLeadOnlyDocumentTemplate(template)),
+        );
         setTemplatesLoaded(true);
       })
       .catch(() => {
@@ -330,14 +334,8 @@ export function PatientDocumentGenerateDialog({
       onGenerated?.();
       onOpenChange(false);
     } catch (error) {
-      const knownError = formatCostEstimateGenerationError(error, lang)
-        ?? formatEnhancedDueDiligenceError(error, lang);
-      const errorMessage =
-        knownError ||
-        (error instanceof Error
-          ? error.message
-          : tx("Не удалось сгенерировать документ", "Dokument konnte nicht erstellt werden"));
-      toast.error(errorMessage);
+      // Every refusal in the user's language (QA 2026-10-11 B-19).
+      toast.error(formatDocumentGenerationError(error, lang));
     } finally {
       setBusy(false);
     }

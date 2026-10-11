@@ -1700,7 +1700,10 @@ export const ru = {
   documents_visibility_internal: "Внутренний",
   documents_visibility_released_internal: "Выпущен внутренне",
   documents_visibility_released_external: "Выпущен внешне",
-  documents_visibility_patient_visible: "Виден пациенту",
+  // `patient_visible` alone shows nothing in the portal; only a release does
+  // (QA 2026-10-11 B-13).
+  documents_visibility_patient_visible: "Можно выпустить пациенту",
+  documents_visibility_patient_released: "Выпущен пациенту",
   documents_translation_in_progress: "В работе",
   documents_translation_completed: "Завершён",
   documents_translation_cancelled: "Отменён",

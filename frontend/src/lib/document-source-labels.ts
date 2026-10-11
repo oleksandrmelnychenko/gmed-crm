@@ -1,4 +1,5 @@
 import type { Translations } from "@/lib/i18n";
+import { knownDocumentCodeLabel } from "@/lib/required-document-labels";
 
 /** Localize system origins while preserving names entered by staff. */
 export function formatDocumentSourceLabel(source: string | null | undefined, tr: Translations) {
@@ -36,6 +37,15 @@ export function formatDocumentSourceLabel(source: string | null | undefined, tr:
   // Other system origins the server writes (documents.ursprung and
   // translation request_source); generated documents carry the template id.
   const origin = value.toLowerCase();
+  // "template:confidentiality_release" names the template when the UI knows
+  // it (QA 2026-10-11 B-06); other generator origins read generically.
+  const template = /^template:([a-z0-9_]+)$/.exec(origin)?.[1];
+  const templateName = template
+    ? knownDocumentCodeLabel(template, (key) => tr.uiText[key] ?? key)
+    : undefined;
+  if (templateName) {
+    return `${tr.documents_generate_from_template}: ${templateName}`;
+  }
   if (/^(template|provider_template|auto_preparation):/.test(origin)) {
     return tr.documents_generate_from_template;
   }

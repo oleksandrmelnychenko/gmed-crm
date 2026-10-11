@@ -44,6 +44,8 @@ export type DocumentItem = {
   lead_id?: string | null;
   lead_name?: string | null;
   has_active_patient_portal_user: boolean;
+  /** An active release to the patient portal exists (the portal shows it). */
+  has_active_portal_release?: boolean;
   order_id: string | null;
   appointment_id: string | null;
   provider_context_ids?: string[];
@@ -358,6 +360,8 @@ export type ShareFormState = {
 export type DocumentTemplate = {
   id: string;
   template_kind?: "builtin" | "provider";
+  /** Generated only for a lead (GwG sheet, patient form, payer package). */
+  lead_only?: boolean;
   provider_id?: string | null;
   provider_name?: string | null;
   doctor_id?: string | null;

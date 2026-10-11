@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { uiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { documentPartyUploadTypeLabel } from "@/pages/documents/model/document-model";
 import {
   DEFAULT_DOCUMENT_PAGE_SIZE,
   DOCUMENT_PAGE_SIZE_OPTIONS,
@@ -39,6 +40,9 @@ type DocumentsGridItem = {
   is_latest_version: boolean;
   patient_name: string | null;
   patient_pid: string | null;
+  /** A lead's document has no patient yet: the lead names it. */
+  lead_name?: string | null;
+  has_active_portal_release?: boolean;
   art: string;
   category: string | null;
   status: string;
@@ -65,7 +69,24 @@ type DocumentsGridLabels = {
   notSet: string;
   unknownUploader: string;
   needsCategorization: string;
+  /** Prefix of a lead's name in the patient column ("Лид", "Anfrage"). */
+  lead?: string;
 };
+
+/**
+ * The type the lists show for a document: a payer's or representative's
+ * upload by its own type, any other by its category (the type when it has
+ * none) — the same text as the patient card's documents tab (QA 2026-10-11).
+ */
+function documentTypeLabel(
+  item: Pick<DocumentsGridItem, "art" | "category">,
+  localizeCode: (value: string) => string,
+) {
+  return (
+    documentPartyUploadTypeLabel(item.art) ??
+    localizeCode(item.category?.trim() || item.art || "")
+  );
+}
 
 type DocumentsGridProps = {
   documents: DocumentsGridItem[];
@@ -85,7 +106,7 @@ type DocumentsGridProps = {
   visibilityBadge: (value: string) => string;
   sensitivityBadge: (value: string) => string;
   formatStatusLabel: (value: string) => string;
-  formatVisibilityLabel: (value: string) => string;
+  formatVisibilityLabel: (value: string, portalReleased?: boolean) => string;
   formatSensitivityLabel: (value: string) => string;
   formatDateTime: (value?: string | null) => string;
   paginated?: boolean;
@@ -358,6 +379,7 @@ export function DocumentsGrid({
     notSet,
     unknownUploader,
     needsCategorization,
+    lead: leadLabel,
   } = labels;
 
   const tree = useMemo(() => splitTranslationTree(documents), [documents]);
@@ -430,7 +452,9 @@ export function DocumentsGrid({
     {
       id: "patient",
       label: patientLabel,
-      accessor: (item) => item.patient_name ?? "",
+      accessor: (item) =>
+        item.patient_name ||
+        (item.lead_name ? `${leadLabel ?? "Lead"}: ${item.lead_name}` : ""),
       sortable: true,
       searchable: true,
       width: 210,
@@ -442,6 +466,13 @@ export function DocumentsGrid({
           >
             {item.patient_name}
           </span>
+        ) : item.lead_name ? (
+          // A lead's document: the lead names it until the conversion
+          // (QA 2026-10-11 B-13).
+          <span className="block truncate text-xs text-foreground" title={item.lead_name}>
+            <span className="text-muted-foreground">{leadLabel ?? "Lead"}:</span>{" "}
+            {item.lead_name}
+          </span>
         ) : (
           <span className="text-xs text-foreground">{notSet}</span>
         ),
@@ -449,7 +480,7 @@ export function DocumentsGrid({
     {
       id: "category",
       label: categoryLabel,
-      accessor: (item) => `${item.art ?? ""} ${item.category ?? ""}`.trim(),
+      accessor: (item) => documentTypeLabel(item, localizeCode),
       sortable: true,
       searchable: true,
       width: 210,
@@ -457,9 +488,9 @@ export function DocumentsGrid({
         item.art || item.category ? (
           <span
             className="inline-flex max-w-full truncate rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-sky-700"
-            title={item.category ? localizeCode(item.category) : undefined}
+            title={item.art ? localizeCode(item.art) : undefined}
           >
-            {localizeCode(item.art ?? item.category ?? "")}
+            {documentTypeLabel(item, localizeCode)}
           </span>
         ) : (
           <span className="text-xs text-muted-foreground">{unclassifiedLabel}</span>
@@ -492,7 +523,7 @@ export function DocumentsGrid({
             variant="outline"
             className={cn("shrink-0 rounded-full text-[10px]", visibilityBadge(item.visibility))}
           >
-            {formatVisibilityLabel(item.visibility)}
+            {formatVisibilityLabel(item.visibility, item.has_active_portal_release)}
           </Badge>
           <Badge
             variant="outline"
@@ -540,6 +571,7 @@ export function DocumentsGrid({
     formatSensitivityLabel,
     formatStatusLabel,
     formatVisibilityLabel,
+    leadLabel,
     localizeCode,
     needsCategorization,
     notSet,

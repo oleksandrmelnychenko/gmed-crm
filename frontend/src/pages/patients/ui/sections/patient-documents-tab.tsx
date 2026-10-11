@@ -171,6 +171,19 @@ function documentTypeText(doc: Pick<DocumentItem, "art" | "category">, localize:
   return documentPartyUploadTypeLabel(doc.art) ?? (doc.category ? localizeDocumentCode(doc.category, localize) : "");
 }
 
+/**
+ * The document's unified name — the same the document list and the detail
+ * page show (QA 2026-10-11 B-13) — else its file name. A signed scan keeps
+ * the document's name, never the scan's file name.
+ */
+function documentDisplayName(
+  doc: Pick<DocumentItem, "auto_name" | "filename">,
+  localize: LocalizeFn,
+): string {
+  const name = doc.auto_name?.trim();
+  return (name ? localizeDocumentCode(name, localize) : "") || doc.filename || "document";
+}
+
 function compactParty(...parts: Array<string | null | undefined>) {
   const seen = new Set<string>();
   return parts
@@ -363,7 +376,7 @@ export function PatientDocumentsTab({
 
     setDocumentPreview({
       id: doc.id,
-      title: doc.filename || "document",
+      title: documentDisplayName(doc, l),
     });
     setDocumentPreviewBusy(true);
     setDocumentPreviewError("");
@@ -377,7 +390,7 @@ export function PatientDocumentsTab({
       documentPreviewUrlRef.current = preview.url;
       setDocumentPreview({
         id: doc.id,
-        title: doc.filename || "document",
+        title: documentDisplayName(doc, l),
         contentType: preview.contentType,
         url: preview.url,
       });
@@ -432,7 +445,7 @@ export function PatientDocumentsTab({
     () => [
       createDocumentPreviewColumn<DocumentItem>({
         getId: (doc) => doc.id,
-        getTitle: (doc) => doc.filename || "document",
+        getTitle: (doc) => documentDisplayName(doc, l),
         label: t.documents_preview,
         onPreview: (doc) => void openPatientDocumentPreview(doc),
         onSigned: onDocumentGenerated,
@@ -449,7 +462,7 @@ export function PatientDocumentsTab({
       {
         id: "filename",
         label: documentsFilenameLabel,
-        accessor: (doc) => doc.filename ?? "",
+        accessor: (doc) => documentDisplayName(doc, l),
         filterType: "text",
         sortable: true,
         required: true,
@@ -463,7 +476,9 @@ export function PatientDocumentsTab({
             {documentTree.depthById.get(doc.id) ? (
               <span aria-hidden className="shrink-0 font-mono text-xs text-muted-foreground">└</span>
             ) : null}
-            <span className="truncate font-mono text-xs text-foreground">{doc.filename}</span>
+            <span className="truncate font-mono text-xs text-foreground">
+              {documentDisplayName(doc, l)}
+            </span>
             {doc.translation_source_document_id ? (
               <Badge
                 variant="outline"
@@ -729,9 +744,12 @@ export function PatientDocumentsTab({
           emptyState={
             <EmptyCell>
               {documents.length === 0
-                ? l(
-                    "patients_no_documents_have_been_uploaded_for_this_patient_yet",
-                  )
+                ? // A role that sees only the documents opened to it (an
+                  // interpreter, the concierge) cannot tell whether the
+                  // patient has others (QA 2026-10-11 B-14).
+                  canManageDocuments
+                  ? l("patients_no_documents_have_been_uploaded_for_this_patient_yet")
+                  : l("patients_no_documents_available_for_your_role")
                 : l("patients_no_document_matches_the_current_filters")}
             </EmptyCell>
           }
@@ -909,7 +927,7 @@ export function PatientDocumentsTab({
       {canManageDocuments ? (
         <DocumentTranslationDialog
           documentId={translationDocument?.id ?? null}
-          title={translationDocument?.filename ?? "document"}
+          title={translationDocument ? documentDisplayName(translationDocument, l) : "document"}
           editing={translationEditing}
           open={Boolean(translationDocument)}
           onOpenChange={(open) => {

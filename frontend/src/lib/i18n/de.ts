@@ -1708,7 +1708,10 @@ export const de = {
   documents_visibility_internal: "Intern",
   documents_visibility_released_internal: "Intern freigegeben",
   documents_visibility_released_external: "Extern freigegeben",
-  documents_visibility_patient_visible: "Für Patienten sichtbar",
+  // `patient_visible` alone shows nothing in the portal; only a release does
+  // (QA 2026-10-11 B-13).
+  documents_visibility_patient_visible: "Zur Patientenfreigabe bereit",
+  documents_visibility_patient_released: "Für Patienten freigegeben",
   documents_translation_in_progress: "In Bearbeitung",
   documents_translation_completed: "Abgeschlossen",
   documents_translation_cancelled: "Abgebrochen",

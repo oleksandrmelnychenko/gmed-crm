@@ -900,6 +900,19 @@ pub(crate) fn german_document_country(value: &str) -> String {
     german.to_string()
 }
 
+/// German names of one or more countries given as codes or names ("DE",
+/// "DE, UA" → "Deutschland, Ukraine"); `None` when none is recorded.
+fn german_country_names(value: Option<&str>) -> Option<String> {
+    let names = value
+        .unwrap_or_default()
+        .split([',', ';', '/'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(german_document_country)
+        .collect::<Vec<_>>();
+    (!names.is_empty()).then(|| names.join(", "))
+}
+
 #[allow(dead_code)]
 impl DocPartyBlock {
     fn address_line(&self) -> Option<String> {
@@ -1578,6 +1591,17 @@ const DOCUMENT_TEMPLATES: &[DocumentTemplateDefinition] = &[
         languages: &["de"],
         text_block_keys: &[],
     },
+];
+
+/// Templates the generator refuses without a lead (`lead_document_only`): the
+/// GwG identification sheet, the lead's patient form and the payer's
+/// signature package.
+const LEAD_ONLY_DOCUMENT_TEMPLATES: &[&str] = &[
+    "gwg_identification",
+    "lead_self_disclosure",
+    "payer_self_disclosure",
+    "patient_payer_statement",
+    "payer_cost_estimate",
 ];
 
 const DOCUMENT_TEXT_BLOCKS: &[TextBlockDefinition] = &[
@@ -4432,6 +4456,26 @@ fn document_needs_categorization(art: Option<&str>, category: Option<&str>) -> b
         || UNSPECIFIC_DOCUMENT_ARTS.contains(&art.as_str())
 }
 
+/// The type of a document whose category staff chose by hand: an upload that
+/// still has the generic upload type (`patient_upload`, `document`, …) takes
+/// the chosen category as its type, so the classification is complete and the
+/// document leaves the intake queue — as after "apply suggestion"
+/// (QA 2026-10-11 B-11). A specific type is kept.
+fn classified_document_art(art: String, category: Option<&str>) -> String {
+    let current = art.trim().to_lowercase();
+    if current.is_empty() || !UNSPECIFIC_DOCUMENT_ARTS.contains(&current.as_str()) {
+        return art;
+    }
+    match category
+        .map(str::trim)
+        .filter(|category| !category.is_empty())
+        .map(str::to_lowercase)
+    {
+        Some(category) if category != "portal_upload" => category,
+        _ => art,
+    }
+}
+
 fn is_interpreter_review_document(
     uploaded_by_role: Option<&str>,
     ursprung: Option<&str>,
@@ -4588,6 +4632,74 @@ fn medical_classification_audit_event(
         "reason": "medical_document_classification",
     });
     event
+}
+
+#[cfg(test)]
+mod qa_2026_10_11_document_tests {
+    use super::*;
+
+    /// B-11: a category chosen by hand completes the classification of an
+    /// upload that still has the generic upload type; a specific type stays.
+    #[test]
+    fn a_chosen_category_classifies_a_generic_upload() {
+        assert_eq!(
+            classified_document_art("patient_upload".into(), Some("personal_passport")),
+            "personal_passport"
+        );
+        assert_eq!(
+            classified_document_art("Document".into(), Some(" Medical_Befund ")),
+            "medical_befund"
+        );
+        assert_eq!(
+            classified_document_art("arztbrief".into(), Some("medical_kardio")),
+            "arztbrief"
+        );
+        assert_eq!(
+            classified_document_art("patient_upload".into(), Some("portal_upload")),
+            "patient_upload"
+        );
+        assert_eq!(
+            classified_document_art("patient_upload".into(), None),
+            "patient_upload"
+        );
+        assert_eq!(classified_document_art(String::new(), Some("identity")), "");
+        assert!(!document_needs_categorization(
+            Some(&classified_document_art(
+                "patient_upload".into(),
+                Some("identity")
+            )),
+            Some("identity")
+        ));
+    }
+
+    /// B-19: the lead's templates are marked for the patient dialogs.
+    #[test]
+    fn lead_only_templates_are_known_templates() {
+        for id in LEAD_ONLY_DOCUMENT_TEMPLATES {
+            assert!(
+                DOCUMENT_TEMPLATES.iter().any(|template| template.id == *id),
+                "{id}"
+            );
+        }
+        assert!(!LEAD_ONLY_DOCUMENT_TEMPLATES.contains(&"enhanced_due_diligence"));
+        assert!(uses_business_document_number("single_order"));
+        assert!(!uses_business_document_number("confidentiality_release"));
+    }
+
+    /// B-20: countries print by their German names, never as codes.
+    #[test]
+    fn countries_print_by_their_german_names() {
+        assert_eq!(
+            german_country_names(Some("DE")).as_deref(),
+            Some("Deutschland")
+        );
+        assert_eq!(
+            german_country_names(Some("DE, UA")).as_deref(),
+            Some("Deutschland, Ukraine")
+        );
+        assert_eq!(german_country_names(Some(" ")), None);
+        assert_eq!(german_country_names(None), None);
+    }
 }
 
 #[cfg(test)]
@@ -5867,6 +5979,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("uk", "birth_date") => "Дата народження",
         ("uk", "order_number") => "Замовлення",
         ("uk", "nationality") => "Громадянство",
+        ("uk", "citizenship") => "Громадянство",
         ("uk", "residence_country") => "Країна проживання",
         ("uk", "appointment") => "Візит",
         ("uk", "intro_heading") => "Короткий вступ",
@@ -5936,6 +6049,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         ("en", "birth_date") => "Date of birth",
         ("en", "order_number") => "Order",
         ("en", "nationality") => "Nationality",
+        ("en", "citizenship") => "Citizenship",
         ("en", "residence_country") => "Country of residence",
         ("en", "appointment") => "Appointment",
         ("en", "intro_heading") => "Introduction",
@@ -6007,6 +6121,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "birth_date") => "Geburtsdatum",
         (_, "order_number") => "Auftrag",
         (_, "nationality") => "Nationalität",
+        (_, "citizenship") => "Staatsangehörigkeit",
         (_, "residence_country") => "Wohnsitzland",
         (_, "appointment") => "Termin",
         (_, "intro_heading") => "Einleitung",
@@ -7773,6 +7888,53 @@ fn generated_document_number_for_template(
 ) -> String {
     generated_typed_document_number(template_id, document_id, generated_at)
         .unwrap_or_else(|| generated_document_public_id(document_id))
+}
+
+/// Templates numbered by their contract, order or quote
+/// (`assign_document_number`), not by the document sequence.
+fn uses_business_document_number(template_id: &str) -> bool {
+    matches!(
+        template_id,
+        "framework_contract" | "single_order" | "order_cost_estimate"
+    )
+}
+
+/// The number a generated document carries and prints, in the format of every
+/// other document (QA 2026-10-11 B-19): `<prefix>-<YYYYMMDD>-<NNNNNN>` from
+/// the document sequence, the prefix of its template (`SE`, `EW`, `DS`, `ET`,
+/// `AML`, `GWG`, else `DOC`). A new version of a document keeps the number of
+/// the version it replaces with a version suffix (`…-V02`). The database
+/// functions are those of the insert trigger, so uploads and generated
+/// documents never differ.
+async fn allocate_generated_document_number(
+    state: &AppState,
+    number_kind: &str,
+    replacement: Option<&ReplacementDocumentVersion>,
+) -> Result<String, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(error = %error, number_kind, "allocate generated document number");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to allocate document number",
+        )
+    };
+    if let Some(replaced) = replacement {
+        let version_number =
+            sqlx::query_scalar::<_, Option<String>>("SELECT document_version_number($1, $2)")
+                .bind(replaced.document_id)
+                .bind(replaced.version_number + 1)
+                .fetch_one(&state.db)
+                .await
+                .map_err(failed)?;
+        if let Some(number) = version_number {
+            return Ok(number);
+        }
+    }
+    sqlx::query_scalar::<_, String>("SELECT next_document_number($1)")
+        .bind(number_kind)
+        .fetch_one(&state.db)
+        .await
+        .map_err(failed)
 }
 
 fn build_treatment_plan_html(context: &GeneratedTreatmentPlanContext) -> String {
@@ -10263,12 +10425,12 @@ fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> Strin
         .nationality
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "n/a".to_string());
+        .unwrap_or_else(|| "—".to_string());
     let residence_country = context
         .residence_country
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "n/a".to_string());
+        .unwrap_or_else(|| "—".to_string());
     let provider_name = context
         .provider_name
         .clone()
@@ -10354,7 +10516,7 @@ fn build_visa_invitation_html(context: &GeneratedVisaInvitationContext) -> Strin
         patient_pid = escape_html(&context.patient_pid),
         birth_date_label = escape_html(translated_label(&context.language, "birth_date")),
         birth_date = escape_html(&birth_date),
-        nationality_label = escape_html(translated_label(&context.language, "nationality")),
+        nationality_label = escape_html(translated_label(&context.language, "citizenship")),
         nationality = escape_html(&nationality),
         residence_country_label =
             escape_html(translated_label(&context.language, "residence_country")),
@@ -10452,33 +10614,34 @@ fn build_visa_invitation_pdf(
         6.0,
     );
 
-    for line in [
-        format!(
+    // Citizenship and country of residence only when recorded: a German
+    // letter never prints an English placeholder (QA 2026-10-11 B-20).
+    let optional_line = |key: &str, value: Option<&str>| {
+        value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("{}: {value}", translated_label(&context.language, key)))
+    };
+    let lines = [
+        Some(format!(
             "{}: {}",
             translated_label(&context.language, "created_on"),
             crate::app_time::local(context.generated_at).format("%d.%m.%Y")
-        ),
-        format!(
+        )),
+        Some(format!(
             "{}: {}",
             translated_label(&context.language, "patient_id"),
             context.patient_pid
-        ),
-        format!(
+        )),
+        Some(format!(
             "{}: {}",
             translated_label(&context.language, "birth_date"),
             birth_date
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "nationality"),
-            context.nationality.as_deref().unwrap_or("n/a")
-        ),
-        format!(
-            "{}: {}",
-            translated_label(&context.language, "residence_country"),
-            context.residence_country.as_deref().unwrap_or("n/a")
-        ),
-    ] {
+        )),
+        optional_line("citizenship", context.nationality.as_deref()),
+        optional_line("residence_country", context.residence_country.as_deref()),
+    ];
+    for line in lines.into_iter().flatten() {
         layout.text_block(
             &line,
             11.0,
@@ -12211,6 +12374,9 @@ fn document_json(row: &sqlx::postgres::PgRow) -> serde_json::Value {
         "patient_id": row.try_get::<Option<Uuid>, _>("patient_id").unwrap_or_default(),
         "lead_id": row.try_get::<Option<Uuid>, _>("lead_id").unwrap_or_default(),
         "has_active_patient_portal_user": row.try_get::<bool, _>("has_active_patient_portal_user").unwrap_or(false),
+        // `patient_visible` alone shows nothing in the portal; only an active
+        // release does (QA 2026-10-11 B-13).
+        "has_active_portal_release": row.try_get::<bool, _>("has_active_portal_release").unwrap_or(false),
         "order_id": row.try_get::<Option<Uuid>, _>("order_id").unwrap_or_default(),
         "appointment_id": row.try_get::<Option<Uuid>, _>("appointment_id").unwrap_or_default(),
         "provider_context_ids": row.try_get::<Vec<Uuid>, _>("provider_context_ids").unwrap_or_default(),
@@ -12560,6 +12726,27 @@ async fn fetch_document_row(
                       AND portal_user.is_active = true
                       AND portal_user.role = 'patient'
                   ) AS has_active_patient_portal_user,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_shares portal_release
+                    WHERE portal_release.document_id = d.id
+                      AND portal_release.channel = 'patient_portal'
+                      AND portal_release.revoked_at IS NULL
+                  ) AS has_active_portal_release,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_signature_members consent_member
+                    JOIN documents member_document ON member_document.id = consent_member.document_id
+                    WHERE consent_member.result_document_id = d.id
+                      AND (member_document.category = 'consent'
+                           OR member_document.art IN ('confidentiality_release', 'privacy_consents',
+                               'privacy_information', 'consent_data_release', 'consent', 'consent_form',
+                               'gdpr_consent', 'einverstaendniserklaerung')
+                           OR member_document.generated_template_id IN ('confidentiality_release',
+                               'privacy_consents', 'privacy_information', 'consent_data_release_child',
+                               'consent_data_release_single')
+                           OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
+                  ) AS bundles_consent_document,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -13231,12 +13418,67 @@ fn explicit_document_policy_boundary_allows(auth: &AuthUser, row: &sqlx::postgre
     .allowed
 }
 
+/// Document types and generated templates of a patient's consent: the
+/// Schweigepflichtsentbindung, the DSGVO consent (Einverständniserklärung zur
+/// Datenübermittlung) with its variants for children, and the privacy
+/// information sheet that goes with them.
+const CONSENT_DOCUMENT_CODES: &[&str] = &[
+    "confidentiality_release",
+    "privacy_consents",
+    "privacy_information",
+    "consent_data_release",
+    "consent_data_release_child",
+    "consent_data_release_single",
+    "consent",
+    "consent_form",
+    "gdpr_consent",
+    "einverstaendniserklaerung",
+];
+
+/// Whether a document row is a consent document of the patient or lead: by
+/// its category (`consent`), type, generated template or recorded compliance
+/// kind, or as a signed package that holds one (`bundles_consent_document`,
+/// read where the query selects it).
+pub(crate) fn is_consent_document_row(row: &sqlx::postgres::PgRow) -> bool {
+    let code = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .unwrap_or_default()
+            .map(|value| value.trim().to_lowercase())
+            .unwrap_or_default()
+    };
+    let category = code("category");
+    let art = code("art");
+    let template = code("generated_template_id");
+    let compliance_kind = code("compliance_kind");
+    category == "consent"
+        || CONSENT_DOCUMENT_CODES.contains(&art.as_str())
+        || CONSENT_DOCUMENT_CODES.contains(&template.as_str())
+        || matches!(
+            compliance_kind.as_str(),
+            "dsgvo" | "confidentiality_release"
+        )
+        || row
+            .try_get::<bool, _>("bundles_consent_document")
+            .unwrap_or(false)
+}
+
+/// Owner decision 2026-10-11: Concierge and Billing never list, open or
+/// download a patient's consent documents — no share or record rule opens
+/// them. CEO, Patient Manager and CEO Assistant keep their access; Billing
+/// keeps the identity document scans (owner decision 2026-10-06).
+fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
+    matches!(role, Role::Concierge | Role::Billing) && is_consent_document_row(row)
+}
+
 pub(crate) fn document_access_allowed(
     auth: &AuthUser,
     row: &sqlx::postgres::PgRow,
     baseline_allowed: bool,
     explicit: ResourceAccessDecision,
 ) -> bool {
+    if consent_document_closed_to_role(auth.role, row) {
+        return false;
+    }
     // Receipt ownership/service assignment remains an absolute workflow rule;
     // ACL may revoke it but may not grant another Concierge access to a receipt.
     if is_concierge_expense_receipt_row(row) && !baseline_allowed {
@@ -13282,6 +13524,9 @@ pub(crate) fn can_view_document_row(
     row: &sqlx::postgres::PgRow,
     assignment_set: &HashSet<Uuid>,
 ) -> bool {
+    if consent_document_closed_to_role(auth.role, row) {
+        return false;
+    }
     let is_concierge_expense_receipt = row
         .try_get::<Option<String>, _>("ursprung")
         .unwrap_or_default()
@@ -14273,6 +14518,9 @@ async fn list_document_templates(
             json!({
                 "id": template.id,
                 "template_kind": "builtin",
+                // Generated only for a lead; the patient dialogs hide it
+                // (QA 2026-10-11 B-19).
+                "lead_only": LEAD_ONLY_DOCUMENT_TEMPLATES.contains(&template.id),
                 "label": template.label,
                 "description": template.description,
                 "art": template.art,
@@ -14290,6 +14538,7 @@ async fn list_document_templates(
         json!({
             "id": provider_template_public_id(template.id),
             "template_kind": "provider",
+            "lead_only": false,
             "provider_id": template.provider_id,
             "provider_name": template.provider_name,
             "doctor_id": template.doctor_id,
@@ -14568,7 +14817,30 @@ async fn generate_provider_document_from_template_internal(
     let rendered_body = apply_provider_template_placeholders(template_body, &replacements);
     let generated_at = chrono::Utc::now();
     let generated_document_id = Uuid::new_v4();
-    let generated_document_number = generated_document_public_id(generated_document_id);
+    let replacement = if let Some(replace_document_id) = body.replace_document_id {
+        match load_replacement_document_version(
+            state,
+            replace_document_id,
+            Some(patient_uuid),
+            None,
+            order_id,
+            appointment_id,
+            &generated_template_id,
+            &template.art,
+            &template.category,
+            false,
+        )
+        .await
+        {
+            Ok(value) => Some(value),
+            Err(resp) => return Err(resp),
+        }
+    } else {
+        None
+    };
+    let generated_document_number =
+        allocate_generated_document_number(state, "provider_template", replacement.as_ref())
+            .await?;
     let auto_name = body
         .auto_name
         .as_deref()
@@ -14662,28 +14934,6 @@ async fn generate_provider_document_from_template_internal(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| template.provider_name.clone());
     let metadata = normalize_generate_document_metadata(body)?;
-
-    let replacement = if let Some(replace_document_id) = body.replace_document_id {
-        match load_replacement_document_version(
-            state,
-            replace_document_id,
-            Some(patient_uuid),
-            None,
-            order_id,
-            appointment_id,
-            &generated_template_id,
-            &template.art,
-            &template.category,
-            false,
-        )
-        .await
-        {
-            Ok(value) => Some(value),
-            Err(resp) => return Err(resp),
-        }
-    } else {
-        None
-    };
 
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
@@ -15383,8 +15633,15 @@ async fn generate_document(
             }
         };
         generated_cost_estimate_document_number(generated_at, sequence)
+    } else if uses_business_document_number(template.id) {
+        // Printed only as a fallback; the stored number is the contract's,
+        // order's or quote's (`assign_document_number`).
+        generated_document_public_id(generated_document_id)
     } else {
-        generated_document_number_for_template(template.id, generated_document_id, generated_at)
+        match allocate_generated_document_number(&state, template.id, replacement.as_ref()).await {
+            Ok(number) => number,
+            Err(response) => return response,
+        }
     };
     let generated_doc_id = generated_document_number.clone();
     let auto_name = body
@@ -16226,8 +16483,11 @@ async fn generate_document(
                 introduction,
                 closing_note,
                 agency,
-                nationality,
-                residence_country,
+                // German country names, never ISO codes; without a recorded
+                // country of residence the address country (QA 2026-10-11).
+                nationality: german_country_names(nationality.as_deref()),
+                residence_country: german_country_names(residence_country.as_deref())
+                    .or_else(|| german_country_names(patient_party.country.as_deref())),
                 passport_number: bindings.passport_number.clone(),
                 passport_valid_until: bindings.passport_valid_until,
                 recipient_block: bindings.recipient_block.clone(),
@@ -17327,13 +17587,9 @@ async fn generate_document(
         Err(resp) => return resp,
     };
 
-    let uses_business_document_number = matches!(
-        template.id,
-        "framework_contract" | "single_order" | "order_cost_estimate"
-    );
     let persist_input = NewStoredDocument {
         document_id: Some(generated_document_id),
-        document_number: (!uses_business_document_number)
+        document_number: (!uses_business_document_number(template.id))
             .then_some(generated_document_number.as_str()),
         patient_id,
         lead_id,
@@ -20952,9 +21208,12 @@ fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
     agency.data_controller_statement.trim()
 }
 
-fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text: &str) {
+/// A box of a consent form, always printed empty: the person ticks it by hand
+/// (owner decision 2026-10-11; Art. 7 DSGVO — an active, unambiguous
+/// consent, never a pre-ticked one).
+fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block_justified(
-        &format!("[{}]  {text}", if checked { "x" } else { " " }),
+        &format!("[ ]  {text}"),
         10.5,
         false,
         4.0,
@@ -20964,9 +21223,11 @@ fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, checked: bool, text
     );
 }
 
-fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, checked: bool, label: &str) {
+/// A communication channel of the consent form, an empty box like
+/// [`adult_legal_checkbox`].
+fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, label: &str) {
     layout.text_block(
-        &format!("[{}]  {label}", if checked { "x" } else { " " }),
+        &format!("[ ]  {label}"),
         10.5,
         false,
         12.0,
@@ -24775,33 +25036,29 @@ fn build_adult_privacy_consents_pdf(
     );
     adult_legal_identity_block(&mut layout, party, true);
     fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
-    // The first three consents are what the service runs on; without them no
-    // contract is sent for signature, so they are always ticked. Only the
-    // recipients and the channels below are the person's choice.
+    // Every box is printed empty and ticked by the person on the printed
+    // copy, also the three consents the service runs on (owner decision
+    // 2026-10-11). Staff fill in only the recipients' names.
     adult_legal_checkbox(
         &mut layout,
-        true,
         &format!(
             "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        true,
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        true,
         &format!(
             "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
-        recipients.is_some(),
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
     if let Some(recipients) = recipients {
@@ -24819,37 +25076,16 @@ fn build_adult_privacy_consents_pdf(
     }
     adult_legal_checkbox(
         &mut layout,
-        [
-            bindings.consent_email,
-            bindings.consent_threema,
-            bindings.consent_whatsapp,
-            bindings.consent_telegram,
-        ]
-        .into_iter()
-        .flatten()
-        .any(|checked| checked),
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
-    adult_legal_channel(
-        &mut layout,
-        bindings.consent_email.unwrap_or(false),
+    for channel in [
         "E-mail",
-    );
-    adult_legal_channel(
-        &mut layout,
-        bindings.consent_threema.unwrap_or(false),
         "Threema-Messenger",
-    );
-    adult_legal_channel(
-        &mut layout,
-        bindings.consent_whatsapp.unwrap_or(false),
         "WhatsApp-Messenger",
-    );
-    adult_legal_channel(
-        &mut layout,
-        bindings.consent_telegram.unwrap_or(false),
         "Telegram-Messenger",
-    );
+    ] {
+        adult_legal_channel(&mut layout, channel);
+    }
     fc_body(
         &mut layout,
         "Ich bin mir der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
@@ -26285,6 +26521,27 @@ async fn list_documents(
                       AND portal_user.is_active = true
                       AND portal_user.role = 'patient'
                   ) AS has_active_patient_portal_user,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_shares portal_release
+                    WHERE portal_release.document_id = d.id
+                      AND portal_release.channel = 'patient_portal'
+                      AND portal_release.revoked_at IS NULL
+                  ) AS has_active_portal_release,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_signature_members consent_member
+                    JOIN documents member_document ON member_document.id = consent_member.document_id
+                    WHERE consent_member.result_document_id = d.id
+                      AND (member_document.category = 'consent'
+                           OR member_document.art IN ('confidentiality_release', 'privacy_consents',
+                               'privacy_information', 'consent_data_release', 'consent', 'consent_form',
+                               'gdpr_consent', 'einverstaendniserklaerung')
+                           OR member_document.generated_template_id IN ('confidentiality_release',
+                               'privacy_consents', 'privacy_information', 'consent_data_release_child',
+                               'consent_data_release_single')
+                           OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
+                  ) AS bundles_consent_document,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -31092,11 +31349,29 @@ async fn update_document(
         .art
         .clone()
         .unwrap_or_else(|| current.try_get::<String, _>("art").unwrap_or_default());
-    let category = body.category.clone().or_else(|| {
-        current
-            .try_get::<Option<String>, _>("category")
-            .unwrap_or_default()
-    });
+    let current_category = current
+        .try_get::<Option<String>, _>("category")
+        .unwrap_or_default();
+    // A category chosen by hand (another one than stored) classifies an
+    // upload that still has the generic upload type; the category the patient
+    // picked in the portal alone does not (owner decision 2026-09-28).
+    let category_chosen = body
+        .category
+        .as_deref()
+        .map(str::trim)
+        .filter(|chosen| !chosen.is_empty())
+        .is_some_and(|chosen| {
+            !current_category
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|stored| stored.eq_ignore_ascii_case(chosen))
+        });
+    let category = body.category.clone().or(current_category);
+    let art = if category_chosen {
+        classified_document_art(art, category.as_deref())
+    } else {
+        art
+    };
     let status = body
         .status
         .clone()
@@ -34029,13 +34304,13 @@ mod tests {
         assert!(consent_text.contains("anna@example.test"));
         assert!(consent_text.contains("GMED-EDV-System"));
         assert!(consent_text.contains("Maria Beispiel, Vertrauenskontakt"));
-        assert!(consent_text.contains("[x]"));
-        assert!(consent_text.contains("[ ]"));
-        // The core consents are ticked even though the fixture leaves one unset.
-        assert!(consent_text.contains("[x] dass alle meine behandelnden"));
-        assert!(consent_text.contains("[x] Threema-Messenger"));
+        // Every box is empty for the person to tick, whatever the bindings
+        // preselect (owner decision 2026-10-11).
+        assert!(!consent_text.contains("[x]"));
+        assert!(consent_text.contains("[ ] dass alle meine behandelnden"));
+        assert!(consent_text.contains("[ ] Threema-Messenger"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
-        assert!(consent_text.contains("[x] Telegram-Messenger"));
+        assert!(consent_text.contains("[ ] Telegram-Messenger"));
         assert!(!consent_text.contains('?'));
 
         let privacy_information =

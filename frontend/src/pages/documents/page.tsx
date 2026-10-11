@@ -54,10 +54,12 @@ import {
   documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
   formatCostEstimateGenerationError,
+  formatDocumentGenerationError,
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
+  isLeadOnlyDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
@@ -647,7 +649,9 @@ function formatGenerateDocumentError(
     return l("documents_fixed_legal_text_override");
   }
 
-  return message;
+  // Every other refusal in the user's language, never raw English
+  // (QA 2026-10-11 B-19).
+  return formatDocumentGenerationError(error, lang);
 }
 
 function formatDate(value?: string | null) {
@@ -3785,6 +3789,7 @@ function StaffDocumentsPage({
               notSet: t.common_not_set,
               unknownUploader: t.documents_unknown_uploader,
               needsCategorization: text.needsCategorization,
+              lead: l("documents_grid_lead"),
             }}
             localizeCode={(value) => localizeDocumentCode(value, l)}
             onSelectionChange={setSelectedDocumentIds}
@@ -3797,7 +3802,9 @@ function StaffDocumentsPage({
             visibilityBadge={visibilityBadge}
             sensitivityBadge={sensitivityBadge}
             formatStatusLabel={(value) => formatDocumentStatusLabel(value, t)}
-            formatVisibilityLabel={(value) => formatVisibilityLabel(value, t)}
+            formatVisibilityLabel={(value, portalReleased) =>
+              formatVisibilityLabel(value, t, portalReleased)
+            }
             formatSensitivityLabel={formatSensitivityLabel}
             formatDateTime={formatDateTime}
           />
@@ -3908,7 +3915,15 @@ function StaffDocumentsPage({
                   className={selectClassName}
                 >
                   <option value="">{t.documents_select_template}</option>
-                  {groupTemplatesForSelect(templates).map(([groupKey, items]) => (
+                  {groupTemplatesForSelect(
+                    // The dialog generates for a patient: the lead's own
+                    // templates are not offered (QA 2026-10-11 B-19).
+                    templates.filter(
+                      (template) =>
+                        !isLeadOnlyDocumentTemplate(template) ||
+                        template.id === generateForm.templateId,
+                    ),
+                  ).map(([groupKey, items]) => (
                     <optgroup key={groupKey} label={templateGroupLabel(groupKey, lang)}>
                       {items.map((template) => (
                         <option key={template.id} value={template.id}>
@@ -6338,7 +6353,11 @@ function StaffDocumentsPage({
                           {formatDocumentStatusLabel(detail.status, t)}
                         </StatusBadge>
                         <StatusBadge tone={documentVisibilityTone(detail.visibility)}>
-                          {formatVisibilityLabel(detail.visibility, t)}
+                          {formatVisibilityLabel(
+                            detail.visibility,
+                            t,
+                            detail.has_active_portal_release,
+                          )}
                         </StatusBadge>
                         <StatusBadge tone={documentSensitivityTone(detail.data_sensitivity)}>
                           {formatSensitivityLabel(detail.data_sensitivity)}

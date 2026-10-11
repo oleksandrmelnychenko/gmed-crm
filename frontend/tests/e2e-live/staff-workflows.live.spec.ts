@@ -608,7 +608,7 @@ test.describe("staff live workflows", () => {
       name: /Ins Patientenportal freigeben|Release to portal/i,
     }).click();
     await expect(
-      workspace.getByText(/Für Patienten sichtbar|Visible to patient/i),
+      workspace.getByText(/Für Patienten freigegeben|Visible to patient/i).first(),
     ).toBeVisible();
     await expect(
       workspace.getByRole("button", {

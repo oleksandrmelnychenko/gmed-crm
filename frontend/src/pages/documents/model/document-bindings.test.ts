@@ -6,10 +6,12 @@ import {
   documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
   formatCostEstimateGenerationError,
+  formatDocumentGenerationError,
   formatEnhancedDueDiligenceError,
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
+  isLeadOnlyDocumentTemplate,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   prefillDocumentBindingsFromText,
@@ -376,6 +378,61 @@ describe("document template binding payloads", () => {
     expect(formatCostEstimateGenerationError(noWorkTypes, "de")).toContain("medizinischen Leistungsarten");
     expect(formatCostEstimateGenerationError(noLines, "de")).toContain("Agenturleistungen aus dem Auftrag");
     expect(formatCostEstimateGenerationError(new Error("Unknown document template"), "ru")).toBeNull();
+  });
+
+  it("never shows a raw English generation refusal (QA 2026-10-11 B-19)", () => {
+    const treatmentPlan = new Error("Treatment plan template requires at least one appointment in scope");
+    expect(formatDocumentGenerationError(treatmentPlan, "ru")).toContain("план");
+    expect(formatDocumentGenerationError(treatmentPlan, "ru")).not.toContain("Treatment plan");
+    expect(formatDocumentGenerationError(treatmentPlan, "de")).toContain("Behandlungsplan");
+    const leadOnly = Object.assign(new Error("The patient form is generated for a lead"), {
+      code: "lead_document_only",
+    });
+    expect(formatDocumentGenerationError(leadOnly, "ru")).toContain("только для лида");
+    expect(
+      formatDocumentGenerationError(new Error("Order context is required for this document"), "de"),
+    ).toBe("Wählen Sie einen Auftrag für dieses Dokument aus.");
+    // The cost estimate and AML messages keep their own wording.
+    expect(
+      formatDocumentGenerationError(
+        new Error("Select medical work types before creating the preliminary cost calculation"),
+        "ru",
+      ),
+    ).toContain("медицинские виды работ");
+    expect(
+      formatDocumentGenerationError(new Error("Enhanced due diligence data is required"), "de"),
+    ).toContain("AML-Prüfung");
+    // Unknown refusals get a localized lead-in; localized client errors stay.
+    expect(formatDocumentGenerationError(new Error("Something new"), "ru")).toBe(
+      "Не удалось создать документ. (Something new)",
+    );
+    const pending = Object.assign(new Error("Документ отправлен на подпись."), {
+      code: "signature_pending",
+    });
+    expect(formatDocumentGenerationError(pending, "ru")).toBe("Документ отправлен на подпись.");
+  });
+
+  it("hides the lead's own templates from patient dialogs (QA 2026-10-11 B-19)", () => {
+    expect(isLeadOnlyDocumentTemplate({ id: "gwg_identification" })).toBe(true);
+    expect(isLeadOnlyDocumentTemplate({ id: "lead_self_disclosure", lead_only: false })).toBe(true);
+    expect(isLeadOnlyDocumentTemplate({ id: "provider:x", lead_only: true })).toBe(true);
+    expect(isLeadOnlyDocumentTemplate({ id: "confidentiality_release", lead_only: false })).toBe(false);
+    expect(isLeadOnlyDocumentTemplate({ id: "enhanced_due_diligence" })).toBe(false);
+  });
+
+  it("labels every template field in Russian (QA 2026-10-11 B-19)", () => {
+    for (const templateId of [
+      "appointment_confirmation",
+      "visa_invitation_letter",
+      "cost_coverage_declaration",
+      "consent_data_release_child",
+      "consent_data_release_single",
+    ]) {
+      for (const field of DOCUMENT_BINDING_FIELDS[templateId] ?? []) {
+        if (["bank_swift", "bank_iban"].includes(field.key)) continue;
+        expect(field.labelRu, `${templateId}.${field.key}`).toBeTruthy();
+      }
+    }
   });
 
   it("keeps fixed legal templates on the protected renderer", () => {

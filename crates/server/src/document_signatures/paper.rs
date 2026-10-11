@@ -197,6 +197,35 @@ async fn record(
     }
 }
 
+/// The file name of a signed version: the document's own file name (or, if it
+/// has none, its unified name) with the extension of the scan's type — a photo
+/// of the signed page is a `.jpg` or `.png` of the same document.
+fn signed_version_filename(
+    document_filename: Option<&str>,
+    auto_name: &str,
+    scan_mime: &str,
+) -> String {
+    let extension = match scan_mime {
+        "image/jpeg" => "jpg",
+        "image/png" => "png",
+        _ => "pdf",
+    };
+    let stem = document_filename
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| match name.rsplit_once('.') {
+            Some((stem, _)) if !stem.trim().is_empty() => stem.trim().to_string(),
+            _ => name.to_string(),
+        })
+        .unwrap_or_else(|| auto_name.trim().replace([' ', '/', '\\'], "_"));
+    let stem = if stem.is_empty() {
+        "document".to_string()
+    } else {
+        stem
+    };
+    format!("{stem}.{extension}")
+}
+
 struct StoredScan<'a> {
     mime: &'a str,
     file_size: i64,
@@ -237,6 +266,16 @@ async fn store_signed_version(
     }
 
     let signed_id = Uuid::new_v4();
+    // The signed scan is the same document: it keeps the document's unified
+    // name (and, by the insert trigger, its number with a version suffix);
+    // the scan's own file name only goes into the audit (QA 2026-10-11 B-07).
+    let signed_filename = signed_version_filename(
+        source
+            .get::<Option<String>, _>("original_filename")
+            .as_deref(),
+        &source.get::<String, _>("auto_name"),
+        scan.mime,
+    );
     sqlx::query(
         r#"INSERT INTO documents (
             id,patient_id,lead_id,order_id,appointment_id,auto_name,original_filename,
@@ -257,7 +296,7 @@ async fn store_signed_version(
     )
     .bind(id)
     .bind(signed_id)
-    .bind(scan.original_filename)
+    .bind(&signed_filename)
     .bind(scan.mime)
     .bind(scan.file_size)
     .bind(scan.storage_key)
@@ -327,6 +366,7 @@ async fn store_signed_version(
         "compliance_kind": kind,
         "signed_at": signed_at.to_rfc3339(),
         "scan_sha256": scan.sha256,
+        "scan_filename": scan.original_filename,
     });
     // A paper copy carries every signature the document needs.
     apply_business_effects(
@@ -377,6 +417,31 @@ async fn store_signed_version(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_signed_version_keeps_the_documents_file_name() {
+        let name = "ADMIN-Schweigepflichtsentbindung_vom_11.10.2026-GMED-Anna_Muster.pdf";
+        assert_eq!(
+            signed_version_filename(Some(name), "ignored", "application/pdf"),
+            name
+        );
+        assert_eq!(
+            signed_version_filename(Some("Einzelauftrag.pdf"), "ignored", "image/png"),
+            "Einzelauftrag.png"
+        );
+        assert_eq!(
+            signed_version_filename(
+                None,
+                "Schweigepflichtsentbindung · Anna Muster",
+                "image/jpeg"
+            ),
+            "Schweigepflichtsentbindung_·_Anna_Muster.jpg"
+        );
+        assert_eq!(
+            signed_version_filename(Some("  "), "", "application/pdf"),
+            "document.pdf"
+        );
+    }
 
     #[test]
     fn a_paper_signature_is_dated_today_or_earlier() {

@@ -156,7 +156,9 @@ function LinkedDocumentsSheet({
             visibilityBadge={linkedDocumentVisibilityBadge}
             sensitivityBadge={linkedDocumentSensitivityBadge}
             formatStatusLabel={(value) => formatDocumentStatusLabel(value, t)}
-            formatVisibilityLabel={(value) => formatVisibilityLabel(value, t)}
+            formatVisibilityLabel={(value, portalReleased) =>
+              formatVisibilityLabel(value, t, portalReleased)
+            }
             formatSensitivityLabel={() =>
               appointmentText("appointments_standard")
             }

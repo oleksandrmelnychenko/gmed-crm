@@ -13,6 +13,7 @@ import {
   selectClass,
   textareaClass,
 } from "@/components/ui-shell";
+import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { uiText, useLang } from "@/lib/i18n";
 import {
   localizeDocumentCategory,
@@ -21,6 +22,7 @@ import {
 import {
   fetchDocument,
   fetchDocumentCategories,
+  fetchDocumentVersions,
   updateDocument,
 } from "@/pages/documents/data/document-api";
 import type {
@@ -35,6 +37,7 @@ import type {
   DocumentVisibility,
 } from "@/pages/documents/model/types";
 
+import { orderCategoryTree } from "../../model/document-category-tree";
 import { FormSection } from "../shared/patient-form-primitives";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -313,25 +316,83 @@ function mergeCategories(
       sort_order: -1,
     });
   }
-  return merged.sort((left, right) => {
-    const order = (left.sort_order ?? 999) - (right.sort_order ?? 999);
-    if (order !== 0) return order;
-    return left.key.localeCompare(right.key);
-  });
+  // Tree order: each category right under its own parent (QA 2026-10-11 B-12).
+  return orderCategoryTree(merged);
 }
 
-function categoryLabel(category: CategoryOption, lang: "de" | "ru") {
+function categoryLabel(
+  category: CategoryOption & { depth: number },
+  lang: "de" | "ru",
+) {
   const label = localizeDocumentCategory(category, lang, (key) =>
     uiText(key, lang),
   );
   const prefix = category.short_code ? `${category.short_code} · ` : "";
-  const indent =
-    category.level === "category"
-      ? ""
-      : category.level === "subcategory"
-        ? "— "
-        : "—— ";
+  const indent = category.depth > 0 ? `${"—".repeat(category.depth)} ` : "";
   return `${indent}${prefix}${label}`;
+}
+
+/**
+ * A free-text field whose stored value may be a system code
+ * ("confidentiality_release", "patient_portal", "template:…"): it shows the
+ * code's label (QA 2026-10-11 B-06, B-12) and keeps the code as long as the
+ * text is not changed; a picked suggestion stores its code.
+ */
+function CodedTextField({
+  id,
+  label,
+  value,
+  displayValue,
+  options = [],
+  placeholder,
+  required = false,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  displayValue: (value: string) => string;
+  options?: Array<{ value: string; label: string }>;
+  placeholder?: string;
+  required?: boolean;
+  onChange: (value: string) => void;
+}) {
+  // The sheet remounts the field per document and language (its key), so the
+  // stored code and its label are those the field opened with.
+  const [initial] = useState(() => ({ value, shown: displayValue(value) }));
+  const [text, setText] = useState(initial.shown);
+  const listId = options.length > 0 ? `${id}-options` : undefined;
+
+  function change(next: string) {
+    setText(next);
+    if (next === initial.shown) {
+      onChange(initial.value);
+      return;
+    }
+    const picked = options.find((option) => option.label === next);
+    onChange(picked ? picked.value : next);
+  }
+
+  return (
+    <Field label={label} htmlFor={id}>
+      <Input
+        id={id}
+        list={listId}
+        value={text}
+        onChange={(event) => change(event.target.value)}
+        className={inputClass}
+        placeholder={placeholder}
+        required={required}
+      />
+      {listId ? (
+        <datalist id={listId}>
+          {options.map((option) => (
+            <option key={option.value} value={option.label} />
+          ))}
+        </datalist>
+      ) : null}
+    </Field>
+  );
 }
 
 type EditForm = {
@@ -399,8 +460,13 @@ export function PatientDocumentEditSheet({
   onOpenChange,
   onSaved,
 }: PatientDocumentEditSheetProps) {
-  const { lang } = useLang();
+  const { lang, t } = useLang();
   const copy = COPY[lang];
+  // After a signature the open sheet follows the document's new current
+  // version (the signed scan) instead of the stale draft (QA 2026-10-11 B-07).
+  const [followed, setFollowed] = useState<{ from: string; to: string } | null>(null);
+  const activeDocumentId =
+    followed && documentId && followed.from === documentId ? followed.to : documentId;
   const [form, setForm] = useState<EditForm | null>(null);
   const [initialForm, setInitialForm] = useState<EditForm | null>(null);
   const dirty = form !== null && initialForm !== null && hasFormChanges(form, initialForm);
@@ -411,7 +477,7 @@ export function PatientDocumentEditSheet({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!open || !documentId) {
+    if (!open || !activeDocumentId) {
       setForm(null);
       setCategories([]);
       setArts([]);
@@ -421,7 +487,7 @@ export function PatientDocumentEditSheet({
     let cancelled = false;
     setLoading(true);
     setError("");
-    void Promise.all([fetchDocument(documentId), fetchDocumentCategories()])
+    void Promise.all([fetchDocument(activeDocumentId), fetchDocumentCategories()])
       .then(([document, lookups]) => {
         if (cancelled) return;
         const loadedForm = formFromDocument(document);
@@ -442,23 +508,50 @@ export function PatientDocumentEditSheet({
     return () => {
       cancelled = true;
     };
-  }, [copy.loadFailed, documentId, open]);
+  }, [copy.loadFailed, activeDocumentId, open]);
 
   const categoryOptions = useMemo(
     () => mergeCategories(categories, form?.category ?? "", lang),
     [categories, form?.category, lang],
   );
+  // Suggestions for the type: known codes by their label, other types as
+  // typed (QA 2026-10-11: no raw codes in the sheet).
   const artOptions = useMemo(
     () =>
-      Array.from(
-        new Set([...DOCUMENT_TYPES, ...arts, form?.art ?? ""].filter(Boolean)),
-      ).sort(),
-    [arts, form?.art],
+      Array.from(new Set([...DOCUMENT_TYPES, ...arts].filter(Boolean)))
+        .sort()
+        .map((art) => ({
+          value: art,
+          label: localizeDocumentCode(art, (key) => uiText(key, lang)),
+        })),
+    [arts, lang],
   );
+  const artLabel = (value: string) =>
+    localizeDocumentCode(value, (key) => uiText(key, lang));
+  const sourceLabel = (value: string) =>
+    value.trim() ? formatDocumentSourceLabel(value, t) : "";
+
+  // A signature (paper scan or electronic) stores a new version: the list
+  // refreshes and the sheet switches to the current version.
+  async function handleSignatureDone() {
+    onSaved();
+    if (!activeDocumentId || !documentId) return;
+    try {
+      const versions = await fetchDocumentVersions(activeDocumentId);
+      const current =
+        versions.find((version) => version.is_latest_version) ??
+        [...versions].sort((left, right) => right.version_number - left.version_number)[0];
+      if (current && current.id !== activeDocumentId) {
+        setFollowed({ from: documentId, to: current.id });
+      }
+    } catch {
+      // The refreshed list shows the new version all the same.
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!documentId || !form || !dirty || busy) return;
+    if (!activeDocumentId || !form || !dirty || busy) return;
     if (!form.autoName.trim() || !form.art.trim()) {
       setError(copy.saveFailed);
       return;
@@ -466,7 +559,7 @@ export function PatientDocumentEditSheet({
     setBusy(true);
     setError("");
     try {
-      await updateDocument(documentId, {
+      await updateDocument(activeDocumentId, {
         auto_name: form.autoName.trim(),
         art: form.art.trim(),
         category: form.category || null,
@@ -557,7 +650,14 @@ export function PatientDocumentEditSheet({
         </div>
       ) : form ? (
         <>
-          {documentId ? <DocumentSignatureAction documentId={documentId} title={initialForm?.autoName || documentId} onDone={onSaved} /> : null}
+          {activeDocumentId ? (
+            <DocumentSignatureAction
+              key={activeDocumentId}
+              documentId={activeDocumentId}
+              title={initialForm?.autoName || activeDocumentId}
+              onDone={() => void handleSignatureDone()}
+            />
+          ) : null}
           <FormSection title={copy.identity}>
             <div className="grid gap-3 md:grid-cols-2">
               <Field
@@ -573,26 +673,17 @@ export function PatientDocumentEditSheet({
                   required
                 />
               </Field>
-              <Field label={copy.type} htmlFor="patient-document-edit-art">
-                <Input
-                  id="patient-document-edit-art"
-                  list="patient-document-art-options"
-                  value={form.art}
-                  onChange={(event) => update("art", event.target.value)}
-                  className={inputClass}
-                  placeholder={copy.typePlaceholder}
-                  required
-                />
-                <datalist id="patient-document-art-options">
-                  {artOptions.map((art) => (
-                    <option
-                      key={art}
-                      value={art}
-                      label={localizeDocumentCode(art, (key) => uiText(key, lang))}
-                    />
-                  ))}
-                </datalist>
-              </Field>
+              <CodedTextField
+                key={`art-${activeDocumentId}-${lang}`}
+                id="patient-document-edit-art"
+                label={copy.type}
+                value={form.art}
+                displayValue={artLabel}
+                options={artOptions}
+                placeholder={copy.typePlaceholder}
+                required
+                onChange={(value) => update("art", value)}
+              />
               <Field
                 label={copy.category}
                 htmlFor="patient-document-edit-category"
@@ -712,10 +803,12 @@ export function PatientDocumentEditSheet({
 
           <FormSection title={copy.source}>
             <div className="grid gap-3 md:grid-cols-2">
-              <TextField
+              <CodedTextField
+                key={`source-person-${activeDocumentId}-${lang}`}
                 id="patient-document-source-person"
                 label={copy.sourcePerson}
                 value={form.sourcePerson}
+                displayValue={sourceLabel}
                 onChange={(value) => update("sourcePerson", value)}
               />
               <TextField
@@ -798,10 +891,12 @@ export function PatientDocumentEditSheet({
                 value={form.klinik}
                 onChange={(value) => update("klinik", value)}
               />
-              <TextField
+              <CodedTextField
+                key={`origin-${activeDocumentId}-${lang}`}
                 id="patient-document-origin"
                 label={copy.origin}
                 value={form.ursprung}
+                displayValue={sourceLabel}
                 onChange={(value) => update("ursprung", value)}
               />
               <Field
@@ -907,13 +1002,14 @@ function visibilityOptions(lang: "de" | "ru"): Array<[string, string]> {
         ["internal", "Intern"],
         ["released_internal", "Intern freigegeben"],
         ["released_external", "Extern freigegeben"],
-        ["patient_visible", "Für Patient sichtbar"],
+        // The portal shows a document only after a release (QA 2026-10-11).
+        ["patient_visible", "Zur Patientenfreigabe bereit"],
       ]
     : [
         ["internal", "Внутренний"],
         ["released_internal", "Открыт внутри компании"],
         ["released_external", "Открыт внешним получателям"],
-        ["patient_visible", "Виден пациенту"],
+        ["patient_visible", "Можно выпустить пациенту"],
       ];
 }
 

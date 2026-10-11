@@ -1335,8 +1335,42 @@ struct PatientLabelQuery {
 struct RequiredPatientDocumentRule {
     key: String,
     label: String,
+    /// Document types (`art`) or generated templates that fulfil the rule,
+    /// normalised by [`normalized_document_code`].
     art: Vec<String>,
+    /// Categories that fulfil the rule, normalised likewise.
     category: Vec<String>,
+    /// Only a signed document fulfils the rule (the consent form): a signed
+    /// version from a paper scan or an electronic signature, or a document
+    /// marked as signed (QA 2026-10-11 B-06).
+    signed: bool,
+}
+
+/// One active document of the patient as the required-document rules see it.
+struct RequiredDocumentCandidate<'a> {
+    art: &'a str,
+    generated_template_id: &'a str,
+    category: &'a str,
+    signed: bool,
+}
+
+/// A document code (type, template, category or a rule's matcher) in the one
+/// form the rules compare: lower case, `_` for spaces and hyphens, German
+/// umlauts and ß spelled out ("Einverständniserklärung" →
+/// "einverstaendniserklaerung").
+fn normalized_document_code(value: &str) -> String {
+    let mut normalized = String::with_capacity(value.len());
+    for character in value.trim().to_lowercase().chars() {
+        match character {
+            'ä' => normalized.push_str("ae"),
+            'ö' => normalized.push_str("oe"),
+            'ü' => normalized.push_str("ue"),
+            'ß' => normalized.push_str("ss"),
+            ' ' | '-' => normalized.push('_'),
+            other => normalized.push(other),
+        }
+    }
+    normalized
 }
 
 #[derive(Clone)]
@@ -7082,6 +7116,7 @@ async fn list_patient_documents(
                   d.uploaded_by,
                   d.mime_type,
                   COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
+                  d.auto_name,
                   COALESCE(d.category, d.art) AS category,
                   d.status,
                   d.document_direction,
@@ -7128,7 +7163,21 @@ async fn list_patient_documents(
                            OR own_request.translated_document_id = d.id)
                       AND own_request.assigned_to = $3
                       AND own_request.status IN ('pending', 'in_progress', 'completed')
-                  ) AS own_translation_document
+                  ) AS own_translation_document,
+                  EXISTS(
+                    SELECT 1
+                    FROM document_signature_members consent_member
+                    JOIN documents member_document ON member_document.id = consent_member.document_id
+                    WHERE consent_member.result_document_id = d.id
+                      AND (member_document.category = 'consent'
+                           OR member_document.art IN ('confidentiality_release', 'privacy_consents',
+                               'privacy_information', 'consent_data_release', 'consent', 'consent_form',
+                               'gdpr_consent', 'einverstaendniserklaerung')
+                           OR member_document.generated_template_id IN ('confidentiality_release',
+                               'privacy_consents', 'privacy_information', 'consent_data_release_child',
+                               'consent_data_release_single')
+                           OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
+                  ) AS bundles_consent_document
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1
@@ -7181,6 +7230,8 @@ async fn list_patient_documents(
                 "compliance_kind": row.try_get::<Option<String>, _>("compliance_kind").unwrap_or_default(),
                 "mime_type": row.try_get::<Option<String>, _>("mime_type").unwrap_or_default(),
                 "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
+                // The unified name the document list shows too (QA 2026-10-11 B-13).
+                "auto_name": row.try_get::<Option<String>, _>("auto_name").unwrap_or_default(),
                 "category": row.try_get::<Option<String>, _>("category").unwrap_or_default(),
                 "status": row.try_get::<String, _>("status").unwrap_or_default(),
                 "document_direction": row.try_get::<Option<String>, _>("document_direction").unwrap_or_default(),
@@ -7267,7 +7318,7 @@ fn parse_required_patient_document_rules(
                             item.as_str()
                                 .map(str::trim)
                                 .filter(|value| !value.is_empty())
-                                .map(ToOwned::to_owned)
+                                .map(normalized_document_code)
                                 .ok_or_else(|| {
                                     err(
                                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -7280,12 +7331,23 @@ fn parse_required_patient_document_rules(
                 .transpose()
                 .map(|value| value.unwrap_or_default())
         };
+        let signed = match object.get("signed") {
+            None | Some(Value::Null) => false,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => {
+                return Err(err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Required patient document settings are invalid",
+                ));
+            }
+        };
 
         rules.push(RequiredPatientDocumentRule {
             key,
             label,
             art: collect_values("art")?,
             category: collect_values("category")?,
+            signed,
         });
     }
 
@@ -7369,15 +7431,24 @@ async fn evaluate_patient_document_alerts(
         .and_then(|value| value.get("document_pack_complete").and_then(Value::as_bool))
         .unwrap_or(false);
 
+    // Only the current version of an active document counts: a draft (a
+    // generated form before it is signed, a scan before its review) is not a
+    // document of the pack yet (QA 2026-10-11 B-06); a signed version
+    // replaces the draft it was made of.
     let mut document_rows = sqlx::query(
         r#"SELECT d.id,
-                  COALESCE(d.original_filename, d.auto_name, 'Document') AS filename,
+                  COALESCE(NULLIF(btrim(d.auto_name), ''), d.original_filename, 'Document') AS filename,
                   d.art,
                   d.category,
+                  d.generated_template_id,
+                  d.signed_at IS NOT NULL AS signed,
                   d.status
            FROM documents d
            WHERE d.patient_id = $1
-             AND d.status IN ('draft', 'active')
+             AND d.status = 'active'
+             AND NOT EXISTS (
+                 SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+             )
            ORDER BY d.created_at DESC"#,
     )
     .bind(patient_uuid)
@@ -7403,21 +7474,26 @@ async fn evaluate_patient_document_alerts(
         let mut matching_documents = Vec::new();
 
         for row in &document_rows {
-            let art = row
-                .try_get::<String, _>("art")
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase()
-                .replace([' ', '-'], "_");
-            let category = row
-                .try_get::<Option<String>, _>("category")
-                .unwrap_or_default()
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase()
-                .replace([' ', '-'], "_");
+            let art =
+                normalized_document_code(&row.try_get::<String, _>("art").unwrap_or_default());
+            let generated_template_id = normalized_document_code(
+                &row.try_get::<Option<String>, _>("generated_template_id")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            );
+            let category = normalized_document_code(
+                &row.try_get::<Option<String>, _>("category")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            );
+            let candidate = RequiredDocumentCandidate {
+                art: &art,
+                generated_template_id: &generated_template_id,
+                category: &category,
+                signed: row.try_get::<bool, _>("signed").unwrap_or(false),
+            };
 
-            if required_document_rule_matches(rule, &art, &category) {
+            if required_document_rule_matches(rule, &candidate) {
                 matching_documents.push(json!({
                     "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
                     "filename": row.try_get::<String, _>("filename").unwrap_or_default(),
@@ -7463,23 +7539,28 @@ async fn evaluate_patient_document_alerts(
     })
 }
 
-/// Whether a patient document (type and category, normalised) fulfils a
-/// required-document rule. A file of another person — a representative's or
-/// a payer's identity document, a proof of authority or of funds — never
-/// fulfils the patient's rule, although its category (`identity`,
-/// `administrative`) is one the default rules name (QA 2026-10-06).
+/// Whether an active patient document (type, generated template and category,
+/// normalised) fulfils a required-document rule: its type or template is one
+/// of the rule's types, or its category one of the rule's categories, and a
+/// rule that asks for a signature has it. A file of another person — a
+/// representative's or a payer's identity document, a proof of authority or
+/// of funds — never fulfils the patient's rule, although its category
+/// (`identity`, `administrative`) is one the default rules name
+/// (QA 2026-10-06).
 fn required_document_rule_matches(
     rule: &RequiredPatientDocumentRule,
-    art: &str,
-    category: &str,
+    document: &RequiredDocumentCandidate<'_>,
 ) -> bool {
-    if crate::routes::documents::is_other_person_document(art) {
+    if crate::routes::documents::is_other_person_document(document.art) {
         return false;
     }
-    let matches_art = !rule.art.is_empty() && rule.art.iter().any(|value| value == art);
-    let matches_category = !rule.category.is_empty()
-        && !category.is_empty()
-        && rule.category.iter().any(|value| value == category);
+    if rule.signed && !document.signed {
+        return false;
+    }
+    let matches_code = |code: &str| !code.is_empty() && rule.art.iter().any(|value| value == code);
+    let matches_art = matches_code(document.art) || matches_code(document.generated_template_id);
+    let matches_category = !document.category.is_empty()
+        && rule.category.iter().any(|value| value == document.category);
     matches_art || matches_category
 }
 
@@ -7563,6 +7644,8 @@ async fn load_staff_visible_patient_document_ids(
                   d.is_medical,
                   d.art,
                   d.category,
+                  d.generated_template_id,
+                  d.compliance_kind,
                   d.visibility,
                   d.ursprung,
                   d.uploaded_by,
@@ -16372,51 +16455,172 @@ mod unicode_pdf_tests {
 
 #[cfg(test)]
 mod required_document_rule_tests {
-    use super::{RequiredPatientDocumentRule, required_document_rule_matches};
+    use super::{
+        RequiredDocumentCandidate, RequiredPatientDocumentRule, normalized_document_code,
+        parse_required_patient_document_rules, required_document_rule_matches,
+    };
+    use serde_json::json;
+
+    /// The default rules after the migration
+    /// `required_documents_category_tree_document_numbers` (QA 2026-10-11).
+    fn default_rules() -> (RequiredPatientDocumentRule, RequiredPatientDocumentRule) {
+        let mut rules = parse_required_patient_document_rules(&json!([
+            {
+                "key": "passport",
+                "label": "Reisepass",
+                "art": ["identity", "passport", "passport_scan", "personal_passport", "reisepass"],
+                "category": ["identity", "passport", "personal_passport"]
+            },
+            {
+                "key": "consent_form",
+                "label": "Einverständniserklärung",
+                "art": [
+                    "consent", "consent_data_release", "consent_data_release_child",
+                    "consent_data_release_single", "consent_form",
+                    "einverstaendniserklaerung", "gdpr_consent", "privacy_consents"
+                ],
+                "category": [],
+                "signed": true
+            }
+        ]))
+        .unwrap_or_else(|_| panic!("default rules parse"));
+        let consent = rules.pop().unwrap();
+        let passport = rules.pop().unwrap();
+        (passport, consent)
+    }
+
+    fn document<'a>(
+        art: &'a str,
+        generated_template_id: &'a str,
+        category: &'a str,
+        signed: bool,
+    ) -> RequiredDocumentCandidate<'a> {
+        RequiredDocumentCandidate {
+            art,
+            generated_template_id,
+            category,
+            signed,
+        }
+    }
 
     #[test]
     fn another_persons_file_never_fulfils_the_patients_rule() {
-        // The default rules of the migration `required_patient_documents`.
-        let passport = RequiredPatientDocumentRule {
-            key: "passport".into(),
-            label: "Reisepass".into(),
-            art: vec![
-                "passport".into(),
-                "passport_scan".into(),
-                "reisepass".into(),
-            ],
-            category: vec!["identity".into(), "passport".into()],
-        };
-        let consent = RequiredPatientDocumentRule {
-            key: "consent_form".into(),
-            label: "Einverständniserklärung".into(),
-            art: vec!["consent".into(), "consent_form".into()],
-            category: vec!["consent".into(), "administrative".into()],
-        };
+        let (passport, consent) = default_rules();
         assert!(required_document_rule_matches(
             &passport,
-            "passport_scan",
-            ""
+            &document("passport_scan", "", "", false)
         ));
         assert!(required_document_rule_matches(
-            &passport, "identity", "identity"
-        ));
-        assert!(required_document_rule_matches(
-            &consent,
-            "other",
-            "administrative"
+            &passport,
+            &document("identity", "", "identity", false)
         ));
         for art in ["payer_identity", "representative_identity"] {
             assert!(
-                !required_document_rule_matches(&passport, art, "identity"),
+                !required_document_rule_matches(&passport, &document(art, "", "identity", false)),
                 "{art}"
             );
         }
         for art in ["payer_funds_proof", "representative_authority"] {
             assert!(
-                !required_document_rule_matches(&consent, art, "administrative"),
+                !required_document_rule_matches(
+                    &consent,
+                    &document(art, "", "administrative", true)
+                ),
                 "{art}"
             );
         }
+    }
+
+    /// QA 2026-10-11 B-11, B-18: the passport category of the category tree
+    /// and a converted lead's identity document fulfil the passport rule.
+    #[test]
+    fn passport_rule_accepts_the_category_tree_and_the_identity_document() {
+        let (passport, _) = default_rules();
+        for (art, category) in [
+            ("patient_upload", "personal_passport"),
+            ("personal_passport", "personal_passport"),
+            ("identity", "administrative"),
+            ("document", "identity"),
+        ] {
+            assert!(
+                required_document_rule_matches(&passport, &document(art, "", category, false)),
+                "{art} / {category}"
+            );
+        }
+        assert!(!required_document_rule_matches(
+            &passport,
+            &document("patient_upload", "", "personal_residence_permit", false)
+        ));
+    }
+
+    /// QA 2026-10-11 B-06: only a signed consent of the DSGVO family fulfils
+    /// the consent form; a draft, a sticker or another administrative
+    /// document never does.
+    #[test]
+    fn consent_rule_needs_a_signed_consent_document() {
+        let (_, consent) = default_rules();
+        assert!(!required_document_rule_matches(
+            &consent,
+            &document("privacy_consents", "privacy_consents", "consent", false)
+        ));
+        assert!(required_document_rule_matches(
+            &consent,
+            &document("privacy_consents", "privacy_consents", "consent", true)
+        ));
+        assert!(required_document_rule_matches(
+            &consent,
+            &document(
+                "consent_data_release",
+                "consent_data_release_child",
+                "consent",
+                true
+            )
+        ));
+        for (art, template, category) in [
+            (
+                "patient_sticker",
+                "patient_sticker_compact",
+                "administrative",
+            ),
+            (
+                "confidentiality_release",
+                "confidentiality_release",
+                "consent",
+            ),
+            ("privacy_information", "privacy_information", "consent"),
+            (
+                "appointment_confirmation",
+                "appointment_confirmation",
+                "administrative_appointment_confirmation",
+            ),
+        ] {
+            assert!(
+                !required_document_rule_matches(&consent, &document(art, template, category, true)),
+                "{template}"
+            );
+        }
+        // A scan typed by hand as "Einverständniserklärung" counts once signed.
+        let typed = normalized_document_code("Einverständniserklärung");
+        assert_eq!(typed, "einverstaendniserklaerung");
+        assert!(required_document_rule_matches(
+            &consent,
+            &document(&typed, "", "", true)
+        ));
+    }
+
+    #[test]
+    fn a_rule_without_a_boolean_signed_flag_is_invalid() {
+        assert!(
+            parse_required_patient_document_rules(&json!([
+                { "key": "consent_form", "label": "Consent", "art": ["consent"], "signed": "yes" }
+            ]))
+            .is_err()
+        );
+        let rules = parse_required_patient_document_rules(&json!([
+            { "key": "passport", "label": "Passport", "art": ["Reise-Pass"] }
+        ]))
+        .unwrap_or_else(|_| panic!("rule parses"));
+        assert!(!rules[0].signed);
+        assert_eq!(rules[0].art, vec!["reise_pass".to_string()]);
     }
 }

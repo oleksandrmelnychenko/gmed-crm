@@ -87,6 +87,8 @@ export type DocumentItem = {
   compliance_kind?: string | null;
   mime_type?: string | null;
   filename: string;
+  /** The unified document name the document list shows too. */
+  auto_name?: string | null;
   category?: string | null;
   status?: string | null;
   uploaded_by_name?: string | null;

@@ -1572,6 +1572,7 @@ export interface Translations
   documents_visibility_released_internal: string;
   documents_visibility_released_external: string;
   documents_visibility_patient_visible: string;
+  documents_visibility_patient_released: string;
   documents_translation_in_progress: string;
   documents_translation_completed: string;
   documents_translation_cancelled: string;

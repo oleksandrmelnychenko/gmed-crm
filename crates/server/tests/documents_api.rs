@@ -508,6 +508,60 @@ async fn seed_patient_share_consent(
     .unwrap();
 }
 
+/// The stored number of a document.
+async fn detail_number(pool: &PgPool, document_id: Uuid) -> String {
+    sqlx::query_scalar("SELECT document_number FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// `<prefix>-<YYYYMMDD>-<NNNNNN>`, the one format of new document numbers
+/// (QA 2026-10-11 B-19).
+fn is_sequential_document_number(number: &str, prefix: &str) -> bool {
+    let Some(rest) = number
+        .strip_prefix(prefix)
+        .and_then(|rest| rest.strip_prefix('-'))
+    else {
+        return false;
+    };
+    let mut parts = rest.split('-');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(date), Some(sequence), None)
+            if date.len() == 8
+                && date.chars().all(|c| c.is_ascii_digit())
+                && sequence.len() >= 6
+                && sequence.chars().all(|c| c.is_ascii_digit())
+    )
+}
+
+/// The required-document alerts of a patient as the CEO sees them.
+async fn required_document_alerts(app: &axum::Router, bearer: &str, patient_id: Uuid) -> Value {
+    let (status, body) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/document-alerts"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
+/// Whether the rule `key` of the alerts is fulfilled.
+fn rule_fulfilled(alerts: &Value, key: &str) -> bool {
+    alerts["required_documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["key"] == key)
+        .unwrap_or_else(|| panic!("rule {key} in {alerts}"))["fulfilled"]
+        == true
+}
+
 async fn configure_required_patient_documents(pool: &PgPool, value: Value) {
     sqlx::query(
         r#"UPDATE system_settings
@@ -4452,6 +4506,341 @@ async fn interpreter_document_alerts_count_only_documents_opened_to_him() {
     assert_eq!(body["missing_count"], 1);
 }
 
+/// QA 2026-10-11 B-06: the required consent form ("Einverständniserklärung")
+/// is fulfilled only by a signed consent of the DSGVO family — never by a
+/// generated draft, an unsigned copy or a patient sticker. The default rules
+/// of the migrations apply. Generated documents get the readable sequential
+/// number with their template's prefix (B-19).
+#[tokio::test]
+async fn required_consent_form_counts_only_a_signed_consent() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("req-consent");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert_eq!(alerts["configured_rule_count"], 2, "{alerts}");
+    assert!(!rule_fulfilled(&alerts, "passport"), "{alerts}");
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    // A label sticker is an administrative document, not the consent form.
+    let (status, sticker) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "patient_sticker_compact",
+            "patient_id": patient_id,
+            "status": "active"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sticker}");
+    let sticker_number = sticker["document_number"].as_str().unwrap();
+    assert!(
+        is_sequential_document_number(sticker_number, "ET"),
+        "{sticker}"
+    );
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    // The consent as a generated draft does not count, nor once active but
+    // unsigned.
+    let (status, consent) = json_request(
+        &app,
+        "POST",
+        "/api/v1/documents/generate",
+        &admin_bearer,
+        Some(json!({
+            "template_id": "privacy_consents",
+            "patient_id": patient_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{consent}");
+    let consent_number = consent["document_number"].as_str().unwrap().to_string();
+    assert!(
+        is_sequential_document_number(&consent_number, "EW"),
+        "{consent}"
+    );
+    assert_ne!(consent_number, sticker_number);
+    let consent_id = Uuid::parse_str(consent["id"].as_str().unwrap()).unwrap();
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    sqlx::query("UPDATE documents SET status = 'active' WHERE id = $1")
+        .bind(consent_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    // Signed, the consent fulfils the rule.
+    let (status, signed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{consent_id}/mark-signed"),
+        &admin_bearer,
+        Some(json!({ "compliance_kind": "dsgvo" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{signed}");
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+    let consent_rule = alerts["required_documents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["key"] == "consent_form")
+        .unwrap();
+    assert_eq!(
+        consent_rule["matching_documents"][0]["id"],
+        consent_id.to_string()
+    );
+    assert_eq!(alerts["missing_count"], 1, "{alerts}");
+}
+
+/// QA 2026-10-11 B-11, B-18: a passport filed under the category tree's
+/// "PERS · Reisepass" fulfils the required passport, and so does the
+/// identity document a converted lead brings. Choosing the category by hand
+/// classifies a portal upload, so it leaves the intake queue.
+#[tokio::test]
+async fn required_passport_accepts_the_category_tree_and_the_converted_identity_document() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("req-passport");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    let (status, body) = multipart_upload(
+        &app,
+        "/api/v1/me/documents/upload",
+        &patient_bearer,
+        &[
+            ("upload_kind", "general".to_string()),
+            ("auto_name", "Reisepass".to_string()),
+        ],
+        &format!("reisepass-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-portal-passport%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let document_id = body["id"].as_str().unwrap().to_string();
+    assert!(intake_queue_contains(&app, &admin_bearer, &document_id).await);
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "passport"), "{alerts}");
+
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let upload_art = detail["art"].as_str().unwrap().to_string();
+
+    // The edit sheet sends the stored type with the chosen category.
+    let (status, updated) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{document_id}/update"),
+        &admin_bearer,
+        Some(json!({ "art": upload_art, "category": "personal_passport" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let (status, detail) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{document_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(detail["category"], "personal_passport", "{detail}");
+    assert_eq!(detail["art"], "personal_passport", "{detail}");
+    assert_eq!(detail["needs_categorization"], false, "{detail}");
+    assert!(!intake_queue_contains(&app, &admin_bearer, &document_id).await);
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(rule_fulfilled(&alerts, "passport"), "{alerts}");
+
+    // The identity document of a converted lead (type `identity`, category
+    // `administrative`) is the patient's passport document as well.
+    let converted_patient = seed_patient(&pool, admin_id, &format!("{tag}-conv")).await;
+    let identity_document = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by
+           ) VALUES (
+                $1, $2, 'Ausweisdokument', 'identity-scan.pdf', 'identity', 'administrative',
+                'active', 'internal', false, 'application/pdf', 1024, $1, 1, $3
+           )"#,
+    )
+    .bind(identity_document)
+    .bind(converted_patient)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let alerts = required_document_alerts(&app, &admin_bearer, converted_patient).await;
+    assert!(rule_fulfilled(&alerts, "passport"), "{alerts}");
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+}
+
+/// Owner decision 2026-10-11: Concierge and Billing never list, open,
+/// download or read the text of a patient's consent document (here a signed
+/// Schweigepflichtsentbindung), not even with a record rule; Billing still
+/// reads the identity document scan (owner decision 2026-10-06) and the CEO
+/// keeps both.
+#[tokio::test]
+async fn concierge_and_billing_are_refused_consent_documents_but_billing_keeps_id_scans() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("consent-access");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+
+    let mut uploaded = Vec::new();
+    for (art, category, name) in [
+        (
+            "confidentiality_release",
+            "consent",
+            "Schweigepflichtsentbindung",
+        ),
+        ("passport_scan", "identity", "Reisepass"),
+    ] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &admin_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("{name} {tag}")),
+                ("art", art.to_string()),
+                ("category", category.to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "internal".to_string()),
+                ("is_medical", "false".to_string()),
+            ],
+            &format!("{art}-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-consent-access%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        uploaded.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    let (consent_id, passport_id) = (uploaded[0], uploaded[1]);
+    sqlx::query(
+        r#"UPDATE documents
+           SET signed_at = now(), signed_by = $2, compliance_kind = 'confidentiality_release'
+           WHERE id = $1"#,
+    )
+    .bind(consent_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for role in ["concierge", "billing"] {
+        let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
+        seed_patient_assignment(&pool, patient_id, user_id, admin_id).await;
+        let bearer = auth_header_for(user_id, role);
+        // A record rule does not open a consent document for these roles.
+        seed_direct_document_rule(&pool, user_id, role, consent_id, "view", "allow", admin_id)
+            .await;
+
+        for path in [
+            format!("/api/v1/patients/{patient_id}/documents"),
+            format!("/api/v1/documents?patient_id={patient_id}"),
+        ] {
+            let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{role} {path}: {body}");
+            assert!(
+                !listed_ids(&body).contains(&consent_id.to_string()),
+                "{role} {path}: {body}"
+            );
+        }
+        for path in [
+            format!("/api/v1/documents/{consent_id}"),
+            format!("/api/v1/documents/{consent_id}/text-extraction"),
+        ] {
+            let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+            assert!(
+                matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+                "{role} {path}: {status} {body}"
+            );
+        }
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{consent_id}/download"),
+            &bearer,
+        )
+        .await;
+        assert!(
+            matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+            "{role} download: {status}"
+        );
+
+        if role == "billing" {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{passport_id}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "billing ID scan: {body}");
+            let (status, _) = bytes_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{passport_id}/download"),
+                &bearer,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "billing ID scan download");
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/patients/{patient_id}/documents"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            assert!(
+                listed_ids(&body).contains(&passport_id.to_string()),
+                "{body}"
+            );
+        }
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{consent_id}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "CEO: {body}");
+}
+
 #[tokio::test]
 async fn ceo_assistant_only_sees_released_medical_documents() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
@@ -4906,9 +5295,14 @@ async fn appointment_confirmation_auto_generates_doc_id() {
     );
     assert_eq!(body["generated_template_id"], "appointment_confirmation");
     let document_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
-    let mut expected_suffix = document_id.simple().to_string();
-    expected_suffix.truncate(8);
-    let expected_doc_id = format!("DOC-{}", expected_suffix.to_ascii_uppercase());
+    // The readable sequential number every document gets (QA 2026-10-11
+    // B-19), printed as the Doc.-ID and stored as the document number.
+    let expected_doc_id = body["document_number"].as_str().unwrap().to_string();
+    assert!(
+        is_sequential_document_number(&expected_doc_id, "DOC"),
+        "{expected_doc_id}"
+    );
+    assert_eq!(detail_number(&pool, document_id).await, expected_doc_id);
 
     let (status, bytes) = bytes_request(
         &app,
@@ -7624,11 +8018,12 @@ async fn onboarding_documents_generate_for_a_lead_with_matching_human_numbers() 
                 assert!(!pdf_text.contains("Informationsblatt zum Datenschutz"));
                 assert!(pdf_text.contains("Maria Beispiel, Vertrauenskontakt"));
                 assert!(pdf_text.contains("GMED-EDV-System"));
-                assert!(pdf_text.contains("[x]"));
-                assert!(pdf_text.contains("[ ]"));
-                assert!(pdf_text.contains("[x] Threema-Messenger"));
+                // Empty boxes the person ticks, whatever was preselected
+                // (owner decision 2026-10-11).
+                assert!(!pdf_text.contains("[x]"));
+                assert!(pdf_text.contains("[ ] Threema-Messenger"));
                 assert!(pdf_text.contains("[ ] WhatsApp-Messenger"));
-                assert!(pdf_text.contains("[x] Telegram-Messenger"));
+                assert!(pdf_text.contains("[ ] Telegram-Messenger"));
             }
             _ => unreachable!(),
         }
@@ -7842,10 +8237,13 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     let appointment_id =
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
 
+    // ISO codes as the card stores them; no country of residence recorded,
+    // so the letter names the address country (QA 2026-10-11 B-20).
     sqlx::query(
         r#"UPDATE patients
-           SET nationality = 'Ukraine',
-               residence_country = 'Germany'
+           SET nationality = 'UA',
+               residence_country = NULL,
+               address_country = 'DE'
            WHERE id = $1"#,
     )
     .bind(patient_id)
@@ -7862,13 +8260,27 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    let templates = catalog_body["templates"].as_array().unwrap();
     assert!(
-        catalog_body["templates"]
-            .as_array()
-            .unwrap()
+        templates
             .iter()
-            .any(|item| item["id"] == "visa_invitation_letter")
+            .any(|item| item["id"] == "visa_invitation_letter" && item["lead_only"] == false)
     );
+    // The lead's templates are marked, so the patient dialog can hide them.
+    for lead_template in [
+        "gwg_identification",
+        "lead_self_disclosure",
+        "payer_self_disclosure",
+        "patient_payer_statement",
+        "payer_cost_estimate",
+    ] {
+        assert!(
+            templates
+                .iter()
+                .any(|item| item["id"] == lead_template && item["lead_only"] == true),
+            "{lead_template}"
+        );
+    }
 
     let (status, body) = json_request(
         &app,
@@ -7899,7 +8311,8 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     let preview_html = body["preview_html"].as_str().unwrap();
     assert!(preview_html.contains("Einladungsschreiben (Visum)"));
     assert!(preview_html.contains("Ukraine"));
-    assert!(preview_html.contains("Germany"));
+    assert!(preview_html.contains("Deutschland"));
+    assert!(preview_html.contains("Staatsangehörigkeit"));
     assert!(preview_html.contains("Reisepass Nr.: MA1234567"));
     assert!(preview_html.contains("Klinik München"));
     assert!(preview_html.contains("0176 9999999"));
@@ -7936,6 +8349,19 @@ async fn document_templates_can_generate_visa_invitation_pdf_document() {
     assert!(pdf_text.contains("München, 19.11.2025"));
     assert!(pdf_text.contains("Reisepass Nr.: MA1234567"));
     assert!(pdf_text.contains("gültig bis 01.01.2050"));
+    assert!(
+        pdf_text.contains("Staatsangehörigkeit: Ukraine"),
+        "{pdf_text}"
+    );
+    assert!(pdf_text.contains("Wohnsitzland: Deutschland"), "{pdf_text}");
+    assert!(!pdf_text.contains(": n/a"), "{pdf_text}");
+    assert!(!pdf_text.contains("Nationalität: UA"), "{pdf_text}");
+    // A generated document gets the readable number of every document.
+    let visa_number = detail_number(&pool, document_id).await;
+    assert!(
+        is_sequential_document_number(&visa_number, "DOC"),
+        "{visa_number}"
+    );
     assert!(pdf_text.contains("Klinik München"));
     assert!(pdf_text.contains("0176 9999999"));
 

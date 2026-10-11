@@ -78,10 +78,16 @@ export function formatDocumentStatusLabel(
   }
 }
 
-/** Label of a document visibility level, shared by every document list. */
+/**
+ * Label of a document visibility level, shared by every document list.
+ * `patient_visible` alone shows nothing in the portal — only an active
+ * portal release does — so it reads "ready for release" until a release
+ * exists (QA 2026-10-11 B-13).
+ */
 export function formatVisibilityLabel(
   visibility: string,
   tr: Translations,
+  portalReleased = false,
 ) {
   switch (visibility) {
     case "internal":
@@ -91,7 +97,9 @@ export function formatVisibilityLabel(
     case "released_external":
       return tr.documents_visibility_released_external;
     case "patient_visible":
-      return tr.documents_visibility_patient_visible;
+      return portalReleased
+        ? tr.documents_visibility_patient_released
+        : tr.documents_visibility_patient_visible;
     default:
       return formatUnknownValue(visibility, tr);
   }

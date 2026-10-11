@@ -873,7 +873,10 @@ export function portalDocumentSourceLabel(
   source?: string | null,
   clinic?: string | null,
 ) {
-  if (!source) {
+  // Staff-side origins (a paper or electronic signature, a template, an
+  // upload by the team) are internal: the patient reads the release by the
+  // team, never "unknown value" (QA 2026-10-11 B-13).
+  if (!source || !(source in PORTAL_DOCUMENT_SOURCE_LABEL_KEYS)) {
     return clinic || portalTranslations().portal_document_source_portal_release;
   }
   return portalEnumLabel(source, PORTAL_DOCUMENT_SOURCE_LABEL_KEYS);

@@ -117,6 +117,23 @@ const DESIGNED_AGENCY_TEMPLATE_IDS = new Set([
   "consent_data_release_single",
 ]);
 
+/** Templates the server generates only for a lead (it marks them `lead_only`). */
+const LEAD_ONLY_TEMPLATE_IDS = new Set([
+  "gwg_identification",
+  "lead_self_disclosure",
+  "payer_self_disclosure",
+  "patient_payer_statement",
+  "payer_cost_estimate",
+]);
+
+/**
+ * Whether a template is generated only for a lead: the patient dialogs never
+ * offer it, the server would refuse it (QA 2026-10-11 B-19).
+ */
+export function isLeadOnlyDocumentTemplate(template: { id: string; lead_only?: boolean }) {
+  return template.lead_only === true || LEAD_ONLY_TEMPLATE_IDS.has(template.id);
+}
+
 export function isFixedLegalDocumentTemplate(templateId: string) {
   return FIXED_LEGAL_TEMPLATE_IDS.has(templateId);
 }
@@ -144,7 +161,7 @@ export function documentBindingFieldLabel(
 const PATIENT_STICKER_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "kt1", label: "KT1", kind: "text" },
   { key: "kt2", label: "KT2", kind: "text" },
-  { key: "cost_code", label: "Kostenstelle / Code", kind: "text" },
+  { key: "cost_code", label: "Kostenstelle / Code", labelRu: "Место затрат / код", kind: "text" },
 ];
 
 const ENHANCED_DUE_DILIGENCE_BOOLEAN_KEYS = [
@@ -332,6 +349,209 @@ export function formatCostEstimateGenerationError(
   return null;
 }
 
+/**
+ * The server's refusals of `POST /documents/generate` (crates/server/src/
+ * routes/documents.rs `generate_document` and its helpers), in the user's
+ * language. A stable error code wins over the message (`lead_document_only`
+ * and the other codes of the lead's documents).
+ */
+const DOCUMENT_GENERATION_ERRORS: Array<{
+  match: string[];
+  ru: string;
+  de: string;
+}> = [
+  {
+    match: ["lead_document_only", "is generated for a lead"],
+    ru: "Этот документ создаётся только для лида (обращения), не для пациента.",
+    de: "Dieses Dokument wird nur für eine Anfrage erstellt, nicht für einen Patienten.",
+  },
+  {
+    match: ["payer_declaration_not_third_party", "names no third-party payer", "has no third-party payer"],
+    ru: "В декларации плательщика не указан третий плательщик.",
+    de: "Die Zahlererklärung nennt keine dritte zahlende Person.",
+  },
+  {
+    match: ["payer_not_submitted", "has not sent its answers"],
+    ru: "Плательщик ещё не отправил свои ответы.",
+    de: "Die zahlende Person hat ihre Angaben noch nicht gesendet.",
+  },
+  {
+    match: ["Treatment plan template requires at least one appointment"],
+    ru: "Для плана лечения нужен хотя бы один термин пациента: выберите заказ или термин с назначенными приёмами.",
+    de: "Für den Behandlungsplan ist mindestens ein Termin erforderlich: Wählen Sie einen Auftrag oder Termin mit geplanten Terminen.",
+  },
+  {
+    match: ["Medication summary template requires at least one case"],
+    ru: "Для обзора медикаментов нужен хотя бы один кейс пациента.",
+    de: "Für die Medikamentenübersicht ist mindestens ein Fall des Patienten erforderlich.",
+  },
+  {
+    match: ["Medication summary template requires recorded medication"],
+    ru: "Для обзора медикаментов у пациента должна быть записана медикация.",
+    de: "Für die Medikamentenübersicht muss beim Patienten eine Medikation erfasst sein.",
+  },
+  {
+    match: ["Framework contract template requires an existing framework contract"],
+    ru: "Сначала создайте рамочный договор пациента.",
+    de: "Erstellen Sie zuerst einen Rahmenvertrag für den Patienten.",
+  },
+  {
+    match: ["Order context is required"],
+    ru: "Выберите заказ для этого документа.",
+    de: "Wählen Sie einen Auftrag für dieses Dokument aus.",
+  },
+  {
+    match: ["Free text document requires document text"],
+    ru: "Введите текст документа.",
+    de: "Geben Sie den Dokumenttext ein.",
+  },
+  {
+    match: ["do not support free-form text overrides"],
+    ru: "Текст этого шаблона нельзя заменить свободным текстом.",
+    de: "Der Text dieser Vorlage kann nicht durch freien Text ersetzt werden.",
+  },
+  {
+    match: ["Generated document text is too long"],
+    ru: "Текст документа слишком длинный.",
+    de: "Der Dokumenttext ist zu lang.",
+  },
+  {
+    match: ["This template is only available after patient conversion"],
+    ru: "Этот шаблон доступен только после создания пациента.",
+    de: "Diese Vorlage ist erst nach der Umwandlung in einen Patienten verfügbar.",
+  },
+  {
+    match: ["Generated documents must be linked to a patient", "Provider templates require a patient context"],
+    ru: "Документ должен относиться к пациенту.",
+    de: "Das Dokument muss einem Patienten zugeordnet sein.",
+  },
+  {
+    match: ["Language is not supported by the selected template", "Unknown document language"],
+    ru: "Этот язык шаблон не поддерживает.",
+    de: "Diese Sprache wird von der Vorlage nicht unterstützt.",
+  },
+  {
+    match: ["Patient birth date is required for a patient sticker"],
+    ru: "Для наклейки нужна дата рождения пациента.",
+    de: "Für das Patientenetikett ist das Geburtsdatum erforderlich.",
+  },
+  {
+    match: ["Unknown patient sticker format"],
+    ru: "Неизвестный формат наклейки.",
+    de: "Unbekanntes Etikettenformat.",
+  },
+  {
+    match: ["before generating its documents"],
+    ru: "Сначала заполните оформление заказа, затем создавайте его документы.",
+    de: "Bearbeiten Sie zuerst die Auftragsvorbereitung und erstellen Sie dann die Dokumente.",
+  },
+  {
+    match: ["Order changed during document generation"],
+    ru: "Заказ изменился во время создания документа. Создайте новую версию.",
+    de: "Der Auftrag wurde während der Erstellung geändert. Erstellen Sie eine neue Version.",
+  },
+  {
+    match: ["text block key"],
+    ru: "Выбранный текстовый блок недоступен для этого шаблона.",
+    de: "Der gewählte Textbaustein ist für diese Vorlage nicht verfügbar.",
+  },
+  {
+    match: ["Provider template must match", "Provider template doctor must match"],
+    ru: "Шаблон провайдера не подходит к выбранному термину.",
+    de: "Die Provider-Vorlage passt nicht zum gewählten Termin.",
+  },
+  {
+    match: ["context do not match", "cannot use lead context", "cannot use patient and lead context", "must use its patient context"],
+    ru: "Заказ или термин не относится к этому пациенту.",
+    de: "Auftrag oder Termin gehört nicht zu diesem Patienten.",
+  },
+  {
+    match: ["Replacement document already has a newer version"],
+    ru: "У документа уже есть более новая версия.",
+    de: "Das Dokument hat bereits eine neuere Version.",
+  },
+  {
+    match: ["Archived documents cannot be replaced again"],
+    ru: "Архивный документ нельзя заменить новой версией.",
+    de: "Ein archiviertes Dokument kann nicht durch eine neue Version ersetzt werden.",
+  },
+  {
+    match: ["Replacement document must"],
+    ru: "Новая версия должна сохранить пациента, заказ, термин и шаблон документа.",
+    de: "Die neue Version muss Patient, Auftrag, Termin und Vorlage des Dokuments beibehalten.",
+  },
+  {
+    match: ["Unknown document template"],
+    ru: "Шаблон не найден.",
+    de: "Vorlage nicht gefunden.",
+  },
+  {
+    match: ["Patient not found", "Lead not found", "Order not found", "Appointment not found", "Replacement document not found"],
+    ru: "Пациент, лид, заказ, термин или документ не найден.",
+    de: "Patient, Anfrage, Auftrag, Termin oder Dokument nicht gefunden.",
+  },
+  {
+    match: ["Invalid document status", "Invalid document visibility"],
+    ru: "Недопустимый статус или видимость документа.",
+    de: "Ungültiger Status oder ungültige Sichtbarkeit des Dokuments.",
+  },
+  {
+    match: ["You are not assigned to this patient", "Insufficient permissions"],
+    ru: "Нет прав создавать документы для этого пациента.",
+    de: "Keine Berechtigung, für diesen Patienten Dokumente zu erstellen.",
+  },
+  {
+    match: ["specialization work type"],
+    ru: "Выбранные виды работ больше недоступны. Обновите выбор.",
+    de: "Die gewählten Leistungsarten sind nicht mehr verfügbar. Bitte aktualisieren Sie die Auswahl.",
+  },
+  {
+    match: ["cost estimate cannot be copied"],
+    ru: "Смету клиента нельзя перенести в документ плательщика.",
+    de: "Der Kostenvoranschlag des Kunden kann nicht übernommen werden.",
+  },
+];
+
+const ALREADY_LOCALIZED_ERROR_CODES = new Set([
+  "signature_pending",
+  "sanctions_confirmed",
+  "sanctions_review_pending",
+  "blocked_country",
+  "rate_limited",
+  "network",
+  "timeout",
+  "aborted",
+]);
+
+/**
+ * A refusal of document generation in the user's language (QA 2026-10-11
+ * B-19): the cost estimate and AML messages, then the known refusals, else
+ * a localized fallback that keeps the server's text for support.
+ */
+export function formatDocumentGenerationError(
+  error: unknown,
+  lang: "de" | "ru",
+): string {
+  const message = error instanceof Error ? error.message : "";
+  const code =
+    error && typeof error === "object" && "code" in error && typeof error.code === "string"
+      ? error.code
+      : "";
+  // Messages the API client already put into the user's language.
+  if (ALREADY_LOCALIZED_ERROR_CODES.has(code) && message) return message;
+  const costEstimate = formatCostEstimateGenerationError(error, lang);
+  if (costEstimate) return costEstimate;
+  const aml = formatEnhancedDueDiligenceError(error, lang);
+  if (aml !== message) return aml;
+  const known = DOCUMENT_GENERATION_ERRORS.find((entry) =>
+    entry.match.some((pattern) => pattern === code || (message && message.includes(pattern))),
+  );
+  if (known) return lang === "de" ? known.de : known.ru;
+  const fallback =
+    lang === "de" ? "Das Dokument konnte nicht erstellt werden." : "Не удалось создать документ.";
+  return message ? `${fallback} (${message})` : fallback;
+}
+
 const PATIENT_PARTY_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "party_street", label: "Patient Straße", labelRu: "Улица пациента", kind: "text" },
   { key: "party_zip", label: "Patient PLZ", labelRu: "Индекс пациента", kind: "text" },
@@ -423,25 +643,26 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     ...AGENCY_SIGNATURE_BINDING_FIELDS,
   ],
   cost_coverage_declaration: [
-    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", kind: "number" },
-    { key: "order_date", label: "Einzelauftrag vom", kind: "date" },
-    { key: "contract_date", label: "Rahmenvertrag vom", kind: "date" },
-    { key: "quote_number", label: "Kostenvoranschlag-Nr.", kind: "text" },
-    { key: "payer_salutation", label: "Kostenübernehmer Anrede", kind: "text" },
-    { key: "payer_name", label: "Kostenübernehmer (Name)", kind: "text" },
-    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", kind: "date" },
-    { key: "payer_street", label: "Kostenübernehmer Straße", kind: "text" },
-    { key: "payer_zip", label: "Kostenübernehmer PLZ", kind: "text" },
-    { key: "payer_city", label: "Kostenübernehmer Ort", kind: "text" },
-    { key: "payer_country", label: "Kostenübernehmer Land", kind: "country" },
-    { key: "payer_email", label: "Kostenübernehmer E-Mail", kind: "text" },
-    { key: "bank_holder", label: "Kontoinhaber", kind: "text" },
-    { key: "bank_name", label: "Bank", kind: "text" },
+    { key: "order_sequence", label: "Laufende Nr. des Einzelauftrags", labelRu: "Порядковый номер отдельного заказа", kind: "number" },
+    { key: "order_date", label: "Einzelauftrag vom", labelRu: "Дата отдельного заказа", kind: "date" },
+    { key: "contract_date", label: "Rahmenvertrag vom", labelRu: "Дата рамочного договора", kind: "date" },
+    { key: "quote_number", label: "Kostenvoranschlag-Nr.", labelRu: "Номер сметы", kind: "text" },
+    { key: "payer_salutation", label: "Kostenübernehmer Anrede", labelRu: "Обращение к плательщику", kind: "text" },
+    { key: "payer_name", label: "Kostenübernehmer (Name)", labelRu: "Имя плательщика", kind: "text" },
+    { key: "payer_birth_date", label: "Kostenübernehmer (geb. am)", labelRu: "Дата рождения плательщика", kind: "date" },
+    { key: "payer_street", label: "Kostenübernehmer Straße", labelRu: "Улица плательщика", kind: "text" },
+    { key: "payer_zip", label: "Kostenübernehmer PLZ", labelRu: "Индекс плательщика", kind: "text" },
+    { key: "payer_city", label: "Kostenübernehmer Ort", labelRu: "Город плательщика", kind: "text" },
+    { key: "payer_country", label: "Kostenübernehmer Land", labelRu: "Страна плательщика", kind: "country" },
+    { key: "payer_email", label: "Kostenübernehmer E-Mail", labelRu: "E-mail плательщика", kind: "text" },
+    { key: "bank_holder", label: "Kontoinhaber", labelRu: "Владелец счёта", kind: "text" },
+    { key: "bank_name", label: "Bank", labelRu: "Банк", kind: "text" },
     { key: "bank_swift", label: "SWIFT/BIC", kind: "text" },
     { key: "bank_iban", label: "IBAN", kind: "text" },
     {
       key: "service_lines_text",
       label: "Leistungen (eine pro Zeile: Beschreibung | Honorar | Menge | Summe)",
+      labelRu: "Услуги (по одной в строке: описание | гонорар | количество | сумма)",
       kind: "textarea",
     },
     ...PAYER_SIGNATURE_BINDING_FIELDS,
@@ -458,37 +679,40 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     { key: "estimate_total", label: "Gesamt (Spanne)", labelRu: "Ориентировочный итог / диапазон", kind: "text" },
   ],
   appointment_confirmation: [
-    { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },
-    { key: "passport_valid_until", label: "Reisepass gültig bis", kind: "date" },
-    { key: "period_from", label: "Erste Untersuchung am", kind: "date" },
-    { key: "examination_weeks", label: "Weitere Kalenderwochen", kind: "text" },
+    { key: "passport_number", label: "Reisepass-Nr.", labelRu: "Номер паспорта", kind: "text" },
+    { key: "passport_valid_until", label: "Reisepass gültig bis", labelRu: "Паспорт действителен до", kind: "date" },
+    { key: "period_from", label: "Erste Untersuchung am", labelRu: "Первое обследование", kind: "date" },
+    { key: "examination_weeks", label: "Weitere Kalenderwochen", labelRu: "Следующие календарные недели", kind: "text" },
     {
       key: "clinics_text",
       label: "Kliniken (eine pro Zeile: Name | Adresse)",
+      labelRu: "Клиники (по одной в строке: название | адрес)",
       kind: "textarea",
     },
-    { key: "recipient_block", label: "Empfänger (Adressblock)", kind: "textarea" },
-    { key: "contact_phones", label: "Rückfragen-Telefon(e)", kind: "text" },
+    { key: "recipient_block", label: "Empfänger (Adressblock)", labelRu: "Получатель (блок адреса)", kind: "textarea" },
+    { key: "contact_phones", label: "Rückfragen-Telefon(e)", labelRu: "Телефон(ы) для вопросов", kind: "text" },
     {
       key: "continuation_statement",
       label: "Hinweis zur Fortsetzung der Behandlung",
+      labelRu: "Примечание о продолжении лечения",
       kind: "textarea",
     },
-    { key: "sign_place", label: "Ort", kind: "text" },
-    { key: "sign_date", label: "Datum", kind: "date" },
+    { key: "sign_place", label: "Ort", labelRu: "Место", kind: "text" },
+    { key: "sign_date", label: "Datum", labelRu: "Дата", kind: "date" },
   ],
   visa_invitation_letter: [
-    { key: "passport_number", label: "Reisepass-Nr.", kind: "text" },
-    { key: "passport_valid_until", label: "Reisepass gültig bis", kind: "date" },
+    { key: "passport_number", label: "Reisepass-Nr.", labelRu: "Номер паспорта", kind: "text" },
+    { key: "passport_valid_until", label: "Reisepass gültig bis", labelRu: "Паспорт действителен до", kind: "date" },
     {
       key: "clinics_text",
       label: "Kliniken (eine pro Zeile: Name | Adresse)",
+      labelRu: "Клиники (по одной в строке: название | адрес)",
       kind: "textarea",
     },
-    { key: "recipient_block", label: "Empfänger (Adressblock)", kind: "textarea" },
-    { key: "contact_phones", label: "Rückfragen-Telefon(e)", kind: "text" },
-    { key: "sign_place", label: "Ort", kind: "text" },
-    { key: "sign_date", label: "Datum", kind: "date" },
+    { key: "recipient_block", label: "Empfänger (Adressblock)", labelRu: "Получатель (блок адреса)", kind: "textarea" },
+    { key: "contact_phones", label: "Rückfragen-Telefon(e)", labelRu: "Телефон(ы) для вопросов", kind: "text" },
+    { key: "sign_place", label: "Ort", labelRu: "Место", kind: "text" },
+    { key: "sign_date", label: "Datum", labelRu: "Дата", kind: "date" },
   ],
   patient_sticker_compact: PATIENT_STICKER_BINDING_FIELDS,
   patient_sticker_standard: PATIENT_STICKER_BINDING_FIELDS,
@@ -570,31 +794,33 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
     },
   ],
   consent_data_release_child: [
-    { key: "child_name", label: "Kind (Name)", kind: "text" },
-    { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
-    { key: "child_address", label: "Adresse des Kindes", kind: "text" },
-    { key: "guardian_name", label: "Sorgeberechtigte/r 1 (Name)", kind: "text" },
-    { key: "guardian_birth_date", label: "Sorgeberechtigte/r 1 (geb. am)", kind: "date" },
-    { key: "guardian_label", label: "Rolle Sorgeberechtigte/r 1", kind: "text" },
-    { key: "guardian2_name", label: "Sorgeberechtigte/r 2 (Name)", kind: "text" },
-    { key: "guardian2_birth_date", label: "Sorgeberechtigte/r 2 (geb. am)", kind: "date" },
-    { key: "guardian2_label", label: "Rolle Sorgeberechtigte/r 2", kind: "text" },
+    { key: "child_name", label: "Kind (Name)", labelRu: "Ребёнок (имя)", kind: "text" },
+    { key: "child_birth_date", label: "Kind (geb. am)", labelRu: "Дата рождения ребёнка", kind: "date" },
+    { key: "child_address", label: "Adresse des Kindes", labelRu: "Адрес ребёнка", kind: "text" },
+    { key: "guardian_name", label: "Sorgeberechtigte/r 1 (Name)", labelRu: "Законный представитель 1 (имя)", kind: "text" },
+    { key: "guardian_birth_date", label: "Sorgeberechtigte/r 1 (geb. am)", labelRu: "Дата рождения представителя 1", kind: "date" },
+    { key: "guardian_label", label: "Rolle Sorgeberechtigte/r 1", labelRu: "Роль представителя 1", kind: "text" },
+    { key: "guardian2_name", label: "Sorgeberechtigte/r 2 (Name)", labelRu: "Законный представитель 2 (имя)", kind: "text" },
+    { key: "guardian2_birth_date", label: "Sorgeberechtigte/r 2 (geb. am)", labelRu: "Дата рождения представителя 2", kind: "date" },
+    { key: "guardian2_label", label: "Rolle Sorgeberechtigte/r 2", labelRu: "Роль представителя 2", kind: "text" },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Entbindung gegenüber",
+      labelRu: "Дополнительно освободить от тайны перед",
       kind: "textarea",
     },
   ],
   consent_data_release_single: [
-    { key: "child_name", label: "Kind (Name)", kind: "text" },
-    { key: "child_birth_date", label: "Kind (geb. am)", kind: "date" },
-    { key: "child_address", label: "Adresse des Kindes", kind: "text" },
-    { key: "guardian_name", label: "Sorgeberechtigte/r (Name)", kind: "text" },
-    { key: "guardian_birth_date", label: "Sorgeberechtigte/r (geb. am)", kind: "date" },
-    { key: "guardian_address", label: "Adresse der/des Sorgeberechtigten", kind: "text" },
+    { key: "child_name", label: "Kind (Name)", labelRu: "Ребёнок (имя)", kind: "text" },
+    { key: "child_birth_date", label: "Kind (geb. am)", labelRu: "Дата рождения ребёнка", kind: "date" },
+    { key: "child_address", label: "Adresse des Kindes", labelRu: "Адрес ребёнка", kind: "text" },
+    { key: "guardian_name", label: "Sorgeberechtigte/r (Name)", labelRu: "Законный представитель (имя)", kind: "text" },
+    { key: "guardian_birth_date", label: "Sorgeberechtigte/r (geb. am)", labelRu: "Дата рождения представителя", kind: "date" },
+    { key: "guardian_address", label: "Adresse der/des Sorgeberechtigten", labelRu: "Адрес представителя", kind: "text" },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Entbindung gegenüber",
+      labelRu: "Дополнительно освободить от тайны перед",
       kind: "textarea",
     },
   ],

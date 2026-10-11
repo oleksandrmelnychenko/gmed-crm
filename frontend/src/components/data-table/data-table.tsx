@@ -773,7 +773,9 @@ function useDataTableContent<T>({
                         <div key={column.id} className="min-w-0">
                           <dt className="truncate text-[10px] text-muted-foreground">{column.label}</dt>
                           <dd className={cn(
-                            "mt-0.5 min-w-0 break-words text-xs text-foreground [&_.flex]:flex-wrap [&_.truncate]:whitespace-normal [&_[data-slot=badge]]:max-w-full [&_[data-slot=badge]]:truncate",
+                            // A badge wraps inside the narrow card column instead of
+                            // being clipped on both sides (QA 2026-10-11 B-21).
+                            "mt-0.5 min-w-0 break-words text-xs text-foreground [&_.flex]:flex-wrap [&_.truncate]:whitespace-normal [&_[data-slot=badge]]:h-auto [&_[data-slot=badge]]:min-h-5 [&_[data-slot=badge]]:max-w-full [&_[data-slot=badge]]:justify-start [&_[data-slot=badge]]:whitespace-normal [&_[data-slot=badge]]:break-words [&_[data-slot=badge]]:text-left",
                             columnAlign(column) === "right" && "font-mono tabular-nums",
                           )}>
                             {column.render ? column.render(row) : defaultRender(column.accessor(row), t)}

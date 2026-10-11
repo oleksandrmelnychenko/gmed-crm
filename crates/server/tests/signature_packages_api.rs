@@ -1677,13 +1677,22 @@ async fn paper_signature_stores_the_scan_as_the_signed_version_with_the_same_eff
     assert_ne!(signed, contract);
     let row = sqlx::query(
         "SELECT replaces_document_id, version_number, generated_template_id, ursprung, original_filename,
-                signed_by, compliance_kind, (signed_at AT TIME ZONE 'Europe/Berlin')::date::text AS signed_on
+                signed_by, compliance_kind, (signed_at AT TIME ZONE 'Europe/Berlin')::date::text AS signed_on,
+                auto_name, document_number
          FROM documents WHERE id=$1",
     )
     .bind(signed)
     .fetch_one(&env.pool)
     .await
     .unwrap();
+    let (contract_name, contract_filename, contract_number): (String, String, String) =
+        sqlx::query_as(
+            "SELECT auto_name, original_filename, document_number FROM documents WHERE id=$1",
+        )
+        .bind(contract)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
     assert_eq!(
         row.get::<Option<Uuid>, _>("replaces_document_id"),
         Some(contract)
@@ -1698,9 +1707,13 @@ async fn paper_signature_stores_the_scan_as_the_signed_version_with_the_same_eff
         row.get::<Option<String>, _>("ursprung").as_deref(),
         Some("paper_signature")
     );
+    // The signed version is the same document: its name and number, not the
+    // scan's file name (QA 2026-10-11 B-07).
+    assert_eq!(row.get::<String, _>("original_filename"), contract_filename);
+    assert_eq!(row.get::<String, _>("auto_name"), contract_name);
     assert_eq!(
-        row.get::<String, _>("original_filename"),
-        "Vertrag unterschrieben.pdf"
+        row.get::<String, _>("document_number"),
+        format!("{contract_number}-V02")
     );
     assert_eq!(row.get::<Option<Uuid>, _>("signed_by"), Some(env.admin_id));
     assert_eq!(
@@ -1773,6 +1786,89 @@ async fn paper_signature_stores_the_scan_as_the_signed_version_with_the_same_eff
     )
     .await;
     assert_eq!(state["can_sign_on_paper"], false, "{state}");
+}
+
+/// QA 2026-10-11 B-07, B-19: a generated Schweigepflichtsentbindung gets the
+/// readable sequential number (`SE-YYYYMMDD-NNNNNN`); signed on paper, its
+/// signed version keeps the document's unified name and file name and its
+/// number with a version suffix, whatever the scan's file is called.
+#[tokio::test]
+async fn a_paper_signed_version_keeps_the_unified_name_and_number() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1990-01-01").await;
+    let (status, generated) = call(
+        &env.app,
+        "POST",
+        "/api/v1/documents/generate",
+        &env.ceo,
+        Some(json!({
+            "template_id": "confidentiality_release",
+            "patient_id": patient,
+            "language": "de",
+            "bindings": { "party_sign_place": "Berlin" }
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let draft = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let number = generated["document_number"].as_str().unwrap().to_string();
+    let today = gmed_server::app_time::today().format("%Y%m%d").to_string();
+    let sequence = number
+        .strip_prefix(&format!("SE-{today}-"))
+        .unwrap_or_else(|| panic!("readable number: {number}"));
+    assert!(
+        sequence.len() >= 6 && sequence.chars().all(|c| c.is_ascii_digit()),
+        "{number}"
+    );
+
+    let scan = pdf(1, 0, false);
+    let (status, value) = paper_signature(
+        &env,
+        draft,
+        (
+            "schweigepflicht-signed-scan.pdf",
+            "application/pdf",
+            &scan[..],
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{value}");
+    let signed = Uuid::parse_str(value["document_id"].as_str().unwrap()).unwrap();
+
+    let load = |id: Uuid| {
+        let pool = env.pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, String, String, String)>(
+                "SELECT auto_name, original_filename, document_number, status FROM documents WHERE id=$1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let (draft_name, draft_file, draft_number, draft_status) = load(draft).await;
+    let (signed_name, signed_file, signed_number, signed_status) = load(signed).await;
+    assert_eq!(draft_number, number);
+    assert_eq!(draft_status, "draft");
+    assert_eq!(signed_status, "active");
+    assert_eq!(signed_name, draft_name);
+    assert_eq!(signed_file, draft_file);
+    assert!(!signed_file.contains("schweigepflicht-signed-scan"));
+    assert_eq!(signed_number, format!("{number}-V02"));
+    // The scan's own name stays in the audit trail.
+    assert_eq!(
+        count(
+            &env.pool,
+            "SELECT count(*) FROM audit_log WHERE action='document_paper_signature_recorded'
+               AND context->>'signed_document_id'=$1::text
+               AND context->>'scan_filename' LIKE 'schweigepflicht-signed-scan%'",
+            signed
+        )
+        .await,
+        1
+    );
 }
 
 /// A document generated before the generators recorded their signature places
