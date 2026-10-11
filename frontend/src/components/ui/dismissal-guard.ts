@@ -71,9 +71,30 @@ export function isInternalOverlayInteractionEvent(event: Event | undefined) {
  * behind it (QA 2026-10-10: Escape in the citizenship list asked "close
  * without saving?").
  */
+// Whether a list or picker was open when the last Escape went down. Recorded in
+// the capture phase, before the list closes and leaves the DOM: a searchable
+// list's own input is gone by the time the dialog hears the key (DEV check
+// 2026-10-11: Escape in the service search closed the whole lead wizard).
+let escapeWhileListOpen = false
+if (typeof document !== "undefined") {
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.key === "Escape") {
+        escapeWhileListOpen = document.querySelector(AUXILIARY_OVERLAY_SELECTOR) !== null
+      }
+    },
+    true,
+  )
+}
+
 export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefined) {
   if (reason !== "escape-key" || !event) {
     return false
+  }
+  if (escapeWhileListOpen) {
+    escapeWhileListOpen = false
+    return true
   }
 
   const activeElement =
