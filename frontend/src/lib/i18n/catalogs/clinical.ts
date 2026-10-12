@@ -431,11 +431,11 @@ export const clinicalRu: ClinicalTranslations = {
   appointments_report_returned_at: "Возвращено {date}",
   appointments_own_reports_title: "Мои отчёты и часы",
   appointments_own_reports_hint:
-    "Все ваши отчёты по терминам. Если вас сняли с термина, отчёт остаётся доступен только для чтения.",
+    "Все ваши отчёты по приёмам. Если вас сняли с приёма, отчёт остаётся доступен только для чтения.",
   appointments_own_reports_empty: "Отчётов пока нет.",
   appointments_own_reports_load_error: "Не удалось загрузить отчёты.",
-  appointments_own_reports_read_only: "Вы сняты с термина — отчёт доступен только для чтения",
-  appointments_own_reports_open_appointment: "Открыть термин",
+  appointments_own_reports_read_only: "Вы сняты с приёма — отчёт доступен только для чтения",
+  appointments_own_reports_open_appointment: "Открыть приём",
   appointments_recurring_occurrence_summary:
     "Приём {index} на {date} ({count} {checklistLabel})",
   appointments_edit_recurrence_rule_guidance: "Изменения правила повтора применяются только при выборе «этот и следующие» или «вся серия». Изменение одного приёма не меняет правило серии.",

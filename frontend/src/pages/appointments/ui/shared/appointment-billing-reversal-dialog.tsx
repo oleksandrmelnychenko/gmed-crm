@@ -94,7 +94,7 @@ export function AppointmentBillingReversalDialog() {
       toast.success(
         creditNotes.length > 0
           ? billingReversalSuccessMessage(creditNotes, tx)
-          : tx("Термин отменён, начисление сторнировано.", "Termin abgesagt, Abrechnung storniert."),
+          : tx("Приём отменён, начисление сторнировано.", "Termin abgesagt, Abrechnung storniert."),
       );
       const done = request.onDone;
       closeAppointmentBillingReversal();
@@ -118,11 +118,11 @@ export function AppointmentBillingReversalDialog() {
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
             <DialogTitle>
-              {tx("Отменить термин со сторно начисления", "Termin mit Abrechnungsstorno absagen")}
+              {tx("Отменить приём со сторно начисления", "Termin mit Abrechnungsstorno absagen")}
             </DialogTitle>
             <DialogDescription>
               {tx(
-                `У термина есть утверждённый отчёт переводчика (${request.interpreterName}, ${request.hours} ч). Отчёт остаётся утверждённым, а его начисление сторнируется вместе с отменой термина.`,
+                `У приёма есть утверждённый отчёт переводчика (${request.interpreterName}, ${request.hours} ч). Отчёт остаётся утверждённым, а его начисление сторнируется вместе с отменой приёма.`,
                 `Der Termin hat einen freigegebenen Dolmetscherbericht (${request.interpreterName}, ${request.hours} Std.). Der Bericht bleibt freigegeben; seine Abrechnung wird mit der Absage storniert.`,
               )}
             </DialogDescription>
@@ -186,7 +186,7 @@ export function AppointmentBillingReversalDialog() {
                 {busy ? <LoaderCircle className="size-4 animate-spin" /> : null}
                 {preview?.requires_credit_note
                   ? tx("Выставить кредит-ноту и отменить", "Gutschrift ausstellen und absagen")
-                  : tx("Отменить термин", "Termin absagen")}
+                  : tx("Отменить приём", "Termin absagen")}
               </Button>
             </DialogFooter>
           </form>

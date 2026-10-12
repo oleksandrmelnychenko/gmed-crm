@@ -35,6 +35,7 @@ import { clearApiCache } from "@/lib/api";
 import { formatPluralCount, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
+import { missingDocumentHints } from "./model/portal-required-documents";
 import {
   confirmPortalDocument,
   fetchPortalDocumentsWorkspace,
@@ -221,6 +222,9 @@ function usePatientDocumentsPageContent() {
     version,
   } = documentsState;
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
+  const missingHints = missingDocumentHints(
+    (documentAlerts?.missing_documents ?? []).map((item) => item.key),
+  );
 
   useRealtimeSubscription(PORTAL_DOCUMENT_REALTIME_EVENTS, () => {
     clearApiCache("/me/documents");
@@ -525,9 +529,17 @@ function usePatientDocumentsPageContent() {
                       many: t.portal_documents_missing_required_document_many,
                     })}
                   </p>
-                  <p className="mt-1 text-sm">
-                    {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
-                  </p>
+                  {missingHints.upload || !missingHints.consent ? (
+                    <p className="mt-1 text-sm">
+                      {t.portal_documents_use_the_upload_form_below_to_send_the_missing_items_to_your_care}
+                    </p>
+                  ) : null}
+                  {missingHints.consent ? (
+                    // A consent is signed, not uploaded: GMED sends it.
+                    <p className="mt-1 text-sm" data-testid="portal-documents-consent-hint">
+                      {l("portal_documents_consent_sent_by_gmed")}
+                    </p>
+                  ) : null}
                 </div>
                 {documentAlerts.missing_count > 0 ? (
                   <div className="flex flex-wrap items-center gap-2">

@@ -929,6 +929,34 @@ test.describe("patient portal smoke flows", () => {
     await page.screenshot({ path: testInfo.outputPath("patient-documents-after-passport.png"), fullPage: true });
   });
 
+  test("a missing consent is not sent through the upload form (QA 2026-10-12 B2-13)", async ({ page }) => {
+    await page.route("**/api/v1/me/document-alerts", (route) =>
+      json(route, {
+        configured_rule_count: 2,
+        document_pack_complete: false,
+        stored_document_pack_complete: false,
+        out_of_sync: false,
+        required_documents: [
+          { key: "passport", label: "Reisepass", fulfilled: true, matching_documents: [] },
+          { key: "consent_form", label: "Einverständniserklärung", fulfilled: false, matching_documents: [] },
+        ],
+        missing_documents: [{ key: "consent_form", label: "Einverständniserklärung" }],
+        missing_count: 1,
+      }),
+    );
+
+    await page.goto("/documents");
+    await expect(page.getByText("Es fehlt noch 1 Pflichtdokument.", { exact: true })).toBeVisible();
+    // GMED sends the consent for signing; the upload form is not offered for it.
+    await expect(page.getByTestId("portal-documents-consent-hint")).toContainText(
+      "schickt Ihnen GMED zur Unterschrift",
+    );
+    await expect(
+      page.getByText("Nutzen Sie das Formular unten, um die fehlenden Unterlagen an Ihr Betreuungsteam zu senden."),
+    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Ausweis hochladen", exact: true })).toHaveCount(0);
+  });
+
   test("a list read that answers after the upload does not hide the sent file (QA B-10 d)", async ({ page }) => {
     let holdNextUploadsList = false;
     let markStaleAnswered: () => void = () => {};

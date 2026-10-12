@@ -41,6 +41,7 @@ import {
   makePatientTrustedContactForm,
   normalizePatientContactForms,
   normalizePatientTrustedContactRelation,
+  parseLanguages,
   patientContactFormsToPayload,
   patientTrustedContactsFromRelations,
   type PatientContactFormState,
@@ -58,7 +59,10 @@ import {
 } from "../../model/sheet-forms";
 import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
+  complianceRevocationNote,
+  complianceRevocationText,
   serializePatientLegalStatus,
+  type ComplianceRevocationNote,
   type PatientLegalStatus,
 } from "../../model/legal-status";
 import { LegalStatusPill } from "../shared/legal-status-pill";
@@ -263,6 +267,8 @@ type PatientProfileEditorFormSectionsProps = {
   updateContacts: (contacts: PatientContactFormState[]) => void;
   updateTrustedContacts: (contacts: PatientTrustedContactFormState[]) => void;
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(field: K, value: PatientLegalStatus[K]) => void;
+  /** Why "compliance completed" is off after a revoked consent. */
+  complianceNote: ComplianceRevocationNote | null;
 };
 
 function PatientProfileEditorFormSections({
@@ -277,6 +283,7 @@ function PatientProfileEditorFormSections({
   updateContacts,
   updateTrustedContacts,
   updateLegalStatusField,
+  complianceNote,
 }: PatientProfileEditorFormSectionsProps) {
   const age = computeAge(form.birthDate);
   const isMinor = age !== null && age < 18;
@@ -469,9 +476,11 @@ function PatientProfileEditorFormSections({
                   <LanguageChips
                     value={form.languages}
                     onChange={(next) => updateField("languages", next)}
+                    // The picker's own prompt, as in "New patient" — not the
+                    // free-text hint "e.g. de, uk" (QA 2026-10-12 B2-13).
                     placeholder={
-                      dictionary.uiText?.patients_languages_placeholder ??
-                      "patients_languages_placeholder"
+                      dictionary.uiText?.patients_languages_select_placeholder ??
+                      "patients_languages_select_placeholder"
                     }
                   />
                 </FormField>
@@ -833,9 +842,11 @@ function PatientProfileEditorFormSections({
 
               <PatientProfileLegalStatusSection
                 dictionary={dictionary}
+                lang={lang}
                 form={form}
                 statusLabel={statusLabel}
                 updateLegalStatusField={updateLegalStatusField}
+                complianceNote={complianceNote}
               />
 
               <PatientProfileNotesSections
@@ -849,18 +860,30 @@ function PatientProfileEditorFormSections({
 
 function PatientProfileLegalStatusSection({
   dictionary,
+  lang,
   form,
   statusLabel,
   updateLegalStatusField,
+  complianceNote,
 }: {
   dictionary: Record<string, string> & { uiText?: Record<string, string> };
+  lang: string;
   form: PatientEditFormState;
   statusLabel: (status: string) => string;
   updateLegalStatusField: <K extends keyof PatientLegalStatus>(
     field: K,
     value: PatientLegalStatus[K],
   ) => void;
+  complianceNote: ComplianceRevocationNote | null;
 }) {
+  // "Compliance completed" waits for a consent signed after a revocation
+  // (QA 2026-10-12 B2-13); the server refuses it too.
+  const complianceBlocked =
+    complianceNote?.state === "blocked" && !form.legalStatus.complianceCompleted;
+  const complianceNoteText =
+    complianceNote && !form.legalStatus.complianceCompleted
+      ? complianceRevocationText(complianceNote, lang === "de" ? "de" : "ru")
+      : "";
   type PatientLegalStatusFlag =
     | "dsgvoSigned"
     | "confidentialityReleaseSigned"
@@ -906,31 +929,41 @@ function PatientProfileLegalStatusSection({
       accessory={<LegalStatusPill status={form.legalStatus} />}
     >
       <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-        {legalStatusItems.map((item) => (
-          <label
-            key={item.key}
-            title={item.documentBound ? readOnlyHint : undefined}
-            className={cn(
-              "flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground transition-colors",
-              item.documentBound
-                ? "cursor-not-allowed bg-muted/30 text-muted-foreground"
-                : "cursor-pointer hover:bg-muted/40",
-            )}
-          >
-            <input
-              type="checkbox"
-              checked={Boolean(form.legalStatus[item.key])}
-              disabled={item.documentBound}
-              aria-readonly={item.documentBound ? true : undefined}
-              onChange={(event) => {
-                if (item.documentBound) return;
-                updateLegalStatusField(item.key, event.target.checked);
-              }}
-              className={checkboxClass}
-            />
-            {item.label}
-          </label>
-        ))}
+        {legalStatusItems.map((item) => {
+          const locked =
+            item.documentBound || (item.key === "complianceCompleted" && complianceBlocked);
+          const note = item.key === "complianceCompleted" ? complianceNoteText : "";
+          return (
+            <label
+              key={item.key}
+              title={item.documentBound ? readOnlyHint : note || undefined}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground transition-colors",
+                locked
+                  ? "cursor-not-allowed bg-muted/30 text-muted-foreground"
+                  : "cursor-pointer hover:bg-muted/40",
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={Boolean(form.legalStatus[item.key])}
+                disabled={locked}
+                aria-readonly={locked ? true : undefined}
+                onChange={(event) => {
+                  if (locked) return;
+                  updateLegalStatusField(item.key, event.target.checked);
+                }}
+                className={checkboxClass}
+              />
+              <span className="min-w-0">
+                <span className="block">{item.label}</span>
+                {note ? (
+                  <span className="block text-[11px] leading-4 text-muted-foreground">{note}</span>
+                ) : null}
+              </span>
+            </label>
+          );
+        })}
       </div>
       {readOnlyHint ? (
         <p className="text-xs leading-5 text-muted-foreground">{readOnlyHint}</p>
@@ -1148,10 +1181,8 @@ function PatientProfileEditorSheetContent({
           nationality: form.citizenships[0] ?? form.nationality,
           citizenships: form.citizenships,
           residence_country: form.residenceCountry,
-          languages: form.languages.split(",").flatMap((value) => {
-            const language = value.trim();
-            return language ? [language] : [];
-          }),
+          // The same picker and normalisation as "New patient".
+          languages: parseLanguages(form.languages),
           functional_labels: parseFunctionalLabels(form.functionalLabels),
           address_street: form.addressStreet,
           address_city: form.addressCity,
@@ -1289,6 +1320,7 @@ function PatientProfileEditorSheetContent({
           updateContacts={updateContacts}
           updateTrustedContacts={setTrustedContacts}
           updateLegalStatusField={updateLegalStatusField}
+          complianceNote={detail ? complianceRevocationNote(detail.legal_status) : null}
         />
         </fieldset>
       ) : null}

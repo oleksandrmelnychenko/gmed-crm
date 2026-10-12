@@ -13302,6 +13302,81 @@ async fn profile_edit_names_the_changed_fields_and_is_no_legal_status_change() {
     );
 }
 
+/// QA 2026-10-12 B2-13: the profile editor saves a record that has a
+/// nationality but no citizenship list and no contact rows with the
+/// citizenship filled from the nationality and the phone and e-mail as
+/// contacts. Changing only the phone names only the phone — not
+/// "Citizenships, Contacts, Phone".
+#[tokio::test]
+async fn editor_phone_change_of_an_older_record_names_only_the_phone() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("profile-edit-older-record");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        "UPDATE patients
+         SET nationality = 'DE', phone_primary = '+49 30 1234567',
+             email = 'anna.muster@example.com'
+         WHERE id = $1",
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &bearer,
+        Some(json!({
+            "first_name": format!("First {tag}"),
+            "last_name": format!("Last {tag}"),
+            "birth_date": "1990-01-01",
+            "gender": "diverse",
+            "phone_primary": "+49 30 7654321",
+            "email": "anna.muster@example.com",
+            "contacts": [
+                { "contact_kind": "phone", "contact_type": "private", "value": "+49 30 7654321", "is_primary": true, "notes": "" },
+                { "contact_kind": "email", "contact_type": "private", "value": "anna.muster@example.com", "is_primary": true, "notes": "" }
+            ],
+            "nationality": "DE",
+            "citizenships": ["DE"],
+            "languages": [],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    support::wait_until("update_patient audit row of the editor save", || async {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log
+             WHERE action = 'update_patient' AND entity_type = 'patient' AND entity_id = $1",
+        )
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        count >= 1
+    })
+    .await;
+    let context: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log
+             WHERE action = 'update_patient' AND entity_type = 'patient' AND entity_id = $1
+             ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        context["changed_fields"],
+        json!(["phone_primary"]),
+        "{context}"
+    );
+}
+
 /// Profile saves audited before the timeline named the changed fields (no
 /// `changed_fields`, `legal_status_updated` set on every save of the editor)
 /// read as a plain profile edit; a legacy save that changed the contract

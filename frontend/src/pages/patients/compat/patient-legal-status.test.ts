@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  complianceRevocationNote,
+  complianceRevocationText,
   getPatientLegalStatusCompletion,
   getPatientLegalStatusSummary,
   isPatientLegalStatusComplete,
@@ -175,6 +177,49 @@ describe("normalizePatientLegalStatusEvidence", () => {
     expect(evidence.dsgvo.revokedAt).toBe("2026-10-11T22:30:00+00:00");
     expect(legalStatusDocumentStateText(evidence.dsgvo, "ru")).toBe("Согласие отозвано 12.10.2026");
     expect(legalStatusDocumentStateText(evidence.dsgvo, "de")).toBe("Einwilligung am 12.10.2026 widerrufen");
+  });
+});
+
+describe("compliance completed after a revocation (QA 2026-10-12 B2-13)", () => {
+  it("reads as not completed while a consent stays revoked and says why", () => {
+    // Revoked before the server switched compliance off: still stored true.
+    const legacy = {
+      compliance_completed: true,
+      dsgvo_signed: false,
+      dsgvo_revoked_at: "2026-10-11T22:30:00+00:00",
+    };
+    expect(normalizePatientLegalStatus(legacy).complianceCompleted).toBe(false);
+    const note = complianceRevocationNote(legacy);
+    expect(note).toEqual({ state: "blocked", items: ["dsgvo"], at: "2026-10-11T22:30:00+00:00" });
+    expect(complianceRevocationText(note!, "ru")).toBe(
+      "Можно отметить только после нового подписанного согласия: согласие DSGVO — отзыв 12.10.2026",
+    );
+    expect(complianceRevocationText(note!, "de")).toBe(
+      "Erst nach einer neu unterschriebenen Einwilligung möglich: DSGVO-Einwilligung am 12.10.2026 widerrufen",
+    );
+  });
+
+  it("names the revocation that switched it off once the consent is signed again", () => {
+    const reopened = {
+      compliance_completed: false,
+      dsgvo_signed: true,
+      compliance_reopened_reason: "consent_revoked",
+      compliance_reopened_at: "2026-10-11T22:30:00+00:00",
+      compliance_reopened_items: ["dsgvo_signed", "confidentiality_release_signed"],
+    };
+    const note = complianceRevocationNote(reopened);
+    expect(note).toEqual({
+      state: "reopened",
+      items: ["dsgvo", "confidentiality_release"],
+      at: "2026-10-11T22:30:00+00:00",
+    });
+    expect(complianceRevocationText(note!, "ru")).toBe(
+      "Снято: согласие DSGVO, освобождение от врачебной тайны — отзыв 12.10.2026",
+    );
+    // Ticked again: no note.
+    expect(complianceRevocationNote({ ...reopened, compliance_completed: true })).toBeNull();
+    expect(complianceRevocationNote({ compliance_completed: true, dsgvo_signed: true })).toBeNull();
+    expect(normalizePatientLegalStatus({ compliance_completed: true }).complianceCompleted).toBe(true);
   });
 });
 

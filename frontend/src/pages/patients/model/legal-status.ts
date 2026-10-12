@@ -75,6 +75,27 @@ function readString(record: LegalStatusRecord | null, key: string) {
   return typeof record?.[key] === "string" ? String(record[key]).trim() : "";
 }
 
+/** The document-bound items, their stored flag and the key of their revocation. */
+const REVOCABLE_LEGAL_ITEMS = [
+  { kind: "dsgvo", flagKey: "dsgvo_signed", revokedKey: "dsgvo_revoked_at" },
+  {
+    kind: "confidentiality_release",
+    flagKey: "confidentiality_release_signed",
+    revokedKey: "confidentiality_release_revoked_at",
+  },
+] as const;
+
+/**
+ * The consents the patient revoked and has not signed again (as the server's
+ * `active_consent_revocations`): the item is unticked and its revocation date
+ * is stored.
+ */
+function activeConsentRevocations(record: LegalStatusRecord | null) {
+  return REVOCABLE_LEGAL_ITEMS.filter(
+    (item) => !readBool(record, item.flagKey) && readString(record, item.revokedKey) !== "",
+  ).map((item) => ({ kind: item.kind, revokedAt: readString(record, item.revokedKey) }));
+}
+
 export function normalizePatientLegalStatus(value: unknown): PatientLegalStatus {
   if (typeof value === "string") {
     return {
@@ -91,7 +112,10 @@ export function normalizePatientLegalStatus(value: unknown): PatientLegalStatus 
     confidentialityReleaseSigned: readBool(record, "confidentiality_release_signed"),
     identityVerified: readBool(record, "identity_verified"),
     documentPackComplete: readBool(record, "document_pack_complete"),
-    complianceCompleted: readBool(record, "compliance_completed"),
+    // A revoked consent switches "compliance completed" off (QA 2026-10-12
+    // B2-13); a record revoked before the server did so reads the same.
+    complianceCompleted:
+      readBool(record, "compliance_completed") && activeConsentRevocations(record).length === 0,
     contractStatus:
       PATIENT_CONTRACT_STATUS_OPTIONS.includes(
         contractStatus as (typeof PATIENT_CONTRACT_STATUS_OPTIONS)[number]
@@ -279,6 +303,68 @@ export function legalStatusDocumentStateText(evidence: LegalStatusEvidenceItem, 
     : text("patient_legal_doc_status_signed");
   const sourceKey = evidence.signedDocument ? SIGNATURE_SOURCE_KEYS[evidence.signedDocument.source] : undefined;
   return sourceKey ? `${signed} · ${text(sourceKey)}` : signed;
+}
+
+/**
+ * Why "compliance completed" is off (QA 2026-10-12 B2-13): `blocked` while a
+ * consent it rests on is revoked and not signed again — it cannot be ticked;
+ * `reopened` when a revocation switched it off and the consent is signed
+ * again — staff tick it once more. `null` otherwise.
+ */
+export type ComplianceRevocationNote = {
+  state: "blocked" | "reopened";
+  items: Array<"dsgvo" | "confidentiality_release">;
+  at: string | null;
+};
+
+const REOPENED_ITEM_KINDS: Record<string, "dsgvo" | "confidentiality_release"> = {
+  dsgvo_signed: "dsgvo",
+  confidentiality_release_signed: "confidentiality_release",
+};
+
+export function complianceRevocationNote(value: unknown): ComplianceRevocationNote | null {
+  const record = asRecord(value);
+  const active = activeConsentRevocations(record);
+  if (active.length > 0) {
+    const dates = active.map((item) => item.revokedAt).sort();
+    return {
+      state: "blocked",
+      items: active.map((item) => item.kind),
+      at: dates[dates.length - 1] ?? null,
+    };
+  }
+  if (
+    readString(record, "compliance_reopened_reason") === "consent_revoked" &&
+    !readBool(record, "compliance_completed")
+  ) {
+    const stored = record?.compliance_reopened_items;
+    const items = (Array.isArray(stored) ? stored : []).flatMap((key) => {
+      const kind = typeof key === "string" ? REOPENED_ITEM_KINDS[key] : undefined;
+      return kind ? [kind] : [];
+    });
+    return { state: "reopened", items, at: readNullableString(record, "compliance_reopened_at") };
+  }
+  return null;
+}
+
+/** "Снято: согласие DSGVO — отзыв 12.10.2026" / the blocked hint, in `lang`. */
+export function complianceRevocationText(note: ComplianceRevocationNote, lang: Lang): string {
+  const items = note.items
+    .map((kind) =>
+      uiText(
+        kind === "dsgvo"
+          ? "patient_legal_compliance_item_dsgvo"
+          : "patient_legal_compliance_item_confidentiality",
+        lang,
+      ),
+    )
+    .join(", ");
+  const date = formatAppDate(note.at);
+  return uiText(
+    note.state === "blocked" ? "patient_legal_compliance_blocked" : "patient_legal_compliance_reopened",
+    lang,
+    { items, date },
+  );
 }
 
 export function getPatientLegalStatusSummary(status: PatientLegalStatus) {

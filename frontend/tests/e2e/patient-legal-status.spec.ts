@@ -36,7 +36,14 @@ function patientDetail(releaseSigned: boolean, dsgvoRevoked = false) {
   if (!dsgvoRevoked) return detail;
   return {
     ...detail,
-    legal_status: { ...detail.legal_status, dsgvo_signed: false, dsgvo_revoked_at: revokedDsgvoEvidence.revoked_at },
+    // Compliance was completed before the revocation and is still stored so
+    // (a record revoked before the server switched it off).
+    legal_status: {
+      ...detail.legal_status,
+      dsgvo_signed: false,
+      dsgvo_revoked_at: revokedDsgvoEvidence.revoked_at,
+      compliance_completed: true,
+    },
     legal_status_evidence: { ...detail.legal_status_evidence, dsgvo: revokedDsgvoEvidence },
   };
 }
@@ -159,6 +166,8 @@ const words = {
     revoked: "Согласие отозвано 12.10.2026",
     revokedHint: "Новые заказы заблокированы, пока нет согласия, подписанного после отзыва.",
     revokedBadge: "Отозвано",
+    compliance: "Комплаенс завершен",
+    complianceBlocked: "Можно отметить только после нового подписанного согласия: согласие DSGVO — отзыв 12.10.2026",
   },
   de: {
     manual: "Manuell markiert, kein unterschriebenes Dokument vorhanden",
@@ -181,6 +190,8 @@ const words = {
     revoked: "Einwilligung am 12.10.2026 widerrufen",
     revokedHint: "Neue Aufträge sind gesperrt, bis eine danach unterschriebene Einwilligung vorliegt.",
     revokedBadge: "Widerrufen",
+    compliance: "Compliance vollständig",
+    complianceBlocked: "Erst nach einer neu unterschriebenen Einwilligung möglich: DSGVO-Einwilligung am 12.10.2026 widerrufen",
   },
 } as const;
 
@@ -318,9 +329,15 @@ for (const lang of ["ru", "de"] as const) {
       await expectNoHorizontalScroll(page, width);
       await page.screenshot({ path: `../artifacts/design-qa/patient-legal-status-revoked-${lang}-${width}.png`, animations: "disabled", fullPage: true });
 
+      // "Compliance completed" is off while the consent stays revoked, and
+      // the card says why (QA 2026-10-12 B2-13).
+      await expect(page.getByTestId("legal-status-compliance-note")).toHaveText(w.complianceBlocked);
+
       await page.getByRole("button", { name: w.updateStatus }).click();
       const sheet = page.getByRole("dialog", { name: w.sheetTitle });
       await expect(sheet.getByTestId("legal-status-sheet-document-dsgvo")).toContainText(w.revoked);
+      await expect(sheet.getByTestId("legal-status-sheet-compliance-note")).toHaveText(w.complianceBlocked);
+      await expect(sheet.getByRole("button", { name: new RegExp(`^${w.compliance}`) })).toBeDisabled();
       expect(errors).toEqual([]);
     });
 

@@ -15,7 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
-import { languageName } from "@/components/ui/language-multi-select";
+import { languageLabel } from "@/components/ui/language-multi-select";
 import { apiFetch } from "@/lib/api";
 import { useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -38,6 +38,8 @@ import { usePatientDetailLabels } from "../../model/detail-model";
 import type { DocumentItem, RelationItem } from "../../model/detail-tab-types";
 import {
   DOCUMENT_BOUND_LEGAL_STATUS_ITEMS,
+  complianceRevocationNote,
+  complianceRevocationText,
   normalizePatientLegalStatusEvidence,
   type PatientLegalStatus,
 } from "../../model/legal-status";
@@ -597,6 +599,12 @@ function usePatientProfileTabContent({
     [detail.legal_status_evidence, legalStatus],
   );
   const canActOnLegalDocuments = canEditPatientProfile && canManageDocuments;
+  // Why "compliance completed" is off after a revocation.
+  const complianceNote = complianceRevocationNote(detail.legal_status);
+  const complianceNoteText =
+    complianceNote && !legalStatus.complianceCompleted
+      ? complianceRevocationText(complianceNote, lang)
+      : null;
   const [legalDocumentTemplateId, setLegalDocumentTemplateId] = useState<string | null>(null);
   const legalDocumentPatient = useMemo<DocumentPatientOption | undefined>(
     () =>
@@ -762,9 +770,11 @@ function usePatientProfileTabContent({
           />
           <ProfileSummaryLine
             label={t.patients_languages}
-            // Names, not the stored codes ("Немецкий", not "de"; QA C2-06).
+            // Named as the language picker names them ("Немецкий (de)").
             value={hiddenOr("languages", fieldValue(
-              detail.languages?.map((code) => languageName(code, lang)),
+              detail.languages?.length
+                ? detail.languages.map((code) => languageLabel(code, lang)).join(", ")
+                : null,
               t.common_not_set,
             ))}
             onEdit={editAction}
@@ -1203,7 +1213,8 @@ function usePatientProfileTabContent({
               icon: ClipboardCheck,
               label: l("patients_compliance"),
               value: legalStatus.complianceCompleted ? t.common_completed : t.common_pending,
-              description: l("patients_internal_approval"),
+              // A revocation switched it off: say why (QA 2026-10-12 B2-13).
+              description: complianceNoteText ?? l("patients_internal_approval"),
               iconClass: legalStatus.complianceCompleted
                 ? "bg-emerald-50 text-emerald-700"
                 : "bg-amber-50 text-amber-700",
@@ -1255,7 +1266,21 @@ function usePatientProfileTabContent({
             return (
               <ProfileDetailTile
                 key={item.key}
-                label={item.label}
+                label={
+                  item.key === "compliance" && complianceNoteText ? (
+                    <span className="space-y-0.5">
+                      <span className="block">{item.label}</span>
+                      <span
+                        className="block text-xs font-normal text-muted-foreground"
+                        data-testid="legal-status-compliance-note"
+                      >
+                        {complianceNoteText}
+                      </span>
+                    </span>
+                  ) : (
+                    item.label
+                  )
+                }
                 value={item.done ? t.common_completed : t.common_pending}
                 done={item.done}
               >
@@ -1352,6 +1377,7 @@ function usePatientProfileTabContent({
             patientId={id}
             initial={legalStatus}
             evidence={legalStatusEvidence}
+            complianceNote={complianceNote}
             open={legalStatusSheetOpen}
             onOpenChange={handleLegalStatusSheetOpenChange}
             onSaved={reload}

@@ -303,6 +303,24 @@ export function canLoadPatientAssignableStaff(actor?: Actor) {
 }
 
 /**
+ * `/patients/{id}/label`: CEO, patient manager and the CEO assistant, who
+ * prints the label read-only (owner decision 2026-10-11).
+ */
+const PATIENT_LABEL_SERVER_ROLES: ReadonlySet<string> = new Set([
+  "ceo",
+  "ceo_assistant",
+  "patient_manager",
+]);
+
+/** "Print label" in the patient card. */
+export function canPrintPatientLabel(actor?: Actor) {
+  return (
+    hasCapability(actor, "patients.view") &&
+    serverAdmitsRole(actor, PATIENT_LABEL_SERVER_ROLES)
+  );
+}
+
+/**
  * `/patients/{id}/documents`: the record roles and the CEO assistant, who
  * reads the patient's documents read-only by the same per-document rule as
  * `/documents?patient_id=` (owner decision 2026-10-11).

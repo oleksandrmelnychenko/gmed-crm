@@ -532,6 +532,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   document_archived_not_releasable: "api_document_archived_not_releasable",
   // DSGVO consent and the confidentiality release follow signed documents only (patients.rs).
   legal_status_requires_signed_document: "api_patients_legal_status_requires_signed_document",
+  // "Compliance completed" after a revoked consent (patients.rs).
+  compliance_requires_active_consents: "api_compliance_requires_active_consents",
   // A file whose generated translation was sent or signed keeps both (documents.rs).
   document_translation_delivery_protected: "api_document_translation_delivery_protected",
   // The adult consent form is refused for a minor: the child's form is signed by the parents (documents.rs).

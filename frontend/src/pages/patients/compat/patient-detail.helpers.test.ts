@@ -22,6 +22,7 @@ import {
 } from "./patient-detail.helpers";
 import {
   canLoadPatientAssignableStaff,
+  canPrintPatientLabel,
   canViewPatientAssignmentsSurface,
   isPatientDetailTabReadOnly,
 } from "../model/detail-model";
@@ -340,6 +341,12 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientContractsSurface("ceo_assistant")).toBe(true);
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
     expect(canManagePatientProfile("ceo_assistant")).toBe(false);
+    // The label prints the card read-only (fixb2 follow-up 2026-10-12).
+    expect(canPrintPatientLabel("ceo_assistant")).toBe(true);
+    expect(canPrintPatientLabel("ceo")).toBe(true);
+    expect(canPrintPatientLabel("patient_manager")).toBe(true);
+    expect(canPrintPatientLabel("interpreter")).toBe(false);
+    expect(canPrintPatientLabel("billing")).toBe(false);
     const access = {
       canViewOperationalSurface: canViewPatientOperationalSurface("ceo_assistant"),
       canViewCareHistory: canViewPatientCareHistorySurface("ceo_assistant"),

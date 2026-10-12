@@ -680,6 +680,87 @@ async fn a_revoked_dsgvo_consent_unticks_the_item_and_blocks_new_orders_until_si
     assert_eq!(status, StatusCode::CREATED, "{created}");
 }
 
+/// QA 2026-10-12 B2-13: "Compliance completed" stayed green after the DSGVO
+/// consent was revoked. The revocation switches it off and records why; it
+/// cannot be ticked again until a consent signed after the revocation exists,
+/// and ticking it then drops the note.
+#[tokio::test]
+async fn a_revocation_switches_compliance_completed_off_until_signed_again() {
+    let Some((app, pool, admin_id, ceo)) = test_context().await else {
+        return;
+    };
+    let patient_id = seed_patient(&pool, admin_id, json!({ "compliance_completed": true })).await;
+    support::seed_signed_consent_document(&pool, patient_id, "dsgvo", admin_id).await;
+    let stored = stored_legal_status(&pool, patient_id).await;
+    assert_eq!(stored["compliance_completed"], true, "{stored}");
+
+    revoke_consent(&app, patient_id, "dsgvo_data_transfer", &ceo).await;
+    let stored = stored_legal_status(&pool, patient_id).await;
+    assert_eq!(stored["compliance_completed"], false, "{stored}");
+    assert_eq!(stored["compliance_reopened_reason"], "consent_revoked");
+    assert_eq!(stored["compliance_reopened_items"], json!(["dsgvo_signed"]));
+    assert_eq!(stored["compliance_reopened_at"], stored["dsgvo_revoked_at"]);
+    // The card carries the note.
+    let card = detail(&app, patient_id, &ceo).await;
+    assert_eq!(
+        card["legal_status"]["compliance_reopened_items"],
+        json!(["dsgvo_signed"]),
+        "{card}"
+    );
+
+    // Ticking it again is refused while the consent stays revoked …
+    let profile_save = json!({ "legal_status": {
+        "identity_verified": false, "document_pack_complete": false,
+        "compliance_completed": true, "contract_status": "not_started", "notes": null
+    } });
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &ceo,
+        Some(profile_save.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "compliance_requires_active_consents");
+    assert_eq!(body["items"], json!(["dsgvo_signed"]));
+    // … re-sending it unticked (any other profile save) is fine.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &ceo,
+        Some(json!({ "legal_status": {
+            "identity_verified": true, "document_pack_complete": false,
+            "compliance_completed": false, "contract_status": "not_started", "notes": null
+        } })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // A consent signed after the revocation: compliance can be ticked again
+    // and the note of the revocation goes.
+    let renewed = seed_generated_draft(&pool, patient_id, "privacy_consents", admin_id).await;
+    let (status, body) = sign_on_paper(&app, renewed, &ceo).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &ceo,
+        Some(profile_save),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let stored = stored_legal_status(&pool, patient_id).await;
+    assert_eq!(stored["compliance_completed"], true, "{stored}");
+    assert!(stored.get("compliance_reopened_at").is_none(), "{stored}");
+    assert!(
+        stored.get("compliance_reopened_items").is_none(),
+        "{stored}"
+    );
+}
+
 /// A revoked Schweigepflichtsentbindung unticks only its item; for an
 /// existing customer the re-check names both the missing release and why.
 #[tokio::test]

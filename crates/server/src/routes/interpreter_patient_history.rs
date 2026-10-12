@@ -174,11 +174,16 @@ async fn get_patient_interpreter_history(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = require_history_role(&auth) {
-        return resp;
-    }
-    if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id).await {
-        return resp;
+    // The CEO assistant reads the whole patient card read-only, the
+    // interpreters who worked with the patient included (owner decision
+    // 2026-10-11); setting a preference stays with the roles above.
+    if auth.role != Role::CeoAssistant {
+        if let Err(resp) = require_history_role(&auth) {
+            return resp;
+        }
+        if let Err(resp) = ensure_patient_scope(&state, &auth, patient_id).await {
+            return resp;
+        }
     }
 
     match sqlx::query(

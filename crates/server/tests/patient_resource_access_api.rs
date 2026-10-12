@@ -1557,6 +1557,10 @@ async fn ceo_assistant_reads_every_patient_tab_read_only() {
         "clinical-document-imports",
         "medication-import-history",
         "clinical",
+        // The interpreters who worked with the patient and the printed label
+        // (fixb2 follow-up 2026-10-12).
+        "interpreter-history",
+        "label",
     ] {
         let path = format!("/api/v1/patients/{patient_id}/{tab}");
         let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
@@ -1639,6 +1643,10 @@ async fn ceo_assistant_reads_every_patient_tab_read_only() {
         (
             format!("/api/v1/patients/{patient_id}/update"),
             json!({ "notes": "Assistant note" }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/interpreter-preferences"),
+            json!({ "interpreter_id": manager_id, "preference": "preferred" }),
         ),
     ] {
         let (status, response) = json_request(&app, "POST", &path, &assistant, Some(body)).await;

@@ -3482,11 +3482,14 @@ async fn update_patient(
             .map(|date| date.to_string()),
         "notes": stored_text("notes"),
         "clinical_warnings": stored_text("clinical_warnings"),
-        "citizenships": current
-            .try_get::<Option<Vec<String>>, _>("citizenships")
-            .ok()
-            .flatten()
-            .unwrap_or_default(),
+        "citizenships": shown_citizenships(
+            current
+                .try_get::<Option<Vec<String>>, _>("citizenships")
+                .ok()
+                .flatten()
+                .unwrap_or_default(),
+            stored_text("nationality").as_deref(),
+        ),
     });
     let stored_legal_status: Value = current
         .try_get::<Option<Value>, _>("legal_status")
@@ -3872,6 +3875,24 @@ async fn update_patient(
         }
         None => None,
     };
+    // "Compliance completed" rests on DSGVO consent and the confidentiality
+    // release: while one of them is revoked and not signed again it cannot be
+    // ticked (QA 2026-10-12 B2-13). Re-sending it unticked is accepted.
+    if let Some(next) = legal_status.as_ref()
+        && next.0.get("compliance_completed").and_then(Value::as_bool) == Some(true)
+        && stored_legal_status
+            .get("compliance_completed")
+            .and_then(Value::as_bool)
+            != Some(true)
+    {
+        let revoked: Vec<&str> = active_consent_revocations(&stored_legal_status)
+            .into_iter()
+            .map(|(item, _)| item.key)
+            .collect();
+        if !revoked.is_empty() {
+            return compliance_requires_active_consents(&revoked);
+        }
+    }
     let clinical_warnings_supplied = body.clinical_warnings.is_some();
     let clinical_warnings = match body.clinical_warnings {
         Some(value) => {
@@ -3953,7 +3974,7 @@ async fn update_patient(
     // under Art. 17 DSGVO, so it keeps no copy of the patient's data.
     let mut changed_fields = changed_profile_fields(&profile_before, &profile_after);
     if let Some(contacts) = normalized_contacts.as_ref() {
-        match sqlx::query_as::<_, (String, String, String, bool, Option<String>)>(
+        match sqlx::query_as::<_, ProfileContact>(
             "SELECT contact_kind, contact_type, value, is_primary, notes
              FROM patient_contacts WHERE patient_id = $1",
         )
@@ -3961,8 +3982,37 @@ async fn update_patient(
         .fetch_all(&state.db)
         .await
         {
-            Ok(mut stored) => {
-                let mut next = contacts
+            Ok(stored) => {
+                // A record without contact rows shows its phone and e-mail
+                // fields as contacts, and the editor sends them back so.
+                let stored: Vec<ProfileContact> = if stored.is_empty() {
+                    let legacy = |key: &str| {
+                        profile_before
+                            .get(key)
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    };
+                    normalize_patient_contacts(
+                        None,
+                        legacy("phone_primary").as_deref(),
+                        legacy("phone_secondary").as_deref(),
+                        legacy("email").as_deref(),
+                    )
+                    .into_iter()
+                    .map(|contact| {
+                        (
+                            contact.contact_kind,
+                            contact.contact_type,
+                            contact.value,
+                            contact.is_primary,
+                            contact.notes,
+                        )
+                    })
+                    .collect()
+                } else {
+                    stored
+                };
+                let next = contacts
                     .iter()
                     .map(|contact| {
                         (
@@ -3974,9 +4024,12 @@ async fn update_patient(
                         )
                     })
                     .collect::<Vec<_>>();
-                stored.sort();
-                next.sort();
-                if stored != next {
+                if contact_list_changed_beyond_legacy_fields(
+                    &stored,
+                    &next,
+                    &profile_before,
+                    &profile_after,
+                ) {
                     changed_fields.push("contacts".to_string());
                     changed_fields.sort();
                 }
@@ -4022,6 +4075,14 @@ async fn update_patient(
             emergency_contact_phone = $22,
             emergency_contact_relation = $23,
             legal_status = CASE WHEN $24::jsonb IS NULL THEN legal_status
+                                -- Ticking "compliance completed" again drops the
+                                -- note of the revocation that switched it off.
+                                WHEN ($24::jsonb->'compliance_completed') = 'true'::jsonb
+                                THEN (COALESCE(legal_status, '{}'::jsonb)
+                                      - ARRAY['compliance_reopened_at',
+                                              'compliance_reopened_reason',
+                                              'compliance_reopened_items']::text[])
+                                     || $24::jsonb
                                 ELSE COALESCE(legal_status, '{}'::jsonb) || $24::jsonb END,
             notes = $25,
             clinical_warnings = CASE WHEN $26 THEN $27 ELSE clinical_warnings END,
@@ -6573,9 +6634,14 @@ fn profile_value_blank(value: Option<&Value>) -> bool {
     }
 }
 
+/// Profile fields holding a country: an older record keeps a name
+/// ("Deutschland"), the form sends the ISO code ("DE") for the same country.
+const PROFILE_COUNTRY_FIELDS: &[&str] = &["nationality", "residence_country", "address_country"];
+
 /// The keys of `after` whose value differs from `before`, sorted. Blank and
-/// missing values are the same ("" = null = []). Used for the audit of a
-/// profile save, which records field names only.
+/// missing values are the same ("" = null = []), and a country name and its
+/// ISO code are the same country. Used for the audit of a profile save, which
+/// records field names only.
 pub(crate) fn changed_profile_fields(before: &Value, after: &Value) -> Vec<String> {
     let Value::Object(after) = after else {
         return Vec::new();
@@ -6588,6 +6654,17 @@ pub(crate) fn changed_profile_fields(before: &Value, after: &Value) -> Vec<Strin
                 return false;
             }
             match (previous, value) {
+                (Some(Value::String(old)), Value::String(new))
+                    if PROFILE_COUNTRY_FIELDS.contains(&key.as_str()) =>
+                {
+                    match (
+                        crate::sanctions::normalize::country_code(old),
+                        crate::sanctions::normalize::country_code(new),
+                    ) {
+                        (Some(old_code), Some(new_code)) => old_code != new_code,
+                        _ => old.trim() != new.trim(),
+                    }
+                }
                 (Some(Value::String(old)), Value::String(new)) => old.trim() != new.trim(),
                 (previous, value) => previous != Some(*value),
             }
@@ -6596,6 +6673,75 @@ pub(crate) fn changed_profile_fields(before: &Value, after: &Value) -> Vec<Strin
         .collect::<Vec<_>>();
     changed.sort();
     changed
+}
+
+/// The citizenships the card shows before a save: the stored list, or for a
+/// record without one (created before several citizenships existed, or by
+/// the create form, which asks for the nationality) the nationality as its
+/// ISO code — the profile editor fills the list the same way, so saving it
+/// unchanged is no citizenship change (QA 2026-10-12 B2-13).
+fn shown_citizenships(stored: Vec<String>, nationality: Option<&str>) -> Vec<String> {
+    if !stored.is_empty() {
+        return stored;
+    }
+    nationality
+        .and_then(crate::sanctions::normalize::country_code)
+        .map(|code| vec![code])
+        .unwrap_or_default()
+}
+
+/// A stored or sent patient contact: kind, type, value, primary, notes.
+type ProfileContact = (String, String, String, bool, Option<String>);
+
+/// Whether a contact list save changed more than the phone and e-mail fields
+/// already name (QA 2026-10-12 B2-13: a phone change was listed as
+/// "Contacts, Phone"). The primary phone, second phone and e-mail mirror
+/// contacts: a changed one explains the contact it removed and the one it
+/// added. Anything else — another contact, a changed type or note — is a
+/// change of the contacts.
+fn contact_list_changed_beyond_legacy_fields(
+    stored: &[ProfileContact],
+    next: &[ProfileContact],
+    before: &Value,
+    after: &Value,
+) -> bool {
+    let mut removed: Vec<&ProfileContact> =
+        stored.iter().filter(|row| !next.contains(row)).collect();
+    let mut added: Vec<&ProfileContact> = next.iter().filter(|row| !stored.contains(row)).collect();
+    let text = |profile: &Value, key: &str| {
+        profile
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
+    for (field, kind) in [
+        ("phone_primary", "phone"),
+        ("phone_secondary", "phone"),
+        ("email", "email"),
+    ] {
+        let old = text(before, field);
+        let new = text(after, field);
+        if old == new {
+            continue;
+        }
+        if let Some(old) = old
+            && let Some(index) = removed
+                .iter()
+                .position(|row| row.0 == kind && row.2.trim() == old)
+        {
+            removed.remove(index);
+        }
+        if let Some(new) = new
+            && let Some(index) = added
+                .iter()
+                .position(|row| row.0 == kind && row.2.trim() == new)
+        {
+            added.remove(index);
+        }
+    }
+    !removed.is_empty() || !added.is_empty()
 }
 
 /// The keys of a normalized legal status (`normalize_legal_status`) whose
@@ -6661,6 +6807,80 @@ mod profile_change_tests {
             changed_profile_fields(&before, &added),
             vec!["email", "languages"]
         );
+    }
+
+    /// QA 2026-10-12 B2-13: a phone change of a record created with a
+    /// nationality only was listed as "Citizenships, Contacts, Phone".
+    #[test]
+    fn a_phone_change_of_an_older_record_names_only_the_phone() {
+        use super::{contact_list_changed_beyond_legacy_fields, shown_citizenships};
+        let before = json!({
+            "phone_primary": "+49 30 1234567", "email": "anna.muster@example.com",
+            "nationality": "Deutschland",
+            "citizenships": shown_citizenships(Vec::new(), Some("Deutschland")),
+        });
+        let after = json!({
+            "phone_primary": "+49 30 7654321", "email": "anna.muster@example.com",
+            "nationality": "DE", "citizenships": ["DE"],
+        });
+        assert_eq!(
+            changed_profile_fields(&before, &after),
+            vec!["phone_primary"]
+        );
+        assert_eq!(
+            shown_citizenships(vec!["UA".into(), "DE".into()], Some("DE")),
+            vec!["UA", "DE"]
+        );
+        assert!(shown_citizenships(Vec::new(), None).is_empty());
+        // A real change of the nationality still counts.
+        let moved = json!({ "nationality": "AT", "citizenships": ["AT"] });
+        assert_eq!(
+            changed_profile_fields(&before, &moved),
+            vec!["citizenships", "nationality"]
+        );
+
+        let contact = |kind: &str, value: &str, primary: bool| {
+            (
+                kind.to_string(),
+                "private".to_string(),
+                value.to_string(),
+                primary,
+                None::<String>,
+            )
+        };
+        let stored = vec![
+            contact("phone", "+49 30 1234567", true),
+            contact("email", "anna.muster@example.com", true),
+        ];
+        let next = vec![
+            contact("phone", "+49 30 7654321", true),
+            contact("email", "anna.muster@example.com", true),
+        ];
+        // The new phone is the phone field's change, not a contact change.
+        assert!(!contact_list_changed_beyond_legacy_fields(
+            &stored, &next, &before, &after
+        ));
+        // A work number added next to it is.
+        let mut with_work = next.clone();
+        with_work.push((
+            "phone".to_string(),
+            "work".to_string(),
+            "+49 30 5550401".to_string(),
+            false,
+            None,
+        ));
+        assert!(contact_list_changed_beyond_legacy_fields(
+            &stored, &with_work, &before, &after
+        ));
+        // A changed note on an unchanged number too.
+        let mut noted = stored.clone();
+        noted[0].4 = Some("nur abends".to_string());
+        assert!(contact_list_changed_beyond_legacy_fields(
+            &stored, &noted, &before, &before
+        ));
+        assert!(!contact_list_changed_beyond_legacy_fields(
+            &stored, &stored, &before, &before
+        ));
     }
 
     #[test]
@@ -6849,17 +7069,44 @@ where
     if withdrawn.is_empty() {
         return Ok(withdrawn);
     }
+    // "Compliance completed" rests on these consents: a revocation switches
+    // it off and records why, for the card (QA 2026-10-12 B2-13). Staff tick
+    // it again once a consent signed after the revocation exists.
     sqlx::query(
         r#"UPDATE patients
-           SET legal_status = COALESCE(legal_status, '{}'::jsonb) || $2,
+           SET legal_status = COALESCE(legal_status, '{}'::jsonb) || $2
+                   || CASE WHEN COALESCE(legal_status, '{}'::jsonb)->'compliance_completed'
+                                = 'true'::jsonb
+                           THEN jsonb_build_object(
+                                    'compliance_completed', false,
+                                    'compliance_reopened_at', $3::text,
+                                    'compliance_reopened_reason', 'consent_revoked',
+                                    'compliance_reopened_items', $4::jsonb)
+                           ELSE '{}'::jsonb END,
                updated_at = now()
            WHERE id = $1"#,
     )
     .bind(patient_id)
     .bind(Value::Object(patch))
+    .bind(revoked_at.to_rfc3339())
+    .bind(json!(withdrawn))
     .execute(executor)
     .await?;
     Ok(withdrawn)
+}
+
+/// 409 for ticking "compliance completed" while a consent it rests on is
+/// revoked and not signed again (QA 2026-10-12 B2-13).
+fn compliance_requires_active_consents(items: &[&str]) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "compliance_requires_active_consents",
+            "message": "Compliance can be completed only once the revoked consent is signed again",
+            "items": items,
+        })),
+    )
+        .into_response()
 }
 
 /// The document-bound consents the patient revoked and has not signed again:
@@ -9115,7 +9362,9 @@ async fn get_patient_label(
     Path(patient_uuid): Path<Uuid>,
     Query(query): Query<PatientLabelQuery>,
 ) -> Result<Json<Value>, axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    // Printing the patient label reads the card: the CEO assistant may print
+    // it too (read-only role, owner decision 2026-10-11).
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::CeoAssistant])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let format = resolve_patient_label_format(query.format.as_deref())?;

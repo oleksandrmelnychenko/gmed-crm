@@ -236,7 +236,7 @@ describe("concierge expense and service request notifications", () => {
       body: "Hotel Adlon · Adlon. Buchung behalten oder Service stornieren",
     });
     expect(localizedNotificationCopy(notice("concierge_booking_decision", body), "ru").title)
-      .toBe("Термин отменён — проверьте бронирование консьержа");
+      .toBe("Приём отменён — проверьте бронирование консьержа");
   });
 });
 

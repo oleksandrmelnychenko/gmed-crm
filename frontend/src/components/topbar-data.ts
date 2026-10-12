@@ -453,8 +453,8 @@ function conciergeBookingDecisionNotificationCopy(
       ? "Termin geändert – Concierge-Buchung prüfen"
       : "Termin abgesagt – Concierge-Buchung prüfen"
     : changed
-      ? "Термин изменён — проверьте бронирование консьержа"
-      : "Термин отменён — проверьте бронирование консьержа";
+      ? "Приём изменён — проверьте бронирование консьержа"
+      : "Приём отменён — проверьте бронирование консьержа";
   if (!data) return { title, body: item.body };
   const slot = data.starts_at ? formatAppDateTime(data.starts_at) : "";
   const hint = lang === "de"

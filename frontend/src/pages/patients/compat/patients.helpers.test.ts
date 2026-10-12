@@ -78,6 +78,9 @@ describe("parseLanguages", () => {
   it("filters empty entries", () => {
     expect(parseLanguages("en,,de,")).toEqual(["en", "de"]);
   });
+  it("sends codes in lower case once and keeps an older name as stored", () => {
+    expect(parseLanguages(" DE, de, Uk , Русский, русский")).toEqual(["de", "uk", "Русский"]);
+  });
 });
 
 describe("computeAge", () => {

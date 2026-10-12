@@ -501,10 +501,21 @@ export function patientContactFormsToPayload(contacts: PatientContactFormState[]
   };
 }
 
+/**
+ * The languages of the language picker as the server stores them, the same
+ * for "New patient" and the profile editor (QA 2026-10-12 B2-13): ISO codes
+ * in lower case, each once. A value an older record keeps as a name
+ * ("Русский") is sent back unchanged, so the server keeps it.
+ */
 export function parseLanguages(value: string) {
+  const seen = new Set<string>();
   return value.split(",").flatMap((item) => {
     const trimmed = item.trim();
-    return trimmed ? [trimmed] : [];
+    const language = /^[A-Za-z]{2,3}$/.test(trimmed) ? trimmed.toLowerCase() : trimmed;
+    const key = language.toLocaleLowerCase();
+    if (!language || seen.has(key)) return [];
+    seen.add(key);
+    return [language];
   });
 }
 

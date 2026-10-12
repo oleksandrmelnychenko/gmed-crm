@@ -15,9 +15,11 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
+  complianceRevocationText,
   legalStatusDocumentStateText,
   normalizePatientLegalStatusEvidence,
   serializePatientLegalStatus,
+  type ComplianceRevocationNote,
   type PatientLegalStatus,
   type PatientLegalStatusEvidence,
   useLegalStatusLabels,
@@ -47,6 +49,7 @@ export function PatientLegalStatusSheet({
   patientId,
   initial,
   evidence,
+  complianceNote = null,
   open,
   onOpenChange,
   onSaved,
@@ -55,6 +58,8 @@ export function PatientLegalStatusSheet({
   initial: PatientLegalStatus;
   /** The signed documents behind DSGVO consent and the confidentiality release. */
   evidence?: PatientLegalStatusEvidence;
+  /** Why "compliance completed" is off after a revocation (`complianceRevocationNote`). */
+  complianceNote?: ComplianceRevocationNote | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
@@ -65,6 +70,7 @@ export function PatientLegalStatusSheet({
       patientId={patientId}
       initial={initial}
       evidence={evidence ?? normalizePatientLegalStatusEvidence(undefined, initial)}
+      complianceNote={complianceNote}
       open={open}
       onOpenChange={onOpenChange}
       onSaved={onSaved}
@@ -76,6 +82,7 @@ function PatientLegalStatusSheetContent({
   patientId,
   initial,
   evidence,
+  complianceNote,
   open,
   onOpenChange,
   onSaved,
@@ -83,6 +90,7 @@ function PatientLegalStatusSheetContent({
   patientId: string;
   initial: PatientLegalStatus;
   evidence: PatientLegalStatusEvidence;
+  complianceNote: ComplianceRevocationNote | null;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
@@ -212,19 +220,36 @@ function PatientLegalStatusSheetContent({
           </p>
           {checklist.map((item) => {
             const active = form[item.key];
+            // "Compliance completed" waits for a consent signed after the
+            // revocation (QA 2026-10-12 B2-13); the server refuses it too.
+            const note = item.key === "complianceCompleted" ? complianceNote : null;
+            const blocked = note?.state === "blocked" && !active;
             return (
               <button
                 key={item.key}
                 type="button"
                 onClick={() => toggle(item.key)}
+                disabled={blocked}
+                aria-disabled={blocked || undefined}
                 className={cn(
                   "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors",
                   active
                     ? "border-emerald-200 bg-emerald-50 text-emerald-900 hover:bg-emerald-100"
                     : "border-border/60 bg-card text-foreground hover:bg-muted/40",
+                  blocked && "cursor-not-allowed opacity-80 hover:bg-card",
                 )}
               >
-                <span>{item.label}</span>
+                <span className="min-w-0 space-y-0.5">
+                  <span className="block">{item.label}</span>
+                  {note && !active ? (
+                    <span
+                      className="block break-words text-xs text-muted-foreground"
+                      data-testid="legal-status-sheet-compliance-note"
+                    >
+                      {complianceRevocationText(note, lang)}
+                    </span>
+                  ) : null}
+                </span>
                 <span
                   className={cn(
                     "inline-flex size-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",

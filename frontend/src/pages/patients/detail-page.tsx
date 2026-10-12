@@ -64,6 +64,7 @@ import {
   canManagePatientProfile,
   canLoadPatientAssignableStaff,
   canOpenPatientDocumentsWorkspace,
+  canPrintPatientLabel as canPrintPatientLabelFor,
   canViewPatientAppointmentsSurface,
   canViewPatientAssignmentsSurface,
   canViewPatientCareHistorySurface,
@@ -1179,7 +1180,7 @@ function usePatientDetailPageContent() {
   const canEditPatientProfile = canManagePatientProfile(user);
   const canExportPatientCompliance = canManagePatientProfile(user);
   const canOpenComplianceWorkspace = canManagePatientProfile(user);
-  const canPrintPatientLabel = hasCapability(user, "patients.edit");
+  const canPrintPatientLabel = canPrintPatientLabelFor(user);
   const canManageWorkflowChecklist =
     hasCapability(user, "patients.edit") || hasCapability(user, "services.edit");
   const deferredTimelineSearch = useDeferredValue(timelineSearch);
