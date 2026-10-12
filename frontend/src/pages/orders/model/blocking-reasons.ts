@@ -316,6 +316,19 @@ export function orderBlockingReasonAnchor(reason: string): string | null {
  * Order workspace section where a lifecycle blocker is resolved; the "Open"
  * link of the blocker list navigates there. Reasons are the server's texts.
  */
+/**
+ * Blockers about patient billing: approved services without an invoice,
+ * draft or unpaid patient invoices. They are resolved on the patient invoices
+ * page, not on the order's supplier-invoice section.
+ */
+export function isPatientInvoiceBlockingReason(reason: string): boolean {
+  return (
+    /^\d+ approved service item\(s\) are not invoiced yet$/.test(reason) ||
+    /^\d+ draft patient invoice\(s\) are not issued yet$/.test(reason) ||
+    /^Patient invoice .+ is not paid yet \(\w+\)$/.test(reason)
+  );
+}
+
 export function orderBlockingReasonSection(reason: string): OrderSectionKey {
   if (
     PLANNING_REASONS.has(reason) ||
@@ -336,11 +349,7 @@ export function orderBlockingReasonSection(reason: string): OrderSectionKey {
     return "services";
   }
   // Open billing is closed on the invoices section of the order.
-  if (
-    /^\d+ approved service item\(s\) are not invoiced yet$/.test(reason) ||
-    /^\d+ draft patient invoice\(s\) are not issued yet$/.test(reason) ||
-    /^Patient invoice .+ is not paid yet \(\w+\)$/.test(reason)
-  ) {
+  if (isPatientInvoiceBlockingReason(reason)) {
     return "invoices";
   }
   if (EXECUTION_REASONS.has(reason)) return "execution";

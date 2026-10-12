@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isOrderReadinessGateApplicable,
+  isPatientInvoiceBlockingReason,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
@@ -146,7 +147,10 @@ describe("orderBlockingReasonSection", () => {
       "Patient invoice RE-2026-0007 is not paid yet (overdue)",
     ]) {
       expect(orderBlockingReasonSection(reason), reason).toBe("invoices");
+      expect(isPatientInvoiceBlockingReason(reason), reason).toBe(true);
     }
+    expect(isPatientInvoiceBlockingReason("2 service item(s) are not approved or invoiced")).toBe(false);
+    expect(isPatientInvoiceBlockingReason("4 workflow checklist item(s) are still open")).toBe(false);
     expect(resolveOrderBlockingReason("2 approved service item(s) are not invoiced yet")).toEqual({
       key: "orders_blocking_approved_services_uninvoiced_count",
       values: { count: 2 },

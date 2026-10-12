@@ -131,9 +131,10 @@ function orderTotal(page: Page) {
   return page.locator("dt", {hasText:/^Сумма заказа$/}).first().locator("xpath=following-sibling::dd");
 }
 
+// The status transitions sit in a menu; its items are menuitems.
 async function openOrderActions(page: Page) {
-  const summary = page.locator("summary", {hasText:"Управление заказом"});
-  if (await summary.locator("xpath=..").getAttribute("open") === null) await summary.click();
+  await page.getByRole("button", {name:"Управление заказом"}).click();
+  await expect(page.getByRole("menu")).toBeVisible();
 }
 
 for (const lang of ["ru", "de"]) {
@@ -429,12 +430,13 @@ test("successful phase and status changes update the workspace", async ({page}) 
   await page.goto(`/orders/${orderId}`);
   // Status changes live in the "Управление заказом" menu; a blocked one stays disabled.
   await openOrderActions(page);
-  await expect(page.getByRole("button", {name:"Завершить", exact:true})).toBeDisabled();
+  await expect(page.getByRole("menuitem", {name:/^Завершить/})).toBeDisabled();
+  await page.keyboard.press("Escape");
   await page.getByRole("button", {name:/Перейти в Исполнение/}).click();
   await expect.poll(() => order.phase).toBe("execution");
   await expect(page.locator('[data-workspace-rail="order"]').getByRole("link", {name:"Исполнение", exact:true})).toBeVisible();
   await openOrderActions(page);
-  await page.getByRole("button", {name:"Приостановить", exact:true}).click();
+  await page.getByRole("menuitem", {name:/^Приостановить/}).click();
   await expect.poll(() => order.status).toBe("paused");
   await expect(page.getByRole("button", {name:/Перейти в Исполнение/})).toBeDisabled();
   expect(writes.filter(write => write.path.endsWith("/phase"))).toHaveLength(1);
@@ -688,7 +690,7 @@ test("cancelling an order needs a reason and shows what is cancelled and what st
   }}));
   await page.goto(`/orders/${orderId}`);
   await openOrderActions(page);
-  await page.getByRole("button", {name:"Отменить", exact:true}).click();
+  await page.getByRole("menuitem", {name:/^Отменить/}).click();
   const dialog = page.getByRole("dialog", {name:"Отменить заказ", exact:true});
   const preview = dialog.getByTestId("order-cancellation-preview");
   await expect(preview).toContainText("Запланированные услуги: 1");
@@ -722,7 +724,11 @@ test("follow-up blockers open the milestone planner, which plans and creates the
     closure_anchor_at:"2026-09-28T10:00:00+02:00", reminder_anchor_appointment_id:"appointment-anchor",
     blocking_reasons:[reason],
   });
+  // The blockers list lives in the "Что нужно сделать" section; the header
+  // only counts them and links there.
   await page.goto(`/orders/${orderId}`);
+  await expect(page.getByText("До следующего этапа осталось: 1", {exact:true})).toBeVisible();
+  await page.getByRole("link", {name:"Что нужно сделать"}).first().click();
   await page.getByRole("button", {name:/Недельный контроль ещё не запланирован/}).click();
   const planner = page.getByTestId("order-followup-milestones");
   await expect(planner).toBeInViewport();
@@ -749,9 +755,8 @@ test("an order has no billing release step: blockers open their section", async 
   Object.assign(order.process_gates, {execution_ready:false, blocking_reasons:[reason]});
   Object.assign(order.lifecycle, {allowed_transitions:[{phase:"execution", blocked:true, reasons:[reason]}]});
   await page.route("**/api/v1/me", route => route.fulfill({json:{id:"pm-user", email:"pm@example.org", name:"PM QA", role:"patient_manager", created_at:"2026-01-01T00:00:00Z"}}));
-  await page.goto(`/orders/${orderId}`);
-  await expect(page.getByRole("button", {name:/Подписи по заказу/})).toBeVisible();
   await page.goto(`/orders/${orderId}?section=gates`);
+  await expect(page.getByRole("button", {name:/Подписи по заказу/})).toBeVisible();
   await expect(page.getByText("Покрытие пакетом").first()).toBeVisible();
   await expect(page.getByText(/Разрешение бухгалтерии|Ждёт бухгалтерию/)).toHaveCount(0);
 });

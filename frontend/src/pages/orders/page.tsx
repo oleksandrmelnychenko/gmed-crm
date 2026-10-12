@@ -1,5 +1,6 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { OrderWorkspaceNav } from "@/components/order-workspace-nav";
+import { StaffLink } from "@/components/staff-link";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
   startTransition,
@@ -48,7 +49,8 @@ import {
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { OverflowMenu } from "@/components/ui/overflow-menu";
 import { Input } from "@/components/ui/input";
 import { ToolbarField } from "@/components/data-table/toolbar-field";
 import {
@@ -123,6 +125,7 @@ import {
 } from "./sections";
 import {
   isOrderReadinessGateApplicable,
+  isPatientInvoiceBlockingReason,
   orderBlockingReasonAnchor,
   orderBlockingReasonSection,
   resolveOrderBlockingReason,
@@ -558,7 +561,6 @@ type OrdersPageState = {
   workflowAssignments: PatientAssignmentOption[];
   detailLoading: boolean;
   detailError: string | null;
-  phaseDraft: string;
   phaseSaving: boolean;
   phaseError: string | null;
   approvingLeistungId: string | null;
@@ -993,7 +995,6 @@ function useOrdersPageContent() {
       workflowAssignments: [],
       detailLoading: false,
       detailError: null,
-      phaseDraft: "",
       phaseSaving: false,
       phaseError: null,
       approvingLeistungId: null,
@@ -1072,7 +1073,6 @@ function useOrdersPageContent() {
     orders,
     patients,
     taxonomyNodes,
-    phaseDraft,
     phaseError,
     phaseSaving,
     planningBusy,
@@ -1117,7 +1117,6 @@ function useOrdersPageContent() {
   const followupDirty = Boolean(orderDetail) && hasFormChanges(
     followupForm, orderFollowupToForm(orderDetail?.followup_flow),
   );
-  const phaseDirty = Boolean(orderDetail) && phaseDraft !== orderDetail?.phase;
   const phaseAdvancePending = useRef(false);
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -1206,8 +1205,6 @@ function useOrdersPageContent() {
     setOrdersPageField("detailLoading", nextValue);
   const setDetailError = (nextValue: SetStateAction<string | null>) =>
     setOrdersPageField("detailError", nextValue);
-  const setPhaseDraft = (nextValue: SetStateAction<string>) =>
-    setOrdersPageField("phaseDraft", nextValue);
   const setPhaseSaving = (nextValue: SetStateAction<boolean>) =>
     setOrdersPageField("phaseSaving", nextValue);
   const setPhaseError = (nextValue: SetStateAction<string | null>) =>
@@ -1641,22 +1638,48 @@ function useOrdersPageContent() {
   ]);
   const canManageDebt = hasCapability(user, "orders.economics");
   const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
+  const orderWorkspaceTopRef = useRef<HTMLDivElement>(null);
+  // Set while a blocker opens a section and scrolls to one of its controls,
+  // so the section change itself does not scroll to the top as well.
+  const pendingOrderAnchorRef = useRef<string | null>(null);
   // Scrolls to an element of the section that is being opened; it renders
   // after the navigation, so wait a few frames for it.
   const scrollToOrderAnchor = useCallback((elementId: string) => {
+    pendingOrderAnchorRef.current = elementId;
     let frames = 0;
     const tick = () => {
+      if (pendingOrderAnchorRef.current !== elementId) return;
       const element = document.getElementById(elementId);
       if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
+        pendingOrderAnchorRef.current = null;
+        element.scrollIntoView?.({ behavior: "smooth", block: "start" });
         return;
       }
       frames += 1;
-      if (frames < 30) window.requestAnimationFrame(tick);
-      else orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (frames < 30) {
+        window.requestAnimationFrame(tick);
+      } else {
+        pendingOrderAnchorRef.current = null;
+        orderSectionAnchorRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+      }
     };
     window.requestAnimationFrame(tick);
   }, []);
+  // Another section opened from the rail starts at the top of the workspace,
+  // header first; otherwise the previous scroll offset lands somewhere in the
+  // middle of the new section.
+  const previousOrderSectionRef = useRef<OrderSectionKey | null>(null);
+  useEffect(() => {
+    if (!isOrderRouteDetail) {
+      previousOrderSectionRef.current = null;
+      return;
+    }
+    const previous = previousOrderSectionRef.current;
+    previousOrderSectionRef.current = activeOrderSection;
+    if (previous === null || previous === activeOrderSection) return;
+    if (pendingOrderAnchorRef.current) return;
+    orderWorkspaceTopRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [activeOrderSection, isOrderRouteDetail]);
   const shouldRenderOrderSection = (section: OrderSectionKey) =>
     !isOrderRouteDetail || activeOrderSection === normalizeOrderSectionKey(section);
 
@@ -1693,7 +1716,6 @@ function useOrdersPageContent() {
     setWorkflowAssignments([]);
     setWorkflowCreateOpen(false);
     setDetailError(null);
-    setPhaseDraft("");
     setProcessGateError(null);
     setProcessGateForm(blankOrderProcessGateForm());
   }, []);
@@ -2014,7 +2036,6 @@ function useOrdersPageContent() {
     setGeneratingServiceGroupId(null);
     setWorkflowChecklist(null);
     setWorkflowAssignments([]);
-    setPhaseDraft("");
     setProcessGateForm(blankOrderProcessGateForm());
     setProcessGateError(null);
     setPlanningForm(blankOrderPlanningForm());
@@ -2043,7 +2064,6 @@ function useOrdersPageContent() {
         orderDocuments: workspace.documents,
         workflowChecklist: workspace.workflow,
         workflowAssignments: workspace.assignments,
-        phaseDraft: sameOrder && current.phaseDraft !== previous?.phase ? current.phaseDraft : workspace.detail.phase,
         processGateForm: merge(current.processGateForm, orderProcessGatesToForm(previous?.process_gates), orderProcessGatesToForm(workspace.detail.process_gates)),
         planningForm: merge(current.planningForm, orderPlanningToForm(previous?.planning_preparation), orderPlanningToForm(workspace.detail.planning_preparation)),
         executionForm: merge(current.executionForm, orderExecutionToForm(previous?.execution_flow), orderExecutionToForm(workspace.detail.execution_flow)),
@@ -2624,41 +2644,6 @@ function useOrdersPageContent() {
       );
     } finally {
       setCreateSaving(false);
-    }
-  }
-
-  async function handleSavePhase() {
-    if (!selectedOrderId || !phaseDraft || phaseDraft === orderDetail?.phase || phaseSaving || statusSaving) {
-      return;
-    }
-    if (
-      orderDetail?.lifecycle?.next_stage &&
-      phaseDraft !== orderDetail.lifecycle.next_stage
-    ) {
-      setPhaseError(
-        l("orders_error_only_next_lifecycle_phase", {
-          phase: orderDetail.lifecycle.next_stage,
-        }),
-      );
-      return;
-    }
-
-    setPhaseSaving(true);
-    setPhaseError(null);
-    try {
-      await updateOrderPhase(selectedOrderId, phaseDraft);
-      window.dispatchEvent(
-        new CustomEvent("gmed:order-phase-changed", {
-          detail: { orderId: selectedOrderId, phase: phaseDraft },
-        }),
-      );
-      triggerReload();
-    } catch (error) {
-      setPhaseError(
-        error instanceof Error ? error.message : l("orders_error_update_phase"),
-      );
-    } finally {
-      setPhaseSaving(false);
     }
   }
 
@@ -3405,7 +3390,7 @@ function useOrdersPageContent() {
     : [];
 
   return (
-    <div className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
+    <div ref={orderWorkspaceTopRef} className={cn("space-y-6", isOrderRouteDetail && "min-h-0")}>
       {isOrderRouteDetail ? <OrderWorkspaceNav mobile /> : null}
       {!isOrderRouteDetail ? (
         <>
@@ -3490,7 +3475,7 @@ function useOrdersPageContent() {
 
                     <button
                       type="button"
-                      onClick={() => openOrder(item.order_id, item.patient_id)}
+                      onClick={() => openOrder(item.order_id)}
                       className="group mt-2 w-full overflow-hidden rounded-2xl border border-border text-left transition-colors hover:border-primary/40"
                     >
                       <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_220px]">
@@ -3770,7 +3755,7 @@ function useOrdersPageContent() {
             </div>
           }
           activeRowId={selectedOrderId}
-          onRowClick={(row) => openOrder(row.id, row.patient_id)}
+          onRowClick={(row) => openOrder(row.id)}
           rowAccent={(row) => {
             if (row.id === selectedOrderId) return "bg-sky-500";
             if (row.status === "cancelled") return "bg-rose-500";
@@ -3804,7 +3789,7 @@ function useOrdersPageContent() {
       ) : null}
 
       <Sheet
-        dirty={phaseDirty || packageCoverageDirty || planningDirty || executionDirty || followupDirty}
+        dirty={packageCoverageDirty || planningDirty || executionDirty || followupDirty}
         open={!isOrderRouteDetail && Boolean(selectedOrderId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -3901,7 +3886,7 @@ function useOrdersPageContent() {
                       )}
                     />
                     <div className="min-w-0 pl-2">
-                      <div className="grid min-w-0 gap-5 @container @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-start">
+                      <div className="grid min-w-0 gap-4 @container @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-start">
                         <div className="min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -3912,6 +3897,9 @@ function useOrdersPageContent() {
                             </span>
                             <StatusBadge tone={orderStatusTone(orderDetail.status)}>
                               {orderStatusLabel(orderDetail.status)}
+                            </StatusBadge>
+                            <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
+                              {phaseLabel(orderDetail.phase)}
                             </StatusBadge>
                           </div>
                           <h1 className="mt-2 min-w-0 max-w-full break-words text-2xl font-semibold leading-tight tracking-tight text-foreground">
@@ -3957,117 +3945,103 @@ function useOrdersPageContent() {
 
                       <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
                         <div className="flex min-w-0 flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-md"
-                            disabled={!detailSubjectHref}
-                            onClick={() => {
-                              if (detailSubjectHref) {
-                                window.open(
-                                  detailSubjectHref,
-                                  "_blank",
-                                  "noopener,noreferrer",
-                                );
-                              }
-                            }}
-                          >
-                            <UserRound className="size-3.5" />
-                            {detailSubjectLabel}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-md"
-                            onClick={() =>
-                              window.open(
-                                detailDocumentsHref,
-                                "_blank",
-                                "noopener,noreferrer",
-                              )
-                            }
+                          {detailSubjectHref ? (
+                            <StaffLink
+                              to={detailSubjectHref}
+                              className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-md")}
+                            >
+                              <UserRound className="size-3.5" />
+                              {detailSubjectLabel}
+                            </StaffLink>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-md"
+                              disabled
+                            >
+                              <UserRound className="size-3.5" />
+                              {detailSubjectLabel}
+                            </Button>
+                          )}
+                          <StaffLink
+                            to={detailDocumentsHref}
+                            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-md")}
                           >
                             <FileText className="size-3.5" />
                             {l("orders_dokumente")}
-                          </Button>
+                          </StaffLink>
                         </div>
 
                         {permissions.canManagePhase &&
                         (orderDetail.lifecycle?.allowed_status_transitions?.length ?? 0) > 0 ? (
-                          <details className="group relative">
-                            <summary className="flex h-8 cursor-pointer list-none items-center gap-2 rounded-md border border-border bg-background px-3 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
-                              {lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
-                              <ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
-                            </summary>
-                            <div className="absolute right-0 z-20 mt-2 grid min-w-56 gap-1 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
-                              {(orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
-                                (transition) => {
-                                  const label =
-                                    transition.status === "active"
+                          <OverflowMenu
+                            label={lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
+                            triggerClassName="h-8 rounded-md px-3 text-xs"
+                            triggerContent={
+                              <>
+                                {lang === "de" ? "Auftrag verwalten" : "Управление заказом"}
+                                <ChevronDown aria-hidden className="size-3.5" />
+                              </>
+                            }
+                            items={(orderDetail.lifecycle?.allowed_status_transitions ?? []).map(
+                              (transition) => {
+                                const label =
+                                  transition.status === "active"
+                                    ? lang === "de"
+                                      ? "Fortsetzen"
+                                      : "Продолжить"
+                                    : transition.status === "paused"
                                       ? lang === "de"
-                                        ? "Fortsetzen"
-                                        : "Продолжить"
-                                      : transition.status === "paused"
+                                        ? "Pausieren"
+                                        : "Приостановить"
+                                      : transition.status === "completed"
                                         ? lang === "de"
-                                          ? "Pausieren"
-                                          : "Приостановить"
-                                        : transition.status === "completed"
-                                          ? lang === "de"
-                                            ? "Abschließen"
-                                            : "Завершить"
-                                          : lang === "de"
-                                            ? "Stornieren"
-                                            : "Отменить";
-                                  const icon =
-                                    transition.status === "active" ? (
-                                      <Play className="size-3.5" />
-                                    ) : transition.status === "paused" ? (
-                                      <Pause className="size-3.5" />
-                                    ) : transition.status === "completed" ? (
-                                      <CheckCircle2 className="size-3.5" />
-                                    ) : (
-                                      <X className="size-3.5" />
-                                    );
-                                  return (
-                                    <Button
-                                      key={transition.status}
-                                      type="button"
-                                      aria-label={label}
-                                      size="sm"
-                                      variant="ghost"
-                                      className={cn(
-                                        "h-8 justify-start rounded-md",
-                                        transition.status === "cancelled" &&
-                                          "text-destructive hover:text-destructive",
-                                      )}
-                                      disabled={
-                                        statusSaving != null ||
-                                        phaseSaving ||
-                                        transition.blocked
-                                      }
-                                      title={
-                                        transition.reasons
-                                          .map(localizedBlockingReason)
-                                          .join("\n") || undefined
-                                      }
-                                      onClick={() =>
-                                        void handleOrderStatusChange(transition.status)
-                                      }
-                                    >
-                                      {statusSaving === transition.status ? (
-                                        <LoaderCircle className="size-3.5 animate-spin" />
-                                      ) : (
-                                        icon
-                                      )}
-                                      {label}
-                                    </Button>
+                                          ? "Abschließen"
+                                          : "Завершить"
+                                        : lang === "de"
+                                          ? "Stornieren"
+                                          : "Отменить";
+                                const icon =
+                                  statusSaving === transition.status ? (
+                                    <LoaderCircle className="animate-spin" />
+                                  ) : transition.status === "active" ? (
+                                    <Play />
+                                  ) : transition.status === "paused" ? (
+                                    <Pause />
+                                  ) : transition.status === "completed" ? (
+                                    <CheckCircle2 />
+                                  ) : (
+                                    <X />
                                   );
-                                },
-                              )}
-                            </div>
-                          </details>
+                                return {
+                                  key: transition.status,
+                                  label,
+                                  icon,
+                                  disabled:
+                                    statusSaving != null ||
+                                    phaseSaving ||
+                                    transition.blocked,
+                                  detail: transition.blocked
+                                    ? lang === "de"
+                                      ? "blockiert"
+                                      : "заблокировано"
+                                    : undefined,
+                                  title:
+                                    transition.reasons
+                                      .map(localizedBlockingReason)
+                                      .join("\n") || undefined,
+                                  className:
+                                    transition.status === "cancelled"
+                                      ? "text-destructive data-highlighted:text-destructive [&_svg]:text-destructive"
+                                      : undefined,
+                                  onSelect: () =>
+                                    void handleOrderStatusChange(transition.status),
+                                };
+                              },
+                            )}
+                          />
                         ) : null}
                       </div>
                     </div>
@@ -4079,12 +4053,12 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
 
-                  <div className="@container rounded-b-xl border-t border-border/70 bg-muted/15 p-5">
-                    <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-center">
-                      <div className="flex min-w-0 items-start gap-3">
+                  <div className="rounded-b-xl border-t border-border/70 bg-muted/15 px-5 py-3">
+                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                      <div className="flex min-w-0 items-center gap-3">
                         <span
                           className={cn(
-                            "flex size-10 shrink-0 items-center justify-center rounded-lg",
+                            "flex size-8 shrink-0 items-center justify-center rounded-lg",
                             orderNextStep?.kind === "terminal" &&
                               orderNextStep.status === "cancelled"
                               ? "bg-muted text-muted-foreground"
@@ -4095,28 +4069,15 @@ function useOrdersPageContent() {
                         >
                           {orderNextStep?.kind === "terminal" &&
                           orderNextStep.status === "cancelled" ? (
-                            <X className="size-5" />
+                            <X className="size-4" />
                           ) : orderNextStepBlocked ? (
-                            <AlertTriangle className="size-5" />
+                            <AlertTriangle className="size-4" />
                           ) : (
-                            <CheckCircle2 className="size-5" />
+                            <CheckCircle2 className="size-4" />
                           )}
                         </span>
                         <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              {lang === "de"
-                                ? "Aktuelle Phase"
-                                : "Текущий этап"}{" "}
-                              {currentLifecyclePhaseIndex >= 0
-                                ? [currentLifecyclePhaseIndex + 1, ORDER_PHASES.length].join(" / ")
-                                : ""}
-                            </p>
-                            <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
-                              {phaseLabel(orderDetail.phase)}
-                            </StatusBadge>
-                          </div>
-                          <h2 className="mt-1 text-lg font-semibold tracking-tight text-foreground">
+                          <p className="text-sm font-semibold leading-5 text-foreground">
                             {orderNextStep?.kind === "terminal"
                               ? orderNextStep.status === "cancelled"
                                 ? lang === "de"
@@ -4140,19 +4101,36 @@ function useOrdersPageContent() {
                                   : lang === "de"
                                     ? "Bereit für den nächsten Schritt"
                                     : "Можно переходить к следующему этапу"}
-                          </h2>
-                          <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                            {orderNextStep?.kind === "phase"
-                              ? lang === "de"
-                                ? "Als Nächstes: " + phaseLabel(orderNextStep.nextPhase)
-                                : "Следующий этап: " + phaseLabel(orderNextStep.nextPhase)
-                              : orderNextStep?.kind === "completion"
-                                ? lang === "de"
-                                  ? "Letzte Phase erreicht. Abschließen unter „Auftrag verwalten“."
-                                  : "Последний этап. Завершить заказ можно в «Управление заказом»."
-                                : lang === "de"
-                                  ? "Phasen und Aufgaben dieses Auftrags ändern sich nicht mehr."
-                                  : "Этапы и задачи этого заказа больше не меняются."}
+                          </p>
+                          <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground">
+                            {currentLifecyclePhaseIndex >= 0 ? (
+                              <span>
+                                {lang === "de" ? "Phase" : "Этап"}{" "}
+                                {currentLifecyclePhaseIndex + 1} / {ORDER_PHASES.length}
+                              </span>
+                            ) : null}
+                            {orderNextStep?.kind === "phase" ? (
+                              <span>
+                                {lang === "de" ? "Als Nächstes: " : "Следующий этап: "}
+                                {phaseLabel(orderNextStep.nextPhase)}
+                              </span>
+                            ) : orderNextStep?.kind === "completion" ? (
+                              <span>
+                                {lang === "de"
+                                  ? "Letzte Phase. Abschließen unter „Auftrag verwalten“."
+                                  : "Последний этап. Завершить заказ можно в «Управление заказом»."}
+                              </span>
+                            ) : null}
+                            {orderNextStepBlocked && activeOrderSection !== "gates" ? (
+                              <StaffLink
+                                replace
+                                to={buildOrderWorkspaceHref(orderDetail.id, "gates", patientContextId)}
+                                className="inline-flex items-center gap-0.5 font-medium text-amber-800 hover:underline"
+                              >
+                                {lang === "de" ? "Was noch zu tun ist" : "Что нужно сделать"}
+                                <ChevronRight className="size-3.5" />
+                              </StaffLink>
+                            ) : null}
                           </p>
                         </div>
                       </div>
@@ -4163,7 +4141,8 @@ function useOrdersPageContent() {
                       orderDetail.lifecycle?.next_stage ? (
                         <Button
                           type="button"
-                          className="min-h-9 max-w-full rounded-lg whitespace-normal"
+                          variant={orderNextStepBlocked ? "outline" : "default"}
+                          className="h-9 max-w-full rounded-lg whitespace-normal"
                           onClick={() => void handleAdvancePhase()}
                           disabled={
                             phaseSaving ||
@@ -4186,128 +4165,6 @@ function useOrdersPageContent() {
                         className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs leading-5 text-rose-700"
                       >
                         {phaseError}
-                      </div>
-                    ) : null}
-
-                    <div className="mt-4 grid gap-2 @min-[38rem]:grid-cols-5">
-                      {ORDER_PHASES.map((phase, index) => {
-                        const isCurrent = phase === orderDetail.phase;
-                        const isCompleted =
-                          currentLifecyclePhaseIndex >= 0 &&
-                          index < currentLifecyclePhaseIndex;
-                        return (
-                          <div
-                            key={phase}
-                            className={cn(
-                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5",
-                              isCurrent
-                                ? "border-orange-300 bg-orange-50 text-orange-950"
-                                : isCompleted
-                                  ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
-                                  : "border-border/60 bg-card text-muted-foreground",
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold",
-                                isCompleted
-                                  ? "bg-emerald-600 text-white"
-                                  : isCurrent
-                                    ? "bg-orange-500 text-white"
-                                    : "bg-muted text-muted-foreground",
-                              )}
-                            >
-                              {isCompleted ? (
-                                <CheckCircle2 className="size-3.5" />
-                              ) : (
-                                index + 1
-                              )}
-                            </span>
-                            <span className="min-w-0 break-words text-xs font-medium leading-4">
-                              {phaseLabel(phase)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    {orderNextStepBlocked ? (
-                      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-card">
-                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 bg-amber-50/70 px-4 py-3">
-                          <div>
-                            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                              <ShieldCheck className="size-4 text-amber-700" />
-                              {lang === "de"
-                                ? "Was noch zu erledigen ist"
-                                : "Что ещё нужно сделать"}
-                            </h3>
-                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                              {lang === "de"
-                                ? "Öffnen Sie einen Punkt, um ihn direkt zu vervollständigen."
-                                : "Откройте пункт — система сразу покажет, где его завершить."}
-                            </p>
-                          </div>
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-amber-300 bg-white text-amber-900"
-                          >
-                            {orderNextStepReasons.length}
-                          </Badge>
-                        </div>
-                        <ol className="divide-y divide-border/60">
-                          {orderNextStepReasons.map((reason, index) => {
-                            const targetSection = orderBlockingReasonSection(reason);
-                            const targetAnchor = orderBlockingReasonAnchor(reason);
-                            return (
-                              <li key={reason}>
-                                <button
-                                  type="button"
-                                  className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
-                                  onClick={() => {
-                                    staffGo(
-                                      buildOrderWorkspaceHref(
-                                        orderDetail.id,
-                                        targetSection,
-                                        detailPatientId || "",
-                                      ),
-                                    );
-                                    // The section opens below this list; bring it into view,
-                                    // also when it is already the active one. A blocker with
-                                    // its own control (the follow-up milestone planner)
-                                    // scrolls to that control once it is rendered.
-                                    if (targetAnchor) {
-                                      scrollToOrderAnchor(targetAnchor);
-                                    } else {
-                                      orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                                    }
-                                  }}
-                                >
-                                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
-                                    {index + 1}
-                                  </span>
-                                  <span className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
-                                    {localizedBlockingReason(reason)}
-                                  </span>
-                                  <span className="hidden shrink-0 items-center gap-1 text-xs font-semibold text-amber-800 sm:flex">
-                                    {lang === "de" ? "Öffnen" : "Открыть"}
-                                    <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-                                  </span>
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ol>
-                      </div>
-                    ) : orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion" ? (
-                      <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
-                        <CheckCircle2 className="size-4 shrink-0" />
-                        {orderNextStep.kind === "completion"
-                          ? lang === "de"
-                            ? "Alle erforderlichen Aufgaben für den Abschluss sind erledigt."
-                            : "Все обязательные пункты для завершения заказа выполнены."
-                          : lang === "de"
-                            ? "Alle erforderlichen Aufgaben für den nächsten Schritt sind erledigt."
-                            : "Все обязательные пункты для перехода выполнены."}
                       </div>
                     ) : null}
                   </div>
@@ -4442,17 +4299,10 @@ function useOrdersPageContent() {
                         </h3>
                         <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-2 @min-[64rem]:grid-cols-5">
                           {detailOverviewLinks.map((link) => (
-                            <button
+                            <StaffLink
                               key={link.href}
-                              type="button"
+                              to={link.href}
                               className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              onClick={() =>
-                                window.open(
-                                  link.href,
-                                  "_blank",
-                                  "noopener,noreferrer",
-                                )
-                              }
                             >
                               <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
                                 <ArrowUpRight aria-hidden className="size-4" />
@@ -4465,7 +4315,7 @@ function useOrdersPageContent() {
                                   {link.description}
                                 </span>
                               </span>
-                            </button>
+                            </StaffLink>
                           ))}
                         </div>
                       </div>
@@ -4491,7 +4341,7 @@ function useOrdersPageContent() {
                                   buildOrderWorkspaceHref(
                                     orderDetail.id,
                                     "services",
-                                    detailPatientId || "",
+                                    patientContextId,
                                   ),
                                 )
                               }
@@ -4509,7 +4359,7 @@ function useOrdersPageContent() {
                                   buildOrderWorkspaceHref(
                                     orderDetail.id,
                                     "invoices",
-                                    detailPatientId || "",
+                                    patientContextId,
                                   ),
                                 )
                               }
@@ -4847,11 +4697,149 @@ function useOrdersPageContent() {
                       reloadNonce={reloadNonce}
                       appointmentsHref={detailAppointmentsHref}
                       providersHref={detailProvidersHref}
-                      onOpenSection={(section) => {
-                        staffGo(buildOrderWorkspaceHref(orderDetail.id, section, detailPatientId || ""));
-                        orderSectionAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                      }}
+                      invoicesHref={detailInvoicesHref}
+                      onOpenSection={(section) =>
+                        staffGo(buildOrderWorkspaceHref(orderDetail.id, section, patientContextId))
+                      }
                     />
+                  </SectionCard>
+                ) : null}
+
+                {shouldRenderOrderSection("gates") ? (
+                  <SectionCard
+                    title={lang === "de" ? "Phasen des Auftrags" : "Этапы заказа"}
+                    description={
+                      lang === "de"
+                        ? "Der Auftrag durchläuft fünf Phasen. Die offenen Punkte darunter blockieren den nächsten Schritt."
+                        : "Заказ проходит пять этапов. Открытые пункты ниже блокируют следующий шаг."
+                    }
+                  >
+                    <div className="grid gap-2 @min-[38rem]:grid-cols-5">
+                      {ORDER_PHASES.map((phase, index) => {
+                        const isCurrent = phase === orderDetail.phase;
+                        const isCompleted =
+                          currentLifecyclePhaseIndex >= 0 &&
+                          index < currentLifecyclePhaseIndex;
+                        return (
+                          <div
+                            key={phase}
+                            className={cn(
+                              "flex min-w-0 items-center gap-2 rounded-lg border px-3 py-2.5",
+                              isCurrent
+                                ? "border-orange-300 bg-orange-50 text-orange-950"
+                                : isCompleted
+                                  ? "border-emerald-200 bg-emerald-50/70 text-emerald-900"
+                                  : "border-border/60 bg-card text-muted-foreground",
+                            )}
+                          >
+                            <span
+                              className={cn(
+                                "flex size-5 shrink-0 items-center justify-center rounded-full font-mono text-[10px] font-semibold",
+                                isCompleted
+                                  ? "bg-emerald-600 text-white"
+                                  : isCurrent
+                                    ? "bg-orange-500 text-white"
+                                    : "bg-muted text-muted-foreground",
+                              )}
+                            >
+                              {isCompleted ? (
+                                <CheckCircle2 className="size-3.5" />
+                              ) : (
+                                index + 1
+                              )}
+                            </span>
+                            <span className="min-w-0 break-words text-xs font-medium leading-4">
+                              {phaseLabel(phase)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {orderNextStepBlocked ? (
+                      <div className="mt-4 overflow-hidden rounded-xl border border-amber-200 bg-card">
+                        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-amber-200 bg-amber-50/70 px-4 py-3">
+                          <div>
+                            <h3 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                              <ShieldCheck className="size-4 text-amber-700" />
+                              {lang === "de"
+                                ? "Was noch zu erledigen ist"
+                                : "Что ещё нужно сделать"}
+                            </h3>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                              {lang === "de"
+                                ? "Öffnen Sie einen Punkt, um ihn direkt zu vervollständigen."
+                                : "Откройте пункт — система сразу покажет, где его завершить."}
+                            </p>
+                          </div>
+                          <Badge
+                            variant="outline"
+                            className="rounded-full border-amber-300 bg-white text-amber-900"
+                          >
+                            {orderNextStepReasons.length}
+                          </Badge>
+                        </div>
+                        <ol className="divide-y divide-border/60">
+                          {orderNextStepReasons.map((reason, index) => {
+                            const targetSection = orderBlockingReasonSection(reason);
+                            const targetAnchor = orderBlockingReasonAnchor(reason);
+                            return (
+                              <li key={reason}>
+                                <button
+                                  type="button"
+                                  className="group flex min-h-12 w-full min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-amber-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-amber-500"
+                                  onClick={() => {
+                                    // Patient billing is settled on the invoices
+                                    // page; the order itself only lists supplier
+                                    // invoices.
+                                    if (isPatientInvoiceBlockingReason(reason)) {
+                                      staffGo(detailInvoicesHref);
+                                      return;
+                                    }
+                                    // A blocker with its own control (the
+                                    // follow-up milestone planner) scrolls to that
+                                    // control once the section has rendered it;
+                                    // otherwise the section opens from its top.
+                                    if (targetAnchor) {
+                                      scrollToOrderAnchor(targetAnchor);
+                                    }
+                                    staffGo(
+                                      buildOrderWorkspaceHref(
+                                        orderDetail.id,
+                                        targetSection,
+                                        patientContextId,
+                                      ),
+                                    );
+                                  }}
+                                >
+                                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-amber-100 font-mono text-xs font-semibold text-amber-900">
+                                    {index + 1}
+                                  </span>
+                                  <span className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground">
+                                    {localizedBlockingReason(reason)}
+                                  </span>
+                                  <span className="hidden shrink-0 items-center gap-1 text-xs font-semibold text-amber-800 sm:flex">
+                                    {lang === "de" ? "Öffnen" : "Открыть"}
+                                    <ChevronRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ol>
+                      </div>
+                    ) : orderNextStep?.kind === "phase" || orderNextStep?.kind === "completion" ? (
+                      <div className="mt-4 flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+                        <CheckCircle2 className="size-4 shrink-0" />
+                        {orderNextStep.kind === "completion"
+                          ? lang === "de"
+                            ? "Alle erforderlichen Aufgaben für den Abschluss sind erledigt."
+                            : "Все обязательные пункты для завершения заказа выполнены."
+                          : lang === "de"
+                            ? "Alle erforderlichen Aufgaben für den nächsten Schritt sind erledigt."
+                            : "Все обязательные пункты для перехода выполнены."}
+                      </div>
+                    ) : null}
                   </SectionCard>
                 ) : null}
 
@@ -5450,17 +5438,10 @@ function useOrdersPageContent() {
                                   href: detailAppointmentsHref,
                                 },
                               ].map((link) => (
-                                <button
+                                <StaffLink
                                   key={link.label}
-                                  type="button"
+                                  to={link.href}
                                   className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                                  onClick={() =>
-                                    window.open(
-                                      link.href,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    )
-                                  }
                                 >
                                   <div className="relative z-10">
                                     <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
@@ -5473,7 +5454,7 @@ function useOrdersPageContent() {
                                   <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
                                     <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                                   </span>
-                                </button>
+                                </StaffLink>
                               ))}
                               {orderDetail.planning_preparation
                                 .treatment_plan_note ? (
@@ -5850,17 +5831,10 @@ function useOrdersPageContent() {
                                   href: detailProvidersHref,
                                 },
                               ].map((link) => (
-                                <button
+                                <StaffLink
                                   key={link.label}
-                                  type="button"
+                                  to={link.href}
                                   className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                                  onClick={() =>
-                                    window.open(
-                                      link.href,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    )
-                                  }
                                 >
                                   <div className="relative z-10">
                                     <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
@@ -5873,7 +5847,7 @@ function useOrdersPageContent() {
                                   <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
                                     <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                                   </span>
-                                </button>
+                                </StaffLink>
                               ))}
                             </div>
                           </div>
@@ -6207,17 +6181,10 @@ function useOrdersPageContent() {
                                   href: detailSubjectHref,
                                 },
                               ].filter((link) => Boolean(link.href)).map((link) => (
-                                <button
+                                <StaffLink
                                   key={link.label}
-                                  type="button"
+                                  to={link.href}
                                   className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
-                                  onClick={() =>
-                                    window.open(
-                                      link.href,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    )
-                                  }
                                 >
                                   <div className="relative z-10">
                                     <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
@@ -6230,7 +6197,7 @@ function useOrdersPageContent() {
                                   <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
                                     <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
                                   </span>
-                                </button>
+                                </StaffLink>
                               ))}
                             </div>
                           </div>
@@ -6248,24 +6215,6 @@ function useOrdersPageContent() {
                           {titleWithDot(tx.orders_phase)}
                         </h2>
                       </div>
-                      {permissions.canManagePhase &&
-                      !detailRequiresPatient &&
-                      orderDetail.lifecycle?.next_stage ? (
-                        <Button
-                          variant="default"
-                          className="h-8 rounded-lg"
-                          onClick={() => void handleAdvancePhase()}
-                          disabled={
-                            phaseSaving || statusSaving != null ||
-                            orderDetail.status !== "active" ||
-                            Boolean(nextLifecycleTransition?.blocked)
-                          }
-                        >
-                          <ChevronRight className="size-4" />
-                          {l("orders_weiter_zu")}{" "}
-                          {phaseLabel(orderDetail.lifecycle.next_stage)}
-                        </Button>
-                      ) : null}
                     </div>
 
                     <div className="mt-5 space-y-5">
@@ -6314,124 +6263,6 @@ function useOrdersPageContent() {
                           }
                         />
                       </div>
-
-                      <div className="flex items-center gap-2" aria-hidden>
-                        <span className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-border" />
-                        <span className="size-1.5 rounded-full bg-orange-400" />
-                        <span className="size-1.5 rounded-full bg-orange-300" />
-                        <span className="size-1.5 rounded-full bg-orange-200" />
-                        <span className="h-px flex-1 bg-gradient-to-r from-border via-border to-transparent" />
-                      </div>
-
-                      <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
-                        {ORDER_PHASES.map((phase) => {
-                          const isCurrent = orderDetail.phase === phase;
-                          const isNext = orderDetail.lifecycle?.next_stage === phase;
-                          const disabled =
-                            detailRequiresPatient ||
-                            orderDetail.status !== "active" ||
-                            !permissions.canManagePhase ||
-                            (!isCurrent && !isNext);
-                          const selected = phaseDraft === phase;
-                          return (
-                            <button
-                              key={phase}
-                              type="button"
-                              disabled={disabled}
-                              onClick={() => setPhaseDraft(phase)}
-                              className={cn(
-                                "relative min-h-[96px] rounded-xl border p-3 pr-10 text-left transition-colors",
-                                selected
-                                  ? "border-orange-200 bg-orange-50/60"
-                                  : "border-border bg-slate-50/70 hover:border-orange-200 hover:bg-orange-50/40",
-                                disabled && "cursor-not-allowed opacity-60",
-                              )}
-                            >
-                              <span
-                                aria-hidden
-                                className={cn(
-                                  "absolute right-3 top-3 flex size-4 items-center justify-center rounded-full border",
-                                  selected ? "border-orange-500" : "border-border",
-                                )}
-                              >
-                                <span
-                                  className={cn(
-                                    "size-2 rounded-full",
-                                    selected ? "bg-orange-500" : "bg-transparent",
-                                  )}
-                                />
-                              </span>
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-semibold text-foreground">
-                                  {phaseLabel(phase)}
-                                </span>
-                              </div>
-                              <p className="mt-3 text-xs leading-tight text-muted-foreground">
-                                {isCurrent
-                                  ? l("orders_aktuelle_auftragsphase")
-                                  : isNext
-                                    ? l("orders_nachster_erlaubter_schritt")
-                                    : l("orders_sequenziell_gesperrt")}
-                              </p>
-                            </button>
-                          );
-                        })}
-                      </div>
-
-                      <div className="flex flex-col gap-3 rounded-xl border border-border bg-slate-50/70 p-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">
-                            {phaseDraft
-                              ? phaseLabel(phaseDraft)
-                              : l("orders_keine_phase_ausgewahlt")}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {l("orders_nur_die_aktuelle_oder_nachste_phase_kann_gespeichert_wer")}
-                          </p>
-                        </div>
-                        {permissions.canManagePhase && !detailRequiresPatient ? (
-                          <Button
-                            className="h-9 rounded-lg"
-                            onClick={() => void handleSavePhase()}
-                            disabled={
-                              phaseSaving ||
-                              orderDetail.status !== "active" ||
-                              !phaseDraft ||
-                              phaseDraft === orderDetail.phase ||
-                              (orderDetail.lifecycle?.next_stage != null &&
-                                phaseDraft !== orderDetail.lifecycle.next_stage) ||
-                              Boolean(nextLifecycleTransition?.blocked)
-                            }
-                          >
-                            {phaseSaving ? (
-                              <LoaderCircle className="size-4 animate-spin" />
-                            ) : null}
-                            {l("orders_phase_speichern")}
-                          </Button>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="rounded-full border-border bg-muted/50 text-muted-foreground"
-                          >
-                            {l("orders_billing_nur_lesend")}
-                          </Badge>
-                        )}
-                      </div>
-
-                      {nextLifecycleTransition?.blocked &&
-                      nextLifecycleTransition.reasons.length > 0 ? (
-                        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-                          <div className="font-medium">
-                            {phaseLabel(nextLifecycleTransition.phase)}{" "}
-                            {l("orders_ist_blockiert")}
-                          </div>
-                          <ul className="mt-2 space-y-1">
-                            {nextLifecycleTransition.reasons.map((reason) => (
-                              <li key={reason}>• {localizedBlockingReason(reason)}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      ) : null}
 
                       {orderDetail.lifecycle?.history?.length ? (
                         <div className="space-y-3">
@@ -7005,38 +6836,24 @@ function useOrdersPageContent() {
                               lang,
                             );
                             const providerValue = leistung.provider_id ? (
-                              <button
-                                type="button"
+                              <StaffLink
+                                to={`/providers/${leistung.provider_id}?return_to=/orders/${orderDetail.id}`}
                                 className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
-                                onClick={() =>
-                                  window.open(
-                                    `/providers/${leistung.provider_id}?return_to=/orders`,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  )
-                                }
                               >
                                 {leistung.provider_name || t.orders_open_provider}
-                              </button>
+                              </StaffLink>
                             ) : (
                               leistung.provider_name || t.orders_unlinked
                             );
                             const doctorValue =
                               leistung.provider_id && leistung.doctor_id ? (
-                                <button
-                                  type="button"
+                                <StaffLink
+                                  to={`/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`}
                                   className="min-w-0 max-w-full break-words text-right font-semibold text-sky-700 hover:text-sky-800"
-                                  onClick={() =>
-                                    window.open(
-                                      `/appointments?provider=${leistung.provider_id}&doctor=${leistung.doctor_id}`,
-                                      "_blank",
-                                      "noopener,noreferrer",
-                                    )
-                                  }
                                 >
                                   {leistung.doctor_name ||
                                     t.orders_open_doctor_context}
-                                </button>
+                                </StaffLink>
                               ) : (
                                 leistung.doctor_name || t.orders_not_specified
                               );
@@ -7516,19 +7333,12 @@ function useOrdersPageContent() {
                               (leistung) => leistung.id === invoice.order_leistung_id,
                             );
                             const providerValue = invoice.provider_id ? (
-                              <button
-                                type="button"
+                              <StaffLink
+                                to={`/providers/${invoice.provider_id}?return_to=/orders/${orderDetail.id}`}
                                 className="min-w-0 max-w-full break-words font-semibold text-sky-700 hover:text-sky-800"
-                                onClick={() =>
-                                  window.open(
-                                    `/providers/${invoice.provider_id}?return_to=/orders`,
-                                    "_blank",
-                                    "noopener,noreferrer",
-                                  )
-                                }
                               >
                                 {providerLabel}
-                              </button>
+                              </StaffLink>
                             ) : invoice.provider_name ? (
                               invoice.provider_name
                             ) : (

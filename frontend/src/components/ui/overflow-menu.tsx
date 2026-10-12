@@ -12,6 +12,9 @@ export type OverflowMenuItem = {
   detail?: ReactNode;
   onSelect?: () => void;
   disabled?: boolean;
+  /** Tooltip, e.g. why a disabled item is blocked. */
+  title?: string;
+  className?: string;
 };
 
 const ITEM_CLASS =
@@ -55,8 +58,9 @@ export function OverflowMenu({
             {items.map((item) => (
               <Menu.Item
                 key={item.key}
-                className={ITEM_CLASS}
+                className={cn(ITEM_CLASS, item.className)}
                 disabled={item.disabled}
+                title={item.title}
                 onClick={item.onSelect}
               >
                 {item.icon}

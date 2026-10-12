@@ -37,6 +37,8 @@ type OrderPipelinePanelProps = {
   reloadNonce: number;
   appointmentsHref: string;
   providersHref: string;
+  /** Patient invoices of this order; closure is settled there, not in the supplier invoices. */
+  invoicesHref: string;
   onOpenSection: (section: OrderSectionKey) => void;
 };
 
@@ -129,6 +131,7 @@ export function OrderPipelinePanel({
   reloadNonce,
   appointmentsHref,
   providersHref,
+  invoicesHref,
   onOpenSection,
 }: OrderPipelinePanelProps) {
   const de = lang === "de";
@@ -371,7 +374,12 @@ export function OrderPipelinePanel({
         stage={stageOf("closure")}
         lang={lang}
         current={current === "closure"}
-        action={openSection("closure", tx("Счета заказа", "Rechnungen"))}
+        action={
+          <StaffLink to={invoicesHref} className={linkButtonClass}>
+            {tx("Счета пациента", "Patientenrechnungen")}
+            <ChevronRight className="ml-1 size-3.5" />
+          </StaffLink>
+        }
       >
         <div className="grid gap-2 sm:grid-cols-2">
           <Fact label={tx("Счетов", "Rechnungen")} value={pipeline.invoices.total} />
