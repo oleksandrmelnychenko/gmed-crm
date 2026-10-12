@@ -39,6 +39,28 @@ pub fn router() -> Router<AppState> {
         )
 }
 
+/// Why the password must be replaced, so the gate tells a brand-new account
+/// "set your own password" instead of "your password was reset or has
+/// expired" (QA E2-07): `initial` — the first sign-in of an account with the
+/// password it was given (no earlier password in the history and no earlier
+/// session), `reset` — an administrator reset it, `expired` — it is older
+/// than the configured expiry. `None` when no change is pending.
+fn password_change_reason(
+    change_required: bool,
+    reset_required: bool,
+    first_sign_in_with_given_password: bool,
+) -> Option<&'static str> {
+    if !change_required {
+        None
+    } else if !reset_required {
+        Some("expired")
+    } else if first_sign_in_with_given_password {
+        Some("initial")
+    } else {
+        Some("reset")
+    }
+}
+
 async fn get_me(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -49,10 +71,16 @@ async fn get_me(
     let settings = state.settings.get().await;
     match sqlx::query(
         "SELECT id, email, name, role, created_at, phone, preferred_language,
-                password_reset_required, password_changed_at
+                password_reset_required, password_changed_at,
+                (CASE WHEN jsonb_typeof(password_history) = 'array'
+                      THEN jsonb_array_length(password_history) ELSE 0 END)::bigint
+                    AS password_history_len,
+                (SELECT COUNT(*) FROM token_families family
+                 WHERE family.user_id = users.id AND family.id <> $2)::bigint AS earlier_sessions
          FROM users WHERE id = $1 AND is_active = true",
     )
     .bind(auth.user_id)
+    .bind(auth.family_id)
     .fetch_optional(&state.db)
     .await
     {
@@ -70,6 +98,12 @@ async fn get_me(
                 password_changed_at,
                 settings.password_expire_days,
             );
+            let password_change_reason = password_change_reason(
+                password_change_required,
+                password_reset_required,
+                u.try_get::<i64, _>("password_history_len").unwrap_or(0) == 0
+                    && u.try_get::<i64, _>("earlier_sessions").unwrap_or(0) == 0,
+            );
             Json(serde_json::json!({
                 "id": u.try_get::<Uuid, _>("id").ok(),
                 "email": u.try_get::<String, _>("email").ok(),
@@ -83,6 +117,7 @@ async fn get_me(
                     .ok()
                     .flatten(),
                 "password_change_required": password_change_required,
+                "password_change_reason": password_change_reason,
                 // The session reaches only the two-factor setup until a factor
                 // is enrolled (mandatory for CEO, IT Admin and PM).
                 "totp_enrolment_required": totp_enrolment_required,
@@ -1060,4 +1095,17 @@ fn own_privacy_request_open_exists() -> axum::response::Response {
         })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod password_change_reason_tests {
+    use super::password_change_reason;
+
+    #[test]
+    fn a_new_account_is_told_to_set_its_own_password() {
+        assert_eq!(password_change_reason(false, false, true), None);
+        assert_eq!(password_change_reason(true, true, true), Some("initial"));
+        assert_eq!(password_change_reason(true, true, false), Some("reset"));
+        assert_eq!(password_change_reason(true, false, false), Some("expired"));
+    }
 }

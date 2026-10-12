@@ -35,12 +35,15 @@ export function submitPatientFeedback(payload: JsonPayload) {
   return postJson("/me/feedback", payload);
 }
 
+/**
+ * Reviews and summary of the staff page. A failed request rejects: the page
+ * shows an error with a retry instead of "0 reviews / no records", which a
+ * manager would read as "there are no reviews" (QA E3-07).
+ */
 export async function fetchStaffFeedbackWorkspace(queryString: string) {
   const [feedback, summary] = await Promise.all([
-    apiFetch<PortalFeedbackItem[]>(`/feedback${queryString}`).catch(() => []),
-    apiFetch<PortalFeedbackSummary>(`/feedback/summary${queryString}`).catch(
-      () => null,
-    ),
+    apiFetch<PortalFeedbackItem[]>(`/feedback${queryString}`),
+    apiFetch<PortalFeedbackSummary>(`/feedback/summary${queryString}`),
   ]);
   return { feedback, summary };
 }

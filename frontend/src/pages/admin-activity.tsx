@@ -549,6 +549,44 @@ export function entityTypeLabel(entityType: string | null, translations: Transla
   return translations.uiText?.[`activity_entity_${entityType}`] ?? humanizeAuditCode(entityType);
 }
 
+/** At most this many codes per list go to the server (the URL stays short). */
+const MAX_LABEL_MATCH_CODES = 120;
+
+/**
+ * The action codes and entity types whose label — as the reader sees it —
+ * contains the search text (QA E3-01). The server stores codes only, so the
+ * search sends these codes along: "Неудачн…" finds the failed sign-ins, not
+ * only "login_failure". Texts shorter than three characters match no label.
+ */
+export function activityLabelMatches(
+  search: string,
+  translations: Translations,
+): { actions: string[]; entities: string[] } {
+  const needle = search.trim().toLocaleLowerCase();
+  if (needle.length < 3) return { actions: [], entities: [] };
+  const actionCodes = new Set<string>([
+    ...Object.keys(EXACT_ACTION_LABEL_KEYS),
+    ...ADMIN_ACTIVITY_REALTIME_EVENTS,
+  ]);
+  const entityTypes = new Set<string>(Object.keys(ACTIVITY_ENTITY_LABEL_KEYS));
+  for (const key of Object.keys(translations.uiText ?? {})) {
+    if (key.startsWith("activity_action_")) actionCodes.add(key.slice("activity_action_".length));
+    else if (key.startsWith("activity_entity_")) entityTypes.add(key.slice("activity_entity_".length));
+  }
+  const matches = (label: string, code: string) =>
+    label.toLocaleLowerCase().includes(needle) && !code.toLocaleLowerCase().includes(needle);
+  return {
+    actions: [...actionCodes]
+      .filter((code) => matches(actionLabel(code, translations), code))
+      .sort()
+      .slice(0, MAX_LABEL_MATCH_CODES),
+    entities: [...entityTypes]
+      .filter((type) => matches(entityTypeLabel(type, translations), type))
+      .sort()
+      .slice(0, MAX_LABEL_MATCH_CODES),
+  };
+}
+
 function entityDisplay(
   entityType: string | null,
   entityId: unknown,
@@ -1117,6 +1155,8 @@ export function AdminActivityPage() {
   const loadData = useCallback(async (params: AdminActivityLoadParams) => {
     dispatchActivityState({ loading: true, error: "" });
     try {
+      // The search also finds rows by the labels shown in the table (QA E3-01).
+      const labelMatches = activityLabelMatches(params.search, t);
       const data = await fetchAdminActivity<ActivityRow>({
         action: params.action,
         dateFrom: params.dateFrom,
@@ -1124,6 +1164,8 @@ export function AdminActivityPage() {
         limit: params.limit,
         offset: params.offset,
         search: params.search,
+        searchActions: labelMatches.actions,
+        searchEntities: labelMatches.entities,
         ...activityViewQuery(params.view),
       });
       const legacyResponse = data.view === undefined;
@@ -1167,7 +1209,7 @@ export function AdminActivityPage() {
         total: 0,
       });
     }
-  }, [t.common_error]);
+  }, [t]);
 
   useEffect(() => {
     void loadData({

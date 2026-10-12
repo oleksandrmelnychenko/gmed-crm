@@ -82,12 +82,19 @@ interface SettingRow {
   editable?: boolean;
 }
 
-/** Readable text for a refused setting change (QA E-31). */
-function describeSettingError(error: unknown, t: Translations): string {
+/**
+ * Readable text for a refused setting change (QA E-31). A refused BIC names
+ * the part that is wrong — bank code, country, location — instead of always
+ * blaming the length (QA R3-04).
+ */
+export function describeSettingError(error: unknown, t: Translations): string {
   const details = (error ?? {}) as { code?: unknown; message?: unknown };
   const message = typeof details.message === "string" ? details.message : String(error);
   if (details.code === "business_setting_ceo_only") return t.settings_ceo_only_hint;
   if (message.startsWith("IBAN")) return t.settings_iban_invalid;
+  if (message.startsWith("BIC bank code")) return t.settings_bic_invalid_bank_code;
+  if (message.startsWith("BIC country code")) return t.settings_bic_invalid_country;
+  if (message.startsWith("BIC location")) return t.settings_bic_invalid_location;
   if (message.startsWith("BIC")) return t.settings_bic_invalid;
   return message || t.common_error;
 }

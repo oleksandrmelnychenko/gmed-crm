@@ -356,23 +356,41 @@ pub fn normalize_iban(value: &str) -> Result<String, &'static str> {
     Ok(grouped)
 }
 
+/// The BIC has neither 8 nor 11 characters.
+pub const BIC_LENGTH_ERROR: &str =
+    "BIC must have 8 or 11 characters: bank code, country, location and optional branch";
+/// Characters 1–4 (bank code) are not all letters.
+pub const BIC_BANK_CODE_ERROR: &str = "BIC bank code (characters 1-4) must be letters";
+/// Characters 5–6 (country) are not letters.
+pub const BIC_COUNTRY_ERROR: &str = "BIC country code (characters 5-6) must be letters";
+/// Location or branch hold other characters than letters and digits.
+pub const BIC_LOCATION_ERROR: &str =
+    "BIC location and branch (characters 7-11) may contain only letters and digits";
+
 /// Validates a BIC (ISO 9362): 4 letters bank code, 2 letters country,
 /// 2 letters or digits location, optionally 3 letters or digits branch.
+/// Each failure has its own message, so the form names the wrong part
+/// instead of always blaming the length (QA R3-04).
 pub fn normalize_bic(value: &str) -> Result<String, &'static str> {
     let compact: String = value
         .chars()
         .filter(|ch| !ch.is_whitespace())
         .map(|ch| ch.to_ascii_uppercase())
         .collect();
-    let bytes = compact.as_bytes();
-    let valid = (bytes.len() == 8 || bytes.len() == 11)
-        && bytes[..6].iter().all(u8::is_ascii_uppercase)
-        && bytes[6..].iter().all(u8::is_ascii_alphanumeric);
-    if valid {
-        Ok(compact)
-    } else {
-        Err("BIC must have 8 or 11 characters: bank code, country, location and optional branch")
+    let chars: Vec<char> = compact.chars().collect();
+    if !(chars.len() == 8 || chars.len() == 11) {
+        return Err(BIC_LENGTH_ERROR);
     }
+    if !chars[..4].iter().all(char::is_ascii_uppercase) {
+        return Err(BIC_BANK_CODE_ERROR);
+    }
+    if !chars[4..6].iter().all(char::is_ascii_uppercase) {
+        return Err(BIC_COUNTRY_ERROR);
+    }
+    if !chars[6..].iter().all(char::is_ascii_alphanumeric) {
+        return Err(BIC_LOCATION_ERROR);
+    }
+    Ok(compact)
 }
 
 fn validate_iban_setting(value: &str) -> Result<Value, UpdateError> {
@@ -760,6 +778,20 @@ mod tests {
         ] {
             assert!(normalize_bic(invalid).is_err(), "{invalid}");
         }
+    }
+
+    #[test]
+    fn bic_errors_name_the_wrong_part() {
+        assert_eq!(normalize_bic("MUSTERBIC"), Err(super::BIC_LENGTH_ERROR));
+        assert_eq!(normalize_bic("COBADEFF1"), Err(super::BIC_LENGTH_ERROR));
+        assert_eq!(normalize_bic("COBADÉFFXXX"), Err(super::BIC_COUNTRY_ERROR));
+        assert_eq!(
+            normalize_bic("C0BADEFFXXX"),
+            Err(super::BIC_BANK_CODE_ERROR)
+        );
+        // QA R3-04: eleven characters, but a digit in the country part.
+        assert_eq!(normalize_bic("COBA1EFFXXX"), Err(super::BIC_COUNTRY_ERROR));
+        assert_eq!(normalize_bic("COBADE-FXXX"), Err(super::BIC_LOCATION_ERROR));
     }
 
     #[test]

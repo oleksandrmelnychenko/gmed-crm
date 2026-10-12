@@ -236,6 +236,9 @@ async fn forced_password_change_confines_the_session_until_the_password_is_repla
     let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&bearer), None).await;
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(me["password_change_required"], true);
+    // Never signed in before and still the given password: the gate says
+    // "first sign-in", not "reset or expired" (QA E2-07).
+    assert_eq!(me["password_change_reason"], "initial");
     let (status, _) = json_request(&app, "GET", "/api/v1/auth/sessions", Some(&bearer), None).await;
     assert_eq!(status, StatusCode::OK);
 
@@ -274,11 +277,28 @@ async fn forced_password_change_confines_the_session_until_the_password_is_repla
     let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&bearer), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(me["password_change_required"], false);
+    assert_eq!(me["password_change_reason"], Value::Null);
     let (status, _) = json_request(&app, "GET", "/api/v1/me/profile", Some(&bearer), None).await;
     assert_eq!(status, StatusCode::OK);
 
     let session = login(&app, &email, "Replacement-pass-2!").await;
     assert_eq!(session["password_change_required"], false);
+
+    // A later forced reset of an account that has signed in before is a reset.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/users/{user_id}/force-password-reset"),
+        Some(&admin),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let session = login(&app, &email, "Replacement-pass-2!").await;
+    let bearer = format!("Bearer {}", session["access_token"].as_str().unwrap());
+    let (status, me) = json_request(&app, "GET", "/api/v1/me", Some(&bearer), None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    assert_eq!(me["password_change_reason"], "reset");
 }
 
 #[tokio::test]

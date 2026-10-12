@@ -2141,9 +2141,6 @@ async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
                  FROM leads
                  WHERE qualification_status = 'converted'
                    AND updated_at >= now() - interval '90 days') AS converted_leads_90d,
-                (SELECT COUNT(DISTINCT COALESCE(NULLIF(BTRIM(country), ''), 'Unknown'))::bigint
-                 FROM leads
-                 WHERE created_at >= now() - interval '90 days') AS active_lead_country_count,
                 (SELECT COUNT(*)::bigint
                  FROM providers
                  WHERE provider_type = 'medical'
@@ -2152,18 +2149,23 @@ async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
     .fetch_one(&state.db)
     .await?;
 
-    let top_countries = sqlx::query(
-        r#"SELECT
-                COALESCE(NULLIF(BTRIM(country), ''), 'Unknown') AS country,
-                COUNT(*)::bigint AS lead_count
+    // Stored values mix ISO codes (new leads) and free-text names (older
+    // leads): "DE", "Germany", "Deutschland" are one country (QA E3-06).
+    let country_rows = sqlx::query(
+        r#"SELECT NULLIF(BTRIM(country), '') AS country, COUNT(*)::bigint AS lead_count
            FROM leads
            WHERE created_at >= now() - interval '90 days'
-           GROUP BY 1
-           ORDER BY 2 DESC, 1
-           LIMIT 5"#,
+           GROUP BY 1"#,
     )
     .fetch_all(&state.db)
     .await?;
+    let lead_countries = LeadCountryTally::from_rows(country_rows.iter().map(|row| {
+        (
+            row.try_get::<Option<String>, _>("country")
+                .unwrap_or_default(),
+            row.try_get::<i64, _>("lead_count").unwrap_or(0),
+        )
+    }));
 
     let leads_90d = summary.try_get::<i64, _>("leads_90d").unwrap_or(0);
     let converted_leads_90d = summary
@@ -2175,20 +2177,179 @@ async fn load_sales_kpis(state: &AppState) -> Result<Value, sqlx::Error> {
         "qualified_leads_30d": summary.try_get::<i64, _>("qualified_leads_30d").unwrap_or(0),
         "converted_leads_30d": summary.try_get::<i64, _>("converted_leads_30d").unwrap_or(0),
         "lead_to_patient_conversion_rate_pct": percentage(converted_leads_90d, leads_90d),
-        "active_lead_country_count": summary
-            .try_get::<i64, _>("active_lead_country_count")
-            .unwrap_or(0),
+        "active_lead_country_count": lead_countries.known_country_count(),
         "new_partner_clinics_90d": summary
             .try_get::<i64, _>("new_partner_clinics_90d")
             .unwrap_or(0),
-        "top_countries": top_countries
-            .into_iter()
-            .map(|row| json!({
-                "country": row.try_get::<String, _>("country").unwrap_or_default(),
-                "lead_count": row.try_get::<i64, _>("lead_count").unwrap_or(0),
-            }))
-            .collect::<Vec<_>>(),
+        "top_countries": lead_countries.top(5),
     }))
+}
+
+/// One bar of the "top lead countries" KPI.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum LeadCountryKey {
+    /// ISO 3166-1 alpha-2 code; the UI shows the localized name.
+    Code(String),
+    /// Stored text naming no known country, compared case-insensitively.
+    Text(String),
+    /// No country stored; the UI shows "not specified" in its language.
+    Unspecified,
+}
+
+/// Names of countries the sanctions normaliser does not know, as older
+/// leads stored them (English, German, Russian).
+fn lead_country_name_code(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "france" | "frankreich" | "франция" => "FR",
+        "italy" | "italien" | "italia" | "италия" => "IT",
+        "spain" | "spanien" | "españa" | "espana" | "испания" => "ES",
+        "portugal" | "португалия" => "PT",
+        "netherlands"
+        | "the netherlands"
+        | "niederlande"
+        | "holland"
+        | "нидерланды"
+        | "голландия" => "NL",
+        "belgium" | "belgien" | "бельгия" => "BE",
+        "luxembourg" | "luxemburg" | "люксембург" => "LU",
+        "ireland" | "irland" | "ирландия" => "IE",
+        "greece" | "griechenland" | "греция" => "GR",
+        "cyprus" | "zypern" | "кипр" => "CY",
+        "malta" | "мальта" => "MT",
+        "denmark" | "dänemark" | "дания" => "DK",
+        "sweden" | "schweden" | "швеция" => "SE",
+        "norway" | "norwegen" | "норвегия" => "NO",
+        "finland" | "finnland" | "финляндия" => "FI",
+        "iceland" | "island" | "исландия" => "IS",
+        "hungary" | "ungarn" | "венгрия" => "HU",
+        "romania" | "rumänien" | "румыния" => "RO",
+        "bulgaria" | "bulgarien" | "болгария" => "BG",
+        "slovakia" | "slowakei" | "словакия" => "SK",
+        "slovenia" | "slowenien" | "словения" => "SI",
+        "croatia" | "kroatien" | "хорватия" => "HR",
+        "serbia" | "serbien" | "сербия" => "RS",
+        "montenegro" | "черногория" => "ME",
+        "bosnia and herzegovina" | "bosnien und herzegowina" | "босния и герцеговина" => {
+            "BA"
+        }
+        "albania" | "albanien" | "албания" => "AL",
+        "north macedonia" | "nordmazedonien" | "северная македония" => "MK",
+        "kosovo" | "косово" => "XK",
+        "liechtenstein" | "лихтенштейн" => "LI",
+        "monaco" | "монако" => "MC",
+        "saudi arabia" | "saudi-arabien" | "саудовская аравия" => "SA",
+        "qatar" | "katar" | "катар" => "QA",
+        "kuwait" | "кувейт" => "KW",
+        "bahrain" | "бахрейн" => "BH",
+        "oman" | "оман" => "OM",
+        "iraq" | "irak" | "ирак" => "IQ",
+        "jordan" | "jordanien" | "иордания" => "JO",
+        "lebanon" | "libanon" | "ливан" => "LB",
+        "egypt" | "ägypten" | "египет" => "EG",
+        "libya" | "libyen" | "ливия" => "LY",
+        "morocco" | "marokko" | "марокко" => "MA",
+        "tunisia" | "tunesien" | "тунис" => "TN",
+        "algeria" | "algerien" | "алжир" => "DZ",
+        "nigeria" | "нигерия" => "NG",
+        "india" | "indien" | "индия" => "IN",
+        "pakistan" | "пакистан" => "PK",
+        "japan" | "япония" => "JP",
+        "south korea" | "südkorea" | "южная корея" => "KR",
+        "mongolia" | "mongolei" | "монголия" => "MN",
+        "canada" | "kanada" | "канада" => "CA",
+        "mexico" | "mexiko" | "мексика" => "MX",
+        "brazil" | "brasilien" | "бразилия" => "BR",
+        "argentina" | "argentinien" | "аргентина" => "AR",
+        "australia" | "australien" | "австралия" => "AU",
+        "великобритания" | "англия" | "england" => "GB",
+        "германия" | "фрг" => "DE",
+        "австрия" | "österreich" => "AT",
+        "украина" | "україна" => "UA",
+        "чехия" | "czech republic" => "CZ",
+        _ => return None,
+    })
+}
+
+impl LeadCountryKey {
+    fn of(raw: Option<&str>) -> Self {
+        let Some(value) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Self::Unspecified;
+        };
+        let known =
+            |code: &str| crate::services::citizenships::is_country_code(code) || code == "XK";
+        if value.chars().count() == 2 && known(value) {
+            return Self::Code(value.to_ascii_uppercase());
+        }
+        if let Some(code) = crate::sanctions::normalize::country_code(value)
+            && known(&code)
+        {
+            return Self::Code(code);
+        }
+        let lower = value.to_lowercase();
+        if let Some(code) = lead_country_name_code(&lower) {
+            return Self::Code(code.to_string());
+        }
+        Self::Text(lower)
+    }
+}
+
+/// Lead counts per country after normalising the stored values.
+struct LeadCountryTally {
+    /// Key, count, and the first spelling seen (for free-text values).
+    groups: Vec<(LeadCountryKey, i64, String)>,
+}
+
+impl LeadCountryTally {
+    fn from_rows(rows: impl IntoIterator<Item = (Option<String>, i64)>) -> Self {
+        let mut groups: Vec<(LeadCountryKey, i64, String)> = Vec::new();
+        for (raw, count) in rows {
+            let key = LeadCountryKey::of(raw.as_deref());
+            match groups.iter_mut().find(|(existing, _, _)| *existing == key) {
+                Some((_, total, _)) => *total += count,
+                None => groups.push((key, count, raw.unwrap_or_default().trim().to_string())),
+            }
+        }
+        // Most leads first; ties by code or text, "not specified" last.
+        groups.sort_by(|a, b| {
+            b.1.cmp(&a.1).then_with(|| {
+                let rank = |key: &LeadCountryKey| match key {
+                    LeadCountryKey::Code(code) => (0, code.clone()),
+                    LeadCountryKey::Text(text) => (1, text.clone()),
+                    LeadCountryKey::Unspecified => (2, String::new()),
+                };
+                rank(&a.0).cmp(&rank(&b.0))
+            })
+        });
+        Self { groups }
+    }
+
+    /// Countries with leads; leads without a country are not a country.
+    fn known_country_count(&self) -> i64 {
+        self.groups
+            .iter()
+            .filter(|(key, _, _)| *key != LeadCountryKey::Unspecified)
+            .count() as i64
+    }
+
+    /// `country` is the ISO code (null when not specified or unknown);
+    /// `label` carries the stored text of a value naming no known country.
+    fn top(&self, limit: usize) -> Vec<Value> {
+        self.groups
+            .iter()
+            .take(limit)
+            .map(|(key, count, spelling)| match key {
+                LeadCountryKey::Code(code) => {
+                    json!({ "country": code, "label": Value::Null, "lead_count": count })
+                }
+                LeadCountryKey::Text(_) => {
+                    json!({ "country": Value::Null, "label": spelling, "lead_count": count })
+                }
+                LeadCountryKey::Unspecified => {
+                    json!({ "country": Value::Null, "label": Value::Null, "lead_count": count })
+                }
+            })
+            .collect()
+    }
 }
 
 async fn load_provider_kpis(state: &AppState) -> Result<Vec<Value>, sqlx::Error> {
@@ -5994,6 +6155,61 @@ async fn load_top_providers(state: &AppState, clause: &str) -> Result<Vec<Value>
             })
         })
         .collect())
+}
+
+#[cfg(test)]
+mod lead_country_tests {
+    use super::*;
+
+    #[test]
+    fn codes_and_names_of_one_country_are_one_bar() {
+        let tally = LeadCountryTally::from_rows([
+            (Some("Germany".to_string()), 13),
+            (Some("DE".to_string()), 5),
+            (Some("deutschland".to_string()), 1),
+            (None, 2),
+            (Some("  ".to_string()), 1),
+            (Some("China".to_string()), 2),
+            (Some("Polen".to_string()), 2),
+            (Some("Frankreich".to_string()), 1),
+            (Some("FR".to_string()), 1),
+            (Some("Atlantis".to_string()), 1),
+            (Some("atlantis".to_string()), 1),
+        ]);
+        // "Not specified" sorts by its count like every other bar; ties go
+        // codes first, then free text.
+        assert_eq!(
+            tally.top(10),
+            vec![
+                json!({ "country": "DE", "label": null, "lead_count": 19 }),
+                json!({ "country": null, "label": null, "lead_count": 3 }),
+                json!({ "country": "CN", "label": null, "lead_count": 2 }),
+                json!({ "country": "FR", "label": null, "lead_count": 2 }),
+                json!({ "country": "PL", "label": null, "lead_count": 2 }),
+                json!({ "country": null, "label": "Atlantis", "lead_count": 2 }),
+            ]
+        );
+        assert_eq!(tally.known_country_count(), 5);
+        assert_eq!(tally.top(1).len(), 1);
+    }
+
+    #[test]
+    fn lead_country_keys_follow_iso_codes() {
+        assert_eq!(
+            LeadCountryKey::of(Some("ua")),
+            LeadCountryKey::Code("UA".to_string())
+        );
+        assert_eq!(
+            LeadCountryKey::of(Some("Украина")),
+            LeadCountryKey::Code("UA".to_string())
+        );
+        assert_eq!(
+            LeadCountryKey::of(Some("XX")),
+            LeadCountryKey::Text("xx".to_string())
+        );
+        assert_eq!(LeadCountryKey::of(Some("")), LeadCountryKey::Unspecified);
+        assert_eq!(LeadCountryKey::of(None), LeadCountryKey::Unspecified);
+    }
 }
 
 #[cfg(test)]

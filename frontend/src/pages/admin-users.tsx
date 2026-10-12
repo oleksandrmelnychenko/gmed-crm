@@ -962,6 +962,10 @@ function useAdminUsersPageContent() {
       clearApiCache("/users");
       if (editUser?.id === user.id) {
         setEditNotice(t.users_sessions_revoked);
+        dispatchAdminUsersState((current) => ({
+          editUser:
+            current.editUser?.id === user.id ? { ...current.editUser, active_sessions: 0 } : current.editUser,
+        }));
       }
       void loadUsers();
     } catch (e) {
@@ -1001,12 +1005,14 @@ function useAdminUsersPageContent() {
     setAdminUsersField("euSaving", true);
     resetUserTotp(target.id)
       .then(() => {
+        // The reset also ends every session of the person: the open dialog
+        // says so at once instead of keeping "Сессии: 1" (QA E2-07 leftover).
         dispatchAdminUsersState((current) => ({
           confirmTotpReset: false,
           editNotice: t.uiText.twofactor_admin_reset_done,
           editUser:
             current.editUser?.id === target.id
-              ? { ...current.editUser, totp_enrolled: false }
+              ? { ...current.editUser, totp_enrolled: false, active_sessions: 0 }
               : current.editUser,
         }));
         clearApiCache("/users");

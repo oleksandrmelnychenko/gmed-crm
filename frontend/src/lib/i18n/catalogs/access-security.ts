@@ -18,6 +18,9 @@ export interface AccessSecurityTranslations {
   settings_ceo_only_hint: string;
   settings_iban_invalid: string;
   settings_bic_invalid: string;
+  settings_bic_invalid_bank_code: string;
+  settings_bic_invalid_country: string;
+  settings_bic_invalid_location: string;
   activity_context_redacted: string;
   activity_portal_actor: string;
 }
@@ -45,6 +48,10 @@ export const accessSecurityRu: AccessSecurityTranslations = {
     "IBAN неверен: проверьте код страны, длину и контрольные цифры.",
   settings_bic_invalid:
     "BIC неверен: 8 или 11 символов — код банка, страна, место и при необходимости филиал.",
+  settings_bic_invalid_bank_code: "BIC неверен: первые 4 символа (код банка) должны быть буквами.",
+  settings_bic_invalid_country: "BIC неверен: символы 5–6 (код страны) должны быть буквами, например DE.",
+  settings_bic_invalid_location:
+    "BIC неверен: место и филиал (символы 7–11) могут содержать только буквы и цифры.",
   activity_context_redacted:
     "Скрыто: данные пациентов, лидов, финансов и проверок видит только CEO",
   activity_portal_actor: "Вход пациента или лида",
@@ -74,6 +81,11 @@ export const accessSecurityDe: AccessSecurityTranslations = {
     "Die IBAN ist ungültig: Bitte Ländercode, Länge und Prüfziffern prüfen.",
   settings_bic_invalid:
     "Die BIC ist ungültig: 8 oder 11 Zeichen – Bankcode, Land, Ort und optional Filiale.",
+  settings_bic_invalid_bank_code: "Die BIC ist ungültig: Die ersten 4 Zeichen (Bankcode) müssen Buchstaben sein.",
+  settings_bic_invalid_country:
+    "Die BIC ist ungültig: Zeichen 5–6 (Ländercode) müssen Buchstaben sein, zum Beispiel DE.",
+  settings_bic_invalid_location:
+    "Die BIC ist ungültig: Ort und Filiale (Zeichen 7–11) dürfen nur Buchstaben und Ziffern enthalten.",
   activity_context_redacted:
     "Ausgeblendet: Patienten-, Lead-, Finanz- und Prüfdaten sieht nur der CEO",
   activity_portal_actor: "Patienten- oder Lead-Zugang",

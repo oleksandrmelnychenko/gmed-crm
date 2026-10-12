@@ -46,6 +46,7 @@ import {
   formatPercent,
   formatRating,
   formatReportDate,
+  leadCountryLabel,
   roleCanOpenReports,
   serviceTypeLabel,
 } from "./model/report-model";
@@ -252,7 +253,11 @@ type ReportsWorkspacePayload = {
     lead_to_patient_conversion_rate_pct?: number | null;
     active_lead_country_count: number;
     new_partner_clinics_90d: number;
-    top_countries: Array<{ country: string; lead_count: number }>;
+    /**
+     * `country`: ISO code (localized here), null when not specified or not a
+     * known country; `label`: the stored text of an unknown country (QA E3-06).
+     */
+    top_countries: Array<{ country: string | null; label?: string | null; lead_count: number }>;
   } | null;
   financial_metrics_visible: boolean;
 };
@@ -541,11 +546,14 @@ function metricCard(
     );
   }
 
+  // A long value (e.g. "0 открыто / 0 на проверке в течение 7 дней") wraps
+  // to its own line on a phone instead of squeezing the label to one letter
+  // per line or pushing the page sideways (QA E3-05).
   return (
     <article
       key={options?.itemKey}
       className={cn(
-        "flex min-w-[210px] items-center justify-between gap-3 px-3 py-1.5",
+        "flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-0.5 px-3 py-1.5 sm:min-w-[210px]",
         options?.borderless ? null : "border border-border",
       )}
     >
@@ -560,7 +568,7 @@ function metricCard(
       {options?.connector ? (
         <span className="h-px min-w-6 flex-1 bg-border/70" />
       ) : null}
-      <span className="shrink-0 text-base font-semibold leading-none text-foreground">
+      <span className="min-w-0 max-w-full text-right text-base font-semibold leading-tight text-foreground [overflow-wrap:anywhere]">
         {value}
       </span>
     </article>
@@ -575,13 +583,17 @@ function lineMetric(label: string, value: string | number) {
   });
 }
 
+/** Label and value side by side; on a phone a long value takes its own line (QA E3-05). */
 function capsuleMetric(label: string, value: string | number) {
   return (
-    <div className="flex min-w-[210px] flex-1 items-center justify-between gap-3 rounded-full border border-border bg-muted/20 px-4 py-2">
+    <div
+      className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-2xl border border-border bg-muted/20 px-4 py-2 sm:min-w-[210px]"
+      data-testid="report-capsule-metric"
+    >
       <span className="min-w-0 max-w-full break-words text-xs font-medium text-muted-foreground">
         {label}
       </span>
-      <span className="shrink-0 text-sm font-semibold leading-none text-foreground">
+      <span className="min-w-0 max-w-full text-sm font-semibold leading-tight text-foreground [overflow-wrap:anywhere]">
         {value}
       </span>
     </div>
@@ -1831,8 +1843,9 @@ function useReportsPageContent() {
                         <div className="grid min-h-[148px] grid-cols-[repeat(auto-fit,minmax(34px,1fr))] items-end gap-2 pb-2">
                           {data.sales_kpis.top_countries.map((item) => (
                             <div
-                              key={`${item.country || "unknown"}-${item.lead_count}`}
+                              key={`${item.country ?? item.label ?? "unspecified"}-${item.lead_count}`}
                               className="flex min-w-0 flex-col items-center gap-1.5"
+                              data-testid="lead-country-bar"
                             >
                               <span className="text-xs font-semibold tabular-nums text-foreground">
                                 {item.lead_count}
@@ -1843,8 +1856,11 @@ function useReportsPageContent() {
                                   height: `${Math.max(14, Math.round((item.lead_count / maxLeadCount) * 112))}px`,
                                 }}
                               />
-                              <span className="max-w-full truncate text-[11px] text-muted-foreground">
-                                {item.country}
+                              <span
+                                className="max-w-full truncate text-[11px] text-muted-foreground"
+                                title={leadCountryLabel(item, lang, text.sales.countryNotSpecified)}
+                              >
+                                {leadCountryLabel(item, lang, text.sales.countryNotSpecified)}
                               </span>
                             </div>
                           ))}

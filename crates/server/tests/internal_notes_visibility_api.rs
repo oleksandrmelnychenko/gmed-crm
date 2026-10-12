@@ -376,3 +376,321 @@ async fn internal_notes_are_read_only_by_the_audience_the_author_chose() {
         vec![private_title, role_title, staff_title]
     );
 }
+
+async fn audit_count(pool: &PgPool, action: &str, note_id: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_log WHERE action = $1 AND entity_type = 'internal_note' AND entity_id = $2::uuid",
+    )
+    .bind(action)
+    .bind(note_id)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+/// QA E3-02: the visibility is always relative to the author. The CEO saving
+/// "role" on a Sales note opens it to Sales (the author's role), never to the
+/// CEO's role, and "private" gives it back to the author alone. The API names
+/// the author's role so the UI can label the choices from the author's view.
+#[tokio::test]
+async fn ceo_visibility_choices_apply_to_the_author() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let pool = &ctx.pool;
+    let author = staff(pool, "sales", &tag, "Ben Muster").await;
+    let colleague = staff(pool, "sales", &tag, "Mia Muster").await;
+    let billing = staff(pool, "billing", &tag, "Viktor Zahler").await;
+    let ceo = staff(pool, "ceo", &tag, "Beispiel Chef").await;
+
+    let title = format!("Sales private {tag}");
+    let note = create_note(&ctx.app, &author, &title, None).await;
+    assert_eq!(note["created_by_role"], "sales");
+    let id = note["id"].as_str().unwrap().to_string();
+
+    // The CEO reads the note with the author's role.
+    let (status, read) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/internal-notes/{id}"),
+        &ceo.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    assert_eq!(read["created_by_role"], "sales");
+    assert_eq!(read["visibility"], "private");
+
+    // "Role" chosen by the CEO = the author's role (Sales), not "ceo".
+    let (status, shared) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/update"),
+        &ceo.bearer,
+        Some(json!({
+            "title": title,
+            "body": "Ergänzt vom CEO",
+            "expected_updated_at": read["updated_at"],
+            "visibility": "role",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{shared}");
+    assert_eq!(shared["visibility"], "role");
+    assert_eq!(shared["visible_role"], "sales");
+    assert_eq!(
+        listed_titles(&ctx.app, &colleague.bearer, &format!("?q={tag}")).await,
+        vec![title.clone()]
+    );
+    assert_eq!(
+        listed_titles(&ctx.app, &billing.bearer, &format!("?q={tag}")).await,
+        Vec::<String>::new()
+    );
+
+    // "Private" chosen by the CEO = the author alone again.
+    let (status, narrowed) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/update"),
+        &ceo.bearer,
+        Some(json!({
+            "title": title,
+            "body": "Ergänzt vom CEO",
+            "expected_updated_at": shared["updated_at"],
+            "visibility": "private",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{narrowed}");
+    assert_eq!(narrowed["visibility"], "private");
+    assert_eq!(narrowed["visible_role"], Value::Null);
+    assert_eq!(
+        listed_titles(&ctx.app, &colleague.bearer, &format!("?q={tag}")).await,
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        listed_titles(&ctx.app, &author.bearer, &format!("?q={tag}")).await,
+        vec![title.clone()]
+    );
+    // The visibility changes go through the audit channel: wait for them.
+    let mut changes = 0;
+    for _ in 0..50 {
+        changes = audit_count(pool, "update_internal_note_visibility", &id).await;
+        if changes >= 2 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(changes, 2);
+}
+
+/// QA E3-03: the CEO Assistant only reads notes; a shared note is archived
+/// only by its author or the CEO; archived notes come back through a
+/// restore by the author or the CEO; both steps are audited.
+#[tokio::test]
+async fn note_writes_follow_role_and_authorship() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let pool = &ctx.pool;
+    let author = staff(pool, "patient_manager", &tag, "Mia Muster").await;
+    let colleague = staff(pool, "billing", &tag, "Ben Muster").await;
+    let assistant = staff(pool, "ceo_assistant", &tag, "Anna Muster").await;
+    let ceo = staff(pool, "ceo", &tag, "Beispiel Chef").await;
+
+    let title = format!("Shared handover {tag}");
+    let note = create_note(&ctx.app, &author, &title, Some("staff")).await;
+    let id = note["id"].as_str().unwrap().to_string();
+    let (status, with_file) = upload_png(
+        &ctx.app,
+        &format!("/api/v1/internal-notes/{id}/attachments"),
+        &author.bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{with_file}");
+    let attachment_id = with_file["attachments"][0]["id"].as_str().unwrap();
+
+    // The assistant reads the shared note and its file …
+    assert_eq!(
+        listed_titles(&ctx.app, &assistant.bearer, &format!("?q={tag}")).await,
+        vec![title.clone()]
+    );
+    let (status, _) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/internal-notes/{id}/attachments/{attachment_id}/download"),
+        &assistant.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // … but writes nothing.
+    let (status, refused) = json_request(
+        &ctx.app,
+        "POST",
+        "/api/v1/internal-notes",
+        &assistant.bearer,
+        Some(json!({ "title": format!("Assistent {tag}") })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["error"], "note_read_only_role");
+    for path in [
+        format!("/api/v1/internal-notes/{id}/update"),
+        format!("/api/v1/internal-notes/{id}/archive"),
+        format!("/api/v1/internal-notes/{id}/restore"),
+        format!("/api/v1/internal-notes/{id}/attachments/{attachment_id}/delete"),
+    ] {
+        let (status, refused) = json_request(
+            &ctx.app,
+            "POST",
+            &path,
+            &assistant.bearer,
+            Some(json!({
+                "title": "Übernommen",
+                "body": "Vom Assistenten",
+                "expected_updated_at": with_file["updated_at"],
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {refused}");
+        assert_eq!(refused["error"], "note_read_only_role", "{path}");
+    }
+    let (status, _) = upload_png(
+        &ctx.app,
+        &format!("/api/v1/internal-notes/{id}/attachments"),
+        &assistant.bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, unchanged) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/internal-notes/{id}"),
+        &author.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unchanged["body"], "Synthetische Übergabe");
+    assert_eq!(unchanged["attachments"].as_array().unwrap().len(), 1);
+
+    // A colleague who reads the shared note may not archive it.
+    let (status, refused) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/archive"),
+        &colleague.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{refused}");
+    assert_eq!(refused["error"], "note_archive_author_only");
+
+    // The author archives it: gone from every live list, audited.
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/archive"),
+        &author.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(audit_count(pool, "archive_internal_note", &id).await, 1);
+    for reader in [&author, &colleague, &ceo] {
+        assert_eq!(
+            listed_titles(&ctx.app, &reader.bearer, &format!("?q={tag}")).await,
+            Vec::<String>::new()
+        );
+    }
+    let (status, _) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/internal-notes/{id}"),
+        &author.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The archive lists what the reader may restore: own notes, the CEO all.
+    let archive = format!("?archived=true&q={tag}");
+    assert_eq!(
+        listed_titles(&ctx.app, &author.bearer, &archive).await,
+        vec![title.clone()]
+    );
+    assert_eq!(
+        listed_titles(&ctx.app, &ceo.bearer, &archive).await,
+        vec![title.clone()]
+    );
+    assert_eq!(
+        listed_titles(&ctx.app, &colleague.bearer, &archive).await,
+        Vec::<String>::new()
+    );
+    let (status, archived_rows) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/internal-notes{archive}"),
+        &author.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        archived_rows[0]["archived_at"].is_string(),
+        "{archived_rows}"
+    );
+
+    // Only the author or the CEO restores; for others it does not exist.
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/restore"),
+        &colleague.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, restored) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/restore"),
+        &ceo.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(restored["title"], title);
+    assert_eq!(restored["visibility"], "staff");
+    assert_eq!(restored["attachments"].as_array().unwrap().len(), 1);
+    assert_eq!(audit_count(pool, "restore_internal_note", &id).await, 1);
+    assert_eq!(
+        listed_titles(&ctx.app, &colleague.bearer, &format!("?q={tag}")).await,
+        vec![title.clone()]
+    );
+    // A live note is not restored again.
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/restore"),
+        &author.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The CEO archives someone else's note as well.
+    let (status, _) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/internal-notes/{id}/archive"),
+        &ceo.bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(audit_count(pool, "archive_internal_note", &id).await, 2);
+}

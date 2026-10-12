@@ -82,6 +82,10 @@ import {
   blankFeedbackForm,
   canReviewStaffFeedback,
   canViewStaffFeedback,
+  formatFeedbackCount,
+  formatFeedbackDecimal,
+  formatFeedbackPercent,
+  formatRatingCount,
   npsOptions,
   patientLabel,
   roleCanCaptureFeedback,
@@ -136,6 +140,10 @@ type StaffFeedbackWorkspaceState = {
   submitting: boolean;
   reviewBusy: boolean;
   error: string;
+  /** The last load of reviews or summary failed (QA E3-07): no "0 reviews" then. */
+  loadFailed: boolean;
+  /** Reviews and summary were loaded at least once. */
+  loaded: boolean;
   notice: string;
   version: number;
   activeReview: PortalFeedbackItem | null;
@@ -182,6 +190,8 @@ function createStaffFeedbackWorkspaceState(): StaffFeedbackWorkspaceState {
     submitting: false,
     reviewBusy: false,
     error: "",
+    loadFailed: false,
+    loaded: false,
     notice: "",
     version: 0,
     activeReview: null,
@@ -1310,10 +1320,12 @@ function PatientFeedbackWorkspace() {
 }
 
 function useStaffFeedbackWorkspaceContent() {
-  const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
+  const { formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
   const { appointmentOptionLabel } = useLanguageHelpers();
   const { user } = useAuth();
-  const { t } = useLang();
+  const { lang, t } = useLang();
+  // "4,9" with a decimal comma in RU and DE (QA E3-07).
+  const formatAverage = (value?: number | null) => formatFeedbackDecimal(value, lang, portalNotSetLabel());
   const feedbackSelectPatientError = t.feedback_select_patient_error;
   const canViewWorkspace = canViewStaffFeedback(user);
   const canCapture = roleCanCaptureFeedback(user);
@@ -1339,6 +1351,8 @@ function useStaffFeedbackWorkspaceContent() {
     submitting,
     reviewBusy,
     error,
+    loadFailed,
+    loaded,
     notice,
     version,
     activeReview,
@@ -1470,17 +1484,17 @@ function useStaffFeedbackWorkspaceContent() {
             feedback: feedbackRows,
             summary: summaryData,
             error: "",
+            loadFailed: false,
+            loaded: true,
             loading: false,
             refreshing: false,
           });
         });
-      } catch (err) {
+      } catch {
         if (cancelled) return;
+        // Shown as its own translated error with a retry (QA E3-07).
         dispatchStaffState({
-          error:
-            err instanceof Error
-              ? err.message
-              : t.feedback_workspace_load_error,
+          loadFailed: true,
           loading: false,
           refreshing: false,
         });
@@ -1899,7 +1913,35 @@ function useStaffFeedbackWorkspaceContent() {
 
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error && !capturePatientError ? <Banner tone="error">{error}</Banner> : null}
+      {loadFailed ? (
+        <div
+          role="alert"
+          data-testid="feedback-load-error"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
+        >
+          <div className="min-w-0 space-y-0.5">
+            <p className="font-medium">{t.feedback_workspace_load_error}</p>
+            <p className="text-xs text-destructive/80">{t.feedback_workspace_load_error_hint}</p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={refreshing}
+            onClick={() => {
+              clearApiCache("/feedback");
+              clearApiCache("/feedback/summary");
+              setVersion((value) => value + 1);
+            }}
+          >
+            {refreshing ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            {t.feedback_retry}
+          </Button>
+        </div>
+      ) : null}
 
+      {loadFailed && !loaded ? null : (
+      <>
       <div className={ADMIN_INLINE_METRICS_GRID} data-testid="feedback-metrics">
         <AdminInlineMetric
           icon={MessageSquare}
@@ -1923,7 +1965,7 @@ function useStaffFeedbackWorkspaceContent() {
         <AdminInlineMetric
           icon={Users}
           label={t.feedback_average_overall_metric}
-          value={formatPortalAverage(summary?.average_scores?.overall)}
+          value={formatAverage(summary?.average_scores?.overall)}
           tone="slate"
         />
       </div>
@@ -1941,22 +1983,18 @@ function useStaffFeedbackWorkspaceContent() {
                 </div>
                 <div className="mt-5 grid gap-2.5 xl:grid-cols-2">
                   <div className="grid gap-1.5 rounded-xl bg-card p-3">
-                    <FeedbackSummaryLine label={t.feedback_overall_average} value={formatPortalAverage(summary.average_scores.overall)} />
-                    <FeedbackSummaryLine label={t.feedback_interpreter_average} value={formatPortalAverage(summary.average_scores.interpreter)} />
-                    <FeedbackSummaryLine label={t.feedback_concierge_average} value={formatPortalAverage(summary.average_scores.concierge)} />
-                    <FeedbackSummaryLine label={t.feedback_treatment_average} value={formatPortalAverage(summary.average_scores.treatment)} />
+                    <FeedbackSummaryLine label={t.feedback_overall_average} value={formatAverage(summary.average_scores.overall)} />
+                    <FeedbackSummaryLine label={t.feedback_interpreter_average} value={formatAverage(summary.average_scores.interpreter)} />
+                    <FeedbackSummaryLine label={t.feedback_concierge_average} value={formatAverage(summary.average_scores.concierge)} />
+                    <FeedbackSummaryLine label={t.feedback_treatment_average} value={formatAverage(summary.average_scores.treatment)} />
                   </div>
                   <div className="grid gap-1.5 rounded-xl bg-card p-3">
-                    <FeedbackSummaryLine label={t.feedback_service_average} value={formatPortalAverage(summary.average_scores.service)} />
-                    <FeedbackSummaryLine label={t.feedback_ambience_average} value={formatPortalAverage(summary.average_scores.infrastructure)} />
-                    <FeedbackSummaryLine label={t.feedback_value_average} value={formatPortalAverage(summary.average_scores.price_value)} />
+                    <FeedbackSummaryLine label={t.feedback_service_average} value={formatAverage(summary.average_scores.service)} />
+                    <FeedbackSummaryLine label={t.feedback_ambience_average} value={formatAverage(summary.average_scores.infrastructure)} />
+                    <FeedbackSummaryLine label={t.feedback_value_average} value={formatAverage(summary.average_scores.price_value)} />
                     <FeedbackSummaryLine
                       label={t.feedback_complication_rate}
-                      value={
-                        summary.complication_rate === null || summary.complication_rate === undefined
-                          ? portalNotSetLabel()
-                          : `${summary.complication_rate.toFixed(1)}%`
-                      }
+                      value={formatFeedbackPercent(summary.complication_rate, lang, portalNotSetLabel())}
                     />
                   </div>
                 </div>
@@ -1968,8 +2006,8 @@ function useStaffFeedbackWorkspaceContent() {
                 rows={summary.top_promoters.slice(0, 5).map((item) => ({
                   id: item.patient_id,
                   name: item.patient_name,
-                  subtitle: `${item.feedback_count} ${t.feedback_feedback_count_suffix}`,
-                  value: item.average_nps.toFixed(1),
+                  subtitle: formatFeedbackCount(lang, item.feedback_count),
+                  value: formatAverage(item.average_nps),
                 }))}
               />
 
@@ -1979,8 +2017,8 @@ function useStaffFeedbackWorkspaceContent() {
                 rows={summary.interpreter_ranking.slice(0, 5).map((item) => ({
                   id: item.user_id ?? item.name,
                   name: item.name,
-                  subtitle: `${item.feedback_count} ${t.feedback_rating_count_suffix}`,
-                  value: item.average_score.toFixed(1),
+                  subtitle: formatRatingCount(lang, item.feedback_count),
+                  value: formatAverage(item.average_score),
                 }))}
               />
 
@@ -1992,8 +2030,8 @@ function useStaffFeedbackWorkspaceContent() {
                   rows={summary.clinic_ranking.slice(0, 5).map((item) => ({
                     id: item.provider_id ?? item.name,
                     name: item.name,
-                    subtitle: `${item.feedback_count} ${t.feedback_rating_count_suffix}`,
-                    value: item.average_score.toFixed(1),
+                    subtitle: formatRatingCount(lang, item.feedback_count),
+                    value: formatAverage(item.average_score),
                   }))}
                 />
               </div>
@@ -2037,6 +2075,8 @@ function useStaffFeedbackWorkspaceContent() {
           />
         </AdminTableCard>
       </div>
+      </>
+      )}
 
       <Sheet open={captureOpen} onOpenChange={setCaptureOpen}>
         <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">

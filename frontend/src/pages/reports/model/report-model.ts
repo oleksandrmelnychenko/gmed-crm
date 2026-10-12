@@ -1,3 +1,4 @@
+import { countryNameForDisplay } from "@/components/ui/country-select";
 import { formatAppDate } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
@@ -72,4 +73,19 @@ export function serviceTypeLabel(value: string, labels: Record<string, string> |
 
 export function roleCanOpenReports(actor?: Actor) {
   return hasCapability(actor, "reports.view");
+}
+
+/**
+ * Name of a "top lead countries" bar (QA E3-06): the server sends ISO codes,
+ * shown as the localized country name ("Германия" / "Deutschland"); the text
+ * of a value naming no known country as stored; "not specified" translated.
+ */
+export function leadCountryLabel(
+  item: { country?: string | null; label?: string | null },
+  lang: Lang,
+  notSpecified: string,
+): string {
+  if (item.country) return countryNameForDisplay(item.country, lang) || item.country;
+  const text = item.label?.trim();
+  return text ? countryNameForDisplay(text, lang) || text : notSpecified;
 }

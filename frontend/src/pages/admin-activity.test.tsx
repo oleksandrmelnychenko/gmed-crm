@@ -6,6 +6,7 @@ import { ru } from "@/lib/i18n/ru";
 import {
   actionLabel,
   actionTone,
+  activityLabelMatches,
   activityViewQuery,
   entityTypeLabel,
   isAccessActivity,
@@ -132,5 +133,29 @@ describe("Medication AI activity localization", () => {
     expect(actionLabel("patient.medication_ai_analysis_ready", de)).toBe(
       "Patient: KI-Entwurf bereit",
     );
+  });
+});
+
+describe("activity log objects and search by label (QA E3-01)", () => {
+  it("names provider catalogue objects instead of English codes", () => {
+    expect(entityTypeLabel("provider_service", ru)).toBe("Услуга провайдера");
+    expect(entityTypeLabel("provider_doctor", ru)).toBe("Врач провайдера");
+    expect(entityTypeLabel("provider_doctor", de)).toBe("Arzt beim Anbieter");
+  });
+
+  it("says Portal in German, never Kabinett", () => {
+    expect(actionLabel("lead_portal_update_payer_declaration", de)).toBe("Portal: Angaben zum Zahler geändert");
+    expect(actionLabel("create_lead_portal_account", de)).toBe("Zugang zum Lead-Portal angelegt");
+  });
+
+  it("sends the codes whose shown label matches the search text", () => {
+    const ruMatches = activityLabelMatches("Неудачн", ru);
+    expect(ruMatches.actions).toContain("login_failure");
+    expect(activityLabelMatches("Fehlgeschlagene Anm", de).actions).toContain("login_failure");
+    expect(activityLabelMatches("Услуга провайдера", ru).entities).toContain("provider_service");
+    // Raw codes are matched by the server already; short texts match nothing.
+    expect(activityLabelMatches("login_failure", ru).actions).not.toContain("login_failure");
+    expect(activityLabelMatches("Не", ru)).toEqual({ actions: [], entities: [] });
+    expect(activityLabelMatches("Заметка", ru).actions.length).toBeLessThanOrEqual(120);
   });
 });

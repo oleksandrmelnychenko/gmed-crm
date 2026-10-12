@@ -96,3 +96,30 @@ describe("activity log details (QA E2-03)", () => {
     expect(activityActorLabel({ user_name: "Mia Muster", action: "payer_link_sent" }, ru)).toBe("Mia Muster");
   });
 });
+
+describe("activity log values in words (QA E3-01)", () => {
+  it("translates record statuses, document categories and visibility", () => {
+    expect(activityContextSummary({ previous_status: "new", status: "in_progress" }, ru)).toBe(
+      "Прежний статус: Новый · Статус: В работе",
+    );
+    expect(activityContextSummary({ category: "medical", status: "active", visibility: "internal" }, ru)).toBe(
+      "Категория: Медицинский · Статус: Активен · Видимость: Внутренний",
+    );
+    expect(activityContextSummary({ category: "identity" }, de)).toBe("Kategorie: Ausweisdokument");
+  });
+
+  it("translates sources, kinds and languages", () => {
+    expect(activityContextSummary({ source: "upload" }, ru)).toBe("Источник: Загрузка файла");
+    expect(activityContextSummary({ kind: "started", status: "clear" }, ru)).toBe(
+      "Вид: Оценка начата · Статус: Без замечаний",
+    );
+    expect(activityContextSummary({ source: "lead_payer_declaration", language: "de" }, ru)).toBe(
+      "Источник: Данные о плательщике (лид) · Язык: немецкий",
+    );
+    expect(activityContextSummary({ language: "ru" }, de)).toBe("Sprache: Russisch");
+  });
+
+  it("keeps an unknown code as stored", () => {
+    expect(activityContextSummary({ source: "some_new_source" }, ru)).toBe("Источник: some_new_source");
+  });
+});

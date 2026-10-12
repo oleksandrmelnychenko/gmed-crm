@@ -1,10 +1,28 @@
 import { useCallback, useEffect } from "react";
 
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type User } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { ChangePasswordForm } from "@/pages/account";
+
+/**
+ * The explanation for the reason the server names (QA E2-07): a brand-new
+ * account is asked to set its own password instead of being told it "was
+ * reset or has expired". An older server sends no reason: the general text.
+ */
+export function passwordRequiredBodyKey(reason: User["password_change_reason"]): string {
+  switch (reason) {
+    case "initial":
+      return "account_password_required_body_initial";
+    case "reset":
+      return "account_password_required_body_reset";
+    case "expired":
+      return "account_password_required_body_expired";
+    default:
+      return "account_password_required_body";
+  }
+}
 
 /**
  * Minimal gate shown after sign-in when the server flags
@@ -44,7 +62,9 @@ export function AccountPasswordRequiredPage() {
       <div className="w-full max-w-2xl space-y-6 rounded-2xl border border-border bg-card p-6 shadow-sm" data-testid="password-required-page">
         <div className="space-y-1">
           <h1 className="text-lg font-semibold text-foreground">{l("account_password_required_title")}</h1>
-          <p className="text-sm leading-6 text-muted-foreground">{l("account_password_required_body")}</p>
+          <p className="text-sm leading-6 text-muted-foreground" data-testid="password-required-reason">
+            {l(passwordRequiredBodyKey(user.password_change_reason))}
+          </p>
           <p className="text-xs text-muted-foreground">{user.email}</p>
         </div>
         <ChangePasswordForm onChanged={onChanged} />

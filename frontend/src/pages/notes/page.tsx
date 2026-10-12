@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
+  ArchiveRestore,
   Download,
   FileImage,
   FileText,
@@ -12,6 +13,7 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { ReadOnlyBanner } from "@/components/read-only-scope";
 import { PageHeader } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +46,8 @@ type NoteSummary = {
   body: string | null;
   created_by: string;
   created_by_name: string;
+  /** The author's current role: "Моя роль" of a note means this role (QA E3-02). */
+  created_by_role?: string | null;
   updated_by_name: string;
   attachment_count: number;
   /** Older servers send no visibility: their notes were visible to all staff. */
@@ -51,6 +55,8 @@ type NoteSummary = {
   visible_role?: string | null;
   created_at: string;
   updated_at: string;
+  /** Set in the archive list (`?archived=true`). */
+  archived_at?: string | null;
 };
 
 type InternalNote = Omit<NoteSummary, "attachment_count"> & {
@@ -89,8 +95,22 @@ export const NOTES_COPY = {
     visibilityAuthorOnly: "Die Sichtbarkeit ändert nur die Person, die die Notiz angelegt hat.",
     visibilityOwn: { private: "Nur ich", role: "Meine Rolle", staff: "Alle Mitarbeitenden" },
     visibilityOther: { private: "Nur Autor:in", role: "Rolle", staff: "Alle Mitarbeitenden" },
+    visibilityAuthorRole: (role: string) => `Rolle der Autor:in: ${role}`,
+    visibilityAuthorRoleUnknown: "Rolle der Autor:in",
+    visibilityHintOther: (author: string) =>
+      `Die Sichtbarkeit gilt aus Sicht der Person, die die Notiz angelegt hat (${author}). Der CEO sieht alle Notizen.`,
     errorNotFound: "Die Notiz gibt es nicht mehr oder sie ist nicht für Sie freigegeben.",
     errorConflict: "Die Notiz wurde inzwischen von jemand anderem geändert. Bitte neu laden.",
+    errorReadOnly: "Ihre Rolle kann Notizen nur lesen.",
+    archiveAuthorOnly: "Archivieren können nur die Person, die die Notiz angelegt hat, und der CEO.",
+    viewActive: "Aktuell",
+    viewArchive: "Archiv",
+    restore: "Wiederherstellen",
+    restored: "Notiz wiederhergestellt",
+    noArchived: "Keine archivierten Notizen",
+    selectArchived: "Archivierte Notiz auswählen",
+    archivedOn: (date: string, by: string) => `Archiviert am ${date} · ${by}`,
+    restoreHint: "Wiederherstellen können die Person, die die Notiz angelegt hat, und der CEO.",
   },
   ru: {
     title: "Заметки",
@@ -123,12 +143,61 @@ export const NOTES_COPY = {
     visibilityAuthorOnly: "Видимость меняет только автор заметки.",
     visibilityOwn: { private: "Только я", role: "Моя роль", staff: "Все сотрудники" },
     visibilityOther: { private: "Только автор", role: "Роль", staff: "Все сотрудники" },
+    visibilityAuthorRole: (role: string) => `Роль автора: ${role}`,
+    visibilityAuthorRoleUnknown: "Роль автора",
+    visibilityHintOther: (author: string) =>
+      `Видимость задаётся от лица автора заметки (${author}). CEO видит все заметки.`,
     errorNotFound: "Заметки больше нет или она вам недоступна.",
     errorConflict: "Заметку тем временем изменил другой сотрудник. Обновите страницу.",
+    errorReadOnly: "Ваша роль может только просматривать заметки.",
+    archiveAuthorOnly: "Архивировать заметку может только её автор или CEO.",
+    viewActive: "Текущие",
+    viewArchive: "Архив",
+    restore: "Восстановить",
+    restored: "Заметка восстановлена",
+    noArchived: "В архиве нет заметок",
+    selectArchived: "Выберите заметку из архива",
+    archivedOn: (date: string, by: string) => `В архиве с ${date} · ${by}`,
+    restoreHint: "Восстановить заметку может её автор или CEO.",
   },
 } as const;
 
 type NotesCopy = (typeof NOTES_COPY)[keyof typeof NOTES_COPY];
+
+/** Who may change the visibility, archive and restore: the author or the CEO (QA E3-03). */
+export function canManageNote(
+  note: Pick<NoteSummary, "created_by"> | null | undefined,
+  viewer: { id: string; role: string } | null | undefined,
+): boolean {
+  if (!note || !viewer || !canWriteNotes(viewer.role)) return false;
+  return note.created_by === viewer.id || viewer.role === "ceo";
+}
+
+/** The CEO Assistant reads notes but writes none (owner rule, QA E3-03); the server refuses it too. */
+export function canWriteNotes(role: string | null | undefined): boolean {
+  return Boolean(role) && role !== "ceo_assistant";
+}
+
+/**
+ * The visibility choices as the editor reads them. The server applies the
+ * choice to the AUTHOR (QA E3-02): for the author they read "Только я /
+ * Моя роль", for anyone else (the CEO) "Только автор / Роль автора: Sales".
+ */
+export function noteVisibilityChoices(
+  note: Pick<NoteSummary, "visibility" | "visible_role" | "created_by" | "created_by_role"> | null | undefined,
+  viewerId: string | undefined,
+  labels: NotesCopy,
+  roleName: (role: string) => string,
+): Record<NoteVisibility, string> {
+  if (!note || !viewerId || note.created_by === viewerId) return labels.visibilityOwn;
+  // "Role" keeps the role the note was shared with; switching to it takes the author's current role.
+  const role = note.visibility === "role" && note.visible_role ? note.visible_role : note.created_by_role;
+  return {
+    private: labels.visibilityOther.private,
+    role: role ? labels.visibilityAuthorRole(roleName(role)) : labels.visibilityAuthorRoleUnknown,
+    staff: labels.visibilityOther.staff,
+  };
+}
 
 /**
  * The badge of a note: the author reads the choices of the form ("Только я",
@@ -155,6 +224,10 @@ export function noteErrorMessage(error: unknown, labels: NotesCopy): string {
   switch (code) {
     case "note_visibility_author_only":
       return labels.visibilityAuthorOnly;
+    case "note_read_only_role":
+      return labels.errorReadOnly;
+    case "note_archive_author_only":
+      return labels.archiveAuthorOnly;
     case "Note not found":
     case "Attachment not found":
       return labels.errorNotFound;
@@ -210,25 +283,35 @@ export function InternalNotesPage() {
   const [newBody, setNewBody] = useState("");
   // New notes stay with their author unless the author shares them.
   const [newVisibility, setNewVisibility] = useState<NoteVisibility>("private");
-  // Only the author (or the CEO) decides who reads a note; the server checks it too.
-  const canChangeVisibility = Boolean(
-    activeNote && user && (activeNote.created_by === user.id || user.role === "ceo"),
-  );
+  // "archive": archived notes the viewer may restore (own notes; the CEO all).
+  const [view, setView] = useState<"active" | "archive">("active");
+  // The CEO Assistant only reads notes (QA E3-03); the server refuses its writes too.
+  const readOnly = !canWriteNotes(user?.role);
+  // Only the author (or the CEO) decides who reads a note and archives it; the server checks it too.
+  const canManage = canManageNote(activeNote, user);
+  const canChangeVisibility = canManage;
+  const editingOthersNote = Boolean(activeNote && user && activeNote.created_by !== user.id);
+  const visibilityChoices = noteVisibilityChoices(activeNote, user?.id, labels, roleName);
   // A plain list: the select reads its <option> children, not a fragment.
-  const visibilityOptions = NOTE_VISIBILITIES.map((value) => (
-    <option key={value} value={value}>
-      {labels.visibilityOwn[value]}
-    </option>
-  ));
+  const optionsFor = (choices: Record<NoteVisibility, string>) =>
+    NOTE_VISIBILITIES.map((value) => (
+      <option key={value} value={value}>
+        {choices[value]}
+      </option>
+    ));
+  const archivedNote = view === "archive" ? (notes.find((note) => note.id === selectedId) ?? null) : null;
 
-  const loadNotes = useCallback(async (keepSelection = true) => {
+  const loadNotes = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const rows = await apiFetch<NoteSummary[]>("/internal-notes", { forceFresh: true });
+      const rows = await apiFetch<NoteSummary[]>(
+        view === "archive" ? "/internal-notes?archived=true" : "/internal-notes",
+        { forceFresh: true },
+      );
       setNotes(rows);
       setSelectedId((current) => {
-        if (keepSelection && current && rows.some((note) => note.id === current)) return current;
+        if (current && rows.some((note) => note.id === current)) return current;
         return rows[0]?.id ?? null;
       });
     } catch (loadError) {
@@ -236,14 +319,22 @@ export function InternalNotesPage() {
     } finally {
       setLoading(false);
     }
-  }, [labels]);
+  }, [labels, view]);
 
   useEffect(() => {
-    void loadNotes(false);
+    void loadNotes();
   }, [loadNotes]);
 
+  function switchView(next: "active" | "archive") {
+    if (next === view) return;
+    setNotice("");
+    setActiveNote(null);
+    setSelectedId(null);
+    setView(next);
+  }
+
   useEffect(() => {
-    if (!selectedId) return;
+    if (!selectedId || view !== "active") return;
     let cancelled = false;
     void apiFetch<InternalNote>(`/internal-notes/${selectedId}`, { forceFresh: true })
       .then((note) => {
@@ -259,7 +350,7 @@ export function InternalNotesPage() {
     return () => {
       cancelled = true;
     };
-  }, [labels, selectedId]);
+  }, [labels, selectedId, view]);
 
   const visibleNotes = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -366,13 +457,35 @@ export function InternalNotesPage() {
   async function archiveNote() {
     if (!activeNote || !window.confirm(labels.confirmArchive)) return;
     setSaving(true);
+    setError("");
+    setNotice("");
     try {
       await apiFetch<void>(`/internal-notes/${activeNote.id}/archive`, { method: "POST" });
+      clearApiCache("/internal-notes");
       setActiveNote(null);
       setSelectedId(null);
-      await loadNotes(false);
+      await loadNotes();
     } catch (archiveError) {
       setError(noteErrorMessage(archiveError, labels));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function restoreNote(note: NoteSummary) {
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const restored = await apiFetch<InternalNote>(`/internal-notes/${note.id}/restore`, { method: "POST" });
+      clearApiCache("/internal-notes");
+      // Back to the current notes with the restored one open.
+      setActiveNote(null);
+      setSelectedId(restored.id);
+      setView("active");
+      setNotice(labels.restored);
+    } catch (restoreError) {
+      setError(noteErrorMessage(restoreError, labels));
     } finally {
       setSaving(false);
     }
@@ -383,15 +496,48 @@ export function InternalNotesPage() {
       <PageHeader
         title={labels.title}
         description={labels.subtitle}
-        actions={<Button type="button" onClick={() => { setNewTitle(""); setNewBody(""); setNewVisibility("private"); setNewNoteOpen(true); }}><Plus />{labels.newNote}</Button>}
+        actions={readOnly ? undefined : (
+          <Button
+            type="button"
+            onClick={() => {
+              switchView("active");
+              setNewTitle("");
+              setNewBody("");
+              setNewVisibility("private");
+              setNewNoteOpen(true);
+            }}
+          >
+            <Plus />
+            {labels.newNote}
+          </Button>
+        )}
       />
 
+      {readOnly ? <ReadOnlyBanner /> : null}
       {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
       {notice ? <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</p> : null}
 
-      <div className="grid min-h-[620px] overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
-        <aside className="flex min-h-0 flex-col overflow-hidden border-b border-border/70 lg:border-r lg:border-b-0">
-          <div className="border-b border-border/70 p-3">
+      <div className="grid min-h-[620px] grid-cols-1 overflow-hidden rounded-lg border border-border/70 bg-card lg:min-h-0 lg:flex-1 lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)]">
+        <aside className="flex min-h-0 min-w-0 flex-col overflow-hidden border-b border-border/70 lg:border-r lg:border-b-0">
+          <div className="space-y-2 border-b border-border/70 p-3">
+            {readOnly ? null : (
+              <div className="inline-flex rounded-lg border border-border/70 bg-muted/30 p-0.5" role="group" aria-label={`${labels.viewActive} / ${labels.viewArchive}`}>
+                {(["active", "archive"] as const).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={view === value}
+                    className={cn(
+                      "rounded-md px-3 py-1 text-xs font-medium transition-colors",
+                      view === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => switchView(value)}
+                  >
+                    {value === "active" ? labels.viewActive : labels.viewArchive}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input className="h-9 rounded-lg bg-field pl-9" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} />
@@ -399,7 +545,7 @@ export function InternalNotesPage() {
           </div>
           <div className="flex min-h-0 max-h-[280px] flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-2 lg:max-h-none">
             {loading ? <div className="flex justify-center py-10"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : null}
-            {!loading && visibleNotes.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted-foreground">{labels.noNotes}</p> : null}
+            {!loading && visibleNotes.length === 0 ? <p className="px-4 py-12 text-center text-sm text-muted-foreground">{view === "archive" ? labels.noArchived : labels.noNotes}</p> : null}
             {visibleNotes.map((note) => (
               <button
                 key={note.id}
@@ -418,7 +564,7 @@ export function InternalNotesPage() {
                     </span>
                     {note.attachment_count > 0 ? <Badge variant="secondary" className="h-5 shrink-0 rounded-full px-1.5 text-[9px]"><Paperclip className="size-2.5" />{note.attachment_count}</Badge> : null}
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium tabular-nums text-sky-700">
-                      {formatDate(note.updated_at)}
+                      {formatDate(view === "archive" && note.archived_at ? note.archived_at : note.updated_at)}
                     </span>
                   </div>
                 </div>
@@ -429,7 +575,35 @@ export function InternalNotesPage() {
         </aside>
 
         <main className="min-w-0 lg:flex lg:min-h-0 lg:flex-col lg:overflow-hidden">
-          {!selectedId ? <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">{labels.selectNote}</div> : (
+          {view === "archive" ? (
+            archivedNote ? (
+              <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain" data-testid="archived-note">
+                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
+                  <div className="min-w-0">
+                    <h2 className="break-words text-base font-semibold text-foreground">{archivedNote.title}</h2>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {labels.archivedOn(formatDate(archivedNote.archived_at ?? archivedNote.updated_at), archivedNote.updated_by_name)}
+                    </p>
+                    <span className={cn("mt-2 inline-flex w-fit items-center rounded-md border px-2 py-1 text-xs font-medium", visibilityTone(archivedNote.visibility ?? "staff"))}>
+                      {noteVisibilityLabel(archivedNote, user?.id, labels, roleName)}
+                    </span>
+                  </div>
+                  {canManageNote(archivedNote, user) ? (
+                    <Button type="button" size="sm" disabled={saving} onClick={() => void restoreNote(archivedNote)}>
+                      {saving ? <LoaderCircle className="animate-spin" /> : <ArchiveRestore />}
+                      {labels.restore}
+                    </Button>
+                  ) : null}
+                </div>
+                <p className="mx-4 mt-3 text-xs text-muted-foreground sm:mx-5">{labels.restoreHint}</p>
+                <p className="mx-4 mt-3 mb-4 whitespace-pre-wrap break-words rounded-lg border border-border/70 bg-muted/20 px-3 py-3 text-sm leading-6 sm:mx-5">
+                  {archivedNote.body || "—"}
+                </p>
+              </div>
+            ) : (
+              <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">{labels.selectArchived}</div>
+            )
+          ) : !selectedId ? <div className="flex min-h-[420px] items-center justify-center text-sm text-muted-foreground">{labels.selectNote}</div> : (
             <div className="min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/70 px-4 py-3.5 sm:px-5">
                 <div className="min-w-0">
@@ -437,17 +611,19 @@ export function InternalNotesPage() {
                   <p className="mt-1 text-xs text-muted-foreground">{`${labels.updated} ${activeNote ? formatDate(activeNote.updated_at) : ""}`}</p>
                   {activeNote ? <p className="mt-1 text-xs text-muted-foreground">{labels.by} {activeNote.updated_by_name}</p> : null}
                 </div>
-                <div className="flex gap-2">
-                  {activeNote ? <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void archiveNote()}><Archive />{labels.archive}</Button> : null}
-                  <Button type="button" size="sm" disabled={saving || !draftTitle.trim()} onClick={() => void saveNote()}>
-                    {saving ? <LoaderCircle className="animate-spin" /> : <Save />}{saving ? labels.saving : labels.save}
-                  </Button>
-                </div>
+                {readOnly ? null : (
+                  <div className="flex gap-2">
+                    {activeNote && canManage ? <Button type="button" size="sm" variant="outline" disabled={saving} onClick={() => void archiveNote()}><Archive />{labels.archive}</Button> : null}
+                    <Button type="button" size="sm" disabled={saving || !draftTitle.trim()} onClick={() => void saveNote()}>
+                      {saving ? <LoaderCircle className="animate-spin" /> : <Save />}{saving ? labels.saving : labels.save}
+                    </Button>
+                  </div>
+                )}
               </div>
 
               <label className="mx-4 mt-4 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteTitle}</span>
-                <Input className="h-9 bg-field" value={draftTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setDraftTitle(event.target.value)} />
+                <Input className="h-9 bg-field" value={draftTitle} maxLength={255} placeholder={labels.untitled} readOnly={readOnly} onChange={(event) => setDraftTitle(event.target.value)} />
               </label>
               {activeNote ? (
                 <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
@@ -459,7 +635,7 @@ export function InternalNotesPage() {
                       className="h-9 w-full max-w-xs rounded-lg bg-field text-[13px]"
                       aria-label={labels.visibility}
                     >
-                      {visibilityOptions}
+                      {optionsFor(visibilityChoices)}
                     </NativeComboboxSelect>
                   ) : (
                     <span className={cn("inline-flex w-fit items-center rounded-md border px-2 py-1 text-xs font-medium", visibilityTone(activeNote.visibility ?? "staff"))}>
@@ -467,7 +643,13 @@ export function InternalNotesPage() {
                     </span>
                   )}
                   <span className="block text-xs font-normal text-muted-foreground">
-                    {canChangeVisibility ? labels.visibilityHint : labels.visibilityAuthorOnly}
+                    {canChangeVisibility
+                      ? editingOthersNote
+                        ? labels.visibilityHintOther(activeNote.created_by_name)
+                        : labels.visibilityHint
+                      : readOnly
+                        ? labels.errorReadOnly
+                        : `${labels.visibilityAuthorOnly} ${labels.archiveAuthorOnly}`}
                   </span>
                 </label>
               ) : null}
@@ -478,6 +660,7 @@ export function InternalNotesPage() {
                   value={draftBody}
                   maxLength={20_000}
                   placeholder={labels.bodyPlaceholder}
+                  readOnly={readOnly}
                   onChange={(event) => setDraftBody(event.target.value)}
                 />
               </label>
@@ -499,9 +682,11 @@ export function InternalNotesPage() {
                         if (file) void attachFile(file);
                       }}
                     />
-                    <Button type="button" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
-                      {uploading ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.attach}
-                    </Button>
+                    {readOnly ? null : (
+                      <Button type="button" variant="outline" disabled={uploading} onClick={() => fileInputRef.current?.click()}>
+                        {uploading ? <LoaderCircle className="animate-spin" /> : <Paperclip />}{labels.attach}
+                      </Button>
+                    )}
                   </div>
                   <div className="divide-y divide-border/60">
                     {activeNote.attachments.map((attachment) => (
@@ -512,7 +697,7 @@ export function InternalNotesPage() {
                           <p className="text-xs text-muted-foreground">{formatSize(attachment.file_size)} · {attachment.uploaded_by_name}</p>
                         </div>
                         <Button type="button" size="icon-sm" variant="ghost" title={attachment.file_name} onClick={() => void downloadApiFile(`/internal-notes/${activeNote.id}/attachments/${attachment.id}/download`, attachment.file_name)}><Download /></Button>
-                        <Button type="button" size="icon-sm" variant="ghost" title={labels.deleteFile} disabled={uploading} onClick={() => void deleteAttachment(attachment)}><Trash2 /></Button>
+                        {readOnly ? null : <Button type="button" size="icon-sm" variant="ghost" title={labels.deleteFile} disabled={uploading} onClick={() => void deleteAttachment(attachment)}><Trash2 /></Button>}
                       </div>
                     ))}
                     {activeNote.attachments.length === 0 ? <p className="px-3 py-5 text-center text-sm text-muted-foreground">{labels.allowedFiles}</p> : null}
@@ -543,7 +728,7 @@ export function InternalNotesPage() {
                 className="h-9 w-full rounded-lg bg-field text-[13px]"
                 aria-label={labels.visibility}
               >
-                {visibilityOptions}
+                {optionsFor(labels.visibilityOwn)}
               </NativeComboboxSelect>
               <span className="text-xs font-normal text-muted-foreground">{labels.visibilityHint}</span>
             </label>

@@ -186,6 +186,10 @@ export type AdminActivityQuery = {
   limit?: number;
   offset?: number;
   search?: string;
+  /** Action codes whose translated label matches `search` (QA E3-01). */
+  searchActions?: readonly string[];
+  /** Entity types whose translated label matches `search`. */
+  searchEntities?: readonly string[];
   view?: "activity" | "security" | "technical" | "all";
   /** `access`: only account, role and permission changes. */
   category?: "access";
@@ -221,7 +225,11 @@ export function fetchAdminActivity<TActivity>(
   if (input.action) query.set("action", input.action);
   if (input.dateFrom) query.set("date_from", input.dateFrom);
   if (input.dateTo) query.set("date_to", input.dateTo);
-  if (input.search) query.set("search", input.search);
+  if (input.search) {
+    query.set("search", input.search);
+    if (input.searchActions?.length) query.set("search_actions", input.searchActions.join(","));
+    if (input.searchEntities?.length) query.set("search_entities", input.searchEntities.join(","));
+  }
   if (input.view) query.set("view", input.view);
   if (input.category) query.set("category", input.category);
   return apiFetch<AdminActivityResponse<TActivity>>(`/admin/activity?${query.toString()}`, {

@@ -267,10 +267,36 @@ struct ActivityQuery {
     /// [`ACCESS_AUDIT_ACTIONS`]). Absent: no extra restriction.
     category: Option<String>,
     search: Option<String>,
+    /// Comma-separated action codes whose translated label matches the
+    /// search text (the UI knows the labels, QA E3-01): the search also
+    /// finds these rows, not only the raw codes.
+    search_actions: Option<String>,
+    /// Comma-separated entity types whose translated label matches.
+    search_entities: Option<String>,
     limit: Option<i64>,
     offset: Option<i64>,
     date_from: Option<String>,
     date_to: Option<String>,
+}
+
+/// Codes from a comma-separated list: trimmed, non-empty, plain code
+/// characters only, at most 300 of them. `None` without any code.
+fn activity_code_list(raw: Option<&str>) -> Option<Vec<String>> {
+    let codes: Vec<String> = raw
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|code| {
+            !code.is_empty()
+                && code.len() <= 120
+                && code
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '-'))
+        })
+        .take(300)
+        .map(str::to_string)
+        .collect();
+    (!codes.is_empty()).then_some(codes)
 }
 
 /// Audit actions that change who can sign in and what they may do: the
@@ -439,6 +465,8 @@ async fn list_activity(
         view,
         category,
         search,
+        search_actions,
+        search_entities,
         limit,
         offset,
         date_from,
@@ -460,6 +488,14 @@ async fn list_activity(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    let (search_actions, search_entities) = if search.is_some() {
+        (
+            activity_code_list(search_actions.as_deref()),
+            activity_code_list(search_entities.as_deref()),
+        )
+    } else {
+        (None, None)
+    };
     let limit = limit.unwrap_or(50).clamp(1, 500);
     let offset = offset.unwrap_or(0).max(0);
     let date_from = match parse_activity_date_start(date_from, "date_from") {
@@ -523,6 +559,8 @@ async fn list_activity(
                  )
                  OR al.action ILIKE '%' || $6 || '%'
                  OR al.entity_type ILIKE '%' || $6 || '%'
+                 OR al.action = ANY(COALESCE($10::TEXT[], '{}'::TEXT[]))
+                 OR al.entity_type = ANY(COALESCE($11::TEXT[], '{}'::TEXT[]))
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
                  OR (
                      (
@@ -543,6 +581,8 @@ async fn list_activity(
     .bind(&category_actions)
     .bind(full_access)
     .bind(&technical_entity_types)
+    .bind(&search_actions)
+    .bind(&search_entities)
     .fetch_one(&state.db)
     .await
     {
@@ -591,6 +631,8 @@ async fn list_activity(
                  )
                  OR al.action ILIKE '%' || $6 || '%'
                  OR al.entity_type ILIKE '%' || $6 || '%'
+                 OR al.action = ANY(COALESCE($12::TEXT[], '{}'::TEXT[]))
+                 OR al.entity_type = ANY(COALESCE($13::TEXT[], '{}'::TEXT[]))
                  OR COALESCE(al.entity_id::TEXT, '') ILIKE '%' || $6 || '%'
                  OR (
                      (
@@ -614,6 +656,8 @@ async fn list_activity(
     .bind(&category_actions)
     .bind(full_access)
     .bind(&technical_entity_types)
+    .bind(&search_actions)
+    .bind(&search_entities)
     .fetch_all(&state.db)
     .await
     {

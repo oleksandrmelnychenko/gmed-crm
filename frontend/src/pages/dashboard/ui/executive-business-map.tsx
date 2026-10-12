@@ -456,8 +456,8 @@ export function ExecutiveBusinessMap({
         <MetricSignal label={copy.openActions} value={loading ? "—" : String(openTasksCount)} note={openTasksCount > 0 ? copy.attention(openTasksCount) : copy.stable} tone={openTasksCount > 0 ? "danger" : "good"} />
       </section>
 
-      <section className="grid border-b border-border xl:grid-cols-[minmax(0,1fr)_350px]">
-        <div className="grid min-w-0 sm:grid-cols-2">
+      <section className="grid grid-cols-1 border-b border-border xl:grid-cols-[minmax(0,1fr)_350px]">
+        <div className="grid min-w-0 grid-cols-1 sm:grid-cols-2">
           <div className="border-b border-border">
             <BusinessDomain
               title={copy.money}
@@ -512,7 +512,7 @@ export function ExecutiveBusinessMap({
           </div>
         </div>
 
-        <aside className="border-t border-border px-4 py-4 sm:px-5 xl:border-l xl:border-t-0">
+        <aside className="min-w-0 border-t border-border px-4 py-4 sm:px-5 xl:border-l xl:border-t-0">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-foreground">{copy.decisions}</h2>
@@ -531,7 +531,7 @@ export function ExecutiveBusinessMap({
                 <button key={task.id} type="button" onClick={() => go(`/task-manager?task=${encodeURIComponent(task.id)}`)} className="group flex w-full items-start gap-3 py-3 text-left">
                   <span className={cn("mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[9px] font-semibold text-white", tone === "danger" && "bg-rose-600", tone === "warning" && "bg-orange-500", tone === "good" && "bg-emerald-600")}>{index + 1}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block break-words text-[11.5px] font-medium leading-4 text-foreground group-hover:text-[var(--brand)]">{localizeTimelineTitle(task.title, l)}</span>
+                    <span className="block text-[11.5px] font-medium leading-4 text-foreground [overflow-wrap:anywhere] group-hover:text-[var(--brand)]">{localizeTimelineTitle(task.title, l)}</span>
                     <span className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground"><Clock3 className="size-3" />{dueLabel(task)}</span>
                   </span>
                   <ArrowRight className="mt-1 size-3 shrink-0 text-muted-foreground" />
@@ -543,7 +543,8 @@ export function ExecutiveBusinessMap({
         </aside>
       </section>
 
-      <section className="grid border-b border-border lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.75fr)] lg:divide-x lg:divide-border">
+      {/* One shrinkable column on phones: long unbroken titles must not widen the page (QA E3-04). */}
+      <section className="grid grid-cols-1 border-b border-border lg:grid-cols-[minmax(0,1.5fr)_minmax(300px,0.75fr)] lg:divide-x lg:divide-border" data-testid="executive-cash-and-events">
         <div className="min-w-0 px-0 py-4 lg:pr-5">
           <div className="flex items-start justify-between gap-3 px-4 lg:px-0">
             <div>
@@ -561,13 +562,13 @@ export function ExecutiveBusinessMap({
             <div><p className="text-[10px] text-muted-foreground">{copy.net}</p><p className="mt-1 text-[12px] font-semibold tabular-nums text-foreground">{money.format(netCashFlow)}</p></div>
           </div>
         </div>
-        <div className="px-4 py-4 lg:pl-5">
+        <div className="min-w-0 px-4 py-4 lg:pl-5">
           <div className="flex items-center justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-[13px] font-semibold text-foreground">{copy.milestones}</h2>
               <p className="mt-1 text-[10.5px] text-muted-foreground">{copy.calendar}</p>
             </div>
-            <button type="button" onClick={() => go("/appointments")} className="text-[10.5px] font-medium text-[var(--brand)] hover:underline">{copy.calendar}</button>
+            <button type="button" onClick={() => go("/appointments")} className="shrink-0 text-[10.5px] font-medium text-[var(--brand)] hover:underline">{copy.calendar}</button>
           </div>
           <div className="mt-3 divide-y divide-border">
             {upcoming.length === 0 ? <p className="py-8 text-[12px] text-muted-foreground">{copy.noEvents}</p> : upcoming.slice(0, 5).map((appointment) => (
@@ -580,7 +581,7 @@ export function ExecutiveBusinessMap({
                   <span className="block truncate text-[11.5px] font-medium text-foreground group-hover:text-[var(--brand)]">{appointment.title || appointment.patient_name}</span>
                   <span className="mt-1 block truncate text-[10px] text-muted-foreground">{appointment.time_start?.slice(0, 5) ?? "—"} · {appointment.patient_name}</span>
                 </span>
-                <CalendarDays className="mt-1 size-3 text-muted-foreground" />
+                <CalendarDays className="mt-1 size-3 shrink-0 text-muted-foreground" />
               </button>
             ))}
           </div>

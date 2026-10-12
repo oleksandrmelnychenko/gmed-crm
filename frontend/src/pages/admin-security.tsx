@@ -142,7 +142,7 @@ export function securityActorName(
 
 /** One-word status of a sign-in session: "Отозвана" / "Активна", never a plural (QA E2-06). */
 export function securitySessionStatus(isRevoked: boolean, t: Translations): string {
-  return isRevoked ? t.uiText.security_session_revoked : t.common_active;
+  return isRevoked ? t.uiText.security_session_revoked : t.uiText.security_session_active;
 }
 
 interface AuditAnalyticsPayload {

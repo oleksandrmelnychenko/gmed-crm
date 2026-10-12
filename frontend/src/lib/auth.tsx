@@ -35,6 +35,11 @@ export interface User {
   /// Set after an admin-forced reset or password expiry: only /account/password-required is usable.
   password_change_required?: boolean;
   /**
+   * Why the change is pending: `initial` — the one-time password of a new
+   * account, `reset` — an administrator reset it, `expired` — too old.
+   */
+  password_change_reason?: "initial" | "reset" | "expired" | null;
+  /**
    * The role must use a second factor (CEO, IT Admin, Patient Manager) and none
    * is set up yet: the session reaches only the two-factor setup
    * (`/account/two-factor-required`) until it is enrolled.

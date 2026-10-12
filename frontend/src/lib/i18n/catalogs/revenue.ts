@@ -1,3 +1,5 @@
+import { pluralWord, type PluralWords } from "../plural";
+
 export interface RevenueTranslations {
   finance_catalog_title: string;
   finance_catalog_description: string;
@@ -357,6 +359,12 @@ export interface RevenueTranslations {
   revenue_accounting_category_provider_expense: string;
 }
 
+/** "1 страна / 2 страны / 5 стран", "1 Lead-Land / 2 Lead-Länder" (QA E3-06). */
+const LEAD_COUNTRY_WORDS: PluralWords = {
+  ru: ["страна", "страны", "стран"],
+  de: ["Lead-Land", "Lead-Länder"],
+};
+
 const revenueReportsTextDe = {
         accessTitle: "Berichte",
         accessDescription:
@@ -426,7 +434,8 @@ const revenueReportsTextDe = {
           title: "Vertriebs-KPI-Übersicht",
           description:
             "Lead-Dynamik, Konversionsdruck und Wachstum neuer Kliniken aus der CRM-Schicht.",
-          leadCountries: (count: number) => `${count} Lead-Länder`,
+          leadCountries: (count: number) =>
+            `${count} ${pluralWord("de", count, LEAD_COUNTRY_WORDS)}`,
           newLeads30d: "Neue Leads / 30 T.",
           qualified30d: "Qualifiziert / 30 T.",
           converted30d: "Konvertiert / 30 T.",
@@ -434,6 +443,7 @@ const revenueReportsTextDe = {
           newPartnerClinicsQuarter: "Neue Partnerkliniken / Quartal",
           topLeadCountries90d: "Top-Lead-Länder / 90 T.",
           noLeadGeographyYet: "Noch keine Lead-Geografie vorhanden.",
+          countryNotSpecified: "Nicht angegeben",
         },
         forecast: {
           openQuotes: "Offene Angebote",
@@ -666,7 +676,8 @@ const revenueReportsTextRu: RevenueReportsText = {
           title: "Сводка KPI продаж",
           description:
             "Динамика лидов, давление по конверсии и рост новых клиник из CRM-слоя.",
-          leadCountries: (count: number) => `${count} стран по лидам`,
+          leadCountries: (count: number) =>
+            `${count} ${pluralWord("ru", count, LEAD_COUNTRY_WORDS)} по лидам`,
           newLeads30d: "Новые лиды / 30 дн.",
           qualified30d: "Квалифицировано / 30 дн.",
           converted30d: "Конвертировано / 30 дн.",
@@ -674,6 +685,7 @@ const revenueReportsTextRu: RevenueReportsText = {
           newPartnerClinicsQuarter: "Новые партнёрские клиники / квартал",
           topLeadCountries90d: "Топ стран по лидам / 90 дн.",
           noLeadGeographyYet: "География лидов пока отсутствует.",
+          countryNotSpecified: "Не указана",
         },
         forecast: {
           openQuotes: "Открытые предложения",

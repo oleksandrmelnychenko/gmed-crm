@@ -632,6 +632,85 @@ async fn activity_access_category_returns_only_account_and_permission_events() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// QA E3-01: the activity search also finds rows by the translated label
+/// the reader sees; the UI sends the codes whose label matches.
+#[tokio::test]
+async fn activity_search_finds_rows_by_their_translated_labels() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let actor = seed_user(&pool, "admin_security_api", "billing").await;
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, created_at)
+           VALUES
+                ($1, 'login_failure', 'auth', NULL, '{"reason":"wrong_password"}'::jsonb, now() - interval '1 minute'),
+                ($1, 'create_internal_note', 'internal_note', gen_random_uuid(), '{}'::jsonb, now() - interval '2 minute'),
+                ($1, 'update_setting', 'system_settings', NULL, '{}'::jsonb, now() - interval '3 minute')"#,
+    )
+    .bind(actor)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let bearer = auth_header_for("it_admin", app.it_admin_id);
+    let actions = |body: &Value| -> Vec<String> {
+        body["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .filter_map(|item| item["action"].as_str().map(str::to_string))
+            .collect()
+    };
+
+    // The label text alone matches no stored code …
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?user_id={actor}&search=Fehlanmeldung"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(actions(&body).is_empty(), "{body}");
+    // … the codes whose label matches find the rows.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/admin/activity?user_id={actor}&search=Fehlanmeldung&search_actions=login_failure,login_failed"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(actions(&body), ["login_failure"], "{body}");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/admin/activity?user_id={actor}&search=Notiz&search_entities=internal_note,bad%20code"
+        ),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(actions(&body), ["create_internal_note"], "{body}");
+    // Without a search text the label codes filter nothing.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/activity?user_id={actor}&search_actions=login_failure"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total"], 3, "{body}");
+}
+
 /// QA E-45 (2026-10-11): the activity log does not hand the IT admin
 /// sanctions decisions, lead e-mails or other patient data; the CEO reads
 /// everything.

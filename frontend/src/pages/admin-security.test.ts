@@ -23,7 +23,9 @@ describe("security page leftovers (QA E2-01, E2-06)", () => {
   it("names a single revoked session in the singular", () => {
     expect(securitySessionStatus(true, ru)).toBe("Отозвана");
     expect(securitySessionStatus(true, de)).toBe("Widerrufen");
-    expect(securitySessionStatus(false, ru)).toBe(ru.common_active);
+    // Same gender as "Отозвана" (a session), not "Активен" (QA E2-06 leftover).
+    expect(securitySessionStatus(false, ru)).toBe("Активна");
+    expect(securitySessionStatus(false, de)).toBe("Aktiv");
   });
 
   it("never names a portal login the server anonymised", () => {

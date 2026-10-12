@@ -45,6 +45,37 @@ function roleLabel(value: string, t: Translations): string | undefined {
   return typeof label === "string" ? label : undefined;
 }
 
+/** Keys whose value is the status code of the changed record. */
+const STATUS_KEYS = new Set(["status", "previous_status", "from_status", "to_status", "new_status", "old_status"]);
+/** Keys whose value is a language code ("de", "ru"). */
+const LANGUAGE_KEYS = new Set(["language", "preferred_language", "lang", "locale"]);
+const CODE_VALUE = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * A stored code shown in words (QA E3-01): first the label of exactly this
+ * key and value, then the shared dictionaries — statuses, languages,
+ * document categories, other known codes. Unknown codes stay as they are.
+ */
+function codeLabel(key: string, text: string, t: Translations): string | undefined {
+  const exact = t.uiText[`activity_context_${key}_${text}`];
+  if (exact) return exact;
+  if (key === "role") return roleLabel(text, t);
+  if (LANGUAGE_KEYS.has(key)) {
+    const language = t.uiText[`activity_language_${text.toLowerCase()}`];
+    if (language) return language;
+  }
+  if (!CODE_VALUE.test(text)) return undefined;
+  if (STATUS_KEYS.has(key) || key === "from" || key === "to") {
+    const status = t.uiText[`activity_status_${text}`];
+    if (status) return status;
+  }
+  if (key === "category" || key === "access_category") {
+    const category = t.uiText[`activity_category_${text}`] ?? t.uiText[`document_category_${text}`];
+    if (category) return category;
+  }
+  return t.uiText[`activity_value_${text}`] ?? t.uiText[`activity_status_${text}`];
+}
+
 function formatScalar(key: string, value: unknown, t: Translations): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "boolean") return value ? t.common_yes : t.common_no;
@@ -52,9 +83,9 @@ function formatScalar(key: string, value: unknown, t: Translations): string | nu
   if (typeof value !== "string") return null;
   const text = value.trim();
   if (!text) return null;
-  const mapped = t.uiText[`activity_context_${key}_${text}`];
+  const mapped = codeLabel(key, text, t);
   if (mapped) return mapped;
-  if (key === "role") return roleLabel(text, t) ?? text;
+  if (key === "role") return text;
   if (ISO_DATE_TIME.test(text)) return formatAppDateTime(normalizeInstant(text)) || text;
   if (ISO_DATE.test(text)) return formatAppDate(text) || text;
   if (UUID.test(text)) return null;

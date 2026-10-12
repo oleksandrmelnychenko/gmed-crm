@@ -343,6 +343,8 @@ export interface AdminSystemTranslations {
   feedback_nps_band: string;
   feedback_loading_workspace: string;
   feedback_workspace_load_error: string;
+  feedback_workspace_load_error_hint: string;
+  feedback_retry: string;
   feedback_submit_success: string;
   feedback_submit_error: string;
   feedback_patient_page_title: string;
@@ -780,6 +782,9 @@ export const adminSystemRu: AdminSystemTranslations = {
   feedback_nps_band: "NPS-группа",
   feedback_loading_workspace: "Загрузка рабочей области отзывов...",
   feedback_workspace_load_error: "Не удалось загрузить рабочую область отзывов.",
+  feedback_workspace_load_error_hint:
+    "Отзывы и показатели сейчас не показаны — это не значит, что отзывов нет. Повторите загрузку.",
+  feedback_retry: "Повторить",
   feedback_submit_success: "Отзыв отправлен. Спасибо.",
   feedback_submit_error: "Не удалось отправить отзыв.",
   feedback_patient_page_title: "Мои отзывы",
@@ -1217,6 +1222,9 @@ export const adminSystemDe: AdminSystemTranslations = {
   feedback_nps_band: "NPS-Band",
   feedback_loading_workspace: "Feedback-Bereich wird geladen...",
   feedback_workspace_load_error: "Feedback-Bereich konnte nicht geladen werden.",
+  feedback_workspace_load_error_hint:
+    "Rückmeldungen und Kennzahlen werden gerade nicht angezeigt – das heißt nicht, dass es keine gibt. Bitte erneut laden.",
+  feedback_retry: "Erneut versuchen",
   feedback_submit_success: "Feedback wurde gesendet. Vielen Dank.",
   feedback_submit_error: "Feedback konnte nicht gesendet werden.",
   feedback_patient_page_title: "Mein Feedback",

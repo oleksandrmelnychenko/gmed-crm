@@ -2456,6 +2456,18 @@ async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
         "now() - interval '2 days'",
     )
     .await;
+    // An older lead with the country as free text counts as the same
+    // country (QA E3-06).
+    seed_lead(
+        &pool,
+        admin_id,
+        &format!("{tag}-ua-legacy"),
+        "Ukraine",
+        "new",
+        "now() - interval '5 days'",
+        "now() - interval '5 days'",
+    )
+    .await;
 
     let (billing_status, billing_body) = json_request(
         &app,
@@ -2618,8 +2630,16 @@ async fn reports_workspace_exposes_billing_and_sales_kpi_scorecards() {
     );
     let top_countries = sales_kpis["top_countries"].as_array().unwrap();
     assert!(top_countries.iter().any(|row| {
-        row["country"] == "UA" && row["lead_count"].as_i64().unwrap_or_default() >= 2
+        row["country"] == "UA" && row["lead_count"].as_i64().unwrap_or_default() >= 3
     }));
+    // Names are folded into ISO codes; "not specified" is null, never the
+    // English word "Unknown".
+    assert!(
+        top_countries
+            .iter()
+            .all(|row| row["country"] != "Ukraine" && row["country"] != "Unknown"),
+        "{top_countries:?}"
+    );
 
     let (assistant_status, assistant_body) = json_request(
         &app,
