@@ -297,6 +297,23 @@ pub(super) async fn suggested(
             client.email = row.get::<Option<String>, _>("email").unwrap_or_default();
         }
     }
+    // The consent form declares the choice of the person who made it in the
+    // cabinet: that parent or guardian signs first (the form names them
+    // first, QA 2026-10-12 A2-06), and must sign (`create_request`).
+    if let Some(choice) = crate::consent_choices::OwnConsentChoice::from_bindings(
+        source
+            .try_get::<Option<Value>, _>("generated_bindings")
+            .ok()
+            .flatten()
+            .as_ref(),
+    ) && let Some(position) = clients.iter().position(|signer| {
+        choice
+            .chosen_by_emails
+            .contains(&signer.email.trim().to_lowercase())
+    }) {
+        let chooser = clients.remove(position);
+        clients.insert(0, chooser);
+    }
     // The Kostenübernehmer signs the cost coverage declaration, in its own
     // `payer` role. Only for roles that may read the patient's payer data
     // (same as above).

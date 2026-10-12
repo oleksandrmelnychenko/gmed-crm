@@ -896,7 +896,7 @@ export const operationsRu: OperationsTranslations = {
   lead_column_group_identity: "Идентификация",
   lead_column_group_qualification: "Квалификация",
   lead_column_group_contact: "Контакты",
-  lead_column_group_origin: "Источник",
+  lead_column_group_origin: "Происхождение",
   lead_column_group_lifecycle: "Жизненный цикл",
   lead_status_new: "Новый",
   lead_status_in_progress: "В работе",

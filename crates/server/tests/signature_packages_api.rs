@@ -453,10 +453,14 @@ async fn upload_bytes(
     .execute(&env.pool)
     .await
     .unwrap();
-    if template == "privacy_consents" {
-        // As generated after the patient chose the options in the cabinet:
-        // only such a consent form goes into an electronic package
-        // (2026-10-12).
+    if matches!(
+        template,
+        "privacy_consents" | "consent_data_release_child" | "consent_data_release_single"
+    ) {
+        // As generated after the patient (for a minor: a parent) chose the
+        // options in the cabinet: only such a consent form goes into an
+        // electronic package (2026-10-12; the minor's forms since QA
+        // 2026-10-12, A2-06).
         let choice = own_consent_choice(&env.pool, patient_id).await;
         sqlx::query(
             "UPDATE documents SET generated_bindings = generated_bindings || jsonb_build_object('_own_consent_choice', $2::jsonb) WHERE id = $1",
@@ -499,6 +503,33 @@ async fn own_consent_choice(pool: &PgPool, patient_id: Uuid) -> Value {
         .unwrap(),
     };
     json!({ "id": id, "choices": choices, "chosen_at": chosen_at, "source": "lead_portal" })
+}
+
+/// A choice a parent saved in the lead cabinet, recorded in a consent form
+/// that belongs to the lead (the form is generated with it).
+async fn bind_lead_consent_choice(env: &Env, document_id: Uuid, lead_id: Uuid) {
+    let (id, choices, chosen_at): (Uuid, Value, chrono::DateTime<chrono::Utc>) = sqlx::query_as(
+        r#"INSERT INTO consent_form_choices (template_id, lead_id, choices, access_kind,
+                                             source, language, text_version)
+           VALUES ('privacy_consents', $1,
+                   '{"agency_processing":true,"doctors_to_agency":true,"data_system":true,
+                     "named_recipients":false,"channel_email":true,"channel_threema":false,
+                     "channel_whatsapp":false,"channel_telegram":false}'::jsonb,
+                   'guardian', 'lead_portal', 'de', '2026-10-12')
+           RETURNING id, choices, chosen_at"#,
+    )
+    .bind(lead_id)
+    .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE documents SET generated_bindings = generated_bindings || jsonb_build_object('_own_consent_choice', $2::jsonb) WHERE id = $1",
+    )
+    .bind(document_id)
+    .bind(json!({ "id": id, "choices": choices, "chosen_at": chosen_at, "source": "lead_portal" }))
+    .execute(&env.pool)
+    .await
+    .unwrap();
 }
 
 fn signer(first: &str, email: &str, role: &str) -> Value {
@@ -1744,6 +1775,99 @@ async fn a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only(
     assert!(status.is_success(), "{status} {value}");
 }
 
+/// QA 2026-10-12: the consent form declares the choice of the person who made
+/// it in the cabinet — for a minor a parent (A2-06) — so that person must be
+/// among the signers; and a recorded choice without the three consents the
+/// service runs on is no consent to sign electronically (A2-02).
+#[tokio::test]
+async fn the_parent_who_chose_must_sign_and_an_incomplete_choice_is_not_signed() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "2016-03-03").await;
+    let child = upload(
+        &env,
+        patient,
+        Doc::new("consent_data_release_child", 1)
+            .anchors(json!([anchor("guardian_1", 0), anchor("guardian_2", 0)])),
+    )
+    .await;
+    // The mother chose in the cabinet (her login's and her contact's address).
+    sqlx::query(
+        r#"UPDATE documents
+           SET generated_bindings = jsonb_set(generated_bindings,
+                   '{_own_consent_choice,chosen_by_emails}', '["anna@example.org"]'::jsonb)
+           WHERE id = $1"#,
+    )
+    .bind(child)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    let (status, body) = call(
+        &env.app,
+        "POST",
+        "/api/v1/signature-packages",
+        &env.ceo,
+        Some(json!({
+            "document_ids": [child],
+            "signers": [signer("Bernd", "bernd@example.org", "client")],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "consent_chooser_must_sign");
+    assert_eq!(body["document_id"], child.to_string());
+    // With the mother among the signers (the father may sign as well) it goes out.
+    send_package(
+        &env,
+        json!({
+            "document_ids": [child],
+            "signers": [
+                signer("Anna", "ANNA@example.org", "client"),
+                signer("Bernd", "bernd@example.org", "client"),
+            ],
+        }),
+    )
+    .await;
+
+    // A choice saved before the rule, without "doctors to GMED": no consent
+    // to sign electronically; paper stays possible.
+    let adult = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
+    let consents = upload(&env, adult, Doc::new("privacy_consents", 1)).await;
+    sqlx::query(
+        r#"UPDATE documents
+           SET generated_bindings = jsonb_set(generated_bindings,
+                   '{_own_consent_choice,choices,doctors_to_agency}', 'false'::jsonb)
+           WHERE id = $1"#,
+    )
+    .bind(consents)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    let (status, state) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/documents/{consents}/signature-requests"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["ineligible_reason"], "consent_choice_incomplete");
+    assert_eq!(state["can_sign_on_paper"], true);
+    let (status, body) = call(
+        &env.app,
+        "POST",
+        "/api/v1/signature-packages",
+        &env.ceo,
+        Some(json!({
+            "document_ids": [consents],
+            "signers": [signer("Erika", "erika@example.org", "client")],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "consent_choice_incomplete");
+}
+
 /// TASK-FB4D: a document signed on paper. The scan becomes the signed next
 /// version, and the contract and the order follow as after an electronic
 /// signature.
@@ -2071,7 +2195,8 @@ async fn frames_of_older_generated_documents_are_found_and_follow_the_bundle_pag
     sqlx::query(
         r#"INSERT INTO consent_form_choices (template_id, lead_id, choices, access_kind, source,
                                              language, text_version)
-           VALUES ('privacy_consents', $1, '{"agency_processing":true,"data_system":true}'::jsonb,
+           VALUES ('privacy_consents', $1,
+                   '{"agency_processing":true,"doctors_to_agency":true,"data_system":true}'::jsonb,
                    'self', 'lead_portal', 'de', '2026-10-12')"#,
     )
     .bind(lead)
@@ -2208,6 +2333,9 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .execute(&env.pool)
         .await
         .unwrap();
+    // A parent chose the consent options in the lead cabinet (QA 2026-10-12,
+    // A2-06): the child's form records that choice.
+    bind_lead_consent_choice(&env, ids[2], lead).await;
     let (contract, order, child, information) = (ids[0], ids[1], ids[2], ids[3]);
 
     let (status, candidates) = call(

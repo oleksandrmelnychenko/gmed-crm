@@ -242,6 +242,21 @@ export const CONSENT_FORM_CHANNELS: readonly (keyof ConsentFormChoices)[] = [
   "channel_telegram",
 ];
 
+/**
+ * The three consents GMED's service runs on (QA 2026-10-12, A2-02): a choice without them is no
+ * consent, so the cabinet saves a choice only with all three (the server answers 422
+ * `consent_core_required` otherwise). Recipients and channels stay free.
+ */
+export const CONSENT_FORM_CORE: readonly (keyof ConsentFormChoices)[] = [
+  "agency_processing",
+  "doctors_to_agency",
+  "data_system",
+];
+
+export function hasCoreConsents(choices: ConsentFormChoices): boolean {
+  return CONSENT_FORM_CORE.every((key) => choices[key]);
+}
+
 export const NO_CONSENT_FORM_CHOICES: ConsentFormChoices = {
   agency_processing: false,
   doctors_to_agency: false,

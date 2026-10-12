@@ -533,6 +533,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   legal_status_requires_signed_document: "api_patients_legal_status_requires_signed_document",
   // A file whose generated translation was sent or signed keeps both (documents.rs).
   document_translation_delivery_protected: "api_document_translation_delivery_protected",
+  // The adult consent form is refused for a minor: the child's form is signed by the parents (documents.rs).
+  minor_consent_form_required: "api_minor_consent_form_required",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

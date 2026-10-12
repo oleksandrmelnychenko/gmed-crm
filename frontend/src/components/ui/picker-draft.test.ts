@@ -6,6 +6,7 @@ import {
   applyExternalValue,
   applyPickerBlur,
   applyPickerChange,
+  parsePastedDate,
   pickerDraftFromValue,
   type PickerDraft,
 } from "./picker-draft";
@@ -152,5 +153,34 @@ describe("picker draft", () => {
 
     expect(step.emit).toBe("09:45");
     expect(applyExternalValue(state, "09:45", true, timeParse, "HH:mm").emit).toBeNull();
+  });
+});
+
+describe("parsePastedDate (QA 2026-10-12, A2-03)", () => {
+  it("reads the spellings people paste", () => {
+    for (const [text, expected] of [
+      ["05.06.1970", { year: 1970, month: 6, day: 5 }],
+      [" 5.6.1970 ", { year: 1970, month: 6, day: 5 }],
+      ["05.06.1970.", { year: 1970, month: 6, day: 5 }],
+      ["20/03/1990", { year: 1990, month: 3, day: 20 }],
+      ["20-03-1990", { year: 1990, month: 3, day: 20 }],
+      ["1965-11-11", { year: 1965, month: 11, day: 11 }],
+      ["29.02.2024", { year: 2024, month: 2, day: 29 }],
+    ] as const) {
+      expect(parsePastedDate(text), text).toEqual(expected);
+    }
+  });
+
+  it("leaves other text and impossible dates to the field", () => {
+    for (const text of ["", "05", "0506", "05.06", "05.06.70", "1970/06/05", "05.06-1970", "31.02.2026", "29.02.2023", "00.01.2020", "12.13.2020", "abc", "05.06.1970 10:30"]) {
+      expect(parsePastedDate(text), text).toBeNull();
+    }
+  });
+
+  it("fills the whole date in one step, as typing it would", () => {
+    const pasted = parsePastedDate("05.06.1970")!;
+    const date = dayjs(new Date(pasted.year, pasted.month - 1, pasted.day));
+    const step = applyPickerChange(pickerDraftFromValue("", parse, FORMAT), date, null, FORMAT);
+    expect(step.emit).toBe("1970-06-05");
   });
 });

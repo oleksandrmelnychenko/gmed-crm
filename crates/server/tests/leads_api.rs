@@ -3102,6 +3102,101 @@ async fn deleted_lead_is_read_only_and_leaves_the_active_list() {
     assert!(listed(&deleted), "the deleted filter finds it: {deleted}");
 }
 
+/// QA 2026-10-12: what staff typed as the reason («Другое») and the internal
+/// note do not survive deleting and anonymising the lead — neither on the row
+/// nor in its audit and history rows. Archiving keeps them.
+#[tokio::test]
+async fn deleting_a_lead_scrubs_the_typed_reason_and_note() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let typed_reason = "Anna Muster: Diagnose passt nicht, Bruder Ben Muster ruft an";
+    let typed_note = "Interne Notiz: Telefon +49 30 1234567";
+
+    let archived = insert_status_lead(&app, &format!("{tag}a"), "new").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{archived}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "archive", "reason": typed_reason, "note": typed_note })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (reason, note): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT failed_reason, failed_note FROM leads WHERE id = $1")
+            .bind(archived)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some(typed_reason));
+    assert_eq!(note.as_deref(), Some(typed_note));
+
+    let deleted = insert_status_lead(&app, &format!("{tag}d"), "new").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{deleted}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": typed_reason, "note": typed_note })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains("Anna Muster"), "{body}");
+    let (reason, note): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT failed_reason, failed_note FROM leads WHERE id = $1")
+            .bind(deleted)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("other"));
+    assert_eq!(note, None);
+    let audit: Vec<serde_json::Value> = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE entity_id = $1 AND action = 'resolve_failed_lead'",
+    )
+    .bind(deleted)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(audit.len(), 1);
+    assert_eq!(audit[0]["reason"], "other", "{:?}", audit[0]);
+    assert!(audit[0]["note"].is_null(), "{:?}", audit[0]);
+    let history: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws(' ', note, metadata::text) FROM workflow_lifecycle_events WHERE entity_id = $1",
+    )
+    .bind(deleted)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        history
+            .iter()
+            .all(|row| !row.contains("Anna Muster") && !row.contains("Notiz")),
+        "{history:?}"
+    );
+    // A listed reason stays as it is.
+    let listed = insert_status_lead(&app, &format!("{tag}l"), "new").await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{listed}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": "duplicate" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let reason: Option<String> =
+        sqlx::query_scalar("SELECT failed_reason FROM leads WHERE id = $1")
+            .bind(listed)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(reason.as_deref(), Some("duplicate"));
+}
+
 /// A document row with a stored file, as the upload would leave it.
 async fn insert_stored_document(
     app: &TestApp,

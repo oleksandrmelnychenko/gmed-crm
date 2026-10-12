@@ -208,7 +208,12 @@ export type PackageWarning = {
  * Reasons why the consent form is not offered for an electronic signature: the person has not chosen
  * its options in the cabinet, or changed the choice after the document was generated (2026-10-12).
  */
-export const CONSENT_CHOICE_REASONS: ReadonlySet<string> = new Set(["consent_choice_missing", "consent_choice_changed"]);
+export const CONSENT_CHOICE_REASONS: ReadonlySet<string> = new Set([
+  "consent_choice_missing",
+  "consent_choice_changed",
+  // A choice without the three consents the service runs on (QA 2026-10-12, A2-02).
+  "consent_choice_incomplete",
+]);
 
 /** Problems the composer shows before sending. Only `no_frames` does not block. */
 export function packageWarnings(selected: PackageCandidate[], limits: PackageCandidates["limits"]): PackageWarning[] {
@@ -340,6 +345,16 @@ export function signatureErrorText(
       return tx(
         "Пациент изменил выбор согласий после создания документа — создайте документ заново или используйте бумажную подпись.",
         "Der Patient hat seine Auswahl der Einwilligungen nach dem Erstellen des Dokuments geändert – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
+      );
+    case "consent_choice_incomplete":
+      return tx(
+        "В сохранённом выборе нет трёх обязательных согласий (обработка GMED, документы от врачей, хранение в системе) — такую форму электронно не подписывают. Попросите выбрать заново в кабинете или используйте бумажную подпись.",
+        "In der gespeicherten Auswahl fehlen die drei erforderlichen Einwilligungen (Verarbeitung durch GMED, Unterlagen der Ärzte, Speicherung im System) – so wird das Formular nicht elektronisch unterschrieben. Bitten Sie um eine neue Auswahl im Kundenkabinett oder nutzen Sie die Unterschrift auf Papier.",
+      );
+    case "consent_chooser_must_sign":
+      return tx(
+        "Форму согласия подписывает тот, кто выбрал варианты в кабинете (у несовершеннолетнего — этот родитель или опекун). Добавьте его в подписанты.",
+        "Die Einwilligung unterschreibt, wer die Optionen im Kundenkabinett gewählt hat (bei Minderjährigen dieser Elternteil bzw. Vormund). Fügen Sie diese Person als Unterzeichnende hinzu.",
       );
     case "electronic_form_excluded":
       return tx(`Для этого документа закон исключает электронную форму${details?.statute ? ` (${details.statute})` : ""}. Его нужно подписать на бумаге.`, `Für dieses Dokument ist die elektronische Form gesetzlich ausgeschlossen${details?.statute ? ` (${details.statute})` : ""}. Es muss auf Papier unterschrieben werden.`);

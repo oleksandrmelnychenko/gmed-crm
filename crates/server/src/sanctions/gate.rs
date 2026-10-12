@@ -609,6 +609,13 @@ pub fn classify(method: &Method, path: &str) -> Option<(Target, Rule)> {
                 | ["debt-management"]
                 | ["ungroup"]
                 | ["leistungen", _, "cancel"] => None,
+                // Correcting the payer (a mistyped name, the organisation
+                // box) stays possible while a hit is open (QA 2026-10-12):
+                // the order is queued and screened again, and the hold stays
+                // until the CEO decides the old hit — an open hit counts
+                // also when its subject is gone (`still_matches = false`),
+                // so renaming the payer lifts nothing.
+                ["payer"] => None,
                 [] if *method == Method::DELETE => None,
                 [] => Some((order, Rule::Always(OrderContractWork))),
                 _ => Some((order, Rule::Always(OrderContractWork))),
@@ -1370,7 +1377,6 @@ mod tests {
             "/orders/{id}/leistungen",
             "/orders/{id}/leistungen/{id}/deliver",
             "/orders/{id}/quotes",
-            "/orders/{id}/payer",
             "/orders/{id}/amendments",
             "/orders/{id}/intake",
             "/framework-contracts/{id}/contracting-party",
@@ -1404,6 +1410,9 @@ mod tests {
             "/orders/{id}/ungroup",
             "/orders/{id}/leistungen/{id}/cancel",
             "/framework-contracts/{id}/terminate",
+            // Correcting the payer while a hit is open (QA 2026-10-12): the
+            // hold stays with the open hit, the new data is screened.
+            "/orders/{id}/payer",
         ] {
             assert_eq!(post(path), None, "{path}");
         }

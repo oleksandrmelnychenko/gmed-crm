@@ -2628,13 +2628,15 @@ async fn list_patients(
                 )
              )
              AND ($2::text = '%%'
-                  OR de_normalize(concat_ws(' ',
+                  -- Every word of the query, in any order ("Anna Muster",
+                  -- "Muster Anna"; QA 2026-10-12, A2-05).
+                  OR search_tokens_match(concat_ws(' ',
                        p.first_name, p.last_name, p.patient_id,
                        p.email, p.phone_primary, p.phone_secondary,
                        p.insurance_provider, p.insurance_number,
                        p.nationality, p.residence_country,
                        array_to_string(p.languages, ' ')
-                     )) LIKE de_normalize($2)
+                     ), $12)
                   OR (length(regexp_replace($2, '\D', '', 'g')) >= 3
                       AND phone_digits(concat_ws(' ', p.phone_primary, p.phone_secondary)) LIKE '%' || regexp_replace($2, '\D', '', 'g') || '%'))
              AND (
@@ -2698,6 +2700,7 @@ async fn list_patients(
         .bind(&allowed_record_ids)
         .bind(&record_rule_ids)
         .bind(all_view_decision)
+        .bind(search.trim())
         .fetch_all(&state.db)
         .await;
 

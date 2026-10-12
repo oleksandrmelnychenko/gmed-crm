@@ -110,6 +110,15 @@ describe("signature package composer rules", () => {
     const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="consent" candidates={candidates([missing])} previewedDocumentIds={[]}
       selection={emptyPackageSelection("consent")} onChange={() => undefined} />);
     expect(markup).toContain("Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett");
+    // QA 2026-10-12: a choice without the three consents (A2-02) and the signer who did not
+    // choose (A2-06) are named in words, never as codes.
+    const incomplete = candidate("consent", { ineligible_reason: "consent_choice_incomplete" });
+    const incompleteMarkup = renderToStaticMarkup(<SignaturePackageComposer documentId="consent" candidates={candidates([incomplete])} previewedDocumentIds={[]}
+      selection={emptyPackageSelection("consent")} onChange={() => undefined} />);
+    expect(incompleteMarkup).toContain("fehlen die drei erforderlichen Einwilligungen");
+    expect(incompleteMarkup).not.toContain("consent_choice_incomplete");
+    expect(signatureErrorText("consent_chooser_must_sign", txRu)).toContain("подписывает тот, кто выбрал");
+    expect(signatureErrorText("consent_chooser_must_sign", tx)).toContain("wer die Optionen im Kundenkabinett gewählt hat");
   });
 
   it("requires every companion attachment and picks a single option automatically", () => {

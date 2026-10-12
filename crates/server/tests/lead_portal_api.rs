@@ -5340,13 +5340,38 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
     let choices = json!({
         "agency_processing": true,
         "doctors_to_agency": true,
-        "data_system": false,
+        "data_system": true,
         "named_recipients": false,
         "channel_email": false,
         "channel_threema": false,
         "channel_whatsapp": true,
         "channel_telegram": false
     });
+
+    // An empty or partial "choice" is no consent (QA 2026-10-12, A2-02): the
+    // three consents the service runs on are part of every saved choice.
+    for partial in [
+        json!({}),
+        json!({ "agency_processing": true, "doctors_to_agency": true, "channel_email": true }),
+    ] {
+        let (status, body) = json_request(
+            router,
+            "POST",
+            &path,
+            &patient,
+            Some(json!({ "choices": partial, "version": "2026-10-12", "language": "de" })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["code"], "consent_core_required", "{body}");
+    }
+    let saved_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_form_choices WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(saved_rows, 0, "a refused choice is not saved");
 
     // Nothing is chosen in advance.
     let (status, list) =
@@ -5442,6 +5467,17 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
     assert_eq!(recorded["id"], json!(choice_id), "{recorded}");
     assert_eq!(recorded["choices"], choices, "{recorded}");
     assert_eq!(recorded["source"], "lead_portal");
+    // Who chose: the lead's own login, named as the person of the form, who
+    // then has to sign it (QA 2026-10-12).
+    assert_eq!(recorded["access_kind"], "self", "{recorded}");
+    assert_eq!(recorded["chosen_by"], json!(user_id), "{recorded}");
+    assert_eq!(recorded["chosen_by_name"], "Clara Portal", "{recorded}");
+    assert!(
+        recorded["chosen_by_emails"]
+            .as_array()
+            .is_some_and(|emails| emails.contains(&json!("clara.consent@example.com"))),
+        "{recorded}"
+    );
 
     // A new choice is a new record; the older one stays.
     let mut changed = choices.clone();
@@ -5475,6 +5511,229 @@ async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choi
     assert_eq!(status, StatusCode::OK, "{state}");
     assert_eq!(
         state["ineligible_reason"], "consent_choice_changed",
+        "{state}"
+    );
+}
+
+/// The text of a stored PDF, whitespace collapsed (layout line breaks).
+async fn document_pdf_text(app: &axum::Router, document_id: Uuid, bearer: &str) -> String {
+    let request = Request::builder()
+        .method("GET")
+        .uri(format!("/api/v1/documents/{document_id}/download"))
+        .header("Authorization", bearer)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), 8 * 1024 * 1024)
+        .await
+        .unwrap();
+    pdf_extract::extract_text_from_mem(&bytes)
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// QA 2026-10-12, A2-06: for a minor the parent chooses the consent options
+/// for the child in the cabinet. The wizard's form is the child's form — the
+/// parents declare and sign, the child is the data subject —, it names the
+/// parent who chose, and that parent is suggested first. The adult forms in
+/// the child's name are refused.
+#[tokio::test]
+async fn a_minor_leads_consent_form_is_the_childs_and_names_the_parent_who_chose() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (mother, father, friend) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
+    let (status, created) = json_request(
+        router,
+        "POST",
+        "/api/v1/leads",
+        &pm,
+        Some(json!({
+            "first_name": "Mia",
+            "last_name": "MusterKid",
+            "date_of_birth": "2015-05-10",
+            "email": "mia.kid.consent@example.com",
+            "trusted_contacts": [
+                {
+                    "id": mother,
+                    "name": "Maria Muster",
+                    "relation": "mother",
+                    "email": "maria.consent@example.com",
+                    "birth_date": "1985-02-01"
+                },
+                {
+                    "id": father,
+                    "name": "Ben Muster",
+                    "relation": "father",
+                    "email": "ben.consent@example.com",
+                    "birth_date": "1983-01-02"
+                },
+                {
+                    "id": friend,
+                    "name": "Oma Beispiel",
+                    "relation": "friend",
+                    "email": "oma.consent@example.com"
+                }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let child: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    // The father gets the login and chooses.
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{child}/portal-guardians"),
+        &pm,
+        Some(json!({ "trusted_contact_id": father })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(guardian, "patient");
+    let (status, request) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/me/lead-requests/{child}"),
+        &parent,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{request}");
+    assert_eq!(request["access_kind"], "guardian");
+    assert_eq!(request["minor"], true);
+    let choices = json!({
+        "agency_processing": true,
+        "doctors_to_agency": true,
+        "data_system": true,
+        "named_recipients": false,
+        "channel_email": true,
+        "channel_threema": false,
+        "channel_whatsapp": false,
+        "channel_telegram": false
+    });
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{child}/consent-choices"),
+        &parent,
+        Some(json!({ "choices": choices, "version": "2026-10-12", "language": "ru" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let (access_kind, chosen_by): (String, Option<Uuid>) = sqlx::query_as(
+        "SELECT access_kind, chosen_by FROM consent_form_choices WHERE lead_id = $1",
+    )
+    .bind(child)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(access_kind, "guardian");
+    assert_eq!(chosen_by, Some(guardian));
+
+    // The adult forms in the child's name are refused.
+    for template in ["privacy_consents", "confidentiality_release"] {
+        let (status, body) = json_request(
+            router,
+            "POST",
+            "/api/v1/documents/generate",
+            &pm,
+            Some(json!({ "template_id": template, "lead_id": child, "language": "de" })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{template}: {body}"
+        );
+        assert_eq!(body["error"], "minor_consent_form_required", "{body}");
+    }
+
+    // The child's form: both parents declare, the father who chose first.
+    let (status, generated) = json_request(
+        router,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(json!({
+            "template_id": "consent_data_release_child",
+            "lead_id": child,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    let recorded: Value = sqlx::query_scalar(
+        "SELECT generated_bindings -> '_own_consent_choice' FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded["choices"], choices, "{recorded}");
+    assert_eq!(recorded["access_kind"], "guardian", "{recorded}");
+    assert_eq!(recorded["chosen_by"], json!(guardian), "{recorded}");
+    assert_eq!(recorded["chosen_by_name"], "Ben Muster", "{recorded}");
+    assert_eq!(
+        recorded["chosen_by_role"], "Personensorgeberechtigte/r",
+        "{recorded}"
+    );
+    assert!(
+        recorded["chosen_by_emails"]
+            .as_array()
+            .is_some_and(|emails| emails.contains(&json!("ben.consent@example.com"))),
+        "{recorded}"
+    );
+    let text = document_pdf_text(router, document_id, &pm).await;
+    let father_at = text.find("Ben Muster, geb. am 02.01.1983").expect(&text);
+    let mother_at = text.find("Maria Muster, geb. am 01.02.1985").expect(&text);
+    assert!(father_at < mother_at, "{text}");
+    assert!(
+        text.contains("von unserem Kind: Mia MusterKid, geb. am 10.05.2015"),
+        "{text}"
+    );
+    assert!(
+        text.contains("sind damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl)"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Die Auswahl hat Ben Muster (Personensorgeberechtigte/r) am"),
+        "{text}"
+    );
+    assert!(text.contains("[x] E-mail"), "{text}");
+    assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
+    // The friend is a recipient; the parents are not.
+    assert!(text.contains("Oma Beispiel"), "{text}");
+    assert!(!text.contains("Ich, Mia"), "{text}");
+    assert!(!text.contains("meine eigene Auswahl"), "{text}");
+
+    // The parent who chose is suggested first and must sign.
+    let (status, state) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/signature-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["ineligible_reason"], Value::Null, "{state}");
+    let clients: Vec<&str> = state["suggested_signers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|signer| signer["role"] == "client")
+        .map(|signer| signer["email"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        clients,
+        ["ben.consent@example.com", "maria.consent@example.com"],
         "{state}"
     );
 }

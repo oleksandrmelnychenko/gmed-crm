@@ -583,7 +583,9 @@ const RISK_MISSING_LABELS: Record<string, [ru: string, de: string]> = {
   pep_period: ["период PEP", "Zeitraum (PEP)"],
   pep_relationship: ["связь с PEP", "Beziehung (PEP)"],
   pep_wealth_origin: ["происхождение состояния PEP", "Vermögensherkunft (PEP)"],
-  id_document_upload: ["второй документ личности (файл)", "weiteres Ausweisdokument (Datei)"],
+  // Block I (T12): no identity document on file, an unreadable or an expired one. The lead
+  // uploads a current copy; for a lead without any document "second" was wrong (QA 2026-10-12).
+  id_document_upload: ["актуальная копия документа личности (файл)", "aktuelle Kopie des Ausweisdokuments (Datei)"],
   sanctions_link_name: ["имя связанного лица", "Name der Person"],
   sanctions_link_kind: ["вид связи", "Art der Verbindung"],
   sanctions_link_since_extent: ["с какого времени и объём связи", "Seit wann und Umfang"],

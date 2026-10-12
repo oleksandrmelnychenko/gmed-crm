@@ -443,7 +443,8 @@ async fn list_leads(
 
     let include_archived = query.include_archived.unwrap_or(false);
     let retention = load_unqualified_lead_retention(&state.db).await;
-    let search_pattern = format!("%{}%", query.search.unwrap_or_default());
+    let search_text = query.search.unwrap_or_default().trim().to_string();
+    let search_pattern = format!("%{search_text}%");
     let source_pattern = format!("%{}%", query.source.unwrap_or_default());
     let country_pattern = format!("%{}%", query.country.unwrap_or_default());
     let concierge_grid_only = lead_service_grid_only(&auth);
@@ -477,13 +478,15 @@ async fn list_leads(
                 OR (
                     $9::bool = false
                     AND (
-                        de_normalize(concat_ws(' ',
+                        -- Every word of the query, in any order ("Mia
+                        -- MusterAR", "MusterAR Mia"; QA 2026-10-12, A2-05).
+                        search_tokens_match(concat_ws(' ',
                              first_name, middle_name, last_name,
                              email, phone, whatsapp_number,
                              city, country, source,
                              notes, message, primary_concern_text,
                              additional_concerns, selected_program
-                           )) LIKE de_normalize($3)
+                           ), $10)
                         OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
                             AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
                     )
@@ -491,11 +494,11 @@ async fn list_leads(
                 OR (
                     $9::bool = true
                     AND (
-                        de_normalize(concat_ws(' ',
+                        search_tokens_match(concat_ws(' ',
                              first_name, middle_name, last_name,
                              email, phone, whatsapp_number,
                              city, country, source
-                           )) LIKE de_normalize($3)
+                           ), $10)
                         OR (length(regexp_replace($3, '\D', '', 'g')) >= 3
                             AND phone_digits(concat_ws(' ', phone, whatsapp_number)) LIKE '%' || regexp_replace($3, '\D', '', 'g') || '%')
                     )
@@ -528,6 +531,7 @@ async fn list_leads(
     .bind(query.lead_type)
     .bind(query.flow)
     .bind(contact_search_only)
+    .bind(&search_text)
     .fetch_all(&state.db)
     .await
     {
@@ -7172,6 +7176,16 @@ async fn resolve_failed_lead(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    // Deleting and anonymising keeps nothing staff typed (QA 2026-10-12): the
+    // reason becomes its listed code (the text of «Другое» becomes `other`)
+    // and the internal note is dropped — on the lead row, in the audit row,
+    // in the lead history and on the withdrawn orders alike. Archiving keeps
+    // both.
+    let (reason, note) = if resolution == "archive" {
+        (reason, note)
+    } else {
+        (anonymised_failure_reason(reason), None)
+    };
     let outcome_status = if resolution == "archive" {
         "archived"
     } else {
@@ -7265,7 +7279,7 @@ async fn resolve_failed_lead(
                 lead_id,
                 failed_from_status: Some(current_status.clone()),
                 reason,
-                note,
+                system_note: None,
                 processed_by: Some(auth.user_id),
                 lead_audit,
                 lifecycle,
@@ -7974,14 +7988,20 @@ pub struct LeadPurgeReport {
 /// source of truth for what "delete a lead" means at the database layer;
 /// both the manual `resolve_failed_lead` handler and the background
 /// sweeper funnel through it.
+///
+/// What staff typed stays nowhere on the anonymised row (QA 2026-10-12): the
+/// failure reason keeps only a listed code ([`anonymised_failure_reason`]),
+/// and the note only a fixed system text (`system_note`, a `'static` string,
+/// so a typed note cannot be passed).
 pub(crate) async fn anonymize_lead_pii(
     executor: impl sqlx::PgExecutor<'_>,
     lead_id: Uuid,
     failed_from_status: Option<String>,
     reason: &str,
-    note: Option<&str>,
+    system_note: Option<&'static str>,
     processed_by: Option<Uuid>,
 ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+    let reason = anonymised_failure_reason(reason);
     // The payer declaration of an unconverted lead goes with it (a converted
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
     // lead's own GwG statements from the cabinet, what the cabinet holds about
@@ -8108,10 +8128,41 @@ pub(crate) async fn anonymize_lead_pii(
     .bind(lead_id)
     .bind(failed_from_status)
     .bind(reason)
-    .bind(note)
+    .bind(system_note)
     .bind(processed_by)
     .execute(executor)
     .await
+}
+
+/// The reasons staff pick when a lead does not fit (frontend
+/// `lead-failure-reasons.ts`), and «Другое».
+const LEAD_FAILURE_REASON_CODES: [&str; 7] = [
+    "not_our_lead",
+    "no_response",
+    "patient_declined",
+    "other_provider",
+    "costs",
+    "duplicate",
+    "other",
+];
+
+/// The failure reason an anonymised lead keeps: a listed reason or a system
+/// code (`auto_purge_storage_limitation`, `dsgvo_erasure`, … — lower-case
+/// letters, digits and at least one `_`); anything staff wrote in their own
+/// words (the text of «Другое» may name a person or a diagnosis) becomes
+/// `other` (QA 2026-10-12).
+pub(crate) fn anonymised_failure_reason(reason: &str) -> &str {
+    let reason = reason.trim();
+    let system_code = reason.contains('_')
+        && reason.len() <= 64
+        && reason
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_');
+    if LEAD_FAILURE_REASON_CODES.contains(&reason) || system_code {
+        reason
+    } else {
+        "other"
+    }
 }
 
 /// One lead deletion for [`purge_lead_and_prospect`]: what is recorded on the
@@ -8120,7 +8171,8 @@ struct LeadPurge<'a> {
     lead_id: Uuid,
     failed_from_status: Option<String>,
     reason: &'a str,
-    note: Option<&'a str>,
+    /// A fixed system text only: a note staff typed never stays on the row.
+    system_note: Option<&'static str>,
     processed_by: Option<Uuid>,
     lead_audit: audit::AuditEvent,
     lifecycle: crate::routes::workflow_lifecycle::RecordEvent<'a>,
@@ -8168,7 +8220,7 @@ async fn purge_lead_and_prospect_in_tx(
         lead_id,
         failed_from_status,
         reason,
-        note,
+        system_note,
         processed_by,
         lead_audit,
         lifecycle,
@@ -8206,7 +8258,7 @@ async fn purge_lead_and_prospect_in_tx(
         lead_id,
         failed_from_status,
         reason,
-        note,
+        system_note,
         processed_by,
     )
     .await?;
@@ -8610,7 +8662,7 @@ pub async fn auto_purge_stale_archived(
                 lead_id,
                 failed_from_status: Some(from_status.clone()),
                 reason: "auto_purge_storage_limitation",
-                note: Some("Auto-purged per cleanup_archived_leads_days retention"),
+                system_note: Some("Auto-purged per cleanup_archived_leads_days retention"),
                 processed_by: None,
                 lead_audit: audit::domain_event(
                     "auto_purge_lead",
@@ -9024,7 +9076,7 @@ async fn purge_unqualified_lead(
             lead_id,
             failed_from_status: Some(from_status.clone()),
             reason: UNQUALIFIED_LEAD_PURGE_REASON,
-            note: Some("Auto-purged: not qualified within unqualified_lead_retention_days"),
+            system_note: Some("Auto-purged: not qualified within unqualified_lead_retention_days"),
             processed_by: None,
             lead_audit: audit::domain_event(
                 "auto_purge_lead",
@@ -9883,6 +9935,32 @@ mod auto_purge_tests {
             now(),
             180
         ));
+    }
+
+    /// QA 2026-10-12: an anonymised lead keeps a listed reason or a system
+    /// code, never what staff typed.
+    #[test]
+    fn an_anonymised_lead_keeps_only_a_reason_code() {
+        for code in [
+            "not_our_lead",
+            "duplicate",
+            "costs",
+            "other",
+            "dsgvo_erasure",
+            "auto_purge_storage_limitation",
+            "auto_purge_unqualified_retention",
+        ] {
+            assert_eq!(anonymised_failure_reason(code), code);
+        }
+        for typed in [
+            "Synthetischer QA-Fall: Patient aus gesperrtem Land",
+            "Anna Muster hat abgesagt",
+            "mueller",
+            "Diagnose: Diabetes",
+            "",
+        ] {
+            assert_eq!(anonymised_failure_reason(typed), "other", "{typed}");
+        }
     }
 
     #[test]

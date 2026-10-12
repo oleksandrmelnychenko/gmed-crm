@@ -945,18 +945,28 @@ test.describe("lead cabinet", () => {
     await expect(block.getByRole("checkbox")).toHaveCount(8);
     for (const box of await block.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
     await expect(block).toContainText("Noch keine Auswahl gespeichert.");
+    const save = page.getByTestId("lead-request-consent-form-save");
+    // An empty or partial choice is no consent (QA 2026-10-12, A2-02): saving waits for the three
+    // consents the service runs on.
+    await expect(save).toBeDisabled();
+    await expect(page.getByTestId("lead-request-consent-form-core-hint")).toBeVisible();
     await block.getByRole("checkbox", { name: /behandelnden Ärzte/ }).check();
     await block.getByRole("checkbox", { name: "WhatsApp", exact: true }).check();
-    await page.getByTestId("lead-request-consent-form-save").click();
+    await expect(save).toBeDisabled();
+    await block.getByRole("checkbox", { name: /beauftragte Mitarbeitende/ }).check();
+    await block.getByRole("checkbox", { name: /EDV-System/ }).check();
+    await expect(page.getByTestId("lead-request-consent-form-core-hint")).toHaveCount(0);
+    await save.click();
     await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
+    await expect(block).toContainText("ein schon erstelltes Formular erstellt GMED dann neu");
     expect(calls.consentChoices).toEqual([
       {
         version: "2026-10-12",
         language: "de",
         choices: {
-          agency_processing: false,
+          agency_processing: true,
           doctors_to_agency: true,
-          data_system: false,
+          data_system: true,
           named_recipients: false,
           channel_email: false,
           channel_threema: false,
@@ -965,6 +975,61 @@ test.describe("lead cabinet", () => {
         },
       },
     ]);
+  });
+
+  test("a whole date pasted into a segment of the date field fills the date (QA 2026-10-12, A2-03)", async ({ page }) => {
+    const { calls } = await setup(page, "lead");
+    await page.goto("/");
+    await page.getByTestId("lead-request-inquiry-consent").getByRole("checkbox").click();
+    const field = page.locator(".MuiPickersInputBase-root", { has: page.locator("#lead-request-date_of_birth") });
+    const paste = async (text: string) => {
+      const day = field.getByRole("spinbutton").first();
+      await day.click();
+      await day.evaluate((node, value) => {
+        const clipboardData = new DataTransfer();
+        clipboardData.setData("text/plain", value);
+        node.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData }));
+      }, text);
+    };
+    await paste("05.06.1970");
+    await expect(page.locator("#lead-request-date_of_birth")).toHaveValue("05.06.1970");
+    await expect.poll(() => calls.personalData.some((patch) => patch.date_of_birth === "1970-06-05")).toBe(true);
+    // The ISO spelling and a date without leading zeros work alike.
+    await paste("1965-11-11");
+    await expect(page.locator("#lead-request-date_of_birth")).toHaveValue("11.11.1965");
+    await paste("3.2.1980");
+    await expect(page.locator("#lead-request-date_of_birth")).toHaveValue("03.02.1980");
+    await expect.poll(() => calls.personalData.some((patch) => patch.date_of_birth === "1980-02-03")).toBe(true);
+  });
+
+  test("a parent chooses the consent options for the child's data (QA 2026-10-12, A2-06)", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) =>
+        Object.assign(request, {
+          access_kind: "guardian",
+          minor: true,
+          consent_form: { version: "2026-10-12", choices: null, chosen_at: null },
+        }),
+    });
+    await page.goto("/");
+    await step(page, "documents");
+    const block = page.getByTestId("lead-request-consent-form");
+    await expect(block).toContainText("wozu Sie für Ihr Kind einwilligen");
+    await expect(block).toContainText("Die Daten und Unterlagen meines Kindes dürfen");
+    await expect(block).not.toContainText("meine personenbezogenen");
+    for (const name of [/meines Kindes einholen/, /seine Behandlungsunterlagen/, /Unterlagen meines Kindes dürfen im EDV-System/]) {
+      await block.getByRole("checkbox", { name }).check();
+    }
+    await block.getByRole("checkbox", { name: "E-Mail", exact: true }).check();
+    await page.getByTestId("lead-request-consent-form-save").click();
+    await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
+    expect(calls.consentChoices).toHaveLength(1);
+    expect(calls.consentChoices[0]?.choices).toMatchObject({
+      agency_processing: true,
+      doctors_to_agency: true,
+      data_system: true,
+      channel_email: true,
+    });
   });
 
   test("another person as payer is named with name and citizenship before sending", async ({ page }) => {

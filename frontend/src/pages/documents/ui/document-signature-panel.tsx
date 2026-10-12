@@ -126,6 +126,11 @@ const ineligibleMessages: Record<string, [string, string]> = {
     "Пациент изменил выбор согласий после создания документа — создайте документ заново или используйте бумажную подпись.",
     "Der Patient hat seine Auswahl der Einwilligungen nach dem Erstellen des Dokuments geändert – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
   ],
+  // A choice without the three consents the service runs on (QA 2026-10-12, A2-02).
+  consent_choice_incomplete: [
+    "В сохранённом выборе нет трёх обязательных согласий — такую форму электронно не подписывают. Попросите выбрать заново в кабинете или используйте бумажную подпись.",
+    "In der gespeicherten Auswahl fehlen die drei erforderlichen Einwilligungen – so wird das Formular nicht elektronisch unterschrieben. Bitten Sie um eine neue Auswahl im Kundenkabinett oder nutzen Sie die Unterschrift auf Papier.",
+  ],
 };
 
 function requestTone(status: SignatureStatus) {

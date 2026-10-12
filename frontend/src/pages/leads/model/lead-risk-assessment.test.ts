@@ -17,6 +17,7 @@ import {
   riskEventLabel,
   riskGateErrorText,
   riskLevelTone,
+  riskMissingLabel,
   riskPointsLine,
   riskReasonValid,
   riskReviewerRoleEligible,
@@ -282,5 +283,13 @@ describe("trigger-flow additions to the portal state", () => {
     expect(normalizeRequestReason({ portal_concern: { text: "Kopf" } })).toEqual({ text: "Kopf", updated_at: null });
     expect(normalizeRequestReason({ request_reason: "  " })).toBeNull();
     expect(normalizeRequestReason({})).toBeNull();
+  });
+});
+
+describe("block I asks for a current identity copy (QA 2026-10-12)", () => {
+  it("never speaks of a second document: a lead without any document gets the block too", () => {
+    expect(riskMissingLabel("id_document_upload", ru)).toBe("актуальная копия документа личности (файл)");
+    expect(riskMissingLabel("id_document_upload", de)).toBe("aktuelle Kopie des Ausweisdokuments (Datei)");
+    expect(riskMissingLabel("id_document_upload", ru)).not.toContain("второй");
   });
 });

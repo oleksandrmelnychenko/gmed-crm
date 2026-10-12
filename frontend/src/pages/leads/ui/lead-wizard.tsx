@@ -197,7 +197,12 @@ import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signatur
 import { agencyCatalogItemName, agencyServiceLineDisplayName, germanDocumentUnitLabel } from "@/lib/agency-service-labels";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
-import { canSignWizardDocument, documentSignedFor, signatureNeedsProof } from "../model/wizard-document-signing";
+import {
+  canSignWizardDocument,
+  documentSignedFor,
+  leadConsentFormTemplate,
+  signatureNeedsProof,
+} from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
   retentionCountdownHint,
@@ -2577,6 +2582,10 @@ function documentsValidationIssues(
   }
   if (!existingChecks?.get("confidentiality_release_signed") && !documents.confidentiality_release.some((document) => (
     document.signed_at && document.compliance_kind === "confidentiality_release"
+  )) && !documents.privacy_consents.some((document) => (
+    // The minor's consent form carries the Schweigepflichtsentbindung (owner decision 2026-10-12).
+    document.signed_at
+    && ["consent_data_release_child", "consent_data_release_single"].includes(document.generated_template_id ?? "")
   ))) {
     issues.push({
       key: "confidentiality-release",
@@ -5717,12 +5726,22 @@ export function LeadWizard({
       }
       const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
       if (!targetLeadId) return false;
+      // For a minor the parents or the guardian declare on the child's form
+      // (QA 2026-10-12, A2-06); a new version replaces only the same form.
+      const generatedTemplateId = templateId === "privacy_consents"
+        ? leadConsentFormTemplate(
+          isMinor(draft.birthDate, new Date()),
+          step1Portal.intake?.representation?.custody,
+        )
+        : templateId;
       const generated = await generateDocument({
-        template_id: templateId,
+        template_id: generatedTemplateId,
         lead_id: targetLeadId,
         order_id: order?.id,
         replace_document_id: sortWizardDocumentsNewestFirst(
-          wizardDocuments[templateId],
+          wizardDocuments[templateId].filter((document) => (
+            !document.generated_template_id || document.generated_template_id === generatedTemplateId
+          )),
         ).find((document) => document.is_latest_version)?.id,
         language: "de",
         document_language: "de",
@@ -8290,18 +8309,25 @@ ${serviceCommentLines.join("\n")}`
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
                   title={tx("Освобождение от медицинской тайны", "Schweigepflichtsentbindung")}
-                  accessory={(
+                  accessory={isMinor(draft.birthDate, new Date()) ? undefined : (
                     <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("confidentiality_release")}>
                       {busy === "generate-confidentiality_release" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
                       {wizardDocuments.confidentiality_release.length > 0 ? tx("Создать новую версию", "Neue Version erstellen") : tx("Создать документ", "Dokument erstellen")}
                     </Button>
                   )}
                 >
-                <p className="text-xs text-muted-foreground">
-                  {tx(
-                    "Отдельное освобождение всех лечащих врачей и медицинских учреждений от медицинской тайны.",
-                    "Separate Entbindung aller behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
-                  )}
+                {/* For a minor the child's consent form carries the release (owner decision 2026-10-12);
+                    the adult form in the child's name is refused (QA 2026-10-12, A2-06). */}
+                <p className="text-xs text-muted-foreground" data-testid="lead-wizard-confidentiality-release-note">
+                  {isMinor(draft.birthDate, new Date())
+                    ? tx(
+                      "Для несовершеннолетнего освобождение от медицинской тайны входит в согласие для ребёнка ниже: его подписывают родители или опекун.",
+                      "Bei Minderjährigen ist die Schweigepflichtsentbindung Teil der Einverständniserklärung für das Kind unten; sie unterschreiben die Sorgeberechtigten bzw. der Vormund.",
+                    )
+                    : tx(
+                      "Отдельное освобождение всех лечащих врачей и медицинских учреждений от медицинской тайны.",
+                      "Separate Entbindung aller behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
+                    )}
                 </p>
                 <WizardDocumentRows
                   documents={wizardDocuments.confidentiality_release}
@@ -8323,7 +8349,12 @@ ${serviceCommentLines.join("\n")}`
               <div id={PRIVACY_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
+                  title={isMinor(draft.birthDate, new Date())
+                    ? tx(
+                      "Согласие на передачу данных ребёнка и освобождение от тайны (подписывают родители / опекун)",
+                      "Einverständniserklärung (Kind) – unterschreiben die Sorgeberechtigten bzw. der Vormund",
+                    )
+                    : tx("Согласие на использование и передачу персональных и медицинских данных", "Einverständniserklärung zur Datenübermittlung")}
                   accessory={(
                     <Button type="button" variant="default" size="sm" className="h-8 rounded-lg" disabled={isBusy} onClick={() => void generateLeadComplianceDocument("privacy_consents")}>
                       {busy === "generate-privacy_consents" ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
@@ -8343,10 +8374,15 @@ ${serviceCommentLines.join("\n")}`
                 {/* The form's boxes (transfer, communication channels) are ticked only by the
                     person's own choice in the cabinet (2026-10-12), never preset here. */}
                 <p data-testid="privacy-consents-own-choice-note" className="rounded-lg border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                  {tx(
-                    "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
-                    "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einwilligung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
-                  )}
+                  {isMinor(draft.birthDate, new Date())
+                    ? tx(
+                      "Для несовершеннолетнего форма «Согласие (ребёнок)»: заявляют и подписывают родители или опекун, данные — ребёнка. Варианты согласия отмечает родитель или опекун в кабинете (блок «Согласие на передачу данных»); форма называет, кто выбрал, и подписать её электронно должен он. Без выбора форма печатается с пустыми полями для бумажной подписи.",
+                      "Für Minderjährige die „Einverständniserklärung (Kind)“: Die Sorgeberechtigten bzw. der Vormund erklären und unterschreiben, betroffen sind die Daten des Kindes. Die Optionen kreuzt ein Elternteil bzw. der Vormund im Kundenkabinett an (Block „Einwilligung zur Datenübermittlung“); das Formular nennt, wer gewählt hat, und diese Person muss elektronisch unterschreiben. Ohne Auswahl wird es mit leeren Kästchen für die Unterschrift auf Papier gedruckt.",
+                    )
+                    : tx(
+                      "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
+                      "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einwilligung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
+                    )}
                 </p>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">

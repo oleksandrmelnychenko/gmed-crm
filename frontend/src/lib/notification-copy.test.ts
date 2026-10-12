@@ -22,13 +22,14 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
       lead_name: "Anna Muster",
       source: "manual",
     });
+    // The lead's channel, not the referral source (QA 2026-10-12).
     expect(notificationCopyFromFacts(item, "ru")).toEqual({
       title: "Новый лид: Anna Muster",
-      body: "Источник: Вручную",
+      body: "Канал: Вручную",
     });
     expect(notificationCopyFromFacts(item, "de")).toEqual({
       title: "Neuer Lead: Anna Muster",
-      body: "Quelle: Manuell",
+      body: "Kanal: Manuell",
     });
   });
 
@@ -36,11 +37,11 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     const legacy = notice("new_lead", "New lead: Ben Muster", "website");
     expect(notificationCopyFromFacts(legacy, "ru")).toEqual({
       title: "Новый лид: Ben Muster",
-      body: "Источник: Сайт",
+      body: "Канал: Сайт",
     });
     // An unknown source code is shown readable, never as "unknown value".
     expect(notificationCopyFromFacts(notice("new_lead", "New lead: Mia", "trade_fair"), "de")?.body)
-      .toBe("Quelle: Trade fair");
+      .toBe("Kanal: Trade fair");
     expect(notificationCopyFromFacts(notice("new_lead", "New lead: Mia", ""), "de")?.body).toBeNull();
   });
 

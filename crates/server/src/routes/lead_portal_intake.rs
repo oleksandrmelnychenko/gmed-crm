@@ -3744,6 +3744,17 @@ async fn save_consent_choices(
     if !CONSENT_LANGUAGES.contains(&language.as_str()) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
     }
+    // An empty or partial "choice" is no consent (QA 2026-10-12, A2-02): the
+    // three consents the service runs on are part of every saved choice; who
+    // does not give them saves nothing and the form goes on paper.
+    if !body.choices.has_core() {
+        return coded(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            consent_choices::CORE_REQUIRED,
+            "The three consents the service needs must be ticked",
+            json!({ "required": ["agency_processing", "doctors_to_agency", "data_system"] }),
+        );
+    }
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -3815,6 +3826,12 @@ async fn save_consent_choices(
         choices: body.choices,
         chosen_at,
         source: "lead_portal".into(),
+        access_kind: Some(kind.as_str().to_string()),
+        chosen_by: Some(auth.user_id),
+        chosen_by_name: None,
+        chosen_by_role: None,
+        chosen_by_emails: Vec::new(),
+        lead_id: Some(lead_id),
     };
     (StatusCode::CREATED, Json(consent_form_json(Some(&saved)))).into_response()
 }

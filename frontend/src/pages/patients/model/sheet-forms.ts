@@ -108,11 +108,31 @@ const ORGANISATION_LEGAL_FORMS = new Set([
   "nv", "fze", "ооо", "оао", "зао", "пао", "тов", "пат",
 ]);
 
-/** Whether a typed name carries a legal form ("Beispiel GmbH", "ООО Полартек"). */
+/**
+ * Institutions that are organisations without a legal form in the name: banks, savings banks,
+ * insurers and foundations (QA 2026-10-12: «Testgrad Commerce Bank» stayed a "person"). Whole
+ * words, or the end of a compound ("Commerzbank", "Kreissparkasse", "Сбербанк"). The same lists as
+ * `ORGANISATION_WORDS` / `ORGANISATION_WORD_ENDINGS` in crates/server/src/sanctions/screening.rs.
+ */
+const ORGANISATION_WORDS = new Set([
+  "bank", "banque", "banca", "banco", "bankhaus", "sparkasse", "versicherung", "insurance", "assurance",
+  "krankenkasse", "stiftung", "foundation", "банк", "фонд", "страховая", "страхова",
+]);
+const ORGANISATION_WORD_ENDINGS = ["bank", "sparkasse", "versicherung", "stiftung", "банк"];
+
+/**
+ * Whether a typed name looks like an organisation's: a legal form ("Beispiel GmbH", "ООО Полартек")
+ * or an institution ("Testgrad Commerce Bank", "Kreissparkasse Beispielstadt").
+ */
 export function relationNameSuggestsOrganisation(name: string): boolean {
   return name
     .split(/[^\p{L}\p{N}]+/u)
-    .some((word) => word !== "" && ORGANISATION_LEGAL_FORMS.has(word.toLocaleLowerCase()));
+    .map((word) => word.toLocaleLowerCase())
+    .some((word) => word !== "" && (
+      ORGANISATION_LEGAL_FORMS.has(word)
+      || ORGANISATION_WORDS.has(word)
+      || ORGANISATION_WORD_ENDINGS.some((ending) => word.length > ending.length && word.endsWith(ending))
+    ));
 }
 
 export function relationToForm(relation: RelationItem): RelationFormState {

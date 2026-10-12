@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { canSignWizardDocument, documentSignedFor, signatureNeedsProof } from "./wizard-document-signing";
+import {
+  canSignWizardDocument,
+  documentSignedFor,
+  leadConsentFormTemplate,
+  signatureNeedsProof,
+} from "./wizard-document-signing";
+
+describe("the consent form the wizard creates (QA 2026-10-12, A2-06)", () => {
+  it("creates the adult form for an adult whatever the custody says", () => {
+    expect(leadConsentFormTemplate(false, null)).toBe("privacy_consents");
+    expect(leadConsentFormTemplate(false, "sole_parent")).toBe("privacy_consents");
+  });
+  it("creates the child's form for a minor, signed by the parents or the guardian", () => {
+    expect(leadConsentFormTemplate(true, null)).toBe("consent_data_release_child");
+    expect(leadConsentFormTemplate(true, undefined)).toBe("consent_data_release_child");
+    expect(leadConsentFormTemplate(true, "joint")).toBe("consent_data_release_child");
+    expect(leadConsentFormTemplate(true, "sole_parent")).toBe("consent_data_release_single");
+    expect(leadConsentFormTemplate(true, "guardian")).toBe("consent_data_release_single");
+  });
+});
 
 const pdf = {
   generated_template_id: null as string | null,

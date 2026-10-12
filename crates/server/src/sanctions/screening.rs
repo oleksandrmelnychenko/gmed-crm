@@ -1192,11 +1192,46 @@ const ORGANISATION_LEGAL_FORMS: &[&str] = &[
     "nv", "fze", "ооо", "оао", "зао", "пао", "тов", "пат",
 ];
 
-/// Whether a contact's name carries a legal form ([`ORGANISATION_LEGAL_FORMS`]).
+/// Institutions that are organisations without a legal form in the name:
+/// banks, savings banks, insurers and foundations (QA 2026-10-12: «Testgrad
+/// Commerce Bank» was taken for a person). Whole words, or the end of a
+/// compound ("Commerzbank", "Kreissparkasse", "Сбербанк"). Kept in step with
+/// `relationNameSuggestsOrganisation` (frontend
+/// `pages/patients/model/sheet-forms.ts`).
+const ORGANISATION_WORDS: &[&str] = &[
+    "bank",
+    "banque",
+    "banca",
+    "banco",
+    "bankhaus",
+    "sparkasse",
+    "versicherung",
+    "insurance",
+    "assurance",
+    "krankenkasse",
+    "stiftung",
+    "foundation",
+    "банк",
+    "фонд",
+    "страховая",
+    "страхова",
+];
+const ORGANISATION_WORD_ENDINGS: &[&str] =
+    &["bank", "sparkasse", "versicherung", "stiftung", "банк"];
+
+/// Whether a contact's name carries a legal form ([`ORGANISATION_LEGAL_FORMS`])
+/// or names an institution ([`ORGANISATION_WORDS`]).
 fn names_an_organisation(name: &str) -> bool {
     name.split(|ch: char| !ch.is_alphanumeric())
         .filter(|word| !word.is_empty())
-        .any(|word| ORGANISATION_LEGAL_FORMS.contains(&word.to_lowercase().as_str()))
+        .any(|word| {
+            let word = word.to_lowercase();
+            ORGANISATION_LEGAL_FORMS.contains(&word.as_str())
+                || ORGANISATION_WORDS.contains(&word.as_str())
+                || ORGANISATION_WORD_ENDINGS.iter().any(|ending| {
+                    word.chars().count() > ending.chars().count() && word.ends_with(ending)
+                })
+        })
 }
 
 /// The birth date in a relation's notes: the lead conversion writes a trusted
@@ -2934,14 +2969,28 @@ mod tests {
             "Beispiel GmbH & Co. KG",
             "ООО Полартек",
             "Polartek",
+            // Banks, insurers and foundations without a legal form (QA 2026-10-12).
+            "Testgrad Commerce Bank",
+            "Banque Beispiel Privée",
+            "Kreissparkasse Beispielstadt",
+            "Beispiel Commerzbank",
+            "Сбер Банк Беспримерный",
+            "Beispiel Versicherung",
+            "Stiftung Beispielhilfe",
         ] {
             let organisation = subject(name);
             assert!(organisation.organisation, "{name}");
             assert_eq!(organisation.first_name, "", "{name}");
             assert_eq!(organisation.last_name, name, "{name}");
         }
-        // Initials and short names stay people.
-        for name in ["Anna O. Muster", "Sa Ko", "Ao Beispiel"] {
+        // Initials, short names and names that merely contain such a word stay people.
+        for name in [
+            "Anna O. Muster",
+            "Sa Ko",
+            "Ao Beispiel",
+            "Anna Bankowski",
+            "Ben Fondel",
+        ] {
             assert!(!subject(name).organisation, "{name}");
         }
     }

@@ -27,6 +27,25 @@ const LEAD_INTAKE_PACKAGE_MEMBERS = new Set(["single_order", "confidentiality_re
 // documents page.
 export { documentSignedFor, signatureNeedsProof } from "@/pages/documents/model/signature-proof";
 
+/** The consent forms the wizard's step 4 creates: the adult's, or the minor's in its two variants. */
+export type LeadConsentFormTemplate = "privacy_consents" | "consent_data_release_child" | "consent_data_release_single";
+
+/**
+ * Which consent form the wizard creates (QA 2026-10-12, A2-06): for a minor the parents or the
+ * guardian declare for the child on the child's form — both parents under joint custody (also while
+ * nobody stated the custody), one parent alone or the guardian otherwise. The server refuses the
+ * adult form for a minor (`minor_consent_form_required`).
+ */
+export function leadConsentFormTemplate(
+  minor: boolean,
+  custody: "joint" | "sole_parent" | "guardian" | null | undefined,
+): LeadConsentFormTemplate {
+  if (!minor) return "privacy_consents";
+  return custody === "sole_parent" || custody === "guardian"
+    ? "consent_data_release_single"
+    : "consent_data_release_child";
+}
+
 // A wizard action policy, not a replacement for the signing API's permissions.
 // Use document types, not translated titles or filenames (e.g. privacy notices).
 export function canSignWizardDocument(document: SigningDocument): boolean {

@@ -134,3 +134,29 @@ export function applyPickerBlur(
     emit: state.committable,
   }
 }
+
+/** A calendar date read from pasted text. */
+export type PastedDate = { year: number; month: number; day: number }
+
+/**
+ * A whole date pasted into a date field (QA 2026-10-12, A2-03): the segmented MUI field takes a
+ * paste only into the selected segment, so "05.06.1970" pasted into "TT" filled nothing. Accepted
+ * are the spellings people copy: DD.MM.YYYY, D.M.YYYY (also with "/" or "-"), and the ISO form
+ * YYYY-MM-DD; surrounding spaces and a trailing dot are ignored. Anything else, and dates that do
+ * not exist (31.02.2026), is `null`: the paste then goes to the field as before.
+ */
+export function parsePastedDate(text: string): PastedDate | null {
+  const value = text.trim().replace(/\.$/, "")
+  const dayFirst = value.match(/^(\d{1,2})\s*([./-])\s*(\d{1,2})\s*\2\s*(\d{4})$/)
+  const isoForm = value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+  const parts = dayFirst
+    ? { day: Number(dayFirst[1]), month: Number(dayFirst[3]), year: Number(dayFirst[4]) }
+    : isoForm
+      ? { year: Number(isoForm[1]), month: Number(isoForm[2]), day: Number(isoForm[3]) }
+      : null
+  if (!parts) return null
+  const { year, month, day } = parts
+  if (year < 1000 || month < 1 || month > 12 || day < 1) return null
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return day <= daysInMonth ? parts : null
+}

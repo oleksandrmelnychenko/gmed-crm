@@ -100,8 +100,10 @@ function newLead(item: NotificationFacts, lang: Lang): NotificationCopy {
     title: name
       ? fill({ ru: "Новый лид: {name}", de: "Neuer Lead: {name}" }, lang, { name })
       : pick({ ru: "Новый лид", de: "Neuer Lead" }, lang),
+    // The lead's channel (manual, website, …), not where the person heard of
+    // GMED (the wizard's «Источник обращения»): "Канал" (QA 2026-10-12).
     body: source
-      ? fill({ ru: "Источник: {source}", de: "Quelle: {source}" }, lang, { source: sourceLabel(source, tr) })
+      ? fill({ ru: "Канал: {source}", de: "Kanal: {source}" }, lang, { source: sourceLabel(source, tr) })
       : null,
   };
 }

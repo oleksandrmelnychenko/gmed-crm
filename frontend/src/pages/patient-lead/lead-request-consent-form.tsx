@@ -8,14 +8,16 @@ import { cn } from "@/lib/utils";
 
 import {
   CONSENT_FORM_CHANNELS,
+  CONSENT_FORM_CORE,
   CONSENT_FORM_OPTIONS,
   NO_CONSENT_FORM_CHOICES,
+  hasCoreConsents,
   saveLeadConsentFormChoices,
   type ConsentFormChoices,
   type LeadRequest,
 } from "./lead-request-api";
 import { consentFormText } from "./lead-request-consent-form-text";
-import { CabinetSection as Section, errorMessage, type RequestQueue } from "./lead-request-parts";
+import { CabinetSection as Section, errorBody, errorMessage, type RequestQueue } from "./lead-request-parts";
 
 /** Whether the draft differs from what is saved (nothing saved counts as "all unticked"). */
 export function consentFormChanged(
@@ -28,11 +30,20 @@ export function consentFormChanged(
   );
 }
 
+/** A parent or guardian chooses for a minor: the texts speak of the child's data (QA 2026-10-12, A2-06). */
+export function choosesForChild(request: Pick<LeadRequest, "access_kind" | "minor">): boolean {
+  return request.access_kind === "guardian" && request.minor === true;
+}
+
 /**
  * The person's own choice of the options of the consent form «Einverständniserklärung zur
  * Datenübermittlung» (Anlage 1), 2026-10-12. Nothing is ticked in advance; the choice counts only
  * once the person saves it (an active choice), and every save is kept. The generated form ticks
  * only what was chosen here; without a saved choice GMED sends the form for a paper signature.
+ *
+ * The three consents the service runs on are part of every saved choice (QA 2026-10-12, A2-02):
+ * an empty or partial "choice" is no consent, so "save" waits for them. A parent of a minor
+ * chooses for the child; the child's form names the parent who chose.
  */
 export function ConsentFormChoicesSection({
   request,
@@ -46,12 +57,13 @@ export function ConsentFormChoicesSection({
   onChange: (request: LeadRequest) => void;
 }) {
   const form = request.consent_form;
-  const text = consentFormText(lang);
+  const text = consentFormText(lang, choosesForChild(request));
   const [draft, setDraft] = useState<ConsentFormChoices>(form?.choices ?? NO_CONSENT_FORM_CHOICES);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!form) return null;
   const changed = consentFormChanged(draft, form.choices);
+  const coreTicked = hasCoreConsents(draft);
 
   async function save() {
     if (!form) return;
@@ -64,7 +76,7 @@ export function ConsentFormChoicesSection({
       onChange({ ...request, consent_form: saved });
       setDraft(saved.choices ?? draft);
     } catch (cause) {
-      setError(errorMessage(cause));
+      setError(errorBody(cause)?.code === "consent_core_required" ? text.coreRequired : errorMessage(cause));
     } finally {
       setBusy(false);
     }
@@ -83,7 +95,14 @@ export function ConsentFormChoicesSection({
           setDraft((current) => ({ ...current, [key]: checked }));
         }}
       />
-      <span className="leading-relaxed">{text.options[key]}</span>
+      <span className="leading-relaxed">
+        {text.options[key]}
+        {CONSENT_FORM_CORE.includes(key) ? (
+          <span className="ml-1 text-xs text-muted-foreground" data-consent-required="">
+            ({text.required})
+          </span>
+        ) : null}
+      </span>
     </label>
   );
 
@@ -98,11 +117,16 @@ export function ConsentFormChoicesSection({
             <div className="grid gap-2 pl-7 sm:grid-cols-2">{CONSENT_FORM_CHANNELS.map(option)}</div>
             <p className="pl-7 text-xs text-muted-foreground">{text.channelsRisk}</p>
           </fieldset>
+          {!coreTicked ? (
+            <p className="text-xs text-muted-foreground" data-testid="lead-request-consent-form-core-hint">
+              {text.coreHint}
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <Button
               type="button"
               variant="outline"
-              disabled={busy || (!changed && Boolean(form.choices))}
+              disabled={busy || !coreTicked || (!changed && Boolean(form.choices))}
               onClick={() => void save()}
               data-testid="lead-request-consent-form-save"
             >

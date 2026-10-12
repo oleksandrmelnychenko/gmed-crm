@@ -87,6 +87,8 @@ describe("order payer", () => {
     // A new contact: the legal form ticks the box, a person's name does not.
     expect(organisationAfterTypedName(EMPTY_ORDER_PAYER, "Beispiel GmbH")).toBe(true);
     expect(organisationAfterTypedName(EMPTY_ORDER_PAYER, "Viktor Zahler")).toBe(false);
+    // A bank without a legal form is an organisation too (QA 2026-10-12).
+    expect(organisationAfterTypedName(EMPTY_ORDER_PAYER, "Testgrad Commerce Bank")).toBe(true);
     // Without a contact name no answer is sent.
     expect(
       orderPayerPayload({ ...EMPTY_ORDER_PAYER, patientPid: "P-1", isOrganisation: true }),

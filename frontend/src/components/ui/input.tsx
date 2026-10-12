@@ -19,6 +19,7 @@ import {
   applyPickerBlur,
   applyPickerChange,
   formatPickerValue,
+  parsePastedDate,
   pickerDraftFromValue,
   type PickerDraftStep,
 } from "@/components/ui/picker-draft"
@@ -278,6 +279,26 @@ function Input({
     applyPickerStep(applyPickerBlur(pickerDraftRef.current, (raw) => parsePickerValue(type, raw), pickerFormat))
   }
 
+  // A whole date pasted into a date field (QA 2026-10-12, A2-03): MUI takes a
+  // paste only into the selected segment, so "05.06.1970" pasted into "TT"
+  // filled nothing. The captured paste fills the whole date instead; other
+  // text goes to the field as before.
+  const handlePickerPaste = (event: React.ClipboardEvent<HTMLElement>) => {
+    if (type !== "date" || disabled || props.readOnly) return
+    const pasted = parsePastedDate(event.clipboardData?.getData("text") ?? "")
+    if (!pasted) return
+    event.preventDefault()
+    event.stopPropagation()
+    const next = dayjs(new Date(pasted.year, pasted.month - 1, pasted.day))
+    const minDate = typeof min === "string" && min ? parseDateValue(min) : null
+    const maxDate = typeof max === "string" && max ? parseDateValue(max) : null
+    const outOfRange =
+      Boolean(minDate && next.isBefore(minDate, "day")) || Boolean(maxDate && next.isAfter(maxDate, "day"))
+    applyPickerStep(
+      applyPickerChange(pickerDraftRef.current, next, outOfRange ? "outOfRange" : null, pickerFormat),
+    )
+  }
+
   if (type === "date" || type === "datetime-local" || type === "time") {
     const {
       controlHeight,
@@ -387,7 +408,7 @@ function Input({
         {...(pickerLang ? { dateAdapter: AppAdapterDayjs, adapterLocale: PICKER_ADAPTER_LOCALE[pickerLang] } : {})}
         localeText={PICKER_LOCALE_TEXT[pickerLang ?? lang]}
       >
-        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents">
+        <span ref={pickerAnchorRef} data-picker-anchor="" className="contents" onPasteCapture={handlePickerPaste}>
           {picker}
         </span>
       </LocalizationProvider>

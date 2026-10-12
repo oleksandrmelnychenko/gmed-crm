@@ -509,7 +509,8 @@ export const ru = {
   leads_title: "Лиды",
   leads_subtitle: "Управление лидами и запросами",
   leads_new: "Новый лид",
-  leads_source: "Источник",
+  // The intake channel (manual, website, …), not the referral source (QA 2026-10-12).
+  leads_source: "Канал",
   leads_needs: "Медицинские потребности",
   leads_qualify: "Квалифицировать",
   leads_convert: "Конвертировать",

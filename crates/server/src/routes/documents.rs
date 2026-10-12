@@ -1137,8 +1137,68 @@ struct GeneratedConsentContext {
     guardian2_label: Option<String>,
     guardian2_birth_date: Option<NaiveDate>,
     extra_release_recipients: Option<String>,
+    /// The options a parent or the guardian chose in the cabinet
+    /// (`crate::consent_choices`); without one every box is printed empty.
+    own_choice: Option<crate::consent_choices::OwnConsentChoice>,
     agency: AgencyContractSettings,
     generated_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// A parent or the guardian as the minor's consent form names them.
+#[derive(Clone, Debug, Default)]
+struct ConsentGuardian {
+    name: Option<String>,
+    birth_date: Option<NaiveDate>,
+    address: Option<String>,
+}
+
+/// The parents or the guardian of a lead who is a minor, as the cabinet
+/// knows them (`lead_representatives`: the first and, under joint custody,
+/// the second legal representative). The one who chose the consent options
+/// in the cabinet comes first: the form names that person first and gives
+/// them the first signature line (QA 2026-10-12, A2-06).
+async fn lead_consent_guardians(
+    state: &AppState,
+    lead_id: Uuid,
+    choice: Option<&crate::consent_choices::OwnConsentChoice>,
+) -> Result<Vec<ConsentGuardian>, sqlx::Error> {
+    let mut conn = state.db.acquire().await?;
+    let Some(loaded) = super::lead_representatives::load(&mut conn, lead_id).await? else {
+        return Ok(Vec::new());
+    };
+    let mut people = loaded
+        .representation
+        .representatives
+        .iter()
+        .filter(|person| person.slot.is_some())
+        .collect::<Vec<_>>();
+    if let Some(choice) = choice
+        && let Some(position) = people.iter().position(|person| {
+            person.email.as_deref().is_some_and(|email| {
+                choice
+                    .chosen_by_emails
+                    .contains(&email.trim().to_lowercase())
+            })
+        })
+    {
+        let chooser = people.remove(position);
+        people.insert(0, chooser);
+    }
+    Ok(people
+        .into_iter()
+        .map(|person| ConsentGuardian {
+            name: Some(person.name()).filter(|name| !name.is_empty()),
+            birth_date: person.date_of_birth,
+            address: DocPartyBlock {
+                street: person.extras.street.clone(),
+                zip: person.extras.zip.clone(),
+                city: person.extras.city.clone(),
+                country: person.extras.country.clone(),
+                ..Default::default()
+            }
+            .address_line(),
+        })
+        .collect())
 }
 
 pub(crate) struct StagedDocumentDelete {
@@ -15815,6 +15875,21 @@ async fn generate_document(
     let insurance_provider = patient_row
         .try_get::<Option<String>, _>("insurance_provider")
         .unwrap_or_default();
+    // A minor's consent is declared by the parents or the guardian on the
+    // child's form (`consent_data_release_child` / `_single`), which also
+    // carries the Schweigepflichtsentbindung (owner decision 2026-10-12): the
+    // adult forms in the child's name would have the child declare and sign
+    // (QA 2026-10-12, A2-06).
+    if matches!(
+        template.id,
+        crate::consent_choices::TEMPLATE | "confidentiality_release"
+    ) && crate::routes::leads::is_minor_on(birth_date, crate::app_time::today())
+    {
+        return gwg_sheet_refusal(
+            "minor_consent_form_required",
+            "For a minor the parents or the guardian sign the child's consent form",
+        );
+    }
     if let Some(requested_language) = normalize_document_language(body.language.as_deref())
         && !template.languages.contains(&requested_language)
     {
@@ -16095,7 +16170,11 @@ async fn generate_document(
             };
         }
     }
-    if template.id == "privacy_consents"
+    // The recipients named in the consent form: the trusted contacts. On the
+    // minor's form the parents and the guardian declare themselves, so they
+    // are no recipients there (QA 2026-10-12, A2-06).
+    let child_consent_form = crate::consent_choices::is_child_form(Some(template.id));
+    if (template.id == "privacy_consents" || child_consent_form)
         && bindings
             .extra_release_recipients
             .as_deref()
@@ -16118,6 +16197,23 @@ async fn generate_document(
         };
         match stored_contacts {
             Ok(Some(contacts)) => {
+                let contacts = if child_consent_form {
+                    Value::Array(
+                        contacts
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|contact| {
+                                !crate::routes::leads::is_parent_or_guardian_relation(
+                                    contact.get("relation").and_then(Value::as_str),
+                                )
+                            })
+                            .cloned()
+                            .collect(),
+                    )
+                } else {
+                    contacts
+                };
                 bindings.extra_release_recipients = trusted_contact_recipients_binding(&contacts);
             }
             Ok(None) => {}
@@ -16189,10 +16285,27 @@ async fn generate_document(
             context.clone();
     }
     // The person's own choice of the consent form options (lead cabinet,
-    // 2026-10-12): the form ticks only those and records the choice, which
-    // an electronic signature needs (`crate::consent_choices`).
+    // 2026-10-12): the form ticks only those, names who chose (for a minor
+    // the parent or guardian, QA 2026-10-12 A2-06) and records the choice,
+    // which an electronic signature needs (`crate::consent_choices`).
     let own_consent_choice = if crate::consent_choices::needs_own_choice(Some(template.id)) {
-        match crate::consent_choices::current_for(&state.db, lead_id, patient_id).await {
+        let subject_email = patient_row
+            .try_get::<Option<String>, _>("email")
+            .ok()
+            .flatten();
+        let loaded = match crate::consent_choices::current_for(&state.db, lead_id, patient_id).await
+        {
+            Ok(Some(mut choice)) => crate::consent_choices::describe_chooser(
+                &state.db,
+                &mut choice,
+                &patient_name,
+                subject_email.as_deref(),
+            )
+            .await
+            .map(|()| Some(choice)),
+            other => other,
+        };
+        match loaded {
             Ok(choice) => choice,
             Err(error) => {
                 tracing::error!(error = %error, ?patient_id, ?lead_id, "load the own consent choice");
@@ -17896,34 +18009,61 @@ async fn generate_document(
         }
         "consent_data_release_child" | "consent_data_release_single" => {
             let sole_guardian = template.id == "consent_data_release_single";
-            let guardian_relations = sqlx::query(
-                r#"SELECT pr.related_name, rp.birth_date
-                   FROM patient_relations pr
-                   LEFT JOIN patients rp ON rp.id = pr.related_patient_id
-                   WHERE pr.patient_id = $1
-                     AND pr.relation_type IN ('parent', 'guardian')
-                   ORDER BY pr.created_at"#,
-            )
-            .bind(patient_uuid)
-            .fetch_all(&state.db)
-            .await
-            .unwrap_or_default();
-            let guardian_at = |idx: usize| -> (Option<String>, Option<NaiveDate>) {
-                match guardian_relations.get(idx) {
-                    Some(row) => (
-                        row.try_get::<String, _>("related_name")
-                            .ok()
-                            .map(|name| name.trim().to_string())
-                            .filter(|name| !name.is_empty()),
-                        row.try_get::<Option<NaiveDate>, _>("birth_date")
-                            .ok()
-                            .flatten(),
-                    ),
-                    None => (None, None),
+            // A lead's parents or guardian are the representatives of the
+            // cabinet (QA 2026-10-12, A2-06); a patient's are its relations.
+            let guardians = match (patient_id, lead_id) {
+                (None, Some(lead_uuid)) => {
+                    match lead_consent_guardians(&state, lead_uuid, own_consent_choice.as_ref())
+                        .await
+                    {
+                        Ok(guardians) => guardians,
+                        Err(error) => {
+                            tracing::error!(error = %error, lead_id = %lead_uuid, "load the lead's representatives for the consent form");
+                            return err(
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                "Failed to load the representatives",
+                            );
+                        }
+                    }
                 }
+                _ => sqlx::query(
+                    r#"SELECT pr.related_name, rp.birth_date
+                       FROM patient_relations pr
+                       LEFT JOIN patients rp ON rp.id = pr.related_patient_id
+                       WHERE pr.patient_id = $1
+                         AND pr.relation_type IN ('parent', 'guardian')
+                       ORDER BY pr.created_at"#,
+                )
+                .bind(patient_uuid)
+                .fetch_all(&state.db)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .map(|row| ConsentGuardian {
+                    name: row
+                        .try_get::<String, _>("related_name")
+                        .ok()
+                        .map(|name| name.trim().to_string())
+                        .filter(|name| !name.is_empty()),
+                    birth_date: row
+                        .try_get::<Option<NaiveDate>, _>("birth_date")
+                        .ok()
+                        .flatten(),
+                    address: None,
+                })
+                .collect(),
             };
-            let (guardian1_name, guardian1_birth) = guardian_at(0);
-            let (guardian2_name_derived, guardian2_birth_derived) = guardian_at(1);
+            let guardian_at = |idx: usize| guardians.get(idx).cloned().unwrap_or_default();
+            let ConsentGuardian {
+                name: guardian1_name,
+                birth_date: guardian1_birth,
+                address: guardian1_address,
+            } = guardian_at(0);
+            let ConsentGuardian {
+                name: guardian2_name_derived,
+                birth_date: guardian2_birth_derived,
+                ..
+            } = guardian_at(1);
             let agency = match load_agency_contract_settings(&state).await {
                 Ok(value) => value,
                 Err(resp) => return resp,
@@ -17947,11 +18087,12 @@ async fn generate_document(
                 guardian_name: bindings.guardian_name.clone().or(guardian1_name),
                 guardian_label: bindings.guardian_label.clone(),
                 guardian_birth_date: bindings.guardian_birth_date.or(guardian1_birth),
-                guardian_address: bindings.guardian_address.clone(),
+                guardian_address: bindings.guardian_address.clone().or(guardian1_address),
                 guardian2_name: bindings.guardian2_name.clone().or(guardian2_name_derived),
                 guardian2_label: bindings.guardian2_label.clone(),
                 guardian2_birth_date: bindings.guardian2_birth_date.or(guardian2_birth_derived),
                 extra_release_recipients: bindings.extra_release_recipients.clone(),
+                own_choice: own_consent_choice.clone(),
                 agency,
                 generated_at,
             };
@@ -21191,11 +21332,6 @@ fn build_appointment_confirmation_pdf(
     Ok(finalize_admin_pdf(document, layout))
 }
 
-/// Default underscore fill-in for a blank handwritten line.
-fn consent_blank_long() -> &'static str {
-    "________________________________________________________________________________"
-}
-
 /// Renders a small muted caption line (the parenthetical hints in the reference form).
 fn consent_caption(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     layout.text_block(
@@ -21209,25 +21345,71 @@ fn consent_caption(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// Returns the trimmed, non-empty value or the long underscore blank for handwritten fill-ins.
-fn consent_value_or_blank(value: Option<&str>) -> String {
-    value
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| consent_blank_long().to_string())
+/// Underscores for a handwritten fill-in that fit on one line together with
+/// the text before and after them. The long blank ([`consent_blank_long`])
+/// after a label wrapped a lone «__» onto the next line (QA 2026-10-12, A2-02
+/// note). Both line breakers are respected: the character count of
+/// `wrap_text_to_width` and the glyph widths of `wrap_text_to_width_precise`.
+fn fitted_consent_blank(before: &str, after: &str, size_pt: f32, width_mm: f32) -> String {
+    const MIN: usize = 8;
+    let max_chars = ((width_mm / (pt_to_mm(size_pt) * 0.54)).floor() as usize).max(18);
+    let used = before.chars().count() + after.chars().count();
+    let mut count = max_chars.saturating_sub(used + 1).clamp(MIN, 80);
+    while count > MIN
+        && approx_text_width_mm(&format!("{before}{}{after}", "_".repeat(count)), size_pt)
+            > width_mm - 1.0
+    {
+        count -= 1;
+    }
+    "_".repeat(count)
+}
+
+/// "{label}{value}", or the label with a blank that fits the line.
+fn consent_labelled_value(label: &str, value: Option<&str>, size_pt: f32, width_mm: f32) -> String {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => format!("{label}{value}"),
+        None => format!(
+            "{label}{}",
+            fitted_consent_blank(label, "", size_pt, width_mm)
+        ),
+    }
+}
+
+/// "Telefonnummer: … E-mail: …" with blanks that keep the line on one line.
+fn consent_contact_line(
+    phone: Option<&str>,
+    email: Option<&str>,
+    size_pt: f32,
+    width_mm: f32,
+) -> String {
+    const PHONE: &str = "Telefonnummer: ";
+    const EMAIL: &str = ".   E-mail: ";
+    let phone = phone.map(str::trim).filter(|value| !value.is_empty());
+    let email = email.map(str::trim).filter(|value| !value.is_empty());
+    match (phone, email) {
+        (Some(phone), Some(email)) => format!("{PHONE}{phone}{EMAIL}{email}"),
+        (Some(phone), None) => {
+            let before = format!("{PHONE}{phone}{EMAIL}");
+            let blank = fitted_consent_blank(&before, "", size_pt, width_mm);
+            format!("{before}{blank}")
+        }
+        (None, Some(email)) => {
+            let after = format!("{EMAIL}{email}");
+            let blank = fitted_consent_blank(PHONE, &after, size_pt, width_mm);
+            format!("{PHONE}{blank}{after}")
+        }
+        (None, None) => {
+            let both = fitted_consent_blank(PHONE, EMAIL, size_pt, width_mm)
+                .chars()
+                .count();
+            let half = "_".repeat((both / 2).max(8));
+            format!("{PHONE}{half}{EMAIL}{half}")
+        }
+    }
 }
 
 fn adult_consent_subject_line(party: &DocPartyBlock) -> String {
-    let birth_date = party
-        .birth_date
-        .map(|value| value.format("%d.%m.%Y").to_string())
-        .unwrap_or_else(|| "________________".to_string());
-    format!(
-        "{}, geb. am {}",
-        consent_value_or_blank(Some(party.name.as_str())),
-        birth_date
-    )
+    consent_person_line(Some(party.name.as_str()), party.birth_date)
 }
 
 fn normalized_agency_person(value: &str) -> Option<&str> {
@@ -21415,11 +21597,11 @@ fn adult_legal_identity_block(
         0.0,
         1.0,
     );
+    // Empty values get a blank that keeps the line on one line (QA
+    // 2026-10-12: «Adresse: ____» used to wrap a lone «__»).
+    let width = layout.available_width(0.0);
     layout.text_block(
-        &format!(
-            "Adresse: {}",
-            consent_value_or_blank(party.address_line().as_deref())
-        ),
+        &consent_labelled_value("Adresse: ", party.address_line().as_deref(), 11.0, width),
         11.0,
         false,
         0.0,
@@ -21428,10 +21610,8 @@ fn adult_legal_identity_block(
         1.0,
     );
     if include_contacts {
-        let phone = consent_value_or_blank(party.phone.as_deref());
-        let email = consent_value_or_blank(party.email.as_deref());
         layout.text_block(
-            &format!("Telefonnummer: {phone}.   E-mail: {email}"),
+            &consent_contact_line(party.phone.as_deref(), party.email.as_deref(), 11.0, width),
             11.0,
             false,
             0.0,
@@ -25546,12 +25726,17 @@ fn build_adult_privacy_consents_pdf(
         "Einverständniserklärung zur Datenübermittlung",
     );
     adult_legal_identity_block(&mut layout, party, true);
+    // "meine eigene Auswahl" only when the person chose with the own login;
+    // a representative's choice is named as such in the note below (QA
+    // 2026-10-12, A2-06).
     fc_body(
         &mut layout,
-        if own_choice.is_some() {
-            "bin damit einverstanden (angekreuzt ist meine eigene Auswahl):"
-        } else {
-            "bin damit einverstanden (bitte ankreuzen):"
+        match own_choice {
+            Some(choice) if choice.access_kind.as_deref() == Some("guardian") => {
+                "bin damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl):"
+            }
+            Some(_) => "bin damit einverstanden (angekreuzt ist meine eigene Auswahl):",
+            None => "bin damit einverstanden (bitte ankreuzen):",
         },
     );
     adult_legal_checkbox(
@@ -25709,11 +25894,14 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             "(Vorname, Name)                        (TT.MM.JJJJ)",
         );
         // Guardian address block (sole variant only).
+        let width = layout.available_width(0.0);
         admin_block(
             &mut layout,
-            &format!(
-                "Adresse: {}",
-                consent_value_or_blank(context.guardian_address.as_deref())
+            &consent_labelled_value(
+                "Adresse: ",
+                context.guardian_address.as_deref(),
+                11.0,
+                width,
             ),
             0.0,
             0.5,
@@ -25761,12 +25949,18 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         &mut layout,
         "(Vorname, Name)                        (TT.MM.JJJJ)",
     );
+    let width = layout.available_width(0.0);
     admin_block(
         &mut layout,
-        &format!(
-            "Adresse{}: {}",
-            if context.sole_guardian { "" } else { "(n)" },
-            consent_value_or_blank(context.child_address.as_deref())
+        &consent_labelled_value(
+            if context.sole_guardian {
+                "Adresse: "
+            } else {
+                "Adresse(n): "
+            },
+            context.child_address.as_deref(),
+            11.0,
+            width,
         ),
         0.0,
         0.5,
@@ -25779,16 +25973,112 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     }
     layout.spacer(1.5);
 
-    // ---- Main consent paragraph ----
+    // ---- The consents, one box per option ----
+    // The same options the adult form has and the cabinet offers: «[x]» only
+    // for what a parent or the guardian chose in the cabinet, else every box
+    // empty for ticking on the printed copy (QA 2026-10-12, A2-06; Art. 7
+    // DSGVO, owner decision 2026-10-11 — never pre-ticked by staff).
+    let own_choice = context.own_choice.as_ref();
+    let chosen = own_choice.map(|choice| choice.choices).unwrap_or_default();
     admin_block(
         &mut layout,
         &format!(
-            "{verb} damit einverstanden, dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende personenbezogene und medizinische Daten von {our} Kind, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore oder andere medizinische Einrichtungen, Dolmetscher, Übersetzer oder Gutachter. {we} {verb} damit einverstanden, dass notwendige Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rechnungen und Quittungen, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind im {data_system_name} gespeichert und verarbeitet werden.",
-            verb = verb,
-            we = we,
-            our = our,
-            agency_identity = agency_identity,
-            data_system_name = data_system_name
+            "{verb} damit einverstanden ({}):",
+            if own_choice.is_some() {
+                "angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl"
+            } else {
+                "bitte ankreuzen"
+            }
+        ),
+        0.0,
+        1.0,
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        chosen.agency_processing,
+        &format!(
+            "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende personenbezogene und medizinische Daten von {our} Kind, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind einholen, bearbeiten, speichern und/oder übermitteln, insbesondere an behandelnde Ärzte, Krankenhäuser, Labore oder andere medizinische Einrichtungen, Dolmetscher, Übersetzer oder Gutachter;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        chosen.doctors_to_agency,
+        &format!(
+            "dass alle behandelnden Ärzte und medizinischen Einrichtungen {our_gen} Kindes dessen Behandlungsunterlagen und medizinische Informationen an {agency_identity} übermitteln dürfen;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        chosen.data_system,
+        &format!(
+            "dass notwendige Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rechnungen und Quittungen, Arzt- und Krankenhausberichte sowie weitere personenbezogene und Gesundheitsdaten von {our} Kind im {data_system_name} gespeichert und verarbeitet werden;"
+        ),
+    );
+    adult_legal_checkbox(
+        &mut layout,
+        chosen.named_recipients,
+        &format!(
+            "dass personenbezogene und medizinische Daten von {our} Kind an folgende Personen und/oder Institutionen/Einrichtungen übermittelt werden; insoweit {release_verb} {we_lower} {agency_person} auch von der Schweigepflicht:"
+        ),
+    );
+    match context
+        .extra_release_recipients
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(recipients) => {
+            for line in recipients.lines().filter(|line| !line.trim().is_empty()) {
+                layout.text_block(
+                    line.trim(),
+                    10.5,
+                    false,
+                    12.0,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.8,
+                );
+            }
+        }
+        None => {
+            layout.text_block(
+                &fitted_consent_blank("", "", 10.5, layout.available_width(12.0)),
+                10.5,
+                false,
+                12.0,
+                TreatmentPlanPdfColor::Body,
+                0.0,
+                0.5,
+            );
+            consent_caption(
+                &mut layout,
+                "(Vollständige Name der Institution / Name, Vorname und Geburtsdatum der Person; Adresse)",
+            );
+        }
+    }
+    adult_legal_checkbox(
+        &mut layout,
+        chosen.any_channel(),
+        &format!(
+            "dass personenbezogene und medizinische Daten von {our} Kind sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:"
+        ),
+    );
+    for (channel, picked) in [
+        ("E-mail", chosen.channel_email),
+        ("Threema-Messenger", chosen.channel_threema),
+        ("WhatsApp-Messenger", chosen.channel_whatsapp),
+        ("Telegram-Messenger", chosen.channel_telegram),
+    ] {
+        adult_legal_channel(&mut layout, picked, channel);
+    }
+    if let Some(choice) = own_choice {
+        admin_block(&mut layout, &choice.printed_note(), 0.0, 1.0);
+    }
+    admin_block(
+        &mut layout,
+        &format!(
+            "{we} {verb} {us_refl} der möglichen Risiken bei der Übermittlung sensibler Daten per E-mail, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
+            us_refl = if context.sole_guardian { "mir" } else { "uns" }
         ),
         0.0,
         1.5,
@@ -25833,55 +26123,9 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
         1.5,
     );
 
-    // ---- Extra-release recipients: ALWAYS rendered (value or underscore blank + caption) ----
-    admin_block(
-        &mut layout,
-        &format!(
-            "Außerdem {release_verb} {we_lower} {agency_person} von der Schweigepflicht gegenüber folgenden Personen und/oder Institutionen/Einrichtungen:",
-            release_verb = release_verb,
-            we_lower = we_lower,
-            agency_person = agency_person
-        ),
-        0.0,
-        0.5,
-    );
-    admin_block(
-        &mut layout,
-        &consent_value_or_blank(context.extra_release_recipients.as_deref()),
-        0.0,
-        0.5,
-    );
-    consent_caption(
-        &mut layout,
-        "(Vollständige Name der Institution / Name, Vorname und Geburtsdatum der Person; Adresse)",
-    );
-    layout.spacer(1.5);
-
-    // ---- Consent to transmission via Email/WhatsApp/Telegram/Threema (incl. risk acknowledgement) ----
-    admin_block(
-        &mut layout,
-        &format!(
-            "{we} {verb} damit einverstanden, dass personenbezogene und medizinische Daten von {our} Kind, Personalausweiskopien, Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation und Information, Kostenvoranschläge, Rechnungen und Quittungen, Behandlungsverträge, Leistungsverträge, Arzt- und Krankenhausberichte über eine abgeschlossene oder noch andauernde Behandlung von {our} Kind per Email, WhatsApp-, Telegram- oder Threema-Messenger eingeholt und/oder übermittelt werden. {we} {verb} {us_refl} der möglichen Risiken bei der Übermittlung sensibler Daten per Email, WhatsApp-, Telegram- oder Threema-Messenger bewusst.",
-            we = we,
-            verb = verb,
-            our = our,
-            us_refl = if context.sole_guardian { "mir" } else { "uns" }
-        ),
-        0.0,
-        1.5,
-    );
-    admin_block(
-        &mut layout,
-        &format!(
-            "{we} {verb} mit der Speicherung und Verarbeitung von personenbezogenen und Gesundheitsdaten von {our} Kind im {data_system_name} einverstanden.",
-            we = we,
-            verb = verb,
-            our = our,
-            data_system_name = data_system_name
-        ),
-        0.0,
-        1.5,
-    );
+    // The release towards the persons named in the form, the transfer by
+    // e-mail or messenger and the storage in the data system are boxes of
+    // the consent list above (2026-10-12).
 
     // ---- Revocation + retention ----
     admin_block(
@@ -34841,6 +35085,7 @@ mod tests {
             guardian2_label: Some("Hut".to_string()),
             guardian2_birth_date: NaiveDate::from_ymd_opt(1990, 4, 5),
             extra_release_recipients: None,
+            own_choice: None,
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 21, 12, 0, 0).unwrap(),
         };
@@ -34853,6 +35098,130 @@ mod tests {
         assert!(!text.contains("Vater"));
         assert!(!text.contains("Hut"));
         assert!(!text.to_ascii_lowercase().contains("c/o"));
+        // Without a choice of the parents every box is empty, ticked on paper.
+        assert!(
+            text.contains("sind damit einverstanden (bitte ankreuzen)"),
+            "{text}"
+        );
+        assert!(!text.contains("[x]"), "{text}");
+        assert!(text.contains("[ ] dass alle behandelnden"), "{text}");
+        assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
+        assert!(text.contains("Personensorgeberechtigte/r 2"), "{text}");
+        assert!(!text.contains("GMED-Kundenkabinett"), "{text}");
+    }
+
+    /// QA 2026-10-12, A2-06: the minor's form ticks what the parent chose in
+    /// the cabinet and names that parent; the child stays the data subject.
+    #[test]
+    fn child_consent_prints_the_parents_own_choice_and_names_who_chose() {
+        let choice = crate::consent_choices::OwnConsentChoice {
+            id: Uuid::nil(),
+            choices: crate::consent_choices::ConsentChoices {
+                agency_processing: true,
+                doctors_to_agency: true,
+                data_system: true,
+                channel_email: true,
+                ..Default::default()
+            },
+            chosen_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 6, 0).unwrap(),
+            source: "lead_portal".into(),
+            access_kind: Some("guardian".into()),
+            chosen_by: Some(Uuid::nil()),
+            chosen_by_name: Some("Maria MusterAR".into()),
+            chosen_by_role: Some("Personensorgeberechtigte/r".into()),
+            chosen_by_emails: vec!["maria.parent@example.com".into()],
+            lead_id: None,
+        };
+        let context = GeneratedConsentContext {
+            sole_guardian: true,
+            auto_name: "Einverständniserklärung".to_string(),
+            document_reference: "EW-20261012-UNITTEST0003".to_string(),
+            child_name: Some("Mia MusterAR".to_string()),
+            child_birth_date: NaiveDate::from_ymd_opt(2015, 5, 10),
+            child_address: None,
+            guardian_name: Some("Maria MusterAR".to_string()),
+            guardian_label: None,
+            guardian_birth_date: NaiveDate::from_ymd_opt(1985, 2, 1),
+            guardian_address: None,
+            guardian2_name: None,
+            guardian2_label: None,
+            guardian2_birth_date: None,
+            extra_release_recipients: Some("Oma Beispiel, geb. am 01.01.1950".to_string()),
+            own_choice: Some(choice),
+            agency: legal_test_agency(),
+            generated_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 10, 0).unwrap(),
+        };
+        let bytes = build_consent_pdf(&context).unwrap();
+        assert_signature_frames_detected(&bytes);
+        let text = assert_legal_pdf_chrome(&bytes, &context.document_reference);
+        assert!(
+            text.contains("Maria MusterAR, geb. am 01.02.1985"),
+            "{text}"
+        );
+        assert!(
+            text.contains("von meinem Kind: Mia MusterAR, geb. am 10.05.2015"),
+            "{text}"
+        );
+        assert!(
+            text.contains("bin damit einverstanden (angekreuzt ist die im GMED-Kundenkabinett getroffene Auswahl)"),
+            "{text}"
+        );
+        assert!(text.contains("[x] dass alle behandelnden Ärzte"), "{text}");
+        assert!(
+            text.contains("[ ] dass personenbezogene und medizinische Daten von meinem Kind an"),
+            "{text}"
+        );
+        assert!(text.contains("Oma Beispiel"), "{text}");
+        assert!(text.contains("[x] E-mail"), "{text}");
+        assert!(text.contains("[ ] WhatsApp-Messenger"), "{text}");
+        assert!(
+            text.contains("Die Auswahl hat Maria MusterAR (Personensorgeberechtigte/r) am 12.10.2026 um 11:06 Uhr"),
+            "{text}"
+        );
+        // Never the adult first-person wording in the child's name.
+        assert!(!text.contains("Ich, Mia MusterAR"), "{text}");
+        assert!(!text.contains("meine eigene Auswahl"), "{text}");
+        assert!(!text.contains("unterzeichnende Person"), "{text}");
+        assert!(
+            text.contains("Personensorgeberechtigte/r / ges. Vertreter"),
+            "{text}"
+        );
+        // The Schweigepflichtsentbindung stays part of the form (owner 2026-10-12).
+        assert!(text.contains("entbinde alle nach § 203 StGB"), "{text}");
+    }
+
+    /// QA 2026-10-12: an empty address, phone or e-mail gets a blank that
+    /// stays on the line instead of wrapping a lone «__».
+    #[test]
+    fn empty_consent_fields_get_blanks_that_fit_the_line() {
+        use super::{
+            PDF_CONTENT_WIDTH_MM, consent_contact_line, consent_labelled_value, wrap_text_to_width,
+            wrap_text_to_width_precise,
+        };
+        let width = PDF_CONTENT_WIDTH_MM;
+        for line in [
+            consent_labelled_value("Adresse: ", None, 11.0, width),
+            consent_labelled_value("Adresse(n): ", Some("  "), 11.0, width),
+            consent_contact_line(None, None, 11.0, width),
+            consent_contact_line(Some("+49 30 1234567"), None, 11.0, width),
+            consent_contact_line(None, Some("anna@example.com"), 11.0, width),
+        ] {
+            assert!(line.contains("________"), "{line}");
+            assert_eq!(wrap_text_to_width(&line, 11.0, width).len(), 1, "{line}");
+            assert_eq!(
+                wrap_text_to_width_precise(&line, 11.0, width).len(),
+                1,
+                "{line}"
+            );
+        }
+        assert_eq!(
+            consent_labelled_value("Adresse: ", Some(" Musterweg 1 "), 11.0, width),
+            "Adresse: Musterweg 1"
+        );
+        assert_eq!(
+            consent_contact_line(Some("+49 1"), Some("a@example.com"), 11.0, width),
+            "Telefonnummer: +49 1.   E-mail: a@example.com"
+        );
     }
 
     #[test]
@@ -35034,6 +35403,12 @@ mod tests {
             chosen_at: chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 12, 8, 5, 0)
                 .unwrap(),
             source: "lead_portal".into(),
+            access_kind: Some("self".into()),
+            chosen_by: Some(Uuid::nil()),
+            chosen_by_name: Some("Erika Beispiel".into()),
+            chosen_by_role: None,
+            chosen_by_emails: vec!["erika@example.test".into()],
+            lead_id: None,
         };
         let chosen = build_adult_privacy_consents_pdf(
             &party,
@@ -35061,7 +35436,37 @@ mod tests {
         assert!(chosen_text.contains("angekreuzt ist meine eigene Auswahl"));
         assert!(chosen_text.contains("12.10.2026 um 10:05 Uhr"));
         assert!(chosen_text.contains("GMED-Kundenkabinett"));
+        // The note names who chose (QA 2026-10-12).
+        assert!(
+            chosen_text.contains("Die Auswahl hat Erika Beispiel am 12.10.2026 um 10:05 Uhr"),
+            "{chosen_text}"
+        );
         assert!(!chosen_text.contains('?'));
+        // A representative's choice is never "meine eigene Auswahl".
+        let represented = crate::consent_choices::OwnConsentChoice {
+            access_kind: Some("guardian".into()),
+            chosen_by_name: Some("Viktor Zahler".into()),
+            chosen_by_role: Some("bevollmächtigte Person".into()),
+            ..own.clone()
+        };
+        let represented_pdf = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261012-UNITTEST0004",
+            Some(&represented),
+        )
+        .unwrap();
+        let represented_text =
+            assert_legal_pdf_chrome(&represented_pdf, "EW-20261012-UNITTEST0004");
+        assert!(
+            !represented_text.contains("meine eigene Auswahl"),
+            "{represented_text}"
+        );
+        assert!(
+            represented_text.contains("Die Auswahl hat Viktor Zahler (bevollmächtigte Person) am"),
+            "{represented_text}"
+        );
 
         let privacy_information =
             build_adult_privacy_information_pdf(&agency, "DS-20260716-UNITTEST0001").unwrap();

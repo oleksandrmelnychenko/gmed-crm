@@ -110,11 +110,18 @@ describe("relation organisation box (sanctions screening, 2026-10-12)", () => {
     });
   });
 
-  it("suggests the box for a name with a legal form only", () => {
+  it("suggests the box for a name with a legal form or of an institution", () => {
     for (const name of ["Beispiel GmbH", "Polartek Shipping LLC", "ООО Полартек", "Beispiel GmbH & Co. KG", "Muster AG"]) {
       expect(relationNameSuggestsOrganisation(name), name).toBe(true);
     }
-    for (const name of ["Viktor Zahler", "Polartek", "Anna Agnes Muster", "Sa Ko", ""]) {
+    // Banks, savings banks, insurers and foundations without a legal form (QA 2026-10-12).
+    for (const name of [
+      "Testgrad Commerce Bank", "Banque Beispiel", "Kreissparkasse Beispielstadt", "Beispiel Commerzbank",
+      "Сбербанк", "Альфа-Банк", "Beispiel Versicherung", "Stiftung Beispielhilfe",
+    ]) {
+      expect(relationNameSuggestsOrganisation(name), name).toBe(true);
+    }
+    for (const name of ["Viktor Zahler", "Polartek", "Anna Agnes Muster", "Sa Ko", "Anna Bankowski", "Ben Fondel", ""]) {
       expect(relationNameSuggestsOrganisation(name), name).toBe(false);
     }
   });

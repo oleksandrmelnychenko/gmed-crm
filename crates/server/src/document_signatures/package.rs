@@ -18,11 +18,18 @@ const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
 /// The consent form «Einverständniserklärung zur Datenübermittlung»: it goes
 /// into an electronic package only with the person's own choice of its
 /// options (2026-10-12, `crate::consent_choices`); without one it is signed
-/// on paper, so a package may go without it.
+/// on paper, so a package may go without it. The same holds for the minor's
+/// forms ([`MINOR_CONSENTS`], the parent's or guardian's choice, QA
+/// 2026-10-12 A2-06).
 const PRIVACY_CONSENTS: &str = crate::consent_choices::TEMPLATE;
 
 /// Preset slots a package may leave empty.
-const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[LEAD_SELF_DISCLOSURE, PRIVACY_CONSENTS];
+const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[
+    LEAD_SELF_DISCLOSURE,
+    PRIVACY_CONSENTS,
+    "consent_data_release_child",
+    "consent_data_release_single",
+];
 
 /// Whether a package may go without a document for this slot.
 fn optional_slot(slot: &[&str]) -> bool {
@@ -1212,11 +1219,14 @@ mod tests {
             signing_slots(Some("framework_contract"), true, false).len(),
             4
         );
-        // The patient form exists only after the lead sent the request: its
-        // slot may stay empty, every other one may not.
+        // The patient form exists only after the lead sent the request, and
+        // a consent form without the own choice of the cabinet is signed on
+        // paper (2026-10-12, also the minor's): those slots may stay empty,
+        // every other one may not.
         assert!(optional_slot(&["lead_self_disclosure"]));
+        assert!(optional_slot(&["privacy_consents"]));
+        assert!(optional_slot(MINOR_CONSENTS));
         assert!(!optional_slot(&["single_order"]));
-        assert!(!optional_slot(MINOR_CONSENTS));
         assert!(!optional_slot(&[]));
         let id = Uuid::new_v4();
         assert_eq!(

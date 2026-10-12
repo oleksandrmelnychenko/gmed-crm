@@ -3118,6 +3118,71 @@ async fn the_payer_dialogs_organisation_box_screens_a_payer_contact() {
     assert_eq!(audited, 1);
 }
 
+/// QA 2026-10-12: staff correct an order payer whose data caused an open
+/// hit. The corrected payer is saved and screened, but the hold stays until
+/// the CEO decides the old hit — renaming the payer lifts nothing.
+#[tokio::test]
+async fn a_payer_that_caused_an_open_hit_can_be_corrected_but_the_hold_stays() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let lead = insert_lead(&app, "Nora", "Beispiel", Some("1990-03-03"), &[], json!([])).await;
+    let (code, order) = request(
+        &app,
+        "POST",
+        "/orders",
+        &app.pm(),
+        Some(json!({ "source_lead_id": lead })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED, "{order}");
+    let order_id = Uuid::parse_str(order["id"].as_str().unwrap()).unwrap();
+    let payer = |name: &str| {
+        json!({
+            "payer_contact_name": name,
+            "payer_address_country": "CY",
+            "payer_role": "cost_bearer"
+        })
+    };
+    set_order_payer(&app, order_id, payer("Testomir Korneev")).await;
+    assert_eq!(lead_status(&app, lead).await["screening"], "review_pending");
+    let hits = lead_hits(&app, lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "payer_contact");
+    let old_hit = hits[0]["id"].as_str().unwrap().to_string();
+
+    // The mistyped payer is corrected while the hit is open.
+    let saved = set_order_payer(&app, order_id, payer("Ben Beispiel")).await;
+    assert_eq!(saved["payer_contact_name"], "Ben Beispiel", "{saved}");
+    assert!(
+        lead_is_queued(&app, lead).await,
+        "the corrected payer is screened again"
+    );
+    // The old hit stays open and keeps holding the lead and its order.
+    assert_eq!(lead_status(&app, lead).await["screening"], "review_pending");
+    let hits = lead_hits(&app, lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["id"], old_hit.as_str());
+    let (code, body) = qualify(&app, lead).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+
+    // The CEO's decision on the old hit lifts the hold.
+    decide(
+        &app,
+        &old_hit,
+        "false_positive",
+        "Payer corrected: a different person was meant",
+    )
+    .await;
+    let (_, body) = qualify(&app, lead).await;
+    assert!(not_a_gate_block(&body), "{body}");
+}
+
 /// Another patient record named as payer of an order or invoice
 /// (`payer_patient_id`, 2026-10-12) is screened as its own patient; its own
 /// open or confirmed hit and its countries hold the patient it pays for like

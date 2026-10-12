@@ -511,7 +511,8 @@ export const de = {
   leads_title: "Leads",
   leads_subtitle: "Leads und Anfragen verwalten",
   leads_new: "Neuer Lead",
-  leads_source: "Quelle",
+  // The intake channel (manual, website, …), not the referral source (QA 2026-10-12).
+  leads_source: "Kanal",
   leads_needs: "Medizinischer Bedarf",
   leads_qualify: "Qualifizieren",
   leads_convert: "Konvertieren",

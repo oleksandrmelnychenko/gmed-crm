@@ -609,6 +609,59 @@ async fn leads_list_supports_search_and_status_filters() {
     assert_eq!(items[0]["qualification_status"], "archived");
 }
 
+/// QA 2026-10-12, A2-05: the lead list finds a lead by its full name as the
+/// row shows it ("Mia MusterAR"), in any order and case, also with an empty
+/// middle name between the two.
+#[tokio::test]
+async fn leads_list_search_matches_the_full_name_word_by_word() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("leadname").replace('-', "");
+    let last_name = format!("Muster{tag}");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (
+                first_name, middle_name, last_name, source, country, qualification_status, created_by
+           ) VALUES ('Mia', '', $1, 'manual', 'DE', 'new', $2)
+           RETURNING id"#,
+    )
+    .bind(&last_name)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let found = |query: String| {
+        let (app, bearer) = (&app, &bearer);
+        async move {
+            let (status, body) = json_request(
+                app,
+                "GET",
+                &format!("/api/v1/leads?search={}", query.replace(' ', "%20")),
+                bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body.as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["id"] == lead_id.to_string())
+        }
+    };
+    for query in [
+        format!("Mia {last_name}"),
+        format!("{last_name} Mia"),
+        format!("  mia   {}  ", last_name.to_lowercase()),
+        last_name.clone(),
+        "Mia".to_string(),
+    ] {
+        assert!(found(query.clone()).await, "{query}");
+    }
+    for query in [format!("Mia {last_name}x"), format!("Ben {last_name}")] {
+        assert!(!found(query.clone()).await, "{query}");
+    }
+}
+
 #[tokio::test]
 async fn orders_list_supports_search_phase_and_provider_doctor_filters() {
     let Some((app, pool, admin_id, bearer)) = test_context().await else {
@@ -968,6 +1021,22 @@ async fn patients_list_search_matches_contact_full_name_and_insurance() {
         )
         .await,
         "full name (first + last) should match via concatenation"
+    );
+    // Word by word, in any order (QA 2026-10-12, A2-05).
+    assert!(
+        patient_search_matches(
+            &app,
+            &bearer,
+            &format!("Last {tag} First {tag}"),
+            patient_id
+        )
+        .await,
+        "full name in reverse order should match word by word"
+    );
+    // No digits: the phone digit matching must not match the tag's digits.
+    assert!(
+        !patient_search_matches(&app, &bearer, "First zzznomatchforthispatient", patient_id).await,
+        "every word must occur"
     );
     // Existing per-column coverage must still work.
     assert!(

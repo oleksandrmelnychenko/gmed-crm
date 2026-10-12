@@ -197,6 +197,36 @@ pub(super) async fn create_request(
     policy
         .validate(&signers)
         .map_err(|code| error(StatusCode::UNPROCESSABLE_ENTITY, code))?;
+    // The consent form declares the choice of the person who made it in the
+    // cabinet (for a minor the parent or guardian, QA 2026-10-12 A2-06): that
+    // person signs it.
+    let client_emails: Vec<&str> = signers
+        .iter()
+        .filter(|signer| signer.role == "client")
+        .map(|signer| signer.email.as_str())
+        .collect();
+    let consent_bindings: Vec<(Uuid, Option<String>, Option<Value>)> = rows
+        .iter()
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("id"),
+                template_of(row),
+                row.get::<Option<Value>, _>("generated_bindings"),
+            )
+        })
+        .collect();
+    if let Some(id) = crate::consent_choices::chooser_missing_from_signers(
+        consent_bindings
+            .iter()
+            .map(|(id, template, bindings)| (*id, template.as_deref(), bindings.as_ref())),
+        &client_emails,
+    ) {
+        return Err(document_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            crate::consent_choices::CHOOSER_MUST_SIGN,
+            id,
+        ));
+    }
     // GMED countersigns a lead's contract or order only once the payer
     // declaration is complete (third party: cost assumption signed first).
     crate::routes::lead_payer::check_signature_request(
