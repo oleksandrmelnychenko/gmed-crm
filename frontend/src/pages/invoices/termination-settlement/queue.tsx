@@ -78,7 +78,7 @@ export function TerminationSettlementQueue({
       id: "patient",
       label: tx("Пациент", "Patient"),
       accessor: (row) => `${row.patient_name} ${row.patient_pid ?? ""}`,
-      width: 210,
+      width: 190,
       render: (row) => (
         <StaffLink className="hover:text-primary hover:underline" to={`/patients/${encodeURIComponent(row.patient_id)}?tab=billing`}>
           {row.patient_name || row.patient_pid || "—"}
@@ -94,6 +94,39 @@ export function TerminationSettlementQueue({
         <StaffLink className="font-mono text-xs hover:text-primary hover:underline" to={`/orders/${encodeURIComponent(row.order_id)}`}>
           {row.order_number}
         </StaffLink>
+      ),
+    },
+    {
+      id: "balance",
+      label: tx("Итог", "Saldo"),
+      accessor: (row) => toAmount(row.current.balance_gross),
+      width: 200,
+      render: (row) => (
+        <span className={cn("text-sm font-semibold", settlementBalanceClass(row.current.balance_gross))}>
+          {settlementBalanceLabel(row.current.balance_gross, row.currency, lang)}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      label: tx("Статус", "Status"),
+      accessor: (row) => row.status,
+      width: 110,
+      render: (row) => (
+        <StatusBadge tone={row.status === "open" ? "warning" : "success"}>
+          {settlementStatusLabel(row.status, lang)}
+        </StatusBadge>
+      ),
+    },
+    {
+      id: "actions",
+      label: tx("Действия", "Aktionen"),
+      accessor: () => "",
+      // Both buttons side by side ("Создать финальный счёт · 1.000,00 €" and
+      // "Закрыть расчёт"); a narrower column wraps them past the compact row.
+      width: 430,
+      render: (row) => (
+        <SettlementActions settlement={row} lang={lang} onChanged={reload} onInvoiceCreated={onOpenInvoice} size="xs" />
       ),
     },
     {
@@ -118,17 +151,6 @@ export function TerminationSettlementQueue({
       render: (row) => <span className="block text-right font-mono tabular-nums">{money(row, row.current.paid_gross)}</span>,
     },
     {
-      id: "balance",
-      label: tx("Итог", "Saldo"),
-      accessor: (row) => toAmount(row.current.balance_gross),
-      width: 220,
-      render: (row) => (
-        <span className={cn("text-sm font-semibold", settlementBalanceClass(row.current.balance_gross))}>
-          {settlementBalanceLabel(row.current.balance_gross, row.currency, lang)}
-        </span>
-      ),
-    },
-    {
       id: "uninvoiced",
       label: tx("Не выставлено", "Nicht berechnet"),
       accessor: (row) => toAmount(row.current.uninvoiced_gross),
@@ -141,26 +163,6 @@ export function TerminationSettlementQueue({
       accessor: (row) => row.final_invoice?.invoice_number ?? "",
       width: 230,
       render: (row) => <FinalInvoiceLink invoice={row.final_invoice} currency={row.currency} lang={lang} />,
-    },
-    {
-      id: "status",
-      label: tx("Статус", "Status"),
-      accessor: (row) => row.status,
-      width: 110,
-      render: (row) => (
-        <StatusBadge tone={row.status === "open" ? "warning" : "success"}>
-          {settlementStatusLabel(row.status, lang)}
-        </StatusBadge>
-      ),
-    },
-    {
-      id: "actions",
-      label: tx("Действия", "Aktionen"),
-      accessor: () => "",
-      width: 360,
-      render: (row) => (
-        <SettlementActions settlement={row} lang={lang} onChanged={reload} onInvoiceCreated={onOpenInvoice} size="xs" />
-      ),
     },
   ];
 

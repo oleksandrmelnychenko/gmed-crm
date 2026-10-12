@@ -227,6 +227,9 @@ import type {
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const INVOICE_DEFAULT_FROZEN_COLUMNS = ["invoice_number", "patient_name"];
+// The patient id and the quote repeat what the patient and order columns say;
+// hidden by default so the amounts come into view without sideways scrolling.
+const INVOICE_DEFAULT_HIDDEN_COLUMNS = ["patient_pid", "quote_number"];
 const INVOICE_MAX_FROZEN_COLUMNS = 3;
 const ACCOUNTING_DEFAULT_FROZEN_COLUMNS = ["entry_date", "description"];
 const ACCOUNTING_MAX_FROZEN_COLUMNS = 3;
@@ -1220,7 +1223,7 @@ function useStaffInvoicesPageContent() {
         filterType: "date",
         group: "audit",
         sortable: true,
-        width: 170,
+        width: 150,
         render: (row) => formatDateTime(invoiceIssuedAt(row), locale, t.common_not_set),
       },
       {
@@ -2414,13 +2417,15 @@ function useStaffInvoicesPageContent() {
             groupLabels={invoiceColumnGroups}
             loading={listBusy}
             maxFrozenColumns={INVOICE_MAX_FROZEN_COLUMNS}
+            defaultHiddenColumns={INVOICE_DEFAULT_HIDDEN_COLUMNS}
+            toolbarClassName="sm:flex-wrap sm:overflow-x-visible"
             toolbarStart={
               <>
             <span className="flex h-8 shrink-0 items-center self-end text-[13px] font-semibold tracking-tight text-foreground">
               {titleWithDot(lang === "de" ? "Ausgangsrechnungen" : "Исходящие счета")}
             </span>
             <span aria-hidden className="mx-1 mb-2 h-4 w-px shrink-0 self-end bg-border" />
-            <ToolbarField label={t.common_search} className="min-w-[220px] flex-1 sm:max-w-sm">
+            <ToolbarField label={t.common_search} className="w-full min-w-[200px] flex-1 sm:w-auto sm:max-w-xs">
             <div className="relative">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -2465,7 +2470,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ patient: patientId || null, order: null, quote: null });
               }}
-              className={cn(selectClassName, "h-8 rounded-md w-[210px] bg-field text-xs")}
+              className={cn(selectClassName, "h-8 rounded-md w-[200px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_patient}</option>
               {patients.map((patient) => (
@@ -2495,7 +2500,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ order: orderId || null, quote: null });
               }}
-              className={cn(selectClassName, "h-8 rounded-md w-[210px] bg-field text-xs")}
+              className={cn(selectClassName, "h-8 rounded-md w-[200px] bg-field text-xs")}
             >
               <option value="__all__">{text.allOrders}</option>
               {filteredOrders.map((order) => (
@@ -2515,7 +2520,7 @@ function useStaffInvoicesPageContent() {
                 setInvoicePage(1);
                 syncQuery({ quote: quoteId || null });
               }}
-              className={cn(selectClassName, "h-8 rounded-md w-[190px] bg-field text-xs")}
+              className={cn(selectClassName, "h-8 rounded-md w-[170px] bg-field text-xs")}
             >
               <option value="__all__">{text.allQuotes}</option>
               {filteredQuotes.map((quote) => (
@@ -2539,7 +2544,7 @@ function useStaffInvoicesPageContent() {
                 }));
                 setInvoicePage(1);
               }}
-              className={cn(selectClassName, "h-8 rounded-md w-[160px] bg-field text-xs")}
+              className={cn(selectClassName, "h-8 rounded-md w-[140px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_status}</option>
               {INVOICE_FILTER_STATUSES.map((status) => (
@@ -2563,7 +2568,7 @@ function useStaffInvoicesPageContent() {
                 }));
                 setInvoicePage(1);
               }}
-              className={cn(selectClassName, "h-8 rounded-md w-[150px] bg-field text-xs")}
+              className={cn(selectClassName, "h-8 rounded-md w-[140px] bg-field text-xs")}
             >
               <option value="__all__">{t.invoices_type}</option>
               {INVOICE_TYPES.map((invoiceType) => (
@@ -2837,7 +2842,12 @@ function useStaffInvoicesPageContent() {
           syncQuery({ invoice: null }, { replace: false });
         }
       }}>
-        <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-3xl">
+        <SheetContent
+          side="right"
+          // Wider than the 50vw sheet default: the detail holds the line
+          // items, dunning and document tables that otherwise scroll sideways.
+          className="w-full border-l border-border p-0 data-[side=right]:sm:max-w-[min(960px,70vw)]"
+        >
           <AdminSheetScaffold
             title={detail ? `${invoiceDisplayNumber(detail, t.revenue_invoices_draft_number)} / ${detail.patient_name}` : t.invoices_title}
             description={text.detailSheetDescription}
@@ -4474,7 +4484,9 @@ function useStaffInvoicesPageContent() {
                           cellClassName: "h-full py-2",
                           render: (row) => (
                             <span className="whitespace-nowrap font-mono text-xs leading-4 tabular-nums text-foreground">
-                              {row.line.vat_rate}%
+                              {row.line.vat_rate === null || row.line.vat_rate === undefined || String(row.line.vat_rate).trim() === ""
+                                ? "—"
+                                : `${row.line.vat_rate}%`}
                             </span>
                           ),
                         },

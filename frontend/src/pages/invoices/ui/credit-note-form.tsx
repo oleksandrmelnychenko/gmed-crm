@@ -90,7 +90,14 @@ export function CreditNoteForm({
         vatRate: current.selection.vatRate || (rates[0]?.rate ?? ""),
       },
     }));
-  const showError = preview.error && preview.error !== "nothing_selected";
+  // An empty amount field is not an error yet: the hint appears once the
+  // user has typed something.
+  const amountUntouched =
+    selection.mode === "amount" && selection.amountGross.trim() === "";
+  const showError =
+    preview.error &&
+    preview.error !== "nothing_selected" &&
+    !(preview.error === "invalid_amount" && amountUntouched);
   const errorText = showError
     ? t[ERROR_KEYS[preview.error!]].replace("{amount}", money(limit ?? 0))
     : "";
