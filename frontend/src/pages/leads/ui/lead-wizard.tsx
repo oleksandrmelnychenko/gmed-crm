@@ -123,6 +123,7 @@ import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import { LeadCustodySelect } from "./lead-custody-select";
 import { LeadGwgSheetActions, gwgSheetBusyKey } from "./lead-gwg-sheet-actions";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
+import { createPayerAutosaveRegistry } from "../model/lead-payer-autosave";
 import { LANGUAGE_OPTIONS, englishLanguageName, languageLabel } from "@/components/ui/language-multi-select";
 import {
   Dialog,
@@ -3057,11 +3058,18 @@ export function LeadWizard({
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
   const leadId = requestedLeadId ?? createdLeadId;
+  const activePayerLeadIdRef = useRef(leadId);
+  activePayerLeadIdRef.current = leadId;
   const [lead, setLead] = useState<LeadDetail | null>(null);
   // "Кто платит": the payer declaration feeds the AML country risk, the
   // documents step and the signing order of the commercial step. It follows
   // every lead refresh (order signatures, documents, readiness).
   const payer = useLeadPayerDeclaration(open ? leadId : null);
+  const [payerAutosaveRegistry] = useState(createPayerAutosaveRegistry);
+  const registerPayerAutosave = useCallback(
+    (flush: () => Promise<boolean>) => payerAutosaveRegistry.register(leadId, flush),
+    [leadId, payerAutosaveRegistry],
+  );
   // The third-party payer's own link and answers (phase 3a); sent, revoked and estimated with leads.edit.
   const payerLink = useLeadPayerLink(open ? leadId : null);
   const canEditPayerLink = useCan("leads.edit");
@@ -5436,9 +5444,25 @@ export function LeadWizard({
     return false;
   };
 
+  async function flushPayerAutosave(): Promise<boolean> {
+    try {
+      const saved = await payerAutosaveRegistry.flush(leadId);
+      if (activePayerLeadIdRef.current !== leadId) return false;
+      if (saved) return true;
+      if (hydrated.current === leadId) setError(tx(
+        "Данные плательщика не сохранены. Проверьте блок «Кто платит» и повторите сохранение.",
+        "Die Zahlerangaben sind nicht gespeichert. Prüfen Sie „Wer zahlt“ und versuchen Sie das Speichern erneut.",
+      ));
+    } catch (nextError) {
+      if (hydrated.current === leadId) setError(errorText(nextError, tx));
+    }
+    return false;
+  }
+
   async function save(target = step, trackBusy = true, draftOverride?: Draft): Promise<boolean> {
     const source = draftOverride ?? draft;
     if (!source || (!leadId && !createMode)) return false;
+    if (!(await flushPayerAutosave())) return false;
     if (trackBusy) setBusy("save");
     setError("");
     setValidationContext(null);
@@ -5465,6 +5489,7 @@ export function LeadWizard({
   /** `draftOverride`: the draft `finishIntake` saved just before, newer than this render's. */
   async function finishOrder(targetStep: StepId, draftOverride?: Draft): Promise<boolean> {
     if (!leadId || !draft) return false;
+    if (!(await flushPayerAutosave())) return false;
     const issues = orderIssues;
     if (issues.length > 0) {
       setError("");
@@ -5488,6 +5513,7 @@ export function LeadWizard({
   /** Completes the intake and saves; the draft it saved, or null when it stopped. */
   async function finishIntake(targetStep: StepId): Promise<Draft | null> {
     if (!leadId || !draft) return null;
+    if (!(await flushPayerAutosave())) return null;
     setError("");
     if (
       step1Portal.mode === "patient"
@@ -6453,6 +6479,7 @@ ${serviceCommentLines.join("\n")}`
 
   async function archiveLead() {
     if (!leadId) return;
+    if (!(await flushPayerAutosave())) return;
     setBusy("archive");
     setError("");
     try {
@@ -6479,6 +6506,7 @@ ${serviceCommentLines.join("\n")}`
   /** «Не подходит» with the chosen reason; the server keeps it as the lead's failure reason. */
   async function markNotQualified() {
     if (!leadId || !notQualifiedReason) return;
+    if (!(await flushPayerAutosave())) return;
     const reason = leadFailureReasonValue(notQualifiedReason);
     if (!reason) {
       setNotQualifiedError(leadFailureReasonError(notQualifiedReason, tx) ?? "");
@@ -6515,6 +6543,7 @@ ${serviceCommentLines.join("\n")}`
   async function prepareReleaseAndNavigate() {
     try {
       if (!leadId || !draft) return;
+      if (!(await flushPayerAutosave())) return;
       setBusy("intake");
       if (!(await save("release", false))) return;
       await refreshLeadState();
@@ -6525,26 +6554,23 @@ ${serviceCommentLines.join("\n")}`
     }
   }
 
-  function navigateToStep(target: StepId) {
+  async function navigateToStep(target: StepId) {
     if (target === step || loading || isBusy || stepNavigationInFlightRef.current) return;
-    setError("");
-    setValidationContext(null);
-    setOrderValidationAttempted(false);
-    setMedicalValidationAttempted(false);
-
-    if (!leadId && createMode) {
-      stepNavigationInFlightRef.current = true;
-      void createLeadAndNavigate(target).catch(showWizardError);
-      return;
+    stepNavigationInFlightRef.current = true;
+    try {
+      if (!(await flushPayerAutosave())) return;
+      setError("");
+      setValidationContext(null);
+      setOrderValidationAttempted(false);
+      setMedicalValidationAttempted(false);
+      if (!leadId && createMode) await createLeadAndNavigate(target);
+      else if (target === "release") await prepareReleaseAndNavigate();
+      else setStep(target);
+    } catch (nextError) {
+      showWizardError(nextError);
+    } finally {
+      stepNavigationInFlightRef.current = false;
     }
-
-    if (target === "release") {
-      stepNavigationInFlightRef.current = true;
-      void prepareReleaseAndNavigate().catch(showWizardError);
-      return;
-    }
-
-    setStep(target);
   }
 
   function updateLine(id: string, patchValue: Partial<ServiceLine>) {
@@ -6918,6 +6944,17 @@ ${serviceCommentLines.join("\n")}`
         onOpenChange={(nextOpen, details) => {
           if (!nextOpen && saveInProgress) {
             details.cancel();
+            return;
+          }
+          if (!nextOpen) {
+            details.cancel();
+            const targetLeadId = leadId;
+            void flushPayerAutosave().then((saved) => {
+              if (saved && activePayerLeadIdRef.current === targetLeadId
+                && (hydrated.current === targetLeadId || (!targetLeadId && hydrated.current === "__new__"))) {
+                onOpenChange(false);
+              }
+            });
             return;
           }
           onOpenChange(nextOpen);
@@ -8149,6 +8186,7 @@ ${serviceCommentLines.join("\n")}`
                   payerLinkCanEdit={canEditPayerLink}
                   leadLanguage={draft.language}
                   onPayerLinkSent={() => void payer.reload()}
+                  registerAutosave={registerPayerAutosave}
                   errorText={(nextError) => errorText(nextError, tx)}
                   onSave={async (form) => {
                     const targetLeadId = leadId;

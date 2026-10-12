@@ -107,6 +107,17 @@ export function createPayerAutosave(
     setBaseline(form: PayerDeclarationForm) {
       if (!closed && !pending && !running) baseline = signatureOf(form);
     },
+    async flush(): Promise<boolean> {
+      clearTimer();
+      ready = true;
+      // Await before a parent disables fields or unmounts this section.
+      // A failed draft needs the visible retry/edit, never an automatic retry.
+      while (running || currentPending()) {
+        if (closed || !enabled || failed || (!running && !currentPending()?.form.kind)) return false;
+        await run();
+      }
+      return !failed;
+    },
     retry() {
       if (closed || !enabled) return;
       failed = false;
@@ -132,3 +143,24 @@ export function createPayerAutosave(
 }
 
 export type PayerAutosave = ReturnType<typeof createPayerAutosave>;
+
+/** A registration belongs to one lead; stale cleanup cannot remove a newer queue. */
+export function createPayerAutosaveRegistry() {
+  let current: { leadId: string | null | undefined; flush: () => Promise<boolean> } | null = null;
+  return {
+    register(leadId: string | null | undefined, flush: () => Promise<boolean>) {
+      const registration = { leadId, flush };
+      current = registration;
+      return () => {
+        if (current === registration) current = null;
+      };
+    },
+    async flush(leadId: string | null | undefined) {
+      const registration = current;
+      if (!registration) return true;
+      if (registration.leadId !== leadId) return false;
+      const saved = await registration.flush();
+      return saved && current === registration;
+    },
+  };
+}

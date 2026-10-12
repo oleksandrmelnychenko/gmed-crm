@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EMPTY_PAYER_DECLARATION_FORM, payerDeclarationPayload, type PayerDeclarationForm } from "./lead-payer";
-import { createPayerAutosave, type PayerAutosaveState } from "./lead-payer-autosave";
+import { createPayerAutosave, createPayerAutosaveRegistry, type PayerAutosaveState } from "./lead-payer-autosave";
 
 const initial: PayerDeclarationForm = { ...EMPTY_PAYER_DECLARATION_FORM, kind: "self", actsOnOwnAccount: true };
 const draft = (patch: Partial<PayerDeclarationForm> = {}) => ({ ...initial, ...patch });
@@ -188,5 +188,87 @@ describe("payer declaration autosave", () => {
     await queue.dispose(false);
     await vi.advanceTimersByTimeAsync(1000);
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("awaits the parent's transition before disabling and unmounting, including edits during a slow save", async () => {
+    const first = deferred();
+    const last = deferred();
+    const save = vi.fn<(form: PayerDeclarationForm) => Promise<unknown>>()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => last.promise);
+    const setParentBusy = vi.fn();
+    const navigate = vi.fn();
+    const registry = createPayerAutosaveRegistry();
+    const queue = createPayerAutosave(initial, vi.fn());
+    const unregister = registry.register("lead-1", () => queue.flush());
+    queue.setEnabled(true);
+    queue.schedule(draft({ sourceOfFundsDescription: "Before the next step" }), save);
+    // The parent must flush BEFORE busy disables the child, not in its cleanup.
+    const transition = (async () => {
+      if (!(await registry.flush("lead-1"))) return;
+      setParentBusy();
+      queue.setEnabled(false);
+      await queue.dispose(false);
+      unregister();
+      navigate();
+    })();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledOnce();
+    expect(setParentBusy).not.toHaveBeenCalled();
+    queue.schedule(draft({ sourceOfFundsDescription: "Latest while waiting" }), save);
+    first.resolve();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1][0].sourceOfFundsDescription).toBe("Latest while waiting");
+    expect(navigate).not.toHaveBeenCalled();
+    expect(setParentBusy).not.toHaveBeenCalled();
+    last.resolve();
+    await transition;
+    expect(setParentBusy).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledOnce();
+  });
+
+  it("blocks a transition on failure or an unselected payer, without background retries", async () => {
+    const save = vi.fn<(form: PayerDeclarationForm) => Promise<unknown>>()
+      .mockRejectedValue(new Error("Synthetic save failure"));
+    const registry = createPayerAutosaveRegistry();
+    const queue = createPayerAutosave(EMPTY_PAYER_DECLARATION_FORM, vi.fn());
+    registry.register("lead-1", () => queue.flush());
+    queue.setEnabled(true);
+    queue.schedule({ ...EMPTY_PAYER_DECLARATION_FORM, actsOnOwnAccount: false }, save);
+    expect(await registry.flush("lead-1")).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    queue.schedule(draft({ actsOnOwnAccount: false }), save);
+    expect(await registry.flush("lead-1")).toBe(false);
+    expect(save).toHaveBeenCalledOnce();
+    expect(await registry.flush("lead-1")).toBe(false);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(save).toHaveBeenCalledOnce();
+    await queue.dispose(false);
+  });
+
+  it("keeps registrations separate by lead and ignores an older section's cleanup", async () => {
+    const registry = createPayerAutosaveRegistry();
+    const old = vi.fn(async () => true);
+    const next = vi.fn(async () => true);
+    const unregisterOld = registry.register("lead-old", old);
+    const unregisterNext = registry.register("lead-next", next);
+    unregisterOld();
+    expect(await registry.flush("lead-old")).toBe(false);
+    expect(old).not.toHaveBeenCalled();
+    expect(await registry.flush("lead-next")).toBe(true);
+    expect(next).toHaveBeenCalledOnce();
+    unregisterNext();
+    expect(await registry.flush("lead-next")).toBe(true);
+  });
+
+  it("rejects completion of an old transition after a different section took ownership", async () => {
+    const saving = deferred();
+    const registry = createPayerAutosaveRegistry();
+    registry.register("lead-old", async () => { await saving.promise; return true; });
+    const transition = registry.flush("lead-old");
+    registry.register("lead-next", async () => true);
+    saving.resolve();
+    expect(await transition).toBe(false);
   });
 });

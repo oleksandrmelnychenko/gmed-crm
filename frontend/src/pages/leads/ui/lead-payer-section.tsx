@@ -156,6 +156,7 @@ export function LeadPayerDeclarationSection({
   lang,
   tx,
   onSave,
+  registerAutosave,
   errorText,
   patientMarker,
   payerLink,
@@ -175,6 +176,8 @@ export function LeadPayerDeclarationSection({
   lang: string;
   tx: Tx;
   onSave: (form: PayerDeclarationForm) => Promise<unknown>;
+  /** Parent transitions await this queue before disabling or unmounting it. */
+  registerAutosave?: (flush: () => Promise<boolean>) => (() => void);
   errorText: (error: unknown) => string;
   /** Set while the payer is the one the patient stated in the lead cabinet. */
   patientMarker?: PatientFieldMarker | null;
@@ -233,10 +236,12 @@ export function LeadPayerDeclarationSection({
       setDirty(next.dirty);
     });
     autosaveRef.current = queue;
+    const unregister = registerAutosave?.(() => queue.flush());
     return () => {
       // Closing the wizard or moving to another step must not drop the last edit.
       queue.setEnabled(mayFlushRef.current);
       void queue.dispose(mayFlushRef.current);
+      unregister?.();
       if (autosaveRef.current === queue) autosaveRef.current = null;
     };
   }, [leadId]);
@@ -266,10 +271,11 @@ export function LeadPayerDeclarationSection({
     setMessage(null);
     setForm(next);
     // Capture this lead's save callback: a later lead must never receive this draft.
-    autosaveRef.current?.schedule(next, async (snapshot) => {
+    const queue = autosaveRef.current;
+    queue?.schedule(next, async (snapshot) => {
       await onSave(snapshot);
       // Another payer or e-mail revokes the link; a third party may make it sendable.
-      void payerLink?.reload();
+      if (activeLeadRef.current === leadId && autosaveRef.current === queue) void payerLink?.reload();
     });
   };
 
