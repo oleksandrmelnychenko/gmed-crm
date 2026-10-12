@@ -276,9 +276,12 @@ for (const lang of ["ru", "de"]) {
       await page.setViewportSize({width, height:1000});
       const {errors} = await prepare(page, lang);
       await page.goto(`/orders/${orderId}`);
+      // The compact header shares the name row with the action buttons; the
+      // name still gets a readable column and is never clipped.
       const heading = page.getByRole("heading", {name:"Toni Müller", exact:true});
       await expect(heading).toBeVisible();
-      expect((await heading.boundingBox())!.width).toBeGreaterThan(width === 390 ? 250 : 500);
+      expect((await heading.boundingBox())!.width).toBeGreaterThan(width === 390 ? 250 : 300);
+      expect(await heading.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
       const economics = orderFinance(page, lang);
       // Four headline tiles, then plan (4) and actual state (11: billed, received, open,
       // open invoices, advance available, patient credit, paid directly, and four margin

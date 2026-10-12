@@ -111,6 +111,8 @@ type OrderServiceGroupWizardProps = {
   onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
   onCreate: (input: CreateOrderServiceGroupInput) => void | Promise<void>;
   onCreated?: () => void;
+  /** Closes the embedding sheet without creating anything. */
+  onCancel?: () => void;
 };
 
 type WizardFormSetter = Dispatch<SetStateAction<WizardForm>>;
@@ -437,6 +439,7 @@ export function OrderServiceGroupWizard({
   onLoadProviderDoctors,
   onCreate,
   onCreated,
+  onCancel,
 }: OrderServiceGroupWizardProps) {
   const { t, lang } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -585,6 +588,7 @@ export function OrderServiceGroupWizard({
       onSubmit={(event) => void handleSubmit(event)}
       onLoadProviderDoctors={onLoadProviderDoctors}
       onUpdateParticipant={updateParticipant}
+      onCancel={onCancel}
     />
   );
 
@@ -639,6 +643,7 @@ function OrderServiceGroupWizardForm({
   onSubmit,
   onLoadProviderDoctors,
   onUpdateParticipant,
+  onCancel,
 }: {
   form: WizardForm;
   translations: Translations;
@@ -661,6 +666,7 @@ function OrderServiceGroupWizardForm({
   duplicateDoctorCount: number;
   setForm: WizardFormSetter;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onCancel?: () => void;
   onLoadProviderDoctors?: (providerId: string) => void | Promise<void>;
   onUpdateParticipant: UpdateWizardParticipant;
 }) {
@@ -705,7 +711,7 @@ function OrderServiceGroupWizardForm({
         selectedDoctorCount={selectedDoctorCount}
         translations={t}
       />
-      <WizardSubmitActions creating={creating} translations={t} />
+      <WizardSubmitActions creating={creating} translations={t} onCancel={onCancel} />
     </form>
   );
 }
@@ -1189,12 +1195,19 @@ function WizardPreviewSection({
 function WizardSubmitActions({
   creating,
   translations: t,
+  onCancel,
 }: {
   creating: boolean;
   translations: Translations;
+  onCancel?: () => void;
 }) {
   return (
-    <div className="flex justify-end">
+    <div className="flex justify-end gap-2">
+      {onCancel ? (
+        <Button type="button" variant="outline" className="rounded-lg" disabled={creating} onClick={onCancel}>
+          {t.common_cancel}
+        </Button>
+      ) : null}
       <Button type="submit" className="rounded-lg" disabled={creating}>
         {creating
           ? t.orders_service_group_creating

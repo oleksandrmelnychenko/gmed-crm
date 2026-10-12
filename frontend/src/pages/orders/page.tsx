@@ -40,6 +40,7 @@ import {
   RotateCcw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   UserRound,
   WalletCards,
   X,
@@ -1123,6 +1124,9 @@ function useOrdersPageContent() {
   );
   const phaseAdvancePending = useRef(false);
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
+  // The provider, category and doctor filters of the list sit in a second row
+  // that opens on demand (or whenever one of them is set).
+  const [moreFiltersOpen, setMoreFiltersOpen] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [workflowCreateError, setWorkflowCreateError] = useState<string | null>(null);
   const [debtManagementSheetOpen, setDebtManagementSheetOpen] = useState(false);
@@ -1638,7 +1642,11 @@ function useOrdersPageContent() {
     [workflowAssignments],
   );
   const debtOwnerOptions = useMemo(() => {
-    const items = [...activeWorkflowAssignments];
+    // Debt collection is owned by staff; the patient's portal account is
+    // part of the assignments but never an owner.
+    const items = activeWorkflowAssignments.filter(
+      (item) => item.user_role !== "patient",
+    );
     const currentOwnerId =
       orderDetail?.process_gates?.debt_management?.owner_user_id;
     const currentOwnerName =
@@ -1829,10 +1837,13 @@ function useOrdersPageContent() {
 
   useEffect(() => {
     if (workflowForm.ownerUserId) return;
+    // A new item goes to the current user, otherwise to the first staff
+    // member of the order; the patient's portal account is never the default.
     const preferredAssignee =
       activeWorkflowAssignments.find((item) => item.user_id === user?.id)
         ?.user_id ??
-      activeWorkflowAssignments[0]?.user_id ??
+      activeWorkflowAssignments.find((item) => item.user_role !== "patient")
+        ?.user_id ??
       "";
     if (!preferredAssignee) return;
     setWorkflowForm((current) => ({
@@ -3328,6 +3339,12 @@ function useOrdersPageContent() {
     filters.providerId !== "" ||
     filters.providerTaxonomyNodeId !== "" ||
     filters.doctorId !== "";
+  const providerFiltersCount = [
+    filters.providerId,
+    filters.providerTaxonomyNodeId,
+    filters.doctorId,
+  ].filter(Boolean).length;
+  const providerFiltersShown = moreFiltersOpen || providerFiltersCount > 0;
   const detailPatientId = orderDetail?.patient_id || null;
   const detailLeadId =
     orderDetail?.lead_id || orderDetail?.source_lead_id || null;
@@ -3377,17 +3394,9 @@ function useOrdersPageContent() {
   const workflowPatientRequired =
     workflowChecklist?.blocked_reason === "patient_required" ||
     detailRequiresPatient;
+  // The patient and the documents already have buttons in the header.
   const detailOverviewLinks = orderDetail
     ? [
-        ...(detailSubjectHref
-          ? [{
-              label: detailSubjectLabel,
-              description: detailSubjectReference
-                ? `${detailSubjectName} (${detailSubjectReference})`
-                : detailSubjectName,
-              href: detailSubjectHref,
-            }]
-          : []),
         ...(detailPatientId
           ? [
               {
@@ -3406,11 +3415,6 @@ function useOrdersPageContent() {
           label: l("orders_rechnungen"),
           description: l("orders_rechnungen_dieses_auftrags_anzeigen"),
           href: detailInvoicesHref,
-        },
-        {
-          label: l("orders_dokumente"),
-          description: l("orders_dokumente_dieses_auftrags_anzeigen"),
-          href: detailDocumentsHref,
         },
       ]
     : [];
@@ -3440,21 +3444,24 @@ function useOrdersPageContent() {
       />
 
       {canManageDebt && (Boolean(debtQueueError) || debtQueue.length > 0) ? (
-        <section className="rounded-lg border border-border/70 bg-card p-6">
+        <section className="rounded-lg border border-border/70 bg-card p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h2 className={tokens.text.sectionTitle}>
+              <h2 className={cn(tokens.text.sectionTitle, "flex flex-wrap items-center gap-2")}>
                 {titleWithDot(
                   l("orders_orders_blocked_by_overdue_receivables_or_an_open_debt_wo"),
                 )}
+                <Badge variant="outline" className="rounded-full border-rose-200 bg-rose-50 text-rose-700">
+                  {debtQueue.length}
+                </Badge>
               </h2>
-              <p className={cn(tokens.text.muted, "mt-2 max-w-3xl")}>
+              <p className={cn(tokens.text.muted, "mt-1 max-w-3xl")}>
                 {l("orders_auftrage_die_durch_uberfallige_forderungen_oder_einen_of")}
               </p>
             </div>
           </div>
 
-          <div className="mt-5">
+          <div className="mt-4">
             {debtQueueError ? (
               <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
                 {debtQueueError}
@@ -3465,107 +3472,51 @@ function useOrdersPageContent() {
                 {l("orders_debt_management_queue_wird_geladen")}
               </div>
             ) : (
-              <div className="space-y-3 pl-6">
-                {debtQueue.slice(0, 6).map((item, index, items) => (
-                  <div
-                    key={item.order_id}
-                    className={cn(
-                      "relative",
-                      index < items.length - 1 &&
-                        "before:absolute before:-bottom-5 before:-left-4 before:top-3 before:w-px before:bg-border",
-                    )}
-                  >
-                    <span className="absolute -left-[1.125rem] top-1.5 z-10 size-2 rounded-full bg-muted-foreground ring-4 ring-background" />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className={tokens.text.sectionTitle}>
-                        {item.order_number}
-                      </div>
-                      <span className="text-sm font-medium text-foreground">
-                        {item.patient_name}
-                      </span>
-                      {item.updated_at ? (
-                        <span className="text-xs text-muted-foreground">
-                          {l("orders_aktualisiert")}: {formatDateTimeLabel(item.updated_at)}
-                        </span>
-                      ) : null}
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "rounded-full",
-                          statusClassName(item.effective_status),
-                        )}
-                      >
-                        {debtStatusLabel(item.effective_status)}
-                      </Badge>
-                    </div>
-
+              <ul className="divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70">
+                {debtQueue.slice(0, 6).map((item) => (
+                  <li key={item.order_id}>
                     <button
                       type="button"
                       onClick={() => openOrder(item.order_id)}
-                      className="group mt-2 w-full overflow-hidden rounded-2xl border border-border text-left transition-colors hover:border-primary/40"
+                      className="flex w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     >
-                      <div className="grid gap-0 sm:grid-cols-[minmax(0,1fr)_220px]">
-                        <div className="px-4 py-3">
-                          <div className="max-w-xl text-xs leading-snug text-muted-foreground">
-                            {debtBlockingReasonLabel(
-                              item.effective_status,
-                              item.overdue_invoice_count,
-                            )}
-                          </div>
-                          {item.note ? (
-                            <div className="mt-2 max-w-xl text-xs leading-snug text-muted-foreground">
-                              {item.note}
-                            </div>
-                          ) : null}
-                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                            <span>
-                              {l("orders_uberfallig_2")}:{" "}
-                              <span className="font-medium text-foreground">
-                                {item.overdue_invoice_count}
-                              </span>
-                            </span>
-                            <span>
-                              {l("orders_owner")}:{" "}
-                              <span className="font-medium text-foreground">
-                                {item.owner_name ?? l("orders_nicht_zugewiesen")}
-                              </span>
-                            </span>
-                            <span>
-                              {l("orders_next_review")}:{" "}
-                              <span className="font-medium text-foreground">
-                                {item.next_review_at
-                                  ? formatDateTimeLabel(item.next_review_at)
-                                  : l("orders_not_scheduled")}
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="relative border-t border-border px-4 py-3 sm:border-t-0 sm:pl-5 sm:before:absolute sm:before:bottom-3 sm:before:left-0 sm:before:top-3 sm:before:border-l sm:before:border-dashed sm:before:border-border">
-                          <div className="space-y-2 text-xs leading-tight">
-                            <div>
-                              <div className="text-muted-foreground">
-                                {l("orders_open_balance")}
-                              </div>
-                              <div className="mt-1 text-2xl font-semibold leading-none text-foreground">
-                                {formatMoney(item.outstanding_balance)}
-                              </div>
-                            </div>
-                            <div className="border-t border-border/70 pt-2">
-                              <div className="text-muted-foreground">
-                                {l("orders_overdue_balance")}
-                              </div>
-                              <div className="mt-1 font-mono text-sm font-semibold tabular-nums text-rose-600">
-                                {formatMoney(item.overdue_balance)}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+                      <span className="font-mono text-xs font-semibold text-foreground">
+                        {item.order_number}
+                      </span>
+                      <span className="min-w-0 max-w-full truncate text-sm font-medium text-foreground">
+                        {item.patient_name}
+                      </span>
+                      <Badge
+                        variant="outline"
+                        className={cn("rounded-full", statusClassName(item.effective_status))}
+                      >
+                        {debtStatusLabel(item.effective_status)}
+                      </Badge>
+                      <span className="hidden min-w-0 flex-1 truncate text-xs text-muted-foreground xl:inline">
+                        {debtBlockingReasonLabel(
+                          item.effective_status,
+                          item.overdue_invoice_count,
+                        )}
+                      </span>
+                      <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                        <span className="whitespace-nowrap">
+                          <span className="text-muted-foreground">{l("orders_open_balance")}: </span>
+                          <span className="font-mono font-semibold tabular-nums text-foreground">
+                            {formatMoney(item.outstanding_balance)}
+                          </span>
+                        </span>
+                        <span className="whitespace-nowrap">
+                          <span className="text-muted-foreground">{l("orders_overdue_balance")}: </span>
+                          <span className="font-mono font-semibold tabular-nums text-rose-600">
+                            {formatMoney(item.overdue_balance)}
+                          </span>
+                        </span>
+                        <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+                      </span>
                     </button>
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
         </section>
@@ -3588,10 +3539,10 @@ function useOrdersPageContent() {
           groupLabels={orderColumnGroupLabels}
           loading={loading}
           maxFrozenColumns={ORDER_MAX_FROZEN_COLUMNS}
-          toolbarClassName="items-end gap-2.5 bg-muted/[0.14] px-4 py-3"
+          toolbarClassName="items-end gap-2.5 bg-muted/[0.14] px-4 py-3 sm:flex-wrap sm:overflow-x-visible"
           toolbarStart={
-            <div className="grid min-w-[960px] flex-1 grid-cols-12 items-end gap-x-2 gap-y-2.5">
-              <ToolbarField label={t.common_search} className="col-span-4 w-full">
+            <div className="flex min-w-0 flex-1 flex-wrap items-end gap-x-2 gap-y-2.5">
+              <ToolbarField label={t.common_search} className="w-full min-w-[200px] flex-1 sm:w-auto sm:max-w-xs">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -3618,7 +3569,7 @@ function useOrdersPageContent() {
                 </div>
               </ToolbarField>
 
-              <ToolbarField label={t.orders_patient} className="col-span-4 w-full">
+              <ToolbarField label={t.orders_patient} className="w-full min-w-[180px] flex-1 sm:w-auto sm:max-w-[260px]">
                 <NativeComboboxSelect
                   value={filters.patientId || "__all__"}
                   onChange={(event) => {
@@ -3637,7 +3588,7 @@ function useOrdersPageContent() {
                 </NativeComboboxSelect>
               </ToolbarField>
 
-              <ToolbarField label={t.orders_phase} className="col-span-2 w-full">
+              <ToolbarField label={t.orders_phase} className="w-[160px]">
                 <NativeComboboxSelect
                   value={filters.phase || "__all__"}
                   onChange={(event) =>
@@ -3660,7 +3611,7 @@ function useOrdersPageContent() {
                 </NativeComboboxSelect>
               </ToolbarField>
 
-              <ToolbarField label={t.users_status} className="col-span-2 w-full">
+              <ToolbarField label={t.users_status} className="w-[140px]">
                 <NativeComboboxSelect
                   value={filters.status || "__all__"}
                   onChange={(event) =>
@@ -3683,10 +3634,74 @@ function useOrdersPageContent() {
                 </NativeComboboxSelect>
               </ToolbarField>
 
-              {permissions.readsOnlyOrderPart ? null : (<>
+              {permissions.readsOnlyOrderPart ? null : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-expanded={providerFiltersShown}
+                  className="h-8 rounded-md bg-field px-2.5"
+                  onClick={() => setMoreFiltersOpen((open) => !open)}
+                >
+                  <SlidersHorizontal className="size-3.5" />
+                  {lang === "de" ? "Anbieter und Arzt" : "Провайдер и врач"}
+                  {providerFiltersCount > 0 ? (
+                    <Badge
+                      variant="outline"
+                      className="rounded-full border-orange-300 bg-orange-50 px-1.5 py-0 text-[10px] text-orange-900"
+                    >
+                      {providerFiltersCount}
+                    </Badge>
+                  ) : null}
+                  <ChevronDown
+                    className={cn(
+                      "size-3.5 transition-transform",
+                      providerFiltersShown && "rotate-180",
+                    )}
+                  />
+                </Button>
+              )}
+              <div className="flex h-8 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon-sm"
+                    className="size-8 shrink-0 rounded-md bg-field"
+                    title={t.orders_refresh}
+                    aria-label={t.orders_refresh}
+                    onClick={triggerReload}
+                  >
+                    <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8 rounded-md bg-field px-2.5"
+                    disabled={!anyQuickFilterActive}
+                    onClick={() => {
+                      setFilters(DEFAULT_FILTERS);
+                      syncQuery({
+                        patient: null,
+                        taxonomy: null,
+                        provider: null,
+                        doctor: null,
+                        order: null,
+                      });
+                    }}
+                  >
+                    <X className="size-3.5" />
+                    {t.common_reset}
+                  </Button>
+                </div>
+            </div>
+          }
+          toolbarAfter={
+            !permissions.readsOnlyOrderPart && providerFiltersShown ? (
+              <div className="flex flex-wrap items-end gap-x-2 gap-y-2.5 border-b border-border/70 bg-muted/[0.14] px-4 pb-3 pt-1">
               <ToolbarField
                 label={`${t.common_provider} / ${t.providers_category}`}
-                className="col-span-6 w-full"
+                className="w-full min-w-[320px] flex-1 lg:max-w-2xl"
               >
                 <ProviderSelectWithTaxonomyFilter
                   value={filters.providerId}
@@ -3721,7 +3736,7 @@ function useOrdersPageContent() {
                 />
               </ToolbarField>
 
-              <ToolbarField label={t.orders_filter_doctor} className="col-span-3 w-full">
+              <ToolbarField label={t.orders_filter_doctor} className="w-full min-w-[200px] flex-1 lg:max-w-xs">
                 <NativeComboboxSelect
                   value={filters.doctorId || "__all__"}
                   onChange={(event) => {
@@ -3741,44 +3756,9 @@ function useOrdersPageContent() {
                   ))}
                 </NativeComboboxSelect>
               </ToolbarField>
-              </>)}
 
-              <ToolbarField label={t.table_actions} className="col-span-3 w-full">
-                <div className="flex h-8 items-center justify-end gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon-sm"
-                    className="size-8 shrink-0 rounded-md bg-field"
-                    title={t.orders_refresh}
-                    aria-label={t.orders_refresh}
-                    onClick={triggerReload}
-                  >
-                    <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 min-w-0 flex-1 justify-center rounded-md bg-field px-2.5"
-                    disabled={!anyQuickFilterActive}
-                    onClick={() => {
-                      setFilters(DEFAULT_FILTERS);
-                      syncQuery({
-                        patient: null,
-                        taxonomy: null,
-                        provider: null,
-                        doctor: null,
-                        order: null,
-                      });
-                    }}
-                  >
-                    <X className="size-3.5" />
-                    {t.common_reset}
-                  </Button>
-                </div>
-              </ToolbarField>
-            </div>
+              </div>
+            ) : undefined
           }
           activeRowId={selectedOrderId}
           onRowClick={(row) => openOrder(row.id)}
@@ -3904,73 +3884,63 @@ function useOrdersPageContent() {
                   />
                 ) : null}
                 <section className="relative rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-                  <div className="relative p-5">
+                  <div className="relative px-4 py-3 sm:px-5">
                     <span
                       className={cn(
-                        "absolute bottom-5 left-0 top-5 w-1 rounded-r-full",
+                        "absolute bottom-3 left-0 top-3 w-1 rounded-r-full",
                         orderAccentClass(orderDetail.phase, orderDetail.status),
                       )}
                     />
                     <div className="min-w-0 pl-2">
-                      <div className="grid min-w-0 gap-4 @container @min-[52rem]:grid-cols-[minmax(0,1fr)_auto] @min-[52rem]:items-start">
-                        <div className="min-w-0">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                              {lang === "de" ? "Auftrag" : "Заказ"}
-                            </span>
-                            <span className="font-mono text-xs font-medium text-foreground">
-                              {orderDetail.order_number}
-                            </span>
-                            <StatusBadge tone={orderStatusTone(orderDetail.status)}>
-                              {orderStatusLabel(orderDetail.status)}
-                            </StatusBadge>
-                            <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
-                              {phaseLabel(orderDetail.phase)}
-                            </StatusBadge>
-                          </div>
-                          <h1 className="mt-2 min-w-0 max-w-full break-words text-2xl font-semibold leading-tight tracking-tight text-foreground">
-                            {detailSubjectName}
-                          </h1>
-                          <p className="mt-1.5 text-sm text-muted-foreground">
-                            {detailSubjectLabel}
-                            {detailSubjectReference ? (
-                              <span className="ml-2 font-mono text-xs text-foreground">
-                                {detailSubjectReference}
-                              </span>
-                            ) : null}
-                          </p>
-                        </div>
-
-                        <dl className="grid min-w-0 gap-2 sm:grid-cols-3 @min-[52rem]:min-w-[460px]">
-                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
-                            <dt className="text-[11px] font-medium text-muted-foreground">
-                              {lang === "de" ? "Auftragssumme" : "Сумма заказа"}
-                            </dt>
-                            <dd className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
+                      <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                        <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                          {lang === "de" ? "Auftrag" : "Заказ"}
+                        </span>
+                        <span className="font-mono text-xs font-medium text-foreground">
+                          {orderDetail.order_number}
+                        </span>
+                        <StatusBadge tone={orderStatusTone(orderDetail.status)}>
+                          {orderStatusLabel(orderDetail.status)}
+                        </StatusBadge>
+                        <StatusBadge tone={orderPhaseTone(orderDetail.phase)}>
+                          {phaseLabel(orderDetail.phase)}
+                        </StatusBadge>
+                        <dl className="ml-auto flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                          <div className="flex items-baseline gap-1.5">
+                            <dt>{lang === "de" ? "Auftragssumme" : "Сумма заказа"}</dt>
+                            <dd className="font-mono font-semibold tabular-nums text-foreground">
                               {formatMoney(orderDetail.total_estimated)}
                             </dd>
                           </div>
-                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
-                            <dt className="text-[11px] font-medium text-muted-foreground">
-                              {lang === "de" ? "Leistungen" : "Услуги"}
-                            </dt>
-                            <dd className="mt-1 text-sm font-semibold text-foreground">
-                              {leistungMetrics.total}
-                            </dd>
+                          <div className="flex items-baseline gap-1.5">
+                            <dt>{lang === "de" ? "Leistungen" : "Услуги"}</dt>
+                            <dd className="font-semibold text-foreground">{leistungMetrics.total}</dd>
                           </div>
-                          <div className="rounded-lg border border-border/70 bg-muted/15 px-3 py-2.5">
-                            <dt className="text-[11px] font-medium text-muted-foreground">
-                              {lang === "de" ? "Aktualisiert" : "Обновлено"}
-                            </dt>
-                            <dd className="mt-1 text-xs font-medium leading-5 text-foreground">
+                          <div className="flex items-baseline gap-1.5">
+                            <dt>{lang === "de" ? "Aktualisiert" : "Обновлено"}</dt>
+                            <dd className="font-medium text-foreground">
                               {formatDateTimeLabel(orderDetail.updated_at)}
                             </dd>
                           </div>
                         </dl>
                       </div>
 
-                      <div className="mt-4 flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-3">
-                        <div className="flex min-w-0 flex-wrap gap-2">
+                      <div className="mt-1.5 flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                        <div className="min-w-0 flex-1 basis-64">
+                          <h1 className="min-w-0 max-w-full break-words text-lg font-semibold leading-tight tracking-tight text-foreground">
+                            {detailSubjectName}
+                          </h1>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {detailSubjectLabel}
+                            {detailSubjectReference ? (
+                              <span className="ml-1.5 font-mono text-foreground">
+                                {detailSubjectReference}
+                              </span>
+                            ) : null}
+                          </p>
+                        </div>
+
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
                           {detailSubjectHref ? (
                             <StaffLink
                               to={detailSubjectHref}
@@ -3998,8 +3968,6 @@ function useOrdersPageContent() {
                             <FileText className="size-3.5" />
                             {l("orders_dokumente")}
                           </StaffLink>
-                        </div>
-
                         {permissions.canManagePhase &&
                         (orderDetail.lifecycle?.allowed_status_transitions?.length ?? 0) > 0 ? (
                           <OverflowMenu
@@ -4069,6 +4037,7 @@ function useOrdersPageContent() {
                             )}
                           />
                         ) : null}
+                        </div>
                       </div>
                     </div>
 
@@ -4079,12 +4048,12 @@ function useOrdersPageContent() {
                     ) : null}
                   </div>
 
-                  <div className="rounded-b-xl border-t border-border/70 bg-muted/15 px-5 py-3">
+                  <div className="rounded-b-xl border-t border-border/70 bg-muted/15 px-4 py-2 sm:px-5">
                     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
                       <div className="flex min-w-0 items-center gap-3">
                         <span
                           className={cn(
-                            "flex size-8 shrink-0 items-center justify-center rounded-lg",
+                            "flex size-7 shrink-0 items-center justify-center rounded-md",
                             orderNextStep?.kind === "terminal" &&
                               orderNextStep.status === "cancelled"
                               ? "bg-muted text-muted-foreground"
@@ -4198,9 +4167,6 @@ function useOrdersPageContent() {
                 <div ref={orderSectionAnchorRef} className="scroll-mt-4" />
                 {shouldRenderOrderSection("overview") ? (
                   <>
-                    {orderDetail.patient_id ? (
-                      <OrderSubscriptionCard orderId={orderDetail.id} lang={lang} />
-                    ) : null}
                     <SectionCard
                       title={lang === "de" ? "Auftrag auf einen Blick" : "Главное о заказе"}
                       description={
@@ -4323,7 +4289,7 @@ function useOrdersPageContent() {
                         <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
                           {lang === "de" ? "Zugehörige Bereiche" : "Связанные данные"}
                         </h3>
-                        <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-2 @min-[64rem]:grid-cols-5">
+                        <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-3">
                           {detailOverviewLinks.map((link) => (
                             <StaffLink
                               key={link.href}
@@ -4346,6 +4312,10 @@ function useOrdersPageContent() {
                         </div>
                       </div>
                     </SectionCard>
+
+                    {orderDetail.patient_id ? (
+                      <OrderSubscriptionCard orderId={orderDetail.id} lang={lang} />
+                    ) : null}
 
                     <SectionCard
                       title={lang === "de" ? "Finanzen des Auftrags" : "Деньги по заказу"}
@@ -8316,6 +8286,7 @@ function useOrdersPageContent() {
               }
               onCreate={handleCreateServiceGroup}
               onCreated={() => setServiceGroupWizardOpen(false)}
+              onCancel={() => setServiceGroupWizardOpen(false)}
             />
           </AdminSheetScaffold>
         </SheetContent>
