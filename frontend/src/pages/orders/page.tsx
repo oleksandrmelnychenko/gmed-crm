@@ -158,6 +158,7 @@ import {
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
 import { orderLoadErrorKey } from "./model/order-load-error";
 import { clientSignatureNote, withSignedTermsConfirmation } from "./model/client-signature";
+import { OrderResignAction } from "./ui/order-resign-action";
 import { skipPassiveOrderRefresh } from "./model/order-realtime";
 import { billingSourceLabel } from "./model/billing-source";
 import { priceVersionDisplayName } from "./model/order-service-presentation";
@@ -4351,14 +4352,25 @@ function useOrdersPageContent() {
                             orderDetail.currency,
                           );
                           return note ? (
-                            <p
-                              data-testid="order-client-signed-version"
-                              className={note.tone === "warning"
-                                ? "rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
-                                : "px-1 text-xs leading-5 text-muted-foreground"}
-                            >
-                              {note.text}
-                            </p>
+                            <>
+                              <p
+                                data-testid="order-client-signed-version"
+                                className={note.tone === "warning"
+                                  ? "rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                                  : "px-1 text-xs leading-5 text-muted-foreground"}
+                              >
+                                {note.text}
+                              </p>
+                              {/* After a reset the client signs a new version (QA C3-01). */}
+                              {note.tone === "warning" ? (
+                                <OrderResignAction
+                                  orderId={orderDetail.id}
+                                  patientId={orderDetail.patient_id}
+                                  leadId={orderDetail.source_lead_id}
+                                  lang={lang}
+                                />
+                              ) : null}
+                            </>
                           ) : null;
                         })()}
                         </div>
