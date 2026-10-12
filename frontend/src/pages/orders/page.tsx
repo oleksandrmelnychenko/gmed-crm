@@ -5002,66 +5002,70 @@ function useOrdersPageContent() {
                             ) : null}
                           </div>
 
-                          <div className="overflow-x-auto">
-                            <table className="w-full min-w-[900px] text-left text-xs">
-                              <thead className="bg-muted/25 text-muted-foreground">
-                                <tr>
-                                  <th className="px-4 py-2.5 font-medium">{l("orders_debt_status")}</th>
-                                  <th className="px-4 py-2.5 font-medium">{l("orders_owner")}</th>
-                                  <th className="px-4 py-2.5 text-right font-medium">{l("orders_uberfallig_2")}</th>
-                                  <th className="px-4 py-2.5 text-right font-medium">{l("orders_open_balance")}</th>
-                                  <th className="px-4 py-2.5 font-medium">{l("orders_letzter_kontakt")}</th>
-                                  <th className="px-4 py-2.5 font-medium">{l("orders_nachstes_review")}</th>
-                                  <th className="px-4 py-2.5 font-medium">{l("orders_erledigt")}</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                <tr className="border-t border-border/70">
-                                  <td className="px-4 py-3">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "whitespace-nowrap rounded-full",
-                                        statusClassName(
-                                          orderDetail.process_gates.debt_management
-                                            ?.effective_status ?? "not_required",
-                                        ),
-                                      )}
-                                    >
-                                      {debtStatusLabel(
-                                        orderDetail.process_gates.debt_management
-                                          ?.effective_status ?? "not_required",
-                                      )}
-                                    </Badge>
-                                  </td>
-                                  <td className="px-4 py-3 font-medium text-foreground">
-                                    {orderDetail.process_gates.debt_management
-                                      ?.owner_name ?? l("orders_nicht_zugewiesen")}
-                                  </td>
-                                  <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
-                                    {orderDetail.process_gates.overdue_invoice_count}
-                                  </td>
-                                  <td className="px-4 py-3 text-right font-mono font-semibold tabular-nums text-foreground">
-                                    {formatMoney(
+                          <dl className="grid gap-x-6 gap-y-3 px-4 py-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_debt_status")}</dt>
+                              <dd className="mt-1">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "whitespace-nowrap rounded-full",
+                                    statusClassName(
                                       orderDetail.process_gates.debt_management
-                                        ?.outstanding_balance ??
-                                        orderDetail.process_gates.outstanding_balance ??
-                                        0,
-                                    )}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.last_contact_at)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.next_review_at)}
-                                  </td>
-                                  <td className="whitespace-nowrap px-4 py-3 text-muted-foreground">
-                                    {formatDateTimeLabel(orderDetail.process_gates.debt_management?.resolved_at)}
-                                  </td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
+                                        ?.effective_status ?? "not_required",
+                                    ),
+                                  )}
+                                >
+                                  {debtStatusLabel(
+                                    orderDetail.process_gates.debt_management
+                                      ?.effective_status ?? "not_required",
+                                  )}
+                                </Badge>
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_owner")}</dt>
+                              <dd className="mt-1 break-words font-medium text-foreground">
+                                {orderDetail.process_gates.debt_management
+                                  ?.owner_name ?? l("orders_nicht_zugewiesen")}
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_uberfallig_2")}</dt>
+                              <dd className="mt-1 font-mono font-semibold tabular-nums text-foreground">
+                                {orderDetail.process_gates.overdue_invoice_count}
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_open_balance")}</dt>
+                              <dd className="mt-1 font-mono font-semibold tabular-nums text-foreground">
+                                {formatMoney(
+                                  orderDetail.process_gates.debt_management
+                                    ?.outstanding_balance ??
+                                    orderDetail.process_gates.outstanding_balance ??
+                                    0,
+                                )}
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_letzter_kontakt")}</dt>
+                              <dd className="mt-1 text-foreground">
+                                {formatDateTimeLabel(orderDetail.process_gates.debt_management?.last_contact_at)}
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_nachstes_review")}</dt>
+                              <dd className="mt-1 text-foreground">
+                                {formatDateTimeLabel(orderDetail.process_gates.debt_management?.next_review_at)}
+                              </dd>
+                            </div>
+                            <div className="min-w-0">
+                              <dt className="font-medium text-muted-foreground">{l("orders_erledigt")}</dt>
+                              <dd className="mt-1 text-foreground">
+                                {formatDateTimeLabel(orderDetail.process_gates.debt_management?.resolved_at)}
+                              </dd>
+                            </div>
+                          </dl>
 
                           {orderDetail.process_gates.debt_management?.note ? (
                             <div className="border-t border-border px-4 py-3 text-xs leading-relaxed text-muted-foreground">
@@ -6780,73 +6784,6 @@ function useOrdersPageContent() {
                       </div>
                     </SectionCard>
 
-                    <SectionCard title={t.orders_service_group_split_title}>
-                      <div className="space-y-3">
-                        {serviceGroupsError ? (
-                          <Banner tone="error" withIcon>
-                            {serviceGroupsError}
-                          </Banner>
-                        ) : null}
-                        {serviceGroupsLoading ? (
-                          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
-                            {t.orders_service_groups_loading}
-                          </div>
-                        ) : null}
-                        {orderServiceGroups.map((group) => (
-                          <OrderServiceGroupPanel
-                            key={group.id}
-                            group={{
-                              ...group,
-                              participants: group.participants ?? [],
-                            }}
-                            preview={serviceGroupPreviews[group.id] ?? null}
-                            generating={generatingServiceGroupId === group.id}
-                            onGenerate={
-                              permissions.canAddLeistung
-                                ? (overrideDuplicates) =>
-                                    void handleGenerateServiceGroupLines(
-                                      group.id,
-                                      overrideDuplicates,
-                                    )
-                                : undefined
-                            }
-                          />
-                        ))}
-                        {!serviceGroupsLoading &&
-                        !serviceGroupsError &&
-                        orderServiceGroups.length === 0 ? (
-                          <EmptyState
-                            title={l("orders_keine_servicegruppen")}
-                            description={l("orders_erstellen_sie_eine_gruppe_um_leistungen_aus_beteiligten")}
-                          />
-                        ) : null}
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard
-                      title={lang === "de" ? "Auftragsgruppe" : "Групповой заказ"}
-                    >
-                      <OrderGroupPanel
-                        orderId={orderDetail.id}
-                        canManage={canManageOrderGroupAndAmendments}
-                      />
-                    </SectionCard>
-
-                    <SectionCard
-                      title={
-                        lang === "de" ? "Betragsänderungen" : "Изменения суммы"
-                      }
-                    >
-                      <OrderAmendmentsPanel
-                        key={orderDetail.id}
-                        orderId={orderDetail.id}
-                        refreshKey={reloadNonce}
-                        onChanged={triggerReload}
-                        currentUserId={user?.id ?? null}
-                        canManage={canManageOrderGroupAndAmendments}
-                      />
-                    </SectionCard>
-
                     <SectionCard title={tx.providers_services}>
                       <div className="space-y-3">
                         {orderDetail.leistungen.length === 0 ? (
@@ -7272,6 +7209,73 @@ function useOrdersPageContent() {
                           })
                         )}
                       </div>
+                    </SectionCard>
+
+                    <SectionCard
+                      title={
+                        lang === "de" ? "Betragsänderungen" : "Изменения суммы"
+                      }
+                    >
+                      <OrderAmendmentsPanel
+                        key={orderDetail.id}
+                        orderId={orderDetail.id}
+                        refreshKey={reloadNonce}
+                        onChanged={triggerReload}
+                        currentUserId={user?.id ?? null}
+                        canManage={canManageOrderGroupAndAmendments}
+                      />
+                    </SectionCard>
+
+                    <SectionCard title={t.orders_service_group_split_title}>
+                      <div className="space-y-3">
+                        {serviceGroupsError ? (
+                          <Banner tone="error" withIcon>
+                            {serviceGroupsError}
+                          </Banner>
+                        ) : null}
+                        {serviceGroupsLoading ? (
+                          <div className="rounded-xl border border-border/50 bg-muted/25 px-4 py-5 text-sm text-muted-foreground">
+                            {t.orders_service_groups_loading}
+                          </div>
+                        ) : null}
+                        {orderServiceGroups.map((group) => (
+                          <OrderServiceGroupPanel
+                            key={group.id}
+                            group={{
+                              ...group,
+                              participants: group.participants ?? [],
+                            }}
+                            preview={serviceGroupPreviews[group.id] ?? null}
+                            generating={generatingServiceGroupId === group.id}
+                            onGenerate={
+                              permissions.canAddLeistung
+                                ? (overrideDuplicates) =>
+                                    void handleGenerateServiceGroupLines(
+                                      group.id,
+                                      overrideDuplicates,
+                                    )
+                                : undefined
+                            }
+                          />
+                        ))}
+                        {!serviceGroupsLoading &&
+                        !serviceGroupsError &&
+                        orderServiceGroups.length === 0 ? (
+                          <EmptyState
+                            title={l("orders_keine_servicegruppen")}
+                            description={l("orders_erstellen_sie_eine_gruppe_um_leistungen_aus_beteiligten")}
+                          />
+                        ) : null}
+                      </div>
+                    </SectionCard>
+
+                    <SectionCard
+                      title={lang === "de" ? "Auftragsgruppe" : "Групповой заказ"}
+                    >
+                      <OrderGroupPanel
+                        orderId={orderDetail.id}
+                        canManage={canManageOrderGroupAndAmendments}
+                      />
                     </SectionCard>
                   </>
                 ) : null}
