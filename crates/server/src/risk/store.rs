@@ -180,7 +180,6 @@ async fn load_for_update(
 #[derive(Clone, Debug, Default)]
 pub struct BlockAnswers {
     pub payer: Option<Declaration>,
-    pub expected_total_eur: Option<f64>,
     pub via_third_party_kind: Option<String>,
     pub occupation: Option<String>,
     pub sector: Option<String>,
@@ -258,7 +257,7 @@ pub async fn load_block_answers(
                   g.pep_wealth_origin, g.sanctions_link_name, g.sanctions_link_kind,
                   g.sanctions_link_since_extent, g.id_data_entered_at, g.birth_place,
                   g.birth_country, g.pep_self, g.sanctions_links,
-                  d.expected_total_eur::float8 AS expected_total_eur, d.via_third_party_kind,
+                  d.via_third_party_kind,
                   s.submitted_at AS statement_submitted_at, s.legal_form AS statement_legal_form,
                   s.payment_reason AS statement_payment_reason,
                   EXISTS (
@@ -297,7 +296,6 @@ pub async fn load_block_answers(
     let entered_at: Option<DateTime<Utc>> = row.try_get("id_data_entered_at").ok().flatten();
     Ok(BlockAnswers {
         payer,
-        expected_total_eur: row.try_get("expected_total_eur").ok().flatten(),
         via_third_party_kind: text("via_third_party_kind"),
         occupation: text("occupation"),
         sector: text("sector"),
@@ -425,9 +423,8 @@ fn block_missing(block: &str, answers: &BlockAnswers) -> (&'static str, Vec<Stri
                         missing.push(key);
                     }
                 }
-                if answers.expected_total_eur.is_none() {
-                    missing.push("expected_total_eur");
-                }
+                // The expected total is no longer asked (owner 2026-10-12): the
+                // amount is GMED's own order, and T10 / T11 are retired.
                 if payer.is_some_and(|payer| payer.via_third_party == Some(true))
                     && answers.via_third_party_kind.is_none()
                 {

@@ -320,7 +320,8 @@ export const VIA_THIRD_PARTY_KINDS = ["person", "psp"] as const;
 
 export type BillingExtrasField = "via_third_party_kind" | "expected_total_eur";
 
-export const BILLING_EXTRAS_FIELDS: readonly BillingExtrasField[] = ["via_third_party_kind", "expected_total_eur"];
+/** The extras the cabinet asks; the expected total no longer (owner 2026-10-12), an older answer stays readable. */
+export const BILLING_EXTRAS_FIELDS: readonly BillingExtrasField[] = ["via_third_party_kind"];
 
 /** The two extras as typed: the kind ("person", "psp" or ""), the amount as text. */
 export type BillingExtrasDraft = Record<BillingExtrasField, string>;

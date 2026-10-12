@@ -1,7 +1,6 @@
 /**
  * Configuration of the lead risk assessment (trigger flow 2026-10-07):
- * country lists 1 and 2, points per trigger, the amount thresholds, the level
- * bounds, whether level 2 asks the follow-up blocks automatically, and the
+ * country lists 1 and 2, points per trigger, the level bounds, whether level 2 asks the follow-up blocks automatically, and the
  * reviewers the CEO names as deputies. `GET/PUT /compliance/risk-config`
  * (reviewers read, the CEO writes); the review queue is
  * `GET /compliance/risk-reviews`. The server validates again.
@@ -10,8 +9,11 @@ import { apiFetch } from "@/lib/api";
 import { hasCapability } from "@/lib/permissions";
 import { riskReviewerRoleEligible, type RiskStatus } from "@/pages/leads/model/lead-risk-assessment";
 
-/** Triggers with points; T1, T2 and T6 have a pair (list 1, list 2). */
-export const RISK_POINT_TRIGGERS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12", "T13"] as const;
+/**
+ * Triggers with points; T1, T2 and T6 have a pair (list 1, list 2). The amount triggers T10 and
+ * T11 are retired (owner 2026-10-12: GMED sets the order), with their thresholds.
+ */
+export const RISK_POINT_TRIGGERS = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T12", "T13"] as const;
 export const RISK_PAIR_TRIGGERS: readonly string[] = ["T1", "T2", "T6"];
 export const RISK_POINTS_MAX = 20;
 
@@ -23,8 +25,6 @@ export type RiskConfig = {
   list_2: string[];
   points: RiskPoints;
   knockout: string[];
-  threshold_1_eur: number;
-  threshold_2_eur: number;
   level_2_from: number;
   level_3_from: number;
   level_2_blocks_automatic: boolean;
@@ -49,10 +49,8 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   version: 1,
   list_1: ["AF", "AO", "BO", "CD", "CI", "CM", "DZ", "HT", "KE", "LA", "LB", "MC", "NA", "NP", "RU", "SS", "SY", "TT", "VE", "VG", "VN", "VU", "YE"],
   list_2: ["IR", "KP", "MM"],
-  points: { T1: [2, 4], T2: [2, 4], T3: 1, T4: 1, T5: 2, T6: [2, 4], T7: 1, T8: 2, T9: 4, T10: 1, T11: 2, T12: 2, T13: 1 },
+  points: { T1: [2, 4], T2: [2, 4], T3: 1, T4: 1, T5: 2, T6: [2, 4], T7: 1, T8: 2, T9: 4, T12: 2, T13: 1 },
   knockout: ["T14", "T15", "T16"],
-  threshold_1_eur: 10000,
-  threshold_2_eur: 25000,
   level_2_from: 4,
   level_3_from: 9,
   level_2_blocks_automatic: true,
@@ -99,8 +97,6 @@ export function normalizeRiskConfig(value: unknown): RiskConfig {
     list_2: codes(raw.list_2, DEFAULT_RISK_CONFIG.list_2),
     points: normalizePoints(raw.points),
     knockout: codes(raw.knockout, DEFAULT_RISK_CONFIG.knockout),
-    threshold_1_eur: num(raw.threshold_1_eur, DEFAULT_RISK_CONFIG.threshold_1_eur),
-    threshold_2_eur: num(raw.threshold_2_eur, DEFAULT_RISK_CONFIG.threshold_2_eur),
     level_2_from: num(raw.level_2_from, DEFAULT_RISK_CONFIG.level_2_from),
     level_3_from: num(raw.level_3_from, DEFAULT_RISK_CONFIG.level_3_from),
     level_2_blocks_automatic:
@@ -146,7 +142,7 @@ export function withListMove(config: RiskConfig, list: "list_1" | "list_2", next
   return { ...config, list_1: normalized.filter((code) => !config.list_2.includes(code)) };
 }
 
-export type RiskConfigError = "levels" | "points" | "thresholds" | "lists" | "codes";
+export type RiskConfigError = "levels" | "points" | "lists" | "codes";
 
 /** What the server would refuse (contract 4.4), in the order of the form. */
 export function riskConfigErrors(config: RiskConfig): RiskConfigError[] {
@@ -156,7 +152,6 @@ export function riskConfigErrors(config: RiskConfig): RiskConfigError[] {
   if (config.list_1.some((code) => config.list_2.includes(code))) errors.push("lists");
   const values = Object.values(config.points).flatMap((value) => (Array.isArray(value) ? value : [value]));
   if (!values.every((value) => Number.isInteger(value) && value >= 0 && value <= RISK_POINTS_MAX)) errors.push("points");
-  if (!(config.threshold_1_eur > 0 && config.threshold_2_eur > 0)) errors.push("thresholds");
   if (
     !Number.isInteger(config.level_2_from)
     || !Number.isInteger(config.level_3_from)

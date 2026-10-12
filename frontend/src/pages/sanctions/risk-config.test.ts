@@ -65,7 +65,6 @@ describe("risk assessment configuration", () => {
     expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, level_2_from: 0 })).toEqual(["levels"]);
     expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, points: { ...DEFAULT_RISK_CONFIG.points, T9: 21 } })).toEqual(["points"]);
     expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, points: { ...DEFAULT_RISK_CONFIG.points, T1: [2, Number.NaN] } })).toEqual(["points"]);
-    expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, threshold_1_eur: 0 })).toEqual(["thresholds"]);
     expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, list_1: ["RUS"] })).toEqual(["codes"]);
     expect(riskConfigErrors({ ...DEFAULT_RISK_CONFIG, list_1: ["IR"] })).toEqual(["lists"]);
   });

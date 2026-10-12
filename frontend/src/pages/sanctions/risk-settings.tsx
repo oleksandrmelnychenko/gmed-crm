@@ -1,6 +1,6 @@
 /**
  * /sanctions?tab=risk (CEO): the configuration of the lead risk assessment
- * (country lists, points per trigger, thresholds, level bounds, automatic
+ * (country lists, points per trigger, level bounds, automatic
  * level-2 blocks, reviewers) and the review queue. Trigger flow 2026-10-07.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -52,8 +52,6 @@ function configErrorText(error: RiskConfigError, t: Translations): string {
       return t.risk_config_error_lists;
     case "points":
       return t.risk_config_error_points;
-    case "thresholds":
-      return t.risk_config_error_thresholds;
     case "levels":
       return t.risk_config_error_levels;
   }
@@ -327,9 +325,7 @@ export function RiskSettingsTab() {
             </div>
           </div>
 
-          <div className="grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2 lg:grid-cols-4">
-            <NumberField label={t.risk_threshold_1} value={config.threshold_1_eur} step={100} disabled={busy} testId="risk-threshold-1" onChange={(value) => patch({ threshold_1_eur: value })} />
-            <NumberField label={t.risk_threshold_2} value={config.threshold_2_eur} step={100} disabled={busy} testId="risk-threshold-2" onChange={(value) => patch({ threshold_2_eur: value })} />
+          <div className="grid gap-3 border-t border-border/60 pt-3 sm:grid-cols-2">
             <NumberField label={t.risk_level_2_from} value={config.level_2_from} min={1} disabled={busy} testId="risk-level-2-from" onChange={(value) => patch({ level_2_from: value })} />
             <NumberField label={t.risk_level_3_from} value={config.level_3_from} min={2} disabled={busy} testId="risk-level-3-from" onChange={(value) => patch({ level_3_from: value })} />
           </div>

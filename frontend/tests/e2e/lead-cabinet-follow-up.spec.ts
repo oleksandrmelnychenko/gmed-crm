@@ -631,7 +631,6 @@ test.describe("lead cabinet stepper and follow-up", () => {
     await choose(page, blockC.getByRole("combobox", { name: /Erfolgt die Zahlung über eine dritte Person/ }), "Ja");
     await blockC.getByRole("textbox", { name: "Bitte beschreiben (wer, welcher Dienst)" }).fill("Mein Bruder");
     await choose(page, blockC.getByRole("combobox", { name: "Über wen erfolgt die Zahlung?" }), "Über eine andere Person");
-    await blockC.getByRole("textbox", { name: "Voraussichtlicher Gesamtbetrag (EUR)" }).fill("12.500");
     await expect
       .poll(() => Object.assign({}, ...calls.billing))
       .toEqual({
@@ -639,11 +638,9 @@ test.describe("lead cabinet stepper and follow-up", () => {
         via_third_party: true,
         via_third_party_details: "Mein Bruder",
         via_third_party_kind: "person",
-        expected_total_eur: 12500,
       });
-    // An amount that is no number is marked and not sent.
-    await blockC.getByRole("textbox", { name: "Voraussichtlicher Gesamtbetrag (EUR)" }).fill("zwölf");
-    await expect(blockC.getByText("Bitte prüfen Sie diese Angabe.")).toBeVisible();
+    // No expected total is asked (owner 2026-10-12): GMED sets the order.
+    await expect(blockC.getByRole("textbox", { name: "Voraussichtlicher Gesamtbetrag (EUR)" })).toHaveCount(0);
 
     const blockI = page.getByTestId("lead-request-follow-up-I");
     // No intro sentence above the upload (owner 2026-10-09): the button says what to do.

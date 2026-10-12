@@ -2,7 +2,7 @@ import { countryLabel } from "@/components/ui/country-select";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type { LeadRequest, LeadRequestRepresentative } from "./lead-request-api";
-import { asksAccount, asksPaymentRoute, draftFromBillingExtras, type BillingField } from "./lead-request-billing-model";
+import { asksAccount, asksPaymentRoute, type BillingField } from "./lead-request-billing-model";
 import {
   STATED_FUNDS_SOURCES,
   blockAAsks,
@@ -434,7 +434,6 @@ export function requestSummary(request: LeadRequest, text: LeadRequestText, lang
                 ? text.viaThirdPartyKindOptions[billing.via_third_party_kind]
                 : "",
             ],
-            [text.billingExtrasFields.expected_total_eur, draftFromBillingExtras(billing).expected_total_eur],
           ] satisfies Array<[string, string | null | undefined]>)
         : [[text.sectionPaymentRoute, text.paymentRouteByPayerShort] satisfies [string, string]]),
     ]);

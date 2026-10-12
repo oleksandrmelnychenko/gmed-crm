@@ -188,7 +188,7 @@
   `stay_reason_details`; H `pep_office`, `pep_country`, `pep_period`,
   `pep_relationship`, `pep_wealth_origin`; J `sanctions_link_name`,
   `sanctions_link_kind`, `sanctions_link_since_extent`), `…/billing`
-  (C: розділ 8, `expected_total_eur`, `via_third_party_kind`),
+  (C: розділ 8, `via_third_party_kind`; `expected_total_eur` з 12.10.2026 не питається),
   `POST …/relationship-proof` (доказ B), `…/identity-document` (I),
   представники (G). `POST …/follow-up/submit` → 422 `follow_up_incomplete`
   з `missing`, інакше фіксує час, переоцінює і повідомляє персонал.

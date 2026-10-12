@@ -462,9 +462,10 @@ export function riskTriggerLabel(key: string, tx: Tx): string {
     case "T9":
       return tx("Оплата наличными или криптовалютой", "Zahlung bar oder in Kryptowährung");
     case "T10":
-      return tx("Сумма обращения выше порога 1", "Wert der Anfrage über Schwelle 1");
+      // Retired 2026-10-12 (owner): kept for the history of older assessments.
+      return tx("Сумма обращения выше порога 1 (отменён)", "Wert der Anfrage über Schwelle 1 (entfallen)");
     case "T11":
-      return tx("Сумма плательщика за 12 месяцев выше порога 2", "12-Monats-Summe desselben Zahlers über Schwelle 2");
+      return tx("Сумма плательщика за 12 месяцев выше порога 2 (отменён)", "12-Monats-Summe desselben Zahlers über Schwelle 2 (entfallen)");
     case "T12":
       return tx(
         "Документ личности: нет, нечитаем или просрочен",

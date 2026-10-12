@@ -42,18 +42,15 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         return Ok(None);
     };
     let row = sqlx::query(&format!(
-        r#"SELECT l.date_of_birth, l.prospect_patient_id, l.converted_patient_id,
+        r#"SELECT l.date_of_birth,
                   g.former_citizenships, g.has_representative, g.under_guardianship,
                   g.pep_self, g.pep_related, g.sanctions_links, g.id_document_unreadable,
                   g.id_valid_until,
                   d.payer_kind, d.payer_type, d.relationship_kind, d.payment_method,
                   d.via_third_party, d.via_third_party_kind,
-                  d.expected_total_eur::float8 AS expected_total_eur,
-                  lower(NULLIF(btrim(d.email), '')) AS payer_email,
                   s.pep_self AS statement_pep_self,
                   s.pep_related AS statement_pep_related,
                   s.sanctions_links AS statement_sanctions_links,
-                  s.estimated_total_eur::float8 AS statement_estimated_total_eur,
                   (
                       EXISTS (
                           SELECT 1 FROM lead_portal_uploads u
@@ -74,7 +71,6 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                   COALESCE(hits.patient_hit, false) AS patient_hit,
                   COALESCE(hits.payer_hit, false) AS payer_hit,
                   COALESCE(hits.recipient_hit, false) AS recipient_hit,
-                  lead_orders.lead_value,
                   COALESCE(lead_orders.order_payers, 0) AS order_payers
            FROM leads l
            LEFT JOIN lead_gwg_declarations g ON g.lead_id = l.id
@@ -92,9 +88,7 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
                           AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id)))
            ) hits ON true
            LEFT JOIN LATERAL (
-               SELECT max(COALESCE(order_service_total_gross(o.id), o.total_estimated))::float8
-                          AS lead_value,
-                      count(DISTINCT {ORDER_PAYER_SQL}) AS order_payers
+               SELECT count(DISTINCT {ORDER_PAYER_SQL}) AS order_payers
                FROM orders o
                WHERE o.source_lead_id = l.id AND o.status <> 'cancelled'
            ) lead_orders ON true
@@ -113,62 +107,9 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
             .flatten()
             .unwrap_or(false)
     };
-    let amount = |column: &str| {
-        row.try_get::<Option<f64>, _>(column)
-            .ok()
-            .flatten()
-            .unwrap_or(0.0)
-    };
     let today = crate::app_time::today();
     let third_party =
         text("payer_kind").as_deref() == Some(crate::routes::lead_payer::PAYER_KIND_THIRD_PARTY);
-    let lead_value = amount("lead_value")
-        .max(amount("statement_estimated_total_eur"))
-        .max(amount("expected_total_eur"));
-    let prospect: Option<Uuid> = row.try_get("prospect_patient_id").ok().flatten();
-    let converted: Option<Uuid> = row.try_get("converted_patient_id").ok().flatten();
-    let payer_email = text("payer_email");
-    // T11: the other non-cancelled orders of the same payer created in the
-    // last 365 days, each once, plus this lead's value.
-    let others: Option<f64> = if third_party {
-        match &payer_email {
-            Some(email) => sqlx::query_scalar(
-                r#"SELECT sum(COALESCE(order_service_total_gross(o.id), o.total_estimated))::float8
-                       FROM orders o
-                       WHERE o.status <> 'cancelled'
-                         AND o.created_at >= now() - interval '365 days'
-                         AND o.source_lead_id IS DISTINCT FROM $1
-                         AND lower(btrim(o.payer_contact_email)) = $2"#,
-            )
-            .bind(lead_id)
-            .bind(email)
-            .fetch_one(&mut *conn)
-            .await?,
-            None => None,
-        }
-    } else {
-        let patients: Vec<Uuid> = [prospect, converted].into_iter().flatten().collect();
-        if patients.is_empty() {
-            None
-        } else {
-            sqlx::query_scalar(
-                r#"SELECT sum(COALESCE(order_service_total_gross(o.id), o.total_estimated))::float8
-                   FROM orders o
-                   WHERE o.status <> 'cancelled'
-                     AND o.created_at >= now() - interval '365 days'
-                     AND o.source_lead_id IS DISTINCT FROM $1
-                     AND o.patient_id = ANY($2)
-                     AND o.payer_patient_id IS NULL
-                     AND o.payer_patient_relation_id IS NULL
-                     AND NULLIF(btrim(o.payer_contact_email), '') IS NULL
-                     AND NULLIF(btrim(o.payer_contact_name), '') IS NULL"#,
-            )
-            .bind(lead_id)
-            .bind(&patients)
-            .fetch_one(&mut *conn)
-            .await?
-        }
-    };
     let payer_type = text("payer_type").filter(|_| third_party);
     let inputs = Inputs {
         patient_citizenships: subjects.patient_citizenships,
@@ -188,8 +129,6 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         order_payers: usize::try_from(row.try_get::<i64, _>("order_payers").unwrap_or(0))
             .unwrap_or(0),
         payment_method: text("payment_method"),
-        lead_value_eur: lead_value,
-        payer_year_sum_eur: others.unwrap_or(0.0) + lead_value,
         identity_document_on_file: flag("identity_on_file"),
         id_document_unreadable: flag("id_document_unreadable"),
         id_valid_until: row.try_get("id_valid_until").ok().flatten(),

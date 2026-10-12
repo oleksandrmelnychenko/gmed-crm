@@ -1151,15 +1151,11 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     .await;
     assert_eq!(status, StatusCode::OK, "{estimated}");
     assert_eq!(estimated["estimated_total_eur"], "12000.00");
-    // Since the trigger flow (2026-10-07) the lead's value counts: a friend
-    // (T4 + T5) paying more than 10 000 EUR (T10) is level 2 of the risk
-    // assessment, which requires the enhanced check and the proof of funds.
-    assert_eq!(estimated["questionnaire"]["check_level"], 2, "{estimated}");
-    assert_eq!(
-        estimated["questionnaire"]["check_reasons"],
-        json!(["risk_assessment"])
-    );
-    assert_eq!(estimated["questionnaire"]["funds_proof_required"], true);
+    // The amount is no trigger since 2026-10-12 (owner: GMED sets the order;
+    // T10 / T11 retired): a friend (T4 + T5) paying 12 000 EUR stays at
+    // level 1, without the proof of funds.
+    assert_eq!(estimated["questionnaire"]["check_level"], 1, "{estimated}");
+    assert_eq!(estimated["questionnaire"]["funds_proof_required"], false);
     // A public office of the payer (a knock-out) keeps it so.
     let (status, body) = patch(
         &app,

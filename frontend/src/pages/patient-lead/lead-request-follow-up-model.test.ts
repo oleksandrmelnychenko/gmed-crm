@@ -89,7 +89,7 @@ describe("follow-up blocks", () => {
     expect(extraFieldOf("unknown")).toBeNull();
   });
 
-  it("sends block C's expected total as a number and the kind of third party", () => {
+  it("sends block C's kind of third party, never the expected total (owner 2026-10-12)", () => {
     expect(parseEuroAmount("12.500")).toBe(12500);
     expect(parseEuroAmount("12.500,50")).toBe(12500.5);
     expect(parseEuroAmount("12500.5")).toBe(12500.5);
@@ -99,14 +99,11 @@ describe("follow-up blocks", () => {
     expect(parseEuroAmount("zwölf")).toBeUndefined();
     const saved = draftFromBillingExtras({ via_third_party_kind: null, expected_total_eur: "12500.00" });
     expect(saved).toEqual({ via_third_party_kind: "", expected_total_eur: "12500.00" });
-    // The same amount written otherwise is no change.
-    expect(billingExtrasPatch(saved, { ...saved, expected_total_eur: "12.500" })).toEqual({});
+    // An older answer stays readable; the amount is no longer sent.
+    expect(billingExtrasPatch(saved, { ...saved, expected_total_eur: "900" })).toEqual({});
     expect(billingExtrasPatch(saved, { via_third_party_kind: "psp", expected_total_eur: "" })).toEqual({
       via_third_party_kind: "psp",
-      expected_total_eur: null,
     });
-    // No amount: not sent, the field says so.
-    expect(billingExtrasPatch(saved, { ...saved, expected_total_eur: "viel" })).toEqual({});
   });
 
   it("takes a certificate as the example of a relationship proof for family only", () => {

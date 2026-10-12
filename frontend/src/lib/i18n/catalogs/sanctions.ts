@@ -142,8 +142,6 @@ export interface SanctionsTranslations {
   risk_points_list_1: string;
   risk_points_list_2: string;
   risk_knockout: string;
-  risk_threshold_1: string;
-  risk_threshold_2: string;
   risk_level_2_from: string;
   risk_level_3_from: string;
   risk_level_2_blocks_automatic: string;
@@ -157,7 +155,6 @@ export interface SanctionsTranslations {
   risk_config_error_codes: string;
   risk_config_error_lists: string;
   risk_config_error_points: string;
-  risk_config_error_thresholds: string;
   risk_config_error_levels: string;
   risk_queue_title: string;
   risk_queue_hint: string;
@@ -313,8 +310,6 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_points_list_1: "список 1",
   risk_points_list_2: "список 2",
   risk_knockout: "K.o.: сразу уровень 3",
-  risk_threshold_1: "Порог 1, EUR (сумма обращения)",
-  risk_threshold_2: "Порог 2, EUR (сумма плательщика за 12 месяцев)",
   risk_level_2_from: "Уровень 2 от, баллов",
   risk_level_3_from: "Уровень 3 от, баллов",
   risk_level_2_blocks_automatic: "На уровне 2 дополнительные вопросы задаются автоматически",
@@ -328,7 +323,6 @@ export const sanctionsRu: SanctionsTranslations = {
   risk_config_error_codes: "Коды стран: две латинские буквы (ISO).",
   risk_config_error_lists: "Страна не может стоять в обоих списках.",
   risk_config_error_points: "Баллы — целые числа от 0 до 20.",
-  risk_config_error_thresholds: "Пороги должны быть больше 0.",
   risk_config_error_levels: "Уровень 2 начинается раньше уровня 3 и больше 0 (целые баллы).",
   risk_queue_title: "Очередь проверки",
   risk_queue_hint: "Обращения, которые ждут решения, сведений или второго проверяющего — сначала самые старые.",
@@ -484,8 +478,6 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_points_list_1: "Liste 1",
   risk_points_list_2: "Liste 2",
   risk_knockout: "K.o.: sofort Stufe 3",
-  risk_threshold_1: "Schwelle 1, EUR (Wert der Anfrage)",
-  risk_threshold_2: "Schwelle 2, EUR (12-Monats-Summe des Zahlers)",
   risk_level_2_from: "Stufe 2 ab Punkten",
   risk_level_3_from: "Stufe 3 ab Punkten",
   risk_level_2_blocks_automatic: "Auf Stufe 2 werden ergänzende Angaben automatisch abgefragt",
@@ -499,7 +491,6 @@ export const sanctionsDe: SanctionsTranslations = {
   risk_config_error_codes: "Ländercodes: zwei lateinische Buchstaben (ISO).",
   risk_config_error_lists: "Ein Land kann nicht in beiden Listen stehen.",
   risk_config_error_points: "Punkte sind ganze Zahlen von 0 bis 20.",
-  risk_config_error_thresholds: "Schwellen müssen größer als 0 sein.",
   risk_config_error_levels: "Stufe 2 beginnt vor Stufe 3 und über 0 (ganze Punkte).",
   risk_queue_title: "Prüfwarteschlange",
   risk_queue_hint: "Anfragen, die auf eine Entscheidung, Angaben oder die Zweitprüfung warten – die ältesten zuerst.",

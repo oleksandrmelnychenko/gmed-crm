@@ -27,7 +27,6 @@ import {
   billingExtrasPatch,
   billingExtrasValue,
   draftFromBillingExtras,
-  parseEuroAmount,
   type BillingExtrasDraft,
   type BillingExtrasField,
   asksAccount,
@@ -475,7 +474,7 @@ export function BillingSections({
                 </LabeledField>
               ) : null}
             </div>
-            {/* Block C asks through whom a payment via a third party goes, and the expected total. */}
+            {/* Block C asks through whom a payment via a third party goes. */}
             {billing.via_third_party_kind !== undefined || billing.expected_total_eur !== undefined ? (
               <BillingExtras
                 request={request}
@@ -508,9 +507,9 @@ export function BillingSections({
 
 /**
  * Block C's extras (trigger flow 2026-10-07): through whom a payment via a
- * third party goes (a person or a payment service provider) and the expected
- * total in EUR. They save on the billing route on their own, only what
- * changed; an amount that is no number is not sent and is marked.
+ * third party goes (a person or a payment service provider). It saves on the
+ * billing route on its own, only what changed. The expected total in EUR is
+ * no longer asked (owner 2026-10-12: GMED sets the order for the treatment).
  */
 function BillingExtras({
   request,
@@ -577,9 +576,7 @@ function BillingExtras({
 
   useAutosave(draft, save);
 
-  const amountInvalid = parseEuroAmount(draft.expected_total_eur) === undefined;
   const errorFor = (field: BillingExtrasField) => {
-    if (field === "expected_total_eur" && amountInvalid) return text.invalidField;
     return refused[field] !== undefined && refused[field] === billingExtrasValue(field, draft) ? text.invalidField : undefined;
   };
   const control = (field: BillingExtrasField) => ({
@@ -612,24 +609,7 @@ function BillingExtras({
           </NativeComboboxSelect>
         </LabeledField>
       ) : null}
-      <LabeledField
-        id="lead-request-expected_total_eur"
-        label={text.billingExtrasFields.expected_total_eur}
-        error={errorFor("expected_total_eur")}
-        required
-        className="sm:col-start-1"
-      >
-        <Input
-          {...control("expected_total_eur")}
-          className={inputClass}
-          inputMode="decimal"
-          autoComplete="off"
-          maxLength={20}
-          value={draft.expected_total_eur}
-          onChange={(event) => setDraft((current) => ({ ...current, expected_total_eur: event.target.value }))}
-        />
-        <p className="text-xs leading-5 text-muted-foreground">{text.expectedTotalHint}</p>
-      </LabeledField>
+      {/* The expected total is no longer asked (owner 2026-10-12): GMED sets the order. */}
     </div>
   );
 }

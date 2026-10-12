@@ -4828,7 +4828,8 @@ async fn staff_estimated_total(
                 ),
             )
             .await?;
-            // The lead's value counts for the risk assessment (T10, T11).
+            // Informational for staff since the amount triggers were retired
+            // (owner 2026-10-12); the reassessment keeps the stored state fresh.
             crate::risk::store::reassess(
                 &mut tx,
                 lead_id,

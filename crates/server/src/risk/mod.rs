@@ -42,11 +42,19 @@ pub const VARIANT_LIST_2: &str = "list_2";
 /// the recipient, not the payer (QA 2026-10-12, round 3). Points as T16.
 pub const VARIANT_RECIPIENT: &str = "recipient";
 
-/// The trigger keys (contract section 1), in table order.
-pub const TRIGGER_KEYS: [&str; 16] = [
-    "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12", "T13", "T14", "T15",
-    "T16",
+/// The trigger keys (contract section 1), in table order. T10 and T11 are
+/// retired ([`RETIRED_TRIGGERS`]); the other keys keep their names.
+pub const TRIGGER_KEYS: [&str; 14] = [
+    "T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T12", "T13", "T14", "T15", "T16",
 ];
+
+/// The amount triggers T10 (the lead's value above threshold 1) and T11 (the
+/// same payer's 12-month sum above threshold 2), retired 2026-10-12 (owner):
+/// the amount is GMED's own order for the treatment, not something the lead
+/// or the payer is asked for. A stored configuration naming them is read
+/// without them, and a stored assessment drops them at its next
+/// reassessment ([`merge`]).
+pub const RETIRED_TRIGGERS: [&str; 2] = ["T10", "T11"];
 
 /// The follow-up blocks, in letter order.
 /// K (owner 2026-10-09): birth name, place and country of birth, asked only
@@ -70,8 +78,6 @@ pub fn trigger_blocks(key: &str) -> &'static [&'static str] {
         "T7" => &["E"],
         "T8" => &["A", "C"],
         "T9" => &["C"],
-        "T10" => &["A"],
-        "T11" => &["A", "C"],
         "T12" => &["I"],
         "T13" => &["G"],
         "T14" => &["H"],
@@ -118,8 +124,8 @@ pub struct RiskConfig {
     pub list_2: Vec<String>,
     pub points: BTreeMap<String, TriggerPoints>,
     pub knockout: Vec<String>,
-    pub threshold_1_eur: f64,
-    pub threshold_2_eur: f64,
+    // `threshold_1_eur` / `threshold_2_eur` of a stored configuration (T10,
+    // T11, retired 2026-10-12) are ignored when it is read.
     pub level_2_from: i32,
     pub level_3_from: i32,
     pub level_2_blocks_automatic: bool,
@@ -144,8 +150,6 @@ impl Default for RiskConfig {
             ("T7", TriggerPoints::Single(1)),
             ("T8", TriggerPoints::Single(2)),
             ("T9", TriggerPoints::Single(4)),
-            ("T10", TriggerPoints::Single(1)),
-            ("T11", TriggerPoints::Single(2)),
             ("T12", TriggerPoints::Single(2)),
             ("T13", TriggerPoints::Single(1)),
         ] {
@@ -162,8 +166,6 @@ impl Default for RiskConfig {
             list_2: codes(&["IR", "KP", "MM"]),
             points,
             knockout: codes(&["T14", "T15", "T16"]),
-            threshold_1_eur: 10_000.0,
-            threshold_2_eur: 25_000.0,
             level_2_from: 4,
             level_3_from: 9,
             level_2_blocks_automatic: true,
@@ -217,9 +219,13 @@ impl RiskConfig {
 
     /// Checks and normalises a configuration sent by the CEO: ISO codes (a
     /// code in both lists stays only in list 2), points 0–20, 0 < level 2 <
-    /// level 3, thresholds > 0, known trigger keys. The reviewer ids are
-    /// checked against the users by the caller.
+    /// level 3, known trigger keys (the retired T10 and T11 are dropped). The
+    /// reviewer ids are checked against the users by the caller.
     pub fn validated(mut self) -> Result<Self, ConfigError> {
+        self.points
+            .retain(|key, _| !RETIRED_TRIGGERS.contains(&key.as_str()));
+        self.knockout
+            .retain(|key| !RETIRED_TRIGGERS.contains(&key.as_str()));
         self.list_1 = normalized_codes(&self.list_1, "list_1")?;
         self.list_2 = normalized_codes(&self.list_2, "list_2")?;
         let list_2 = self.list_2.clone();
@@ -251,12 +257,6 @@ impl RiskConfig {
         }
         if self.level_3_from > 1_000 {
             return Err(config_error("level_3_from", "Level bound is too high"));
-        }
-        if !(self.threshold_1_eur.is_finite() && self.threshold_1_eur > 0.0) {
-            return Err(config_error("threshold_1_eur", "Thresholds must be > 0"));
-        }
-        if !(self.threshold_2_eur.is_finite() && self.threshold_2_eur > 0.0) {
-            return Err(config_error("threshold_2_eur", "Thresholds must be > 0"));
         }
         if self.version < 1 {
             self.version = 1;
@@ -330,10 +330,6 @@ pub struct Inputs {
     /// Different payers named on the lead's non-cancelled orders.
     pub order_payers: usize,
     pub payment_method: Option<String>,
-    /// The lead's value (T10).
-    pub lead_value_eur: f64,
-    /// 12-month sum of the same payer incl. this lead (T11).
-    pub payer_year_sum_eur: f64,
     pub identity_document_on_file: bool,
     pub id_document_unreadable: bool,
     pub id_valid_until: Option<NaiveDate>,
@@ -372,7 +368,7 @@ impl Inputs {
             .is_none_or(|kind| kind == crate::routes::lead_payer::PAYER_TYPE_PERSON)
     }
 
-    /// Whose score the "who pays" triggers (T8–T11) add to.
+    /// Whose score the "who pays" triggers (T8, T9) add to.
     pub fn who_pays(&self) -> &'static str {
         if self.third_party {
             SUBJECT_PAYER
@@ -505,13 +501,7 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
     if matches!(inputs.payment_method.as_deref(), Some("cash" | "crypto")) {
         fire("T9", who_pays, None);
     }
-    // T10 / T11: amounts.
-    if inputs.lead_value_eur > config.threshold_1_eur {
-        fire("T10", who_pays, None);
-    }
-    if inputs.payer_year_sum_eur > config.threshold_2_eur {
-        fire("T11", who_pays, None);
-    }
+    // T10 / T11 (amounts) are retired (owner 2026-10-12, [`RETIRED_TRIGGERS`]).
     // T12: identity.
     if inputs.identity_issue() {
         fire("T12", SUBJECT_PATIENT, None);
@@ -596,8 +586,10 @@ pub struct Merged {
 /// upload does not keep it), T16 unless its subject is in `t16_kept_for`.
 fn withdrawable(entry: &Sticky, t16_kept_for: &[&str]) -> bool {
     // T13 too (owner 2026-10-10): a "yes" to the representative or guardianship
-    // question taken back left a point for good.
-    matches!(entry.key.as_str(), "T12" | "T13")
+    // question taken back left a point for good. The retired amount triggers
+    // never fire again and go as well (owner 2026-10-12).
+    RETIRED_TRIGGERS.contains(&entry.key.as_str())
+        || matches!(entry.key.as_str(), "T12" | "T13")
         || (entry.key == "T16" && !t16_kept_for.contains(&entry.subject.as_str()))
 }
 
@@ -919,39 +911,25 @@ mod tests {
 
     #[test]
     fn who_pays_triggers_go_to_the_payer_or_the_patient() {
-        let amounts = Inputs {
+        let route = Inputs {
             via_third_party_person: true,
             payment_method: Some("cash".into()),
-            lead_value_eur: 10_000.01,
-            payer_year_sum_eur: 25_000.01,
             ..clean()
         };
         assert_eq!(
-            fire(amounts.clone()),
-            vec![
-                ("T8", "patient", None, 2),
-                ("T9", "patient", None, 4),
-                ("T10", "patient", None, 1),
-                ("T11", "patient", None, 2),
-            ]
+            fire(route.clone()),
+            vec![("T8", "patient", None, 2), ("T9", "patient", None, 4)]
         );
         let payer = fire(Inputs {
             third_party: true,
             payer_type: Some("person".into()),
             relationship_kind: Some("spouse".into()),
-            ..amounts
+            ..route
         });
         assert!(payer.contains(&("T8", "payer", None, 2)));
-        assert!(payer.contains(&("T11", "payer", None, 2)));
-        // At the threshold nothing fires; two payers on orders fire T8; crypto T9.
-        assert!(
-            fire(Inputs {
-                lead_value_eur: 10_000.0,
-                payer_year_sum_eur: 25_000.0,
-                ..clean()
-            })
-            .is_empty()
-        );
+        assert!(payer.contains(&("T9", "payer", None, 4)));
+        // No amount fires anything (T10 / T11 retired 2026-10-12); two payers
+        // on orders fire T8; an older crypto answer T9.
         assert_eq!(
             fire(Inputs {
                 order_payers: 2,
@@ -1507,10 +1485,19 @@ mod tests {
         let mut bad = default.clone();
         bad.level_2_from = 9;
         assert_eq!(bad.validated().unwrap_err().field, "level_2_from");
-        let mut bad = default.clone();
-        bad.threshold_2_eur = 0.0;
-        assert_eq!(bad.validated().unwrap_err().field, "threshold_2_eur");
         assert_eq!(RiskConfig::from_setting(None), default);
+        // A configuration stored before 2026-10-12 still names the retired
+        // amount triggers and their thresholds: read without them, not reset.
+        let mut older = serde_json::to_value(&default).unwrap();
+        older["points"]["T10"] = serde_json::json!(1);
+        older["points"]["T11"] = serde_json::json!(2);
+        older["points"]["T9"] = serde_json::json!(3);
+        older["threshold_1_eur"] = serde_json::json!(10_000.0);
+        older["threshold_2_eur"] = serde_json::json!(25_000.0);
+        let read = RiskConfig::from_setting(Some(older));
+        assert_eq!(read.points_for("T9", None), 3, "the CEO's points stay");
+        assert!(!read.points.contains_key("T10") && !read.points.contains_key("T11"));
+        assert!(!TRIGGER_KEYS.contains(&"T10") && !TRIGGER_KEYS.contains(&"T11"));
         assert_eq!(
             RiskConfig::from_setting(Some(serde_json::json!({"version": "x"}))),
             default
