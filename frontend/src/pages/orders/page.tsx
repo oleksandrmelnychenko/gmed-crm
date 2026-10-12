@@ -405,7 +405,9 @@ function OrderSummaryLine({
     <div className={cn("flex items-center gap-3 rounded-lg py-2", className)}>
       <span className="min-w-0 text-sm text-muted-foreground">{label}</span>
       <span className="h-px min-w-4 flex-1 bg-border/70" />
-      <span className="min-w-0 max-w-[50%] break-words text-right text-sm font-semibold leading-tight text-foreground">
+      {/* The value keeps its width (dates must not break mid-number); a long
+          label wraps instead. */}
+      <span className="max-w-[50%] shrink-0 break-words text-right text-sm font-semibold leading-tight text-foreground">
         {value}
       </span>
     </div>
@@ -5448,7 +5450,7 @@ function useOrdersPageContent() {
                             <div className="mt-1 text-sm text-muted-foreground">
                               {l("orders_verknupfte_arbeitsbereiche_nutzen_um_medizinische_slots")}
                             </div>
-                            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3">
+                            <div className="mt-4 grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2">
                               {[
                                 {
                                   label: l("orders_medizinische_und_nicht_medizinische_termine"),
@@ -5469,18 +5471,18 @@ function useOrdersPageContent() {
                                 <StaffLink
                                   key={link.label}
                                   to={link.href}
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  <div className="relative z-10">
-                                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
+                                    <ArrowUpRight aria-hidden className="size-4" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-foreground">
                                       {link.label}
-                                    </h3>
-                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                    </span>
+                                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
                                       {link.description}
-                                    </p>
-                                  </div>
-                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                                    </span>
                                   </span>
                                 </StaffLink>
                               ))}
@@ -5841,7 +5843,7 @@ function useOrdersPageContent() {
                                 orderDetail.execution_flow.issues_resolved_at,
                               )}
                             />
-                            <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
+                            <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2 pt-2">
                               {[
                                 {
                                   label: l("orders_termine"),
@@ -5862,18 +5864,18 @@ function useOrdersPageContent() {
                                 <StaffLink
                                   key={link.label}
                                   to={link.href}
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  <div className="relative z-10">
-                                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
+                                    <ArrowUpRight aria-hidden className="size-4" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-foreground">
                                       {link.label}
-                                    </h3>
-                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                    </span>
+                                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
                                       {link.description}
-                                    </p>
-                                  </div>
-                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                                    </span>
                                   </span>
                                 </StaffLink>
                               ))}
@@ -6185,7 +6187,7 @@ function useOrdersPageContent() {
                                 )}
                               />
                             </div>
-                            <div className="grid grid-cols-[repeat(auto-fit,minmax(185px,1fr))] gap-3 pt-2">
+                            <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-2 pt-2">
                               {[
                                 {
                                   label: l("orders_termine"),
@@ -6212,18 +6214,18 @@ function useOrdersPageContent() {
                                 <StaffLink
                                   key={link.label}
                                   to={link.href}
-                                  className="group relative min-h-[150px] overflow-hidden rounded-xl border border-slate-200 bg-slate-50/80 p-4 pb-14 text-left transition-colors hover:border-orange-200 hover:bg-orange-50/50"
+                                  className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 >
-                                  <div className="relative z-10">
-                                    <h3 className="text-[13px] font-semibold tracking-tight text-foreground">
+                                  <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
+                                    <ArrowUpRight aria-hidden className="size-4" />
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-foreground">
                                       {link.label}
-                                    </h3>
-                                    <p className="mt-2 text-xs leading-tight text-muted-foreground">
+                                    </span>
+                                    <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
                                       {link.description}
-                                    </p>
-                                  </div>
-                                  <span className="absolute bottom-0 right-0 flex size-12 items-center justify-center rounded-br-xl rounded-tl-[1.75rem] bg-orange-100 text-orange-700 transition-all duration-200 group-hover:size-14 group-hover:bg-orange-200 group-hover:text-orange-800">
-                                    <ArrowUpRight className="size-4 transition-transform duration-200 group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+                                    </span>
                                   </span>
                                 </StaffLink>
                               ))}
@@ -7101,7 +7103,7 @@ function useOrdersPageContent() {
                                   </div>
                                 </div>
 
-                                <div className="grid gap-1.5 border-t border-border bg-muted/15 p-3 min-[760px]:grid-cols-2">
+                                <div className="grid gap-1.5 border-t border-border bg-muted/15 p-3 min-[760px]:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                                   <MiniMetric
                                     label={t.common_provider}
                                     value={providerValue}
