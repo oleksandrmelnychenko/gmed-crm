@@ -413,21 +413,16 @@ pub(crate) const PORTAL_LEAD_SQL: &str = r#"
 /// The lead's own login (`l.portal_user_id`) is closed for the request (QA
 /// 2026-10-12, A3-01; owner decision 2026-10-03: a minor has no login of its
 /// own): the lead is a minor — under 18 today by the date of birth on file,
-/// `CURRENT_DATE` being German time in every session — and a parent's or
-/// guardian's access was issued for it (`lead_portal_access`, kind
-/// `guardian`, active or revoked since: a revoked parent's access does not
-/// reopen the child's login). The login itself stays active: it reaches no
-/// request (reads and writes answer 403 `lead_request_guardian_only`, the list
-/// is empty with `own_access_closed`) and staff issue no password for it.
-/// Nothing is stored, so a corrected date of birth (18 or older) opens it
-/// again by itself. Expects the lead as `l`.
+/// `CURRENT_DATE` being German time in every session. Since 2026-10-12
+/// (owner) this holds before any parent's access is issued too: the child's
+/// login created with the lead never fills in the request. The login itself
+/// stays active: it reaches no request (reads and writes answer 403
+/// `lead_request_guardian_only`, the list is empty with `own_access_closed`)
+/// and staff issue no password for it. Nothing is stored, so a corrected date
+/// of birth (18 or older) opens it again by itself. Expects the lead as `l`.
 pub(crate) const OWN_LOGIN_CLOSED_SQL: &str = r#"(
     l.date_of_birth IS NOT NULL
-    AND l.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')
-    AND EXISTS (
-        SELECT 1 FROM lead_portal_access closed_by
-        WHERE closed_by.lead_id = l.id AND closed_by.kind = 'guardian'
-    ))"#;
+    AND l.date_of_birth > (CURRENT_DATE - INTERVAL '18 years'))"#;
 
 /// The code of the refusal of a request to the closed own login of a minor
 /// ([`OWN_LOGIN_CLOSED_SQL`]), also its `error`, so the UI translates it.
@@ -480,7 +475,7 @@ fn lead_request_path_id(path: &str) -> Option<Uuid> {
 }
 
 /// The requests `user_id` reaches, oldest first. The own login of a minor
-/// whose parents have access reaches nothing ([`OWN_LOGIN_CLOSED_SQL`]).
+/// reaches nothing ([`OWN_LOGIN_CLOSED_SQL`]).
 pub(crate) async fn accessible_leads<'e, E>(
     executor: E,
     user_id: Uuid,
@@ -2718,9 +2713,9 @@ pub(crate) fn not_found() -> axum::response::Response {
 }
 
 /// `GET /me/lead-requests`: every request the caller reaches, oldest first.
-/// `own_access_closed` is true for the own login of a minor whose parents
-/// have access ([`OWN_LOGIN_CLOSED_SQL`]): the cabinet then says, neutrally,
-/// that only the parents or the guardian fill in the request.
+/// `own_access_closed` is true for the own login of a minor
+/// ([`OWN_LOGIN_CLOSED_SQL`]): the cabinet then says, neutrally, that only
+/// the parents or the guardian fill in the request.
 async fn list_my_lead_requests(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2736,6 +2731,9 @@ async fn list_my_lead_requests(
         Ok(closed) => closed,
         Err(error) => return internal(error, "check the minor's own login"),
     };
+    if own_access_closed {
+        notify_parents_access_missing(&state, auth.user_id).await;
+    }
     let mut requests = Vec::with_capacity(leads.len());
     for (lead_id, kind) in leads {
         match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -2744,6 +2742,47 @@ async fn list_my_lead_requests(
         }
     }
     Json(json!({ "requests": requests, "own_access_closed": own_access_closed })).into_response()
+}
+
+/// A minor signed in with the own login before anybody gave the parents
+/// access (owner 2026-10-12): staff are told once per lead to issue it, with
+/// the notice the cabinet sends for a date of birth under 18. Best effort.
+async fn notify_parents_access_missing(state: &AppState, user_id: Uuid) {
+    let leads: Vec<Uuid> = match sqlx::query_scalar(&format!(
+        r#"SELECT l.id FROM leads l
+           WHERE l.portal_user_id = $1
+             AND {PORTAL_LEAD_SQL}
+             AND {OWN_LOGIN_CLOSED_SQL}
+             AND NOT EXISTS (
+                 SELECT 1 FROM lead_portal_access a
+                 WHERE a.lead_id = l.id AND a.kind = 'guardian'
+             )
+             AND NOT EXISTS (
+                 SELECT 1 FROM user_notifications n
+                 WHERE n.entity_type = 'lead' AND n.entity_id = l.id
+                   AND n.kind = 'lead_portal_minor'
+             )"#
+    ))
+    .bind(user_id)
+    .fetch_all(&state.db)
+    .await
+    {
+        Ok(leads) => leads,
+        Err(error) => {
+            tracing::warn!(%error, "find minors without parents' access");
+            return;
+        }
+    };
+    for lead_id in leads {
+        notify_lead_staff_once(
+            state,
+            lead_id,
+            "lead_portal_minor",
+            "Patient is under 18: issue the parents' access",
+            "The patient signed in with the own login, but is under 18. A minor has no own login; issue access to a parent or legal guardian.",
+        )
+        .await;
+    }
 }
 
 /// `GET /me/lead-requests/{lead_id}`.
@@ -2799,7 +2838,7 @@ async fn update_my_personal_data(
         && crate::routes::leads::is_minor_on(next.date_of_birth, today)
     {
         drop(tx);
-        notify_lead_staff(
+        notify_lead_staff_once(
             &state,
             lead_id,
             "lead_portal_minor",
@@ -2823,7 +2862,10 @@ async fn update_my_personal_data(
         };
     }
 
-    let now = Utc::now();
+    let now = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal update time"),
+    };
     let mut markers = Map::new();
     for field in &changed {
         markers.insert(
@@ -3090,10 +3132,14 @@ async fn update_my_payer(
             Err(error) => internal(error, "load request"),
         };
     };
+    let now = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal update time"),
+    };
     markers.insert(
         PAYER_MARKER.to_string(),
         json!({
-            "at": Utc::now(),
+            "at": now,
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(
@@ -3132,6 +3178,16 @@ async fn update_my_payer(
     }
 }
 
+/// Portal changes and submission use the same database clock. Read it after
+/// the lead lock: transaction-start time can predate a preceding writer.
+pub(crate) async fn portal_update_time(
+    conn: &mut sqlx::PgConnection,
+) -> Result<DateTime<Utc>, sqlx::Error> {
+    sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(conn)
+        .await
+}
+
 /// The "entered by the patient" marker of sections 7 and 8, made from the
 /// stored declaration (`None` without one).
 async fn billing_marker(
@@ -3140,20 +3196,20 @@ async fn billing_marker(
     actor: Uuid,
     kind: AccessKind,
 ) -> Result<Option<Value>, sqlx::Error> {
-    Ok(lead_payer::load_declaration(conn, lead_id)
-        .await?
-        .map(|declaration| {
-            json!({
-                "at": Utc::now(),
-                "by": actor,
-                "kind": kind.as_str(),
-                "hash": value_marker(
-                    lead_id,
-                    BILLING_MARKER,
-                    Some(&declaration.billing_marker_value()),
-                ),
-            })
-        }))
+    let Some(declaration) = lead_payer::load_declaration(&mut *conn, lead_id).await? else {
+        return Ok(None);
+    };
+    let now = portal_update_time(conn).await?;
+    Ok(Some(json!({
+        "at": now,
+        "by": actor,
+        "kind": kind.as_str(),
+        "hash": value_marker(
+            lead_id,
+            BILLING_MARKER,
+            Some(&declaration.billing_marker_value()),
+        ),
+    })))
 }
 
 /// `POST /me/lead-requests/{lead_id}/billing`: autosave of where the invoice
@@ -3369,10 +3425,14 @@ async fn update_my_billing(
         }
     }
     if let Some(value) = &recipient_marker {
+        let now = match portal_update_time(&mut tx).await {
+            Ok(now) => now,
+            Err(error) => return internal(error, "read portal update time"),
+        };
         markers.insert(
             INVOICE_RECIPIENT_MARKER.to_string(),
             json!({
-                "at": Utc::now(),
+                "at": now,
                 "by": auth.user_id,
                 "kind": kind.as_str(),
                 "hash": value_marker(lead_id, INVOICE_RECIPIENT_MARKER, Some(value)),
@@ -3579,9 +3639,13 @@ async fn update_my_enhanced_details(
     {
         return internal(error, "store profession");
     }
+    let now = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal update time"),
+    };
     let marker = json!({
         ENHANCED_DETAILS_MARKER: {
-            "at": Utc::now(),
+            "at": now,
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(
@@ -3707,10 +3771,14 @@ async fn update_my_identification(
     {
         return internal(error, "store identification");
     }
+    let now = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal update time"),
+    };
     let mut marker = json!({});
     if !changed.is_empty() {
         marker[IDENTIFICATION_MARKER] = json!({
-            "at": Utc::now(),
+            "at": now,
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(lead_id, IDENTIFICATION_MARKER, Some(&next.marker_value())),
@@ -3718,13 +3786,13 @@ async fn update_my_identification(
     }
     if !statements_changed.is_empty() {
         marker[STATEMENTS_MARKER] = json!({
-            "at": Utc::now(),
+            "at": now,
             "by": auth.user_id,
             "kind": kind.as_str(),
             "hash": value_marker(
                 lead_id,
                 STATEMENTS_MARKER,
-                Some(&format!("{}|{}", statements_changed.join(","), Utc::now())),
+                Some(&format!("{}|{}", statements_changed.join(","), now)),
             ),
         });
     }
@@ -3789,6 +3857,10 @@ struct ConsentRevokeRequest {
 #[serde(deny_unknown_fields)]
 struct ConsentChoicesRequest {
     choices: consent_choices::ConsentChoices,
+    /// The persons or institutions named for "named recipients" (owner
+    /// 2026-10-12); an older cabinet sends none.
+    #[serde(default)]
+    recipients: Vec<consent_choices::ConsentRecipient>,
     /// [`consent_choices::TEXT_VERSION`] of the texts the person saw.
     version: String,
     language: String,
@@ -3801,6 +3873,8 @@ fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>, viewer:
     json!({
         "version": consent_choices::TEXT_VERSION,
         "choices": choice.map(|choice| choice.choices),
+        "recipients": choice.map(|choice| choice.recipients.clone()).unwrap_or_default(),
+        "max_recipients": consent_choices::MAX_RECIPIENTS,
         "chosen_at": choice.map(|choice| choice.chosen_at),
         "chosen_by_me": choice.map(|choice| choice.chosen_by == Some(viewer)),
     })
@@ -3845,6 +3919,23 @@ async fn save_consent_choices(
             json!({ "required": ["agency_processing", "doctors_to_agency", "data_system"] }),
         );
     }
+    // "Named recipients" names somebody (owner 2026-10-12); the list is part
+    // of the choice and printed only while that option is chosen.
+    let recipients = match consent_choices::clean_recipients(&body.choices, body.recipients) {
+        Ok(recipients) => recipients,
+        Err(code) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                code,
+                "Name at least one recipient (at most five): name, who they are, optionally how to reach them",
+                json!({ "field": "recipients", "max": consent_choices::MAX_RECIPIENTS }),
+            );
+        }
+    };
+    let recipients_json = match serde_json::to_value(&recipients) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode recipients"),
+    };
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
@@ -3878,8 +3969,8 @@ async fn save_consent_choices(
     let (choice_id, chosen_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         r#"INSERT INTO consent_form_choices (
                template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-               source, language, text_version)
-           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6
+               source, language, text_version, recipients)
+           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8
            FROM leads l WHERE l.id = $7
            RETURNING id, chosen_at"#,
     )
@@ -3890,6 +3981,7 @@ async fn save_consent_choices(
     .bind(&language)
     .bind(consent_choices::TEXT_VERSION)
     .bind(lead_id)
+    .bind(&recipients_json)
     .fetch_one(&mut *tx)
     .await
     {
@@ -3907,6 +3999,8 @@ async fn save_consent_choices(
                 "consent_form_choice_id": choice_id,
                 "template": consent_choices::TEMPLATE,
                 "choices": choices,
+                // Names stay out of the audit trail (erasure); the choice row keeps them.
+                "recipients_count": recipients.len(),
                 "text_version": consent_choices::TEXT_VERSION,
                 "language": language,
                 "access_kind": kind.as_str(),
@@ -3931,6 +4025,7 @@ async fn save_consent_choices(
     let saved = consent_choices::OwnConsentChoice {
         id: choice_id,
         choices: body.choices,
+        recipients,
         chosen_at,
         source: "lead_portal".into(),
         access_kind: Some(kind.as_str().to_string()),
@@ -5006,13 +5101,18 @@ async fn submit_my_lead_request(
         Ok(counts) => counts,
         Err(error) => return internal(error, "count uploads"),
     };
+    let submitted_at = match portal_update_time(&mut tx).await {
+        Ok(now) => now,
+        Err(error) => return internal(error, "read portal submission time"),
+    };
     if let Err(error) = sqlx::query(
         r#"UPDATE leads
-           SET portal_submitted_at = now(), portal_submitted_by = $2, updated_at = now()
+           SET portal_submitted_at = $3, portal_submitted_by = $2, updated_at = $3
            WHERE id = $1"#,
     )
     .bind(lead_id)
     .bind(auth.user_id)
+    .bind(submitted_at)
     .execute(&mut *tx)
     .await
     {
@@ -5022,11 +5122,12 @@ async fn submit_my_lead_request(
     // exists: the required statements are in it). Same time as the send.
     if let Err(error) = sqlx::query(
         r#"UPDATE lead_gwg_declarations
-           SET declared_correct_at = now(), declared_correct_by = $2
+           SET declared_correct_at = $3, declared_correct_by = $2
            WHERE lead_id = $1"#,
     )
     .bind(lead_id)
     .bind(auth.user_id)
+    .bind(submitted_at)
     .execute(&mut *tx)
     .await
     {
@@ -5131,6 +5232,94 @@ async fn submit_my_lead_request(
 /// Stores a notification about the lead for its owner and the patient
 /// managers (the CEO when there is neither). Like the retention notices it
 /// names no person; best effort.
+const LEAD_NOTIFICATION_RECIPIENTS_SQL: &str = r#"WITH owner AS (
+       SELECT u.id FROM leads l
+       JOIN users u ON u.id = l.created_by
+       WHERE l.id = $1 AND u.is_active AND u.role <> 'patient'
+   ), managers AS (
+       SELECT id FROM users WHERE is_active AND role = 'patient_manager'
+   ), fallback AS (
+       SELECT id FROM users
+       WHERE is_active AND role = 'ceo'
+         AND NOT EXISTS (SELECT 1 FROM owner)
+         AND NOT EXISTS (SELECT 1 FROM managers)
+   )
+   SELECT id FROM owner
+   UNION SELECT id FROM managers
+   UNION SELECT id FROM fallback"#;
+
+/// A once-per-lead notice, including concurrent cabinet reads and retries.
+/// The lead lock protects the recheck and the whole recipient batch; realtime
+/// events are published only after the transaction commits.
+async fn notify_lead_staff_once(
+    state: &AppState,
+    lead_id: Uuid,
+    kind: &str,
+    title: &str,
+    body: &str,
+) {
+    let stored: Result<Vec<(Uuid, Uuid)>, sqlx::Error> = async {
+        let mut tx = state.db.begin().await?;
+        let lead = sqlx::query_scalar::<_, Uuid>("SELECT id FROM leads WHERE id = $1 FOR UPDATE")
+            .bind(lead_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+        if lead.is_none() {
+            return Ok(Vec::new());
+        }
+        let notified: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM user_notifications
+             WHERE entity_type = 'lead' AND entity_id = $1 AND kind = $2)",
+        )
+        .bind(lead_id)
+        .bind(kind)
+        .fetch_one(&mut *tx)
+        .await?;
+        if notified {
+            return Ok(Vec::new());
+        }
+        let recipients: Vec<Uuid> = sqlx::query_scalar(LEAD_NOTIFICATION_RECIPIENTS_SQL)
+            .bind(lead_id)
+            .fetch_all(&mut *tx)
+            .await?;
+        let mut stored = Vec::with_capacity(recipients.len());
+        for recipient in recipients {
+            let notification_id: Uuid = sqlx::query_scalar(
+                "INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id)
+                 VALUES ($1, $2, $3, $4, 'lead', $5) RETURNING id",
+            )
+            .bind(recipient)
+            .bind(kind)
+            .bind(title)
+            .bind(body)
+            .bind(lead_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            stored.push((recipient, notification_id));
+        }
+        tx.commit().await?;
+        Ok(stored)
+    }
+    .await;
+    let stored = match stored {
+        Ok(stored) => stored,
+        Err(error) => {
+            tracing::warn!(%error, %lead_id, kind, "store once-only lead portal notification");
+            return;
+        }
+    };
+    for (recipient, notification_id) in stored {
+        crate::realtime::publish_notification_event(
+            state,
+            recipient,
+            "notification.created",
+            Some(notification_id),
+            json!({ "entity_type": "lead", "entity_id": lead_id }),
+        )
+        .await;
+    }
+}
+
 pub(crate) async fn notify_lead_staff(
     state: &AppState,
     lead_id: Uuid,
@@ -5151,26 +5340,10 @@ pub(crate) async fn notify_lead_staff_with(
     body: &str,
     params: Option<Value>,
 ) {
-    let recipients: Vec<Uuid> = match sqlx::query_scalar(
-        r#"WITH owner AS (
-               SELECT u.id FROM leads l
-               JOIN users u ON u.id = l.created_by
-               WHERE l.id = $1 AND u.is_active AND u.role <> 'patient'
-           ), managers AS (
-               SELECT id FROM users WHERE is_active AND role = 'patient_manager'
-           ), fallback AS (
-               SELECT id FROM users
-               WHERE is_active AND role = 'ceo'
-                 AND NOT EXISTS (SELECT 1 FROM owner)
-                 AND NOT EXISTS (SELECT 1 FROM managers)
-           )
-           SELECT id FROM owner
-           UNION SELECT id FROM managers
-           UNION SELECT id FROM fallback"#,
-    )
-    .bind(lead_id)
-    .fetch_all(&state.db)
-    .await
+    let recipients: Vec<Uuid> = match sqlx::query_scalar(LEAD_NOTIFICATION_RECIPIENTS_SQL)
+        .bind(lead_id)
+        .fetch_all(&state.db)
+        .await
     {
         Ok(ids) => ids,
         Err(error) => {
@@ -5354,129 +5527,172 @@ async fn get_lead_portal_intake(
     // the step is shown to the cabinet, which questions it asks, and when the
     // lead last changed the answers while they still are what the lead
     // entered. The proofs are listed also when another payer was named since.
-    let (representation, representation_updated_at, billing, billing_updated_at, enhanced_details) =
-        if statements_visible {
-            let loaded = match state.db.acquire().await {
-                Ok(mut conn) => match lead_representatives::load(&mut conn, lead_id).await {
-                    Ok(loaded) => {
-                        let loaded = loaded.unwrap_or_default();
-                        match extra_state(
-                            &mut conn,
-                            lead_id,
-                            declaration.as_ref(),
-                            &loaded.representation,
-                            None,
-                        )
-                        .await
-                        {
-                            // Block C's answers (the expected total, through whom a
-                            // payment via a third party goes) beside section 8.
-                            Ok(extra) => {
-                                match crate::risk::cabinet::payer_extras(&mut conn, lead_id).await {
-                                    // The invoice recipient of step 3 (2026-10-11).
-                                    Ok((_, billing_extras)) => {
-                                        lead_invoice_recipient::load(&mut conn, lead_id).await.map(
-                                            |recipient| (loaded, extra, billing_extras, recipient),
-                                        )
-                                    }
-                                    Err(error) => Err(error),
+    let (
+        representation,
+        representation_updated_at,
+        billing,
+        billing_updated_at,
+        enhanced_details,
+        payer_organisation,
+    ) = if statements_visible {
+        let loaded = match state.db.acquire().await {
+            Ok(mut conn) => match lead_representatives::load(&mut conn, lead_id).await {
+                Ok(loaded) => {
+                    let loaded = loaded.unwrap_or_default();
+                    match extra_state(
+                        &mut conn,
+                        lead_id,
+                        declaration.as_ref(),
+                        &loaded.representation,
+                        None,
+                    )
+                    .await
+                    {
+                        // Block C's answers (the expected total, through whom a
+                        // payment via a third party goes) beside section 8.
+                        Ok(extra) => {
+                            match crate::risk::cabinet::payer_extras(&mut conn, lead_id).await {
+                                // The invoice recipient of step 3 (2026-10-11).
+                                Ok((payer_extras, billing_extras)) => {
+                                    lead_invoice_recipient::load(&mut conn, lead_id).await.map(
+                                        |recipient| {
+                                            (loaded, extra, payer_extras, billing_extras, recipient)
+                                        },
+                                    )
                                 }
+                                Err(error) => Err(error),
                             }
-                            Err(error) => Err(error),
                         }
+                        Err(error) => Err(error),
+                    }
+                }
+                Err(error) => Err(error),
+            },
+            Err(error) => Err(error),
+        };
+        match loaded {
+            Ok((loaded, extra, payer_extras, billing_extras, stored_recipient)) => {
+                let route_by = payment_route_by(declaration.as_ref(), &loaded.representation, None);
+                let updated_at = updates.get(ENHANCED_DETAILS_MARKER).and_then(|update| {
+                    let current = value_marker(
+                        lead_id,
+                        ENHANCED_DETAILS_MARKER,
+                        Some(&enhanced_marker_value(
+                            declaration.as_ref(),
+                            &identification,
+                        )),
+                    );
+                    (update.get("hash").and_then(Value::as_str) == Some(current.as_str()))
+                        .then(|| update.get("at").cloned())
+                        .flatten()
+                });
+                let mut enhanced_details = extra.questions.to_json();
+                enhanced_details["check_required"] = json!(extra.questions.check_required);
+                enhanced_details["answers"] =
+                    enhanced_answers_json(declaration.as_ref(), &identification);
+                enhanced_details["funds_proof_documents"] = json!(
+                    uploads_of(UploadKind::SelfFundsProof)
+                        .iter()
+                        .map(staff_file)
+                        .collect::<Vec<_>>()
+                );
+                enhanced_details["updated_at"] = json!(updated_at);
+                let follow_up = match state.db.acquire().await {
+                    Ok(mut conn) => {
+                        crate::risk::cabinet::follow_up_json(&mut conn, lead_id, auth.user_id).await
                     }
                     Err(error) => Err(error),
-                },
-                Err(error) => Err(error),
-            };
-            match loaded {
-                Ok((loaded, extra, billing_extras, stored_recipient)) => {
-                    let route_by =
-                        payment_route_by(declaration.as_ref(), &loaded.representation, None);
-                    let updated_at = updates.get(ENHANCED_DETAILS_MARKER).and_then(|update| {
-                        let current = value_marker(
-                            lead_id,
-                            ENHANCED_DETAILS_MARKER,
-                            Some(&enhanced_marker_value(
-                                declaration.as_ref(),
-                                &identification,
-                            )),
-                        );
-                        (update.get("hash").and_then(Value::as_str) == Some(current.as_str()))
-                            .then(|| update.get("at").cloned())
-                            .flatten()
-                    });
-                    let mut enhanced_details = extra.questions.to_json();
-                    enhanced_details["check_required"] = json!(extra.questions.check_required);
-                    enhanced_details["answers"] =
-                        enhanced_answers_json(declaration.as_ref(), &identification);
-                    enhanced_details["funds_proof_documents"] = json!(
-                        uploads_of(UploadKind::SelfFundsProof)
-                            .iter()
-                            .map(staff_file)
-                            .collect::<Vec<_>>()
-                    );
-                    enhanced_details["updated_at"] = json!(updated_at);
-                    // What the former extra step would still ask (information for
-                    // staff; the cabinet asks the follow-up blocks of the risk
-                    // assessment now).
-                    enhanced_details["missing"] =
-                        json!(missing_extra(declaration.as_ref(), &identification, extra));
-                    // The relationship proofs of block B.
-                    enhanced_details["relationship_proof_documents"] = json!(
-                        uploads_of(UploadKind::RelationshipProof)
-                            .iter()
-                            .map(staff_file)
-                            .collect::<Vec<_>>()
-                    );
-                    let mut billing = declaration
-                        .clone()
-                        .unwrap_or_default()
-                        .billing_staff_json(route_by);
-                    crate::risk::cabinet::merge_into(&mut billing, billing_extras);
-                    // "Со слов пациента": who receives the invoice and whether
-                    // that recipient pays (step 3, 2026-10-11), as the lead
-                    // answered; an older request's section 7 read the same way.
-                    let paying_parent = lead_representatives::payer_same_person(
-                        &loaded.representation,
-                        declaration.as_ref(),
-                    )
-                    .is_some();
-                    let recipient = lead_invoice_recipient::effective(
-                        stored_recipient.as_ref(),
-                        declaration.as_ref(),
-                        paying_parent,
-                    );
-                    crate::risk::cabinet::merge_into(&mut billing, recipient.portal_json());
-                    billing["recipient_updated_at"] = json!(
-                        updates
-                            .get(INVOICE_RECIPIENT_MARKER)
-                            .filter(|update| {
-                                update.get("hash").and_then(Value::as_str)
-                                    == Some(
-                                        value_marker(
-                                            lead_id,
-                                            INVOICE_RECIPIENT_MARKER,
-                                            Some(&recipient.marker_value()),
-                                        )
-                                        .as_str(),
+                };
+                let follow_up = match follow_up {
+                    Ok(value) => value,
+                    Err(error) => return internal(error, "load relationship proof requirement"),
+                };
+                enhanced_details["relationship_proof_requested"] = json!(
+                    declaration
+                        .as_ref()
+                        .is_some_and(|payer| payer.is_third_party())
+                        && follow_up["blocks"]
+                            .as_array()
+                            .is_some_and(|blocks| blocks.iter().any(|block| block == "B"))
+                );
+                // What the former extra step would still ask (information for
+                // staff; the cabinet asks the follow-up blocks of the risk
+                // assessment now).
+                enhanced_details["missing"] =
+                    json!(missing_extra(declaration.as_ref(), &identification, extra));
+                // The relationship proofs of block B.
+                enhanced_details["relationship_proof_documents"] = json!(
+                    uploads_of(UploadKind::RelationshipProof)
+                        .iter()
+                        .map(staff_file)
+                        .collect::<Vec<_>>()
+                );
+                let mut billing = declaration
+                    .clone()
+                    .unwrap_or_default()
+                    .billing_staff_json(route_by);
+                crate::risk::cabinet::merge_into(&mut billing, billing_extras);
+                // "Со слов пациента": who receives the invoice and whether
+                // that recipient pays (step 3, 2026-10-11), as the lead
+                // answered; an older request's section 7 read the same way.
+                let paying_parent = lead_representatives::payer_same_person(
+                    &loaded.representation,
+                    declaration.as_ref(),
+                )
+                .is_some();
+                let recipient = lead_invoice_recipient::effective(
+                    stored_recipient.as_ref(),
+                    declaration.as_ref(),
+                    paying_parent,
+                );
+                crate::risk::cabinet::merge_into(&mut billing, recipient.portal_json());
+                billing["recipient_updated_at"] = json!(
+                    updates
+                        .get(INVOICE_RECIPIENT_MARKER)
+                        .filter(|update| {
+                            update.get("hash").and_then(Value::as_str)
+                                == Some(
+                                    value_marker(
+                                        lead_id,
+                                        INVOICE_RECIPIENT_MARKER,
+                                        Some(&recipient.marker_value()),
                                     )
+                                    .as_str(),
+                                )
+                        })
+                        .and_then(|update| update.get("at").cloned())
+                );
+                (
+                    lead_representatives::staff_payload(&loaded),
+                    lead_representatives::updated_at(&loaded, &updates),
+                    billing,
+                    billing_updated_at,
+                    enhanced_details,
+                    declaration
+                        .as_ref()
+                        .filter(|payer| payer.is_organisation() && payer_marker.is_some())
+                        .map(|_| {
+                            json!({
+                                "legal_form": payer_extras["organisation_legal_form"],
+                                "register_number": payer_extras["organisation_register_number"],
+                                "contact_name": payer_extras["organisation_contact_name"],
                             })
-                            .and_then(|update| update.get("at").cloned())
-                    );
-                    (
-                        lead_representatives::staff_payload(&loaded),
-                        lead_representatives::updated_at(&loaded, &updates),
-                        billing,
-                        billing_updated_at,
-                        enhanced_details,
-                    )
-                }
-                Err(error) => return internal(error, "load representation"),
+                        })
+                        .unwrap_or(Value::Null),
+                )
             }
-        } else {
-            (Value::Null, None, Value::Null, None, Value::Null)
-        };
+            Err(error) => return internal(error, "load representation"),
+        }
+    } else {
+        (
+            Value::Null,
+            None,
+            Value::Null,
+            None,
+            Value::Null,
+            Value::Null,
+        )
+    };
     // The payer's own link (phase 3a), for the same roles: how far it is and
     // the check level of the payer's answers.
     let payer_link = if statements_visible {
@@ -5507,6 +5723,15 @@ async fn get_lead_portal_intake(
     {
         Ok(rows) => rows,
         Err(error) => return internal(error, "load consents"),
+    };
+    let consent_form = if statements_visible {
+        let subject_name = [data.first_name.as_str(), data.last_name.as_str()].join(" ");
+        match super::lead_portal_consent_view::load(&state.db, lead_id, &subject_name).await {
+            Ok(value) => value,
+            Err(error) => return internal(error, "load consent choices"),
+        }
+    } else {
+        Value::Null
     };
     let medical = auth.can(Capability::PatientsMedicalView);
     let time = |row: &PgRow, column: &str| {
@@ -5606,6 +5831,7 @@ async fn get_lead_portal_intake(
         "fill_mode": fill_mode,
         "patient_fields": patient_field_markers(lead_id, &data, &updates),
         "patient_payer": payer_marker,
+        "payer_organisation": payer_organisation,
         "progress": {
             "filled": data.filled_count(),
             "total": PROGRESS_FIELDS.len(),
@@ -5623,6 +5849,7 @@ async fn get_lead_portal_intake(
             .unwrap_or(false),
         "submitted_by": submitted_by,
         "consents": consent_items,
+        "consent_form": consent_form,
         "uploads": upload_items,
         "uploads_hidden": !medical,
         "identification": identification_json,

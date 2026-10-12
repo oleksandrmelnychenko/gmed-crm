@@ -1145,6 +1145,18 @@ async fn sending_needs_the_data_and_the_request_consent_and_tells_the_managers()
         "Allianz Care"
     );
     assert_eq!(insured["progress"]["total"], 12);
+    let marker_follows_submission: bool = sqlx::query_scalar(
+        "SELECT (portal_field_updates->'has_insurance'->>'at')::timestamptz > portal_submitted_at
+         FROM leads WHERE id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(&app.suite.pool)
+    .await
+    .unwrap();
+    assert!(
+        marker_follows_submission,
+        "the database clock orders a cabinet edit after submission"
+    );
     // A change after sending is what "send again" is for.
     assert_eq!(insured["changed_since_submit"], true, "{insured}");
     let (_, intake) = json_request(
@@ -3513,8 +3525,19 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     assert!(concierge["billing"].is_null(), "{concierge}");
     assert!(concierge["billing_updated_at"].is_null(), "{concierge}");
 
-    // Cash and crypto are flagged; "to me" drops the other address and keeps
-    // the e-mail; `null` clears; "no" drops the description.
+    // Cryptocurrency is no longer offered (owner 2026-10-12).
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &billing,
+        &patient,
+        Some(json!({ "payment_method": "crypto" })),
+    )
+    .await;
+    assert!(status.is_client_error(), "{status} {body}");
+
+    // Cash and other methods are flagged; "to me" drops the other address
+    // and keeps the e-mail; `null` clears; "no" drops the description.
     let (status, body) = json_request(
         router,
         "POST",
@@ -3522,7 +3545,8 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
         &patient,
         Some(json!({
             "invoice_to": "self",
-            "payment_method": "crypto",
+            "payment_method": "other",
+            "payment_method_details": "Scheck",
             "via_third_party": false,
             "via_third_party_details": "stray text"
         })),
@@ -3540,7 +3564,7 @@ async fn the_cabinet_states_where_the_invoice_goes_and_how_the_patient_pays() {
     let (_, staff) = json_request(router, "GET", &intake, &manager, None).await;
     assert_eq!(
         staff["billing"]["compliance_flags"],
-        json!(["crypto_payment"]),
+        json!(["other_method"]),
         "{staff}"
     );
     let (status, body) = json_request(
@@ -5755,10 +5779,102 @@ async fn choose(
     .await
 }
 
+#[tokio::test]
+async fn the_minor_access_notification_is_sent_once_for_parallel_reads() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, _, child) =
+        lead_with_login(&app, "Mia", "mia.concurrent.notice@example.com").await;
+    sqlx::query("UPDATE leads SET date_of_birth = '2015-05-10' WHERE id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Hold inserts until both readers reach their notification attempt.
+    // The old check-then-insert implementation lets both pass NOT EXISTS;
+    // the locked implementation lets one insert while the other waits on it.
+    let mut gate = pool.begin().await.unwrap();
+    let gate_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *gate)
+        .await
+        .unwrap();
+    sqlx::query("LOCK TABLE user_notifications IN SHARE MODE")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let mut readers = Vec::new();
+    for _ in 0..2 {
+        let router = router.clone();
+        let bearer = child.clone();
+        readers.push(tokio::spawn(async move {
+            json_request(&router, "GET", "/api/v1/me/lead-requests", &bearer, None).await
+        }));
+    }
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        sqlx::query("SELECT pg_stat_clear_snapshot()")
+            .execute(&mut *gate)
+            .await
+            .unwrap();
+        let blocked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity waiting
+             WHERE $1 = ANY(pg_blocking_pids(waiting.pid))
+                OR EXISTS(SELECT 1 FROM pg_stat_activity first_waiter
+                          WHERE $1 = ANY(pg_blocking_pids(first_waiter.pid))
+                            AND first_waiter.pid = ANY(pg_blocking_pids(waiting.pid)))",
+        )
+        .bind(gate_pid)
+        .fetch_one(&mut *gate)
+        .await
+        .unwrap();
+        if blocked >= 2 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "both readers must reach the lock gate"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    gate.commit().await.unwrap();
+    for reader in readers {
+        let (status, list) = tokio::time::timeout(std::time::Duration::from_secs(10), reader)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(status, StatusCode::OK, "{list}");
+        assert_eq!(list["own_access_closed"], true, "{list}");
+        assert_eq!(list["requests"], json!([]), "{list}");
+    }
+    let (count, recipients): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), count(DISTINCT user_id) FROM user_notifications
+         WHERE entity_type = 'lead' AND entity_id = $1 AND kind = 'lead_portal_minor'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(count > 0, "the staff notification is stored");
+    assert_eq!(count, recipients, "exactly one notice per staff recipient");
+    json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    let repeated: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_notifications
+         WHERE entity_type = 'lead' AND entity_id = $1 AND kind = 'lead_portal_minor'",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(repeated, count, "a later retry creates no further notices");
+}
+
 /// QA 2026-10-12, A3-01: a minor's own login (made while the lead had no date
-/// of birth) is closed once staff set a date under 18 and a parent has access:
-/// it reaches nothing of the request, read or write, with a neutral 403; staff
-/// issue it no password. Only a parent's choice counts for the child's form —
+/// of birth) is closed once staff set a date under 18 — since 2026-10-12
+/// (owner) before a parent has access too: it reaches nothing of the request,
+/// read or write, with a neutral 403; staff issue it no password and are told
+/// to give the parents access. Only a parent's choice counts for the child's form —
 /// a choice the child's login saved before is ignored and never shown as the
 /// parent's. A corrected date of birth opens the login again.
 #[tokio::test]
@@ -5805,21 +5921,31 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
 
-    // Before any parent has access the own login still reaches the request,
-    // but the child's choice no longer counts, and it chooses nothing more.
+    // Even before any parent has access the own login reaches nothing
+    // (owner 2026-10-12), and staff are told once to issue the parents'
+    // access.
+    let notices = || async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM user_notifications
+             WHERE entity_type = 'lead' AND entity_id = $1 AND kind = 'lead_portal_minor'",
+        )
+        .bind(lead_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    };
     let (status, list) =
         json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(list["own_access_closed"], false, "{list}");
-    assert_eq!(list["requests"][0]["minor"], true, "{list}");
-    assert_eq!(
-        list["requests"][0]["consent_form"]["choices"],
-        Value::Null,
-        "{list}"
-    );
+    assert_eq!(list["own_access_closed"], true, "{list}");
+    assert_eq!(list["requests"], json!([]), "{list}");
     let (status, body) = choose(router, lead_id, &child, &all).await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["code"], "consent_choice_by_guardian", "{body}");
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "lead_request_guardian_only", "{body}");
+    let told = notices().await;
+    assert!(told > 0, "staff are told to issue the parents' access");
+    json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    assert_eq!(notices().await, told, "told once");
 
     // The mother gets her access: the child's own login closes.
     let (status, issued) = json_request(
@@ -5934,6 +6060,26 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     let (status, saved) = choose(router, lead_id, &parent, &mine).await;
     assert_eq!(status, StatusCode::CREATED, "{saved}");
     assert_eq!(saved["chosen_by_me"], true, "{saved}");
+    let (status, staff) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff}");
+    let form = &staff["consent_form"];
+    assert_eq!(form["choices"], mine, "{form}");
+    assert_eq!(form["chosen_by"], json!(guardian), "{form}");
+    assert_eq!(form["access_kind"], "guardian", "{form}");
+    assert_eq!(form["chosen_by_name"], "Maria Muster", "{form}");
+    assert_eq!(
+        form["chosen_by_role"], "Personensorgeberechtigte/r",
+        "{form}"
+    );
+    assert_eq!(form["version"], "2026-10-12", "{form}");
+    assert!(chrono::DateTime::parse_from_rfc3339(form["chosen_at"].as_str().unwrap()).is_ok());
     // A child's choice stored later (as before the rule) still never counts.
     sqlx::query(
         r#"INSERT INTO consent_form_choices

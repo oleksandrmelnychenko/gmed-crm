@@ -268,10 +268,28 @@ export const NO_CONSENT_FORM_CHOICES: ConsentFormChoices = {
   channel_telegram: false,
 };
 
+/** Who a named recipient is to the person (owner 2026-10-12). */
+export const CONSENT_RECIPIENT_RELATIONS = ["spouse", "child", "relative", "family_doctor", "clinic", "other"] as const;
+export type ConsentRecipientRelation = (typeof CONSENT_RECIPIENT_RELATIONS)[number];
+
+/**
+ * A person or institution named for "named recipients": part of the choice, printed on the form
+ * while that option is chosen; not sanctions-screened (owner 2026-10-12).
+ */
+export type ConsentRecipient = { name: string; relation: ConsentRecipientRelation; contact?: string | null };
+
+/** At most this many recipients (the server answers 422 `consent_recipients_invalid` otherwise). */
+export const MAX_CONSENT_RECIPIENTS = 5;
+/** "Named recipients" ticked without anybody named. */
+export const CONSENT_RECIPIENTS_REQUIRED = "consent_recipients_required";
+export const CONSENT_RECIPIENTS_INVALID = "consent_recipients_invalid";
+
 /** The person's saved choice; `choices` is null until they saved one. */
 export type LeadRequestConsentForm = {
   version: string;
   choices: ConsentFormChoices | null;
+  /** The named recipients of the saved choice; absent on an older server. */
+  recipients?: ConsentRecipient[];
   chosen_at: string | null;
   /**
    * Whether this login saved the choice; `false` when the other parent or guardian did (QA
@@ -799,10 +817,11 @@ export function saveLeadConsentFormChoices(
   choices: ConsentFormChoices,
   version: string,
   language: string,
+  recipients: ConsentRecipient[] = [],
 ): Promise<LeadRequestConsentForm> {
   return apiFetch<LeadRequestConsentForm>(`${base(leadId)}/consent-choices`, {
     method: "POST",
-    body: JSON.stringify({ choices, version, language }),
+    body: JSON.stringify({ choices, recipients, version, language }),
   });
 }
 

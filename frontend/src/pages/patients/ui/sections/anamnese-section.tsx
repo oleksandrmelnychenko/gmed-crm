@@ -1,6 +1,8 @@
 import { useEffect, useState, type JSX } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DirtyDismissConfirmDialog } from "@/components/ui/dirty-dismiss-confirm-dialog";
 import { toast } from "@/components/ui/toast";
@@ -8,7 +10,6 @@ import { berlinLocalInputToIso, formatAppDateTime, isoToBerlinLocalInput } from 
 import { cn } from "@/lib/utils";
 import { Copy, Pencil, Plus, Trash2 } from "lucide-react";
 
-import { PatientSheetScaffold } from "@/pages/patients/ui/shared/patient-sheet-scaffold";
 import type {
   ClinicalNarrative,
   ClinicalNarrativeSpecialization,
@@ -31,7 +32,7 @@ import { ClinicalRecordSource } from "./clinical-record-source";
 type Bilingual = (ru: string, de: string) => string;
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-input bg-field px-3 text-[13px] text-foreground focus:outline-none focus:border-ring focus:ring-2 focus:ring-ring/30";
 const datePillClass =
   "inline-flex items-center rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700";
 
@@ -237,6 +238,7 @@ export function AnamneseSection({
   onSave,
   loadHistory,
   requireCurrent = false,
+  className,
 }: {
   active: ClinicalNarrative | null;
   specializations?: SpecializationItem[];
@@ -246,6 +248,7 @@ export function AnamneseSection({
   onSave: (n: ClinicalNarrative) => Promise<unknown>;
   loadHistory: () => Promise<ClinicalNarrative[]>;
   requireCurrent?: boolean;
+  className?: string;
 }): JSX.Element {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
   const fields = narrativeFields(tx);
@@ -393,7 +396,7 @@ export function AnamneseSection({
   const anamnesisTimeMissing = Boolean(editing && !editing.anamnese_at);
 
   return (
-    <section className="rounded-xl border border-border/70 bg-slate-50/60">
+    <section className={cn("rounded-xl border border-border/70 bg-slate-50/60", className)}>
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -466,7 +469,7 @@ export function AnamneseSection({
       <div className="space-y-2.5 p-3">
         {active ? (
           <div className="space-y-3">
-            <div className="overflow-hidden rounded-lg border border-border/60 bg-white">
+            <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
               <div className="grid min-w-0 gap-1.5 border-b border-border/60 px-3 py-2.5 sm:grid-cols-[minmax(12rem,0.45fr)_minmax(0,1fr)] sm:items-center">
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
@@ -497,7 +500,7 @@ export function AnamneseSection({
               </div>
             </div>
             {activeNonEmpty.length > 0 ? (
-              <dl className="overflow-hidden rounded-lg border border-border/60 bg-white">
+              <dl className="overflow-hidden rounded-lg border border-border/60 bg-card">
                 {activeNonEmpty.map((field) => (
                   <div
                     key={field.key}
@@ -535,7 +538,7 @@ export function AnamneseSection({
                   .map((item) => (
                     <div
                       key={`${item.id}-details`}
-                      className="overflow-hidden rounded-lg border border-border/60 bg-white"
+                      className="overflow-hidden rounded-lg border border-border/60 bg-card"
                     >
                       <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-xs font-semibold text-foreground">
                         {specializationLabelForItem(item, lang === "de" ? "de" : "ru")}
@@ -587,7 +590,7 @@ export function AnamneseSection({
         )}
 
         {historyOpen ? (
-          <div className="overflow-hidden rounded-lg border border-border/60 bg-white">
+          <div className="overflow-hidden rounded-lg border border-border/60 bg-card">
             <p className="border-b border-border/60 bg-muted/20 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               {tx("История версий", "Versionsverlauf")}
             </p>
@@ -604,7 +607,7 @@ export function AnamneseSection({
                   return (
                     <li
                       key={version.id ?? `${version.updated_at}`}
-                      className="flex items-start justify-between gap-2.5 bg-white px-3 py-2.5"
+                      className="flex items-start justify-between gap-2.5 bg-card px-3 py-2.5"
                     >
                       <div className="grid min-w-0 flex-1 gap-2 md:grid-cols-[10rem_minmax(0,1fr)]">
                         <div className="min-w-0">
@@ -689,255 +692,262 @@ export function AnamneseSection({
         ) : null}
       </div>
 
-      <PatientSheetScaffold
-        open={Boolean(editing)}
-        onOpenChange={(open) => {
-          if (!open) setEditing(null);
-        }}
-        width="form-heavy"
-        title={
-          editingMode === "edit"
-            ? `${tx("Редактировать", "Bearbeiten")}: ${tx("Анамнез", "Anamnese")}`
-            : `${tx("Новая версия", "Neue Version")}: ${tx("Анамнез", "Anamnese")}`
-        }
-        footer={
-          <>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-8 rounded-lg"
-              onClick={() => setEditing(null)}
-            >
-              {tx("Отмена", "Abbrechen")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-8 rounded-lg"
-              disabled={busy || !editing || currentMissing || anamnesisTimeMissing}
-              onClick={() => void submit()}
-            >
-              {tx("Сохранить", "Speichern")}
-            </Button>
-          </>
-        }
-      >
-        {editing ? (
-          <div className="space-y-3">
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
-                <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
-              </span>
-              <Input
-                type="datetime-local"
-                required
-                aria-invalid={anamnesisTimeMissing}
-                value={isoToBerlinLocalInput(editing.anamnese_at)}
-                onChange={(event) =>
-                  setEditing((current) =>
-                    current
-                      ? { ...current, anamnese_at: berlinLocalInputToIso(event.target.value) }
-                      : current,
-                  )
-                }
-                className={cn(inputClass, anamnesisTimeMissing && "border-destructive")}
-              />
-            </label>
-            <div className="grid gap-3 md:grid-cols-2">
-              {fields.map((field) => (
-                <label key={field.key} className="block">
-                  <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                    {field.label}
-                    {requireCurrent && field.key === "anamnese_aktuelle" ? (
+      <Dialog open={Boolean(editing)} onOpenChange={(open) => {
+        if (!open) setEditing(null);
+      }}>
+        <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[860px] sm:pb-0" data-testid="anamnesis-editor-dialog">
+          <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
+            <DialogTitle className="text-[15px] font-semibold">
+              {editingMode === "edit"
+                ? `${tx("Редактировать", "Bearbeiten")}: ${tx("Анамнез", "Anamnese")}`
+                : `${tx("Новая версия", "Neue Version")}: ${tx("Анамнез", "Anamnese")}`}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">
+            {editing ? (
+              <div className="space-y-3">
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
+                  <label className="block min-w-0">
+                    <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                      {tx("Дата и время анамнеза", "Zeitpunkt der Anamnese")}
                       <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
-                    ) : null}
-                  </span>
-                  <textarea
-                    required={requireCurrent && field.key === "anamnese_aktuelle"}
-                    aria-invalid={currentMissing && field.key === "anamnese_aktuelle"}
-                    value={editing[field.key] ?? ""}
-                    onChange={(event) => setField(field.key, event.target.value)}
-                    className={cn(
-                      inputClass,
-                      "h-24 py-2",
-                      currentMissing && field.key === "anamnese_aktuelle" && "border-destructive",
-                    )}
-                  />
-                  {currentMissing && field.key === "anamnese_aktuelle" ? (
-                    <span role="alert" className="mt-1 block text-xs text-destructive">
-                      {tx("Обязательное поле", "Pflichtfeld")}
                     </span>
-                  ) : null}
-                </label>
-              ))}
-            </div>
-            <div>
-              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                {tx("Специализации", "Spezialisierungen")}
-              </span>
-              <ClinicalSpecializationsField
-                ids={editing.specialization_ids ?? []}
-                selected={editing.specializations ?? []}
-                options={specializations}
-                lang={lang}
-                tx={tx}
-                onChange={(specializationIds, selectedItems) =>
-                  setEditing((current) =>
-                    current
-                      ? {
-                          ...current,
-                          specialization_ids: specializationIds,
-                          specializations: selectedNarrativeSpecializations(
-                            current.specializations ?? [],
-                            selectedItems,
-                          ),
-                        }
-                      : current,
-                  )
-                }
-              />
-            </div>
-            {(editing.specializations ?? []).map((specialization) => {
-              const checklist = narrativeSpecializationChecklist(specialization, specializations);
-              return (
-              <div
-                key={specialization.id}
-                className="space-y-3 rounded-lg border border-border/60 bg-background p-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-foreground">
-                    {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
-                  </p>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="size-7 shrink-0 rounded-md p-0 text-rose-700 hover:bg-rose-50"
-                    aria-label={`${lang === "de" ? "Entfernen" : "Удалить"}: ${specializationLabelForItem(
-                      specialization,
-                      lang === "de" ? "de" : "ru",
-                    )}`}
-                    title={
-                      lang === "de"
-                        ? "Spezialisierung entfernen"
-                        : "Удалить специализацию"
-                    }
-                    onClick={() => removeSpecialization(specialization.id)}
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  {checklist ? (
-                    <div className="space-y-1 md:col-span-2">
-                      <span className="block text-[11px] font-medium text-muted-foreground">
-                        {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
-                      </span>
-                      <SpecializationChecklistForm
-                        checklist={checklist}
-                        tx={tx}
-                        onChange={(next) => updateSpecializationChecklist(specialization.id, next)}
-                      />
-                    </div>
-                  ) : null}
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                      {checklist
-                        ? tx("Дополнение свободным текстом", "Ergänzung als Freitext")
-                        : tx("Анамнез по специализации", "Fachspezifische Anamnese")}
-                    </span>
-                    <textarea
-                      value={checklist ? checklist.notes : specialization.narrative_text ?? ""}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        if (checklist) {
-                          updateSpecializationChecklist(specialization.id, { ...checklist, notes: value });
-                          return;
-                        }
-                        setEditing((current) =>
-                          current
-                            ? {
-                                ...current,
-                                specializations: (current.specializations ?? []).map((item) =>
-                                  item.id === specialization.id
-                                    ? { ...item, narrative_text: value || null }
-                                    : item,
-                                ),
-                              }
-                            : current,
-                        );
-                      }}
-                      className={cn(inputClass, "h-28 py-2")}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                      {tx(
-                        "Оценка / заключение специалиста",
-                        "Fachärztliche Beurteilung / Stellungnahme",
-                      )}
-                    </span>
-                    <textarea
-                      value={specialization.assessment_text ?? ""}
+                    <Input
+                      type="datetime-local"
+                      required
+                      aria-invalid={anamnesisTimeMissing}
+                      value={isoToBerlinLocalInput(editing.anamnese_at)}
                       onChange={(event) =>
                         setEditing((current) =>
                           current
-                            ? {
-                                ...current,
-                                specializations: (current.specializations ?? []).map((item) =>
-                                  item.id === specialization.id
-                                    ? { ...item, assessment_text: event.target.value || null }
-                                    : item,
-                                ),
-                              }
+                            ? { ...current, anamnese_at: berlinLocalInputToIso(event.target.value) }
                             : current,
                         )
                       }
-                      className={cn(inputClass, "h-28 py-2")}
+                      className={cn(inputClass, "sm:max-w-72", anamnesisTimeMissing && "border-destructive")}
                     />
                   </label>
-                </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {fields.map((field) => (
+                      <label key={field.key} className="block min-w-0">
+                        <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                          {field.label}
+                          {requireCurrent && field.key === "anamnese_aktuelle" ? (
+                            <span aria-hidden="true" className="ml-0.5 text-destructive">*</span>
+                          ) : null}
+                        </span>
+                        <textarea
+                          required={requireCurrent && field.key === "anamnese_aktuelle"}
+                          aria-invalid={currentMissing && field.key === "anamnese_aktuelle"}
+                          value={editing[field.key] ?? ""}
+                          onChange={(event) => setField(field.key, event.target.value)}
+                          className={cn(
+                            inputClass,
+                            "h-24 resize-y py-2.5 leading-5",
+                            currentMissing && field.key === "anamnese_aktuelle" && "border-destructive",
+                          )}
+                        />
+                        {currentMissing && field.key === "anamnese_aktuelle" ? (
+                          <span role="alert" className="mt-1 block text-xs text-destructive">
+                            {tx("Обязательное поле", "Pflichtfeld")}
+                          </span>
+                        ) : null}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <AdminSectionTitle>{tx("Специализации", "Spezialisierungen")}</AdminSectionTitle>
+                  <ClinicalSpecializationsField
+                    compact
+                    ids={editing.specialization_ids ?? []}
+                    selected={editing.specializations ?? []}
+                    options={specializations}
+                    lang={lang}
+                    tx={tx}
+                    onChange={(specializationIds, selectedItems) =>
+                      setEditing((current) =>
+                        current
+                          ? {
+                              ...current,
+                              specialization_ids: specializationIds,
+                              specializations: selectedNarrativeSpecializations(
+                                current.specializations ?? [],
+                                selectedItems,
+                              ),
+                            }
+                          : current,
+                      )
+                    }
+                  />
+                </section>
+                {(editing.specializations ?? []).map((specialization) => {
+                  const checklist = narrativeSpecializationChecklist(specialization, specializations);
+                  return (
+                  <div
+                    key={specialization.id}
+                    className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <AdminSectionTitle>
+                        {specializationLabelForItem(specialization, lang === "de" ? "de" : "ru")}
+                      </AdminSectionTitle>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="size-7 shrink-0 rounded-md p-0 text-rose-700 hover:bg-rose-50"
+                        aria-label={`${lang === "de" ? "Entfernen" : "Удалить"}: ${specializationLabelForItem(
+                          specialization,
+                          lang === "de" ? "de" : "ru",
+                        )}`}
+                        title={
+                          lang === "de"
+                            ? "Spezialisierung entfernen"
+                            : "Удалить специализацию"
+                        }
+                        onClick={() => removeSpecialization(specialization.id)}
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {checklist ? (
+                        <div className="space-y-1 md:col-span-2">
+                          <span className="block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                            {tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                          </span>
+                          <SpecializationChecklistForm
+                            compact
+                            checklist={checklist}
+                            tx={tx}
+                            onChange={(next) => updateSpecializationChecklist(specialization.id, next)}
+                          />
+                        </div>
+                      ) : null}
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                          {checklist
+                            ? tx("Дополнение свободным текстом", "Ergänzung als Freitext")
+                            : tx("Анамнез по специализации", "Fachspezifische Anamnese")}
+                        </span>
+                        <textarea
+                          value={checklist ? checklist.notes : specialization.narrative_text ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            if (checklist) {
+                              updateSpecializationChecklist(specialization.id, { ...checklist, notes: value });
+                              return;
+                            }
+                            setEditing((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    specializations: (current.specializations ?? []).map((item) =>
+                                      item.id === specialization.id
+                                        ? { ...item, narrative_text: value || null }
+                                        : item,
+                                    ),
+                                  }
+                                : current,
+                            );
+                          }}
+                          className={cn(inputClass, "h-28 resize-y py-2.5 leading-5")}
+                        />
+                      </label>
+                      <label className="block min-w-0">
+                        <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                          {tx(
+                            "Оценка / заключение специалиста",
+                            "Fachärztliche Beurteilung / Stellungnahme",
+                          )}
+                        </span>
+                        <textarea
+                          value={specialization.assessment_text ?? ""}
+                          onChange={(event) =>
+                            setEditing((current) =>
+                              current
+                                ? {
+                                    ...current,
+                                    specializations: (current.specializations ?? []).map((item) =>
+                                      item.id === specialization.id
+                                        ? { ...item, assessment_text: event.target.value || null }
+                                        : item,
+                                    ),
+                                  }
+                                : current,
+                            )
+                          }
+                          className={cn(inputClass, "h-28 resize-y py-2.5 leading-5")}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  );
+                })}
+                <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+                  <label className="block min-w-0">
+                    <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
+                      Red flags
+                    </span>
+                    <textarea
+                      value={editing.red_flags ?? ""}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current
+                            ? { ...current, red_flags: event.target.value || null }
+                            : current,
+                        )
+                      }
+                      className={cn(inputClass, "h-24 resize-y py-2.5 leading-5")}
+                      placeholder={tx(
+                        "Тревожные признаки и особые риски",
+                        "Warnzeichen und besondere Risiken",
+                      )}
+                    />
+                  </label>
+                  <label className="flex items-center gap-2 border-t border-border/50 pt-3">
+                    <input
+                      type="checkbox"
+                      checked={editing.is_active}
+                      onChange={(event) =>
+                        setEditing((current) =>
+                          current ? { ...current, is_active: event.target.checked } : current,
+                        )
+                      }
+                      className="size-3.5 rounded border-border/60 accent-[var(--brand)] focus:ring-2 focus:ring-ring/30"
+                    />
+                    <span className="text-[13px] text-foreground">{tx("Активный", "Aktiv")}</span>
+                  </label>
+                </section>
               </div>
-              );
-            })}
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                Red flags
-              </span>
-              <textarea
-                value={editing.red_flags ?? ""}
-                onChange={(event) =>
-                  setEditing((current) =>
-                    current
-                      ? { ...current, red_flags: event.target.value || null }
-                      : current,
-                  )
-                }
-                className={cn(inputClass, "h-24 py-2")}
-                placeholder={tx(
-                  "Тревожные признаки и особые риски",
-                  "Warnzeichen und besondere Risiken",
-                )}
-              />
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={editing.is_active}
-                onChange={(event) =>
-                  setEditing((current) =>
-                    current ? { ...current, is_active: event.target.checked } : current,
-                  )
-                }
-                className="size-4 rounded border-border text-primary focus:ring-2 focus:ring-ring/40"
-              />
-              <span className="text-sm text-foreground">{tx("Активный", "Aktiv")}</span>
-            </label>
+            ) : null}
           </div>
-        ) : null}
-      </PatientSheetScaffold>
+          <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t border-border/50 bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 rounded-lg"
+                onClick={() => setEditing(null)}
+              >
+                {tx("Отмена", "Abbrechen")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-8 rounded-lg"
+                disabled={busy || !editing || currentMissing || anamnesisTimeMissing}
+                onClick={() => void submit()}
+              >
+                {tx("Сохранить", "Speichern")}
+              </Button>
+            </>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <DirtyDismissConfirmDialog
         open={Boolean(deleteTarget)}

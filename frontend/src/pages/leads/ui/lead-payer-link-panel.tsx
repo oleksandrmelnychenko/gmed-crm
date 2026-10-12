@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Link2, LoaderCircle, Mail, Undo2 } from "lucide-react";
+import { CircleAlert, LoaderCircle, Mail, Undo2 } from "lucide-react";
 
-import { Banner, checkboxClass, inputClass, StatusBadge, tokens } from "@/components/ui-shell";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { Banner, checkboxClass, inputClass } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { cn } from "@/lib/utils";
 
 import {
@@ -127,14 +129,13 @@ export function LeadPayerLinkPanel({
   }
 
   return (
-    <div className="space-y-2.5 rounded-lg border border-border/70 bg-background/60 p-3" data-testid="lead-payer-link">
+    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5 text-[13px]" data-testid="lead-payer-link">
       <div className="flex flex-wrap items-center gap-2">
-        <Link2 aria-hidden="true" className="size-3.5 text-muted-foreground" />
-        <span className="text-xs font-semibold text-foreground">{tx("Ссылка для плательщика", "Zahler-Link")}</span>
+        <AdminSectionTitle>{tx("Ссылка для плательщика", "Zahler-Link")}</AdminSectionTitle>
         {status && !actions.cabinet ? (
-          <span className="inline-flex" data-testid="lead-payer-link-badge" data-status={link?.status}>
-            <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
-          </span>
+          <StatusChip tone={status.tone} data-testid="lead-payer-link-badge" data-status={link?.status}>
+            {status.label}
+          </StatusChip>
         ) : null}
       </div>
 
@@ -144,21 +145,27 @@ export function LeadPayerLinkPanel({
         </p>
       ) : (
         <>
-          <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-status">
-            {status ? status.text : tx("Ссылка ещё не отправлялась", "Noch kein Link gesendet")}
-          </p>
+          {status ? (
+            <p className="break-words text-xs leading-5 text-muted-foreground" data-testid="lead-payer-link-status">
+              {status.text}
+            </p>
+          ) : (
+            <StatusChip tone="neutral" data-testid="lead-payer-link-status">
+              {tx("Ссылка ещё не отправлялась", "Noch kein Link gesendet")}
+            </StatusChip>
+          )}
           {actions.highlight ? (
-            <p className="text-xs font-medium leading-5 text-[var(--brand)]" data-testid="lead-payer-link-ready">
+            <StatusChip tone="success" className="rounded-lg" data-testid="lead-payer-link-ready">
               {tx(
                 "Пациент отправил заявку: теперь можно отправить ссылку плательщику",
                 "Die Anfrage ist eingegangen: Der Zahler-Link kann jetzt gesendet werden",
               )}
-            </p>
+            </StatusChip>
           ) : null}
           {canEdit ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-                <span className="whitespace-nowrap text-muted-foreground" id={`lead-payer-link-language-${leadId}`}>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                <span className="whitespace-nowrap text-[11.5px] leading-tight text-muted-foreground" id={`lead-payer-link-language-${leadId}`}>
                   {tx("Язык письма", "Sprache der E-Mail")}
                 </span>
                 <div className="flex gap-1" role="group" aria-labelledby={`lead-payer-link-language-${leadId}`}>
@@ -168,11 +175,12 @@ export function LeadPayerLinkPanel({
                       type="button"
                       aria-pressed={chosenLanguage === option}
                       disabled={locked}
-                      className={
+                      className={cn(
+                        "h-7 min-w-9 rounded-lg border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
                         chosenLanguage === option
-                          ? "rounded-md border border-primary/40 bg-primary/10 px-2 py-0.5 text-xs text-primary"
-                          : "rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground"
-                      }
+                          ? "border-[var(--brand)] bg-[var(--brand)] text-white"
+                          : "border-border/50 bg-field text-muted-foreground hover:text-foreground",
+                      )}
                       onClick={() => setLanguage(option)}
                     >
                       {LANGUAGE_LABELS[option]}
@@ -197,7 +205,7 @@ export function LeadPayerLinkPanel({
                   type="button"
                   size="sm"
                   variant={actions.highlight ? "default" : actions.sendKind === "resend" ? "outline" : "default"}
-                  className={cn("h-8 rounded-lg", actions.highlight && "ring-2 ring-[var(--brand)]/40 ring-offset-1")}
+                  className={cn("h-8 rounded-lg text-xs", actions.highlight && "ring-2 ring-[var(--brand)]/40 ring-offset-1")}
                   disabled={locked || !actions.sendEnabled}
                   data-highlight={actions.highlight ? "true" : undefined}
                   onClick={() => {
@@ -216,7 +224,7 @@ export function LeadPayerLinkPanel({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    className="h-8 rounded-lg text-rose-700"
+                    className="h-8 rounded-lg text-xs text-rose-700"
                     disabled={locked}
                     onClick={() => setConfirm("revoke")}
                   >
@@ -228,9 +236,10 @@ export function LeadPayerLinkPanel({
             </div>
           ) : null}
           {canEdit && actions.sendBlockedText ? (
-            <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-payer-link-blocked">
-              {actions.sendBlockedText}
-            </p>
+            <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-payer-link-blocked">
+              <CircleAlert aria-hidden="true" className="mt-0.5" />
+              <span>{actions.sendBlockedText}</span>
+            </StatusChip>
           ) : null}
         </>
       )}
@@ -257,9 +266,9 @@ export function LeadPayerLinkPanel({
 
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? (
-        <p role="status" className="text-xs text-emerald-700" data-testid="lead-payer-link-notice">
+        <StatusChip tone="success" role="status" data-testid="lead-payer-link-notice">
           {notice}
-        </p>
+        </StatusChip>
       ) : null}
 
       <LeadConfirmDialog
@@ -345,14 +354,14 @@ function EstimatedTotalField({
   }
 
   return (
-    <div className="space-y-1 border-t border-border/60 pt-2.5">
-      <label htmlFor={id} className={cn(tokens.text.label, "block")}>
+    <div className="space-y-1.5 border-t border-border/50 pt-3">
+      <label htmlFor={id} className="block text-[11.5px] leading-tight text-muted-foreground">
         {tx("Ожидаемая общая сумма, EUR", "Voraussichtlicher Gesamtbetrag, EUR")}
       </label>
       <div className="flex items-center gap-2">
         <Input
           id={id}
-          className={cn(inputClass, "w-full max-w-[12rem]")}
+          className={cn(inputClass, "h-9 w-full max-w-[12rem] bg-field text-[13px]")}
           inputMode="decimal"
           autoComplete="off"
           value={value}

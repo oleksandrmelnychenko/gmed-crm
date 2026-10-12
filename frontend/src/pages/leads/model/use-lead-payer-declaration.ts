@@ -31,8 +31,11 @@ export function useLeadPayerDeclaration(leadId: string | null | undefined, enabl
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const requestRef = useRef(0);
+  const activeLeadIdRef = useRef(leadId);
+  activeLeadIdRef.current = leadId;
 
   const reload = useCallback(async () => {
+    if (activeLeadIdRef.current !== leadId) return null;
     if (!leadId || !enabled) {
       setData(null);
       return null;
@@ -41,24 +44,26 @@ export function useLeadPayerDeclaration(leadId: string | null | undefined, enabl
     setLoading(true);
     try {
       const next = await fetchLeadPayerDeclaration(leadId);
-      if (request === requestRef.current) {
+      if (request === requestRef.current && activeLeadIdRef.current === leadId) {
         setData(next);
         setError(null);
       }
       return next;
     } catch (nextError) {
-      if (request === requestRef.current) setError(nextError);
+      if (request === requestRef.current && activeLeadIdRef.current === leadId) setError(nextError);
       return null;
     } finally {
-      if (request === requestRef.current) setLoading(false);
+      if (request === requestRef.current && activeLeadIdRef.current === leadId) setLoading(false);
     }
   }, [enabled, leadId]);
 
   const save = useCallback(async (form: PayerDeclarationForm) => {
     if (!leadId) return null;
-    const request = ++requestRef.current;
+    // A closing section may flush its captured old lead. It must not invalidate
+    // the new lead's reload, or put that old response into the current UI.
+    const request = activeLeadIdRef.current === leadId ? ++requestRef.current : null;
     const next = await saveLeadPayerDeclaration(leadId, payerDeclarationPayload(form));
-    if (request === requestRef.current) {
+    if (request !== null && request === requestRef.current && activeLeadIdRef.current === leadId) {
       setData(next);
       setError(null);
     }

@@ -390,7 +390,7 @@ fn decision_error(refusal: DecisionError) -> Response {
         DecisionError::BlocksRequired => error(
             StatusCode::UNPROCESSABLE_ENTITY,
             "blocks_required",
-            "Name the blocks (A–J) to request",
+            "Name the blocks (A–L) to request",
         ),
         DecisionError::ProposalPending => error(
             StatusCode::CONFLICT,

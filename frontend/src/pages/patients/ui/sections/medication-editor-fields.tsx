@@ -1,19 +1,29 @@
 import type { ReactNode } from "react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass, inputClass } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import { darreichungsformOptions, einnahmeformOptions } from "../../data/medication-options";
 import { updateClinicalMedicationLifecycle, type ClinicalMedication } from "../../data/patient-clinical";
-import { Field, PatientFormSection } from "../shared/patient-form-primitives";
+import { Field } from "../shared/patient-form-primitives";
 import { MedicationNameFields } from "./medication-name-fields";
 
 export const MEDICATION_EDITOR_CLASS_NAME =
-  "data-[side=right]:sm:w-[calc(100vw-1.5rem)] data-[side=right]:sm:max-w-[960px] data-[side=right]:sm:bottom-auto sm:max-h-[calc(100dvh-1.5rem)]";
+  "sm:max-w-[960px] data-[side=right]:sm:w-[calc(100vw-1.5rem)] data-[side=right]:sm:max-w-[960px] data-[side=right]:sm:bottom-auto sm:max-h-[calc(100dvh-2rem)]";
 
-const controlClass = cn(inputClass, "w-full min-w-0");
+const controlClass = cn(inputClass, "h-9 w-full min-w-0 bg-field text-[13px]");
 const nullable = (value: string) => value === "" ? null : value;
+
+function MedicationFormSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+      <AdminSectionTitle>{title}</AdminSectionTitle>
+      {children}
+    </section>
+  );
+}
 
 export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, attribution }: {
   draft: ClinicalMedication;
@@ -33,14 +43,14 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
   ] as const;
 
   function flag(key: "apothekenpflichtig" | "rezeptpflichtig" | "btm" | "aut_idem_sperre" | "abgabebeschraenkung", label: string) {
-    return <label className="flex min-w-0 items-start gap-2 text-sm text-foreground">
-      <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={draft[key]} onChange={event => onChange({[key]:event.target.checked})} />
+    return <label className="flex min-w-0 items-start gap-2 text-[13px] text-foreground">
+      <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0 accent-[var(--brand)]")} checked={draft[key]} onChange={event => onChange({[key]:event.target.checked})} />
       <span>{label}</span>
     </label>;
   }
 
-  return <div className="space-y-4">
-    <PatientFormSection title={tx("Препарат", "Medikament")}>
+  return <div className="space-y-3">
+    <MedicationFormSection title={tx("Препарат", "Medikament")}>
       <MedicationNameFields value={draft} onChange={onChange} lang={lang} inputClassName={controlClass} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label={tx("Категория", "Kategorie")}>
@@ -73,9 +83,9 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
           </NativeComboboxSelect>
         </Field>
       </div>
-    </PatientFormSection>
+    </MedicationFormSection>
 
-    <PatientFormSection title={tx("Дозировка и схема приёма", "Dosierung und Einnahme")}>
+    <MedicationFormSection title={tx("Дозировка и схема приёма", "Dosierung und Einnahme")}>
       <Field label={tx("Дозировка", "Stärke")}><Input value={draft.staerke ?? ""} onChange={event => onChange({staerke:nullable(event.target.value)})} className={controlClass} placeholder="5 mg" /></Field>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {doses.map(([key, label, accessibleLabel]) => <Field key={key} label={label}>
@@ -86,9 +96,9 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
         <Field label={tx("Причина", "Grund")}><Input value={draft.grund ?? ""} onChange={event => onChange({grund:nullable(event.target.value)})} className={controlClass} /></Field>
         <Field label={tx("Указания", "Hinweise")}><Input value={draft.hinweis ?? ""} onChange={event => onChange({hinweis:nullable(event.target.value)})} className={controlClass} /></Field>
       </div>
-    </PatientFormSection>
+    </MedicationFormSection>
 
-    <PatientFormSection title={tx("Назначение и сроки", "Verordnung und Zeitraum")}>
+    <MedicationFormSection title={tx("Назначение и сроки", "Verordnung und Zeitraum")}>
       <div className="grid gap-3 md:grid-cols-3">
         <Field label={tx("Дата назначения", "Verordnet am")}><Input type="date" value={draft.verordnet_am ?? ""} onChange={event => onChange({verordnet_am:nullable(event.target.value)})} className={controlClass} /></Field>
         <Field label={tx("Приём с", "Einnahme von")}><Input type="date" value={draft.einnahme_von ?? ""} onChange={event => onChange({einnahme_von:nullable(event.target.value)})} className={controlClass} /></Field>
@@ -96,9 +106,9 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
       </div>
       {!dateRangeValid ? <p role="alert" className="text-xs text-destructive">{tx("Дата окончания не может быть раньше даты начала.", "Das Enddatum darf nicht vor dem Startdatum liegen.")}</p> : null}
       {attribution}
-    </PatientFormSection>
+    </MedicationFormSection>
 
-    <PatientFormSection title={tx("Отпуск и ограничения", "Abgabe und Einschränkungen")}>
+    <MedicationFormSection title={tx("Отпуск и ограничения", "Abgabe und Einschränkungen")}>
       <fieldset className="min-w-0 space-y-3">
         <legend className="text-xs font-medium text-muted-foreground">{tx("Правовой статус", "Rechtlicher Status")}</legend>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -112,13 +122,13 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
         <div className="grid gap-3 sm:grid-cols-3">
           {flag("aut_idem_sperre", tx("Aut-Idem-блок", "Aut-Idem-Sperre"))}
           {flag("abgabebeschraenkung", tx("Огранич. отпуска", "Abgabebeschränkung"))}
-          <label className="flex items-start gap-2 text-sm text-foreground">
-            <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0")} checked={draft.sonstige_vermerke !== null} onChange={event => onChange({sonstige_vermerke:event.target.checked ? (draft.sonstige_vermerke ?? "") : null})} />
+          <label className="flex items-start gap-2 text-[13px] text-foreground">
+            <input type="checkbox" className={cn(checkboxClass, "mt-0.5 shrink-0 accent-[var(--brand)]")} checked={draft.sonstige_vermerke !== null} onChange={event => onChange({sonstige_vermerke:event.target.checked ? (draft.sonstige_vermerke ?? "") : null})} />
             {tx("Прочие пометки", "Sonstige Vermerke")}
           </label>
         </div>
         {draft.sonstige_vermerke !== null ? <Input value={draft.sonstige_vermerke} onChange={event => onChange({sonstige_vermerke:event.target.value})} className={controlClass} aria-label={tx("Прочие пометки", "Sonstige Vermerke")} /> : null}
       </fieldset>
-    </PatientFormSection>
+    </MedicationFormSection>
   </div>;
 }

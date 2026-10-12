@@ -16,8 +16,12 @@ import type {
 /** Where the invoice can go, in the order of the form. */
 export const INVOICE_TARGETS = ["self", "payer", "other"] as const satisfies readonly InvoiceTo[];
 
-/** How GMED's services can be paid, in the order of the form. */
-export const PAYMENT_METHODS = ["bank_transfer", "card", "cash", "crypto", "other"] as const satisfies readonly PaymentMethod[];
+/**
+ * How GMED's services can be paid, in the order of the form. Cryptocurrency
+ * is no longer offered (owner 2026-10-12); an older answer keeps its label
+ * and the server asks for another method before sending.
+ */
+export const PAYMENT_METHODS = ["bank_transfer", "card", "cash", "other"] as const satisfies readonly PaymentMethod[];
 
 /** The two sections as the patient types them (strings; answers as "yes", "no" or ""). */
 export type BillingDraft = {

@@ -1,4 +1,5 @@
-import { StatusBadge } from "@/components/record-workspace/recipes/status-badge";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { StatusChip } from "@/components/ui/status-chip";
 import { useLang } from "@/lib/i18n";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
@@ -44,39 +45,39 @@ export function LeadSigningPackagePanel({
 
   const description = contractDocument
     ? tx(
-        "Клиент получает одно приглашение: рамочный договор, заказ, анкета пациента (если создана), освобождение от врачебной тайны и согласие DSGVO. Сначала подписывает клиент, затем GMED.",
-        "Der Kunde erhält eine Einladung: Rahmenvertrag, Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung. Zuerst unterschreibt der Kunde, danach GMED.",
+        "Договор, заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение. Сначала клиент, затем GMED.",
+        "Vertrag, Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung. Zuerst der Kunde, danach GMED.",
       )
     : orderDocument
       ? inheritedContract
         ? tx(
-            "Действует ранее подписанный рамочный договор. Клиент получает одно приглашение: заказ, анкета пациента (если создана), освобождение от врачебной тайны и согласие DSGVO.",
-            "Es gilt ein bereits unterzeichneter Rahmenvertrag. Der Kunde erhält eine Einladung: Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung.",
+            "Ранее подписанный договор действует. Заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — одно приглашение.",
+            "Der bereits unterzeichnete Vertrag gilt. Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – eine Einladung.",
           )
         : tx(
-            "Рамочного договора ещё нет — пакет уйдёт с заказом, анкетой пациента (если создана), освобождением от врачебной тайны и согласием DSGVO. Лучше сначала создать договор ниже, тогда он войдёт в тот же пакет.",
-            "Noch kein Rahmenvertrag – das Paket geht mit Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung. Besser zuerst unten den Vertrag erstellen, dann ist er im selben Paket.",
+            "Заказ, анкета (если создана), освобождение от тайны и согласие DSGVO — один пакет. Создайте договор ниже, чтобы добавить его к ним.",
+            "Auftrag, Patientenformular (falls erstellt), Schweigepflichtsentbindung und DSGVO-Einwilligung – ein Paket. Vertrag unten erstellen, um ihn hinzuzufügen.",
           )
       : tx(
-          "Создайте рамочный договор и заказ ниже — они уходят на подпись одним пакетом вместе с освобождением от врачебной тайны и согласием DSGVO. Отдельные документы можно выбрать в окне подписи.",
-          "Rahmenvertrag und Auftrag unten erstellen – sie gehen zusammen mit Schweigepflichtsentbindung und DSGVO-Einwilligung als ein Paket zur Unterschrift. Einzelne Dokumente lassen sich im Unterschriftsfenster wählen.",
+          "Создайте договор и заказ ниже. Документы для общего приглашения выбираются в окне подписи.",
+          "Vertrag und Auftrag unten erstellen. Die Dokumente für die gemeinsame Einladung wählen Sie im Unterschriftsfenster.",
         );
 
   return (
     <section
-      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border/70 bg-muted/20 px-4 py-3"
+      className="flex min-w-0 flex-wrap items-start justify-between gap-3 rounded-xl border border-border/50 bg-card p-3.5"
       data-testid="lead-signing-package"
     >
-      <div className="min-w-0 flex-1 space-y-1">
+      <div className="w-full min-w-0 space-y-1 sm:w-auto sm:flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-sm font-semibold text-foreground">
+          <AdminSectionTitle>
             {tx("Электронная подпись пакета", "Elektronische Unterschrift des Pakets")}
-          </h3>
+          </AdminSectionTitle>
           {contractSigned ? (
-            <StatusBadge tone="success">{tx("Договор подписан", "Vertrag unterzeichnet")}</StatusBadge>
+            <StatusChip tone="success">{tx("Договор подписан", "Vertrag unterzeichnet")}</StatusChip>
           ) : null}
         </div>
-        <p className="text-xs text-muted-foreground">{description}</p>
+        <p className="text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
       <div className="shrink-0">
         {source ? (

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail, UserRound } from "lucide-react";
+import { Check, Copy, FileText, KeyRound, LoaderCircle, Mail } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { StatusChip } from "@/components/ui/status-chip";
 import {
   Dialog,
   DialogClose,
@@ -159,8 +161,8 @@ export function LeadPortalAccessDetail({
   }, []);
   // A minor gets no login of his own (the server refuses to create one): the
   // parents get theirs in the block below, so no access is created for the
-  // child. A login made before that rule reaches nothing once a parent has
-  // access, and gets no new password then (the server refuses it too).
+  // child. A login made before the date of birth was known reaches nothing
+  // once it shows a minor, and gets no new password (the server refuses it too).
   const canCreate = minor !== true && status === "none" && Boolean(lead.email);
   const canReset = status !== "none" && status !== "disabled" && !ownLoginClosed;
   const canOffer = canIssue && (canCreate || canReset);
@@ -274,75 +276,75 @@ export function LeadPortalAccessDetail({
 
   return (
     <div className="space-y-3 px-4 py-3 text-xs" data-testid="lead-portal-access">
-      {/* Head line: what this is, its state, and the actions right beside the
-          state (the row is as wide as the table, so a button at its far end
-          is out of sight). */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      {/* Portal state and grouped actions stay visually separate. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <UserRound className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          <span className="text-[13px] font-semibold text-foreground">{de ? "Patientenportal" : "Портал пациента"}</span>
-          <StatusBadge tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusBadge>
+          <AdminSectionTitle>{de ? "Patientenportal" : "Портал пациента"}</AdminSectionTitle>
+          <StatusChip tone={leadPortalStatusTone(status)}>{leadPortalStatusLabel(status, lang)}</StatusChip>
         </div>
-        {canIssue && (canCreate || canReset) ? (
-          <Button
-            type="button"
-            size="sm"
-            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
-            disabled={busy}
-            onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
-          >
-            {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
-            {canReset
-              ? de
-                ? "Neues Passwort"
-                : "Новый пароль"
-              : de
-                ? "Zugang anlegen"
-                : "Создать доступ"}
-          </Button>
-        ) : null}
-        {canOffer ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
-            disabled={busy || emailInfo === undefined}
-            onClick={() => {
-              setEmailNotice("");
-              setEmailConfirmOpen(true);
-            }}
-            data-testid="lead-portal-send-email"
-          >
-            <Mail className="size-3.5" />
-            {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
-          </Button>
-        ) : null}
-        {canOfferSheet ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 gap-1.5 rounded-md px-2.5 text-xs"
-            disabled={busy || sheetBusy}
-            title={de ? "Dokumentationsbogen natürliche Personen (GwG), aus der Anfrage ausgefüllt" : "Лист идентификации по GwG, заполненный из заявки"}
-            onClick={() => void downloadGwgSheet()}
-            data-testid="lead-gwg-sheet"
-          >
-            {sheetBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
-            Doku-Bogen GwG
-          </Button>
-        ) : null}
-        {sheetNotice ? (
-          <span className="text-emerald-700" role="status" data-testid="lead-gwg-sheet-notice">
-            {sheetNotice}
-          </span>
-        ) : null}
-        {emailNotice ? (
-          <span className="text-emerald-700" role="status" data-testid="lead-portal-email-notice">
-            {emailNotice}
-          </span>
-        ) : null}
+        <div className="flex max-w-full flex-wrap items-center gap-2" role="group" aria-label={de ? "Portalaktionen" : "Действия с порталом"}>
+          {canOffer ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
+              disabled={busy}
+              onClick={() => (canReset ? setConfirmOpen(true) : void issue())}
+            >
+              {busy ? <LoaderCircle className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />}
+              {canReset
+                ? de
+                  ? "Neues Passwort"
+                  : "Новый пароль"
+                : de
+                  ? "Zugang anlegen"
+                  : "Создать доступ"}
+            </Button>
+          ) : null}
+          {canOffer ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
+              disabled={busy || emailInfo === undefined}
+              onClick={() => {
+                setEmailNotice("");
+                setEmailConfirmOpen(true);
+              }}
+              data-testid="lead-portal-send-email"
+            >
+              <Mail className="size-3.5" />
+              {de ? "Zugang per E-Mail senden" : "Отправить доступ на e-mail"}
+            </Button>
+          ) : null}
+          {canOfferSheet ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 rounded-lg bg-field px-2.5 text-xs"
+              disabled={busy || sheetBusy}
+              title={de ? "Dokumentationsbogen natürliche Personen (GwG), aus der Anfrage ausgefüllt" : "Лист идентификации по GwG, заполненный из заявки"}
+              onClick={() => void downloadGwgSheet()}
+              data-testid="lead-gwg-sheet"
+            >
+              {sheetBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : <FileText className="size-3.5" />}
+              Doku-Bogen GwG
+            </Button>
+          ) : null}
+          {sheetNotice ? (
+            <span className="text-emerald-700" role="status" data-testid="lead-gwg-sheet-notice">
+              {sheetNotice}
+            </span>
+          ) : null}
+          {emailNotice ? (
+            <span className="text-emerald-700" role="status" data-testid="lead-portal-email-notice">
+              {emailNotice}
+            </span>
+          ) : null}
+        </div>
       </div>
       {status !== "none" ? (
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-7">
@@ -386,21 +388,17 @@ export function LeadPortalAccessDetail({
             </>
           ) : null}
         </dl>
-      ) : (
+      ) : minor === true || !lead.email ? (
         <p className="text-muted-foreground">
           {minor === true
             ? de
               ? "Das Kind hat keinen eigenen Zugang: Die Eltern erhalten ihren Zugang unten."
               : "У ребёнка нет своего доступа: доступ получают родители (ниже)."
-            : lead.email
-            ? de
-              ? "Für diesen Lead wurde noch kein Zugang angelegt."
-              : "Для этого лида доступ ещё не создан."
             : de
               ? "Ohne E-Mail-Adresse kann kein Zugang angelegt werden."
               : "Без электронной почты доступ создать нельзя."}
         </p>
-      )}
+      ) : null}
       {ownLoginClosed && status !== "none" ? (
         <p className="text-muted-foreground" data-testid="lead-portal-own-login-closed">
           {de
@@ -408,7 +406,7 @@ export function LeadPortalAccessDetail({
             : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже). Если дату рождения исправить на 18 лет и старше, вход снова заработает."}
         </p>
       ) : null}
-      {error ? <p className="text-rose-700">{error}</p> : null}
+      {error ? <p className="text-rose-700" role="alert">{error}</p> : null}
       <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} onIntake={onPortalIntake} />
 
       <Dialog open={confirmOpen} onOpenChange={(open) => !busy && setConfirmOpen(open)}>

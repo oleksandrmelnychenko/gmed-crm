@@ -24689,6 +24689,8 @@ struct LeadSelfDisclosure {
     payment_route: Option<GwgPaymentRoute>,
     /// The expected total in EUR the lead stated ("8.000,00 EUR").
     expected_total: Option<String>,
+    /// Block C's recorded intermediary; never inferred from a risk trigger.
+    via_third_party_kind: Option<String>,
     /// `None` until the own-interest question was answered.
     acts_on_own_account: Option<bool>,
     beneficial_owner_name: Option<String>,
@@ -24963,6 +24965,10 @@ async fn load_lead_self_disclosure(
         invoice_recipient,
         payment_route,
         expected_total,
+        via_third_party_kind: billing_extras["via_third_party_kind"]
+            .as_str()
+            .filter(|_| patient_side_pays)
+            .map(str::to_string),
         salutation: statements.salutation,
         first_name: text("first_name").unwrap_or_default(),
         middle_name: text("middle_name"),
@@ -25501,6 +25507,18 @@ fn build_lead_self_disclosure_pdf(
                 "Zahlung über Dritte / Zahlungsdienstleister",
                 route.via_third_party.map(|_| route.third_party_line()),
             ));
+            if route.via_third_party == Some(true) {
+                rows.push((
+                    "Zahlung erfolgt über",
+                    data.via_third_party_kind
+                        .as_deref()
+                        .and_then(|kind| match kind {
+                            "person" => Some("Privatperson".to_string()),
+                            "psp" => Some("Zahlungsdienstleister".to_string()),
+                            _ => None,
+                        }),
+                ));
+            }
         }
         rows.push((
             "Voraussichtlicher Gesamtbetrag",
@@ -25902,18 +25920,17 @@ fn build_adult_privacy_consents_pdf(
         chosen.named_recipients,
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
-    if let Some(recipients) = recipients {
-        for line in recipients.lines().filter(|line| !line.trim().is_empty()) {
-            layout.text_block(
-                line.trim(),
-                10.5,
-                false,
-                12.0,
-                TreatmentPlanPdfColor::Body,
-                0.0,
-                0.8,
-            );
-        }
+    // The persons the person named in the cabinet (owner 2026-10-12), then
+    // any staff added.
+    let named = own_choice.map(|choice| choice.recipient_lines()).unwrap_or_default();
+    for line in named
+        .iter()
+        .map(String::as_str)
+        .chain(recipients.into_iter().flat_map(str::lines))
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        layout.text_block(line, 10.5, false, 12.0, TreatmentPlanPdfColor::Body, 0.0, 0.8);
     }
     adult_legal_checkbox(
         &mut layout,
@@ -26158,26 +26175,23 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
             "dass personenbezogene und medizinische Daten von {our} Kind an folgende Personen und/oder Institutionen/Einrichtungen übermittelt werden; insoweit {release_verb} {we_lower} {agency_person} auch von der Schweigepflicht:"
         ),
     );
-    match context
-        .extra_release_recipients
-        .as_deref()
+    // The persons a parent or the guardian named in the cabinet (owner
+    // 2026-10-12), then any staff added; a blank line when there are none.
+    let named = own_choice.map(|choice| choice.recipient_lines()).unwrap_or_default();
+    let lines: Vec<&str> = named
+        .iter()
+        .map(String::as_str)
+        .chain(context.extra_release_recipients.as_deref().into_iter().flat_map(str::lines))
         .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        Some(recipients) => {
-            for line in recipients.lines().filter(|line| !line.trim().is_empty()) {
-                layout.text_block(
-                    line.trim(),
-                    10.5,
-                    false,
-                    12.0,
-                    TreatmentPlanPdfColor::Body,
-                    0.0,
-                    0.8,
-                );
+        .filter(|line| !line.is_empty())
+        .collect();
+    match lines.is_empty() {
+        false => {
+            for line in lines {
+                layout.text_block(line, 10.5, false, 12.0, TreatmentPlanPdfColor::Body, 0.0, 0.8);
             }
         }
-        None => {
+        true => {
             layout.text_block(
                 &fitted_consent_blank("", "", 10.5, layout.available_width(12.0)),
                 10.5,
@@ -35348,6 +35362,7 @@ mod tests {
                 channel_email: true,
                 ..Default::default()
             },
+            recipients: Vec::new(),
             chosen_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 6, 0).unwrap(),
             source: "lead_portal".into(),
             access_kind: Some("guardian".into()),
@@ -35697,6 +35712,7 @@ mod tests {
                 channel_whatsapp: true,
                 ..Default::default()
             },
+            recipients: Vec::new(),
             chosen_at: chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 12, 8, 5, 0)
                 .unwrap(),
             source: "lead_portal".into(),
@@ -36860,6 +36876,32 @@ mod tests {
 
     #[test]
     fn the_lead_self_disclosure_prints_the_payment_route_and_a_paying_parent() {
+        for (kind, label) in [("person", "Privatperson"), ("psp", "Zahlungsdienstleister")] {
+            let data = super::LeadSelfDisclosure {
+                payer: Some(super::LeadDisclosurePayer {
+                    self_payer: true,
+                    ..Default::default()
+                }),
+                payment_route: Some(super::GwgPaymentRoute {
+                    via_third_party: Some(true),
+                    ..Default::default()
+                }),
+                via_third_party_kind: Some(kind.to_string()),
+                ..anna_lead_disclosure()
+            };
+            let pdf = super::build_lead_self_disclosure_pdf(
+                &data,
+                &legal_test_agency(),
+                None,
+                "DOC-TEST-INTERMEDIARY",
+            )
+            .unwrap();
+            let text = normalized_pdf_text(&pdf);
+            assert!(
+                text.contains(&format!("Zahlung erfolgt über {label}")),
+                "{text}"
+            );
+        }
         // A self-payer in cash with the expected total (QA 2026-10-10 B5).
         let cash = super::LeadSelfDisclosure {
             payer: Some(super::LeadDisclosurePayer {

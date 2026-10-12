@@ -395,22 +395,6 @@ export function FinalInvoiceLink({
   );
 }
 
-/**
- * Hint shown next to billing actions: releasing the final invoice applies the
- * order's paid advances automatically (routes/invoices/advance_application.rs).
- */
-export function AdvancePaymentHint({ lang }: { lang: Lang }) {
-  const tx = txFor(lang);
-  return (
-    <p className="text-xs leading-5 text-muted-foreground">
-      {tx(
-        "Оплаченные авансы зачитываются в финальный счёт автоматически при его выпуске (статус «Отправлен»); зачёт можно снять и повторить в самом счёте («Зачесть предоплату»). При переплате оформите кредит-ноту и возврат в счёте.",
-        "Bezahlte Anzahlungen werden beim Freigeben der Schlussrechnung automatisch angerechnet; die Anrechnung lässt sich in der Rechnung lösen und erneut vornehmen („Vorauszahlung anrechnen“). Bei Überzahlung Gutschrift und Erstattung in der Rechnung erfassen.",
-      )}
-    </p>
-  );
-}
-
 /** One settlement as a card: figures, lines, final invoice and billing actions. */
 export function TerminationSettlementCard({
   settlement,
@@ -476,7 +460,6 @@ export function TerminationSettlementCard({
       ) : (
         <>
           <SettlementActions settlement={settlement} lang={lang} onChanged={onChanged} />
-          <AdvancePaymentHint lang={lang} />
         </>
       )}
     </section>

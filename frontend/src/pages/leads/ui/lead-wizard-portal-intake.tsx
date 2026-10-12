@@ -3,17 +3,20 @@ import { CheckCheck, Clock3, LoaderCircle, RefreshCw, UserRound, X } from "lucid
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
   reviewLeadPortalUpload,
   type LeadPortalIntake,
+  type LeadPortalConsent,
   type LeadPortalUpload,
   type PatientFieldMarker,
   type Step1FillMode,
 } from "../data/lead-portal-intake-api";
 import { portalProgressText } from "../model/lead-portal-intake";
+import { latestPortalConsent } from "../model/lead-portal-consents";
 
 type Tx = (ru: string, de: string) => string;
 
@@ -156,21 +159,36 @@ export function Step1FillModeSwitch({
     <div
       role="radiogroup"
       aria-label={tx("Кто заполняет данные клиента", "Wer füllt die Personendaten aus")}
-      className="inline-flex rounded-lg border border-border bg-muted/30 p-0.5"
+      className="inline-flex max-w-full flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1"
       data-testid="step1-fill-mode"
     >
-      {options.map((option) => (
+      {options.map((option, index) => (
         <button
           key={option.value}
           type="button"
           role="radio"
           aria-checked={mode === option.value}
+          tabIndex={mode === option.value ? 0 : -1}
           disabled={disabled}
           className={cn(
-            "rounded-md px-3 py-1 text-xs transition-colors",
-            mode === option.value ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            "min-h-8 cursor-pointer rounded-md border px-3 py-1.5 text-[13px] leading-5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-default disabled:opacity-60",
+            mode === option.value
+              ? "border-[var(--brand)] bg-[var(--brand)] font-semibold text-white shadow-sm"
+              : "border-transparent bg-card text-muted-foreground hover:border-border hover:bg-muted/70 hover:text-foreground",
           )}
           onClick={() => onChange(option.value)}
+          onKeyDown={(event) => {
+            if (disabled) return;
+            let nextIndex: number;
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") nextIndex = (index + 1) % options.length;
+            else if (event.key === "ArrowLeft" || event.key === "ArrowUp") nextIndex = (index + options.length - 1) % options.length;
+            else if (event.key === "Home") nextIndex = 0;
+            else if (event.key === "End") nextIndex = options.length - 1;
+            else return;
+            event.preventDefault();
+            if (options[nextIndex].value !== mode) onChange(options[nextIndex].value);
+            event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]?.focus();
+          }}
         >
           {option.label}
         </button>
@@ -192,14 +210,19 @@ export function Step1PortalSummary({ intake, mode, tx }: { intake: LeadPortalInt
     ) : null;
   }
   const parts = portalProgressText(intake.progress, tx, formatAppDateTime);
+  const allFieldsFilled = intake.progress.total > 0 && intake.progress.filled >= intake.progress.total;
   return (
-    <p className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-right text-xs text-muted-foreground" data-testid="step1-portal-summary">
+    <div className="flex flex-wrap items-center justify-end gap-1.5 text-xs text-muted-foreground" data-testid="step1-portal-summary">
       {intake.submitted_at ? <CheckCheck aria-hidden="true" className="size-3.5 text-emerald-600" /> : <Clock3 aria-hidden="true" className="size-3.5" />}
-      <span>{tx("Портал пациента:", "Patientenportal:")}</span>
-      {parts.map((part) => (
-        <span key={part}>{part}</span>
-      ))}
-    </p>
+      <span className="mr-0.5">{tx("Портал пациента:", "Patientenportal:")}</span>
+      {parts.map((part, index) => {
+        // portalProgressText returns fields, medical documents, then submission.
+        const tone = index === 0
+          ? allFieldsFilled ? "success" : "warning"
+          : index === 1 ? intake.progress.documents > 0 ? "success" : "info" : "success";
+        return <StatusChip key={part} tone={tone}>{part}</StatusChip>;
+      })}
+    </div>
   );
 }
 
@@ -242,30 +265,33 @@ export function PatientDataPendingNotice({
   const birthDate = missing.includes("birthDate");
   const legalSex = missing.includes("legalSex");
   const what = birthDate && legalSex
-    ? tx("дату рождения и пол по документам", "Geburtsdatum und Geschlecht")
+    ? tx("дату рождения и пол согласно документам", "Geburtsdatum und Geschlecht")
     : birthDate
       ? tx("дату рождения", "das Geburtsdatum")
-      : tx("пол по документам", "das Geschlecht laut Dokument");
+      : tx("пол согласно документам", "das Geschlecht laut Dokument");
   const fields = birthDate && legalSex
     ? tx("эти поля", "diese Felder")
     : tx("это поле", "dieses Feld");
   return (
-    <div
+    <StatusChip
+      tone="warning"
       role="status"
       data-testid="patient-data-pending"
-      className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900"
+      className="w-full items-start rounded-xl px-3 py-2"
     >
-      <Clock3 aria-hidden="true" className="size-4 shrink-0" />
-      <span className="min-w-0 flex-1">
-        {tx(
-          `Ждём данные пациента: ${what} пациент заполнит в портале. Медицинская часть станет доступна после этого — или заполните ${fields} сами на шаге «Данные клиента».`,
-          `Warten auf die Daten des Patienten: ${what} trägt der Patient im Portal ein. Danach ist der medizinische Teil verfügbar – oder Sie füllen ${fields} selbst unter „Personendaten“ aus.`,
-        )}
+      <Clock3 aria-hidden="true" className="mt-[3px] size-3.5 shrink-0" />
+      <span className="flex min-w-0 flex-1 flex-col items-start gap-2 sm:flex-row sm:gap-3">
+        <span className="min-w-0 flex-1 leading-5">
+          {tx(
+            `Ждём данные пациента: ${what} пациент заполнит в портале. Медицинская часть станет доступна после этого — или заполните ${fields} сами на шаге «Данные клиента».`,
+            `Warten auf die Daten des Patienten: ${what} trägt der Patient im Portal ein. Danach ist der medizinische Teil verfügbar – oder Sie füllen ${fields} selbst unter „Personendaten“ aus.`,
+          )}
+        </span>
+        <Button type="button" variant="outline" size="sm" className="h-7 shrink-0 text-xs" onClick={onOpenStep1}>
+          {tx("К данным клиента", "Zu den Personendaten")}
+        </Button>
       </span>
-      <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={onOpenStep1}>
-        {tx("К данным клиента", "Zu den Personendaten")}
-      </Button>
-    </div>
+    </StatusChip>
   );
 }
 
@@ -371,18 +397,52 @@ export function PatientUploadMark({ documentId, lang }: { documentId: string; la
 
 /** Portal consent to process the request data, for the compliance (documents) step. */
 export function PortalInquiryConsentLine({ intake, tx }: { intake: LeadPortalIntake | null; tx: Tx }) {
-  const consent = intake?.consents.find((item) => item.type === "lead_inquiry_processing" && !item.revoked_at);
-  if (!consent?.given_at) return null;
+  if (!intake) return null;
   return (
-    <p className="text-xs text-emerald-700" data-testid="portal-inquiry-consent">
-      {tx("Согласие на обработку данных обращения (портал)", "Einwilligung zur Bearbeitung der Anfrage (Portal)")} ✓{" "}
-      {formatAppDateTime(consent.given_at)}
-      <span className="block text-muted-foreground">
-        {tx(
-          "Не заменяет подписанный документ DSGVO: удаление через 14 дней останавливает только он.",
-          "Ersetzt nicht das unterschriebene DSGVO-Dokument: nur dieses stoppt die Löschung nach 14 Tagen.",
-        )}
-      </span>
-    </p>
+    <div className="space-y-1" data-testid="portal-inquiry-consent">
+      <PortalConsentRecord
+        label={tx("Согласие на обработку данных обращения (портал)", "Einwilligung zur Bearbeitung der Anfrage (Portal)")}
+        consent={latestPortalConsent(intake.consents, "lead_inquiry_processing")}
+        tx={tx}
+      />
+    </div>
+  );
+}
+
+/** Art. 9 consent is a separate fact, even before the first medical upload. */
+export function PortalHealthConsentLine({ intake, tx }: { intake: LeadPortalIntake | null; tx: Tx }) {
+  if (!intake || intake.uploads_hidden) return null;
+  return (
+    <div data-testid="portal-health-consent">
+      <PortalConsentRecord
+        label={tx("Согласие на обработку медицинских данных (ст. 9 DSGVO, портал)", "Einwilligung zur Verarbeitung von Gesundheitsdaten (Art. 9 DSGVO, Portal)")}
+        consent={latestPortalConsent(intake.consents, "health_data_processing")}
+        tx={tx}
+      />
+    </div>
+  );
+}
+
+function PortalConsentRecord({ label, consent, tx }: { label: string; consent: LeadPortalConsent | null; tx: Tx }) {
+  const revoked = Boolean(consent?.revoked_at);
+  const given = Boolean(consent?.given_at);
+  const who = consent?.access_kind === "guardian" ? tx("родитель / представитель", "Elternteil / Vertretung")
+    : consent?.access_kind === "self" ? tx("пациент", "Patient/in") : null;
+  return (
+    <div className="space-y-1 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium leading-5">{label}</span>
+        <StatusChip tone={!revoked && given ? "success" : "warning"}>
+          {revoked ? tx("Отозвано", "Widerrufen") : given ? tx("Дано", "Erteilt") : tx("Не дано", "Nicht erteilt")}
+        </StatusChip>
+      </div>
+      {given || revoked ? (
+        <p className="leading-5 text-muted-foreground">
+          {consent?.given_at ? `${tx("Дано:", "Erteilt:")} ${formatAppDateTime(consent.given_at)}` : ""}
+          {consent?.revoked_at ? ` · ${tx("Отозвано:", "Widerrufen:")} ${formatAppDateTime(consent.revoked_at)}` : ""}
+          {who ? ` · ${who}` : ""}{consent?.version ? ` · ${tx("версия", "Version")} ${consent.version}` : ""}
+        </p>
+      ) : null}
+    </div>
   );
 }

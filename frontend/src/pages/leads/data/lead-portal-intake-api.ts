@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import { normalizeLeadPortalConsentForm, type LeadPortalConsentForm } from "../model/lead-portal-consents";
 
 import { INVOICE_TO_VALUES, PAYMENT_METHODS, type InvoiceTo, type PaymentMethod } from "../model/lead-payer";
 import {
@@ -206,6 +207,8 @@ export type LeadPortalRecipient = {
  * the payer section.
  */
 export type LeadPortalBilling = {
+  /** When the patient last changed the current invoice recipient. */
+  recipient_updated_at?: string | null;
   /**
    * Step 3 of the cabinet (owner spec 2026-10-11), as the lead answered it:
    * who receives the invoice (`self` or `third_party`), whether that
@@ -241,6 +244,8 @@ export type LeadPortalBilling = {
   /** Payment through a third person or a payment service provider; null while unanswered. */
   via_third_party: boolean | null;
   via_third_party_details: string | null;
+  /** Follow-up block C: person or payment service provider; absent on an older server. */
+  via_third_party_kind?: "person" | "psp" | null;
   /**
    * Follow-up block C: the total the lead expects to pay, in EUR ("6000.00");
    * null while not answered, absent on an older server.
@@ -267,6 +272,10 @@ export type LeadPortalPayerLink = {
 
 /** `GET /leads/{id}/portal-intake`: what the patient did in the portal. */
 export type LeadPortalIntake = {
+  /** Organisation details entered in the cabinet; hidden for roles without statement access. */
+  payer_organisation?: { legal_form: string | null; register_number: string | null; contact_name: string | null } | null;
+  /** Read-only Anlage 1 choices made by the patient or representative. */
+  consent_form?: LeadPortalConsentForm | null;
   lead_id: string;
   fill_mode: Step1FillMode;
   /** Keys are lead columns: first_name, date_of_birth, street_address, … */
@@ -363,6 +372,9 @@ export type LeadPortalEnhancedDetails = {
     sector: string | null;
   };
   funds_proof_documents: LeadIdentityDocument[];
+  /** Block B: uploaded relationship evidence and whether it was requested. */
+  relationship_proof_documents?: LeadIdentityDocument[];
+  relationship_proof_requested?: boolean | null;
   /** Last change by the lead while the answers are still what the lead entered. */
   updated_at: string | null;
 };
@@ -393,6 +405,8 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
     fill_mode: raw.fill_mode === "patient" ? "patient" : "staff",
     patient_fields: raw.patient_fields && typeof raw.patient_fields === "object" ? raw.patient_fields : {},
     patient_payer: raw.patient_payer && typeof raw.patient_payer === "object" ? raw.patient_payer : null,
+    payer_organisation: raw.identification_hidden ? null : normalizePayerOrganisation(raw.payer_organisation),
+    consent_form: raw.identification_hidden ? null : normalizeLeadPortalConsentForm(raw.consent_form),
     progress: raw.progress ?? { filled: 0, total: 0, documents: 0, submitted_at: null },
     submitted_at: raw.submitted_at ?? null,
     submitted_by: raw.submitted_by ?? null,
@@ -453,6 +467,8 @@ export function normalizeLeadPortalEnhancedDetails(value: unknown): LeadPortalEn
       sector: textOrNull(answers.sector),
     },
     funds_proof_documents: normalizeIdentityDocuments(raw.funds_proof_documents),
+    relationship_proof_documents: normalizeIdentityDocuments(raw.relationship_proof_documents),
+    relationship_proof_requested: answerOrNull(raw.relationship_proof_requested),
     updated_at: textOrNull(raw.updated_at),
   };
 }
@@ -476,6 +492,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 const textOrNull = (value: unknown) => (typeof value === "string" && value.trim() ? value.trim() : null);
 const answerOrNull = (value: unknown) => (typeof value === "boolean" ? value : null);
+
+function normalizePayerOrganisation(value: unknown): NonNullable<LeadPortalIntake["payer_organisation"]> | null {
+  const raw = asRecord(value);
+  return raw ? { legal_form: textOrNull(raw.legal_form), register_number: textOrNull(raw.register_number), contact_name: textOrNull(raw.contact_name) } : null;
+}
 
 /** The lead's statements with every key present; null when the server sent none. */
 function normalizeIdentification(value: unknown): LeadGwgIdentification | null {
@@ -624,6 +645,7 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
         };
   return {
     ...recipientKeys,
+    recipient_updated_at: textOrNull(raw.recipient_updated_at),
     invoice_to: INVOICE_TO_VALUES.find((item) => item === raw.invoice_to) ?? null,
     invoice_name: textOrNull(raw.invoice_name),
     invoice_street: textOrNull(raw.invoice_street),
@@ -641,6 +663,7 @@ export function normalizeLeadPortalBilling(value: unknown): LeadPortalBilling | 
     bank_name: textOrNull(raw.bank_name),
     via_third_party: answerOrNull(raw.via_third_party),
     via_third_party_details: textOrNull(raw.via_third_party_details),
+    via_third_party_kind: raw.via_third_party_kind === "person" || raw.via_third_party_kind === "psp" ? raw.via_third_party_kind : null,
     expected_total_eur:
       raw.expected_total_eur === undefined
         ? undefined

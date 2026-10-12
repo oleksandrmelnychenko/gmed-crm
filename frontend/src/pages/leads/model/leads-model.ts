@@ -258,6 +258,24 @@ export function leadErrorMessage(
     );
   }
   const normalized = message.toLocaleLowerCase("en-US");
+  if (normalized === "lead master data is incomplete for a prospect patient") {
+    const labels: Record<string, string> = {
+      first_name: tx("имя", "Vorname"),
+      last_name: tx("фамилию", "Nachname"),
+      date_of_birth: tx("дату рождения", "Geburtsdatum"),
+      legal_sex: tx("пол согласно документам", "Geschlecht laut Ausweisdokument"),
+    };
+    const missing = leadErrorBody(error)?.missing;
+    const fields = Array.isArray(missing) ? Array.from(new Set(missing))
+      .flatMap((key) => typeof key === "string" && labels[key] ? [labels[key]] : []) : [];
+    return fields.length ? tx(
+      `На шаге «Данные клиента» заполните: ${fields.join(", ")}. После этого можно продолжить медицинскую часть.`,
+      `Im Schritt „Personendaten“ ergänzen: ${fields.join(", ")}. Danach kann der medizinische Teil fortgesetzt werden.`,
+    ) : tx(
+      "Чтобы продолжить медицинскую часть, заполните имя, фамилию, дату рождения и пол согласно документам на шаге «Данные клиента».",
+      "Um den medizinischen Teil fortzusetzen, Vorname, Nachname, Geburtsdatum und Geschlecht laut Ausweisdokument im Schritt „Personendaten“ ergänzen.",
+    );
+  }
   const exact = LEAD_ERROR_MESSAGES[normalized];
   if (exact) return tx(exact[0], exact[1]);
 

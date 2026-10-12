@@ -636,7 +636,9 @@ pub async fn block_open(
         return Ok(true);
     }
     let config = load_config(conn).await?;
-    Ok(assessment.score.level == 2
+    // Level 3 too, as in `block_states` (owner 2026-10-10): the payer link
+    // asks what the staff wizard and the cabinet already show as open.
+    Ok(assessment.score.level >= 2
         && config.level_2_blocks_automatic
         && blocks_of(&assessment.triggers).contains(&block))
 }

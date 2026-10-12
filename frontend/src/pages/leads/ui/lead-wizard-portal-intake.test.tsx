@@ -94,7 +94,8 @@ describe("wizard step 1 and the patient portal", () => {
     expect(html.match(/patient-upload-mark/g)).toHaveLength(1);
 
     const consent = renderToStaticMarkup(<PortalInquiryConsentLine intake={intake} tx={tx} />);
-    expect(consent).toContain("Согласие на обработку данных обращения (портал) ✓");
+    expect(consent).toContain("Согласие на обработку данных обращения (портал)");
+    expect(consent).toContain("Дано:");
   });
 
   it("ignores an answer that is not a portal state", () => {

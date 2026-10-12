@@ -337,3 +337,85 @@ final result: passed
 - Targeted ESLint and TypeScript project checks passed.
 
 final result: passed
+
+
+---
+
+# Design QA — Sanctions, lead documents, orders and form privacy — 2026-10-12
+
+## Evidence and scope
+
+- Source captures supplied by the user: `codex-clipboard-64c080ba-6012-468e-994c-2fbd4930f9be.png` (payer), `codex-clipboard-015bacdf-b305-4dff-96e5-745a54b8bbaf.png` (patient data), `codex-clipboard-9432708b-0e6b-47c2-a5c3-274de296e9d3.png` (risk table), and `codex-clipboard-862e28fc-a438-4c87-a1f6-d0dcd39b3a4c.png` (order pipeline), read from the user's Temp folder.
+- Main implementation at `http://127.0.0.1:5173`. Captures in `C:/Users/oleks/Developer/gmed/.tmp/sanctions-design/`: `before.png`, `after.png`, `list.png`, `risk.png`, `mobile-list-before.png`, `mobile-list.png`, `lead-components.png`, `lead-components-mobile.png`, `order-overview.png`, `order-pipeline-bottom.png`, `legal-before.png`, `legal-after.png`, `legal-retention.png`, `legal-lists.png`.
+- Source and revised captures were opened together in comparison inputs. The supplied screenshots describe the areas to restyle; existing console typography and components are the design authority. Smaller typography, compact cards, plain field labels, shared table and separators are intentional changes.
+- Payer/patient/risk components were rendered with synthetic data and disabled actions to avoid remote autosave. Representation fields and invoice tax inputs were included. Orders and legal notice were inspected through read-only live routes. Medical form actions and document generation were not exercised.
+- The legal before capture enters at `#privacy`; the after capture also verifies the newly styled page header at `/legal`. This is an intentional difference in scroll position, not a visual fidelity claim for identical crops.
+
+## Findings and iterations
+
+1. P2 — the selected sanctions tab was clipped at 390 px. Added active-tab reveal on selection and nav resize. The post-fix mobile capture shows the entire active label inside the viewport; page width remains 390 px.
+2. P2 — oversized/uppercase labels, deep nested cards and wide gaps in the supplied lead/order captures. Reused console section titles, light borders, 13 px body text, 11.5 px labels, compact grids and inline metrics. Revised desktop and mobile component captures have no clipped text or controls.
+3. P2 — the hand-built risk table did not use the shared table and the date column lacked separation. Replaced it with DataTable, explicit column widths, wrapping and tabular dates. The desktop row is readable; the 390 px breakpoint uses the table's existing record cards with all four detail fields. Document width 380 px equals scroll width 380 px (10 px scrollbar).
+4. P2 — privacy lists became plain paragraphs during initial text extraction. Re-extracted the reference's OOXML list markers. Revised DOM has 14 numbered sections, five semantic lists and 22 list items in DE and RU: six data categories, five purposes, two processors, four other recipients, five retention cases. The retention capture shows bullets and consistent continuation spacing.
+
+## Fidelity surfaces
+
+- Typography: existing application font stack retained; normal-case compact labels, semibold section headings and monospace dates/numbers. Long Russian/German labels wrap. Reduced display size is intentional for console density.
+- Spacing/layout: compact padding, aligned grid columns and dividers replace nested grey cards. Mobile patient facts become one column; table records wrap. No horizontal page overflow in the tested component state.
+- Colors/tokens: existing card/field/border/foreground tokens and GMED orange marker; blue patient provenance, amber warnings and red mandatory compliance remain semantic. Disabled fixture controls intentionally look disabled.
+- Assets: existing GMED logo raster reused for the public legal header; existing Lucide icons retained. No custom logo/icon approximations or generated images.
+- Copy/content: requested helper labels removed; document readiness/action warnings highlighted. The supplied privacy text keeps its DE/RU content and list structure, uses configured agency contacts, omits the reference's unresolved website-policy placeholder, and renders the responsible person's configured name with a localized label. Existing cooperation notice remains for contracted patients.
+
+## Verification and limits
+
+- Main and worktree TypeScript checks and focused ESLint checks passed for the completed code, including the final privacy list and layout changes.
+- Targeted tests cover sanctions country union/failure behavior, payer data, patient statements, risk triggers, order need/pipeline models, privacy scope and list semantics, cabinet languages and Cyrillic-only name hints.
+- Name hint is advisory, shown only for actual Cyrillic in first/last/middle name, and preserves entered values and field error descriptions. Latin accented names and empty names have no hint.
+- Country sync is triggered after a manual sanctions refresh/import, unions current geographic regimes with existing country blocks, and preserves policy on source failure. No remote policy write was performed for visual QA; the existing daily backend scheduler is outside this frontend change.
+- The 4176 worktree contains the same scoped changes while preserving its newer behavior. Its signed-in visual QA remains unavailable because the existing login was reported deactivated; no account settings were changed. Main 5173 provides rendered verification.
+- DOCX reference text and list markers were inspected locally. Its packaged renderer could not run because LibreOffice is absent; no edited DOCX is being delivered.
+- Clean final load of `/legal`: 14 sections, five lists, 22 items, no page overflow (1280/1280 px) and no new console errors. An earlier HMR error during the temporary content-schema transition was cleared by loading the final modules.
+
+No actionable P0/P1/P2 issue remains in the rendered main preview states. The remaining 4176 authentication limit is an environment constraint.
+
+final result: passed (main preview); worktree authenticated visual verification blocked by deactivated login
+
+
+---
+
+# Design QA — Wizard follow-up and cabinet evidence — 2026-10-12
+
+## Final behavior
+
+- The wizard uses a grey canvas with white sections, compact console typography and shared semantic StatusChip tokens. Missing/blocked items use amber; completed consents and checks use green. The fill-mode selection uses solid GMED orange and keyboard navigation. Portal completion and document counts are separate colored chips.
+- Payer-link language, contact consent, send eligibility and recipient statements use the same section/field/chip styles. The economic-interest Yes/No controls and unanswered chip sit immediately beside the question and wrap on narrow screens.
+- Diagnosis, anamnesis, allergy, CAVE and medication editors share centered Dialog layout, grey scroll canvas, white groups and fixed footer. Their backdrop and the outer lead wizard cover the full viewport with black at 40% opacity.
+- The passport spelling hint is permanently visible in RU/UA; separate field correction appears for Cyrillic. This supersedes the earlier conditional-only hint. The release worktree also includes the confirmed optional transliteration suggestion and user-friendly copy; entered values are preserved until the user accepts a suggestion.
+- The eight cabinet visibility gaps are mapped in [cabinet-to-wizard-parity.md](qa/cabinet-to-wizard-parity.md), with explicit unknown/declined semantics and existing medical/identity permissions. A source count of 113 independently exercised fields is not claimed because the original matrix was unavailable.
+
+## Rendered checks
+
+- Actual components were rendered in an ignored preview using synthetic names, organisation/contact data, statement choices and file metadata. Clinical and payer callbacks were local mocks; no invitation, patient consent, signature, real clinical save or remote policy update was submitted.
+- Desktop captures: `C:/Users/oleks/Developer/gmed/.tmp/sanctions-design/payer-section-after.png`, `payer-link-after.png`, `wizard-consents-after.png`, `anamnesis-checklist-after.png`, and the five `*-editor-after.png` captures. Supplied diagnosis/anamnesis screenshots were inspected alongside implementation captures.
+- Mobile diagnosis, anamnesis, allergy and medication dialogs at 390 × 844: content width 364 px, height 812 px, no horizontal dialog overflow; header and footer remain reachable. The medication picker closes with Escape while keeping its editor open. Anamnesis still prompts before discarding an edited checklist.
+- The live outer wizard backdrop was measured against the full browser viewport (1546 × 1244). Browser viewport overrides were reset after responsive checks.
+
+## Release checks at preparation
+
+- Canonical release source: latest upstream main plus the agreed product changes, including removal of new cryptocurrency payment choices and closure of a minor's own cabinet login before parents receive access.
+- Full frontend suite: 364 test files, 3225 tests passed. Full frontend lint, staff navigation guard, TypeScript and production Vite build passed. Targeted consent, payer, clinical dialog and keyboard tests passed in both checkouts.
+- Server read-only consent helper tests and patient form PDF payment-route test passed from a separate canonical-worktree target directory; Rust formatter and relevant Clippy check passed. The isolated lead cabinet API suite and final payer autosave checks are recorded separately after completion.
+- This section documents local rendering and checks; DEV publication/live payload verification is recorded in the release verification entry. It does not certify a live cabinet-to-wizard round trip for every draft slot.
+
+final result: rendered follow-up passed; full DEV publication verification pending
+
+
+## Follow-up verification and deployment timing
+
+- Latest completed frontend state: 365 test files / 3235 tests passed; main and canonical TypeScript checks passed. Full lint and staff navigation checks passed; the canonical production Vite build passed after the autosave type correction. The focused payer suites have 78 checks, including 9 autosave regressions for serialized updates, retry and flush on step/unmount; rendered synthetic Yes/No input changed the local save counter once and showed the green saved chip without a Save button.
+- DEV deployment runner recovery tests were actually executed in a Linux container: 17 passed. Release image/migration-rehearsal coverage: 8 passed. The first Windows runner invocation skipped the Linux-only cases; that is superseded by the executed Linux run.
+- The isolated cabinet API run exposed a clock-source mismatch: application-time markers could appear older than database-time submission. Canonical portal marker writers now use database clock_timestamp() after the row lock; submission and declaration confirmation share a database timestamp. The insurance-after-submit regression passed with an explicit marker-after-submission assertion and the original changed-since-submit/re-send assertions.
+- Minor notification inserts now serialize on the lead and recheck once-only state inside the same transaction. A deterministic test with two concurrent readers and a real PostgreSQL lock gate passed with a four-connection pool. Existing guardian choice checks additionally assert the staff consent_form values and author metadata.
+- The owner is still editing the canonical source and explicitly said they will announce readiness. No DEV publish, release commit or final source freeze has occurred. Repeat full release gates and refresh the isolated candidate from the completed canonical source after that signal; the candidate currently is preparation only.
+
+final result: completed scoped changes verified; full DEV release awaits the owner's finished edits

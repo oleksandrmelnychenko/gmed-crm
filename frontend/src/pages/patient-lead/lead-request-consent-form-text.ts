@@ -1,4 +1,4 @@
-import type { ConsentFormChoices } from "./lead-request-api";
+import type { ConsentFormChoices, ConsentRecipientRelation } from "./lead-request-api";
 import { asLeadCabinetLang } from "./lead-request-text";
 
 /**
@@ -30,9 +30,22 @@ export type ConsentFormText = {
   unsaved: string;
   /** The own login of a minor: only a parent or the guardian chooses (QA 2026-10-12, A3-01). */
   byGuardianOnly: string;
+  /** The named recipients (owner 2026-10-12), shown while "named recipients" is ticked. */
+  recipientsTitle: string;
+  recipientsHint: string;
+  recipientName: string;
+  recipientRelation: string;
+  recipientContact: string;
+  recipientRelations: Record<ConsentRecipientRelation, string>;
+  addRecipient: string;
+  removeRecipient: string;
+  /** "Named recipients" ticked, nobody named (`consent_recipients_required`). */
+  recipientsRequired: string;
+  /** A recipient incomplete or too long, or more than five (`consent_recipients_invalid`). */
+  recipientsInvalid: string;
 };
 
-type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint">;
+type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint" | "recipientsHint">;
 
 const de: ConsentFormText = {
   title: "Einwilligung zur Datenübermittlung (Anlage 1)",
@@ -45,7 +58,7 @@ const de: ConsentFormText = {
       "Meine behandelnden Ärzte und medizinischen Einrichtungen dürfen meine Behandlungsunterlagen an GMED übermitteln.",
     data_system: "Meine Unterlagen dürfen im EDV-System von GMED gespeichert und verarbeitet werden.",
     named_recipients:
-      "Meine Daten dürfen an die Personen oder Institutionen übermittelt werden, die im Formular genannt sind (z. B. meine Vertrauenspersonen).",
+      "Meine Daten dürfen an die Personen oder Institutionen übermittelt werden, die ich unten nenne (z. B. meine Vertrauenspersonen).",
     channel_email: "E-Mail",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -67,6 +80,16 @@ const de: ConsentFormText = {
   unsaved: "Ihre Änderungen sind noch nicht gespeichert.",
   byGuardianOnly:
     "Für Minderjährige wählen die Eltern bzw. der Vormund mit ihrem eigenen Zugang, wozu sie einwilligen. Hier ist nichts auszuwählen.",
+  recipientsTitle: "Vertrauenspersonen und Institutionen",
+  recipientsHint: "Nennen Sie, an wen GMED Ihre Daten übermitteln darf (höchstens 5). Nur diese Personen stehen im Formular.",
+  recipientName: "Name bzw. Name der Institution",
+  recipientRelation: "Wer ist das?",
+  recipientContact: "Telefon oder E-Mail (optional)",
+  recipientRelations: { spouse: "Ehe-/Lebenspartner/in", child: "Kind", relative: "Angehörige/r", family_doctor: "Hausarzt/Hausärztin", clinic: "Klinik/Einrichtung", other: "Sonstige" },
+  addRecipient: "Person hinzufügen",
+  removeRecipient: "Entfernen",
+  recipientsRequired: "Bitte nennen Sie mindestens eine Person oder Institution – oder entfernen Sie das Häkchen.",
+  recipientsInvalid: "Bitte geben Sie bei jeder Person den Namen an und wählen Sie, wer das ist (höchstens 5 Personen).",
 };
 
 const deChild: ChildTexts = {
@@ -79,7 +102,7 @@ const deChild: ChildTexts = {
       "Die behandelnden Ärzte und medizinischen Einrichtungen meines Kindes dürfen seine Behandlungsunterlagen an GMED übermitteln.",
     data_system: "Die Unterlagen meines Kindes dürfen im EDV-System von GMED gespeichert und verarbeitet werden.",
     named_recipients:
-      "Die Daten meines Kindes dürfen an die Personen oder Institutionen übermittelt werden, die im Formular genannt sind.",
+      "Die Daten meines Kindes dürfen an die Personen oder Institutionen übermittelt werden, die ich unten nenne.",
     channel_email: "E-Mail",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -88,6 +111,7 @@ const deChild: ChildTexts = {
   channelsTitle: "Die Daten und Unterlagen meines Kindes dürfen über diese Kommunikationswege eingeholt oder übermittelt werden:",
   coreHint:
     "Ohne die drei erforderlichen Einwilligungen kann GMED die Anfrage für Ihr Kind nicht bearbeiten; deshalb lässt sich die Auswahl erst mit ihnen speichern. Möchten Sie sie nicht geben, speichern Sie nichts und sprechen Sie mit uns.",
+  recipientsHint: "Nennen Sie, an wen GMED die Daten Ihres Kindes übermitteln darf (höchstens 5). Sich selbst als Eltern bzw. Vormund müssen Sie hier nicht nennen.",
 };
 
 const en: ConsentFormText = {
@@ -100,7 +124,7 @@ const en: ConsentFormText = {
     doctors_to_agency: "My treating doctors and medical institutions may send my treatment records to GMED.",
     data_system: "My documents may be stored and processed in GMED's IT system.",
     named_recipients:
-      "My data may be passed on to the persons or institutions named in the form (for example my trusted persons).",
+      "My data may be passed on to the persons or institutions I name below (for example my trusted persons).",
     channel_email: "E-mail",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -122,6 +146,16 @@ const en: ConsentFormText = {
   unsaved: "Your changes are not saved yet.",
   byGuardianOnly:
     "For a minor, the parents or the guardian choose what they consent to with their own access. There is nothing to choose here.",
+  recipientsTitle: "Trusted persons and institutions",
+  recipientsHint: "Name who GMED may pass your data on to (at most 5). Only these persons appear on the form.",
+  recipientName: "Name or name of the institution",
+  recipientRelation: "Who is this?",
+  recipientContact: "Phone or e-mail (optional)",
+  recipientRelations: { spouse: "Spouse / partner", child: "Child", relative: "Relative", family_doctor: "Family doctor", clinic: "Clinic / institution", other: "Other" },
+  addRecipient: "Add a person",
+  removeRecipient: "Remove",
+  recipientsRequired: "Please name at least one person or institution – or untick the box.",
+  recipientsInvalid: "Please give each person a name and choose who they are (at most 5 persons).",
 };
 
 const enChild: ChildTexts = {
@@ -132,7 +166,7 @@ const enChild: ChildTexts = {
       "GMED and the staff it instructs may obtain, process and store my child's personal and medical data and documents and, where needed, pass them on to treating doctors, clinics, laboratories, interpreters, translators, assessors or payers.",
     doctors_to_agency: "My child's treating doctors and medical institutions may send my child's treatment records to GMED.",
     data_system: "My child's documents may be stored and processed in GMED's IT system.",
-    named_recipients: "My child's data may be passed on to the persons or institutions named in the form.",
+    named_recipients: "My child's data may be passed on to the persons or institutions I name below.",
     channel_email: "E-mail",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -141,6 +175,7 @@ const enChild: ChildTexts = {
   channelsTitle: "My child's data and documents may be obtained or passed on through these channels:",
   coreHint:
     "Without the three required consents GMED cannot handle the request for your child, so your choice can be saved only with them. If you do not want to give them, save nothing and talk to us.",
+  recipientsHint: "Name who GMED may pass your child's data on to (at most 5). You need not name yourself as parent or guardian.",
 };
 
 const uk: ConsentFormText = {
@@ -153,7 +188,7 @@ const uk: ConsentFormText = {
     doctors_to_agency: "Мої лікарі та медичні заклади можуть передавати GMED мої медичні документи.",
     data_system: "Мої документи можуть зберігатися й оброблятися в ІТ-системі GMED.",
     named_recipients:
-      "Мої дані можуть передаватися особам або установам, названим у формі (наприклад, моїм довіреним особам).",
+      "Мої дані можуть передаватися особам або установам, яких я назву нижче (наприклад, моїм довіреним особам).",
     channel_email: "Електронна пошта",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -175,6 +210,16 @@ const uk: ConsentFormText = {
   unsaved: "Зміни ще не збережено.",
   byGuardianOnly:
     "За неповнолітнього батьки або опікун обирають, на що погоджуються, через свій власний доступ. Тут нічого обирати не потрібно.",
+  recipientsTitle: "Довірені особи та установи",
+  recipientsHint: "Вкажіть, кому GMED може передавати ваші дані (не більше 5). У формі будуть лише ці особи.",
+  recipientName: "Ім’я та прізвище або назва установи",
+  recipientRelation: "Хто це?",
+  recipientContact: "Телефон або e-mail (необов’язково)",
+  recipientRelations: { spouse: "Чоловік / дружина, партнер", child: "Дитина", relative: "Родич", family_doctor: "Сімейний лікар", clinic: "Клініка / установа", other: "Інше" },
+  addRecipient: "Додати особу",
+  removeRecipient: "Видалити",
+  recipientsRequired: "Вкажіть, будь ласка, хоча б одну особу чи установу — або зніміть позначку.",
+  recipientsInvalid: "Для кожної особи вкажіть ім’я та оберіть, хто це (не більше 5 осіб).",
 };
 
 const ukChild: ChildTexts = {
@@ -185,7 +230,7 @@ const ukChild: ChildTexts = {
       "GMED і уповноважені працівники можуть отримувати, обробляти, зберігати персональні й медичні дані та документи моєї дитини і за потреби передавати їх лікарям, клінікам, лабораторіям, перекладачам, експертам або платникам.",
     doctors_to_agency: "Лікарі та медичні заклади моєї дитини можуть передавати GMED її медичні документи.",
     data_system: "Документи моєї дитини можуть зберігатися й оброблятися в ІТ-системі GMED.",
-    named_recipients: "Дані моєї дитини можуть передаватися особам або установам, названим у формі.",
+    named_recipients: "Дані моєї дитини можуть передаватися особам або установам, яких я назву нижче.",
     channel_email: "Електронна пошта",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -194,6 +239,7 @@ const ukChild: ChildTexts = {
   channelsTitle: "Дані та документи моєї дитини можна отримувати або передавати цими каналами:",
   coreHint:
     "Без трьох обов'язкових згод GMED не може опрацювати запит для вашої дитини, тому вибір можна зберегти лише з ними. Якщо ви не хочете їх давати, нічого не зберігайте й зв'яжіться з нами.",
+  recipientsHint: "Вкажіть, кому GMED може передавати дані вашої дитини (не більше 5). Себе як батька, матір чи опікуна вказувати не потрібно.",
 };
 
 const ru: ConsentFormText = {
@@ -206,7 +252,7 @@ const ru: ConsentFormText = {
     doctors_to_agency: "Мои лечащие врачи и медицинские учреждения могут передавать GMED мои медицинские документы.",
     data_system: "Мои документы могут храниться и обрабатываться в ИТ-системе GMED.",
     named_recipients:
-      "Мои данные могут передаваться лицам или учреждениям, названным в форме (например, моим доверенным лицам).",
+      "Мои данные могут передаваться лицам или учреждениям, которых я назову ниже (например, моим доверенным лицам).",
     channel_email: "Электронная почта",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -228,6 +274,16 @@ const ru: ConsentFormText = {
   unsaved: "Изменения ещё не сохранены.",
   byGuardianOnly:
     "За несовершеннолетнего родители или опекун выбирают, на что они соглашаются, через свой собственный доступ. Здесь ничего выбирать не нужно.",
+  recipientsTitle: "Доверенные лица и учреждения",
+  recipientsHint: "Укажите, кому GMED может передавать ваши данные (не более 5). В форме будут только эти лица.",
+  recipientName: "Имя и фамилия или название учреждения",
+  recipientRelation: "Кто это?",
+  recipientContact: "Телефон или e-mail (необязательно)",
+  recipientRelations: { spouse: "Супруг(а) / партнёр", child: "Ребёнок", relative: "Родственник", family_doctor: "Семейный врач", clinic: "Клиника / учреждение", other: "Другое" },
+  addRecipient: "Добавить лицо",
+  removeRecipient: "Удалить",
+  recipientsRequired: "Укажите, пожалуйста, хотя бы одно лицо или учреждение — или снимите отметку.",
+  recipientsInvalid: "Для каждого лица укажите имя и выберите, кто это (не более 5 лиц).",
 };
 
 const ruChild: ChildTexts = {
@@ -238,7 +294,7 @@ const ruChild: ChildTexts = {
       "GMED и уполномоченные сотрудники могут получать, обрабатывать, хранить персональные и медицинские данные и документы моего ребёнка и при необходимости передавать их лечащим врачам, клиникам, лабораториям, переводчикам, экспертам или плательщикам.",
     doctors_to_agency: "Лечащие врачи и медицинские учреждения моего ребёнка могут передавать GMED его медицинские документы.",
     data_system: "Документы моего ребёнка могут храниться и обрабатываться в ИТ-системе GMED.",
-    named_recipients: "Данные моего ребёнка могут передаваться лицам или учреждениям, названным в форме.",
+    named_recipients: "Данные моего ребёнка могут передаваться лицам или учреждениям, которых я назову ниже.",
     channel_email: "Электронная почта",
     channel_threema: "Threema",
     channel_whatsapp: "WhatsApp",
@@ -247,6 +303,7 @@ const ruChild: ChildTexts = {
   channelsTitle: "Данные и документы моего ребёнка можно получать или передавать по этим каналам:",
   coreHint:
     "Без трёх обязательных согласий GMED не может обработать обращение для вашего ребёнка, поэтому выбор можно сохранить только с ними. Если вы не хотите их давать, ничего не сохраняйте и свяжитесь с нами.",
+  recipientsHint: "Укажите, кому GMED может передавать данные вашего ребёнка (не более 5). Себя как родителя или опекуна указывать не нужно.",
 };
 
 /**

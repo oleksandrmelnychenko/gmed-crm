@@ -67,6 +67,77 @@ function statement(html: string, testId: string): string {
 }
 
 describe("LeadGwgStatements", () => {
+  it("shows saved organisation fields with provenance even before identification is filled", () => {
+    const intake = portalState({
+      identification: null, identification_updated_at: null, identity_documents: [],
+      patient_payer: { at: "2026-10-12T08:15:00Z", access_kind: null },
+      payer_organisation: { legal_form: "GmbH", register_number: "HRB 55501", contact_name: "Ben Muster" },
+    });
+    const html = render(intake, null, "de");
+    expect(html).toContain('data-testid="lead-gwg-payer-organisation"');
+    expect(statement(html, "lead-gwg-payer-organisation-register_number")).toContain("HRB 55501");
+    expect(statement(html, "lead-gwg-payer-organisation-contact_name")).toContain("Ben Muster");
+    expect(html).toContain("vom Patienten · 12.10.2026 10:15");
+    expect(html).not.toMatch(/<(input|textarea|select|button)\b/);
+    expect(render({ ...intake, identification_hidden: true })).toBe("");
+  });
+
+  it("shows recipient data and its own update time before a payer declaration is saved", () => {
+    const intake = portalState({
+      identification: null, identification_updated_at: null, identity_documents: [],
+      billing: {
+        invoice_recipient: "third_party", invoice_recipient_is_payer: true, invoice_to: null,
+        recipient_updated_at: "2026-10-12T08:30:00Z",
+        recipient: {
+          type: "organisation", name: "Beispiel GmbH", legal_form: "GmbH", contact_name: "Ben Muster",
+          street: "Musterweg 4", city: "Berlin", country: "DE", email: "rechnung@example.com",
+        },
+      },
+    });
+    const html = render(intake, null, "de");
+    expect(statement(html, "lead-gwg-billing-recipient_legal_form")).toContain("GmbH");
+    expect(statement(html, "lead-gwg-billing-recipient_contact_name")).toContain("Ben Muster");
+    expect(statement(html, "lead-gwg-billing-recipient_address")).toContain("Musterweg 4");
+    expect(statement(html, "lead-gwg-billing-invoice_email")).toContain("rechnung@example.com");
+    expect(html).toContain('data-testid="lead-gwg-recipient-updated"');
+    expect(html).toContain("12.10.2026 10:30");
+  });
+
+  it("keeps relationship proof files visible when no other extra answer exists", () => {
+    const intake = portalState({
+      identification: null, identification_updated_at: null, identity_documents: [],
+      enhanced_details: {
+        relationship_proof_requested: false,
+        relationship_proof_documents: [
+          { id: "proof-1", file_name: "relationship-proof.pdf", uploaded_at: "2026-10-12T08:15:00Z", reviewed: true },
+        ],
+      },
+    });
+    const html = renderToStaticMarkup(
+      <LeadGwgStatements intake={intake} payer={null} tx={ru} lang="ru" onDownloadDocument={() => undefined} />,
+    );
+    expect(html).toContain('data-testid="lead-gwg-relationship-proof"');
+    expect(html).toContain("relationship-proof.pdf");
+    expect(html).toContain("12.10.2026");
+    expect(html).toContain("просмотрен");
+    expect(html).toContain('<button type="button"');
+    expect(html).not.toContain("lead-gwg-relationship-proof-missing");
+    expect(render({ ...intake, identification_hidden: true })).toBe("");
+  });
+
+  it("warns about missing requested relationship proof and falls back to block B on older servers", () => {
+    const intake = portalState({
+      enhanced_details: { relationship_proof_requested: true, relationship_proof_documents: [] },
+    });
+    expect(render(intake)).toContain('data-testid="lead-gwg-relationship-proof-missing"');
+    const legacy = portalState({ enhanced_details: null });
+    const html = renderToStaticMarkup(
+      <LeadGwgStatements intake={legacy} payer={{ payer_kind: "third_party" }} askedBlocks={["B"]} tx={ru} lang="ru" />,
+    );
+    expect(html).toContain("Подтверждение связи запрошено");
+    expect(render(legacy)).not.toContain('data-testid="lead-gwg-relationship-proof"');
+  });
+
   it("shows what the lead stated, grouped and with the time of the last change", () => {
     const html = render(portalState());
     expect(html).toContain("Данные от пациента");

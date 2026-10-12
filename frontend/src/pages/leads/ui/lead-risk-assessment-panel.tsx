@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { Check, LoaderCircle, RotateCcw, ShieldAlert, Undo2, X } from "lucide-react";
 
+import { DataTable } from "@/components/data-table/data-table";
+import type { ColumnDef } from "@/components/data-table/types";
+
 import { Section, StatusBadge, checkboxClass, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -39,6 +42,7 @@ import {
   type RiskBlockState,
   type RiskDecision,
   type RiskDecisionKind,
+  type RiskTrigger,
 } from "../model/lead-risk-assessment";
 import type { LeadRiskController } from "../model/use-lead-risk-assessment";
 
@@ -64,47 +68,68 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
       </p>
     );
   }
+  const columns: ColumnDef<RiskTrigger>[] = [
+    {
+      id: "trigger",
+      label: tx("Триггер", "Auslöser"),
+      accessor: (trigger) => riskTriggerLabel(trigger.key, tx),
+      minWidth: 360,
+      cellClassName: "whitespace-normal break-words leading-4",
+      render: (trigger) => {
+        const variant = riskVariantLabel(trigger.variant, tx);
+        return (
+          <span data-testid={`lead-risk-trigger-${trigger.key}`} data-active={trigger.active ? "true" : "false"}>
+            <span className="mr-1.5 font-mono text-[11px] text-muted-foreground">{trigger.key}</span>
+            <span className="font-medium">{riskTriggerLabel(trigger.key, tx)}</span>
+            {variant ? <span className="text-muted-foreground"> · {variant}</span> : null}
+          </span>
+        );
+      },
+    },
+    { id: "subject", label: tx("Кого касается", "Betrifft"), accessor: (trigger) => riskSubjectLabel(trigger.subject, tx, trigger.variant), width: 150 },
+    {
+      id: "points",
+      label: tx("Баллы", "Punkte"),
+      accessor: (trigger) => trigger.points,
+      width: 72,
+      align: "right",
+      render: (trigger) => trigger.knockout
+        ? <span className="font-semibold text-rose-700 dark:text-rose-300">K.o.</span>
+        : <span className="font-semibold tabular-nums">{trigger.points}</span>,
+    },
+    {
+      id: "state",
+      label: tx("Состояние", "Zustand"),
+      accessor: (trigger) => riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value)),
+      width: 240,
+      cellClassName: "whitespace-normal break-words leading-4",
+      render: (trigger) => (
+        <span data-testid={`lead-risk-trigger-${trigger.key}-state`} className={trigger.active ? "text-foreground" : "text-muted-foreground"}>
+          {riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value))}
+        </span>
+      ),
+    },
+    {
+      id: "first_fired_at",
+      label: tx("Впервые", "Erstmals"),
+      accessor: (trigger) => trigger.first_fired_at,
+      width: 120,
+      cellClassName: "whitespace-nowrap font-mono tabular-nums",
+      render: (trigger) => formatAppDate(trigger.first_fired_at) || "—",
+    },
+  ];
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[34rem] text-left text-xs leading-4" data-testid="lead-risk-triggers">
-        <thead className="text-[11px] uppercase tracking-[0.04em] text-muted-foreground">
-          <tr className="border-b border-border/70">
-            <th className="py-1.5 pr-3 font-medium">{tx("Триггер", "Auslöser")}</th>
-            <th className="py-1.5 pr-3 font-medium">{tx("Кого касается", "Betrifft")}</th>
-            <th className="py-1.5 pr-3 text-right font-medium">{tx("Баллы", "Punkte")}</th>
-            <th className="py-1.5 pr-3 font-medium">{tx("Состояние", "Zustand")}</th>
-            <th className="whitespace-nowrap py-1.5 pl-3 font-medium">{tx("Впервые", "Erstmals")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {score.triggers.map((trigger) => {
-            const knockout = trigger.knockout;
-            const variant = riskVariantLabel(trigger.variant, tx);
-            return (
-              <tr
-                key={`${trigger.key}-${trigger.subject}`}
-                className="border-b border-border/50 last:border-b-0"
-                data-testid={`lead-risk-trigger-${trigger.key}`}
-                data-active={trigger.active ? "true" : "false"}
-              >
-                <td className="py-1.5 pr-3 align-top">
-                  <span className="font-mono text-[11px] text-muted-foreground">{trigger.key}</span>{" "}
-                  <span className="font-medium text-foreground">{riskTriggerLabel(trigger.key, tx)}</span>
-                  {variant ? <span className="text-muted-foreground"> · {variant}</span> : null}
-                </td>
-                <td className="py-1.5 pr-3 align-top">{riskSubjectLabel(trigger.subject, tx, trigger.variant)}</td>
-                <td className="py-1.5 pr-3 text-right align-top font-semibold tabular-nums">
-                  {knockout ? <span className="text-rose-700 dark:text-rose-300">K.o.</span> : trigger.points}
-                </td>
-                <td className="py-1.5 pr-3 align-top" data-testid={`lead-risk-trigger-${trigger.key}-state`}>
-                  {riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value))}
-                </td>
-                <td className="whitespace-nowrap py-1.5 pl-3 align-middle tabular-nums">{formatAppDate(trigger.first_fired_at) || "—"}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div data-testid="lead-risk-triggers">
+      <DataTable
+        rows={score.triggers}
+        columns={columns}
+        rowId={(trigger) => `${trigger.key}-${trigger.subject}`}
+        density="compact"
+        rowHeightOverrides={{ compact: 56 }}
+        mobilePrimaryColumnId="trigger"
+        mobileDetailColumnIds={["subject", "points", "state", "first_fired_at"]}
+        className="shadow-none sm:max-h-[440px] [&_.data-table-row]:cursor-default"
+      />
     </div>
   );
 }

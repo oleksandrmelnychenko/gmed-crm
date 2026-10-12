@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
+import { LoaderCircle, PauseCircle, Pencil, PlayCircle, Plus, Trash2 } from "lucide-react";
 
 import { DataTable } from "@/components/data-table/data-table";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,6 @@ import {
 } from "@/pages/patients/data/patient-clinical";
 import type { ProviderSummary } from "@/pages/providers/model/types";
 
-import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { MedicationEditorFields, MEDICATION_EDITOR_CLASS_NAME } from "./medication-editor-fields";
 import { doctorsForProviderBranch } from "./provider-doctor-selection";
 
@@ -53,7 +53,7 @@ type HoldEditor = {
 };
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 
 function blankToNull(value: string): string | null {
   return value === "" ? null : value;
@@ -173,7 +173,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+      <span className="mb-1 block text-[11.5px] font-medium leading-tight text-muted-foreground">
         {label}
         {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </span>
@@ -437,26 +437,29 @@ function ClinicalListSection<T extends { id?: string | null }>({
           ))
         )}
 
-        <PatientSheetScaffold
+        <Dialog
           open={Boolean(editing)}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) setEditing(null);
           }}
-          width="form-heavy"
-          maxWidthClassName={editorClassName}
-          headerClassName={editorClassName ? "border-b border-border/70" : undefined}
-          title={
-            editing?.index === null
-              ? `${tx("Добавить", "Hinzufügen")}: ${title}`
-              : `${tx("Редактировать", "Bearbeiten")}: ${title}`
-          }
-          footer={
-            <>
+        >
+          <DialogContent overlayClassName="bg-black/40" className={cn("flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0", editorClassName)} data-testid="clinical-entry-editor-dialog">
+            <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
+              <DialogTitle className="text-[15px] font-semibold">
+                {editing?.index === null
+                  ? `${tx("Добавить", "Hinzufügen")}: ${title}`
+                  : `${tx("Редактировать", "Bearbeiten")}: ${title}`}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">
+              {editing ? form(editing.draft, set) : null}
+            </div>
+            <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t border-border/50 bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-8 rounded-lg"
+                className="h-9 rounded-lg text-xs"
                 onClick={() => setEditing(null)}
               >
                 {tx("Отмена", "Abbrechen")}
@@ -464,17 +467,16 @@ function ClinicalListSection<T extends { id?: string | null }>({
               <Button
                 type="button"
                 size="sm"
-                className="h-8 rounded-lg"
+                className="h-9 rounded-lg text-xs"
                 disabled={busy || !editing || !isValid(editing.draft)}
                 onClick={submitDraft}
               >
-                {tx("Сохранить", "Speichern")}
+                {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
+                {busy ? tx("Сохранение…", "Wird gespeichert…") : tx("Сохранить", "Speichern")}
               </Button>
-            </>
-          }
-        >
-          {editing ? form(editing.draft, set) : null}
-        </PatientSheetScaffold>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </section>
   );
@@ -536,7 +538,8 @@ export function PatientClinicalWarningSection({
         </div>
       )}
       form={(draft, set) => (
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+          <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
           <Field required label={isAllergy ? tx("Аллерген", "Allergen") : "CAVE"}>
             <Input
               required

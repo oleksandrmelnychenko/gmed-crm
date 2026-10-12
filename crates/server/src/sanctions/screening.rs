@@ -30,6 +30,10 @@
 //!   (`lead_payer`), never twice — see [`recipient_subjects`];
 //! * patients (`patient`) that are active or inactive. Prospective patients
 //!   are covered by their lead.
+//!
+//! Not screened (owner decision 2026-10-12): the persons and institutions the
+//! person names in the cabinet as recipients of the consent form
+//! (`consent_form_choices.recipients`, `crate::consent_choices`).
 //! * the relations of such a patient that pay or receive the invoices
 //!   (`patient_relation`, QA 2026-10-11 B-25): the default payer, a relation
 //!   an order or an invoice names as payer, and the parents and guardians of

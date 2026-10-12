@@ -7,6 +7,8 @@ import {
   choiceOnlyByGuardian,
   choosesForChild,
   consentFormChanged,
+  recipientsProblem,
+  recipientsToSend,
 } from "./lead-request-consent-form";
 import { consentFormText } from "./lead-request-consent-form-text";
 
@@ -163,5 +165,47 @@ describe("consent form choices in the lead cabinet", () => {
       expect(text.savedAt("12.10.2026")).toContain("12.10.2026");
     }
     expect(consentFormText("uk").title).toBe("Згода на передачу даних (додаток 1)");
+  });
+});
+
+describe("named recipients of the consent form (owner 2026-10-12)", () => {
+  const named = { ...CORE, named_recipients: true };
+  const row = (name: string, relation: "" | "spouse" | "family_doctor", contact = "") => ({ name, relation, contact });
+
+  it("asks for at least one complete person while the option is ticked", () => {
+    expect(recipientsProblem(named, [])).toBe("required");
+    expect(recipientsProblem(named, [row("", "")])).toBe("required");
+    expect(recipientsProblem(named, [row("Olga Muster", "")])).toBe("invalid");
+    expect(recipientsProblem(named, [row("", "spouse")])).toBe("invalid");
+    expect(recipientsProblem(named, [row("Olga Muster", "spouse")])).toBeNull();
+    expect(recipientsProblem(named, Array.from({ length: 6 }, () => row("Olga", "spouse")))).toBe("invalid");
+    expect(recipientsProblem(CORE, [row("Olga", "")])).toBeNull();
+  });
+
+  it("sends trimmed rows and drops empty ones", () => {
+    expect(recipientsToSend([row("  Olga   Muster ", "spouse", " +49 151 000000 "), row("", ""), row("Praxis Dr. Beispiel", "family_doctor")])).toEqual([
+      { name: "Olga Muster", relation: "spouse", contact: "+49 151 000000" },
+      { name: "Praxis Dr. Beispiel", relation: "family_doctor", contact: null },
+    ]);
+  });
+
+  it("shows the saved persons while the option is chosen", () => {
+    const html = renderToStaticMarkup(
+      <ConsentFormChoicesSection
+        request={request({
+          version: "2026-10-12",
+          choices: named,
+          recipients: [{ name: "Olga Muster", relation: "spouse", contact: "+49 151 000000" }],
+          chosen_at: "2026-10-12T10:00:00Z",
+        })}
+        lang="ru"
+        enqueue={queue}
+        onChange={() => undefined}
+      />,
+    );
+    expect(html).toContain("Доверенные лица и учреждения");
+    expect(html).toContain(value=Olga Muster);
+    expect(html).toContain(value=+49 151 000000);
+    expect(html).toContain("которых я назову ниже");
   });
 });

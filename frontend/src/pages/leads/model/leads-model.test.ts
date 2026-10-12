@@ -269,6 +269,16 @@ describe("lead errors", () => {
   const ru = (ruText: string) => ruText;
   const de = (_ruText: string, deText: string) => deText;
 
+  it("explains exactly which personal data prevent the medical record", () => {
+    const error = Object.assign(new Error("Lead master data is incomplete for a prospect patient"), {
+      status: 422, body: { missing: ["date_of_birth", "legal_sex", "date_of_birth", "unexpected_server_key"] },
+    });
+    expect(leadErrorMessage(error, ru)).toBe("На шаге «Данные клиента» заполните: дату рождения, пол согласно документам. После этого можно продолжить медицинскую часть.");
+    expect(leadErrorMessage(error, de)).toContain("Geburtsdatum, Geschlecht laut Ausweisdokument");
+    expect(leadErrorMessage(error, ru)).not.toContain("unexpected_server_key");
+    expect(leadErrorMessage(new Error("Lead master data is incomplete for a prospect patient"), ru)).toContain("имя, фамилию, дату рождения и пол согласно документам");
+  });
+
   it("names the real reason when a converted lead rejects intake work", () => {
     // The backend answers 409, whose generic text ("data changed, reload") would mislead.
     const conflict = Object.assign(new Error("Converted lead must use its patient context"), { status: 409 });

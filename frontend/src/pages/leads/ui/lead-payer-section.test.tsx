@@ -3,7 +3,7 @@ import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { normalizeLeadPortalEnhancedDetails, type LeadPortalEnhancedDetails } from "../data/lead-portal-intake-api";
+import { normalizeLeadPortalEnhancedDetails, normalizeLeadPortalIntake, type LeadPortalEnhancedDetails, type LeadPortalIntake } from "../data/lead-portal-intake-api";
 import { payerDeclarationChanged } from "../model/use-lead-payer-declaration";
 import type { PayerDeclaration, PayerDeclarationStatus } from "../model/lead-payer";
 import { LeadPayerDeclarationSection, LeadPayerSignatureFlow } from "./lead-payer-section";
@@ -112,6 +112,7 @@ function renderSection(
   declaration: PayerDeclaration | null,
   translate: (ru: string, de: string) => string = tx,
   statusPatch: Partial<PayerDeclarationStatus> = {},
+  portalIntake: LeadPortalIntake | null = null,
 ) {
   return renderToStaticMarkup(
     // A third party has a date of birth: the date field needs the pickers' adapter.
@@ -125,6 +126,7 @@ function renderSection(
         canEdit
         lang={translate === tx ? "ru" : "de"}
         tx={translate}
+        portalIntake={portalIntake}
         onSave={async () => undefined}
         errorText={() => "error"}
       />
@@ -140,6 +142,76 @@ function recipientBlock(html: string): string {
 }
 
 describe("LeadPayerDeclarationSection: invoice recipient (section 7)", () => {
+  it("shows existing drafts without a manual save action or initial autosave status", () => {
+    const html = renderSection(selfPayer);
+    expect(html).not.toContain(">Сохранить<");
+    expect(html).not.toContain("lead-payer-autosave-status");
+    expect(html).not.toContain("lead-payer-autosave-error");
+    expect(html).toContain("lead-payer-own-account");
+    expect(html).toMatch(/type="radio"[^>]*checked=""|checked=""[^>]*type="radio"/);
+  });
+
+  it("shows the saved recipient address, e-mail and update time before saving a payer declaration", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1", identification: {},
+      billing: {
+        invoice_recipient: "third_party", invoice_recipient_is_payer: false,
+        recipient_updated_at: "2026-10-12T08:30:00Z",
+        recipient: {
+          type: "person", name: "Mia Muster", street: "Musterweg 4", zip: "10115", city: "Berlin", country: "DE",
+          email: "mia@example.com", phone: "+49 30 5550100", relationship_kind: "friend",
+        },
+      },
+    })!;
+    const html = renderSection(null, tx, {}, intake);
+    expect(html).toContain('data-testid="lead-payer-recipient-snapshot"');
+    expect(html).toContain("Mia Muster");
+    expect(html).toContain("Musterweg 4");
+    expect(html).toContain("mia@example.com");
+    expect(html).toContain('data-testid="lead-payer-recipient-updated"');
+    expect(html).toContain("12.10.2026 10:30");
+    expect(html).not.toMatch(/<input[^>]*value="mia@example.com"/);
+    expect(html).not.toMatch(/<input[^>]*value="Musterweg 4"/);
+  });
+
+  it("shows the organisation mask and its cabinet provenance without adding editable fields", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1", identification: {},
+      patient_payer: { at: "2026-10-12T08:15:00Z", access_kind: null },
+      payer_organisation: { legal_form: "GmbH", register_number: "HRB 55501", contact_name: "Ben Muster" },
+    })!;
+    const declaration: PayerDeclaration = {
+      ...selfPayer, payer_kind: "third_party", payer_type: "organisation", organisation_name: "Beispiel GmbH",
+    };
+    const html = renderSection(declaration, de, {}, intake);
+    expect(html).toContain('data-testid="lead-payer-organisation-cabinet"');
+    expect(html).toContain("HRB 55501");
+    expect(html).toContain("Ben Muster");
+    expect(html).toContain("Rechtsform");
+    expect(html).toContain("Registernummer");
+    expect(html).toContain("vom Patienten · 12.10.2026 10:15");
+    expect(html).not.toMatch(/<input[^>]*value="HRB 55501"/);
+    expect(html).not.toMatch(/<input[^>]*value="Ben Muster"/);
+  });
+
+  it("does not show the new cabinet snapshots when identification is hidden", () => {
+    const intake = normalizeLeadPortalIntake({
+      lead_id: "lead-1", identification_hidden: true,
+      payer_organisation: { legal_form: "GmbH", register_number: "HRB 55501", contact_name: "Ben Muster" },
+      billing: {
+        invoice_recipient: "third_party", invoice_recipient_is_payer: false,
+        recipient_updated_at: "2026-10-12T08:30:00Z",
+        recipient: { type: "person", name: "Mia Muster", email: "mia@example.com" },
+      },
+    })!;
+    const declaration: PayerDeclaration = { ...selfPayer, payer_kind: "third_party", payer_type: "organisation" };
+    const html = renderSection(declaration, tx, {}, intake);
+    expect(html).not.toContain('data-testid="lead-payer-organisation-cabinet"');
+    expect(html).not.toContain('data-testid="lead-payer-recipient-snapshot"');
+    expect(html).not.toContain("mia@example.com");
+    expect(html).not.toContain("HRB 55501");
+  });
+
   it("shows where the invoice goes, read-only, and the two staff inputs with the stored values", () => {
     const html = renderSection(selfPayer);
     const block = recipientBlock(html);

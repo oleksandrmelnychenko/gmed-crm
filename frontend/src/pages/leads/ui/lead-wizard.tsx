@@ -23,6 +23,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ComponentProps,
   type ReactNode,
 } from "react";
 import {
@@ -58,6 +59,7 @@ import {
 import { AdminSheetScaffold, SheetFormFooter } from "@/components/admin-page-patterns";
 import { StaffLink } from "@/components/staff-link";
 import { Badge } from "@/components/ui/badge";
+import { StatusChip } from "@/components/ui/status-chip";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryCodeFromStoredValue, countryLabel } from "@/components/ui/country-select";
@@ -145,7 +147,7 @@ import {
   CountBadge,
   EmptyCell,
   inputClass,
-  Section,
+  Section as WorkspaceSection,
   selectClass,
   StatusBadge,
   textareaClass,
@@ -271,6 +273,7 @@ import {
 import { LeadGwgStatements } from "./lead-gwg-statements";
 import { enhancedFundsProofOutstanding } from "../model/lead-gwg-statements";
 import { LeadRiskAssessmentPanel } from "./lead-risk-assessment-panel";
+import { PortalConsentChoiceView } from "./lead-portal-consent-choices";
 import { LeadIdentityDocumentData } from "./lead-identity-document-data";
 import { LeadPatientConcern } from "./lead-patient-concern";
 import { useLeadRiskAssessment } from "../model/use-lead-risk-assessment";
@@ -282,6 +285,7 @@ import {
   PatientDataPendingNotice,
   PatientUpdatedBanner,
   PortalInquiryConsentLine,
+  PortalHealthConsentLine,
   PortalUploadsProvider,
   Step1FillModeSwitch,
   Step1PortalFieldNote,
@@ -775,7 +779,12 @@ const COST_ESTIMATE_WORK_TYPES_ID = "lead-wizard-cost-estimate-work-types";
 const COST_ESTIMATE_WORK_TYPES_REASON = "Medical work types are not selected";
 const COST_ESTIMATE_OUTDATED_REASON = "Preliminary cost calculation document is missing";
 const COST_ESTIMATE_WORK_TYPES_STEP = { ru: "Оформление заказа", de: "Auftragserfassung" };
-const WIZARD_DOCUMENT_SECTION_CLASS = "rounded-xl border border-border/70 bg-card p-4";
+const WIZARD_DOCUMENT_SECTION_CLASS = "min-w-0 rounded-xl border border-border/50 bg-card p-3.5";
+
+/** Each wizard group sits on its own card against the shared muted canvas. */
+function Section({ className, ...props }: ComponentProps<typeof WorkspaceSection>) {
+  return <WorkspaceSection {...props} className={cn(WIZARD_DOCUMENT_SECTION_CLASS, className)} />;
+}
 
 const DISCOVERY_SOURCE_OPTIONS = [
   { value: "customer_referral", ru: "Рекомендация клиента", de: "Empfehlung eines Kunden" },
@@ -2485,7 +2494,7 @@ function masterValidationIssues(errors: MasterValidationErrors, tx: Tx): Validat
     firstName: tx("Имя", "Vorname"),
     lastName: tx("Фамилия", "Nachname"),
     birthDate: tx("Дата рождения", "Geburtsdatum"),
-    legalSex: tx("Пол по документам", "Geschlecht laut Ausweisdokument"),
+    legalSex: tx("Пол согласно документам", "Geschlecht laut Ausweisdokument"),
     email: tx("Электронная почта", "E-Mail-Adresse"),
     phone: tx("Телефон", "Telefonnummer"),
     street: tx("Улица и дом", "Straße und Hausnummer"),
@@ -6915,12 +6924,13 @@ ${serviceCommentLines.join("\n")}`
         }}
       >
       <DialogContent
+        overlayClassName="bg-black/40"
         showOverlay={!documentPreview}
         showCloseButton={!saveInProgress}
         className="flex h-[94vh] w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-lg p-0 sm:h-[min(96vh,68rem)] sm:w-[91vw] sm:max-w-[91vw] sm:pb-0"
       >
         <DialogTitle className="sr-only">{tx("Оформление обращения", "Lead-Aufnahme")}</DialogTitle>
-        <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
+        <header className="flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3 pr-14 sm:gap-4 sm:px-5 sm:pr-14">
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <h2 className="truncate text-base font-semibold text-foreground">
@@ -6934,21 +6944,17 @@ ${serviceCommentLines.join("\n")}`
               </h2>
               {/* The countdown sits after the name; what it means is in the tooltip, not in a banner. */}
               {retentionDays != null ? (
-                <span
+                <StatusChip
                   role="status"
                   data-lead-retention-countdown
                   title={retentionCountdownHint(lang)}
-                  className={cn(
-                    "inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium",
-                    retentionDays <= 3
-                      ? "border-destructive/30 bg-destructive/10 text-destructive"
-                      : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200",
-                  )}
+                  tone={retentionDays <= 3 ? "error" : "warning"}
+                  className="shrink-0"
                 >
                   <CircleAlert aria-hidden="true" className="size-3.5" />
                   {/* "Löschung in 14 T." already ends with a period. */}
                   {withFinalPeriod(retentionCountdownLabel(retentionDays, lang))}
-                </span>
+                </StatusChip>
               ) : null}
             </div>
             {isRepeatIntake ? (
@@ -7030,7 +7036,7 @@ ${serviceCommentLines.join("\n")}`
         <nav
           ref={stepNavRef}
 
-          className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="shrink-0 overflow-x-auto overscroll-x-contain border-b border-border bg-card [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           aria-label={tx("Этапы оформления", "Schritte der Lead-Aufnahme")}
         >
           <div className="flex w-max min-w-full justify-center px-4 py-2.5">
@@ -7091,7 +7097,7 @@ ${serviceCommentLines.join("\n")}`
           </div>
         </nav>
 
-        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain px-4 py-5 outline-none [scrollbar-gutter:stable] sm:px-5">
+        <main ref={stepPanelRef} id="lead-wizard-step-panel" role="tabpanel" aria-labelledby={`lead-wizard-tab-${step}`} tabIndex={-1} aria-busy={loading || isBusy} className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-scroll overscroll-contain bg-muted px-3 py-4 outline-none [scrollbar-gutter:stable] sm:px-5 sm:py-5">
           <SanctionsLeadBanner leadId={leadId} refreshKey={lead} className="mb-5" />
           {validationIssues.length > 0 ? (
             <div role="alert" aria-live="assertive" className="mb-5">
@@ -7362,7 +7368,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                 </Field>
                 <Field
-                  label={tx("Пол по документам", "Geschlecht laut Ausweisdokument")}
+                  label={tx("Пол согласно документам", "Geschlecht laut Ausweisdokument")}
                   required
                   error={visibleMasterError("legalSex")}
                   errorId={`${MASTER_FIELD_IDS.legalSex}-error`}
@@ -7587,29 +7593,31 @@ ${serviceCommentLines.join("\n")}`
               </div>
               {amlRequired || amlHints.length > 0 || wizardDocuments.enhanced_due_diligence.length > 0 ? (
                 <div className="mt-4" data-testid="lead-aml-enhanced-check" data-required={amlRequired ? "true" : "false"}>
-                  <Banner tone={amlRequired ? "error" : "warning"} withIcon>
+                  <div className="rounded-xl border border-border/50 bg-card p-3.5">
                     <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0">
-                        <div className="font-semibold">
+                      <div className="min-w-0 space-y-2">
+                        <StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>
+                          <ShieldCheck aria-hidden="true" />
                           {amlRequired
                             ? tx("Требуется усиленная AML-проверка", "Verstärkte AML-Prüfung erforderlich")
                             : amlCheckSettled(enhancedCheck)
                               ? tx("Усиленная AML-проверка не обязательна", "Verstärkte AML-Prüfung nicht vorgeschrieben")
                               : tx("Усиленная AML-проверка", "Verstärkte AML-Prüfung")}
-                        </div>
+                        </StatusChip>
                         {amlRequiredText ? (
-                          <div className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-reasons">
+                          <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-reasons">
                             {amlRequiredText}
                             {" · Durchführung verstärkter Sorgfaltspflichten (§ 15 GwG)"}
-                          </div>
+                          </p>
                         ) : null}
                         {amlHints.map((hint) => (
-                          <div key={hint} className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-hint">
-                            {hint}
-                          </div>
+                          <StatusChip key={hint} tone="warning" data-testid="lead-aml-enhanced-check-hint">
+                            <CircleAlert aria-hidden="true" />
+                            <span>{hint}</span>
+                          </StatusChip>
                         ))}
                         {!leadId ? (
-                          <div className="mt-1 text-xs leading-5" data-testid="lead-aml-enhanced-check-after-create">
+                          <div className="text-xs leading-5 text-muted-foreground" data-testid="lead-aml-enhanced-check-after-create">
                             {tx(
                               "Проверку можно заполнить после создания обращения.",
                               "Die Prüfung kann nach dem Anlegen des Leads ausgefüllt werden.",
@@ -7622,7 +7630,7 @@ ${serviceCommentLines.join("\n")}`
                           type="button"
                           variant={amlRequired ? "destructive" : "outline"}
                           size="sm"
-                          className="shrink-0"
+                          className="h-8 shrink-0 rounded-lg"
                           disabled={isBusy}
                           onClick={openAmlSheet}
                         >
@@ -7634,7 +7642,7 @@ ${serviceCommentLines.join("\n")}`
                       ) : null}
                     </div>
                     {wizardDocuments.enhanced_due_diligence.length > 0 ? (
-                      <div className="mt-3 border-t border-current/15 pt-3">
+                      <div className="mt-3 border-t border-border/50 pt-3">
                         <WizardDocumentRows
                           documents={wizardDocuments.enhanced_due_diligence}
                           complianceKind="enhanced_due_diligence"
@@ -7651,7 +7659,7 @@ ${serviceCommentLines.join("\n")}`
                         />
                       </div>
                     ) : null}
-                  </Banner>
+                  </div>
                 </div>
               ) : null}
               </Section>
@@ -8134,6 +8142,7 @@ ${serviceCommentLines.join("\n")}`
                   lang={lang}
                   tx={tx}
                   patientMarker={step1Portal.intake?.patient_payer ?? null}
+                  portalIntake={step1Portal.intake}
                   enhancedDetails={step1Portal.intake?.enhanced_details ?? null}
                   prefill={payerPrefill}
                   payerLink={payerLink}
@@ -8142,7 +8151,9 @@ ${serviceCommentLines.join("\n")}`
                   onPayerLinkSent={() => void payer.reload()}
                   errorText={(nextError) => errorText(nextError, tx)}
                   onSave={async (form) => {
+                    const targetLeadId = leadId;
                     const saved = await payer.save(form);
+                    if (hydrated.current !== targetLeadId) return;
                     handleAmlCountryChange({ payerCountries: payerAmlCountries(saved) });
                     // Another payer or e-mail clears the payment route the payer stated:
                     // "Данные от пациента" is read afresh, not left stale.
@@ -8152,7 +8163,12 @@ ${serviceCommentLines.join("\n")}`
                 />
               ) : null}
               {leadId && payer.data?.status.cost_assumption.required ? renderPayerSignatureFlow(false) : null}
-              <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
+              {step1Portal.intake ? (
+                <Section title={tx("Согласия из кабинета", "Einwilligungen aus dem Kundenkabinett")}>
+                  <PortalInquiryConsentLine intake={step1Portal.intake} tx={tx} />
+                  <PortalHealthConsentLine intake={step1Portal.intake} tx={tx} />
+                </Section>
+              ) : null}
               {patientUploadDocuments.length > 0 ? (
                 <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Загружено пациентом", "Vom Patienten hochgeladen")}>
                   <WizardDocumentRows
@@ -8194,6 +8210,7 @@ ${serviceCommentLines.join("\n")}`
                   />
                   <LeadGwgStatements
                     intake={step1Portal.intake}
+                    onDownloadDocument={(document) => void downloadDocumentFile(document.id, document.file_name).catch(showWizardError)}
                     payer={payer.data?.declaration ?? null}
                     payerLink={payerLink.data}
                     askedBlocks={riskAskedBlocks}
@@ -8223,7 +8240,7 @@ ${serviceCommentLines.join("\n")}`
               <div data-testid="lead-wizard-enhanced-check-section" data-required={amlRequired ? "true" : "false"}>
                 <Section
                   className={WIZARD_DOCUMENT_SECTION_CLASS}
-                  title={tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}
+                  title={<StatusChip tone={amlRequired ? "error" : amlHints.length > 0 ? "warning" : "neutral"}>{tx("Усиленная AML-проверка", "Verstärkte Sorgfaltspflichten (§ 15 GwG)")}</StatusChip>}
                   accessory={(
                     <Button
                       type="button"
@@ -8240,37 +8257,34 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
-                  <div className="mb-2 space-y-1">
-                    <p
-                      className={cn("text-xs leading-5", amlRequired ? "text-rose-700 dark:text-rose-300" : "text-muted-foreground")}
-                      data-testid="lead-wizard-enhanced-check-status"
-                    >
-                      {amlRequired
-                        ? `${tx("Обязательна", "Erforderlich")}: ${amlRequiredText}`
-                        : tx(
-                          "Не обязательна: нет страны из чёрного списка и подтверждённого совпадения с санкционным списком. Можно провести добровольно.",
-                          "Nicht vorgeschrieben: kein Land der Blacklist und kein bestätigter Sanktionstreffer. Freiwillig möglich.",
-                        )}
-                    </p>
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-2" data-testid="lead-wizard-enhanced-check-status">
+                      <StatusChip tone={amlRequired ? "error" : "neutral"}>
+                        {amlRequired ? tx("Обязательна", "Erforderlich") : tx("Добровольная проверка", "Freiwillige Prüfung")}
+                      </StatusChip>
+                      {amlRequired ? <p className="text-xs leading-5 text-rose-700 dark:text-rose-300">{amlRequiredText}</p> : null}
+                    </div>
                     {amlHints.map((hint) => (
-                      <p key={hint} className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-enhanced-check-hint">
-                        {hint}
-                      </p>
+                      <StatusChip key={hint} tone="warning" data-testid="lead-wizard-enhanced-check-hint">
+                        <CircleAlert aria-hidden="true" />
+                        <span>{hint}</span>
+                      </StatusChip>
                     ))}
                     {/* The check is required: a self-paying patient owes the proof of funds (owner rule 2026-10-07). */}
                     {amlRequired && enhancedFundsProofOutstanding(step1Portal.intake?.enhanced_details) ? (
-                      <p className="text-xs font-medium leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-self-funds-proof-missing">
-                        {tx(
+                      <StatusChip tone="warning" data-testid="lead-wizard-self-funds-proof-missing">
+                        <CircleAlert aria-hidden="true" />
+                        <span>{tx(
                           "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
                           "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
-                        )}
-                      </p>
+                        )}</span>
+                      </StatusChip>
                     ) : null}
                   </div>
                   <WizardDocumentRows
                     documents={wizardDocuments.enhanced_due_diligence}
                     complianceKind="enhanced_due_diligence"
-                    emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                    emptyLabel=""
                     lang={lang}
                     busy={busy}
                     disabled={isBusy}
@@ -8288,7 +8302,7 @@ ${serviceCommentLines.join("\n")}`
                 <div data-testid="lead-wizard-self-disclosure-section" data-available={leadRequestSent ? "true" : "false"}>
                   <Section
                     className={WIZARD_DOCUMENT_SECTION_CLASS}
-                    title={tx("Анкета пациента (Patientenformular)", "Patientenformular")}
+                    title={tx("Анкета пациента", "Patientenformular")}
                     accessory={(
                       <Button
                         type="button"
@@ -8306,22 +8320,23 @@ ${serviceCommentLines.join("\n")}`
                   >
                     <p className="text-xs leading-5 text-muted-foreground">
                       {tx(
-                        "Ответы пациента из кабинета: личные данные, документ, представители, кто платит, заявления и дополнительные ответы — без причины обращения и медицинских данных. Подписывает пациент (за несовершеннолетнего — законные представители) в одном пакете с договором, заказом и согласиями.",
-                        "Angaben des Patienten aus dem Kabinett: Personalien, Ausweis, Vertretung, Kostenträger, Erklärungen und ergänzende Angaben – ohne Anliegen und medizinische Angaben. Es unterschreibt der Patient (bei Minderjährigen die gesetzlichen Vertreter) im selben Paket wie Vertrag, Auftrag und Einwilligungen.",
+                        "Ответы из кабинета. Подписывает пациент или законные представители вместе с договором, заказом и согласиями.",
+                        "Angaben aus dem Portal. Der Patient oder die gesetzlichen Vertreter unterschreiben zusammen mit Vertrag, Auftrag und Einwilligungen.",
                       )}
                     </p>
                     {!leadRequestSent ? (
-                      <p className="text-xs leading-5 text-amber-700 dark:text-amber-300" data-testid="lead-wizard-self-disclosure-hint">
-                        {tx(
-                          "Документ можно создать после того, как пациент отправит заявку в кабинете.",
-                          "Das Dokument kann erstellt werden, sobald der Patient die Anfrage im Kabinett gesendet hat.",
-                        )}
-                      </p>
+                      <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-wizard-self-disclosure-hint">
+                        <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                        <span>{tx(
+                          "Ожидаем отправку заявки пациентом — после этого можно создать анкету.",
+                          "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.",
+                        )}</span>
+                      </StatusChip>
                     ) : null}
                     <WizardDocumentRows
                       documents={wizardDocuments.lead_self_disclosure}
                       complianceKind="other"
-                      emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                      emptyLabel=""
                       lang={lang}
                       busy={busy}
                       disabled={isBusy}
@@ -8355,14 +8370,14 @@ ${serviceCommentLines.join("\n")}`
                       "Bei Minderjährigen ist die Schweigepflichtsentbindung Teil der Einverständniserklärung für das Kind unten; sie unterschreiben die Sorgeberechtigten bzw. der Vormund.",
                     )
                     : tx(
-                      "Отдельное освобождение всех лечащих врачей и медицинских учреждений от медицинской тайны.",
-                      "Separate Entbindung aller behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
+                      "Разрешение лечащим врачам и медицинским учреждениям раскрывать сведения, составляющие медицинскую тайну.",
+                      "Entbindung der behandelnden Ärzte und medizinischen Einrichtungen von der Schweigepflicht.",
                     )}
                 </p>
                 <WizardDocumentRows
                   documents={wizardDocuments.confidentiality_release}
                   complianceKind="confidentiality_release"
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -8392,6 +8407,7 @@ ${serviceCommentLines.join("\n")}`
                     </Button>
                   )}
                 >
+                <PortalConsentChoiceView intake={step1Portal.intake} tx={tx} />
                 <div className="space-y-1 rounded-lg border border-border/70 bg-muted/10 px-3 py-2">
                   {isRepeatIntake && (!draft.privacyConsent || !draft.healthcareConsent) ? (
                     <p data-testid="repeat-consent-note" className="pb-1 text-xs leading-5 text-amber-800">
@@ -8507,7 +8523,7 @@ ${serviceCommentLines.join("\n")}`
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_consents}
                   complianceKind="dsgvo"
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -8533,7 +8549,7 @@ ${serviceCommentLines.join("\n")}`
               >
                 <WizardDocumentRows
                   documents={wizardDocuments.privacy_information}
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -8578,9 +8594,9 @@ ${serviceCommentLines.join("\n")}`
                   </span>
                 )}
               >
-                <p className="text-xs text-muted-foreground">
+                <StatusChip>
                   {tx("PDF, JPG или PNG · до 25 МБ", "PDF, JPG oder PNG · bis 25 MB")}
-                </p>
+                </StatusChip>
                 {/* Trigger flow 2026-10-07: staff enter the document data from the scan; the lead only uploads it. */}
                 {(() => {
                   const patientScans = (
@@ -8791,9 +8807,10 @@ ${serviceCommentLines.join("\n")}`
                       <p className="mb-2 text-xs text-destructive">{workTypesError}</p>
                     ) : null}
                     {costEstimateStatus === "no_catalog_work_types" && costEstimateHint ? (
-                      <p role="status" className="mb-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                        {costEstimateHint}
-                      </p>
+                      <StatusChip tone="warning" role="status" className="mb-2 w-full items-start rounded-xl px-3 py-2">
+                        <CircleAlert aria-hidden="true" className="mt-[3px]" />
+                        <span className="min-w-0 leading-5">{costEstimateHint}</span>
+                      </StatusChip>
                     ) : null}
                     {!workTypesLoading && !workTypesError ? (
                       <div
@@ -9008,7 +9025,7 @@ ${serviceCommentLines.join("\n")}`
                   documents={commercialDocuments.framework_contract}
                   complianceKind="framework_contract"
                   showSignatureStatus={false}
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -9113,26 +9130,27 @@ ${serviceCommentLines.join("\n")}`
                     <span>{tx("Добавить услугу из каталога", "Leistung aus dem Katalog hinzufügen")}</span>
                   </label>
                   {draft.specialties.length === 0 ? (
-                    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-amber-800 dark:text-amber-300" data-testid="lead-order-service-needs-specialty">
-                      <span>
+                    <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-order-service-needs-specialty">
+                      <CircleAlert aria-hidden="true" className="mt-[3px]" />
+                      <span className="min-w-0 leading-5">
                         {tx(
                           "Сначала выберите специализацию: от неё зависят услуги и смета.",
                           "Bitte zuerst eine Fachrichtung auswählen: Leistungen und Kostenvoranschlag hängen davon ab.",
                         )}
+                        <button
+                          type="button"
+                          className="ml-2 rounded-sm font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
+                          onClick={() => openValidationIssue({
+                            key: "specialties",
+                            step: "order",
+                            message: tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
+                            fieldId: SERVICE_SPECIALTIES_ID,
+                          })}
+                        >
+                          {tx("К специализации", "Zur Fachrichtung")}
+                        </button>
                       </span>
-                      <button
-                        type="button"
-                        className="font-medium underline underline-offset-2"
-                        onClick={() => openValidationIssue({
-                          key: "specialties",
-                          step: "order",
-                          message: tx("Выберите хотя бы одну специализацию", "Mindestens eine Fachrichtung auswählen"),
-                          fieldId: SERVICE_SPECIALTIES_ID,
-                        })}
-                      >
-                        {tx("К специализации", "Zur Fachrichtung")}
-                      </button>
-                    </p>
+                    </StatusChip>
                   ) : null}
                   <NativeComboboxSelect
                     id={ORDER_SERVICE_SELECT_ID}
@@ -9172,19 +9190,13 @@ ${serviceCommentLines.join("\n")}`
                     })}
                   </NativeComboboxSelect>
                 </div>
-                {orderServiceLines.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {tx("Услуги из каталога не выбраны", "Keine Katalogleistungen ausgewählt")}
-                    {" · "}
-                    {tx("Виды работ выше задают потребность; договор, заказ и смету можно создать только после добавления хотя бы одной услуги с ценой.", "Die Arbeitsarten oben beschreiben den Bedarf; Vertrag, Auftrag und Kostenvoranschlag lassen sich erst nach mindestens einer Leistung mit Preis erstellen.")}
-                  </p>
-                ) : (
+                {orderServiceLines.length > 0 ? (
                   <OrderCatalogServicesTable lines={orderServiceLines} catalogById={agencyServiceById} effectiveOn={draft.programDateFrom || undefined} lang={lang} tx={tx} disabled={isBusy}
                     describe={resolvedServiceCatalogDescription} selectedPriceId={selectedAgencyServicePriceId}
                     onQuantityChange={(line, quantity) => { setCommercialSaveFeedback(null); updateLine(line.id, { quantity }); }}
                     onPriceChange={(line, service, priceId) => applyAgencyServicePrice(line.id, service, priceId)}
                     onDelete={setDeleteServiceLine} totals={orderServicesEstimate} />
-                )}
+                ) : null}
               </Section>
               <div id={ORDER_DOCUMENT_ID} tabIndex={-1} className="focus:outline-none">
                 <Section
@@ -9199,7 +9211,7 @@ ${serviceCommentLines.join("\n")}`
                 >
                 <WizardDocumentRows
                   documents={commercialDocuments.single_order}
-                  emptyLabel={tx("Документ ещё не создан", "Dokument wurde noch nicht erstellt")}
+                  emptyLabel=""
                   lang={lang}
                   busy={busy}
                   disabled={isBusy}
@@ -9677,19 +9689,22 @@ ${serviceCommentLines.join("\n")}`
                         {costEstimateHint}
                       </p>
                     ) : (
-                      <Banner tone="warning">
-                        <p>{costEstimateHint}</p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="mt-2 h-8"
-                          disabled={isBusy}
-                          onClick={() => openReadinessReason(COST_ESTIMATE_WORK_TYPES_REASON)}
-                        >
-                          {tx("Перейти к видам работ", "Zu den Leistungsarten")}
-                        </Button>
-                      </Banner>
+                      <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
+                        <CircleAlert aria-hidden="true" className="mt-[3px]" />
+                        <span className="flex min-w-0 flex-1 flex-col items-start gap-2 sm:flex-row sm:gap-3">
+                          <span className="min-w-0 flex-1 leading-5">{costEstimateHint}</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 shrink-0 text-xs"
+                            disabled={isBusy}
+                            onClick={() => openReadinessReason(COST_ESTIMATE_WORK_TYPES_REASON)}
+                          >
+                            {tx("Перейти к видам работ", "Zu den Leistungsarten")}
+                          </Button>
+                        </span>
+                      </StatusChip>
                     )}
                   </div>
                 ) : commercialDocuments.cost_estimate.length > 0
@@ -9809,7 +9824,7 @@ ${serviceCommentLines.join("\n")}`
           ) : null}
         </main>
         {draft ? (
-          <footer className="shrink-0 border-t border-border bg-muted/50 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+          <footer className="shrink-0 border-t border-border bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
             {error || autosaveStatus === "error" ? (
               <div role="alert" className="mb-3 flex max-h-28 items-start gap-2 overflow-y-auto rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                 <CircleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
@@ -9933,24 +9948,23 @@ ${serviceCommentLines.join("\n")}`
                 bodyWrapperClassName="space-y-6"
               >
                 <div
-                  className={cn(
-                    "border-l-4 px-3 py-2.5 text-sm",
-                    amlRequired
-                      ? "border-rose-500 bg-rose-50 text-rose-800"
-                      : "border-amber-500 bg-amber-50 text-amber-900",
-                  )}
+                  className="space-y-2"
                   data-testid="lead-aml-sheet-requirement"
                 >
-                  <div className="font-semibold">
+                  <StatusChip tone={amlRequired ? "error" : "neutral"}>
+                    <ShieldCheck aria-hidden="true" />
                     {amlRequired
                       ? tx("Требуется усиленная проверка", "Verstärkte Prüfung erforderlich")
                       : tx("Добровольная проверка", "Freiwillige Prüfung")}
-                  </div>
+                  </StatusChip>
                   {amlRequiredText ? (
-                    <div className="mt-1 text-xs leading-5">{amlRequiredText}</div>
+                    <p className="text-xs leading-5 text-muted-foreground">{amlRequiredText}</p>
                   ) : null}
                   {amlHints.map((hint) => (
-                    <div key={hint} className="mt-1 text-xs leading-5">{hint}</div>
+                    <StatusChip key={hint} tone="warning">
+                      <CircleAlert aria-hidden="true" />
+                      <span>{hint}</span>
+                    </StatusChip>
                   ))}
                 </div>
 

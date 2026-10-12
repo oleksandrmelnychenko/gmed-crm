@@ -40,6 +40,7 @@ pub mod lead_payer;
 pub mod lead_payer_link;
 pub mod lead_payer_package;
 pub mod lead_portal_account;
+mod lead_portal_consent_view;
 pub mod lead_portal_guardians;
 pub mod lead_portal_intake;
 pub mod lead_portal_login_email;

@@ -6,7 +6,8 @@ import { useCallback, useEffect, useId, useState, type ReactNode } from "react";
 import { CircleCheck, LoaderCircle, ShieldAlert } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
-import { Banner, Field, StatusBadge, textareaClass } from "@/components/ui-shell";
+import { Field, StatusBadge, textareaClass } from "@/components/ui-shell";
+import { StatusChip, type StatusChipTone } from "@/components/ui/status-chip";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -256,15 +257,16 @@ export function SanctionsLiveCheckNotice({
   }, [possible, leadId, storedKey]);
 
   if (state.phase === "idle") return null;
-  let tone = "text-muted-foreground";
+  let tone: StatusChipTone = "neutral";
   let icon: ReactNode = <LoaderCircle className="size-3.5 animate-spin" aria-hidden />;
   let text = t.sanctions_live_checking;
   if (state.phase === "error") {
+    tone = "warning";
     icon = <ShieldAlert className="size-3.5" aria-hidden />;
     text = t.sanctions_live_error;
   } else if (state.phase === "done") {
     if (state.result.status === "clear") {
-      tone = "text-emerald-700";
+      tone = "success";
       icon = <CircleCheck className="size-3.5" aria-hidden />;
       text = formatUiText(t.sanctions_live_clear, {
         date: state.result.list_version_date ? formatAppDate(state.result.list_version_date) : "—",
@@ -283,29 +285,28 @@ export function SanctionsLiveCheckNotice({
           ) : (
             <ShieldAlert className="size-3.5" aria-hidden />
           );
-        tone = {
-          pending: "rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800",
-          confirmed: "rounded-md border border-red-200 bg-red-50 px-2 py-1 text-red-800",
-          cleared: "text-emerald-700",
-        }[match.tone];
+        tone = ({
+          pending: "warning",
+          confirmed: "error",
+          cleared: "success",
+        } as const)[match.tone];
         text = match.text;
       }
     } else {
-      tone = "text-amber-700";
+      tone = "warning";
       icon = <ShieldAlert className="size-3.5" aria-hidden />;
       text = t.sanctions_live_unavailable;
     }
   }
   return (
-    <p
+    <div
       role="status"
       aria-live="polite"
       data-testid="sanctions-live-check"
-      className={cn("flex items-center gap-1.5 text-xs leading-5", tone, className)}
+      className={cn("flex", className)}
     >
-      {icon}
-      <span>{text}</span>
-    </p>
+      <StatusChip tone={tone}>{icon}<span>{text}</span></StatusChip>
+    </div>
   );
 }
 
@@ -367,12 +368,14 @@ export function SanctionsLeadBanner({
   return (
     <div className={cn("space-y-2", className)} data-testid="sanctions-lead-banner">
       {banners.map((banner) => (
-        <Banner
+        <StatusChip
           key={banner.kind}
           tone={banner.kind === "confirmed" ? "error" : "warning"}
-          withIcon
+          className="w-full items-start rounded-xl px-3 py-2"
+          role="status"
         >
-          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <ShieldAlert aria-hidden="true" className="mt-0.5" />
+          <span className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span className="min-w-0">{banner.text}</span>
             {(banner.kind === "review" || banner.kind === "confirmed") && status.can_review ? (
               <StaffLink to="/sanctions" className="shrink-0 text-xs font-semibold underline underline-offset-2">
@@ -389,8 +392,8 @@ export function SanctionsLeadBanner({
                 {t.sanctions_country_revoke}
               </Button>
             ) : null}
-          </div>
-        </Banner>
+          </span>
+        </StatusChip>
       ))}
       {status.can_lift_country_block && leadId ? (
         <>

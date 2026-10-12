@@ -50,6 +50,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   AdminSheetScaffold,
   AdminInlineMetric,
+  AdminSectionTitle,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
@@ -4232,11 +4233,11 @@ function useOrdersPageContent() {
                       }
                     >
                       <div className="grid min-w-0 gap-4 @min-[52rem]:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
-                        <div className="min-w-0 overflow-hidden rounded-xl border border-border/70 bg-card">
-                          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 bg-muted/20 px-4 py-3">
-                            <p className="text-xs font-semibold uppercase tracking-[0.1em] text-foreground">
+                        <div className="min-w-0 space-y-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <AdminSectionTitle>
                               {lang === "de" ? "Bedarf des Patienten" : "Потребность пациента"}
-                            </p>
+                            </AdminSectionTitle>
                             {orderNeedSummary.interpreterRequired ? (
                               <StatusBadge tone="warning">
                                 {lang === "de" ? "Dolmetscher erforderlich" : "Нужен переводчик"}
@@ -4245,31 +4246,31 @@ function useOrdersPageContent() {
                           </div>
 
                           <div className="divide-y divide-border/60">
-                            <div className="grid gap-1.5 px-4 py-3 sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
+                            <div className="grid gap-1.5 py-2.5 sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
                               <p className="text-xs font-medium text-muted-foreground">
                                 {lang === "de" ? "Hauptanliegen" : "Основная потребность"}
                               </p>
-                              <p className="break-words text-sm font-semibold leading-5 text-foreground">
+                              <p className="break-words text-[13px] font-medium leading-5 text-foreground">
                                 {orderNeedSummary.primaryNeed || tx.common_not_set}
                               </p>
                             </div>
 
                             {orderNeedSummary.services.length > 0 ? (
-                              <div className="px-4 py-3">
+                              <div className="py-2.5">
                                 <p className="text-xs font-medium text-muted-foreground">
                                   {lang === "de" ? "Gewünschte Leistungen" : "Запрошенные услуги"}
                                 </p>
-                                <ol className="mt-2 space-y-2">
+                                <ol className="mt-1.5 divide-y divide-border/50">
                                   {orderNeedSummary.services.map((service, index) => (
                                     <li
                                       key={`${service.name}-${index}`}
-                                      className="grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2.5 rounded-lg border border-border/60 bg-muted/10 px-3 py-2.5"
+                                      className="grid grid-cols-[1.25rem_minmax(0,1fr)] gap-2 py-2"
                                     >
-                                      <span className="flex size-6 items-center justify-center rounded-full bg-orange-100 font-mono text-[11px] font-semibold text-orange-800">
+                                      <span className="pt-0.5 text-center font-mono text-[11px] text-muted-foreground">
                                         {index + 1}
                                       </span>
                                       <span className="min-w-0">
-                                        <span className="block break-words text-sm font-semibold leading-5 text-foreground">
+                                        <span className="block break-words text-[13px] font-medium leading-5 text-foreground">
                                           {localizeOrderNeedLabel(service.name, lang)}
                                         </span>
                                         {service.note ? (
@@ -4285,7 +4286,7 @@ function useOrdersPageContent() {
                             ) : null}
 
                             {orderNeedSummary.facts.length > 0 || orderNeedSummary.additionalNotes.length > 0 ? (
-                              <div className="space-y-2 px-4 py-3">
+                              <div className="space-y-2 py-2.5">
                                 {orderNeedSummary.facts.map((fact) => (
                                   <div key={`${fact.label}-${fact.value}`} className="grid gap-1 text-xs sm:grid-cols-[9.5rem_minmax(0,1fr)] sm:gap-4">
                                     <span className="text-muted-foreground">{localizeOrderNeedLabel(fact.label, lang)}</span>
@@ -4364,18 +4365,18 @@ function useOrdersPageContent() {
                       </div>
 
                       <div className="mt-4 border-t border-border/60 pt-4">
-                        <h3 className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                        <AdminSectionTitle>
                           {lang === "de" ? "Zugehörige Bereiche" : "Связанные данные"}
-                        </h3>
-                        <div className="mt-2 grid gap-2 @min-[32rem]:grid-cols-3">
+                        </AdminSectionTitle>
+                        <div className="mt-2 grid overflow-hidden rounded-lg border border-border/50 @min-[32rem]:grid-cols-3">
                           {detailOverviewLinks.map((link) => (
                             <StaffLink
                               key={link.href}
                               to={link.href}
-                              className="group flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5 text-left transition-colors hover:border-orange-300 hover:bg-orange-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="group flex min-w-0 items-center gap-2.5 border-b border-border/50 bg-card px-3 py-2.5 text-left transition-colors last:border-b-0 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring @min-[32rem]:border-b-0 @min-[32rem]:border-r @min-[32rem]:last:border-r-0"
                             >
-                              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/50 text-muted-foreground group-hover:bg-orange-100 group-hover:text-orange-700">
-                                <ArrowUpRight aria-hidden className="size-4" />
+                              <span className="shrink-0 text-muted-foreground group-hover:text-primary">
+                                <ArrowUpRight aria-hidden className="size-3.5" />
                               </span>
                               <span className="min-w-0">
                                 <span className="block truncate text-xs font-semibold text-foreground">
@@ -4758,6 +4759,7 @@ function useOrdersPageContent() {
                 ) : null}
                 {shouldRenderOrderSection("pipeline") ? (
                   <SectionCard
+                    className="border-0 bg-transparent [&>div]:px-0 [&>div:first-child]:bg-transparent [&>div:last-child]:pb-0"
                     title={lang === "de" ? "Pipeline des Auftrags" : "Пайплайн заказа"}
                     description={
                       lang === "de"

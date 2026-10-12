@@ -483,7 +483,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     // A bank transfer asks for the account; the holder is offered, the rest is typed.
     const method = route.getByRole("combobox", { name: METHOD_QUESTION });
     await method.click();
-    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Überweisung", "Karte", "Bar", "Kryptowährung", "Sonstiges"]);
+    await expect(page.getByRole("option")).toHaveText(["Auswählen", "Überweisung", "Karte", "Bar", "Sonstiges"]);
     await page.getByRole("option", { name: "Überweisung" }).click();
     await expect(page.getByRole("option")).toHaveCount(0);
     const holder = route.getByRole("textbox", { name: "Kontoinhaber/in" });
@@ -565,7 +565,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       });
     await expect(billing.getByRole("textbox", { name: "E-Mail für Rechnungen (optional)" })).toBeVisible();
 
-    // "Other" as method says what it is; cash and cryptocurrency are flagged; a card needs no bank.
+    // "Other" as method says what it is; cash is flagged; a card needs no bank.
     const method = route.getByRole("combobox", { name: METHOD_QUESTION });
     const details = route.getByRole("textbox", { name: "Bitte beschreiben", exact: true });
     const note = page.getByTestId("lead-request-payment-method-note");
@@ -580,11 +580,9 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method_details: "Scheck" });
     await choose(page, method, "Bar");
     await expect(details).toHaveCount(0);
-    await expect(note).toContainText("Barzahlungen und Zahlungen in Kryptowährung prüft GMED gesondert (Geldwäschegesetz).");
+    await expect(note).toContainText("Barzahlungen prüft GMED gesondert (Geldwäschegesetz).");
     await expect(route.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveCount(0);
     await expect.poll(() => calls.billing.at(-1)).toEqual({ payment_method: "cash", payment_method_details: "" });
-    await choose(page, method, "Kryptowährung");
-    await expect(note).toBeVisible();
     await choose(page, method, "Karte");
     await expect(note).toHaveCount(0);
     await expect(route.getByRole("textbox", { name: "Kontoinhaber/in" })).toHaveValue("Anna Muster");
@@ -807,7 +805,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
           invoice_city: "Berlin",
           invoice_country: "DE",
           invoice_email: "rechnungsstelle.der.beispielstiftung@example.com",
-          payment_method: "crypto",
+          payment_method: "cash",
           via_third_party: true,
           via_third_party_details: "Zahlungsdienstleister-der-Beispielstiftung-für-Patientenhilfe",
         }),
@@ -826,7 +824,7 @@ test.describe("lead cabinet: invoice recipient and payment route", () => {
       expect(await widestOverhang(page, "lead-request-step-billing"), `${width}px`).toBeLessThanOrEqual(1);
       // The method list opens inside the screen.
       await route.getByRole("combobox", { name: METHOD_QUESTION }).click();
-      const optionEdge = await page.getByRole("option", { name: "Kryptowährung" }).evaluate((node) => node.getBoundingClientRect().right);
+      const optionEdge = await page.getByRole("option", { name: "Sonstiges" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(optionEdge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");
       await expect(page.getByRole("option")).toHaveCount(0);

@@ -24,6 +24,7 @@ import {
   invoiceTaxLine,
   invoiceToLabel,
   payerRelationshipKindLabel,
+  type InvoiceTo,
   type PaymentMethod,
   type PayerRelationshipKind,
 } from "./lead-payer";
@@ -40,6 +41,29 @@ export type Tx = (ru: string, de: string) => string;
 
 /** Shown for a statement the lead left empty. */
 export const EMPTY_STATEMENT = "—";
+
+/** Cabinet organisation data stays read-only; it never enters the staff save payload. */
+export function payerOrganisationStatements(
+  mask: { legal_form: string | null; register_number: string | null; contact_name: string | null },
+  tx: Tx,
+) {
+  return [
+    { key: "legal_form", label: tx("Правовая форма", "Rechtsform"), value: mask.legal_form?.trim() || "" },
+    { key: "register_number", label: tx("Регистрационный номер", "Registernummer"), value: mask.register_number?.trim() || "" },
+    { key: "contact_name", label: tx("Контактное лицо", "Ansprechperson"), value: mask.contact_name?.trim() || "" },
+  ];
+}
+
+/** Read the cabinet choice directly, including before its derived declaration is saved. */
+export function portalInvoiceTo(billing: LeadPortalBilling): InvoiceTo | null {
+  if (billing.invoice_recipient === "self") return "self";
+  if (billing.invoice_recipient === "third_party") {
+    if (billing.invoice_recipient_is_payer === true) return "payer";
+    if (billing.invoice_recipient_is_payer === false) return "other";
+    return null;
+  }
+  return billing.invoice_recipient === undefined ? billing.invoice_to : null;
+}
 
 type GwgIntake = Pick<LeadPortalIntake, "identification" | "identification_updated_at" | "identity_documents">
   & Partial<
@@ -111,6 +135,7 @@ const BILLING_ANSWER_KEYS = [
   "account_holder",
   "bank_name",
   "via_third_party",
+  "via_third_party_kind",
   "via_third_party_details",
 ] as const satisfies readonly (keyof LeadPortalBilling)[];
 
@@ -306,6 +331,7 @@ export function gwgLegalAnswers(identification: GwgLegalAnswerSource, tx: Tx, la
  * the cabinet in one.
  */
 export type GwgPayerStatement = {
+  payer_kind?: "self" | "third_party" | null;
   acts_on_own_account?: boolean | null;
   /**
    * False while nobody answered the question: `acts_on_own_account` is then
@@ -524,6 +550,7 @@ export type BillingStatementKey =
   | "recipient_legal_form"
   | "recipient_contact_name"
   | "recipient_phone"
+  | "recipient_address"
   | "invoice_to"
   | "invoice_name"
   | "invoice_address"
@@ -534,6 +561,7 @@ export type BillingStatementKey =
   | "account_holder"
   | "bank_name"
   | "via_third_party"
+  | "via_third_party_kind"
   | "expected_total";
 
 export type BillingStatement = {
@@ -587,13 +615,14 @@ export function billingStatements(
   });
 
   const invoice: BillingStatement[] = [];
+  const invoiceTo = portalInvoiceTo(billing);
+  const party = billing.invoice_recipient === "third_party" ? billing.recipient ?? null : null;
+  const recipientAddress = party ? representativeAddress(party, lang) : "";
   // Step 3 of the cabinet (owner spec 2026-10-11): who receives the invoice and
-  // whether that recipient pays, as the lead said it; a third party's data
-  // when it does not pay (one who pays is the payer above).
+  // whether that recipient pays, as the lead said it, with its saved data
+  // also when it is the payer (the organisation mask stays read-only).
   if (billing.invoice_recipient !== undefined) {
-    const party = billing.recipient ?? null;
     const third = billing.invoice_recipient === "third_party";
-    const paying = billing.invoice_recipient_is_payer === true;
     const organisation = party?.type === "organisation";
     const who =
       billing.invoice_recipient === "self"
@@ -618,7 +647,7 @@ export function billingStatements(
         answerLabel(billing.invoice_recipient_is_payer ?? null, tx),
       ),
     );
-    if (third && !paying && party) {
+    if (third && party) {
       if (organisation) {
         invoice.push(
           statement("recipient_legal_form", tx("Правовая форма", "Rechtsform"), party.legal_form),
@@ -635,23 +664,26 @@ export function billingStatements(
         );
       }
       if (party.phone) invoice.push(statement("recipient_phone", tx("Телефон получателя", "Telefon des Empfängers"), party.phone));
+      if (invoiceTo !== "other" && recipientAddress) {
+        invoice.push(statement("recipient_address", tx("Адрес получателя счёта", "Anschrift des Rechnungsempfängers"), recipientAddress));
+      }
     }
   }
-  invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(billing.invoice_to, tx)));
-  if (billing.invoice_to === "other") {
+  invoice.push(statement("invoice_to", tx("Счёт направляется", "Rechnung geht an"), invoiceToLabel(invoiceTo, tx)));
+  if (invoiceTo === "other") {
     invoice.push(
-      statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), billing.invoice_name),
+      statement("invoice_name", tx("Имя на счёте", "Name auf der Rechnung"), party ? party.name : billing.invoice_name),
       statement(
         "invoice_address",
         tx("Адрес для счёта", "Rechnungsanschrift"),
-        representativeAddress(
+        party ? recipientAddress : representativeAddress(
           { street: billing.invoice_street, zip: billing.invoice_zip, city: billing.invoice_city, country: billing.invoice_country },
           lang,
         ),
       ),
     );
   }
-  invoice.push(statement("invoice_email", tx("E-mail для счетов", "E-Mail für Rechnungen"), billing.invoice_email));
+  invoice.push(statement("invoice_email", tx("E-mail для счетов", "E-Mail für Rechnungen"), party ? party.email : billing.invoice_email));
   const taxLine = invoiceTaxLine(billing);
   if (taxLine) invoice.push(statement("invoice_tax", "USt-IdNr. / Steuernummer", taxLine));
 
@@ -692,6 +724,16 @@ export function billingStatements(
           },
         ),
       );
+      if (billing.via_third_party === true && billing.via_third_party_kind) {
+        payment.push(statement(
+          "via_third_party_kind",
+          tx("Через кого проходит оплата", "Über wen erfolgt die Zahlung"),
+          billing.via_third_party_kind === "person"
+            ? tx("Физическое лицо", "Privatperson")
+            : tx("Платёжный провайдер", "Zahlungsdienstleister"),
+          { warning: true },
+        ));
+      }
     }
   }
   // Block C: the total the lead expects to pay, once given (QA 2026-10-10: it

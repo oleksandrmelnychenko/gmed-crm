@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 import type { SpecializationItem } from "@/pages/providers/model/types";
@@ -15,6 +16,7 @@ export function ClinicalSpecializationsField({
   lang,
   tx,
   onChange,
+  compact = false,
 }: {
   ids: string[];
   selected: SpecializationItem[];
@@ -22,6 +24,7 @@ export function ClinicalSpecializationsField({
   lang: string;
   tx: Bilingual;
   onChange: (ids: string[], selected: SpecializationItem[]) => void;
+  compact?: boolean;
 }) {
   const labelLang = lang === "de" ? "de" : "ru";
   const availableItems = useMemo(() => {
@@ -44,11 +47,11 @@ export function ClinicalSpecializationsField({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+    <div className={cn("space-y-2", !compact && "rounded-lg border border-border/60 p-2.5")}>
       <NativeComboboxSelect
         value=""
         aria-label={tx("Добавить специализацию", "Spezialisierung hinzufügen")}
-        className="h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
+        className={cn("h-9 w-full rounded-lg border border-border bg-field px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40", compact && "text-[13px]")}
         onChange={(event) => add(event.target.value)}
       >
         <option value="">
@@ -70,7 +73,7 @@ export function ClinicalSpecializationsField({
               <Badge
                 key={id}
                 variant="outline"
-                className="gap-1 border-amber-300 bg-amber-50 py-1 pr-1 font-semibold text-amber-700"
+                className={cn("gap-1 border-amber-300 bg-amber-50 py-1 pr-1 font-semibold text-amber-700", compact && "rounded-full border-border/50 bg-muted/40 text-xs font-medium text-foreground")}
               >
                 {label}
                 <button

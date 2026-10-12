@@ -123,6 +123,11 @@ export type LeadRequestText = {
   requestFor: string;
   language: string;
   sectionPerson: string;
+  namePassportHint: string;
+  namePassportCorrection: string;
+  /** "{name}": the suggested passport spelling. */
+  namePassportSuggestion: string;
+  namePassportApply: string;
   sectionAddress: string;
   sectionContact: string;
   sectionConsent: string;
@@ -368,7 +373,7 @@ export type LeadRequestText = {
   invoiceEmailHint: string;
   vatHint: string;
   paymentMethodOptions: Record<PaymentMethod, string>;
-  /** Cash and cryptocurrency are checked separately (money laundering act). */
+  /** Cash (and an older answer "cryptocurrency") is checked separately (money laundering act). */
   cashCryptoNote: string;
   totalAmountHint: string;
   /** Section 8 when the payer answers it: nothing is asked here. */
@@ -862,6 +867,10 @@ const de: LeadRequestText = {
   requestFor: "Anfrage für",
   language: "Sprache",
   sectionPerson: "Persönliche Daten",
+  namePassportHint: "Bitte schreiben Sie Ihren Namen in lateinischen Buchstaben – genau wie im Reisepass, z. B. Anna Ivanova.",
+  namePassportCorrection: "Nur lateinische Buchstaben, wie im Reisepass.",
+  namePassportSuggestion: "Im Reisepass vermutlich: {name}",
+  namePassportApply: "Übernehmen",
   sectionAddress: "Adresse",
   sectionContact: "Kontakt",
   sectionConsent: "Datenschutz und Einwilligung",
@@ -1182,7 +1191,7 @@ const de: LeadRequestText = {
     crypto: "Kryptowährung",
     other: "Sonstiges",
   },
-  cashCryptoNote: "Barzahlungen und Zahlungen in Kryptowährung prüft GMED gesondert (Geldwäschegesetz).",
+  cashCryptoNote: "Barzahlungen prüft GMED gesondert (Geldwäschegesetz).",
   totalAmountHint: "Den voraussichtlichen Gesamtbetrag trägt GMED ein.",
   paymentRouteByPayer: "Den Zahlungsweg gibt die zahlende Person / Organisation selbst an; GMED wendet sich dazu an sie.",
   paymentRouteByPayerShort: "gibt die zahlende Person an",
@@ -1290,7 +1299,7 @@ const ru: LeadRequestText = {
     middle_name: "Отчество / второе имя",
     last_name: "Фамилия",
     date_of_birth: "Дата рождения",
-    legal_sex: "Пол по документам",
+    legal_sex: "Пол согласно документам",
     citizenships: "Гражданство",
     street_address: "Улица и дом",
     zip_code: "Почтовый индекс",
@@ -1365,6 +1374,10 @@ const ru: LeadRequestText = {
   requestFor: "Заявка для",
   language: "Язык",
   sectionPerson: "Личные данные",
+  namePassportHint: "Пишите имя, фамилию и отчество латинскими буквами — так, как в загранпаспорте. Например: Anna Ivanova.",
+  namePassportCorrection: "Только латинские буквы, как в загранпаспорте.",
+  namePassportSuggestion: "В загранпаспорте, скорее всего: {name}",
+  namePassportApply: "Подставить",
   sectionAddress: "Адрес",
   sectionContact: "Контакт",
   sectionConsent: "Защита данных и согласие",
@@ -1682,7 +1695,7 @@ const ru: LeadRequestText = {
     crypto: "Криптовалюта",
     other: "Другое",
   },
-  cashCryptoNote: "Оплату наличными и криптовалютой GMED проверяет отдельно (закон о противодействии отмыванию денег).",
+  cashCryptoNote: "Оплату наличными GMED проверяет отдельно (закон о противодействии отмыванию денег).",
   totalAmountHint: "Ожидаемую общую сумму вносит GMED.",
   paymentRouteByPayer:
     "Способ оплаты указывает сам плательщик (лицо или организация, которая платит); GMED обратится к нему по этому вопросу.",
@@ -1866,6 +1879,10 @@ const uk: LeadRequestText = {
   requestFor: "Заявка для",
   language: "Мова",
   sectionPerson: "Особисті дані",
+  namePassportHint: "Пишіть ім’я, прізвище та по батькові латинськими літерами — так, як у закордонному паспорті. Наприклад: Hanna Ivanenko.",
+  namePassportCorrection: "Лише латинські літери, як у закордонному паспорті.",
+  namePassportSuggestion: "У закордонному паспорті, найімовірніше: {name}",
+  namePassportApply: "Підставити",
   sectionAddress: "Адреса",
   sectionContact: "Контакт",
   sectionConsent: "Захист даних і згода",
@@ -2183,7 +2200,7 @@ const uk: LeadRequestText = {
     crypto: "Криптовалюта",
     other: "Інше",
   },
-  cashCryptoNote: "Оплату готівкою та криптовалютою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
+  cashCryptoNote: "Оплату готівкою GMED перевіряє окремо (закон про запобігання відмиванню коштів).",
   totalAmountHint: "Очікувану загальну суму вносить GMED.",
   paymentRouteByPayer:
     "Спосіб оплати вказує сам платник (особа або організація, яка платить); GMED звернеться до нього із цього приводу.",
@@ -2367,6 +2384,10 @@ const en: LeadRequestText = {
   requestFor: "Request for",
   language: "Language",
   sectionPerson: "Personal details",
+  namePassportHint: "Please write your names in Latin letters – exactly as in your passport, e.g. Anna Ivanova.",
+  namePassportCorrection: "Latin letters only, as in your passport.",
+  namePassportSuggestion: "Your passport most likely says: {name}",
+  namePassportApply: "Use this",
   sectionAddress: "Address",
   sectionContact: "Contact",
   sectionConsent: "Privacy and consent",
@@ -2677,7 +2698,7 @@ const en: LeadRequestText = {
     crypto: "Cryptocurrency",
     other: "Other",
   },
-  cashCryptoNote: "GMED checks cash payments and payments in cryptocurrency separately (Money Laundering Act).",
+  cashCryptoNote: "GMED checks cash payments separately (Money Laundering Act).",
   totalAmountHint: "GMED enters the expected total amount.",
   paymentRouteByPayer: "The paying person / organisation states the payment route themselves; GMED will contact them about it.",
   paymentRouteByPayerShort: "stated by the paying person",

@@ -183,13 +183,14 @@ pub const INVOICE_TO_VALUES: &[&str] = &[INVOICE_TO_SELF, INVOICE_TO_PAYER, INVO
 pub const PAYMENT_METHOD_BANK_TRANSFER: &str = "bank_transfer";
 pub const PAYMENT_METHOD_CARD: &str = "card";
 pub const PAYMENT_METHOD_CASH: &str = "cash";
+/// No longer offered (owner 2026-10-12): an older answer keeps its
+/// compliance flag and is asked again before the request is sent.
 pub const PAYMENT_METHOD_CRYPTO: &str = "crypto";
 pub const PAYMENT_METHOD_OTHER: &str = "other";
 pub const PAYMENT_METHODS: &[&str] = &[
     PAYMENT_METHOD_BANK_TRANSFER,
     PAYMENT_METHOD_CARD,
     PAYMENT_METHOD_CASH,
-    PAYMENT_METHOD_CRYPTO,
     PAYMENT_METHOD_OTHER,
 ];
 
@@ -3517,7 +3518,7 @@ pub(crate) fn portal_missing_billing(
         return missing;
     }
     match declaration.payment_method.as_deref() {
-        None => missing.push("payment_method"),
+        None | Some(PAYMENT_METHOD_CRYPTO) => missing.push("payment_method"),
         Some(PAYMENT_METHOD_OTHER) if blank(&declaration.payment_method_details) => {
             missing.push("payment_method_details");
         }
@@ -4554,9 +4555,14 @@ mod tests {
         .unwrap();
         assert_eq!(other.payment_method_details.as_deref(), Some("Scheck"));
         assert_eq!(other.payment_route_flags(), ["other_method"]);
-        let crypto =
-            apply_billing_patch(&other, &patch(json!({ "payment_method": "crypto" }))).unwrap();
-        assert_eq!(crypto.payment_method_details, None);
+        // Cryptocurrency is no longer offered (owner 2026-10-12); an older
+        // answer keeps its flag.
+        assert!(apply_billing_patch(&other, &patch(json!({ "payment_method": "crypto" }))).is_err());
+        let crypto = Declaration {
+            payment_method: Some("crypto".into()),
+            payment_method_details: None,
+            ..other.clone()
+        };
         assert_eq!(crypto.payment_route_flags(), ["crypto_payment"]);
         assert!(
             from_input(&input("self"))

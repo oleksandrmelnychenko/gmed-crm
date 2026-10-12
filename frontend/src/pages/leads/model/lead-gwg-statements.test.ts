@@ -25,6 +25,8 @@ import {
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
+  payerOrganisationStatements,
+  portalInvoiceTo,
   paymentMethodLabel,
   paymentRouteByPayerLine,
   paymentRouteByPayerNote,
@@ -542,6 +544,7 @@ describe("warnings about the representation of a minor", () => {
 /** Sections 7–8 as the server sends them for a self-payer who has answered nothing yet. */
 function billing(patch: Partial<LeadPortalBilling> = {}): LeadPortalBilling {
   return {
+    recipient_updated_at: null,
     invoice_to: null,
     invoice_name: null,
     invoice_street: null,
@@ -558,7 +561,9 @@ function billing(patch: Partial<LeadPortalBilling> = {}): LeadPortalBilling {
     account_holder: null,
     bank_name: null,
     via_third_party: null,
+    via_third_party_kind: null,
     via_third_party_details: null,
+    expected_total_eur: undefined,
     compliance_flags: [],
     ...patch,
   };
@@ -685,6 +690,86 @@ describe("labels of sections 7–8", () => {
 });
 
 describe("sections 7–8 as the group shows them", () => {
+  it("does not revive an old declaration address or e-mail after the cabinet clears recipient fields", () => {
+    const value = normalizeLeadPortalBilling({
+      invoice_recipient: "third_party", invoice_recipient_is_payer: false,
+      recipient: { type: "person", name: null, street: null, zip: null, city: null, country: null, email: null },
+      invoice_to: "other", invoice_name: "Old recipient", invoice_street: "Old address", invoice_email: "old@example.com",
+    })!;
+    const invoice = billingStatements(value, ru, "ru").invoice;
+    expect(invoice.find((row) => row.key === "invoice_name")?.value).toBe("");
+    expect(invoice.find((row) => row.key === "invoice_address")?.value).toBe("");
+    expect(invoice.find((row) => row.key === "invoice_email")?.value).toBe("");
+    expect(portalInvoiceTo({ ...value, invoice_recipient_is_payer: null, invoice_to: "payer" })).toBeNull();
+  });
+
+  it("shows the third-party payment kind only for an affirmative payment route", () => {
+    const value = normalizeLeadPortalBilling({
+      via_third_party: true, via_third_party_kind: "psp", via_third_party_details: "Payment service account",
+    })!;
+    const payment = billingStatements(value, de, "de").payment;
+    expect(payment.find((row) => row.key === "via_third_party_kind")?.value).toBe("Zahlungsdienstleister");
+    expect(payment.find((row) => row.key === "via_third_party")?.details).toBe("Payment service account");
+    expect(billingStatements({ ...value, via_third_party: false }, de, "de").payment.map((row) => row.key))
+      .not.toContain("via_third_party_kind");
+    expect(billingStatements({ ...value, via_third_party_kind: "person" }, ru, "ru").payment
+      .find((row) => row.key === "via_third_party_kind")?.value).toBe("Физическое лицо");
+  });
+
+  it("reads a recipient directly before the payer declaration has been created", () => {
+    const value = normalizeLeadPortalBilling({
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: false,
+      invoice_to: null,
+      recipient: {
+        type: "person", name: "Mia Muster", street: "Musterweg 4", zip: "10115", city: "Berlin",
+        country: "DE", email: "mia@example.com", relationship_kind: "friend",
+      },
+    })!;
+    expect(portalInvoiceTo(value)).toBe("other");
+    const invoice = billingStatements(value, de, "de").invoice;
+    expect(invoice.find((row) => row.key === "invoice_name")?.value).toBe("Mia Muster");
+    expect(invoice.find((row) => row.key === "invoice_address")?.value).toContain("Musterweg 4");
+    expect(invoice.find((row) => row.key === "invoice_address")?.value).toContain("Deutschland");
+    expect(invoice.find((row) => row.key === "invoice_email")?.value).toBe("mia@example.com");
+    expect(invoice.find((row) => row.key === "invoice_to")?.value).toBe("an eine andere Adresse");
+  });
+
+  it("keeps paying organisation recipient details visible in the read-only invoice rows", () => {
+    const value = normalizeLeadPortalBilling({
+      invoice_recipient: "third_party",
+      invoice_recipient_is_payer: true,
+      invoice_to: "self",
+      recipient: {
+        type: "organisation", name: "Beispiel GmbH", legal_form: "GmbH", contact_name: "Ben Muster",
+        street: "Musterweg 4", zip: "10115", city: "Berlin", country: "DE", email: "rechnung@example.com",
+        phone: "+49 30 5550100", payment_reason: "Arbeitgeber bezahlt die Behandlung.",
+      },
+    })!;
+    expect(portalInvoiceTo(value)).toBe("payer");
+    const invoice = billingStatements(value, de, "de").invoice;
+    expect(invoice.find((row) => row.key === "recipient_legal_form")?.value).toBe("GmbH");
+    expect(invoice.find((row) => row.key === "recipient_contact_name")?.value).toBe("Ben Muster");
+    expect(invoice.find((row) => row.key === "recipient_address")?.value).toContain("Musterweg 4");
+    expect(invoice.find((row) => row.key === "invoice_email")?.value).toBe("rechnung@example.com");
+    expect(invoice.find((row) => row.key === "recipient_phone")?.value).toBe("+49 30 5550100");
+  });
+
+  it("keeps the legacy invoice choice when the server sends no recipient fields", () => {
+    const value = normalizeLeadPortalBilling({ invoice_to: "payer", invoice_email: "legacy@example.com" })!;
+    expect(portalInvoiceTo(value)).toBe("payer");
+    expect(billingStatements(value, ru, "ru").invoice.find((row) => row.key === "invoice_email")?.value).toBe("legacy@example.com");
+  });
+
+  it("labels and trims the cabinet organisation mask without requiring optional registration", () => {
+    expect(payerOrganisationStatements({ legal_form: " GmbH ", register_number: null, contact_name: " Ben Muster " }, de))
+      .toEqual([
+        { key: "legal_form", label: "Rechtsform", value: "GmbH" },
+        { key: "register_number", label: "Registernummer", value: "" },
+        { key: "contact_name", label: "Ansprechperson", value: "Ben Muster" },
+      ]);
+  });
+
   it("shows the invoice recipient of step 3 as the lead answered it (owner spec 2026-10-11)", () => {
     const raw = {
       invoice_to: "other",

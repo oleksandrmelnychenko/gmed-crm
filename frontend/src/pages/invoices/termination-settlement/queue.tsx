@@ -25,7 +25,7 @@ import {
   settlementStatusLabel,
   toAmount,
 } from "./model";
-import { AdvancePaymentHint, FinalInvoiceLink, SettlementActions } from "./ui";
+import { FinalInvoiceLink, SettlementActions } from "./ui";
 
 /** Billing queue: final settlements of orders stopped by a contract termination. */
 export function TerminationSettlementQueue({
@@ -199,7 +199,6 @@ export function TerminationSettlementQueue({
           </div>
         }
       />
-      <AdvancePaymentHint lang={lang} />
     </div>
   );
 }

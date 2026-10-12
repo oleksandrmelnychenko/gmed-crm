@@ -2,10 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Check,
-  Circle,
+  CircleAlert,
   FileText,
   LoaderCircle,
-  Save,
   Upload,
 } from "lucide-react";
 
@@ -20,6 +19,8 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { StatusChip } from "@/components/ui/status-chip";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
@@ -30,7 +31,9 @@ import { cn } from "@/lib/utils";
 import { generateDocument, uploadDocument } from "@/pages/documents/data/document-api";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
-import type { LeadPortalEnhancedDetails, PatientFieldMarker } from "../data/lead-portal-intake-api";
+import { normalizeLeadPortalBilling, type LeadPortalEnhancedDetails, type LeadPortalIntake, type PatientFieldMarker } from "../data/lead-portal-intake-api";
+import { billingStatements, payerOrganisationStatements, portalInvoiceTo } from "../model/lead-gwg-statements";
+import { createPayerAutosave, type PayerAutosave, type PayerAutosaveState } from "../model/lead-payer-autosave";
 import { standaloneCostAssumptionKept } from "../model/lead-payer-package";
 import type { LeadPayerLinkController } from "../model/use-lead-payer-link";
 import { useLeadPayerPackage } from "../model/use-lead-payer-package";
@@ -106,7 +109,7 @@ function PayerCheckbox({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="flex cursor-pointer items-start gap-3 py-2">
+    <label className="flex cursor-pointer items-start gap-2 py-1.5">
       <input
         id={id}
         type="checkbox"
@@ -115,15 +118,24 @@ function PayerCheckbox({
         onChange={(event) => onChange(event.target.checked)}
         className={cn(checkboxClass, "mt-0.5")}
       />
-      <span className="text-sm text-foreground">{label}</span>
+      <span className="text-[13px] leading-5 text-foreground">{label}</span>
     </label>
+  );
+}
+
+function PayerReadOnlyStatement({ label, value, testId }: { label: string; value: string; testId: string }) {
+  return (
+    <div className="min-w-0" data-testid={testId}>
+      <dt className="text-[11.5px] font-medium leading-snug text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 break-words text-[13px] font-medium leading-5 text-foreground">{value || "—"}</dd>
+    </div>
   );
 }
 
 /**
  * "Кто платит" in the compliance step: who pays, own economic interest or a
  * beneficial owner, the source of funds and the third-party payer's data. The
- * form is saved explicitly; the server records the declaration with an audit
+ * form saves changed drafts automatically; the server records the declaration with an audit
  * row and makes a third party the payer of the lead's orders.
  *
  * A third party is a private person (personal identity, address,
@@ -151,6 +163,7 @@ export function LeadPayerDeclarationSection({
   leadLanguage,
   onPayerLinkSent,
   enhancedDetails,
+  portalIntake = null,
   prefill = null,
 }: {
   leadId: string;
@@ -178,10 +191,12 @@ export function LeadPayerDeclarationSection({
    * without it the declaration's answers are shown without files.
    */
   enhancedDetails?: LeadPortalEnhancedDetails | null;
+  /** Cabinet snapshots are read-only and are hidden with the identification privacy guard. */
+  portalIntake?: LeadPortalIntake | null;
   /**
    * A repeat intake without a declaration of its own: the patient's declaration
    * fixed at the conversion of the last request. It only fills the form; staff
-   * check it and save (QA B-18, 2026-10-11).
+   * check it before editing; untouched prefill is not written (QA B-18, 2026-10-11).
    */
   prefill?: PayerDeclaration | null;
 }) {
@@ -192,10 +207,43 @@ export function LeadPayerDeclarationSection({
   // without effects (static markup) already shows it.
   const [form, setForm] = useState<PayerDeclarationForm>(initialForm);
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<"save" | "upload" | null>(null);
+  const [busy, setBusy] = useState<"upload" | null>(null);
   const [message, setMessage] = useState<{ tone: "error" | "success"; text: string } | null>(null);
+  const [autosave, setAutosave] = useState<PayerAutosaveState>({ status: "idle", dirty: false, error: null });
   const [evidenceName, setEvidenceName] = useState("");
   const loadedFor = useRef<string | null>(null);
+  const formRef = useRef(form);
+  const autosaveRef = useRef<PayerAutosave | null>(null);
+  const mayFlushRef = useRef(false);
+  const activeLeadRef = useRef(leadId);
+  activeLeadRef.current = leadId;
+  mayFlushRef.current = canEdit && !disabled;
+
+  useEffect(() => {
+    const initial = prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
+    formRef.current = initial;
+    setForm(initial);
+    setDirty(false);
+    setMessage(null);
+    setEvidenceName("");
+    setAutosave({ status: "idle", dirty: false, error: null });
+    const queue = createPayerAutosave(initial, (next) => {
+      if (activeLeadRef.current !== leadId) return;
+      setAutosave(next);
+      setDirty(next.dirty);
+    });
+    autosaveRef.current = queue;
+    return () => {
+      // Closing the wizard or moving to another step must not drop the last edit.
+      queue.setEnabled(mayFlushRef.current);
+      void queue.dispose(mayFlushRef.current);
+      if (autosaveRef.current === queue) autosaveRef.current = null;
+    };
+  }, [leadId]);
+
+  useEffect(() => {
+    autosaveRef.current?.setEnabled(canEdit && !disabled && busy !== "upload" && !(loading && !data));
+  }, [leadId, canEdit, disabled, busy, loading, data]);
 
   // Take the stored declaration unless the user is editing it. Sending the
   // payer link marks the payer as informed without another change.
@@ -205,16 +253,27 @@ export function LeadPayerDeclarationSection({
     if (dirty && loadedFor.current?.startsWith(`${leadId}:`)) return;
     if (loadedFor.current === key) return;
     loadedFor.current = key;
-    setForm(prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration));
+    const next = prefillActive && prefill ? payerDeclarationPrefillForm(prefill) : payerDeclarationToForm(data?.declaration);
+    formRef.current = next;
+    setForm(next);
+    autosaveRef.current?.setBaseline(next);
   }, [data, dirty, leadId, prefill, prefillActive]);
 
   const patch = <K extends keyof PayerDeclarationForm>(key: K, value: PayerDeclarationForm[K]) => {
+    const next = { ...formRef.current, [key]: value };
+    formRef.current = next;
     setDirty(true);
     setMessage(null);
-    setForm((current) => ({ ...current, [key]: value }));
+    setForm(next);
+    // Capture this lead's save callback: a later lead must never receive this draft.
+    autosaveRef.current?.schedule(next, async (snapshot) => {
+      await onSave(snapshot);
+      // Another payer or e-mail revokes the link; a third party may make it sendable.
+      void payerLink?.reload();
+    });
   };
 
-  const readOnly = disabled || !canEdit || busy !== null;
+  const readOnly = disabled || !canEdit || busy !== null || (loading && !data);
   const thirdParty = form.kind === "third_party";
   // An older server knows neither the payer type nor the relationship kind
   // nor the lead's contact consent: the form then stays the one for a person.
@@ -229,9 +288,22 @@ export function LeadPayerDeclarationSection({
   const costEstimateConsent = costEstimateConsentLine(data, tx);
   // Section 7: the lead chose where the invoice goes; an older server does
   // not send the key, and a lead who has not answered yet has it null.
-  const invoiceTo = data?.declaration?.invoice_to;
+  const cabinetHidden = portalIntake?.identification_hidden === true;
+  const cabinet = cabinetHidden ? null : portalIntake;
+  const cabinetBilling = cabinet?.billing ?? null;
+  const organisationMask = cabinet?.payer_organisation ?? null;
+  const invoiceTo = cabinetBilling ? portalInvoiceTo(cabinetBilling) : data?.declaration?.invoice_to;
+  const invoiceName = cabinetBilling
+    ? cabinetBilling.invoice_recipient === "third_party" ? cabinetBilling.recipient?.name : cabinetBilling.invoice_name
+    : data?.declaration?.invoice_name;
   const invoiceToKnown = invoiceTo !== undefined;
   const invoiceTaxShown = invoiceTaxFieldsShown(form);
+  const recipientBilling = cabinetHidden
+    ? null
+    : cabinetBilling ?? (data?.declaration && invoiceToKnown ? normalizeLeadPortalBilling(data.declaration) : null);
+  const recipientStatements = recipientBilling
+    ? billingStatements(recipientBilling, tx, lang).invoice.filter((row) => row.key !== "invoice_to" && row.key !== "invoice_tax")
+    : [];
   // The self-paying lead's own source of funds (read-only): shown while the
   // stored declaration says the patient pays and the server knows the answer.
   const storedSource = data?.declaration?.self_funds_source?.trim();
@@ -262,30 +334,6 @@ export function LeadPayerDeclarationSection({
         "Nachweis der Herkunft der Mittel erforderlich (verstärkte Prüfung): vom Patienten noch nicht hochgeladen",
       );
 
-  async function save() {
-    if (!form.kind) {
-      setMessage({ tone: "error", text: payerReasonLabel("payer_declaration_missing", tx) });
-      return;
-    }
-    setBusy("save");
-    setMessage(null);
-    try {
-      await onSave(form);
-      setDirty(false);
-      loadedFor.current = null;
-      setMessage({
-        tone: "success",
-        text: tx("Данные о плательщике сохранены", "Angaben zum Zahler gespeichert"),
-      });
-      // Another payer or e-mail revokes the link; a third party may make it sendable.
-      void payerLink?.reload();
-    } catch (error) {
-      setMessage({ tone: "error", text: errorText(error) });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function uploadEvidence(file: File | undefined) {
     if (!file) return;
     if (file.size > MAX_EVIDENCE_FILE_SIZE) {
@@ -297,6 +345,8 @@ export function LeadPayerDeclarationSection({
     }
     setBusy("upload");
     setMessage(null);
+    const uploadQueue = autosaveRef.current;
+    const uploadIsCurrent = () => activeLeadRef.current === leadId && autosaveRef.current === uploadQueue;
     try {
       const body = new FormData();
       body.set("lead_id", leadId);
@@ -306,12 +356,13 @@ export function LeadPayerDeclarationSection({
       body.set("category", "finance_source_of_funds");
       body.set("access_category", "financial");
       const uploaded = await uploadDocument(body);
+      if (!uploadIsCurrent()) return;
       setEvidenceName(file.name);
       patch("sourceOfFundsDocumentId", uploaded.id);
     } catch (error) {
-      setMessage({ tone: "error", text: errorText(error) });
+      if (uploadIsCurrent()) setMessage({ tone: "error", text: errorText(error) });
     } finally {
-      setBusy(null);
+      if (uploadIsCurrent()) setBusy(null);
     }
   }
 
@@ -346,7 +397,7 @@ export function LeadPayerDeclarationSection({
   return (
     <div id={PAYER_SECTION_ID} tabIndex={-1} className="focus:outline-none">
       <Section
-        className="rounded-xl border border-border/70 bg-card p-4"
+        className="rounded-xl border border-border/50 bg-card p-3.5"
         title={(
           <span className="inline-flex flex-wrap items-center gap-2">
             <span>{tx("Кто платит", "Wer zahlt")}</span>
@@ -356,17 +407,20 @@ export function LeadPayerDeclarationSection({
             {patientMarker && !dirty ? <PatientFieldBadge marker={patientMarker} tx={tx} /> : null}
           </span>
         )}
-        accessory={canEdit ? (
-          <Button
-            type="button"
-            size="sm"
-            className="h-8 rounded-lg"
-            disabled={readOnly || (!dirty && Boolean(data?.declaration))}
-            onClick={() => void save()}
+        accessory={canEdit && autosave.status !== "idle" ? (
+          <StatusChip
+            tone={autosave.status === "error" ? "warning" : autosave.status === "saved" ? "success" : "neutral"}
+            role="status"
+            data-testid="lead-payer-autosave-status"
+            data-status={autosave.status}
           >
-            {busy === "save" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-            {tx("Сохранить", "Speichern")}
-          </Button>
+            {autosave.status === "saving" ? <LoaderCircle aria-hidden="true" className="animate-spin" /> : null}
+            {autosave.status === "saving" ? tx("Сохраняется…", "Wird gespeichert…")
+              : autosave.status === "saved" ? tx("Сохранено", "Gespeichert")
+                : autosave.status === "error" ? tx("Не сохранено", "Nicht gespeichert")
+                  : !form.kind ? tx("Выберите, кто платит", "Bitte wählen, wer zahlt")
+                    : tx("Есть несохранённые изменения", "Ungespeicherte Änderungen")}
+          </StatusChip>
         ) : undefined}
       >
         {loadError && !data && !(loadError instanceof ApiRequestError && loadError.status === 404)
@@ -378,13 +432,13 @@ export function LeadPayerDeclarationSection({
         {prefillActive && canEdit ? (
           <p className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs leading-5 text-sky-800" data-testid="lead-payer-prefill-note">
             {tx(
-              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные и сохраните — до сохранения ничего не записано.",
-              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen und speichern – vor dem Speichern wird nichts übernommen.",
+              "Заполнено по декларации плательщика, зафиксированной при конвертации прошлого обращения. Проверьте данные: внесённые изменения сохраняются автоматически.",
+              "Aus der Zahlererklärung übernommen, die bei der Umwandlung der letzten Anfrage festgehalten wurde. Bitte prüfen: Änderungen werden automatisch gespeichert.",
             )}
           </p>
         ) : null}
 
-        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex flex-wrap gap-2">
+        <div role="radiogroup" aria-label={tx("Кто платит", "Wer zahlt")} className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg bg-muted/40 p-1">
           {([
             ["self", tx("Пациент платит сам", "Patient zahlt selbst")],
             ["third_party", tx("Платит третье лицо", "Ein Dritter zahlt")],
@@ -392,13 +446,15 @@ export function LeadPayerDeclarationSection({
             <label
               key={kind}
               className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-                form.kind === kind ? "border-[var(--brand)] bg-muted/40" : "border-border",
+                "flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+                form.kind === kind ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                readOnly && "cursor-default",
               )}
             >
               <input
                 type="radio"
                 name={`lead-payer-kind-${leadId}`}
+                className="size-3.5 shrink-0 accent-[var(--brand)]"
                 value={kind}
                 checked={form.kind === kind}
                 disabled={readOnly}
@@ -416,10 +472,10 @@ export function LeadPayerDeclarationSection({
             "Пациент действует в собственных экономических интересах",
             "Der Patient handelt im eigenen wirtschaftlichen Interesse",
           )}
-          className="flex flex-wrap items-center gap-x-4 gap-y-1 border-y border-border/70 py-2"
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border/60 py-2.5"
           data-testid="lead-payer-own-account"
         >
-          <span className="text-sm text-foreground">
+          <span className="min-w-0 text-[13px] leading-5 text-foreground">
             {tx(
               "Пациент действует в собственных экономических интересах",
               "Der Patient handelt im eigenen wirtschaftlichen Interesse",
@@ -429,10 +485,11 @@ export function LeadPayerDeclarationSection({
             [true, tx("Да", "Ja")],
             [false, tx("Нет", "Nein")],
           ] as const).map(([value, label]) => (
-            <label key={String(value)} className="flex cursor-pointer items-center gap-1.5 text-sm">
+            <label key={String(value)} className="flex cursor-pointer items-center gap-1.5 text-[13px]">
               <input
                 type="radio"
                 name={`lead-payer-own-account-${leadId}`}
+                className="size-3.5 shrink-0 accent-[var(--brand)]"
                 checked={form.actsOnOwnAccount === value}
                 disabled={readOnly}
                 onChange={() => patch("actsOnOwnAccount", value)}
@@ -441,7 +498,7 @@ export function LeadPayerDeclarationSection({
             </label>
           ))}
           {form.actsOnOwnAccount === null ? (
-            <span className="text-xs text-muted-foreground">{tx("Не отвечено", "Nicht beantwortet")}</span>
+            <StatusChip tone="warning">{tx("Не отвечено", "Nicht beantwortet")}</StatusChip>
           ) : null}
         </div>
         {form.actsOnOwnAccount === false ? (
@@ -496,12 +553,12 @@ export function LeadPayerDeclarationSection({
           </PayerField>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <FileText aria-hidden="true" className="size-3.5" />
-          <span>
+          <StatusChip tone={form.sourceOfFundsDocumentId ? "success" : leadSelfFunds?.proofRequired ? "warning" : "neutral"}>
+            <FileText aria-hidden="true" />
             {form.sourceOfFundsDocumentId
               ? `${tx("Подтверждение приложено", "Nachweis beigefügt")}${evidenceName ? `: ${evidenceName}` : ""}`
               : staffProofLabel}
-          </span>
+          </StatusChip>
           {canEdit ? (
             <label className={cn("inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted/40", readOnly && "pointer-events-none opacity-50")}>
               {busy === "upload" ? <LoaderCircle className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
@@ -526,11 +583,11 @@ export function LeadPayerDeclarationSection({
         </div>
 
         {leadSelfFunds ? (
-          <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/10 p-3 text-xs" data-testid="lead-payer-self-funds">
+          <div className="space-y-1.5 border-t border-border/60 pt-3 text-xs" data-testid="lead-payer-self-funds">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-semibold text-foreground">
+              <AdminSectionTitle>
                 {tx("Источник средств — указал пациент в кабинете", "Herkunft der Mittel – Angaben des Patienten im Portal")}
-              </span>
+              </AdminSectionTitle>
               {leadSelfFunds.updatedAt ? (
                 <PatientFieldBadge marker={{ at: leadSelfFunds.updatedAt, access_kind: null }} tx={tx} />
               ) : null}
@@ -548,34 +605,34 @@ export function LeadPayerDeclarationSection({
               </p>
             ) : null}
             {leadSelfFunds.proofDocuments ? (
-              <div data-testid="lead-payer-self-funds-proof">
-                <span className="text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-2" data-testid="lead-payer-self-funds-proof">
+                <StatusChip tone={leadSelfFunds.proofDocuments.length > 0 ? "success" : leadSelfFunds.proofRequired ? "warning" : "neutral"}>
                   {tx("Подтверждение", "Nachweis")}
                   {" · "}
                   {leadSelfFunds.proofRequired
                     ? tx("обязательно (усиленная проверка)", "erforderlich (verstärkte Prüfung)")
                     : tx("необязательно", "optional")}
-                  {": "}
-                </span>
+                  {leadSelfFunds.proofDocuments.length === 0 ? `: ${tx("не загружено", "nicht hochgeladen")}` : null}
+                </StatusChip>
                 {leadSelfFunds.proofDocuments.length > 0
-                  ? leadSelfFunds.proofDocuments
+                  ? <span className="text-foreground">{leadSelfFunds.proofDocuments
                     .map((document) => [
                       document.file_name || "—",
                       document.uploaded_at ? formatAppDate(document.uploaded_at) : "",
                       document.reviewed ? tx("просмотрен", "geprüft") : "",
                     ].filter(Boolean).join(" · "))
-                    .join(", ")
-                  : tx("не загружено", "nicht hochgeladen")}
+                    .join(", ")}</span>
+                  : null}
               </div>
             ) : null}
           </div>
         ) : null}
 
         {thirdParty ? (
-          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3">
-            <div className="text-xs font-semibold text-foreground">
+          <div className="space-y-3 border-t border-border/60 pt-3">
+            <AdminSectionTitle>
               {tx("Плательщик (третье лицо)", "Kostenübernehmer (Dritter)")}
-            </div>
+            </AdminSectionTitle>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {typed ? (
                 <PayerField label={tx("Тип плательщика", "Art des Zahlers")} required>
@@ -689,6 +746,21 @@ export function LeadPayerDeclarationSection({
                 </fieldset>
               ) : null}
             </div>
+            {organisation && organisationMask ? (
+              <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-payer-organisation-cabinet">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">
+                    {tx("Данные организации из кабинета", "Organisationsangaben aus dem Portal")}
+                  </span>
+                  {cabinet?.patient_payer ? <PatientFieldBadge marker={cabinet.patient_payer} tx={tx} /> : null}
+                </div>
+                <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                  {payerOrganisationStatements(organisationMask, tx).map((row) => (
+                    <PayerReadOnlyStatement key={row.key} label={row.label} value={row.value} testId={`lead-payer-organisation-${row.key}`} />
+                  ))}
+                </dl>
+              </div>
+            ) : null}
             <div className="border-t border-border/70">
               <PayerCheckbox
                 checked={form.payerInformed}
@@ -706,43 +778,44 @@ export function LeadPayerDeclarationSection({
             </div>
             {typed && data?.status.contact_consent_required === false ? (
               // A parent with an own cabinet login pays: nobody else is told the contact.
-              <p className="text-xs text-muted-foreground" data-testid="lead-payer-contact-consent" data-required="false">
+              <StatusChip tone="neutral" data-testid="lead-payer-contact-consent" data-required="false">
                 {tx(
                   "Согласие на передачу контактов: не требуется (платит родитель)",
                   "Einwilligung zur Kontaktweitergabe: nicht nötig (Elternteil zahlt)",
                 )}
-              </p>
+              </StatusChip>
             ) : typed ? (
-              <p className="text-xs text-muted-foreground" data-testid="lead-payer-contact-consent">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] leading-5 text-muted-foreground" data-testid="lead-payer-contact-consent">
                 {tx(
                   "Согласие пациента на передачу контактов плательщику:",
                   "Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:",
                 )}
                 {" "}
                 {contactConsentAt ? (
-                  <span className="font-mono text-foreground">{formatAppDateTime(contactConsentAt)}</span>
+                  <StatusChip tone="success">
+                    {tx("дано", "erteilt")}
+                    <span className="font-mono">{formatAppDateTime(contactConsentAt)}</span>
+                  </StatusChip>
                 ) : (
-                  <span className="font-medium text-amber-700 dark:text-amber-300">
+                  <StatusChip tone="warning">
                     {tx("ещё не дано", "noch nicht erteilt")}
-                  </span>
+                  </StatusChip>
                 )}
               </p>
             ) : null}
             {typed && costEstimateConsent ? (
               <p
-                className="text-xs text-muted-foreground"
+                className="flex flex-wrap items-center gap-x-2 gap-y-1.5 text-[11.5px] leading-5 text-muted-foreground"
                 data-testid="lead-payer-cost-estimate-consent"
                 data-state={costEstimateConsent.state}
               >
                 {costEstimateConsent.prefix}
-                <span
-                  className={cn(
-                    costEstimateConsent.state === "given" && "font-mono text-foreground",
-                    costEstimateConsent.state === "missing" && "font-medium text-amber-700 dark:text-amber-300",
-                  )}
+                <StatusChip
+                  tone={costEstimateConsent.state === "given" ? "success" : costEstimateConsent.state === "missing" ? "warning" : "neutral"}
+                  className={costEstimateConsent.state === "given" ? "font-mono" : undefined}
                 >
                   {costEstimateConsent.value}
-                </span>
+                </StatusChip>
               </p>
             ) : null}
             {payerLink?.data ? (
@@ -764,7 +837,7 @@ export function LeadPayerDeclarationSection({
                 {errorText(payerLink.error)}
               </p>
             ) : null}
-            <p className="text-xs text-muted-foreground">
+            <p className="max-w-3xl text-[11.5px] leading-5 text-muted-foreground">
               {tx(
                 "Плательщик подписывает согласие на оплату (Kostenübernahmeerklärung, присоединение к долгу). Документ создаётся на шаге «Договор и смета», когда заказ уже есть.",
                 "Der Kostenübernehmer unterschreibt die Kostenübernahmeerklärung (Schuldbeitritt). Sie wird im Schritt „Vertrag & Angebot“ erstellt, sobald der Auftrag besteht.",
@@ -774,22 +847,34 @@ export function LeadPayerDeclarationSection({
         ) : null}
 
         {invoiceToKnown || invoiceTaxShown ? (
-          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-payer-invoice-recipient">
-            <div className="text-xs font-semibold text-foreground">
+          <div className="space-y-3 border-t border-border/60 pt-3" data-testid="lead-payer-invoice-recipient">
+            <AdminSectionTitle>
               {tx("Получатель счёта (раздел 7 анкеты)", "Rechnungsempfänger (Abschnitt 7)")}
-            </div>
+            </AdminSectionTitle>
+            {cabinetBilling?.recipient_updated_at ? (
+              <span className="inline-flex" data-testid="lead-payer-recipient-updated">
+                <PatientFieldBadge marker={{ at: cabinetBilling.recipient_updated_at, access_kind: null }} tx={tx} />
+              </span>
+            ) : null}
             {invoiceToKnown ? (
               <p className="text-xs text-muted-foreground" data-testid="lead-payer-invoice-to">
                 {tx("Счёт направляется: ", "Rechnung geht an: ")}
                 <span className="font-medium text-foreground">{invoiceToLabel(invoiceTo, tx)}</span>
-                {invoiceTo === "other" && data?.declaration?.invoice_name ? (
-                  <span className="font-medium text-foreground">{` — ${data.declaration.invoice_name}`}</span>
+                {invoiceTo === "other" && invoiceName ? (
+                  <span className="font-medium text-foreground">{` — ${invoiceName}`}</span>
                 ) : null}
                 {" · "}
                 {invoiceTo
                   ? tx("выбрал пациент в кабинете", "vom Patienten im Portal gewählt")
                   : tx("выбирает пациент в кабинете", "wählt der Patient im Portal")}
               </p>
+            ) : null}
+            {recipientStatements.length > 0 ? (
+              <dl className="grid gap-x-5 gap-y-2.5 sm:grid-cols-2 lg:grid-cols-3" data-testid="lead-payer-recipient-snapshot">
+                {recipientStatements.map((row) => (
+                  <PayerReadOnlyStatement key={row.key} label={row.label} value={row.value} testId={`lead-payer-recipient-${row.key}`} />
+                ))}
+              </dl>
             ) : null}
             {invoiceTaxShown ? (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -819,11 +904,13 @@ export function LeadPayerDeclarationSection({
         ) : null}
 
         {missing.length > 0 ? (
-          <ul className="space-y-1 text-xs text-amber-700 dark:text-amber-300">
+          <ul className="flex flex-wrap gap-2">
             {missing.map((code) => (
-              <li key={code} className="flex items-start gap-1.5">
-                <Circle aria-hidden="true" className="mt-1 size-2 shrink-0" />
-                {payerReasonLabel(code, tx, thirdParty ? form.payerType : null)}
+              <li key={code}>
+                <StatusChip tone="warning">
+                  <CircleAlert aria-hidden="true" />
+                  {payerReasonLabel(code, tx, thirdParty ? form.payerType : null)}
+                </StatusChip>
               </li>
             ))}
           </ul>
@@ -832,6 +919,14 @@ export function LeadPayerDeclarationSection({
           message.tone === "error"
             ? <Banner tone="error">{message.text}</Banner>
             : <p role="status" className="text-xs text-emerald-700">{message.text}</p>
+        ) : null}
+        {autosave.status === "error" ? (
+          <div className="space-y-2" data-testid="lead-payer-autosave-error">
+            <Banner tone="error">{errorText(autosave.error)}</Banner>
+            <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg text-xs" disabled={readOnly} onClick={() => autosaveRef.current?.retry()}>
+              {tx("Повторить сохранение", "Speichern erneut versuchen")}
+            </Button>
+          </div>
         ) : null}
       </Section>
     </div>
@@ -941,7 +1036,7 @@ export function LeadPayerSignatureFlow({
 
   return (
     <Section
-      className="rounded-xl border border-border/70 bg-card p-4"
+      className="rounded-xl border border-border/50 bg-card p-3.5"
       title={tx("Порядок подписания", "Reihenfolge der Unterschriften")}
       accessory={required && canGenerate && standaloneKept ? (
         <Button
@@ -1004,12 +1099,20 @@ export function LeadPayerSignatureFlow({
         </p>
       ) : null}
       {status && !status.agency_signed_order && status.agency_blocking.length > 0 ? (
-        <Banner tone="warning">
-          <span className="font-medium">{tx("GMED сможет подписать, когда:", "GMED kann unterschreiben, sobald:")}</span>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5">
-            {status.agency_blocking.map((code) => <li key={code}>{payerReasonLabel(code, tx)}</li>)}
-          </ul>
-        </Banner>
+        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2">
+          <CircleAlert aria-hidden="true" className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block font-semibold">{tx("GMED сможет подписать, когда:", "GMED kann unterschreiben, sobald:")}</span>
+            <span role="list" className="mt-1 block space-y-0.5">
+              {status.agency_blocking.map((code) => (
+                <span role="listitem" key={code} className="flex items-start gap-1.5">
+                  <span aria-hidden="true">·</span>
+                  <span>{payerReasonLabel(code, tx)}</span>
+                </span>
+              ))}
+            </span>
+          </span>
+        </StatusChip>
       ) : null}
       {error ? <Banner tone="error">{error}</Banner> : null}
     </Section>

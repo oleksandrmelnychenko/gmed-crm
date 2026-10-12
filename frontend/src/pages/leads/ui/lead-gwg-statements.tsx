@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
+import { CircleAlert, Download } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { StatusBadge } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
+import { StatusChip } from "@/components/ui/status-chip";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
@@ -14,6 +17,7 @@ import type {
   LeadGwgIdentification,
   LeadPortalEnhancedDetails,
   LeadPortalPayerLink,
+  PatientFieldMarker,
   LeadRepresentative,
 } from "../data/lead-portal-intake-api";
 import {
@@ -22,10 +26,12 @@ import {
   contactChannelsLabel,
   EMPTY_STATEMENT,
   gwgLegalAnswers,
+  hasBillingStatements,
   hasGwgStatements,
   idDocumentTypeLabel,
   idDocumentValidity,
   ownAccountStatement,
+  payerOrganisationStatements,
   paymentRouteByPayerLine,
   representationStatements,
   representationWarningText,
@@ -52,14 +58,14 @@ import { identityDocumentEnteredLine } from "../model/lead-identity-document-dat
 import { PatientFieldBadge } from "./lead-wizard-portal-intake";
 
 const WARNING_TEXT = "text-amber-700 dark:text-amber-300";
-const STATEMENT_COLUMNS = "grid-cols-2 sm:grid-cols-3";
+const STATEMENT_COLUMNS = "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
 
 /** One group of statements: a caption and its facts as a definition list. */
 function StatementGroup({ title, columns, children }: { title: string; columns: string; children: ReactNode }) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-2.5 border-t border-border/50 pt-3">
       <h4 className="text-xs font-semibold text-foreground">{title}</h4>
-      <dl className={cn("grid gap-x-6 gap-y-3", columns)}>{children}</dl>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", columns)}>{children}</dl>
     </div>
   );
 }
@@ -89,8 +95,8 @@ function Statement({
       {/* Long German labels ("Staatsangehörigkeit") wrap inside a narrow column. */}
       <dt
         className={cn(
-          "break-words text-[11px] font-medium text-muted-foreground",
-          sentence ? "leading-snug" : "uppercase tracking-[0.06em]",
+          "break-words text-[11.5px] font-medium leading-snug text-muted-foreground",
+          sentence && "max-w-prose",
         )}
       >
         {label}
@@ -108,12 +114,21 @@ function Statement({
 }
 
 /** The uploaded files of one kind, each with the day of the upload and "reviewed". */
-function UploadedFiles({ documents, tx }: { documents: readonly LeadIdentityDocument[]; tx: Tx }) {
+function UploadedFiles({ documents, tx, onDownload }: {
+  documents: readonly LeadIdentityDocument[];
+  tx: Tx;
+  onDownload?: (document: LeadIdentityDocument) => void;
+}) {
   return (
     <ul className="space-y-0.5">
       {documents.map((document) => (
         <li key={document.id}>
-          {document.file_name || EMPTY_STATEMENT}
+          {onDownload ? (
+            <button type="button" className="inline-flex items-center gap-1.5 text-left underline decoration-border underline-offset-4 hover:text-[var(--brand)]" onClick={() => onDownload(document)}>
+              <Download aria-hidden="true" className="size-3.5 shrink-0" />
+              {document.file_name || EMPTY_STATEMENT}
+            </button>
+          ) : document.file_name || EMPTY_STATEMENT}
           <span className="font-normal text-muted-foreground">
             {document.uploaded_at ? ` · ${formatAppDate(document.uploaded_at)}` : ""}
             {document.reviewed ? ` · ${tx("просмотрен", "geprüft")}` : ""}
@@ -158,7 +173,7 @@ function RepresentativeStatements({
           </span>
         ) : null}
       </div>
-      <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
         <Statement label={tx("Дата рождения", "Geburtsdatum")}>{formatAppDate(person.date_of_birth)}</Statement>
         <Statement label={tx("Место рождения", "Geburtsort")}>
           {joined(person.birth_place, country(person.birth_country))}
@@ -230,7 +245,7 @@ function RepresentationGroup({
 }) {
   const minor = statements.kind === "minor";
   return (
-    <div className="space-y-2" data-testid="lead-gwg-representation">
+    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-representation">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <h4 className="text-xs font-semibold text-foreground">
           {minor ? tx("Законные представители", "Gesetzliche Vertreter") : tx("Представительство", "Vertretung")}
@@ -241,7 +256,7 @@ function RepresentationGroup({
           </span>
         ) : null}
       </div>
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2">
+      <dl className="grid grid-cols-1 gap-x-5 gap-y-2.5 sm:grid-cols-2">
         {statements.kind === "minor" ? (
           <Statement label={tx("Кто представляет ребёнка", "Wer vertritt das Kind")} testId="lead-gwg-custody">
             {statements.custody}
@@ -315,6 +330,34 @@ function BillingStatementRow({ statement, className }: { statement: BillingState
   );
 }
 
+function PayerOrganisationGroup({
+  mask,
+  marker,
+  tx,
+}: {
+  mask: Parameters<typeof payerOrganisationStatements>[0];
+  marker: PatientFieldMarker | null;
+  tx: Tx;
+}) {
+  return (
+    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-payer-organisation">
+      <div className="flex flex-wrap items-center gap-2">
+        <h4 className="text-xs font-semibold text-foreground">
+          {tx("Плательщик — данные организации из кабинета", "Zahler – Organisationsangaben aus dem Portal")}
+        </h4>
+        {marker ? <PatientFieldBadge marker={marker} tx={tx} /> : null}
+      </div>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
+        {payerOrganisationStatements(mask, tx).map((row) => (
+          <Statement key={row.key} label={row.label} testId={`lead-gwg-payer-organisation-${row.key}`}>
+            {row.value}
+          </Statement>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
 /**
  * Invoice recipient and payment route (sections 7–8 of the form): where the
  * invoice goes as the lead chose it, the staff fields USt-IdNr. /
@@ -340,7 +383,7 @@ function BillingGroup({
   const payerAnswered = Boolean(payerLink?.submitted_at);
   const statements = billingStatements(billing, tx, lang, payerAnswered);
   return (
-    <div className="space-y-2" data-testid="lead-gwg-billing">
+    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-billing">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
           {tx("Счёт и оплата (разделы 7–8 анкеты)", "Rechnung und Zahlung (Abschnitte 7–8)")}
@@ -350,8 +393,14 @@ function BillingGroup({
             <PatientFieldBadge marker={{ at: updatedAt, access_kind: null }} tx={tx} />
           </span>
         ) : null}
+        {billing.recipient_updated_at ? (
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-muted-foreground" data-testid="lead-gwg-recipient-updated">
+            {tx("Получатель счёта:", "Rechnungsempfänger:")}
+            <PatientFieldBadge marker={{ at: billing.recipient_updated_at, access_kind: null }} tx={tx} />
+          </span>
+        ) : null}
       </div>
-      <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
         {statements.invoice.map((statement) => (
           <BillingStatementRow key={statement.key} statement={statement} />
         ))}
@@ -362,7 +411,7 @@ function BillingGroup({
         </p>
       ) : null}
       {statements.payment.length > 0 ? (
-        <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+        <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
           {statements.payment.map((statement) => (
             <BillingStatementRow
               key={statement.key}
@@ -373,9 +422,10 @@ function BillingGroup({
         </dl>
       ) : null}
       {statements.complianceLine ? (
-        <p data-testid="lead-gwg-billing-flag" className={cn("text-xs font-medium leading-5", WARNING_TEXT)}>
-          {statements.complianceLine}
-        </p>
+        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-gwg-billing-flag">
+          <CircleAlert aria-hidden="true" className="mt-0.5" />
+          <span>{statements.complianceLine}</span>
+        </StatusChip>
       ) : null}
     </div>
   );
@@ -512,7 +562,7 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
     details.asks.funds_proof ? tx("обязательно", "erforderlich") : tx("необязательно", "optional")
   }`;
   return (
-    <div className="space-y-2" data-testid="lead-gwg-enhanced-details">
+    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-enhanced-details">
       <div className="flex flex-wrap items-center gap-2">
         <h4 className="text-xs font-semibold text-foreground">
           {tx("Дополнительные сведения", "Zusätzliche Angaben")}
@@ -528,7 +578,7 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
           </span>
         ) : null}
       </div>
-      <dl className={cn("grid gap-x-6 gap-y-3", STATEMENT_COLUMNS)}>
+      <dl className={cn("grid gap-x-5 gap-y-2.5", STATEMENT_COLUMNS)}>
         {ownFunds ? (
           <>
             <Statement label={tx("Источник средств (пациент платит сам)", "Herkunft der Mittel (Selbstzahler)")} testId="lead-gwg-self-funds-sources">
@@ -576,13 +626,39 @@ function EnhancedDetailsGroup({ details, tx }: { details: LeadPortalEnhancedDeta
         </p>
       ) : null}
       {proofMissing ? (
-        <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-self-funds-proof-missing">
-          {tx(
+        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-self-funds-proof-missing">
+          <CircleAlert aria-hidden="true" className="mt-0.5" />
+          <span>{tx(
             "Требуется усиленная проверка: подтверждение источника средств пациента ещё не загружено",
             "Verstärkte Prüfung erforderlich: Der Nachweis der Herkunft der Mittel des Patienten fehlt noch",
-          )}
-        </p>
+          )}</span>
+        </StatusChip>
       ) : null}
+    </div>
+  );
+}
+
+/** The saved proof of the payer relationship, also before any other extra answer. */
+function RelationshipProofGroup({ details, tx, onDownload, fallbackRequested }: {
+  details: LeadPortalEnhancedDetails | null | undefined;
+  tx: Tx;
+  onDownload?: (document: LeadIdentityDocument) => void;
+  fallbackRequested: boolean;
+}) {
+  const documents = details?.relationship_proof_documents ?? [];
+  const requested = details?.relationship_proof_requested ?? fallbackRequested;
+  if (!requested && documents.length === 0) return null;
+  return (
+    <div className="space-y-2.5 border-t border-border/50 pt-3" data-testid="lead-gwg-relationship-proof">
+      <h4 className="text-xs font-semibold text-foreground">
+        {tx("Подтверждение связи с плательщиком", "Nachweis der Beziehung zum Zahler")}
+      </h4>
+      {documents.length > 0 ? <UploadedFiles documents={documents} tx={tx} onDownload={onDownload} /> : (
+        <StatusChip tone="warning" data-testid="lead-gwg-relationship-proof-missing">
+          <CircleAlert aria-hidden="true" />
+          <span>{tx("Подтверждение связи запрошено — документ ещё не загружен", "Beziehungsnachweis angefordert – noch kein Dokument hochgeladen")}</span>
+        </StatusChip>
+      )}
     </div>
   );
 }
@@ -687,12 +763,13 @@ function PayerAnswersGroup({
         </p>
       ) : null}
       {fundsProofMissing(questionnaire) ? (
-        <p className={cn("text-xs font-medium leading-5", WARNING_TEXT)} data-testid="lead-payer-funds-proof-missing">
-          {tx(
+        <StatusChip tone="warning" className="w-full items-start rounded-xl px-3 py-2" data-testid="lead-payer-funds-proof-missing">
+          <CircleAlert aria-hidden="true" className="mt-0.5" />
+          <span>{tx(
             "Уровень проверки 2: подтверждение источника средств ещё не загружено",
             "Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch",
-          )}
-        </p>
+          )}</span>
+        </StatusChip>
       ) : null}
       <p className="text-xs leading-5 text-muted-foreground" data-testid="lead-gwg-payer-privacy">
         {privacy ||
@@ -738,6 +815,7 @@ export function LeadGwgStatements({
   payer,
   payerLink,
   askedBlocks = [],
+  onDownloadDocument,
   tx,
   lang,
   today = appDateKey(),
@@ -753,6 +831,8 @@ export function LeadGwgStatements({
    * unanswered; otherwise only answers are shown.
    */
   askedBlocks?: readonly string[];
+  /** Optional read-only file action; the caller retains its document permissions and error handling. */
+  onDownloadDocument?: (document: LeadIdentityDocument) => void;
   tx: Tx;
   lang: string;
   /** The Berlin date ("YYYY-MM-DD") the identity document must still be valid on. */
@@ -774,11 +854,17 @@ export function LeadGwgStatements({
   const payerGroup = payerLink?.questionnaire ? (
     <PayerAnswersGroup state={payerLink} tx={tx} lang={lang} today={today} />
   ) : null;
+  const organisationGroup = intake.payer_organisation ? (
+    <PayerOrganisationGroup mask={intake.payer_organisation} marker={intake.patient_payer} tx={tx} />
+  ) : null;
+  const billingGroup = intake.billing ? (
+    <BillingGroup billing={intake.billing} updatedAt={intake.billing_updated_at} payerLink={intake.payer_link} tx={tx} lang={lang} />
+  ) : null;
 
   if (!identification || !hasGwgStatements(intake)) {
     return (
-      <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-gwg-statements">
-        <div className="text-xs font-semibold text-foreground">{title}</div>
+      <div className="space-y-2.5 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-gwg-statements">
+        <AdminSectionTitle>{title}</AdminSectionTitle>
         <ChangedSinceSubmitLine intake={intake} tx={tx} />
         <p className="text-xs text-muted-foreground" data-testid="lead-gwg-statements-empty">
           {tx(
@@ -789,6 +875,9 @@ export function LeadGwgStatements({
         {/* Who represents a minor is known from the request before anybody opens the cabinet. */}
         {representation?.kind === "minor" ? <div className="pt-1.5">{representationGroup}</div> : null}
         {payerGroup ? <div className="pt-1.5">{payerGroup}</div> : null}
+        {organisationGroup}
+        {hasBillingStatements(intake) ? billingGroup : null}
+        <RelationshipProofGroup details={intake.enhanced_details} tx={tx} onDownload={onDownloadDocument} fallbackRequested={askedBlocks.includes("B") && payer?.payer_kind === "third_party"} />
       </div>
     );
   }
@@ -817,9 +906,9 @@ export function LeadGwgStatements({
   const paymentBackgroundShown = asked("B") || Boolean(paymentBackground);
 
   return (
-    <div className="space-y-3 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-gwg-statements">
+    <div className="space-y-3 rounded-xl border border-border/50 bg-card p-3.5" data-testid="lead-gwg-statements">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-semibold text-foreground">{title}</span>
+        <AdminSectionTitle>{title}</AdminSectionTitle>
         <PatientFieldBadge marker={{ at: intake.identification_updated_at, access_kind: null }} tx={tx} />
       </div>
       <ChangedSinceSubmitLine intake={intake} tx={tx} />
@@ -908,21 +997,15 @@ export function LeadGwgStatements({
       ) : null}
 
       {enhancedDetailsShown(intake.enhanced_details) ? <EnhancedDetailsGroup details={intake.enhanced_details} tx={tx} /> : null}
+      <RelationshipProofGroup details={intake.enhanced_details} tx={tx} onDownload={onDownloadDocument} fallbackRequested={askedBlocks.includes("B") && payer?.payer_kind === "third_party"} />
 
       <LeadGwgFollowUpAnswers identification={identification} tx={tx} lang={lang} />
 
 
-      {intake.billing ? (
-        <BillingGroup
-          billing={intake.billing}
-          updatedAt={intake.billing_updated_at}
-          payerLink={intake.payer_link}
-          tx={tx}
-          lang={lang}
-        />
-      ) : null}
+      {billingGroup}
 
       {payerGroup}
+      {organisationGroup}
 
       {legalAnswers.length > 0 ? (
       <StatementGroup title={tx("Юридические вопросы", "Rechtliche Fragen")} columns="grid-cols-1 sm:grid-cols-2">
@@ -941,7 +1024,7 @@ export function LeadGwgStatements({
       </StatementGroup>
       ) : null}
 
-      <p className="text-xs text-muted-foreground" data-testid="lead-gwg-declared-correct">
+      <p className="border-t border-border/50 pt-3 text-xs text-muted-foreground" data-testid="lead-gwg-declared-correct">
         {identification.declared_correct_at
           ? `${tx("Подтвердил правильность:", "Richtigkeit bestätigt am")} ${formatAppDateTime(identification.declared_correct_at)}`
           : `${tx("Подтвердил правильность:", "Richtigkeit bestätigt:")} ${tx("ещё нет", "noch nicht")}`}

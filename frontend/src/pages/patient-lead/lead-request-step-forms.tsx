@@ -1,11 +1,12 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, ArrowRight, LoaderCircle, Upload } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CitizenshipMultiSelect } from "@/components/ui/citizenship-multi-select";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
+import { StatusChip } from "@/components/ui/status-chip";
 import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
 import { inputClass, selectClass } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
@@ -19,6 +20,7 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import { BillingSections } from "./lead-request-billing";
+import { nameNeedsLatinSpelling, suggestPassportSpelling } from "./name-transliteration";
 import { ConsentFormChoicesSection } from "./lead-request-consent-form";
 import {
   ContactChannelsField,
@@ -279,6 +281,48 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
   const { draft, set, errorFor, fieldProps } = personal;
   const consentMissing = consentGiven(request, INQUIRY_CONSENT) ? [] : [text.sectionConsent];
 
+  const showLatinNameHint = /\p{Script=Cyrillic}/u.test([draft.first_name, draft.last_name, draft.middle_name].join(" "));
+  const cabinetLang = asLeadCabinetLang(lang);
+  const showNamePassportHint = showLatinNameHint || cabinetLang === "ru" || cabinetLang === "uk";
+  // A passport name has Latin letters only (accents such as ü or é are fine),
+  // spaces, hyphens, apostrophes and dots; a Cyrillic name gets the passport
+  // spelling as a suggestion the lead confirms with one click.
+  const nameNeedsLatin = (field: "first_name" | "last_name" | "middle_name") =>
+    Boolean(draft[field].trim()) && nameNeedsLatinSpelling(draft[field]);
+  const nameCorrection = (field: "first_name" | "last_name" | "middle_name") => {
+    if (!nameNeedsLatin(field)) return null;
+    const suggestion = suggestPassportSpelling(draft[field], cabinetLang);
+    return (
+      <span
+        id={`lead-request-${field}-latin-hint`}
+        role="status"
+        className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs leading-5 text-amber-800 dark:text-amber-300"
+      >
+        <span>{text.namePassportCorrection}</span>
+        {suggestion ? (
+          <>
+            <span>{text.namePassportSuggestion.replace("{name}", suggestion)}</span>
+            <Button
+              type="button"
+              size="xs"
+              variant="outline"
+              data-testid={`lead-request-${field}-latin-apply`}
+              onClick={() => set(field, suggestion)}
+            >
+              {text.namePassportApply}
+            </Button>
+          </>
+        ) : null}
+      </span>
+    );
+  };
+  const nameFieldProps = (field: "first_name" | "last_name" | "middle_name") => {
+    const props = fieldProps(field);
+    return {
+      ...props,
+      "aria-describedby": [props["aria-describedby"], showNamePassportHint ? "lead-request-name-passport-hint" : null, nameNeedsLatin(field) ? `lead-request-${field}-latin-hint` : null].filter(Boolean).join(" "),
+    };
+  };
   return (
     <StepFrame
       testId="lead-request-step-person"
@@ -305,6 +349,12 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
       </Section>
 
       <Section title={text.sectionPerson}>
+        {showNamePassportHint ? (
+          <StatusChip id="lead-request-name-passport-hint" tone="warning" className="items-start rounded-lg px-2.5 py-1.5">
+            <CircleAlert aria-hidden="true" className="mt-[3px]" />
+            <span>{text.namePassportHint}</span>
+          </StatusChip>
+        ) : null}
         <div className={GRID}>
           {withIdentification ? (
             <IdentificationFormField form={identification} field="salutation" text={text}>
@@ -332,30 +382,33 @@ export function PersonStep({ request, text, lang, enqueue, onChange, missing, na
             className={withIdentification ? "sm:col-start-1 lg:col-start-auto" : undefined}
           >
             <Input
-              {...fieldProps("first_name")}
+              {...nameFieldProps("first_name")}
               className={inputClass}
               autoComplete="given-name"
               value={draft.first_name}
               onChange={(event) => set("first_name", event.target.value)}
             />
+            {nameCorrection("first_name")}
           </FormField>
           <FormField field="last_name" text={text} error={errorFor("last_name")} required>
             <Input
-              {...fieldProps("last_name")}
+              {...nameFieldProps("last_name")}
               className={inputClass}
               autoComplete="family-name"
               value={draft.last_name}
               onChange={(event) => set("last_name", event.target.value)}
             />
+            {nameCorrection("last_name")}
           </FormField>
           <FormField field="middle_name" text={text} error={errorFor("middle_name")}>
             <Input
-              {...fieldProps("middle_name")}
+              {...nameFieldProps("middle_name")}
               className={inputClass}
               autoComplete="additional-name"
               value={draft.middle_name}
               onChange={(event) => set("middle_name", event.target.value)}
             />
+            {nameCorrection("middle_name")}
           </FormField>
           <FormField field="date_of_birth" text={text} error={errorFor("date_of_birth")} required>
             <Input

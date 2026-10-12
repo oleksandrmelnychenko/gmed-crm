@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { BadgeCheck, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { StatusChip } from "@/components/ui/status-chip";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { subscriptionKindLabel } from "@/pages/patients/model/list-model";
 
@@ -74,17 +76,14 @@ export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang
 
   return (
     <section
-      className="min-w-0 rounded-xl border border-border/70 bg-card"
+      className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5"
       data-testid="order-subscription"
       aria-label={de ? "Tarif" : "Тариф"}
     >
-      <div className="flex flex-wrap items-center gap-2 border-b border-border/60 bg-muted/20 px-4 py-3">
-        <BadgeCheck className="size-4 text-muted-foreground" aria-hidden="true" />
-        <p className="text-xs font-semibold uppercase tracking-[0.1em] text-foreground">
-          {de ? "Tarif · Kontotyp des Patienten" : "Тариф · тип аккаунта пациента"}
-        </p>
-      </div>
-      <div className="space-y-3 px-4 py-3 text-sm">
+      <AdminSectionTitle>
+        {de ? "Tarif · Kontotyp des Patienten" : "Тариф · тип аккаунта пациента"}
+      </AdminSectionTitle>
+      <div className="space-y-3 text-[13px] leading-5">
         <p data-testid="order-subscription-current">
           {current ? (
             <>
@@ -110,7 +109,7 @@ export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang
         {data.can_edit ? (
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <NativeComboboxSelect
-              className="h-9 min-w-0 flex-1 bg-field text-sm"
+              className="h-9 min-w-0 flex-1 bg-field text-[13px]"
               value={choice}
               aria-label={de ? "Tarif wählen" : "Выбрать тариф"}
               onChange={(event) => setChoice(event.target.value)}
@@ -126,21 +125,21 @@ export function OrderSubscriptionCard({ orderId, lang }: { orderId: string; lang
             <Button
               type="button"
               size="sm"
-              className="h-9 shrink-0 rounded-md"
+              className="h-9 shrink-0 rounded-lg text-xs"
               disabled={busy || !dirty}
               onClick={() => void save()}
               data-testid="order-subscription-save"
             >
-              {busy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}
+              {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
               {de ? "Tarif speichern" : "Сохранить тариф"}
             </Button>
           </div>
         ) : null}
         {notice ? (
-          <p role="status" className="text-xs text-emerald-700">{notice}</p>
+          <StatusChip tone="success" role="status">{notice}</StatusChip>
         ) : null}
         {error ? (
-          <p role="alert" className="text-xs text-rose-700">{error}</p>
+          <StatusChip tone="error" role="alert">{error}</StatusChip>
         ) : null}
       </div>
     </section>

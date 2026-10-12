@@ -112,6 +112,7 @@ export function LeadMedicalIntakeForm({
         }}
       />
       <DiagnosisTreeSection
+        className="min-w-0 bg-card"
         items={diagnoses}
         providers={providers}
         allDoctors={allDoctors}
@@ -124,6 +125,7 @@ export function LeadMedicalIntakeForm({
       />
       <div id={anamneseId} tabIndex={-1} className="rounded-xl outline-none">
         <AnamneseSection
+          className="min-w-0 bg-card"
           active={narrative}
           specializations={specializations}
           canManage

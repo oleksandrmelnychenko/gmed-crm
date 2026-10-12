@@ -1290,7 +1290,7 @@ test.describe("payer link", () => {
         ],
         funds_description: `${long}-Rücklagen`,
       },
-      route: { ...completeRoute(), payment_method: "crypto", account_country: null, account_holder: null, bank_name: null, via_third_party: true, via_third_party_details: long },
+      route: { ...completeRoute(), payment_method: "cash", account_country: null, account_holder: null, bank_name: null, via_third_party: true, via_third_party_details: long },
       identityDocuments: [document("doc-id", `${long}-Ausweis-des-Geschaeftsfuehrers.pdf`)],
     });
 
@@ -1352,7 +1352,7 @@ test.describe("payer link", () => {
       await expect(page.getByTestId("payer-link-payment-method-note")).toBeVisible();
       // A company is asked how the payment is made.
       await page.getByRole("combobox", { name: "Welche Zahlungsart für Rechnungen bevorzugt die Organisation?" }).click();
-      const edge = await page.getByRole("option", { name: "Kryptowährung" }).evaluate((node) => node.getBoundingClientRect().right);
+      const edge = await page.getByRole("option", { name: "Sonstiges" }).evaluate((node) => node.getBoundingClientRect().right);
       expect(edge, `${width}px`).toBeLessThanOrEqual(width);
       await page.keyboard.press("Escape");
       await expect(page.getByRole("option")).toHaveCount(0);

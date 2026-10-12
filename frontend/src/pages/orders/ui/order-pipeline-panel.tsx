@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Banner, StatusBadge } from "@/components/ui-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
@@ -42,7 +43,7 @@ type OrderPipelinePanelProps = {
   onOpenSection: (section: OrderSectionKey) => void;
 };
 
-const linkButtonClass = buttonVariants({ variant: "outline", size: "sm" });
+const linkButtonClass = cn(buttonVariants({ variant: "outline", size: "sm" }), "h-8 rounded-lg bg-field text-xs");
 
 const STAGE_ICONS: Record<OrderPipelineStageKey, LucideIcon> = {
   medical: Stethoscope,
@@ -77,14 +78,13 @@ function StageBlock({
   return (
     <section
       className={cn(
-        "rounded-lg border bg-card",
-        current ? "border-orange-300 ring-1 ring-orange-200" : "border-border/70",
+        "rounded-xl border bg-card p-3.5",
+        current ? "border-primary/40 ring-1 ring-primary/10" : "border-border/50",
       )}
     >
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 bg-muted/20 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon className="size-4 shrink-0 text-muted-foreground" />
-          <h3 className="text-sm font-semibold text-foreground">{pipelineStageLabel(stage.key, lang)}</h3>
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <AdminSectionTitle><Icon className="mr-1.5 inline size-3.5 text-muted-foreground" aria-hidden />{pipelineStageLabel(stage.key, lang)}</AdminSectionTitle>
           <StatusBadge
             tone={
               stage.state === "done"
@@ -99,9 +99,9 @@ function StageBlock({
         </div>
         {action}
       </header>
-      <div className="space-y-3 p-4">
+      <div className="space-y-2.5 pt-3 text-[13px] leading-5">
         {stage.missing.length > 0 ? (
-          <ul className="space-y-1 text-sm text-amber-900">
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-amber-700 dark:text-amber-300">
             {stage.missing.map((reason) => (
               <li key={reason} className="flex items-start gap-2">
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-amber-500" />
@@ -118,9 +118,9 @@ function StageBlock({
 
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-md border border-border/60 bg-background/70 px-3 py-2">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="mt-0.5 truncate text-sm font-semibold text-foreground">{value}</div>
+    <div className="min-w-0 px-3 py-1.5 sm:border-l sm:border-border/60 first:sm:border-l-0">
+      <div className="text-[11.5px] leading-4 text-muted-foreground">{label}</div>
+      <div className="mt-1 truncate font-mono text-base font-semibold leading-tight tabular-nums text-foreground">{value}</div>
     </div>
   );
 }
@@ -168,7 +168,7 @@ export function OrderPipelinePanel({
   const stageOf = (key: OrderPipelineStageKey) =>
     pipeline.stages.find((stage) => stage.key === key) ?? { key, state: "pending" as const, missing: [] };
   const openSection = (key: OrderPipelineStageKey, label: string) => (
-    <Button type="button" variant="outline" size="sm" onClick={() => onOpenSection(pipelineStageSection(key))}>
+    <Button type="button" variant="outline" size="sm" className="h-8 rounded-lg bg-field text-xs" onClick={() => onOpenSection(pipelineStageSection(key))}>
       {label}
       <ChevronRight className="ml-1 size-3.5" />
     </Button>
@@ -178,7 +178,7 @@ export function OrderPipelinePanel({
   const medical = pipeline.medical;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <ol className="grid gap-2 sm:grid-cols-5">
         {pipeline.stages.map((stage, index) => (
           <li

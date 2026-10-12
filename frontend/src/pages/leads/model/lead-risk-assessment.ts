@@ -1,7 +1,7 @@
 /**
  * The points-based risk assessment of a lead (trigger flow, owner spec
  * "Trigger-Ablauf im Detail" of 2026-10-07): the server scores triggers T1–T16
- * into points and a level, names the follow-up blocks A–J and keeps the
+ * into points and a level, names the follow-up blocks A–L and keeps the
  * history; staff decide (release / request more / reject, a reason each, two
  * different reviewers at level 3). The engine never decides by itself.
  * Server: `crates/server/src/routes/lead_risk.rs`, `crates/server/src/risk/*`.
@@ -39,7 +39,7 @@ export const RISK_KNOCKOUT_TRIGGERS: readonly string[] = ["T14", "T15", "T16"];
 /** Triggers whose points depend on the country list (list 1 / list 2). */
 export const RISK_LIST_TRIGGERS: readonly string[] = ["T1", "T2", "T6"];
 
-/** The follow-up blocks staff may request (A–J). */
+/** The follow-up blocks staff may request (A–L). */
 export const RISK_BLOCK_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"] as const;
 
 export type RiskBlockKey = (typeof RISK_BLOCK_KEYS)[number];

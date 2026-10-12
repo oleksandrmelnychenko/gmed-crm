@@ -25,11 +25,13 @@ export function SpecializationChecklistForm({
   tx,
   disabled = false,
   onChange,
+  compact = false,
 }: {
   checklist: SpecializationChecklist;
   tx: Bilingual;
   disabled?: boolean;
   onChange: (next: SpecializationChecklist) => void;
+  compact?: boolean;
 }) {
   const items = parseChecklistTemplate(checklist.template);
 
@@ -39,7 +41,7 @@ export function SpecializationChecklistForm({
   }
 
   return (
-    <div data-specialization-checklist className="space-y-1.5">
+    <div data-specialization-checklist className={cn("space-y-1.5", compact && "divide-y divide-border/50")}>
       {items.map((item) => {
         if (checklistGroupFolded(items, item, checklist.answers)) return null;
         const answer = checklist.answers[String(item.index)] ?? {};
@@ -56,12 +58,12 @@ export function SpecializationChecklistForm({
           <div
             key={item.index}
             data-specialization-checklist-item={item.label}
-            className={cn("rounded-md border border-border/60 bg-white px-2.5 py-1.5", item.child && "ml-4")}
+            className={cn("rounded-md border border-border/60 bg-white px-2.5 py-1.5", item.child && "ml-4", compact && "rounded-none border-0 bg-transparent px-0 py-2.5")}
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className={cn("text-sm text-foreground", !item.child && "font-semibold")}>{item.label}</span>
+              <span className={cn("text-sm text-foreground", !item.child && "font-semibold", compact && "min-w-0 flex-1 text-[13px] font-medium leading-5")}>{item.label}</span>
               {item.yesNo ? (
-                <span role="group" aria-label={item.label} className="inline-flex rounded-md border border-border bg-white p-0.5">
+                <span role="group" aria-label={item.label} className={cn("inline-flex rounded-md border border-border bg-white p-0.5", compact && "shrink-0 gap-0.5 border-0 bg-muted/40 p-1")}>
                   {(["ja", "nein"] as const).map((value) => (
                     <button
                       key={value}
@@ -73,6 +75,8 @@ export function SpecializationChecklistForm({
                         answer.value === value
                           ? value === "ja" ? "bg-orange-500 text-white" : "bg-slate-600 text-white"
                           : "text-muted-foreground hover:text-foreground",
+                        compact && "h-7 rounded text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30",
+                        compact && answer.value === value && "bg-card text-foreground shadow-sm",
                       )}
                       // A second click withdraws the answer.
                       onClick={() => patch(item, (current) => ({ ...current, value: current.value === value ? null : value }))}
@@ -93,7 +97,7 @@ export function SpecializationChecklistForm({
                         type="checkbox"
                         disabled={disabled}
                         checked={checked}
-                        className="size-3.5 rounded border-border accent-orange-500"
+                        className={cn("size-3.5 rounded border-border accent-orange-500", compact && "accent-[var(--brand)]")}
                         onChange={() =>
                           patch(item, (current) => ({
                             ...current,
@@ -120,7 +124,7 @@ export function SpecializationChecklistForm({
                   return (
                     <label
                       key={field.key}
-                      className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground", field.kind === "text" && "min-w-48 flex-1")}
+                      className={cn("inline-flex items-center gap-1.5 text-xs text-muted-foreground", field.kind === "text" && "min-w-48 flex-1", compact && "min-w-0 max-w-full flex-wrap")}
                     >
                       <span className="shrink-0">{field.unit ? `${label}, ${field.unit}` : label}</span>
                       <input
@@ -128,7 +132,7 @@ export function SpecializationChecklistForm({
                         inputMode={field.kind === "number" ? "decimal" : undefined}
                         disabled={disabled}
                         value={answer.fields?.[field.key] ?? ""}
-                        className={cn(inputClass, field.kind === "number" ? "w-20" : "min-w-0 flex-1")}
+                        className={cn(inputClass, field.kind === "number" ? "w-20" : "min-w-0 flex-1", compact && "text-[13px]")}
                         onChange={(event) =>
                           patch(item, (current) => ({
                             ...current,

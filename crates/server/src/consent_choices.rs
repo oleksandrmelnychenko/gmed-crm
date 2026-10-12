@@ -112,11 +112,115 @@ impl ConsentChoices {
     }
 }
 
+/// Who a named recipient is to the person, in the order the cabinet offers it.
+pub const RECIPIENT_RELATIONS: [&str; 6] = [
+    "spouse",
+    "child",
+    "relative",
+    "family_doctor",
+    "clinic",
+    "other",
+];
+/// At most this many recipients per choice.
+pub const MAX_RECIPIENTS: usize = 5;
+const RECIPIENT_TEXT_MAX: usize = 120;
+/// Refusal of a save in the cabinet: "named recipients" is ticked, but nobody
+/// is named.
+pub const RECIPIENTS_REQUIRED: &str = "consent_recipients_required";
+/// Refusal of a save in the cabinet: a recipient is incomplete, too long, of
+/// an unknown kind, or there are more than [`MAX_RECIPIENTS`].
+pub const RECIPIENTS_INVALID: &str = "consent_recipients_invalid";
+
+/// A person or institution the person names for the option
+/// [`ConsentChoices::named_recipients`] (owner decision 2026-10-12): who they
+/// are and how to reach them, nothing more. Part of the choice, so the form
+/// prints exactly the list the person chose; not sanctions-screened (owner
+/// decision 2026-10-12).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConsentRecipient {
+    /// The person's name or the institution's name.
+    pub name: String,
+    /// One of [`RECIPIENT_RELATIONS`].
+    pub relation: String,
+    /// A phone number or an e-mail address; optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contact: Option<String>,
+}
+
+impl ConsentRecipient {
+    /// The relation as the German form names it.
+    fn relation_label(&self) -> &'static str {
+        match self.relation.as_str() {
+            "spouse" => "Ehe-/Lebenspartner/in",
+            "child" => "Kind",
+            "relative" => "Angehörige/r",
+            "family_doctor" => "Hausarzt/Hausärztin",
+            "clinic" => "Klinik/Einrichtung",
+            _ => "Sonstige",
+        }
+    }
+
+    /// The line the form prints: "Name (Beziehung), Kontakt".
+    pub fn printed_line(&self) -> String {
+        let mut line = format!("{} ({})", self.name.trim(), self.relation_label());
+        if let Some(contact) = self.contact.as_deref().map(str::trim).filter(|contact| !contact.is_empty()) {
+            line.push_str(", ");
+            line.push_str(contact);
+        }
+        line
+    }
+}
+
+/// The recipients as they are stored: trimmed, blank contacts dropped. `Err`
+/// with [`RECIPIENTS_INVALID`] for an empty name, an unknown relation, a text
+/// over 120 characters or more than [`MAX_RECIPIENTS`]; with
+/// [`RECIPIENTS_REQUIRED`] when "named recipients" is ticked and nobody is
+/// named.
+pub fn clean_recipients(
+    choices: &ConsentChoices,
+    recipients: Vec<ConsentRecipient>,
+) -> Result<Vec<ConsentRecipient>, &'static str> {
+    // Without the consent to pass data on, no third party's data is kept.
+    if !choices.named_recipients {
+        return Ok(Vec::new());
+    }
+    if recipients.len() > MAX_RECIPIENTS {
+        return Err(RECIPIENTS_INVALID);
+    }
+    let mut cleaned = Vec::with_capacity(recipients.len());
+    for recipient in recipients {
+        let name = recipient.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        let relation = recipient.relation.trim().to_string();
+        let contact = recipient
+            .contact
+            .map(|contact| contact.trim().to_string())
+            .filter(|contact| !contact.is_empty());
+        if name.is_empty()
+            || name.chars().count() > RECIPIENT_TEXT_MAX
+            || !RECIPIENT_RELATIONS.contains(&relation.as_str())
+            || contact.as_ref().is_some_and(|contact| contact.chars().count() > RECIPIENT_TEXT_MAX)
+        {
+            return Err(RECIPIENTS_INVALID);
+        }
+        cleaned.push(ConsentRecipient { name, relation, contact });
+    }
+    if choices.named_recipients && cleaned.is_empty() {
+        return Err(RECIPIENTS_REQUIRED);
+    }
+    Ok(cleaned)
+}
+
 /// A saved choice as a generated form records it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OwnConsentChoice {
     pub id: Uuid,
     pub choices: ConsentChoices,
+    /// The persons or institutions named for "named recipients"; printed only
+    /// while that option is chosen. Empty in documents generated before
+    /// 2026-10-12's recipients.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recipients: Vec<ConsentRecipient>,
     pub chosen_at: DateTime<Utc>,
     /// Where the person chose: `lead_portal`.
     pub source: String,
@@ -147,6 +251,15 @@ impl OwnConsentChoice {
     /// The value kept under [`BINDING_KEY`].
     pub fn binding(&self) -> Value {
         json!(self)
+    }
+
+    /// The lines the form prints under "an folgende Personen oder
+    /// Institutionen": the named recipients while that option is chosen.
+    pub fn recipient_lines(&self) -> Vec<String> {
+        if !self.choices.named_recipients {
+            return Vec::new();
+        }
+        self.recipients.iter().map(ConsentRecipient::printed_line).collect()
     }
 
     /// The choice a generated document recorded, if any.
@@ -245,7 +358,8 @@ pub fn electronic_signing_refusal(
 /// choice never comes back as the parent's. A corrected date of birth
 /// re-judges it.
 const CURRENT_SQL: &str = r#"
-    SELECT c.id, c.choices, c.chosen_at, c.source, c.access_kind, c.chosen_by, c.lead_id
+    SELECT c.id, c.choices, c.chosen_at, c.source, c.access_kind, c.chosen_by, c.lead_id,
+           c.recipients
     FROM consent_form_choices c
     LEFT JOIN leads subject ON subject.id = c.lead_id
     WHERE c.template_id = 'privacy_consents'
@@ -285,6 +399,7 @@ where
         String,
         Option<Uuid>,
         Option<Uuid>,
+        Value,
     );
     let row: Option<Row> = sqlx::query_as(CURRENT_SQL)
         .bind(lead_id)
@@ -292,10 +407,11 @@ where
         .fetch_optional(executor)
         .await?;
     Ok(row.and_then(
-        |(id, choices, chosen_at, source, access_kind, chosen_by, choice_lead_id)| {
+        |(id, choices, chosen_at, source, access_kind, chosen_by, choice_lead_id, recipients)| {
             Some(OwnConsentChoice {
                 id,
                 choices: serde_json::from_value(choices).ok()?,
+                recipients: serde_json::from_value(recipients).unwrap_or_default(),
                 chosen_at,
                 source,
                 access_kind: Some(access_kind),
@@ -467,6 +583,7 @@ mod tests {
                 channel_whatsapp: true,
                 ..core()
             },
+            recipients: Vec::new(),
             chosen_at: Utc.with_ymd_and_hms(2026, 10, 12, 8, 5, 0).unwrap(),
             source: "lead_portal".into(),
             access_kind: None,
@@ -540,6 +657,60 @@ mod tests {
             }
             .has_core()
         );
+    }
+
+    #[test]
+    fn named_recipients_are_checked_and_printed_only_while_chosen() {
+        let named = ConsentChoices {
+            named_recipients: true,
+            ..core()
+        };
+        let person = |name: &str, relation: &str, contact: Option<&str>| ConsentRecipient {
+            name: name.into(),
+            relation: relation.into(),
+            contact: contact.map(Into::into),
+        };
+        assert_eq!(clean_recipients(&named, Vec::new()), Err(RECIPIENTS_REQUIRED));
+        assert_eq!(
+            clean_recipients(&core(), vec![person("Olga", "spouse", None)]),
+            Ok(Vec::new()),
+            "not chosen: nobody is kept"
+        );
+        assert_eq!(
+            clean_recipients(&named, vec![person("  Olga   Muster ", "spouse", Some("  "))]),
+            Ok(vec![person("Olga Muster", "spouse", None)])
+        );
+        for invalid in [
+            person(" ", "spouse", None),
+            person("Olga", "neighbour", None),
+            person(&"x".repeat(121), "other", None),
+            person("Olga", "other", Some(&"1".repeat(121))),
+        ] {
+            assert_eq!(clean_recipients(&named, vec![invalid]), Err(RECIPIENTS_INVALID));
+        }
+        assert_eq!(
+            clean_recipients(&named, vec![person("Olga", "spouse", None); MAX_RECIPIENTS + 1]),
+            Err(RECIPIENTS_INVALID)
+        );
+
+        let mut recorded = choice();
+        recorded.recipients = vec![
+            person("Olga Muster", "spouse", Some("+49 151 000000")),
+            person("Praxis Dr. Beispiel", "family_doctor", None),
+        ];
+        assert!(recorded.recipient_lines().is_empty(), "not chosen: nothing printed");
+        recorded.choices.named_recipients = true;
+        assert_eq!(
+            recorded.recipient_lines(),
+            [
+                "Olga Muster (Ehe-/Lebenspartner/in), +49 151 000000",
+                "Praxis Dr. Beispiel (Hausarzt/Hausärztin)",
+            ]
+        );
+        let restored =
+            OwnConsentChoice::from_bindings(Some(&json!({ BINDING_KEY: recorded.binding() })))
+                .unwrap();
+        assert_eq!(restored, recorded);
     }
 
     #[test]

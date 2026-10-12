@@ -1,9 +1,13 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 
+import { buttonVariants } from "@/components/ui/button";
 import { buildApiUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { isLeadPortalUser } from "@/lib/staff-route-access";
+import { FormPrivacyNotice } from "./form-privacy-notice";
 
 type LegalNotice = Partial<Record<
   | "agency_name"
@@ -21,7 +25,12 @@ type LegalNotice = Partial<Record<
   string
 >>;
 
-const cardClass = "space-y-3 rounded-xl border border-border bg-card px-4 py-4 shadow-sm sm:px-5";
+const cardClass = "space-y-4 rounded-xl border border-border/50 bg-card p-4 sm:p-5";
+const headingClass = "flex items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground";
+
+function SectionMarker() {
+  return <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />;
+}
 
 /**
  * Impressum and Datenschutzerklärung, reachable without signing in (Art. 13
@@ -30,13 +39,14 @@ const cardClass = "space-y-3 rounded-xl border border-border bg-card px-4 py-4 s
  * same page inside the portal (see `LegalNoticeRoute`).
  */
 export function LegalNoticePage() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const { user } = useAuth();
   const { hash } = useLocation();
   const l = (key: string) => t.uiText[key] ?? key;
   const [notice, setNotice] = useState<LegalNotice | null>(null);
   const [failed, setFailed] = useState(false);
   const inPortal = user?.role === "patient" && !user.password_change_required;
+  const formNotice = !inPortal || isLeadPortalUser(user);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,13 +73,14 @@ export function LegalNoticePage() {
   const name = notice?.agency_name || "GMED";
   const privacyEmail = notice?.agency_privacy_email || notice?.agency_email || "";
   const paragraphs = (key: string) => l(key).split("\n\n");
+  const title = lang === "de" ? "Impressum & Datenschutz" : "Impressum и защита данных";
 
   const content = (
     <>
       <section className={cardClass} data-testid="legal-imprint">
-        <h1 className="text-lg font-semibold leading-tight">{l("legal_imprint_title")}</h1>
+        <h2 className={headingClass}><SectionMarker />{l("legal_imprint_title")}</h2>
         {failed ? <p className="text-red-700">{l("legal_load_error")}</p> : null}
-        <address className="not-italic leading-6">
+        <address className="break-words not-italic leading-6">
           <strong>{name}</strong>
           {notice?.agency_care_of ? <><br />{notice.agency_care_of}</> : null}
           {notice?.agency_address ? <><br />{notice.agency_address}</> : null}
@@ -81,7 +92,8 @@ export function LegalNoticePage() {
       </section>
 
       <section id="privacy" className={`${cardClass} scroll-mt-4 leading-relaxed`} data-testid="legal-privacy">
-        <h2 className="text-lg font-semibold leading-tight">{l("legal_privacy_title")}</h2>
+        <h2 className={headingClass}><SectionMarker />{l("legal_privacy_title")}</h2>
+        {formNotice ? <FormPrivacyNotice lang={lang} agency={notice} /> : <>
         <p>
           <strong>{l("legal_privacy_controller")}:</strong> {name}
           {notice?.agency_address ? `, ${notice.agency_address}` : ""}
@@ -98,6 +110,7 @@ export function LegalNoticePage() {
           {l("legal_objection_notice")}
         </p>
         <p>{l("legal_complaint_body")}</p>
+        </>}
       </section>
     </>
   );
@@ -105,16 +118,23 @@ export function LegalNoticePage() {
   // Inside the portal the shell already provides <main> and the way back.
   if (inPortal) {
     return (
-      <div className="mx-auto w-full max-w-2xl space-y-5 pb-16 text-sm text-foreground" data-testid="legal-notice">
+      <div className="mx-auto w-full max-w-3xl space-y-4 pb-16 text-[13px] text-foreground" data-testid="legal-notice">
+        <h1 className="text-lg font-semibold tracking-tight">{title}</h1>
         {content}
       </div>
     );
   }
   return (
-    <main className="mx-auto max-w-3xl space-y-5 px-4 py-8 text-sm text-foreground" data-testid="legal-notice">
-      <a href="/login" className="text-xs text-muted-foreground underline">
-        {l("legal_back")}
-      </a>
+    <main className="mx-auto w-full max-w-4xl space-y-4 px-4 py-6 text-[13px] text-foreground sm:px-6" data-testid="legal-notice">
+      <header className="space-y-5 pb-1">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <img src="/gmed-logo.png" alt="GMED" className="h-8 w-auto object-contain" />
+          <a href="/login" className={`${buttonVariants({ variant: "outline", size: "sm" })} h-8 rounded-lg bg-field text-xs`}>
+            <ArrowLeft aria-hidden="true" className="size-3.5" />{l("legal_back")}
+          </a>
+        </div>
+        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+      </header>
       {content}
     </main>
   );

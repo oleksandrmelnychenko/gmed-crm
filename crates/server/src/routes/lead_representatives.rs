@@ -1553,9 +1553,10 @@ async fn finish_cabinet_write(
         store_lead(&mut *tx, lead_id, Some(contacts), &json!({})).await?;
     }
     let state = load(&mut *tx, lead_id).await?.unwrap_or_default();
+    let now = intake::portal_update_time(&mut *tx).await?;
     let marker = json!({
         REPRESENTATION_MARKER: {
-            "at": Utc::now(),
+            "at": now,
             "by": actor,
             "kind": kind.as_str(),
             "hash": intake::value_marker(

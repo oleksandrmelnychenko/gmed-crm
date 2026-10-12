@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { StatusChip } from "@/components/ui/status-chip";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { CountrySelect, countryLabel } from "@/components/ui/country-select";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { LoaderCircle, Pencil, Plus, Trash2, X } from "lucide-react";
 import type {
   AllDoctorOption,
   ClinicalDiagnosis,
@@ -16,7 +19,6 @@ import type {
 import { specializationLabelForItem } from "@/pages/providers/model/specialization-labels";
 import type { ProviderSummary, SpecializationItem } from "@/pages/providers/model/types";
 
-import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { ClinicalRecordSource } from "./clinical-record-source";
 import { doctorsForProviderBranch } from "./provider-doctor-selection";
 
@@ -25,7 +27,7 @@ type Bilingual = (ru: string, de: string) => string;
 type DiagnosisKind = "main" | "secondary" | "prozedur";
 
 const inputClass =
-  "h-9 w-full rounded-lg border border-border bg-transparent px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
+  "h-9 w-full rounded-lg border border-border bg-field px-3 text-[13px] text-foreground focus:outline-none focus:ring-2 focus:ring-ring/40";
 const rootAddActionClass =
   "border border-orange-500 bg-orange-500 text-white shadow-sm hover:border-orange-600 hover:bg-orange-600 hover:text-white";
 const childAddActionClass =
@@ -286,7 +288,7 @@ function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
+      <span className="mb-1.5 block text-[11.5px] font-medium leading-snug text-muted-foreground">
         {label}
         {required ? <span aria-hidden="true" className="ml-0.5 text-destructive">*</span> : null}
       </span>
@@ -427,7 +429,7 @@ function DiagnosisSpecializationsField({
 
   return (
     <Field label={tx("Специализации", "Spezialisierungen")}>
-      <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+      <div className="space-y-2">
         <NativeComboboxSelect
           value=""
           aria-label={tx("Добавить специализацию", "Spezialisierung hinzufügen")}
@@ -708,30 +710,32 @@ function DiagnosisForm({
   return (
     <div className="space-y-3">
       {parentLabel ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        <StatusChip tone="warning" className="w-full rounded-xl px-3 py-2">
           {tx("Запись будет вложена под", "Eintrag wird untergeordnet zu")}:{" "}
           <span className="font-medium">{parentLabel}</span>
-        </div>
+        </StatusChip>
       ) : null}
 
+      <section className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+        <AdminSectionTitle>{tx("Общие сведения", "Allgemeine Angaben")}</AdminSectionTitle>
       {isDiagnosis ? (
-        <div className="space-y-2 rounded-lg border border-border/50 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="space-y-2.5">
+          <span className="block text-[11.5px] font-medium leading-tight text-muted-foreground">
             {tx("Тип диагноза", "Diagnosetyp")}
-          </p>
-          <div role="radiogroup" className="grid gap-2 sm:grid-cols-2">
+          </span>
+          <div role="radiogroup" aria-label={tx("Тип диагноза", "Diagnosetyp")} className="grid gap-2 sm:grid-cols-2">
             <label
               className={cn(
-                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors",
                 draft.kind === "main"
-                  ? "border-sky-300 bg-sky-50/70 text-sky-800"
-                  : "border-border/70 text-muted-foreground",
+                  ? "border-[var(--brand)] bg-[var(--brand)]/5 text-foreground"
+                  : "border-border/60 bg-field text-muted-foreground hover:text-foreground",
               )}
             >
               <input
                 type="radio"
                 name={`diagnosis-kind-${draft.cid}`}
-                className="size-4"
+                className="size-3.5 shrink-0 accent-[var(--brand)]"
                 checked={draft.kind === "main"}
                 onChange={() => setDiagnosisKind("main")}
               />
@@ -739,16 +743,16 @@ function DiagnosisForm({
             </label>
             <label
               className={cn(
-                "flex items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-[13px] transition-colors",
                 draft.kind === "secondary"
-                  ? "border-violet-300 bg-violet-50/70 text-violet-800"
-                  : "border-border/70 text-muted-foreground",
+                  ? "border-[var(--brand)] bg-[var(--brand)]/5 text-foreground"
+                  : "border-border/60 bg-field text-muted-foreground hover:text-foreground",
               )}
             >
               <input
                 type="radio"
                 name={`diagnosis-kind-${draft.cid}`}
-                className="size-4"
+                className="size-3.5 shrink-0 accent-[var(--brand)]"
                 checked={draft.kind === "secondary"}
                 onChange={() => setDiagnosisKind("secondary")}
               />
@@ -879,7 +883,7 @@ function DiagnosisForm({
           <textarea
             value={draft.red_flags ?? ""}
             onChange={(e) => set({ red_flags: blankToNull(e.target.value) })}
-            className={cn(inputClass, "h-24 py-2")}
+            className={cn(inputClass, "h-20 resize-y py-2")}
             placeholder={tx(
               "Тревожные признаки и особые риски",
               "Warnzeichen und besondere Risiken",
@@ -887,16 +891,17 @@ function DiagnosisForm({
           />
         </Field>
       ) : null}
+      </section>
 
       {isDiagnosis ? (
-        <div className="space-y-2 rounded-lg border border-border/50 p-3">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+          <AdminSectionTitle>
             {tx("Лечащий врач", "Behandelnder Arzt")}
-          </p>
-          <label className="flex items-center gap-2 text-sm text-foreground">
+          </AdminSectionTitle>
+          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground">
             <input
               type="checkbox"
-              className="size-4 rounded border-border"
+              className="size-3.5 rounded border-border accent-[var(--brand)]"
               checked={draft.treating_none}
               onChange={(e) =>
                 set(
@@ -946,14 +951,14 @@ function DiagnosisForm({
         </div>
       ) : null}
 
-      <div className="space-y-2 rounded-lg border border-border/50 p-3">
-        <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="min-w-0 space-y-3 rounded-xl border border-border/50 bg-card p-3.5">
+        <AdminSectionTitle>
           {tx("Кто поставил/провёл", "Wer gestellt/durchgeführt")}
-        </p>
-        <label className="flex items-center gap-2 text-sm text-foreground">
+        </AdminSectionTitle>
+        <label className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground">
           <input
             type="checkbox"
-            className="size-4 rounded border-border"
+            className="size-3.5 rounded border-border accent-[var(--brand)]"
             checked={draft.source_mode === "intern"}
             onChange={(e) =>
               set(
@@ -1022,6 +1027,7 @@ export function DiagnosisTreeSection({
   canManage,
   lang,
   onSave,
+  className,
 }: {
   items: ClinicalDiagnosis[];
   providers: ProviderSummary[];
@@ -1030,6 +1036,7 @@ export function DiagnosisTreeSection({
   canManage: boolean;
   lang: string;
   onSave: (next: ClinicalDiagnosis[]) => Promise<unknown>;
+  className?: string;
 }) {
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
@@ -1117,7 +1124,7 @@ export function DiagnosisTreeSection({
   const editingParentLabel = editingParent ? displayLabel(editingParent) : null;
 
   return (
-    <section className="rounded-xl border border-border/70 bg-slate-50/60">
+    <section className={cn("rounded-xl border border-border/70 bg-slate-50/60", className)}>
       <header className="flex items-center justify-between gap-3 border-b border-border/60 px-4 py-3">
         <div className="flex items-center gap-2">
           <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
@@ -1171,30 +1178,43 @@ export function DiagnosisTreeSection({
           ))
         )}
 
-        <PatientSheetScaffold
+        <Dialog
           open={Boolean(editing)}
           onOpenChange={(open) => {
             if (!open) setEditing(null);
           }}
-          width="form-heavy"
-          title={
-            editing?.mode === "add"
-              ? editingParentLabel
-                ? `${tx("Добавить вложенный", "Untergeordnet hinzufügen")}: ${
-                    editing ? kindLabel(editing.draft.kind, tx) : ""
-                  }`
-                : `${tx("Добавить", "Hinzufügen")}: ${
-                    editing ? kindLabel(editing.draft.kind, tx) : ""
-                  }`
-              : `${tx("Редактировать", "Bearbeiten")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
-          }
-          footer={
-            <>
+        >
+          <DialogContent overlayClassName="bg-black/40" className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col gap-0 overflow-hidden rounded-xl p-0 sm:max-w-[680px] sm:pb-0" data-testid="diagnosis-editor-dialog">
+            <DialogHeader className="shrink-0 border-b border-border/50 bg-card px-4 py-3 pr-14 text-left">
+              <DialogTitle className="text-[15px] font-semibold">
+                {editing?.mode === "add"
+                  ? editingParentLabel
+                    ? `${tx("Добавить вложенный", "Untergeordnet hinzufügen")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
+                    : `${tx("Добавить", "Hinzufügen")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`
+                  : `${tx("Редактировать", "Bearbeiten")}: ${editing ? kindLabel(editing.draft.kind, tx) : ""}`}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-muted px-3 py-3 sm:px-4">
+              {editing ? (
+                <DiagnosisForm
+                  draft={editing.draft}
+                  nodes={nodes}
+                  providers={providers}
+                  allDoctors={allDoctors}
+                  specializations={specializations}
+                  lang={lang}
+                  tx={tx}
+                  parentLabel={editingParentLabel}
+                  set={set}
+                />
+              ) : null}
+            </div>
+            <DialogFooter className="mx-0 mb-0 shrink-0 rounded-none border-t border-border/50 bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-8 rounded-lg"
+                className="h-9 rounded-lg text-xs"
                 onClick={() => setEditing(null)}
               >
                 {tx("Отмена", "Abbrechen")}
@@ -1202,29 +1222,16 @@ export function DiagnosisTreeSection({
               <Button
                 type="button"
                 size="sm"
-                className="h-8 rounded-lg"
+                className="h-9 rounded-lg text-xs"
                 disabled={busy || !canSave}
                 onClick={submitDraft}
               >
-                {tx("Сохранить", "Speichern")}
+                {busy ? <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin" /> : null}
+                {busy ? tx("Сохранение…", "Wird gespeichert…") : tx("Сохранить", "Speichern")}
               </Button>
-            </>
-          }
-        >
-          {editing ? (
-            <DiagnosisForm
-              draft={editing.draft}
-              nodes={nodes}
-              providers={providers}
-              allDoctors={allDoctors}
-              specializations={specializations}
-              lang={lang}
-              tx={tx}
-              parentLabel={editingParentLabel}
-              set={set}
-            />
-          ) : null}
-        </PatientSheetScaffold>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </section>
   );
