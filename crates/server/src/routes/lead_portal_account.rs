@@ -27,6 +27,7 @@ use uuid::Uuid;
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::auth::{password, password_policy};
+use crate::routes::lead_portal_intake::OWN_LOGIN_CLOSED_SQL;
 use crate::state::AppState;
 use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
@@ -408,6 +409,21 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
         .into_response()
 }
 
+/// 409 `minor_own_login_closed`: the lead's own login of a minor whose
+/// parents have access gets no new password and no sign-in e-mail (QA
+/// 2026-10-12, A3-01). The code is also the `error`, which the UI translates.
+pub(crate) fn minor_own_login_closed() -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "minor_own_login_closed",
+            "code": "minor_own_login_closed",
+            "message": "The minor's own login is closed while the parents have access",
+        })),
+    )
+        .into_response()
+}
+
 fn internal(error: sqlx::Error, lead_id: Uuid, what: &str) -> axum::response::Response {
     tracing::error!(%error, %lead_id, what, "lead portal account");
     err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
@@ -422,15 +438,16 @@ async fn get_lead_portal_account(
     if let Err(response) = auth.require_capability(Capability::LeadsView) {
         return response;
     }
-    let row = match sqlx::query(
+    let row = match sqlx::query(&format!(
         r#"SELECT l.id, u.id AS user_id, u.email, u.is_active, u.password_reset_required,
                   u.created_at,
                   (SELECT max(tf.created_at) FROM token_families tf WHERE tf.user_id = u.id)
-                      AS last_login_at
+                      AS last_login_at,
+                  {OWN_LOGIN_CLOSED_SQL} AS own_login_closed
            FROM leads l
            LEFT JOIN users u ON u.id = l.portal_user_id
-           WHERE l.id = $1"#,
-    )
+           WHERE l.id = $1"#
+    ))
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await
@@ -458,6 +475,9 @@ async fn get_lead_portal_account(
                     .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_login_at")
                     .ok()
                     .flatten(),
+                // A minor's own login while the parents have access (QA
+                // 2026-10-12, A3-01): it reaches nothing, no password is issued.
+                "own_login_closed": row.try_get::<bool, _>("own_login_closed").unwrap_or(false),
             })
         });
     Json(json!({
@@ -485,15 +505,16 @@ async fn issue_lead_portal_access(
         Ok(tx) => tx,
         Err(error) => return internal(error, lead_id, "begin"),
     };
-    let lead = match sqlx::query(
+    let lead = match sqlx::query(&format!(
         r#"SELECT l.email, l.first_name, l.last_name, l.qualification_status,
                   l.converted_patient_id, l.portal_user_id, l.date_of_birth,
-                  u.is_active AS portal_active
+                  u.is_active AS portal_active,
+                  {OWN_LOGIN_CLOSED_SQL} AS own_login_closed
            FROM leads l
            LEFT JOIN users u ON u.id = l.portal_user_id
            WHERE l.id = $1
-           FOR UPDATE OF l"#,
-    )
+           FOR UPDATE OF l"#
+    ))
     .bind(lead_id)
     .fetch_optional(&mut *tx)
     .await
@@ -511,6 +532,11 @@ async fn issue_lead_portal_access(
 
     let portal_user: Option<Uuid> = lead.try_get("portal_user_id").ok().flatten();
     if let Some(user_id) = portal_user {
+        // A minor's own login while the parents have access gets no password
+        // (QA 2026-10-12, A3-01): the parents use theirs.
+        if lead.try_get::<bool, _>("own_login_closed").unwrap_or(false) {
+            return minor_own_login_closed();
+        }
         if !lead
             .try_get::<Option<bool>, _>("portal_active")
             .ok()

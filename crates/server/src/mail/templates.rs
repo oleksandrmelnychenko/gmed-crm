@@ -580,6 +580,10 @@ pub struct PayerInvitationEmail<'a> {
     /// a neutral greeting without the organisation's name, and the patient
     /// named "your organisation" as the paying party.
     pub organisation: bool,
+    /// The organisation's contact person as the lead named it: greeted by
+    /// name when known (QA 2026-10-12, round 3); never the organisation's
+    /// name. Ignored for a person.
+    pub contact_name: Option<&'a str>,
     /// "First Last" of the patient (the lead).
     pub patient_name: &'a str,
     /// `{console_url}/payer#<token>`; the token is in the fragment only.
@@ -694,9 +698,14 @@ fn payer_invitation_copy(language: MailLanguage) -> PayerInvitationCopy {
 
 pub fn payer_invitation(email: &PayerInvitationEmail<'_>) -> RenderedEmail {
     let copy = payer_invitation_copy(email.language);
-    let name = email.payer_name.trim();
-    // An organisation is not greeted by its name.
-    let greeting = if name.is_empty() || email.organisation {
+    // An organisation is not greeted by its name, but by its contact person
+    // when the lead named one.
+    let name = if email.organisation {
+        email.contact_name.map(str::trim).unwrap_or_default()
+    } else {
+        email.payer_name.trim()
+    };
+    let greeting = if name.is_empty() {
         copy.greeting.to_string()
     } else {
         copy.greeting_named.replace("{name}", name)
@@ -1122,6 +1131,7 @@ mod tests {
                 language,
                 payer_name: "Viktor Zahler",
                 organisation: false,
+                contact_name: None,
                 patient_name: "Mia Muster",
                 link_url: "https://console.gmed-health.com/payer#abc123",
                 expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1146,6 +1156,7 @@ mod tests {
             language: MailLanguage::De,
             payer_name: "",
             organisation: false,
+            contact_name: None,
             patient_name: "Mia Muster",
             link_url: "https://console.gmed-health.com/payer#abc123",
             expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1212,6 +1223,7 @@ mod tests {
                 language,
                 payer_name: "Beispiel GmbH",
                 organisation: true,
+                contact_name: None,
                 patient_name: "Mia Muster",
                 link_url: "https://console.gmed-health.com/payer#abc123",
                 expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1234,6 +1246,8 @@ mod tests {
             language: MailLanguage::De,
             payer_name: "Viktor Zahler",
             organisation: false,
+            // A person's contact name plays no part.
+            contact_name: Some("Erika Beispiel"),
             patient_name: "Mia Muster",
             link_url: "https://console.gmed-health.com/payer#abc123",
             expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
@@ -1243,6 +1257,33 @@ mod tests {
         });
         assert!(person.text.starts_with("Guten Tag Viktor Zahler,\n"));
         assert!(person.text.contains("hat Sie als zahlende Person"));
+        // An organisation with a known contact person greets that person,
+        // never the organisation (QA 2026-10-12, round 3).
+        for (language, greeting) in [
+            (MailLanguage::De, "Guten Tag Erika Beispiel,\n"),
+            (MailLanguage::En, "Hello Erika Beispiel,\n"),
+            (MailLanguage::Ru, "Здравствуйте, Erika Beispiel!\n"),
+            (MailLanguage::Uk, "Вітаємо, Erika Beispiel!\n"),
+        ] {
+            let email = payer_invitation(&PayerInvitationEmail {
+                language,
+                payer_name: "Beispiel GmbH",
+                organisation: true,
+                contact_name: Some(" Erika Beispiel "),
+                patient_name: "Paul Muster",
+                link_url: "https://console.gmed-health.com/payer#abc123",
+                expires_on: NaiveDate::from_ymd_opt(2026, 11, 5).unwrap(),
+                privacy_url: "https://console.gmed-health.com/legal#privacy",
+                agency: &agency,
+                logo_url: None,
+            });
+            assert!(
+                email.text.starts_with(greeting),
+                "{language:?}: {}",
+                email.text
+            );
+            assert!(!email.text.contains("Beispiel GmbH"), "{language:?}");
+        }
     }
 
     /// The code e-mail greets nobody and speaks of no person: it fits a

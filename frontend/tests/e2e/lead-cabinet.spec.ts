@@ -461,6 +461,8 @@ async function setup(
     accountLanguage?: "de" | "ru" | null;
     /** Changes the request before the page loads it (a parent's access, an older server, entered data). */
     prepare?: (request: ReturnType<typeof leadRequest>) => void;
+    /** The own login of a minor whose parents have access: no request, `own_access_closed` (A3-01). */
+    ownAccessClosed?: boolean;
   } = {},
 ) {
   await startClockAt(page);
@@ -514,7 +516,11 @@ async function setup(
         },
       });
     }
-    if (path === "/me/lead-requests") return route.fulfill({ json: { requests: [request] } });
+    if (path === "/me/lead-requests") {
+      return route.fulfill({
+        json: options.ownAccessClosed ? { requests: [], own_access_closed: true } : { requests: [request] },
+      });
+    }
     if (path === "/me/lead-requests/lead-1/personal-data" && method === "POST") {
       const patch = req.postDataJSON() as Record<string, unknown>;
       calls.personalData.push(patch);
@@ -1030,6 +1036,35 @@ test.describe("lead cabinet", () => {
       data_system: true,
       channel_email: true,
     });
+  });
+
+  test("a minor's own login sees only that the parents fill in the request (QA 2026-10-12, A3-01)", async ({ page }) => {
+    await setup(page, "lead", { ownAccessClosed: true });
+    await page.goto("/");
+    const notice = page.getByTestId("lead-request-guardian-only");
+    await expect(notice).toContainText("Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter");
+    await expect(page.getByTestId("lead-request")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-steps")).toHaveCount(0);
+  });
+
+  test("a minor's own login chooses no consent options; the parents do (QA 2026-10-12, A3-01)", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) =>
+        Object.assign(request, {
+          access_kind: "self",
+          minor: true,
+          consent_form: { version: "2026-10-12", choices: null, chosen_at: null },
+        }),
+    });
+    await page.goto("/");
+    await step(page, "documents");
+    const block = page.getByTestId("lead-request-consent-form");
+    await expect(block.getByTestId("lead-request-consent-form-by-guardian")).toContainText(
+      "Für Minderjährige wählen die Eltern bzw. der Vormund",
+    );
+    await expect(block.getByRole("checkbox")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-consent-form-save")).toHaveCount(0);
+    expect(calls.consentChoices).toHaveLength(0);
   });
 
   test("another person as payer is named with name and citizenship before sending", async ({ page }) => {

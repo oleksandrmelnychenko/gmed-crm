@@ -410,7 +410,77 @@ pub(crate) const PORTAL_LEAD_SQL: &str = r#"
     AND l.converted_patient_id IS NULL
     AND COALESCE(l.failed_outcome_status, 'none') <> 'delete_anonymized'"#;
 
-/// The requests `user_id` reaches, oldest first.
+/// The lead's own login (`l.portal_user_id`) is closed for the request (QA
+/// 2026-10-12, A3-01; owner decision 2026-10-03: a minor has no login of its
+/// own): the lead is a minor — under 18 today by the date of birth on file,
+/// `CURRENT_DATE` being German time in every session — and a parent's or
+/// guardian's access was issued for it (`lead_portal_access`, kind
+/// `guardian`, active or revoked since: a revoked parent's access does not
+/// reopen the child's login). The login itself stays active: it reaches no
+/// request (reads and writes answer 403 `lead_request_guardian_only`, the list
+/// is empty with `own_access_closed`) and staff issue no password for it.
+/// Nothing is stored, so a corrected date of birth (18 or older) opens it
+/// again by itself. Expects the lead as `l`.
+pub(crate) const OWN_LOGIN_CLOSED_SQL: &str = r#"(
+    l.date_of_birth IS NOT NULL
+    AND l.date_of_birth > (CURRENT_DATE - INTERVAL '18 years')
+    AND EXISTS (
+        SELECT 1 FROM lead_portal_access closed_by
+        WHERE closed_by.lead_id = l.id AND closed_by.kind = 'guardian'
+    ))"#;
+
+/// The code of the refusal of a request to the closed own login of a minor
+/// ([`OWN_LOGIN_CLOSED_SQL`]), also its `error`, so the UI translates it.
+pub(crate) const GUARDIAN_ONLY: &str = "lead_request_guardian_only";
+
+/// 403 [`GUARDIAN_ONLY`]: neutral, it names no reason beyond who has access.
+pub(crate) fn guardian_only() -> axum::response::Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "error": GUARDIAN_ONLY,
+            "code": GUARDIAN_ONLY,
+            "message": "Only the parents or the legal guardian have access to this request",
+        })),
+    )
+        .into_response()
+}
+
+/// Whether `user_id` is the own login of a minor's request that is closed to
+/// it ([`OWN_LOGIN_CLOSED_SQL`]): of `lead_id`, or of any request the portal
+/// still serves when `lead_id` is `None`.
+pub(crate) async fn own_login_closed<'e, E>(
+    executor: E,
+    user_id: Uuid,
+    lead_id: Option<Uuid>,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    sqlx::query_scalar(&format!(
+        r#"SELECT EXISTS (
+               SELECT 1 FROM leads l
+               WHERE l.portal_user_id = $1
+                 AND ($2::uuid IS NULL OR l.id = $2)
+                 AND {PORTAL_LEAD_SQL}
+                 AND {OWN_LOGIN_CLOSED_SQL}
+           )"#
+    ))
+    .bind(user_id)
+    .bind(lead_id)
+    .fetch_one(executor)
+    .await
+}
+
+/// The lead id of a path `/me/lead-requests/{lead_id}[/…]`.
+fn lead_request_path_id(path: &str) -> Option<Uuid> {
+    let path = path.strip_prefix("/api/v1").unwrap_or(path);
+    let rest = path.strip_prefix("/me/lead-requests/")?;
+    Uuid::parse_str(rest.split('/').next()?).ok()
+}
+
+/// The requests `user_id` reaches, oldest first. The own login of a minor
+/// whose parents have access reaches nothing ([`OWN_LOGIN_CLOSED_SQL`]).
 pub(crate) async fn accessible_leads<'e, E>(
     executor: E,
     user_id: Uuid,
@@ -421,7 +491,7 @@ where
     let rows = sqlx::query(&format!(
         r#"SELECT l.id, 'self' AS kind, l.created_at
            FROM leads l
-           WHERE l.portal_user_id = $1 AND {PORTAL_LEAD_SQL}
+           WHERE l.portal_user_id = $1 AND {PORTAL_LEAD_SQL} AND NOT {OWN_LOGIN_CLOSED_SQL}
            UNION ALL
            SELECT l.id, 'guardian' AS kind, l.created_at
            FROM lead_portal_access a
@@ -531,6 +601,15 @@ pub async fn lead_portal_guard(
     let Some(user_id) = patient else {
         return next.run(request).await;
     };
+    // The own login of a minor whose parents have access reaches nothing of
+    // the request, read or write (QA 2026-10-12, A3-01).
+    if let Some(lead_id) = lead_request_path_id(request.uri().path()) {
+        match own_login_closed(&state.db, user_id, Some(lead_id)).await {
+            Ok(true) => return guardian_only(),
+            Ok(false) => {}
+            Err(error) => return internal(error, "check the minor's own login"),
+        }
+    }
     if lead_portal_allows_path(request.uri().path()) {
         return next.run(request).await;
     }
@@ -560,7 +639,8 @@ pub(crate) fn require_patient(auth: &AuthUser) -> Result<(), axum::response::Res
 }
 
 /// Locks the lead and checks the caller's link in the same statement. `None`
-/// when the lead is gone, converted or not the caller's.
+/// when the lead is gone, converted or not the caller's — or closed to the
+/// caller as a minor's own login ([`OWN_LOGIN_CLOSED_SQL`]).
 pub(crate) async fn lock_my_lead(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     lead_id: Uuid,
@@ -568,7 +648,7 @@ pub(crate) async fn lock_my_lead(
 ) -> Result<Option<(AccessKind, PgRow)>, sqlx::Error> {
     let row = sqlx::query(&format!(
         r#"SELECT CASE
-                    WHEN l.portal_user_id = $2 THEN 'self'
+                    WHEN l.portal_user_id = $2 AND NOT {OWN_LOGIN_CLOSED_SQL} THEN 'self'
                     WHEN EXISTS (
                         SELECT 1 FROM lead_portal_access a
                         WHERE a.lead_id = l.id AND a.user_id = $2
@@ -2573,7 +2653,7 @@ pub(crate) async fn request_payload(
         "max_documents": MAX_PORTAL_UPLOADS,
         "consents": consents,
         // The person's own choice of the consent form options (2026-10-12).
-        "consent_form": consent_form_json(consent_choice.as_ref()),
+        "consent_form": consent_form_json(consent_choice.as_ref(), user_id),
         "submitted_at": row
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
@@ -2638,6 +2718,9 @@ pub(crate) fn not_found() -> axum::response::Response {
 }
 
 /// `GET /me/lead-requests`: every request the caller reaches, oldest first.
+/// `own_access_closed` is true for the own login of a minor whose parents
+/// have access ([`OWN_LOGIN_CLOSED_SQL`]): the cabinet then says, neutrally,
+/// that only the parents or the guardian fill in the request.
 async fn list_my_lead_requests(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -2649,6 +2732,10 @@ async fn list_my_lead_requests(
         Ok(leads) => leads,
         Err(error) => return internal(error, "list requests"),
     };
+    let own_access_closed = match own_login_closed(&state.db, auth.user_id, None).await {
+        Ok(closed) => closed,
+        Err(error) => return internal(error, "check the minor's own login"),
+    };
     let mut requests = Vec::with_capacity(leads.len());
     for (lead_id, kind) in leads {
         match request_payload(&state, lead_id, auth.user_id, kind).await {
@@ -2656,7 +2743,7 @@ async fn list_my_lead_requests(
             Err(error) => return internal(error, "load request"),
         }
     }
-    Json(json!({ "requests": requests })).into_response()
+    Json(json!({ "requests": requests, "own_access_closed": own_access_closed })).into_response()
 }
 
 /// `GET /me/lead-requests/{lead_id}`.
@@ -3708,11 +3795,14 @@ struct ConsentChoicesRequest {
 }
 
 /// The cabinet's view of the person's own choice of the consent form options.
-fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>) -> Value {
+/// `chosen_by_me` says whether the viewer's login saved it: a choice the
+/// other parent saved is not shown as the viewer's own (QA 2026-10-12, A3-01).
+fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>, viewer: Uuid) -> Value {
     json!({
         "version": consent_choices::TEXT_VERSION,
         "choices": choice.map(|choice| choice.choices),
         "chosen_at": choice.map(|choice| choice.chosen_at),
+        "chosen_by_me": choice.map(|choice| choice.chosen_by == Some(viewer)),
     })
 }
 
@@ -3759,11 +3849,28 @@ async fn save_consent_choices(
         Ok(tx) => tx,
         Err(error) => return internal(error, "begin"),
     };
-    let kind = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
-        Ok(Some((kind, _))) => kind,
+    let (kind, row) = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some(found)) => found,
         Ok(None) => return not_found(),
         Err(error) => return internal(error, "lock request"),
     };
+    // For a minor only a parent or the guardian chooses — the child's form
+    // names and is signed by the one who chose (QA 2026-10-12, A3-01). The
+    // lead's own login of a minor (before any parent has access) saves
+    // nothing; a choice it saved earlier never counts for the child.
+    if kind == AccessKind::Own
+        && crate::routes::leads::is_minor_on(
+            PersonalData::from_row(&row).date_of_birth,
+            crate::app_time::today(),
+        )
+    {
+        return coded(
+            StatusCode::CONFLICT,
+            consent_choices::BY_GUARDIAN,
+            "For a minor, a parent or the legal guardian chooses with their own access",
+            json!({}),
+        );
+    }
     let choices = match serde_json::to_value(body.choices) {
         Ok(value) => value,
         Err(error) => return internal(error, "encode choices"),
@@ -3833,7 +3940,11 @@ async fn save_consent_choices(
         chosen_by_emails: Vec::new(),
         lead_id: Some(lead_id),
     };
-    (StatusCode::CREATED, Json(consent_form_json(Some(&saved)))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(consent_form_json(Some(&saved), auth.user_id)),
+    )
+        .into_response()
 }
 
 #[allow(clippy::result_large_err)]
@@ -5441,6 +5552,19 @@ async fn get_lead_portal_intake(
             Ok(value) => value,
             Err(error) => return internal(error, "load guardians"),
         };
+    // The lead's own login is closed while the minor's parents have access
+    // (QA 2026-10-12, A3-01): the access row says so, and offers no password.
+    let own_login_closed: bool = match sqlx::query_scalar(&format!(
+        r#"SELECT l.portal_user_id IS NOT NULL AND {OWN_LOGIN_CLOSED_SQL}
+           FROM leads l WHERE l.id = $1"#
+    ))
+    .bind(lead_id)
+    .fetch_optional(&state.db)
+    .await
+    {
+        Ok(value) => value.unwrap_or(false),
+        Err(error) => return internal(error, "check the minor's own login"),
+    };
     let fill_mode = match row
         .try_get::<Option<String>, _>("fill_mode")
         .ok()
@@ -5514,6 +5638,7 @@ async fn get_lead_portal_intake(
         "payer_link": payer_link,
         "guardians": guardians,
         "minor": crate::routes::leads::is_minor_on(data.date_of_birth, crate::app_time::today()),
+        "own_login_closed": own_login_closed,
         "can_issue": crate::routes::lead_portal_account::may_issue_portal_password(auth.role),
         "can_review_uploads": medical && auth.can(Capability::LeadsEdit),
     }))

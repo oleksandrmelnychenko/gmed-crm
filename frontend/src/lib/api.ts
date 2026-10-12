@@ -538,6 +538,9 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   document_translation_delivery_protected: "api_document_translation_delivery_protected",
   // The adult consent form is refused for a minor: the child's form is signed by the parents (documents.rs).
   minor_consent_form_required: "api_minor_consent_form_required",
+  // A minor's own login while the parents have access (lead_portal_intake.rs, lead_portal_account.rs).
+  lead_request_guardian_only: "api_lead_request_guardian_only",
+  minor_own_login_closed: "api_minor_own_login_closed",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

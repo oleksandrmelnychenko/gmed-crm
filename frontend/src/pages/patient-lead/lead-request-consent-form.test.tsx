@@ -2,7 +2,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { NO_CONSENT_FORM_CHOICES, hasCoreConsents, type LeadRequest } from "./lead-request-api";
-import { ConsentFormChoicesSection, choosesForChild, consentFormChanged } from "./lead-request-consent-form";
+import {
+  ConsentFormChoicesSection,
+  choiceOnlyByGuardian,
+  choosesForChild,
+  consentFormChanged,
+} from "./lead-request-consent-form";
 import { consentFormText } from "./lead-request-consent-form-text";
 
 const queue = <Result,>(task: () => Promise<Result>) => task();
@@ -95,6 +100,47 @@ describe("consent form choices in the lead cabinet", () => {
     // Staff make the new form; nothing is re-created by itself (QA 2026-10-12).
     expect(markup).toContain("уже созданную форму сотрудник GMED тогда создаст заново");
     expect(markup).not.toContain("будет создана заново");
+  });
+
+  it("lets a minor's own login choose nothing (QA 2026-10-12, A3-01)", () => {
+    expect(choiceOnlyByGuardian({ access_kind: "self", minor: true })).toBe(true);
+    expect(choiceOnlyByGuardian({ access_kind: "self", minor: false })).toBe(false);
+    expect(choiceOnlyByGuardian({ access_kind: "guardian", minor: true })).toBe(false);
+    const markup = renderToStaticMarkup(
+      <ConsentFormChoicesSection
+        request={request(
+          { version: "2026-10-12", choices: null, chosen_at: null },
+          { access_kind: "self", minor: true },
+        )}
+        lang="ru"
+        enqueue={queue}
+        onChange={() => undefined}
+      />,
+    );
+    expect(markup).toContain('data-testid="lead-request-consent-form-by-guardian"');
+    expect(markup).toContain("родители или опекун выбирают");
+    expect(markup).not.toContain('type="checkbox"');
+    expect(markup).not.toContain("lead-request-consent-form-save");
+    for (const lang of ["de", "en", "uk", "ru"]) {
+      expect(consentFormText(lang).byGuardianOnly.trim()).not.toBe("");
+      expect(consentFormText(lang).savedByOtherAt("12.10.2026")).toContain("12.10.2026");
+    }
+  });
+
+  it("names a choice the other parent saved as theirs, not the viewer's (QA 2026-10-12, A3-01)", () => {
+    const markup = renderToStaticMarkup(
+      <ConsentFormChoicesSection
+        request={request(
+          { version: "2026-10-12", choices: CORE, chosen_at: "2026-10-12T08:05:00Z", chosen_by_me: false },
+          { access_kind: "guardian", minor: true },
+        )}
+        lang="ru"
+        enqueue={queue}
+        onChange={() => undefined}
+      />,
+    );
+    expect(markup).toContain("сохранил другой родитель или представитель");
+    expect(markup).not.toContain("Ваш выбор от");
   });
 
   it("is hidden for an older server without the consent form", () => {

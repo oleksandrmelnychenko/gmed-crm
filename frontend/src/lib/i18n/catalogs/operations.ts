@@ -905,7 +905,7 @@ export const operationsRu: OperationsTranslations = {
   lead_status_converted: "Пациент создан",
   lead_status_archived: "В архиве",
   lead_status_deleted: "Удалён",
-  lead_compliance_status: "Статус compliance",
+  lead_compliance_status: "Статус комплаенса",
   lead_compliance_pending: "Ожидает",
   lead_compliance_documents_sent: "Документы отправлены",
   lead_compliance_signed: "Подписано",
@@ -980,7 +980,7 @@ export const operationsRu: OperationsTranslations = {
   lead_workflow_missing_count: "Нужно сделать",
   lead_workflow_complete_gate_title: "Данные для квалификации",
   lead_workflow_complete_gate_description:
-    "Проверьте контакт, дату рождения, юридический пол, compliance и согласия.",
+    "Проверьте контакт, дату рождения, юридический пол, комплаенс и согласия.",
   lead_workflow_qualify_title: "Квалифицировать",
   lead_workflow_qualify_description:
     "Доступно только когда все проверки квалификации закрыты.",
@@ -1089,7 +1089,7 @@ export const operationsRu: OperationsTranslations = {
   lead_entered_at: "Вошёл в этап",
   lead_qualification_gate_data: "Данные гейта квалификации",
   lead_qualification_gate_description:
-    "Заполните недостающие поля compliance и идентификации прямо из рабочего пространства лида.",
+    "Заполните недостающие поля комплаенса и идентификации прямо из рабочего пространства лида.",
   lead_full_name: "Полное имя",
   lead_primary_language: "Основной язык",
   lead_language_ar: "Арабский",

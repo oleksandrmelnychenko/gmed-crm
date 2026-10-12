@@ -281,6 +281,12 @@ export type LeadPortalIntake = {
   uploads_hidden: boolean;
   guardians: { links: LeadGuardianLink[]; candidates: LeadGuardianCandidate[] };
   minor: boolean;
+  /**
+   * The lead's own login is closed while the minor's parents have access (QA 2026-10-12, A3-01): it
+   * reaches no request and gets no password; a corrected date of birth (18+) opens it again.
+   * False on an older server.
+   */
+  own_login_closed: boolean;
   can_issue: boolean;
   /** The caller may mark patient uploads as reviewed (leads.edit + medical access). */
   can_review_uploads: boolean;
@@ -398,6 +404,7 @@ export function normalizeLeadPortalIntake(value: unknown): LeadPortalIntake | nu
       candidates: Array.isArray(raw.guardians?.candidates) ? raw.guardians.candidates : [],
     },
     minor: Boolean(raw.minor),
+    own_login_closed: raw.own_login_closed === true,
     can_issue: Boolean(raw.can_issue),
     can_review_uploads: Boolean(raw.can_review_uploads),
     identification: normalizeIdentification(raw.identification),

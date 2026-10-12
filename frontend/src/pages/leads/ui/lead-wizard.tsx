@@ -203,6 +203,7 @@ import {
   leadConsentFormTemplate,
   orderClientSignatureState,
   signatureNeedsProof,
+  versionsSameForm,
 } from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
@@ -2828,7 +2829,7 @@ function ToggleRow({
       "flex cursor-pointer items-center gap-3 py-3",
       withDivider && "border-b border-border/70 last:border-b-0",
     )}>
-      <input id={id} type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
+      <input id={id} type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className={checkboxClass} />
       <span className="text-sm text-foreground">{label}</span>
     </label>
   );
@@ -5735,7 +5736,8 @@ export function LeadWizard({
       const targetLeadId = leadId ?? lastPersistedLeadIdRef.current;
       if (!targetLeadId) return false;
       // For a minor the parents or the guardian declare on the child's form
-      // (QA 2026-10-12, A2-06); a new version replaces only the same form.
+      // (QA 2026-10-12, A2-06); a new version replaces the same form, also
+      // when the date of birth or the custody changed its variant (round 3).
       const generatedTemplateId = templateId === "privacy_consents"
         ? leadConsentFormTemplate(
           isMinor(draft.birthDate, new Date()),
@@ -5748,7 +5750,7 @@ export function LeadWizard({
         order_id: order?.id,
         replace_document_id: sortWizardDocumentsNewestFirst(
           wizardDocuments[templateId].filter((document) => (
-            !document.generated_template_id || document.generated_template_id === generatedTemplateId
+            versionsSameForm(document.generated_template_id, generatedTemplateId)
           )),
         ).find((document) => document.is_latest_version)?.id,
         language: "de",

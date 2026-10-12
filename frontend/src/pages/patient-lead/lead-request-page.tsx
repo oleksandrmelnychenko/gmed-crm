@@ -9,7 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { setPortalAccountLabel } from "@/lib/portal-account-label";
 import { cn } from "@/lib/utils";
 
-import { fetchMyLeadRequests, type LeadRequest } from "./lead-request-api";
+import { fetchMyLeadRequestList, type LeadRequest } from "./lead-request-api";
 import { FollowUpStep } from "./lead-request-follow-up";
 import { useRequestQueue, type RequestQueue } from "./lead-request-parts";
 import { SendStep } from "./lead-request-send-step";
@@ -70,6 +70,8 @@ export function LeadRequestPage() {
   const lang = resolveLeadCabinetLang(chosenLang, requestLang, portalLang);
   const text = leadRequestText(lang);
   const [requests, setRequests] = useState<LeadRequest[] | null>(null);
+  // The own login of a minor whose parents have access reaches no request (QA 2026-10-12, A3-01).
+  const [ownAccessClosed, setOwnAccessClosed] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState("");
 
@@ -90,8 +92,9 @@ export function LeadRequestPage() {
   const load = useCallback(async () => {
     setError("");
     try {
-      const loaded = await fetchMyLeadRequests();
+      const { requests: loaded, ownAccessClosed: closed } = await fetchMyLeadRequestList();
       setRequestLang(asLeadCabinetLang(loaded[0]?.personal_data.primary_language));
+      setOwnAccessClosed(closed);
       setRequests(loaded);
       setSelected((current) =>
         current && loaded.some((request) => request.lead_id === current) ? current : loaded[0]?.lead_id ?? null,
@@ -154,7 +157,9 @@ export function LeadRequestPage() {
     return (
       <LeadCabinetFrame lang={lang} onLang={chooseLang}>
         <h1 className="text-xl font-semibold">{text.title}</h1>
-        <p className="text-sm text-muted-foreground">{text.noRequest}</p>
+        <p className="text-sm text-muted-foreground" data-testid={ownAccessClosed ? "lead-request-guardian-only" : undefined}>
+          {ownAccessClosed ? text.guardianOnly : text.noRequest}
+        </p>
       </LeadCabinetFrame>
     );
   }

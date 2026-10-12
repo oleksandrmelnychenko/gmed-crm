@@ -51,6 +51,26 @@ export function leadFailureReasonLabel(reason: string | null | undefined, tx: Tx
   return known ? tx(known.ru, known.de) : value;
 }
 
+/** The lead history entries whose note is the failure reason (server `REASON_TRANSITIONS`). */
+const REASON_TRANSITIONS = new Set(["status_change", "archived", "deleted"]);
+
+/**
+ * The note of a lead history entry («Процесс») as staff read it (QA 2026-10-12, A3-02): the reason
+ * of a status change, an archiving or a deletion by its label — the anonymisation leaves only the
+ * code there, «Другое» (`other`) included —, any other note as it is; null when there is none.
+ */
+export function leadLifecycleNoteLabel(
+  transitionKind: string,
+  note: string | null | undefined,
+  tx: Tx,
+): string | null {
+  const value = note?.trim() ?? "";
+  if (!value) return null;
+  if (!REASON_TRANSITIONS.has(transitionKind)) return value;
+  if (value === LEAD_FAILURE_REASON_OTHER) return leadFailureReasonOtherLabel(tx);
+  return leadFailureReasonLabel(value, tx);
+}
+
 /** The reason choice prefilled from a stored reason. */
 export function leadFailureReasonDraft(reason: string | null | undefined): LeadFailureReasonDraft {
   const value = reason?.trim() ?? "";

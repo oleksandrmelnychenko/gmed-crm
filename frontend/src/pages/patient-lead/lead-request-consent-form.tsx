@@ -7,6 +7,7 @@ import { formatAppDateTime } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
 import {
+  CONSENT_CHOICE_BY_GUARDIAN,
   CONSENT_FORM_CHANNELS,
   CONSENT_FORM_CORE,
   CONSENT_FORM_OPTIONS,
@@ -36,6 +37,14 @@ export function choosesForChild(request: Pick<LeadRequest, "access_kind" | "mino
 }
 
 /**
+ * The lead's own login of a minor chooses nothing: only a parent's or the guardian's choice counts
+ * for the child's form (QA 2026-10-12, A3-01; the server answers 409 `consent_choice_by_guardian`).
+ */
+export function choiceOnlyByGuardian(request: Pick<LeadRequest, "access_kind" | "minor">): boolean {
+  return request.access_kind === "self" && request.minor === true;
+}
+
+/**
  * The person's own choice of the options of the consent form «Einverständniserklärung zur
  * Datenübermittlung» (Anlage 1), 2026-10-12. Nothing is ticked in advance; the choice counts only
  * once the person saves it (an active choice), and every save is kept. The generated form ticks
@@ -62,6 +71,17 @@ export function ConsentFormChoicesSection({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   if (!form) return null;
+  if (choiceOnlyByGuardian(request)) {
+    return (
+      <div data-testid="lead-request-consent-form">
+        <Section title={text.title}>
+          <p className="text-sm text-muted-foreground" data-testid="lead-request-consent-form-by-guardian">
+            {text.byGuardianOnly}
+          </p>
+        </Section>
+      </div>
+    );
+  }
   const changed = consentFormChanged(draft, form.choices);
   const coreTicked = hasCoreConsents(draft);
 
@@ -76,7 +96,14 @@ export function ConsentFormChoicesSection({
       onChange({ ...request, consent_form: saved });
       setDraft(saved.choices ?? draft);
     } catch (cause) {
-      setError(errorBody(cause)?.code === "consent_core_required" ? text.coreRequired : errorMessage(cause));
+      const code = errorBody(cause)?.code;
+      setError(
+        code === "consent_core_required"
+          ? text.coreRequired
+          : code === CONSENT_CHOICE_BY_GUARDIAN
+            ? text.byGuardianOnly
+            : errorMessage(cause),
+      );
     } finally {
       setBusy(false);
     }
@@ -137,7 +164,9 @@ export function ConsentFormChoicesSection({
               {changed && form.choices
                 ? text.unsaved
                 : form.chosen_at
-                  ? text.savedAt(formatAppDateTime(form.chosen_at))
+                  ? form.chosen_by_me === false
+                    ? text.savedByOtherAt(formatAppDateTime(form.chosen_at))
+                    : text.savedAt(formatAppDateTime(form.chosen_at))
                   : text.notSaved}
             </p>
           </div>

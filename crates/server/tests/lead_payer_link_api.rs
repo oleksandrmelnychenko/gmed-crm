@@ -1552,6 +1552,47 @@ async fn the_payer_answers_uploads_and_submits_and_the_identity_is_adopted() {
     assert!(request["payer"]["street"].is_null(), "{request}");
 }
 
+/// QA 2026-10-12 (round 3): an organisation whose contact person the lead
+/// named is greeted by that person — never by the organisation's name.
+#[tokio::test]
+async fn an_organisation_with_a_contact_person_is_greeted_by_that_person() {
+    let Some(app) = payer_app().await else { return };
+    let (lead_id, patient) = lead(&app, "company-contact").await;
+    name_payer(
+        &app,
+        lead_id,
+        &patient,
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "company",
+            "organisation_name": "Beispiel GmbH",
+            "organisation_contact_name": "Erika Beispiel",
+            "country": "DE",
+            "relationship_kind": "employer",
+            "email": "kasse.kontakt@example.com",
+            "contact_consent": true
+        }),
+    )
+    .await;
+    submit_request(&app, lead_id).await;
+    send_link(&app, lead_id, json!({})).await;
+    let invitation = app
+        .texts()
+        .into_iter()
+        .rev()
+        .find(|text| text.contains("/payer#"))
+        .expect("an invitation");
+    assert!(
+        invitation.starts_with("Guten Tag Erika Beispiel,\n"),
+        "{invitation}"
+    );
+    assert!(
+        invitation.contains("hat Ihre Organisation als zahlende Partei"),
+        "{invitation}"
+    );
+    assert!(!invitation.contains("Beispiel GmbH"), "{invitation}");
+}
+
 #[tokio::test]
 async fn an_organisation_states_its_representative_and_beneficial_owners() {
     let Some(app) = payer_app().await else { return };

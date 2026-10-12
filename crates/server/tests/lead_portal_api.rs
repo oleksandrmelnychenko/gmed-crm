@@ -5737,3 +5737,311 @@ async fn a_minor_leads_consent_form_is_the_childs_and_names_the_parent_who_chose
         "{state}"
     );
 }
+
+/// Saves a consent choice through the cabinet.
+async fn choose(
+    app: &axum::Router,
+    lead_id: Uuid,
+    bearer: &str,
+    choices: &Value,
+) -> (StatusCode, Value) {
+    json_request(
+        app,
+        "POST",
+        &format!("/api/v1/me/lead-requests/{lead_id}/consent-choices"),
+        bearer,
+        Some(json!({ "choices": choices, "version": "2026-10-12", "language": "de" })),
+    )
+    .await
+}
+
+/// QA 2026-10-12, A3-01: a minor's own login (made while the lead had no date
+/// of birth) is closed once staff set a date under 18 and a parent has access:
+/// it reaches nothing of the request, read or write, with a neutral 403; staff
+/// issue it no password. Only a parent's choice counts for the child's form —
+/// a choice the child's login saved before is ignored and never shown as the
+/// parent's. A corrected date of birth opens the login again.
+#[tokio::test]
+async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let pm = app.staff("patient_manager");
+    let (lead_id, child_login, child) =
+        lead_with_login(&app, "Mia", "mia.closed.login@example.com").await;
+    let all = json!({
+        "agency_processing": true,
+        "doctors_to_agency": true,
+        "data_system": true,
+        "named_recipients": true,
+        "channel_email": true,
+        "channel_threema": true,
+        "channel_whatsapp": true,
+        "channel_telegram": true
+    });
+    let request = format!("/api/v1/me/lead-requests/{lead_id}");
+    // While nothing says the lead is a minor, the own login chooses.
+    let (status, body) = choose(router, lead_id, &child, &all).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+
+    // Staff set a date of birth under 18 and name the mother.
+    let mother = Uuid::new_v4();
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({
+            "date_of_birth": "2015-05-10",
+            "trusted_contacts": [{
+                "id": mother,
+                "name": "Maria Muster",
+                "relation": "mother",
+                "email": "maria.closed.parent@example.com",
+                "birth_date": "1985-02-01"
+            }]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    // Before any parent has access the own login still reaches the request,
+    // but the child's choice no longer counts, and it chooses nothing more.
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["own_access_closed"], false, "{list}");
+    assert_eq!(list["requests"][0]["minor"], true, "{list}");
+    assert_eq!(
+        list["requests"][0]["consent_form"]["choices"],
+        Value::Null,
+        "{list}"
+    );
+    let (status, body) = choose(router, lead_id, &child, &all).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "consent_choice_by_guardian", "{body}");
+
+    // The mother gets her access: the child's own login closes.
+    let (status, issued) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians"),
+        &pm,
+        Some(json!({ "trusted_contact_id": mother })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{issued}");
+    let guardian: Uuid = issued["user_id"].as_str().unwrap().parse().unwrap();
+    let access_id: Uuid = issued["access_id"].as_str().unwrap().parse().unwrap();
+    let parent = bearer(guardian, "patient");
+
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["requests"], json!([]), "{list}");
+    assert_eq!(list["own_access_closed"], true, "{list}");
+    let (_, me) = json_request(router, "GET", "/api/v1/me", &child, None).await;
+    assert_eq!(
+        me["portal_mode"], "lead",
+        "the patient portal stays closed: {me}"
+    );
+    for (method, path, body) in [
+        ("GET", request.clone(), None),
+        (
+            "POST",
+            format!("{request}/personal-data"),
+            Some(json!({ "city": "Hamburg" })),
+        ),
+        (
+            "POST",
+            format!("{request}/consent-choices"),
+            Some(json!({ "choices": all, "version": "2026-10-12", "language": "de" })),
+        ),
+        (
+            "POST",
+            format!("{request}/representation"),
+            Some(json!({ "custody": "sole_parent" })),
+        ),
+        ("POST", format!("{request}/submit"), declared()),
+    ] {
+        let (status, refused) = json_request(router, method, &path, &child, body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {refused}");
+        assert_eq!(
+            refused["code"], "lead_request_guardian_only",
+            "{path}: {refused}"
+        );
+        assert_eq!(
+            refused["error"], "lead_request_guardian_only",
+            "{path}: {refused}"
+        );
+    }
+    let (status, body) = json_request(router, "GET", "/api/v1/me/documents", &child, None).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["code"], "lead_portal_only", "{body}");
+    let active: bool = sqlx::query_scalar("SELECT is_active FROM users WHERE id = $1")
+        .bind(child_login)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(active, "restricted, not switched off");
+
+    // Staff see it and issue the child no password.
+    let (status, account) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-account"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{account}");
+    assert_eq!(account["account"]["own_login_closed"], true, "{account}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-account"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "minor_own_login_closed", "{body}");
+    let (_, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(intake["own_login_closed"], true, "{intake}");
+
+    // The mother sees no choice of the child as hers, and chooses herself.
+    let (status, own) = json_request(router, "GET", &request, &parent, None).await;
+    assert_eq!(status, StatusCode::OK, "{own}");
+    assert_eq!(own["access_kind"], "guardian");
+    assert_eq!(own["consent_form"]["choices"], Value::Null, "{own}");
+    let mine = json!({
+        "agency_processing": true,
+        "doctors_to_agency": true,
+        "data_system": true,
+        "named_recipients": false,
+        "channel_email": true,
+        "channel_threema": false,
+        "channel_whatsapp": false,
+        "channel_telegram": false
+    });
+    let (status, saved) = choose(router, lead_id, &parent, &mine).await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["chosen_by_me"], true, "{saved}");
+    // A child's choice stored later (as before the rule) still never counts.
+    sqlx::query(
+        r#"INSERT INTO consent_form_choices
+               (template_id, lead_id, choices, chosen_by, access_kind, source, language, text_version)
+           VALUES ('privacy_consents', $1, $2, $3, 'self', 'lead_portal', 'de', '2026-10-12')"#,
+    )
+    .bind(lead_id)
+    .bind(&all)
+    .bind(child_login)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (_, own) = json_request(router, "GET", &request, &parent, None).await;
+    assert_eq!(own["consent_form"]["choices"], mine, "{own}");
+    assert_eq!(own["consent_form"]["chosen_by_me"], true, "{own}");
+
+    // The child's form records the mother's choice and is signed by her.
+    let (status, generated) = json_request(
+        router,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(json!({
+            "template_id": "consent_data_release_single",
+            "lead_id": lead_id,
+            "language": "de"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id: Uuid = generated["id"].as_str().unwrap().parse().unwrap();
+    let recorded: Value = sqlx::query_scalar(
+        "SELECT generated_bindings -> '_own_consent_choice' FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded["access_kind"], "guardian", "{recorded}");
+    assert_eq!(recorded["chosen_by"], json!(guardian), "{recorded}");
+    assert_eq!(recorded["choices"], mine, "{recorded}");
+    let text = document_pdf_text(router, document_id, &pm).await;
+    assert!(text.contains("Die Auswahl hat Maria Muster"), "{text}");
+    assert!(!text.contains("Die Auswahl hat Mia"), "{text}");
+    let (status, state) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/signature-requests"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["ineligible_reason"], Value::Null, "{state}");
+
+    // A changed custody makes the next version the other variant of the same
+    // form, not a second form beside it (QA 2026-10-12, round 3).
+    let (status, version) = json_request(
+        router,
+        "POST",
+        "/api/v1/documents/generate",
+        &pm,
+        Some(json!({
+            "template_id": "consent_data_release_child",
+            "lead_id": lead_id,
+            "language": "de",
+            "replace_document_id": document_id
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version}");
+    let version_id: Uuid = version["id"].as_str().unwrap().parse().unwrap();
+    let (root, replaces): (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT version_root_document_id, replaces_document_id FROM documents WHERE id = $1",
+    )
+    .bind(version_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(root, Some(document_id));
+    assert_eq!(replaces, Some(document_id));
+
+    // Revoking the mother's access does not reopen the child's login.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/portal-guardians/{access_id}/revoke"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, list) = json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    assert_eq!(list["own_access_closed"], true, "{list}");
+
+    // A corrected date of birth opens it again.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/update"),
+        &pm,
+        Some(json!({ "date_of_birth": "1990-05-10" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (_, list) = json_request(router, "GET", "/api/v1/me/lead-requests", &child, None).await;
+    assert_eq!(list["own_access_closed"], false, "{list}");
+    assert_eq!(list["requests"][0]["access_kind"], "self", "{list}");
+    let (status, _) = json_request(router, "GET", &request, &child, None).await;
+    assert_eq!(status, StatusCode::OK);
+}

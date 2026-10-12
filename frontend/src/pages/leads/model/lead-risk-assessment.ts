@@ -69,8 +69,11 @@ export type RiskTrigger = {
   key: string;
   /** `patient` or `payer`: whose score the points add to. */
   subject: string;
-  /** `list_1` / `list_2` for the country triggers, else null. */
-  variant: "list_1" | "list_2" | null;
+  /**
+   * `list_1` / `list_2` for the country triggers; `recipient` for T16 of the payer's side when only
+   * the third-party invoice recipient has a confirmed hit (QA 2026-10-12, round 3); else null.
+   */
+  variant: "list_1" | "list_2" | "recipient" | null;
   points: number;
   /** Still true in the latest live evaluation; a fired trigger stays (sticky) either way. */
   active: boolean;
@@ -205,7 +208,8 @@ function normalizeTrigger(value: unknown): RiskTrigger | null {
   const raw = record(value);
   const key = text(raw?.key);
   if (!raw || !key) return null;
-  const variant = raw.variant === "list_1" || raw.variant === "list_2" ? raw.variant : null;
+  const variant =
+    raw.variant === "list_1" || raw.variant === "list_2" || raw.variant === "recipient" ? raw.variant : null;
   return {
     key: key.toUpperCase(),
     subject: text(raw.subject) ?? "patient",
@@ -507,7 +511,12 @@ export function riskTriggerStateLabel(
   return date ? `${fixed} ${date}` : fixed;
 }
 
-export function riskSubjectLabel(subject: string, tx: Tx): string {
+/**
+ * Whom a trigger concerns. A confirmed hit of the third-party invoice recipient alone adds to the
+ * payer's side but names the recipient (QA 2026-10-12, round 3: the T16 row said «плательщик»).
+ */
+export function riskSubjectLabel(subject: string, tx: Tx, variant: RiskTrigger["variant"] = null): string {
+  if (subject === "payer" && variant === "recipient") return tx("получатель счёта", "Rechnungsempfänger");
   if (subject === "patient") return tx("пациент", "Patient");
   if (subject === "payer") return tx("плательщик", "Zahler");
   if (subject === "representative") return tx("представитель", "Vertreter");

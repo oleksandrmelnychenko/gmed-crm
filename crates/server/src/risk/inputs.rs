@@ -207,6 +207,7 @@ pub async fn load(conn: &mut PgConnection, lead_id: Uuid) -> Result<Option<Input
         // A hit of the invoice recipient is the payer's side even while the
         // patient pays: the recipient is a third party on the money side.
         payer_hit: (third_party && flag("payer_hit")) || flag("recipient_hit"),
+        recipient_hit_only: flag("recipient_hit") && !(third_party && flag("payer_hit")),
         // A confirmation is final: its T16 stays even when the subject no
         // longer fires (e.g. the patient took over the payment).
         confirmed_hit_patient: flag("patient_hit"),

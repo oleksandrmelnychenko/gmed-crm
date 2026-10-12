@@ -37,6 +37,10 @@ pub const SUBJECT_PAYER: &str = "payer";
 
 pub const VARIANT_LIST_1: &str = "list_1";
 pub const VARIANT_LIST_2: &str = "list_2";
+/// T16 on the payer's side for a confirmed hit of the third-party invoice
+/// recipient alone (no confirmed hit of the payer): the trigger table names
+/// the recipient, not the payer (QA 2026-10-12, round 3). Points as T16.
+pub const VARIANT_RECIPIENT: &str = "recipient";
 
 /// The trigger keys (contract section 1), in table order.
 pub const TRIGGER_KEYS: [&str; 16] = [
@@ -349,6 +353,9 @@ pub struct Inputs {
     /// its bank, or the third-party invoice recipient who does not pay (owner
     /// decision 2026-10-11).
     pub payer_hit: bool,
+    /// `payer_hit` comes from the invoice recipient alone: T16 then carries
+    /// [`VARIANT_RECIPIENT`].
+    pub recipient_hit_only: bool,
     /// A confirmed hit of the patient's side, whatever fires now: its stored
     /// T16 stays (a confirmation is final, see [`merge`]).
     pub confirmed_hit_patient: bool,
@@ -532,7 +539,11 @@ pub fn evaluate(inputs: &Inputs, config: &RiskConfig) -> Vec<Fired> {
         fire("T16", SUBJECT_PATIENT, None);
     }
     if inputs.payer_hit {
-        fire("T16", SUBJECT_PAYER, None);
+        fire(
+            "T16",
+            SUBJECT_PAYER,
+            inputs.recipient_hit_only.then_some(VARIANT_RECIPIENT),
+        );
     }
     fired
 }
@@ -618,6 +629,10 @@ pub fn merge(
                     entry.points = fired.points;
                     entry.variant = fired.variant.map(str::to_string);
                     merged.raised = true;
+                } else if entry.key == "T16" {
+                    // T16's variant says who on the payer's side is hit (the
+                    // recipient alone or the payer): always the live one.
+                    entry.variant = fired.variant.map(str::to_string);
                 } else if entry.variant.is_none() && fired.variant.is_some() {
                     entry.variant = fired.variant.map(str::to_string);
                 }
@@ -1049,6 +1064,42 @@ mod tests {
             assert!(score.knockout, "{key}");
             assert_eq!(score.level, 3, "{key} {subject}");
         }
+    }
+
+    /// QA 2026-10-12 (round 3): a confirmed hit of the third-party invoice
+    /// recipient alone is T16 of the payer's side named as the recipient; a
+    /// confirmed hit of the payer keeps the plain T16, and the stored variant
+    /// follows the live one.
+    #[test]
+    fn a_recipient_hit_alone_names_the_recipient() {
+        let recipient = evaluate(
+            &Inputs {
+                payer_hit: true,
+                recipient_hit_only: true,
+                ..clean()
+            },
+            &config(),
+        );
+        let t16 = recipient.iter().find(|fired| fired.key == "T16").unwrap();
+        assert_eq!(t16.subject, SUBJECT_PAYER);
+        assert_eq!(t16.variant, Some(VARIANT_RECIPIENT));
+        assert!(t16.knockout);
+        let payer = evaluate(
+            &Inputs {
+                payer_hit: true,
+                ..third_party_person("spouse")
+            },
+            &config(),
+        );
+        let now = Utc::now();
+        let stored = merge(&[], &recipient, now, &[]).triggers;
+        let merged = merge(&stored, &payer, now, &[SUBJECT_PAYER]);
+        let t16 = merged
+            .triggers
+            .iter()
+            .find(|trigger| trigger.key == "T16")
+            .unwrap();
+        assert_eq!(t16.variant, None, "{merged:?}");
     }
 
     #[test]

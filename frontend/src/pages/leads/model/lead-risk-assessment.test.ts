@@ -24,9 +24,11 @@ import {
   riskSecondReviewerMissing,
   riskShowsPreview,
   riskStatusLabel,
+  riskSubjectLabel,
   riskSuggestedBlocks,
   riskTriggerLabel,
   riskTriggerStateLabel,
+  riskVariantLabel,
 } from "./lead-risk-assessment";
 import { normalizeFollowUpAnswers, normalizeRequestReason, normalizeStaffIdDataMarks } from "./lead-risk-intake";
 
@@ -291,5 +293,27 @@ describe("block I asks for a current identity copy (QA 2026-10-12)", () => {
     expect(riskMissingLabel("id_document_upload", ru)).toBe("актуальная копия документа личности (файл)");
     expect(riskMissingLabel("id_document_upload", de)).toBe("aktuelle Kopie des Ausweisdokuments (Datei)");
     expect(riskMissingLabel("id_document_upload", ru)).not.toContain("второй");
+  });
+});
+
+describe("T16 of the invoice recipient (QA 2026-10-12, round 3)", () => {
+  it("names the recipient, not the payer, for a confirmed hit of the recipient alone", () => {
+    const assessment = normalizeLeadRiskAssessment({
+      status: "review_required",
+      level: 3,
+      points: 0,
+      knockout: true,
+      triggers: [
+        { key: "T16", subject: "payer", variant: "recipient", points: 0, knockout: true, active: true, first_fired_at: "2026-10-12T08:00:00Z" },
+        { key: "T16", subject: "patient", variant: "somewhere", points: 0, knockout: true, active: true, first_fired_at: "2026-10-12T08:00:00Z" },
+      ],
+    });
+    const [recipient, patient] = assessment.triggers;
+    expect(recipient.variant).toBe("recipient");
+    expect(patient.variant).toBeNull();
+    expect(riskSubjectLabel(recipient.subject, ru, recipient.variant)).toBe("получатель счёта");
+    expect(riskSubjectLabel(recipient.subject, de, recipient.variant)).toBe("Rechnungsempfänger");
+    expect(riskSubjectLabel("payer", ru)).toBe("плательщик");
+    expect(riskVariantLabel("recipient", ru)).toBe("");
   });
 });

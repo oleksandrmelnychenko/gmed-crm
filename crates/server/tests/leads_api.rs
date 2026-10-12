@@ -3202,6 +3202,265 @@ async fn deleting_a_lead_scrubs_the_typed_reason_and_note() {
     assert_eq!(reason.as_deref(), Some("duplicate"));
 }
 
+/// QA 2026-10-12, A3-02 (owner decision 2026-10-12): the text of «Не подходит»
+/// → «Другое» goes to the append-only audit as its code only; the lead history
+/// keeps it until the lead is deleted and anonymised, which scrubs the history
+/// and — through the narrow erasure exception of `audit_log` — the free text of
+/// audit rows written before the rule. Every other change of the audit log is
+/// still refused.
+#[tokio::test]
+async fn deleting_a_lead_scrubs_the_not_qualified_text_from_history_and_audit() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    let pm = app.auth_header("patient_manager");
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let typed =
+        format!("Ben Muster {tag}: Diagnose Prostatakarzinom, will nicht zahlen (synthetisch)");
+    let typed_note = format!("Interne Notiz {tag}: Rückruf bei Anna Muster");
+    let lead_id = insert_status_lead(&app, &tag, "in_progress").await;
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/qualify"),
+        &pm,
+        Some(json!({ "status": "not_qualified", "reason": typed })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // (1) The audit keeps the code and that a text was typed, never the text.
+    let audit: Value = sqlx::query_scalar(
+        "SELECT context FROM audit_log WHERE action = 'qualify_lead' AND entity_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audit["reason"], "other", "{audit}");
+    assert_eq!(audit["reason_free_text"], true, "{audit}");
+    // The lead and its history keep the text while the lead lives.
+    let (_, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert_eq!(detail["failed_outcome"]["reason"], json!(typed), "{detail}");
+    assert!(detail["lifecycle"].to_string().contains(&tag), "{detail}");
+
+    // Rows written before the rule carry the text: the scrub reaches them.
+    let order_id = Uuid::new_v4();
+    let legacy: Vec<i64> = {
+        let mut ids = Vec::new();
+        for (action, entity_type, entity_id, context) in [
+            (
+                "qualify_lead",
+                "lead",
+                lead_id,
+                json!({ "status": "not_qualified", "previous_status": "new", "reason": typed }),
+            ),
+            (
+                "resolve_failed_lead",
+                "lead",
+                lead_id,
+                json!({ "resolution": "archive", "reason": typed, "note": typed_note,
+                        "failed_from_status": "not_qualified" }),
+            ),
+            (
+                "cancel_order",
+                "order",
+                order_id,
+                json!({ "status": "cancelled", "source_lead_id": lead_id, "lead_reason": typed,
+                        "cancelled_service_ids": [] }),
+            ),
+        ] {
+            let id: i64 = sqlx::query_scalar(
+                r#"INSERT INTO audit_log (action, entity_type, entity_id, context, created_at)
+                   VALUES ($1, $2, $3, $4, now() - interval '1 day')
+                   RETURNING id"#,
+            )
+            .bind(action)
+            .bind(entity_type)
+            .bind(entity_id)
+            .bind(context)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            ids.push(id);
+        }
+        ids
+    };
+    // An unrelated lead's row stays untouched.
+    let other_lead = insert_status_lead(&app, &format!("{tag}o"), "new").await;
+    let untouched: i64 = sqlx::query_scalar(
+        r#"INSERT INTO audit_log (action, entity_type, entity_id, context)
+           VALUES ('qualify_lead', 'lead', $1, $2) RETURNING id"#,
+    )
+    .bind(other_lead)
+    .bind(json!({ "status": "not_qualified", "reason": typed }))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+
+    // The audit log stays append-only outside the erasure.
+    for statement in [
+        "UPDATE audit_log SET context = jsonb_set(context, '{reason}', '\"x\"') WHERE id = $1",
+        "DELETE FROM audit_log WHERE id = $1",
+    ] {
+        let refused = sqlx::query(statement).bind(legacy[0]).execute(pool).await;
+        assert!(refused.is_err(), "{statement} must be refused");
+    }
+    // Inside it, only text values of `context` may change: no other column,
+    // no key, no flag, no delete.
+    for statement in [
+        "UPDATE audit_log SET action = 'other_action' WHERE id = $1",
+        "UPDATE audit_log SET created_at = now() WHERE id = $1",
+        "UPDATE audit_log SET context = context - 'reason' WHERE id = $1",
+        "UPDATE audit_log SET context = jsonb_set(context, '{reason}', 'true') WHERE id = $1",
+        "DELETE FROM audit_log WHERE id = $1",
+    ] {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        let refused = sqlx::query(statement)
+            .bind(legacy[0])
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            refused.is_err(),
+            "{statement} must be refused in the erasure"
+        );
+        tx.rollback().await.unwrap();
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/leads/{lead_id}/failed-flow"),
+        &pm,
+        Some(json!({ "resolution": "delete", "reason": typed, "note": typed_note })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains(&tag), "{body}");
+
+    // (2) The lead history keeps the code only.
+    let history: Vec<(String, Option<String>, Value)> = sqlx::query_as(
+        r#"SELECT transition_kind, note, metadata FROM workflow_lifecycle_events
+           WHERE entity_type = 'lead' AND entity_id = $1"#,
+    )
+    .bind(lead_id)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|(kind, note, _)| kind == "status_change" && note.as_deref() == Some("other")),
+        "{history:?}"
+    );
+    for (_, note, metadata) in &history {
+        let row = format!("{note:?} {metadata}");
+        assert!(!row.contains(&tag), "{row}");
+    }
+    let (_, detail) =
+        json_request(&app, "GET", &format!("/api/v1/leads/{lead_id}"), &pm, None).await;
+    assert!(!detail.to_string().contains(&tag), "{detail}");
+
+    // (3) No audit row of the lead holds the text any more; the rows, their
+    // actions, times and codes stay.
+    let leaking: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM audit_log
+           WHERE (entity_id = $1 OR context ->> 'source_lead_id' = $1::text)
+             AND context::text LIKE '%' || $2 || '%'"#,
+    )
+    .bind(lead_id)
+    .bind(&tag)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(leaking, 0);
+    for id in &legacy {
+        let (context, created_at_old): (Value, bool) = sqlx::query_as(
+            "SELECT context, created_at < now() - interval '12 hours' FROM audit_log WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert!(created_at_old, "the time stays");
+        for key in ["reason", "lead_reason", "note"] {
+            if context.get(key).is_some() {
+                assert_eq!(context[key], "[erased]", "{key}: {context}");
+            }
+        }
+    }
+    let cancel: Value = sqlx::query_scalar("SELECT context FROM audit_log WHERE id = $1")
+        .bind(legacy[2])
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(cancel["status"], "cancelled", "{cancel}");
+    assert_eq!(cancel["cancelled_service_ids"], json!([]), "{cancel}");
+    // The deletion's own row says what it scrubbed.
+    let resolution: Value = sqlx::query_scalar(
+        r#"SELECT context FROM audit_log
+           WHERE action = 'resolve_failed_lead' AND entity_id = $1
+             AND context ->> 'resolution' = 'delete'"#,
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(resolution["reason"], "other", "{resolution}");
+    assert_eq!(resolution["reason_free_text"], true, "{resolution}");
+    assert_eq!(resolution["note_present"], true, "{resolution}");
+    assert!(
+        resolution["scrubbed_free_text"]["audit_rows"]
+            .as_u64()
+            .is_some_and(|rows| rows >= 3),
+        "{resolution}"
+    );
+    assert!(
+        resolution["scrubbed_free_text"]["lifecycle_events"]
+            .as_u64()
+            .is_some_and(|rows| rows >= 1),
+        "{resolution}"
+    );
+    // Another lead's row is not touched.
+    let other: Value = sqlx::query_scalar("SELECT context FROM audit_log WHERE id = $1")
+        .bind(untouched)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(other["reason"], json!(typed), "{other}");
+    // The setting is off again after the scrub.
+    let setting: Option<String> =
+        sqlx::query_scalar("SELECT current_setting('gmed.dsgvo_erasure', true)")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_ne!(setting.as_deref(), Some("on"));
+
+    // The database's own rule for free text matches the server's.
+    for (reason, free) in [
+        ("costs", false),
+        ("other", false),
+        ("auto_purge_storage_limitation", false),
+        ("  duplicate ", false),
+        ("", false),
+        ("Umzug ins Ausland", true),
+        ("[erased]", true),
+    ] {
+        let sql: bool = sqlx::query_scalar("SELECT gmed_lead_failure_reason_is_free_text($1)")
+            .bind(reason)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(sql, free, "{reason:?}");
+    }
+}
+
 /// A document row with a stored file, as the upload would leave it.
 async fn insert_stored_document(
     app: &TestApp,

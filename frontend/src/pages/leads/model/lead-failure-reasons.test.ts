@@ -9,6 +9,7 @@ import {
   leadFailureReasonLabel,
   leadFailureReasonOtherLabel,
   leadFailureReasonValue,
+  leadLifecycleNoteLabel,
 } from "./lead-failure-reasons";
 
 const ru = (text: string) => text;
@@ -72,5 +73,19 @@ describe("the failure reason of a lead", () => {
     expect(leadFailureReasonError({ choice: "other", text: "x".repeat(501) }, ru)).toBe("Не более 500 символов");
     expect(leadFailureReasonError({ choice: "other", text: "Umzug" }, de)).toBeNull();
     expect(leadFailureReasonError({ choice: "duplicate", text: "" }, ru)).toBeNull();
+  });
+});
+
+describe("the notes of the lead history (QA 2026-10-12, A3-02)", () => {
+  it("reads the reason of a status change, an archiving or a deletion as its label", () => {
+    expect(leadLifecycleNoteLabel("status_change", "costs", ru)).toBe("Не устраивает стоимость");
+    expect(leadLifecycleNoteLabel("deleted", "other", ru)).toBe("Другое");
+    expect(leadLifecycleNoteLabel("deleted", "other", de)).toBe("Andere");
+    expect(leadLifecycleNoteLabel("archived", "Umzug ins Ausland", de)).toBe("Umzug ins Ausland");
+    expect(leadLifecycleNoteLabel("status_change", null, ru)).toBeNull();
+    expect(leadLifecycleNoteLabel("status_change", "  ", ru)).toBeNull();
+    // Other entries keep their note as it is.
+    expect(leadLifecycleNoteLabel("converted", "Lead converted to patient", ru)).toBe("Lead converted to patient");
+    expect(leadLifecycleNoteLabel("converted", "other", ru)).toBe("other");
   });
 });

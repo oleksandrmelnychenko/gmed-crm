@@ -92,7 +92,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
                   <span className="font-medium text-foreground">{riskTriggerLabel(trigger.key, tx)}</span>
                   {variant ? <span className="text-muted-foreground"> · {variant}</span> : null}
                 </td>
-                <td className="py-1.5 pr-3 align-top">{riskSubjectLabel(trigger.subject, tx)}</td>
+                <td className="py-1.5 pr-3 align-top">{riskSubjectLabel(trigger.subject, tx, trigger.variant)}</td>
                 <td className="py-1.5 pr-3 text-right align-top font-semibold tabular-nums">
                   {knockout ? <span className="text-rose-700 dark:text-rose-300">K.o.</span> : trigger.points}
                 </td>
@@ -263,10 +263,16 @@ export function LeadRiskAssessmentPanel({
         "Die Freigabe hebt das Zurückhalten von Unterschriften, Qualifizierung und Konvertierung auf. Ein neuer Auslöser oder mehr Punkte heben sie wieder auf.",
       ) + fourEyes;
     }
-    return tx(
-      "Отклонение ничего не отправляет пациенту; позже его можно заменить разрешением.",
-      "Die Ablehnung wird dem Patienten nicht mitgeteilt; später kann eine Freigabe folgen.",
-    ) + fourEyes;
+    // With a confirmed sanctions hit no permission can follow (QA 2026-10-12, round 3).
+    return (assessment.sanctions_confirmed
+      ? tx(
+          "Отклонение ничего не отправляет пациенту. При подтверждённом совпадении с санкционным списком разрешение невозможно.",
+          "Die Ablehnung wird dem Patienten nicht mitgeteilt. Bei einem bestätigten Treffer auf einer Sanktionsliste ist keine Freigabe möglich.",
+        )
+      : tx(
+          "Отклонение ничего не отправляет пациенту; позже его можно заменить разрешением.",
+          "Die Ablehnung wird dem Patienten nicht mitgeteilt; später kann eine Freigabe folgen.",
+        )) + fourEyes;
   })();
 
   return (

@@ -312,11 +312,12 @@ async fn send_login_email(
     if let Err(response) = require_sender(&auth, &body) {
         return response;
     }
-    let row = match sqlx::query(
+    let row = match sqlx::query(&format!(
         r#"SELECT u.email, u.name, u.is_active, u.password_hash,
                   l.qualification_status, l.compliance_status, l.created_at,
                   l.converted_patient_id, l.primary_language, l.first_name, l.last_name,
-                  (l.portal_user_id IS NOT DISTINCT FROM u.id) AS own_login
+                  (l.portal_user_id IS NOT DISTINCT FROM u.id) AS own_login,
+                  {} AS own_login_closed
            FROM leads l
            JOIN users u ON u.id = $2
            WHERE l.id = $1
@@ -328,7 +329,8 @@ async fn send_login_email(
                        AND a.kind = 'guardian' AND a.revoked_at IS NULL
                  )
              )"#,
-    )
+        crate::routes::lead_portal_intake::OWN_LOGIN_CLOSED_SQL
+    ))
     .bind(lead_id)
     .bind(body.user_id)
     .fetch_optional(&state.db)
@@ -347,6 +349,11 @@ async fn send_login_email(
         );
     }
     let own_login = row.try_get::<bool, _>("own_login").unwrap_or(false);
+    // The own login of a minor whose parents have access gets no sign-in
+    // e-mail (QA 2026-10-12, A3-01).
+    if own_login && row.try_get::<bool, _>("own_login_closed").unwrap_or(false) {
+        return crate::routes::lead_portal_account::minor_own_login_closed();
+    }
     let recipient_name = if own_login {
         let lead_name = format!(
             "{} {}",

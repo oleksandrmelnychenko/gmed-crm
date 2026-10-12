@@ -13,7 +13,11 @@
 //!   only — staff can neither set nor change a choice). Every save is a new
 //!   row of `consent_form_choices` (history; the newest counts). For a minor
 //!   the parent or guardian with access chooses for the child (QA 2026-10-12,
-//!   A2-06).
+//!   A2-06); only such a choice counts (A3-01): the lead's own login of a
+//!   minor saves nothing ([`BY_GUARDIAN`]), and a choice the lead's own login
+//!   saved while the person was under 18 (by the date of birth on file) is
+//!   ignored everywhere — the cabinet, the generated form, the electronic
+//!   signature ([`current_for`]).
 //! * A choice needs the three consents GMED's service runs on
 //!   ([`ConsentChoices::has_core`]: processing by GMED, the doctors' records
 //!   to GMED, storage in GMED's data system). An empty or partial "choice" is
@@ -69,6 +73,10 @@ pub const CORE_REQUIRED: &str = "consent_core_required";
 /// Refusal of an electronic package: the person who chose the options is not
 /// among the client signers.
 pub const CHOOSER_MUST_SIGN: &str = "consent_chooser_must_sign";
+/// Refusal of a save in the cabinet: the lead's own login of a minor; a
+/// parent or the guardian chooses with their own access (QA 2026-10-12,
+/// A3-01).
+pub const BY_GUARDIAN: &str = "consent_choice_by_guardian";
 
 /// The options of the form, in the order it prints them.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,7 +214,10 @@ pub fn is_child_form(template: Option<&str>) -> bool {
 
 /// Why the document cannot be signed electronically as it is, read from the
 /// document alone: a consent form generated without the person's own choice,
-/// or with a choice that lacks a consent the service runs on.
+/// or with a choice that lacks a consent the service runs on. The minor's
+/// form counts only a parent's or the guardian's choice: one the lead's own
+/// login saved (`access_kind = self`, generated before 2026-10-12's QA round
+/// A3-01) counts as none ([`MISSING`]).
 pub fn electronic_signing_refusal(
     template: Option<&str>,
     bindings: Option<&Value>,
@@ -216,25 +227,45 @@ pub fn electronic_signing_refusal(
     }
     match OwnConsentChoice::from_bindings(bindings) {
         None => Some(MISSING),
+        // Older records without `access_kind` are not judged by it.
+        Some(choice)
+            if is_child_form(template) && choice.access_kind.as_deref() == Some("self") =>
+        {
+            Some(MISSING)
+        }
         Some(choice) if !choice.choices.has_core() => Some(INCOMPLETE),
         Some(_) => None,
     }
 }
 
+/// The newest choice that counts. A choice of the lead's own login made while
+/// the person was a minor — under 18 on the day of the choice (German time) by
+/// the date of birth on file now — is ignored (QA 2026-10-12, A3-01): only a
+/// parent's or the guardian's choice counts for a minor, and a child's old
+/// choice never comes back as the parent's. A corrected date of birth
+/// re-judges it.
 const CURRENT_SQL: &str = r#"
-    SELECT id, choices, chosen_at, source, access_kind, chosen_by, lead_id
-    FROM consent_form_choices
-    WHERE template_id = 'privacy_consents'
-      AND (lead_id = $1
-           OR patient_id = $2
-           OR lead_id IN (SELECT l.id FROM leads l
-                          WHERE l.converted_patient_id = $2 OR l.prospect_patient_id = $2))
-    ORDER BY seq DESC
+    SELECT c.id, c.choices, c.chosen_at, c.source, c.access_kind, c.chosen_by, c.lead_id
+    FROM consent_form_choices c
+    LEFT JOIN leads subject ON subject.id = c.lead_id
+    WHERE c.template_id = 'privacy_consents'
+      AND (c.lead_id = $1
+           OR c.patient_id = $2
+           OR c.lead_id IN (SELECT l.id FROM leads l
+                            WHERE l.converted_patient_id = $2 OR l.prospect_patient_id = $2))
+      AND NOT (
+          c.access_kind = 'self'
+          AND subject.date_of_birth IS NOT NULL
+          AND subject.date_of_birth
+              > ((c.chosen_at AT TIME ZONE 'Europe/Berlin')::date - INTERVAL '18 years')
+      )
+    ORDER BY c.seq DESC
     LIMIT 1"#;
 
 /// The newest own choice of a lead or patient: the lead's, the patient's, or
 /// that of a lead the patient came from (a choice made in the cabinet stays
-/// with the patient after the conversion).
+/// with the patient after the conversion). A minor's own choice does not
+/// count (see [`CURRENT_SQL`]).
 pub async fn current_for<'e, E>(
     executor: E,
     lead_id: Option<Uuid>,
@@ -576,6 +607,42 @@ mod tests {
                 [(id, Some("consent_data_release_child"), Some(&bindings))],
                 &["other.parent@example.com", "maria.parent@example.com"],
             ),
+            None
+        );
+    }
+
+    /// QA 2026-10-12, A3-01: the minor's form records only a parent's or the
+    /// guardian's choice; one the child's own login saved counts as none.
+    #[test]
+    fn a_childs_own_choice_never_makes_the_minors_form_signable() {
+        let mut own = choice();
+        own.access_kind = Some("self".into());
+        let own_bindings = json!({ BINDING_KEY: own.binding() });
+        let mut parent = choice();
+        parent.access_kind = Some("guardian".into());
+        let parent_bindings = json!({ BINDING_KEY: parent.binding() });
+        for template in CHILD_TEMPLATES {
+            assert_eq!(
+                electronic_signing_refusal(Some(template), Some(&own_bindings)),
+                Some(MISSING),
+                "{template}"
+            );
+            assert_eq!(
+                electronic_signing_refusal(Some(template), Some(&parent_bindings)),
+                None,
+                "{template}"
+            );
+            // A record without `access_kind` (older documents) is not judged by it.
+            let older = json!({ BINDING_KEY: choice().binding() });
+            assert_eq!(
+                electronic_signing_refusal(Some(template), Some(&older)),
+                None,
+                "{template}"
+            );
+        }
+        // The adult's own choice stays the adult's.
+        assert_eq!(
+            electronic_signing_refusal(Some(TEMPLATE), Some(&own_bindings)),
             None
         );
     }

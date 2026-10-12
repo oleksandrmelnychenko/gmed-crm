@@ -24,8 +24,12 @@ export type ConsentFormText = {
   save: string;
   saving: string;
   savedAt: (date: string) => string;
+  /** The choice the other parent or guardian saved (QA 2026-10-12, A3-01). */
+  savedByOtherAt: (date: string) => string;
   notSaved: string;
   unsaved: string;
+  /** The own login of a minor: only a parent or the guardian chooses (QA 2026-10-12, A3-01). */
+  byGuardianOnly: string;
 };
 
 type ChildTexts = Pick<ConsentFormText, "intro" | "options" | "channelsTitle" | "coreHint">;
@@ -57,8 +61,12 @@ const de: ConsentFormText = {
   saving: "Wird gespeichert …",
   savedAt: (date) =>
     `Ihre Auswahl vom ${date} ist gespeichert. Sie können sie jederzeit ändern; ein schon erstelltes Formular erstellt GMED dann neu.`,
+  savedByOtherAt: (date) =>
+    `Die Auswahl vom ${date} hat der andere Elternteil bzw. Vertreter gespeichert. Speichern Sie Ihre eigene Auswahl, gilt diese; unterschreiben muss, wer zuletzt gewählt hat.`,
   notSaved: "Noch keine Auswahl gespeichert.",
   unsaved: "Ihre Änderungen sind noch nicht gespeichert.",
+  byGuardianOnly:
+    "Für Minderjährige wählen die Eltern bzw. der Vormund mit ihrem eigenen Zugang, wozu sie einwilligen. Hier ist nichts auszuwählen.",
 };
 
 const deChild: ChildTexts = {
@@ -108,8 +116,12 @@ const en: ConsentFormText = {
   saving: "Saving …",
   savedAt: (date) =>
     `Your choice of ${date} is saved. You can change it at any time; GMED staff then prepare a form already made anew.`,
+  savedByOtherAt: (date) =>
+    `The choice of ${date} was saved by the other parent or representative. If you save your own choice, yours counts; whoever chose last signs.`,
   notSaved: "No choice saved yet.",
   unsaved: "Your changes are not saved yet.",
+  byGuardianOnly:
+    "For a minor, the parents or the guardian choose what they consent to with their own access. There is nothing to choose here.",
 };
 
 const enChild: ChildTexts = {
@@ -157,8 +169,12 @@ const uk: ConsentFormText = {
   saving: "Зберігаємо …",
   savedAt: (date) =>
     `Ваш вибір від ${date} збережено. Ви можете змінити його будь-коли; уже створену форму працівник GMED тоді створить заново.`,
+  savedByOtherAt: (date) =>
+    `Вибір від ${date} зберіг інший з батьків або представник. Якщо ви збережете власний вибір, діятиме ваш; підписує той, хто обрав останнім.`,
   notSaved: "Вибір ще не збережено.",
   unsaved: "Зміни ще не збережено.",
+  byGuardianOnly:
+    "За неповнолітнього батьки або опікун обирають, на що погоджуються, через свій власний доступ. Тут нічого обирати не потрібно.",
 };
 
 const ukChild: ChildTexts = {
@@ -206,8 +222,12 @@ const ru: ConsentFormText = {
   saving: "Сохраняем …",
   savedAt: (date) =>
     `Ваш выбор от ${date} сохранён. Вы можете изменить его в любой момент; уже созданную форму сотрудник GMED тогда создаст заново.`,
+  savedByOtherAt: (date) =>
+    `Выбор от ${date} сохранил другой родитель или представитель. Если вы сохраните свой выбор, будет действовать ваш; подписывает тот, кто выбрал последним.`,
   notSaved: "Выбор ещё не сохранён.",
   unsaved: "Изменения ещё не сохранены.",
+  byGuardianOnly:
+    "За несовершеннолетнего родители или опекун выбирают, на что они соглашаются, через свой собственный доступ. Здесь ничего выбирать не нужно.",
 };
 
 const ruChild: ChildTexts = {

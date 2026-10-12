@@ -273,6 +273,11 @@ export type LeadRequestConsentForm = {
   version: string;
   choices: ConsentFormChoices | null;
   chosen_at: string | null;
+  /**
+   * Whether this login saved the choice; `false` when the other parent or guardian did (QA
+   * 2026-10-12, A3-01). `null` without a choice, absent on an older server.
+   */
+  chosen_by_me?: boolean | null;
 };
 
 export type LeadRequestDocument = {
@@ -712,9 +717,25 @@ export type PersonalDataPatch = Partial<Record<keyof LeadRequestPersonalData, st
 const base = (leadId: string) => `/me/lead-requests/${encodeURIComponent(leadId)}`;
 
 export async function fetchMyLeadRequests(): Promise<LeadRequest[]> {
-  const result = await apiFetch<{ requests: LeadRequest[] }>("/me/lead-requests", { forceFresh: true });
-  return result.requests ?? [];
+  return (await fetchMyLeadRequestList()).requests;
 }
+
+/**
+ * The requests of the login and whether it is the own login of a minor whose parents have access
+ * (QA 2026-10-12, A3-01): such a login reaches no request; the cabinet then says, neutrally, that
+ * the parents or the legal representative fill it in. `ownAccessClosed` is false on an older server.
+ */
+export async function fetchMyLeadRequestList(): Promise<{ requests: LeadRequest[]; ownAccessClosed: boolean }> {
+  const result = await apiFetch<{ requests?: LeadRequest[]; own_access_closed?: boolean }>("/me/lead-requests", {
+    forceFresh: true,
+  });
+  return { requests: result.requests ?? [], ownAccessClosed: result.own_access_closed === true };
+}
+
+/** The refusal of every request call of a minor's own login while the parents have access. */
+export const LEAD_REQUEST_GUARDIAN_ONLY = "lead_request_guardian_only";
+/** The refusal of a consent choice of a minor's own login: a parent or the guardian chooses. */
+export const CONSENT_CHOICE_BY_GUARDIAN = "consent_choice_by_guardian";
 
 export function saveLeadPersonalData(leadId: string, patch: PersonalDataPatch): Promise<LeadRequest> {
   return apiFetch<LeadRequest>(`${base(leadId)}/personal-data`, {

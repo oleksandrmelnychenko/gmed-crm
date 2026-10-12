@@ -118,6 +118,8 @@ export type LeadRequestText = {
   loadFailed: string;
   retry: string;
   noRequest: string;
+  /** The own login of a minor whose parents have access (QA 2026-10-12, A3-01): neutral, no reason. */
+  guardianOnly: string;
   requestFor: string;
   language: string;
   sectionPerson: string;
@@ -855,6 +857,8 @@ const de: LeadRequestText = {
   loadFailed: "Die Anfrage konnte nicht geladen werden.",
   retry: "Erneut versuchen",
   noRequest: "Für Ihr Konto ist derzeit keine offene Anfrage vorhanden.",
+  guardianOnly:
+    "Diese Anfrage füllen Ihre Eltern bzw. Ihr gesetzlicher Vertreter mit ihrem eigenen Zugang aus. Bei Fragen wenden Sie sich bitte an GMED.",
   requestFor: "Anfrage für",
   language: "Sprache",
   sectionPerson: "Persönliche Daten",
@@ -1356,6 +1360,8 @@ const ru: LeadRequestText = {
   loadFailed: "Не удалось загрузить заявку.",
   retry: "Повторить",
   noRequest: "Для вашего аккаунта сейчас нет открытой заявки.",
+  guardianOnly:
+    "Эту заявку заполняют ваши родители или законный представитель через свой собственный доступ. Если у вас есть вопросы, обратитесь в GMED.",
   requestFor: "Заявка для",
   language: "Язык",
   sectionPerson: "Личные данные",
@@ -1855,6 +1861,8 @@ const uk: LeadRequestText = {
   loadFailed: "Не вдалося завантажити заявку.",
   retry: "Спробувати ще раз",
   noRequest: "Для вашого акаунта зараз немає відкритої заявки.",
+  guardianOnly:
+    "Цю заявку заповнюють ваші батьки або законний представник через свій власний доступ. Якщо у вас є запитання, зверніться до GMED.",
   requestFor: "Заявка для",
   language: "Мова",
   sectionPerson: "Особисті дані",
@@ -2354,6 +2362,8 @@ const en: LeadRequestText = {
   loadFailed: "The request could not be loaded.",
   retry: "Try again",
   noRequest: "There is no open request for your account at the moment.",
+  guardianOnly:
+    "Your parents or your legal representative fill in this request with their own access. If you have any questions, please contact GMED.",
   requestFor: "Request for",
   language: "Language",
   sectionPerson: "Personal details",

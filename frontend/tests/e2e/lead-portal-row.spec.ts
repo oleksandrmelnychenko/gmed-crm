@@ -360,3 +360,68 @@ test("a minor lead has no quick sheet button: the sheets are made per parent in 
   await expect(adult.getByTestId("lead-gwg-sheet")).toHaveText("Doku-Bogen GwG");
   expect(calls.filter((call) => call.path === "/documents/generate")).toEqual([]);
 });
+
+test("a child's own login is closed while the parents have access; revoking asks in the app's dialog (QA 2026-10-12)", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const calls = await setup(page, "ru", {}, leads[0].id);
+  const accessId = "22222222-2222-4222-8222-222222222222";
+  const intake = {
+    ...minorPortalIntake(leads[0].id),
+    own_login_closed: true,
+    guardians: {
+      links: [
+        {
+          access_id: accessId,
+          user_id: "u-anna",
+          trusted_contact_id: "11111111-1111-4111-8111-111111111111",
+          name: "Anna Muster",
+          email: "anna.muster@example.com",
+          is_active: true,
+          password_change_pending: false,
+          last_login_at: null,
+          created_at: "2026-10-05T12:00:00Z",
+          revoked_at: null,
+          revoked_reason: null,
+        },
+      ],
+      candidates: [
+        {
+          trusted_contact_id: "11111111-1111-4111-8111-111111111111",
+          name: "Anna Muster",
+          relation: "parent",
+          email: "anna.muster@example.com",
+          access_id: accessId,
+        },
+      ],
+    },
+  };
+  // Registered after setup, so it wins for the child's portal state.
+  await page.route((url) => url.pathname === `/api/v1/leads/${leads[0].id}/portal-intake`, (route) =>
+    route.fulfill({ json: intake }));
+  await page.route((url) => url.pathname === `/api/v1/leads/${leads[0].id}/portal-guardians/${accessId}/revoke`, (route) => {
+    calls.push({ method: route.request().method(), path: `/portal-guardians/${accessId}/revoke`, body: null });
+    return route.fulfill({ json: { access_id: accessId, login_deactivated: true } });
+  });
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => {
+    nativeDialogs += 1;
+    void dialog.dismiss();
+  });
+  await page.goto("/leads");
+  await page.getByTestId(`lead-expand-${leads[0].id}`).first().click();
+  const minor = page.getByTestId("lead-portal-access").first();
+  await expect(minor.getByTestId("lead-portal-own-login-closed")).toContainText("Собственный вход ребёнка закрыт");
+  // No password and no sign-in e-mail for the child's own login.
+  await expect(minor.getByRole("button", { name: "Новый пароль" })).toHaveCount(1);
+  await expect(minor.getByTestId("lead-guardian-access").getByRole("button", { name: "Новый пароль" })).toHaveCount(1);
+  await expect(minor.getByTestId("lead-portal-send-email")).toHaveCount(0);
+
+  await minor.getByTestId("lead-guardian-revoke").click();
+  const question = page.getByTestId("lead-guardian-revoke-dialog");
+  await expect(question).toContainText("Отозвать доступ родителя к этой заявке?");
+  await expect(question).toContainText("Anna Muster больше не сможет открыть эту заявку");
+  await question.getByRole("button", { name: "Отозвать", exact: true }).click();
+  await expect(question).toHaveCount(0);
+  expect(calls.filter((call) => call.path.endsWith("/revoke"))).toHaveLength(1);
+  expect(nativeDialogs).toBe(0);
+});

@@ -160,6 +160,45 @@ state.audit_sender.try_send(audit::domain_diff_event(
 
 `audit_log` під цей виняток не підпадає: туди персональних даних пацієнта не кладуть (див. «Випадок 3»). Тест: `task_history_stays_append_only_except_for_text_in_the_erasure` (`crates/server/tests/admin_compliance_api.rs`) — звичайне оновлення відхиляється, у стиранні — лише зміна тексту.
 
+## Вільний текст про лід у `audit_log` і виняток для видалення (Art. 17 DSGVO)
+
+QA 2026-10-12 (A3-02): текст, який персонал набрав у «Не подходит» → «Другое», потрапляв в аудит (`qualify_lead`, `context.reason`) і після «Удалить и анонимизировать» лишався там — із ім'ям і діагнозом. Так само вільна причина й внутрішня нотатка архівування (`resolve_failed_lead`, `reason` / `note`) і їхня копія в скасуванні замовлень ліда (`cancel_order`, `lead_reason`).
+
+**Від тепер** аудит такого тексту не отримує: `reason` — лише код зі списку або `other` (`leads::anonymised_failure_reason`), поруч прапорці `reason_free_text` і (для `resolve_failed_lead`) `note_present`; сам текст живе лише в рядку ліда й в історії ліда (`workflow_lifecycle_events.note`), які видалення ліда очищує. Realtime-подія `lead.failed_resolved` теж несе лише код.
+
+**Для рядків, записаних раніше**, власник 2026-10-12 затвердив виняток, вузький так само, як для історії задач (міграція `20261012194730_audit_log_erasure_text_scrub.sql`):
+
+- діє лише всередині транзакції видалення ліда: `leads::scrub_lead_free_text_in_tx` (викликає `anonymize_lead_pii` — ручне видалення, правило 14 днів, sweeper архіву, стирання пацієнта з його лідами) вмикає `set_config('gmed.dsgvo_erasure', 'on', true)` лише на час своїх `UPDATE` і одразу вимикає; після коміту чи відкату налаштування зникає саме;
+- тригер `prevent_audit_mutation` дозволяє лише `UPDATE` і лише зміну текстових значень `context` (`gmed_jsonb_only_text_changed`): ті самі ключі, структура, числа, прапорці й `null`; `action`, `entity_*`, `user_id`, `created_at`, `old_value`, `new_value`, `ip_address` не змінюються; `DELETE` — як і раніше лише sweeper-у зберігання (`gmed.audit_retention_cleanup`);
+- замінюється лише вільний текст: `reason` і `lead_reason`, що не є кодом (`gmed_lead_failure_reason_is_free_text` у БД — те саме правило, що `leads::failure_reason_is_free_text`), і будь-яка `note`, — на маркер `[erased]`; коди лишаються. Рядки — `qualify_lead` і `resolve_failed_lead` ліда та `cancel_order` замовлень із `context.source_lead_id` цього ліда;
+- сам факт фіксується в незмінному журналі: рядок видалення (`resolve_failed_lead`, `auto_purge_lead`, …) несе `scrubbed_free_text` з лічильниками `audit_rows`, `lifecycle_events`, `realtime_events`;
+- лідів, видалених до міграції, міграція очищує один раз тим самим правилом (історія ліда й рядки аудиту), у своїй транзакції з тим самим налаштуванням.
+
+Тест: `deleting_a_lead_scrubs_the_not_qualified_text_from_history_and_audit` (`crates/server/tests/leads_api.rs`) — поза видаленням `UPDATE` і `DELETE` відхиляються, всередині — відхиляються зміна інших колонок, ключів, нетекстових значень і `DELETE`; після видалення жоден рядок аудиту ліда не містить тексту, рядки й коди лишилися, рядок іншого ліда не змінено.
+
+Перевірка, чи лишився вільний текст (лише читання):
+
+```sql
+-- Рядки аудиту з вільним текстом про лід (до видалення ліда це очікувано).
+SELECT a.id, a.created_at, a.action, a.entity_type, a.entity_id,
+       COALESCE(a.context ->> 'source_lead_id', a.entity_id::text) AS lead_id,
+       l.qualification_status
+FROM audit_log a
+LEFT JOIN leads l
+       ON l.id = COALESCE((a.context ->> 'source_lead_id')::uuid, a.entity_id)
+WHERE ((a.entity_type = 'lead' AND a.action IN ('qualify_lead', 'resolve_failed_lead'))
+       OR (a.entity_type = 'order' AND a.action = 'cancel_order'))
+  AND ((gmed_lead_failure_reason_is_free_text(a.context ->> 'reason')
+        AND a.context ->> 'reason' <> '[erased]')
+       OR (gmed_lead_failure_reason_is_free_text(a.context ->> 'lead_reason')
+           AND a.context ->> 'lead_reason' <> '[erased]')
+       OR (jsonb_typeof(a.context -> 'note') = 'string'
+           AND a.context ->> 'note' <> '[erased]'))
+ORDER BY a.created_at;
+```
+
+Для видалених лідів (`qualification_status = 'deleted'`) запит має повертати порожньо.
+
 ## Як перевірити покриття зараз
 
 ```bash

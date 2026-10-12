@@ -5,12 +5,22 @@ import {
   leadConsentFormTemplate,
   orderClientSignatureState,
   signatureNeedsProof,
+  versionsSameForm,
 } from "./wizard-document-signing";
 
 describe("the consent form the wizard creates (QA 2026-10-12, A2-06)", () => {
   it("creates the adult form for an adult whatever the custody says", () => {
     expect(leadConsentFormTemplate(false, null)).toBe("privacy_consents");
     expect(leadConsentFormTemplate(false, "sole_parent")).toBe("privacy_consents");
+  });
+  it("versions the consent form across its variants instead of adding a second one (round 3)", () => {
+    expect(versionsSameForm("consent_data_release_child", "consent_data_release_single")).toBe(true);
+    expect(versionsSameForm("privacy_consents", "consent_data_release_child")).toBe(true);
+    expect(versionsSameForm("consent_data_release_single", "consent_data_release_single")).toBe(true);
+    expect(versionsSameForm(null, "consent_data_release_child")).toBe(true);
+    expect(versionsSameForm("confidentiality_release", "consent_data_release_child")).toBe(false);
+    expect(versionsSameForm("privacy_consents", "enhanced_due_diligence")).toBe(false);
+    expect(versionsSameForm("enhanced_due_diligence", "enhanced_due_diligence")).toBe(true);
   });
   it("creates the child's form for a minor, signed by the parents or the guardian", () => {
     expect(leadConsentFormTemplate(true, null)).toBe("consent_data_release_child");

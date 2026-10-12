@@ -147,6 +147,7 @@ import {
   leadFailureReasonLabel,
   leadFailureReasonOtherLabel,
   leadFailureReasonValue,
+  leadLifecycleNoteLabel,
   type LeadFailureReasonDraft,
 } from "./model/lead-failure-reasons";
 import { LeadSanctionsBadge, useLeadSanctionsFlags } from "@/pages/sanctions/components";
@@ -2374,8 +2375,10 @@ function useLeadsPageContent() {
                             {formatDate(event.created_at, locale, t.common_not_set)}
                           </span>
                         </div>
-                        {event.note ? (
-                          <p className="mt-2 text-sm text-slate-600">{event.note}</p>
+                        {leadLifecycleNoteLabel(event.transition_kind, event.note, tx) ? (
+                          <p className="mt-2 text-sm text-slate-600">
+                            {leadLifecycleNoteLabel(event.transition_kind, event.note, tx)}
+                          </p>
                         ) : null}
                       </div>
                     ))}
@@ -3077,6 +3080,7 @@ function useLeadsPageContent() {
 
             <ToolbarField label={t.users_status}>
             <NativeComboboxSelect
+              aria-label={t.users_status}
               value={filters.status || "__all__"}
               onChange={(event) => {
                 const status = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
@@ -3099,6 +3103,7 @@ function useLeadsPageContent() {
 
             <ToolbarField label={t.lead_type}>
             <NativeComboboxSelect
+              aria-label={t.lead_type}
               value={filters.leadType || "__all__"}
               onChange={(event) => {
                 const leadType = event.target.value && event.target.value !== "__all__" ? event.target.value : "";
@@ -3117,6 +3122,7 @@ function useLeadsPageContent() {
 
             <ToolbarField label={t.common_archive}>
             <NativeComboboxSelect
+              aria-label={t.common_archive}
               value={filters.includeArchived || "false"}
               onChange={(event) => {
                 const includeArchived = event.target.value === "true" ? "true" : "false";

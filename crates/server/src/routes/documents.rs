@@ -13403,9 +13403,18 @@ async fn load_replacement_document_version(
     let legacy_template_match = art == template_art
         && (category.as_deref() == Some(template_category)
             || (allow_legacy_generated_category && category.as_deref() == Some("generated")));
+    // The consent form of a lead is one document in its variants: the
+    // adult's, the child's for both parents and the one for a sole parent or
+    // the guardian. A changed date of birth or custody makes the next version
+    // a different variant of the same form, not a second form beside it (QA
+    // 2026-10-12, round 3).
     let template_matches = generated_template_id
         .as_deref()
-        .map(|value| value == expected_template_id)
+        .map(|value| {
+            value == expected_template_id
+                || (crate::consent_choices::needs_own_choice(Some(value))
+                    && crate::consent_choices::needs_own_choice(Some(expected_template_id)))
+        })
         .unwrap_or(legacy_template_match);
 
     if !template_matches {
@@ -19019,6 +19028,35 @@ fn admin_signature_grid(
     admin_signature_rows(layout, vec![left, right]);
 }
 
+/// The height of one row of [`admin_signature_rows`] (two parties side by
+/// side).
+const ADMIN_SIGNATURE_ROW_HEIGHT_MM: f32 = 32.0;
+
+/// The height [`admin_block`] takes for `text` at the full content width.
+fn admin_block_height_mm(
+    layout: &TreatmentPlanPdfLayout,
+    text: &str,
+    before: f32,
+    after: f32,
+) -> f32 {
+    let lines = wrap_text_to_width_precise(text, 11.0, layout.available_width(0.0)).len();
+    before + after + lines as f32 * pdf_line_height_mm(11.0, 1.45)
+}
+
+/// Starts a new page unless the closing text of a form (`closing_mm`, its
+/// heading included) and the signature rows of `signers` parties fit on this
+/// one together: a signature never stands alone on the last page, without
+/// the declaration it signs (QA 2026-10-12, round 3).
+fn keep_closing_with_signature_rows(
+    layout: &mut TreatmentPlanPdfLayout,
+    closing_mm: f32,
+    signers: usize,
+) {
+    // `admin_signature_rows` needs its rows and 12 mm above the footer.
+    let rows = signers.div_ceil(2).max(1);
+    layout.ensure_space(closing_mm + ADMIN_SIGNATURE_ROW_HEIGHT_MM * rows as f32 + 12.0);
+}
+
 /// Signature blocks two per row: the first row holds the first party and the
 /// Auftragnehmer, further parties (e.g. a second legal representative) follow
 /// in rows below.
@@ -19027,7 +19065,7 @@ fn admin_signature_rows(
     parties: Vec<AdminSignatureParty<'_>>,
 ) {
     const COLUMN_GAP_MM: f32 = 14.0;
-    const BLOCK_HEIGHT_MM: f32 = 32.0;
+    const BLOCK_HEIGHT_MM: f32 = ADMIN_SIGNATURE_ROW_HEIGHT_MM;
     const SIGNATURE_LINE_OFFSET_MM: f32 = 12.0;
     /// Distance from the signature line down to the "Ort, den Datum" line;
     /// leaves room to write the date by hand under the printed name.
@@ -24534,6 +24572,9 @@ struct LeadDisclosureRecipient {
 #[derive(Clone, Debug, Default)]
 struct LeadSelfDisclosure {
     submitted_at: chrono::DateTime<chrono::Utc>,
+    /// When the follow-up answers were sent, if after the request: the form
+    /// says so beside the request's time (QA 2026-10-12, round 3).
+    follow_up_sent_at: Option<chrono::DateTime<chrono::Utc>>,
     salutation: Option<String>,
     first_name: String,
     middle_name: Option<String>,
@@ -24707,6 +24748,15 @@ async fn load_lead_self_disclosure(
     let stored_recipient = super::lead_invoice_recipient::load(&mut conn, lead_id)
         .await
         .map_err(|error| failed(error, "invoice recipient"))?;
+    let follow_up_sent_at = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+        "SELECT follow_up_answered_at FROM lead_risk_assessments WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|error| failed(error, "follow-up answers"))?
+    .flatten()
+    .filter(|answered_at| *answered_at > submitted_at);
     drop(conn);
 
     let representation = &represented.representation;
@@ -24837,6 +24887,7 @@ async fn load_lead_self_disclosure(
         .map(fmt_money_de);
     Ok(LeadSelfDisclosure {
         submitted_at,
+        follow_up_sent_at,
         invoice_recipient,
         payment_route,
         expected_total,
@@ -25010,16 +25061,25 @@ fn build_lead_self_disclosure_pdf(
         0.0,
         3.0,
     );
+    // The follow-up answers sent later are part of the form: the header names
+    // their time too, not only the request's (QA 2026-10-12, round 3).
+    let follow_up_sent = data.follow_up_sent_at.map(payer_date_time);
+    let sent_line = match &follow_up_sent {
+        Some((follow_up_on, follow_up_at)) => format!(
+            "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal; ergänzende Angaben übermittelt am {follow_up_on} um {follow_up_at}."
+        ),
+        None => format!(
+            "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal."
+        ),
+    };
     admin_block(
         &mut layout,
         &if minor {
             format!(
-                "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal. Für die minderjährige Patientin / den minderjährigen Patienten machen die gesetzlichen Vertreter die Angaben und bestätigen sie."
+                "{sent_line} Für die minderjährige Patientin / den minderjährigen Patienten machen die gesetzlichen Vertreter die Angaben und bestätigen sie."
             )
         } else {
-            format!(
-                "Angaben aus dem Patientenformular, übermittelt am {sent_on} um {sent_at} über das Patientenportal."
-            )
+            sent_line
         },
         0.0,
         3.0,
@@ -25043,6 +25103,12 @@ fn build_lead_self_disclosure_pdf(
         meta.push(("Auftrags-Nr.", order_number.to_string()));
     }
     meta.push(("Anfrage gesendet", format!("{sent_on} {sent_at}")));
+    if let Some((follow_up_on, follow_up_at)) = &follow_up_sent {
+        meta.push((
+            "Ergänzende Angaben gesendet",
+            format!("{follow_up_on} {follow_up_at}"),
+        ));
+    }
     legal_meta_grid(&mut layout, &meta);
 
     let mut section = PayerSectionCounter(0);
@@ -25533,8 +25599,6 @@ fn build_lead_self_disclosure_pdf(
     // 7. The declaration of § 11 Abs. 6 GwG and the signature of the
     // patient side: the patient, for a minor every legal representative
     // (frames `guardian_1`, `guardian_2` like the minors' consent).
-    layout.ensure_space(30.0);
-    section.heading(&mut layout, "Versicherung");
     let representatives = data
         .acting_persons
         .iter()
@@ -25562,18 +25626,19 @@ fn build_lead_self_disclosure_pdf(
                 .unwrap_or_else(|| "____________________".to_string()),
         ]
     };
-    admin_block(
-        &mut layout,
-        if !minor {
-            "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
-        } else if signers.len() > 1 {
-            "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
-        } else {
-            "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
-        },
-        0.0,
-        2.0,
-    );
+    let declaration = if !minor {
+        "Ich versichere, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+    } else if signers.len() > 1 {
+        "Wir versichern als gesetzliche Vertreter, dass unsere Angaben richtig und vollständig sind. Änderungen teilen wir der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+    } else {
+        "Ich versichere als gesetzliche/r Vertreter/in, dass meine Angaben richtig und vollständig sind. Änderungen teile ich der GMED unverzüglich mit (§ 11 Abs. 6 GwG)."
+    };
+    // The heading, the declaration and the signatures stay on one page: the
+    // signature line never stands alone on the last page (QA 2026-10-12).
+    let closing_mm = 14.0 + admin_block_height_mm(&layout, declaration, 0.0, 2.0);
+    keep_closing_with_signature_rows(&mut layout, closing_mm, signers.len());
+    section.heading(&mut layout, "Versicherung");
+    admin_block(&mut layout, declaration, 0.0, 2.0);
     let anchors = (0..signers.len())
         .map(|index| format!("guardian_{}", index + 1))
         .collect::<Vec<_>>();
@@ -26169,16 +26234,19 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     );
 
     // ---- Electronic signature clause ----
-    admin_block(
-        &mut layout,
-        &format!(
-            "{we} {verb} damit einverstanden, dass diese Einverständniserklärung und Schweigepflichtsentbindung auch durch eine elektronische Unterschrift erteilt werden kann, die die gleiche rechtliche Gültigkeit wie eine handschriftliche Unterschrift hat. Die elektronische Unterschrift erfolgt unter der Voraussetzung, dass sie den geltenden rechtlichen Anforderungen entspricht.",
-            we = we,
-            verb = verb
-        ),
-        0.0,
-        4.0,
+    // The clause and every signature line stay on one page: the second
+    // parent's line never stands alone on the last page (QA 2026-10-12).
+    let e_signature_clause = format!(
+        "{we} {verb} damit einverstanden, dass diese Einverständniserklärung und Schweigepflichtsentbindung auch durch eine elektronische Unterschrift erteilt werden kann, die die gleiche rechtliche Gültigkeit wie eine handschriftliche Unterschrift hat. Die elektronische Unterschrift erfolgt unter der Voraussetzung, dass sie den geltenden rechtlichen Anforderungen entspricht.",
+        we = we,
+        verb = verb
     );
+    let signature_lines = if context.sole_guardian { 1.0 } else { 2.0 };
+    layout.ensure_space(
+        admin_block_height_mm(&layout, &e_signature_clause, 0.0, 4.0)
+            + signature_lines * (LEGAL_SIGNATURE_FRAME_HEIGHT_MM + 14.0),
+    );
+    admin_block(&mut layout, &e_signature_clause, 0.0, 4.0);
 
     // ---- Signature block(s) ----
     if context.sole_guardian {
@@ -35190,6 +35258,72 @@ mod tests {
         assert!(text.contains("entbinde alle nach § 203 StGB"), "{text}");
     }
 
+    /// QA 2026-10-12 (round 3): the second parent's signature line stood
+    /// alone on page 3. However long the form gets, both lines share a page.
+    #[test]
+    fn both_parents_sign_the_childs_form_on_one_page() {
+        for recipients in 0..40 {
+            let context = GeneratedConsentContext {
+                sole_guardian: false,
+                auto_name: "Einverständniserklärung".to_string(),
+                document_reference: "EW-20261012-UNITTEST0004".to_string(),
+                child_name: Some("Mia Muster".to_string()),
+                child_birth_date: NaiveDate::from_ymd_opt(2015, 5, 10),
+                child_address: None,
+                guardian_name: Some("Maria Muster".to_string()),
+                guardian_label: None,
+                guardian_birth_date: NaiveDate::from_ymd_opt(1985, 2, 1),
+                guardian_address: None,
+                guardian2_name: Some("Ben Muster".to_string()),
+                guardian2_label: None,
+                guardian2_birth_date: NaiveDate::from_ymd_opt(1983, 1, 2),
+                extra_release_recipients: Some(
+                    (0..recipients)
+                        .map(|index| format!("Beispiel Person {index}, geb. am 01.01.1950"))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                ),
+                own_choice: None,
+                agency: legal_test_agency(),
+                generated_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 10, 0).unwrap(),
+            };
+            let generated = build_consent_pdf(&context).unwrap();
+            let page_of = |role: &str| {
+                generated
+                    .signature_anchors
+                    .iter()
+                    .find(|anchor| anchor.role == role)
+                    .map(|anchor| anchor.page)
+                    .unwrap_or_else(|| panic!("{role} missing"))
+            };
+            assert_eq!(
+                page_of("guardian_1"),
+                page_of("guardian_2"),
+                "{recipients} recipients"
+            );
+        }
+    }
+
+    /// QA 2026-10-12 (round 3): the closing declaration of a form and its
+    /// signature rows start a new page together when they do not fit.
+    #[test]
+    fn the_closing_text_moves_with_its_signature_rows() {
+        let (_document, regular, bold) = super::new_admin_pdf().unwrap();
+        let mut layout =
+            super::legal_document_pdf_layout("DOC-UNITTEST", &legal_test_agency(), regular, bold);
+        let room = super::ADMIN_SIGNATURE_ROW_HEIGHT_MM + 12.0 + 20.0;
+        layout.y_mm = layout.content_bottom_mm() + room + 5.0;
+        super::keep_closing_with_signature_rows(&mut layout, 20.0, 2);
+        assert_eq!(layout.page_number, 1, "it fits");
+        layout.y_mm = layout.content_bottom_mm() + room - 5.0;
+        super::keep_closing_with_signature_rows(&mut layout, 20.0, 1);
+        assert_eq!(layout.page_number, 2, "a new page");
+        // Three parties need two rows.
+        layout.y_mm = layout.content_bottom_mm() + room + 5.0;
+        super::keep_closing_with_signature_rows(&mut layout, 20.0, 3);
+        assert_eq!(layout.page_number, 3);
+    }
+
     /// QA 2026-10-12: an empty address, phone or e-mail gets a blank that
     /// stays on the line instead of wrapping a lone «__».
     #[test]
@@ -36388,6 +36522,40 @@ mod tests {
         }
         assert!(!text.contains("gesetzl. Vertreter/in"), "{text}");
         assert!(!text.contains("wird von GMED erfasst"), "{text}");
+    }
+
+    /// QA 2026-10-12 (round 3): the follow-up answers sent after the request
+    /// are in the form, so the header names their time as well.
+    #[test]
+    fn the_self_disclosure_names_when_the_follow_up_answers_came() {
+        let later = super::LeadSelfDisclosure {
+            follow_up_sent_at: Some(Utc.with_ymd_and_hms(2026, 10, 7, 10, 55, 0).unwrap()),
+            ..anna_lead_disclosure()
+        };
+        let generated = super::build_lead_self_disclosure_pdf(
+            &later,
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0009",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&generated.bytes);
+        for expected in [
+            "übermittelt am 07.10.2026 um 10:30 über das Patientenportal; ergänzende Angaben übermittelt am 07.10.2026 um 12:55.",
+            "Ergänzende Angaben gesendet",
+        ] {
+            assert!(text.contains(expected), "{expected} missing in {text}");
+        }
+        let without = super::build_lead_self_disclosure_pdf(
+            &anna_lead_disclosure(),
+            &legal_test_agency(),
+            None,
+            "DOC-LEAD-SD-0010",
+        )
+        .unwrap();
+        let text = normalized_pdf_text(&without.bytes);
+        assert!(!text.contains("Ergänzende Angaben gesendet"), "{text}");
+        assert!(!text.contains("ergänzende Angaben übermittelt"), "{text}");
     }
 
     #[test]

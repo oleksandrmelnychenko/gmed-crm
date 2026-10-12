@@ -42,6 +42,7 @@ import { currentGwgSheet, gwgSheetErrorText, gwgSheetRequest } from "../model/gw
 import { guardianLinkRelation, medicalDocumentsFactLabel } from "../model/lead-portal-intake";
 import { leadErrorMessage } from "../model/leads-model";
 import { trustedContactRelationLabel } from "../model/lead-trusted-contacts";
+import { LeadConfirmDialog } from "./lead-confirm-dialog";
 import {
   fetchLeadPortalIntake,
   issueLeadGuardianAccess,
@@ -119,14 +120,18 @@ export function LeadPortalAccessDetail({
   // Whether the lead is a minor, from the portal state the parents' block
   // loads: `undefined` while loading, `null` when it is not known.
   const [minor, setMinor] = useState<boolean | null | undefined>(undefined);
+  // The child's own login while the parents have access (QA 2026-10-12, A3-01).
+  const [ownLoginClosed, setOwnLoginClosed] = useState(false);
   const onPortalIntake = useCallback((intake: LeadPortalIntake | null) => {
     setMinor(intake ? intake.minor : null);
+    setOwnLoginClosed(intake?.own_login_closed === true);
   }, []);
   // A minor gets no login of his own (the server refuses to create one): the
   // parents get theirs in the block below, so no access is created for the
-  // child. A login made before that rule keeps its password reset.
+  // child. A login made before that rule reaches nothing once a parent has
+  // access, and gets no new password then (the server refuses it too).
   const canCreate = minor !== true && status === "none" && Boolean(lead.email);
-  const canReset = status !== "none" && status !== "disabled";
+  const canReset = status !== "none" && status !== "disabled" && !ownLoginClosed;
   const canOffer = canIssue && (canCreate || canReset);
 
   // Whether the sign-in data can go out by e-mail, and the lead's language.
@@ -363,6 +368,13 @@ export function LeadPortalAccessDetail({
               : "Без электронной почты доступ создать нельзя."}
         </p>
       )}
+      {ownLoginClosed && status !== "none" ? (
+        <p className="text-muted-foreground" data-testid="lead-portal-own-login-closed">
+          {de
+            ? "Der eigene Zugang des Kindes ist gesperrt: Die Anfrage füllen die Eltern mit ihrem Zugang (unten) aus. Wird das Geburtsdatum auf 18 Jahre oder älter korrigiert, gilt er wieder."
+            : "Собственный вход ребёнка закрыт: заявку заполняют родители через свой доступ (ниже). Если дату рождения исправить на 18 лет и старше, вход снова заработает."}
+        </p>
+      ) : null}
       {error ? <p className="text-rose-700">{error}</p> : null}
       <LeadGuardianAccess lead={lead} lang={lang} canIssue={canIssue} onChanged={onChanged} onIntake={onPortalIntake} />
 
@@ -800,6 +812,9 @@ export function LeadGuardianAccess({
   // `name`: the parent's own, for the greeting of the message (QA 2026-10-10: "Здравствуйте!" without a name).
   const [issued, setIssued] = useState<{ email: string; password: string; created: boolean; userId: string; name: string } | null>(null);
   const [notice, setNotice] = useState("");
+  // "Отозвать" asks in the app's own dialog, never the browser's `confirm()`,
+  // which an embedded browser dismisses silently (QA 2026-10-12, round 3).
+  const [revoking, setRevoking] = useState<{ accessId: string; name: string } | null>(null);
   const onIntakeRef = useRef(onIntake);
   useEffect(() => {
     onIntakeRef.current = onIntake;
@@ -901,10 +916,8 @@ export function LeadGuardianAccess({
                   size="sm"
                   className="h-7 rounded-md text-xs text-rose-700"
                   disabled={busy !== null}
-                  onClick={() => {
-                    if (!window.confirm(tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?"))) return;
-                    void run(`revoke-${link.access_id}`, () => revokeLeadGuardianAccess(lead.id, link.access_id));
-                  }}
+                  data-testid="lead-guardian-revoke"
+                  onClick={() => setRevoking({ accessId: link.access_id, name: link.name ?? "" })}
                 >
                   {tx("Отозвать", "Widerrufen")}
                 </Button>
@@ -954,6 +967,27 @@ export function LeadGuardianAccess({
       ) : null}
       {notice ? <p className="text-emerald-700">{notice}</p> : null}
       {error ? <p className="text-rose-700">{error}</p> : null}
+      <LeadConfirmDialog
+        open={revoking !== null}
+        title={tx("Отозвать доступ родителя к этой заявке?", "Zugang des Elternteils zu dieser Anfrage widerrufen?")}
+        description={tx(
+          `${revoking?.name || "Родитель"} больше не сможет открыть эту заявку. Доступ можно выдать заново.`,
+          `${revoking?.name || "Der Elternteil"} kann diese Anfrage danach nicht mehr öffnen. Der Zugang kann neu angelegt werden.`,
+        )}
+        confirmLabel={tx("Отозвать", "Widerrufen")}
+        cancelLabel={tx("Отмена", "Abbrechen")}
+        destructive
+        busy={revoking !== null && busy === `revoke-${revoking.accessId}`}
+        testId="lead-guardian-revoke-dialog"
+        onCancel={() => setRevoking(null)}
+        onConfirm={() => {
+          const current = revoking;
+          if (!current) return;
+          void run(`revoke-${current.accessId}`, () => revokeLeadGuardianAccess(lead.id, current.accessId)).finally(
+            () => setRevoking(null),
+          );
+        }}
+      />
       <PortalCredentialsDialog
         credentials={
           issued

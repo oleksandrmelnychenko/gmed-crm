@@ -4584,6 +4584,20 @@ async fn staff_send(
         Ok(link) => link,
         Err(error) => return intake::internal(error, "store payer link"),
     };
+    // An organisation is greeted by the contact person the lead named, not
+    // by "Guten Tag," alone (QA 2026-10-12, round 3).
+    let contact_name = if declaration.is_organisation() {
+        match crate::risk::cabinet::payer_extras(&mut tx, lead_id).await {
+            Ok((mask, _)) => mask["organisation_contact_name"]
+                .as_str()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string),
+            Err(error) => return intake::internal(error, "load the organisation's contact"),
+        }
+    } else {
+        None
+    };
     if let Err(error) = tx.commit().await {
         return intake::internal(error, "commit payer link");
     }
@@ -4597,6 +4611,7 @@ async fn staff_send(
         language: mail_language,
         payer_name: declaration.payer_name().as_deref().unwrap_or_default(),
         organisation: declaration.is_organisation(),
+        contact_name: contact_name.as_deref(),
         patient_name: &context.patient_name,
         link_url: &link_url,
         expires_on: crate::app_time::date_of(link.expires_at),

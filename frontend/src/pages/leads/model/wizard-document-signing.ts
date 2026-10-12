@@ -46,6 +46,24 @@ export function leadConsentFormTemplate(
     : "consent_data_release_child";
 }
 
+const LEAD_CONSENT_FORM_TEMPLATES: ReadonlySet<string> = new Set<LeadConsentFormTemplate>([
+  "privacy_consents",
+  "consent_data_release_child",
+  "consent_data_release_single",
+]);
+
+/**
+ * Whether a document of the wizard's consent slot is a new version of the form `templateId` will
+ * create (QA 2026-10-12, round 3): the adult's and the minor's two forms are variants of one form,
+ * so a changed date of birth or custody versions the existing form instead of adding a second one.
+ * An uploaded document without a template stays a candidate, as before.
+ */
+export function versionsSameForm(documentTemplateId: string | null | undefined, templateId: string): boolean {
+  if (!documentTemplateId) return true;
+  if (documentTemplateId === templateId) return true;
+  return LEAD_CONSENT_FORM_TEMPLATES.has(documentTemplateId) && LEAD_CONSENT_FORM_TEMPLATES.has(templateId);
+}
+
 type OrderSignatureDocument = Pick<DocumentItem, "id" | "signed_at" | "is_latest_version" | "created_at">;
 
 export type OrderClientSignatureState<T extends OrderSignatureDocument = OrderSignatureDocument> = {

@@ -4630,7 +4630,10 @@ async fn qualify_lead(
                 Vec::new()
             };
             // Status, reopened orders, history entry and audit row commit
-            // together.
+            // together. The append-only audit keeps the reason as its code
+            // only (QA 2026-10-12, A3-02): the text of «Другое» may name a
+            // person or a diagnosis and lives on the lead and in its history,
+            // which the anonymisation clears.
             if let Err(e) = audit::write_in_transaction(
                 &mut tx,
                 &audit::domain_event(
@@ -4641,7 +4644,10 @@ async fn qualify_lead(
                     json!({
                         "status": body.status.clone(),
                         "previous_status": current_status.clone(),
-                        "reason": not_qualified_reason.clone(),
+                        "reason": not_qualified_reason.as_deref().map(anonymised_failure_reason),
+                        "reason_free_text": not_qualified_reason
+                            .as_deref()
+                            .is_some_and(failure_reason_is_free_text),
                     }),
                 ),
             )
@@ -7188,6 +7194,9 @@ async fn resolve_failed_lead(
     // and the internal note is dropped — on the lead row, in the audit row,
     // in the lead history and on the withdrawn orders alike. Archiving keeps
     // both.
+    // Whether staff typed a reason of their own and a note: the audit records
+    // only that (QA 2026-10-12, A3-02).
+    let (typed_reason, typed_note) = (failure_reason_is_free_text(reason), note.is_some());
     let (reason, note) = if resolution == "archive" {
         (reason, note)
     } else {
@@ -7207,6 +7216,10 @@ async fn resolve_failed_lead(
     // A failed lead no longer needs the order opened while it was prepared:
     // it is withdrawn in this transaction, so the order list never shows an
     // active order of an archived or deleted lead.
+    // The append-only audit (the order's cancellation and the lead's
+    // resolution) keeps the reason as its code and only whether a text or a
+    // note was typed (QA 2026-10-12, A3-02): an archived lead keeps both on its
+    // row and in its history, which a later deletion clears.
     let withdrawn_orders = match crate::routes::orders::withdraw_lead_orders_in_tx(
         &mut tx,
         lead_id,
@@ -7216,7 +7229,7 @@ async fn resolve_failed_lead(
         } else {
             crate::routes::orders::LEAD_DELETED_CANCELLATION_REASON
         },
-        reason,
+        anonymised_failure_reason(reason),
     )
     .await
     {
@@ -7233,8 +7246,9 @@ async fn resolve_failed_lead(
         Some(lead_id),
         json!({
             "resolution": resolution.clone(),
-            "reason": reason,
-            "note": note,
+            "reason": anonymised_failure_reason(reason),
+            "reason_free_text": typed_reason,
+            "note_present": typed_note,
             "failed_from_status": current_status.clone(),
         }),
     );
@@ -7323,6 +7337,7 @@ async fn resolve_failed_lead(
 
     match update_result {
         Ok(result) if result.rows_affected() > 0 => {
+            // Realtime events are stored for catch-up: codes only (A3-02).
             crate::realtime::publish_lead_event(
                 &state,
                 Some(auth.user_id),
@@ -7330,8 +7345,8 @@ async fn resolve_failed_lead(
                 lead_id,
                 json!({
                     "resolution": outcome_status,
-                    "reason": reason,
-                    "note": note,
+                    "reason": anonymised_failure_reason(reason),
+                    "note_present": note.is_some(),
                     "failed_from_status": current_status,
                 }),
             )
@@ -7999,15 +8014,18 @@ pub struct LeadPurgeReport {
 /// What staff typed stays nowhere on the anonymised row (QA 2026-10-12): the
 /// failure reason keeps only a listed code ([`anonymised_failure_reason`]),
 /// and the note only a fixed system text (`system_note`, a `'static` string,
-/// so a typed note cannot be passed).
+/// so a typed note cannot be passed). Nor outside it (A3-02): the lead
+/// history and the audit rows lose staff's words in the same transaction
+/// ([`scrub_lead_free_text_in_tx`]); what was scrubbed is returned for the
+/// caller's audit row.
 pub(crate) async fn anonymize_lead_pii(
-    executor: impl sqlx::PgExecutor<'_>,
+    conn: &mut sqlx::PgConnection,
     lead_id: Uuid,
     failed_from_status: Option<String>,
     reason: &str,
     system_note: Option<&'static str>,
     processed_by: Option<Uuid>,
-) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+) -> Result<(sqlx::postgres::PgQueryResult, LeadFreeTextScrub), sqlx::Error> {
     let reason = anonymised_failure_reason(reason);
     // The payer declaration of an unconverted lead goes with it (a converted
     // one belongs to the patient record and is kept, § 8 Abs. 4 GwG). The
@@ -8016,7 +8034,7 @@ pub(crate) async fn anonymize_lead_pii(
     // payments (§ 12 Abs. 1 GwG), the payer's own statement and links
     // (phase 3a; the link e-mails go with the links) and the invoice
     // recipient of step 3 (2026-10-11) follow the same rule.
-    sqlx::query(
+    let result = sqlx::query(
         r#"WITH removed_payer AS (
                DELETE FROM lead_payer_declarations
                WHERE lead_id = $1 AND patient_id IS NULL
@@ -8137,8 +8155,14 @@ pub(crate) async fn anonymize_lead_pii(
     .bind(reason)
     .bind(system_note)
     .bind(processed_by)
-    .execute(executor)
-    .await
+    .execute(&mut *conn)
+    .await?;
+    let scrubbed = if result.rows_affected() > 0 {
+        scrub_lead_free_text_in_tx(conn, lead_id).await?
+    } else {
+        LeadFreeTextScrub::default()
+    };
+    Ok((result, scrubbed))
 }
 
 /// The reasons staff pick when a lead does not fit (frontend
@@ -8170,6 +8194,166 @@ pub(crate) fn anonymised_failure_reason(reason: &str) -> &str {
     } else {
         "other"
     }
+}
+
+/// Whether a failure reason is staff's own words rather than a listed or
+/// system code ([`anonymised_failure_reason`]); a blank reason is none.
+pub(crate) fn failure_reason_is_free_text(reason: &str) -> bool {
+    let reason = reason.trim();
+    !reason.is_empty() && anonymised_failure_reason(reason) != reason
+}
+
+/// What an erased free text in `audit_log.context` becomes (owner decision
+/// 2026-10-12, QA A3-02): a neutral marker in place of staff's words, the row
+/// and its codes stay.
+pub(crate) const ERASED_AUDIT_TEXT: &str = "[erased]";
+
+/// The lead history entries whose note is the failure reason: a status
+/// change (to "not qualified"), an archiving, a deletion.
+const REASON_TRANSITIONS: [&str; 3] = ["status_change", "archived", "deleted"];
+
+/// What the anonymisation of a lead scrubbed outside its row.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct LeadFreeTextScrub {
+    pub lifecycle_events: u64,
+    pub audit_rows: u64,
+    pub realtime_events: u64,
+}
+
+/// The lead history entry with staff's words removed: the reason of a status
+/// change, an archiving or a deletion becomes its code, the internal note in
+/// the metadata goes. `None` when nothing changes.
+fn scrubbed_lifecycle_event(
+    transition_kind: &str,
+    note: Option<&str>,
+    metadata: &Value,
+) -> Option<(Option<String>, Value)> {
+    let next_note = match note {
+        Some(note) if REASON_TRANSITIONS.contains(&transition_kind) => {
+            Some(anonymised_failure_reason(note).to_string())
+        }
+        other => other.map(str::to_string),
+    };
+    let mut next_metadata = metadata.clone();
+    if let Some(object) = next_metadata.as_object_mut()
+        && object.get("note").is_some_and(|note| !note.is_null())
+    {
+        object.remove("note");
+    }
+    (next_note.as_deref() != note || &next_metadata != metadata)
+        .then_some((next_note, next_metadata))
+}
+
+/// An audit context with staff's words about a failed lead replaced by
+/// [`ERASED_AUDIT_TEXT`]: a reason that is no code (`reason` of
+/// `qualify_lead` and `resolve_failed_lead`, `lead_reason` of the order's
+/// `cancel_order`) and any internal note (`note`). Keys, codes, flags and
+/// every other value stay — the database lets nothing else change (migration
+/// `20261012194730_audit_log_erasure_text_scrub.sql`). `None` when nothing
+/// changes.
+fn scrubbed_audit_context(context: &Value) -> Option<Value> {
+    let mut next = context.clone();
+    let object = next.as_object_mut()?;
+    for key in ["reason", "lead_reason"] {
+        if let Some(Value::String(text)) = object.get_mut(key)
+            && failure_reason_is_free_text(text.as_str())
+            && text.as_str() != ERASED_AUDIT_TEXT
+        {
+            *text = ERASED_AUDIT_TEXT.to_string();
+        }
+    }
+    if let Some(Value::String(text)) = object.get_mut("note")
+        && text.as_str() != ERASED_AUDIT_TEXT
+    {
+        *text = ERASED_AUDIT_TEXT.to_string();
+    }
+    (next != *context).then_some(next)
+}
+
+/// Staff's words about a lead outside its row, scrubbed when the lead is
+/// deleted and anonymised — by staff, by a retention rule or with the DSGVO
+/// erasure of its patient (QA 2026-10-12, A3-02; owner decision 2026-10-12):
+///
+/// * the lead history (`workflow_lifecycle_events`): the reason of a status
+///   change, an archiving or a deletion keeps only its code, the internal
+///   note goes;
+/// * `audit_log`: the free-text reason and the note of `qualify_lead`,
+///   `resolve_failed_lead` and of the `cancel_order` rows of the lead's
+///   orders become [`ERASED_AUDIT_TEXT`]. The log stays append-only: the
+///   trigger lets only text values of `context` change, and only while the
+///   transaction-local setting `gmed.dsgvo_erasure` is on — switched on for
+///   these statements alone.
+pub(crate) async fn scrub_lead_free_text_in_tx(
+    conn: &mut sqlx::PgConnection,
+    lead_id: Uuid,
+) -> Result<LeadFreeTextScrub, sqlx::Error> {
+    let mut scrubbed = LeadFreeTextScrub::default();
+    let events: Vec<(Uuid, String, Option<String>, Value)> = sqlx::query_as(
+        r#"SELECT id, transition_kind, note, metadata
+           FROM workflow_lifecycle_events
+           WHERE entity_type = 'lead' AND entity_id = $1
+           FOR UPDATE"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (id, transition_kind, note, metadata) in events {
+        if let Some((note, metadata)) =
+            scrubbed_lifecycle_event(&transition_kind, note.as_deref(), &metadata)
+        {
+            sqlx::query(
+                "UPDATE workflow_lifecycle_events SET note = $2, metadata = $3 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(note)
+            .bind(metadata)
+            .execute(&mut *conn)
+            .await?;
+            scrubbed.lifecycle_events += 1;
+        }
+    }
+    // The stored realtime events of the lead (catch-up of open pages) repeat
+    // what changed, the reason of an archiving with its note among it; a
+    // deleted lead needs none of them.
+    scrubbed.realtime_events =
+        sqlx::query("DELETE FROM realtime_events WHERE entity_type = 'lead' AND entity_id = $1")
+            .bind(lead_id)
+            .execute(&mut *conn)
+            .await?
+            .rows_affected();
+    let rows: Vec<(i64, Value)> = sqlx::query_as(
+        r#"SELECT id, context
+           FROM audit_log
+           WHERE context IS NOT NULL
+             AND ((entity_type = 'lead' AND entity_id = $1
+                   AND action IN ('qualify_lead', 'resolve_failed_lead'))
+                  OR (entity_type = 'order' AND action = 'cancel_order'
+                      AND context ->> 'source_lead_id' = $1::text))"#,
+    )
+    .bind(lead_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let changes: Vec<(i64, Value)> = rows
+        .iter()
+        .filter_map(|(id, context)| scrubbed_audit_context(context).map(|next| (*id, next)))
+        .collect();
+    if !changes.is_empty() {
+        sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+            .execute(&mut *conn)
+            .await?;
+        for (id, context) in &changes {
+            sqlx::query("UPDATE audit_log SET context = $2 WHERE id = $1")
+                .bind(id)
+                .bind(context)
+                .execute(&mut *conn)
+                .await?;
+        }
+        sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'off', true)")
+            .execute(&mut *conn)
+            .await?;
+        scrubbed.audit_rows = changes.len() as u64;
+    }
+    Ok(scrubbed)
 }
 
 /// One lead deletion for [`purge_lead_and_prospect`]: what is recorded on the
@@ -8260,7 +8444,7 @@ async fn purge_lead_and_prospect_in_tx(
     // The patient login lives as long as the lead (owner decision 2026-10-03).
     crate::routes::lead_portal_account::disable_for_lead_in_tx(tx, lead_id, processed_by).await?;
 
-    let result = anonymize_lead_pii(
+    let (result, scrubbed) = anonymize_lead_pii(
         &mut **tx,
         lead_id,
         failed_from_status,
@@ -8270,6 +8454,12 @@ async fn purge_lead_and_prospect_in_tx(
     )
     .await?;
     if result.rows_affected() > 0 {
+        // The deletion's own audit row says what it scrubbed in the history
+        // and the audit (QA 2026-10-12, A3-02).
+        let mut lead_audit = lead_audit;
+        if let Some(context) = lead_audit.context.as_object_mut() {
+            context.insert("scrubbed_free_text".to_string(), json!(scrubbed));
+        }
         audit::write_in_transaction(tx, &lead_audit).await?;
         if let Some(prospect) = prospect {
             let (action, prospect_id) = match prospect {
@@ -9990,6 +10180,70 @@ mod auto_purge_tests {
         ] {
             assert_eq!(anonymised_failure_reason(typed), "other", "{typed}");
         }
+    }
+
+    /// QA 2026-10-12, A3-02: the deletion scrubs staff's words from the lead
+    /// history and the audit context, keeping codes, keys and flags.
+    #[test]
+    fn the_deletion_scrubs_typed_words_but_keeps_codes() {
+        use super::{
+            ERASED_AUDIT_TEXT, failure_reason_is_free_text, scrubbed_audit_context,
+            scrubbed_lifecycle_event,
+        };
+        use serde_json::json;
+        assert!(failure_reason_is_free_text("Ben Muster, Diagnose X"));
+        assert!(!failure_reason_is_free_text(" costs "));
+        assert!(!failure_reason_is_free_text(
+            "auto_purge_storage_limitation"
+        ));
+        assert!(!failure_reason_is_free_text("  "));
+
+        let (note, metadata) = scrubbed_lifecycle_event(
+            "status_change",
+            Some("Ben Muster, Diagnose X"),
+            &json!({ "status": "not_qualified" }),
+        )
+        .unwrap();
+        assert_eq!(note.as_deref(), Some("other"));
+        assert_eq!(metadata, json!({ "status": "not_qualified" }));
+        let (note, metadata) = scrubbed_lifecycle_event(
+            "archived",
+            Some("duplicate"),
+            &json!({ "resolution": "archived", "note": "Interne Notiz" }),
+        )
+        .unwrap();
+        assert_eq!(note.as_deref(), Some("duplicate"));
+        assert_eq!(metadata, json!({ "resolution": "archived" }));
+        // System notes of other entries and clean entries stay.
+        assert_eq!(
+            scrubbed_lifecycle_event("converted", Some("Lead converted to patient"), &json!({})),
+            None
+        );
+        assert_eq!(
+            scrubbed_lifecycle_event("deleted", Some("other"), &json!({ "note": null })),
+            None
+        );
+
+        let context = json!({
+            "status": "not_qualified",
+            "reason": "Ben Muster, Diagnose X",
+            "note": "Interne Notiz",
+            "lead_reason": "costs",
+            "reason_free_text": true,
+            "cancelled_service_ids": []
+        });
+        let scrubbed = scrubbed_audit_context(&context).unwrap();
+        assert_eq!(scrubbed["reason"], ERASED_AUDIT_TEXT);
+        assert_eq!(scrubbed["note"], ERASED_AUDIT_TEXT);
+        assert_eq!(scrubbed["lead_reason"], "costs");
+        assert_eq!(scrubbed["reason_free_text"], true);
+        assert_eq!(scrubbed["status"], "not_qualified");
+        assert_eq!(scrubbed["cancelled_service_ids"], json!([]));
+        assert_eq!(scrubbed_audit_context(&scrubbed), None, "idempotent");
+        assert_eq!(
+            scrubbed_audit_context(&json!({ "reason": "no_response", "note": null })),
+            None
+        );
     }
 
     #[test]
