@@ -867,17 +867,22 @@ function PatientProfileLegalStatusSection({
     | "identityVerified"
     | "documentPackComplete"
     | "complianceCompleted";
+  // DSGVO consent and the confidentiality release follow signed documents
+  // only (owner decision 2026-10-12): shown, never edited, never sent.
   const legalStatusItems: Array<{
     key: PatientLegalStatusFlag;
     label: string;
+    documentBound?: boolean;
   }> = [
     {
       key: "dsgvoSigned",
       label: dictionary.patient_profile_editor_dsgvo_signed,
+      documentBound: true,
     },
     {
       key: "confidentialityReleaseSigned",
       label: dictionary.patient_profile_editor_confidentiality_released,
+      documentBound: true,
     },
     {
       key: "identityVerified",
@@ -892,6 +897,8 @@ function PatientProfileLegalStatusSection({
       label: dictionary.patient_profile_editor_readiness_confirmed,
     },
   ];
+  const readOnlyHint =
+    dictionary.uiText?.patient_legal_doc_read_only_hint ?? "";
 
   return (
     <FormSection
@@ -902,20 +909,32 @@ function PatientProfileLegalStatusSection({
         {legalStatusItems.map((item) => (
           <label
             key={item.key}
-            className="flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground cursor-pointer hover:bg-muted/40 transition-colors"
+            title={item.documentBound ? readOnlyHint : undefined}
+            className={cn(
+              "flex items-center gap-2 rounded-lg border border-border/50 bg-card px-2.5 py-2 text-[12.5px] text-foreground transition-colors",
+              item.documentBound
+                ? "cursor-not-allowed bg-muted/30 text-muted-foreground"
+                : "cursor-pointer hover:bg-muted/40",
+            )}
           >
             <input
               type="checkbox"
               checked={Boolean(form.legalStatus[item.key])}
-              onChange={(event) =>
-                updateLegalStatusField(item.key, event.target.checked)
-              }
+              disabled={item.documentBound}
+              aria-readonly={item.documentBound ? true : undefined}
+              onChange={(event) => {
+                if (item.documentBound) return;
+                updateLegalStatusField(item.key, event.target.checked);
+              }}
               className={checkboxClass}
             />
             {item.label}
           </label>
         ))}
       </div>
+      {readOnlyHint ? (
+        <p className="text-xs leading-5 text-muted-foreground">{readOnlyHint}</p>
+      ) : null}
       <FormField label={dictionary.patient_profile_editor_contract_status}>
         <NativeComboboxSelect
           value={form.legalStatus.contractStatus}

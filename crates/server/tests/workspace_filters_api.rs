@@ -12882,6 +12882,12 @@ async fn patient_profile_updates_structured_legal_status() {
 
     let tag = unique_tag("patient-legal-status");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    // DSGVO consent and the confidentiality release follow signed documents
+    // only (owner decision 2026-10-12); the profile save re-sends them
+    // unchanged.
+    support::seed_signed_consent_document(&pool, patient_id, "dsgvo", admin_id).await;
+    support::seed_signed_consent_document(&pool, patient_id, "confidentiality_release", admin_id)
+        .await;
 
     let (status, body) = json_request(
         &app,
@@ -12927,6 +12933,11 @@ async fn patient_profile_updates_structured_legal_status() {
         detail_body["legal_status"]["notes"],
         "Waiting for signed framework package"
     );
+    for kind in ["dsgvo", "confidentiality_release"] {
+        let evidence = &detail_body["legal_status_evidence"][kind];
+        assert_eq!(evidence["state"], "signed", "{kind}: {evidence}");
+        assert_eq!(evidence["signed_document"]["source"], "paper_signature");
+    }
     assert_eq!(detail_body["functional_labels"][0], "vip");
     assert_eq!(detail_body["functional_labels"][1], "high_risk");
 }
@@ -13036,6 +13047,8 @@ async fn patient_timeline_includes_compliance_audit_events() {
     seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
     let pm_bearer = auth_header_for(pm_id, "patient_manager");
 
+    // DSGVO consent follows a signed document only (owner decision
+    // 2026-10-12); the contract status is a legal-status change on its own.
     let (status, _) = json_request(
         &app,
         "POST",
@@ -13043,7 +13056,6 @@ async fn patient_timeline_includes_compliance_audit_events() {
         &bearer,
         Some(json!({
             "legal_status": {
-                "dsgvo_signed": true,
                 "compliance_completed": false,
                 "contract_status": "pending"
             }

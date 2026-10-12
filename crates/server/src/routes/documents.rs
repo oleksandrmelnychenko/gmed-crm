@@ -1955,15 +1955,167 @@ fn is_signature_compliance_kind(kind: &str) -> bool {
     )
 }
 
-/// Which `legal_status` key a signed document satisfies, and the value to set.
-/// `other` and `enhanced_due_diligence` touch no compliance flag.
-fn legal_status_flag_for_compliance_kind(kind: &str) -> Option<(&'static str, Value)> {
+/// Types (template, or for an upload the document type) of the
+/// Einverständniserklärung for a minor. It carries the
+/// Schweigepflichtsentbindung clause as well, so a signed one counts for DSGVO
+/// consent and for the confidentiality release (owner decision 2026-10-12).
+pub(crate) const CHILD_CONSENT_FORM_TYPES: [&str; 3] = [
+    "consent_data_release_child",
+    "consent_data_release_single",
+    "consent_data_release",
+];
+
+/// Whether the document is an Einverständniserklärung for a minor
+/// ([`CHILD_CONSENT_FORM_TYPES`]), by its template or, without one, its type.
+pub(crate) fn is_child_consent_form(generated_template_id: Option<&str>, art: &str) -> bool {
+    let document_type = generated_template_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| art.trim());
+    CHILD_CONSENT_FORM_TYPES.contains(&document_type)
+}
+
+/// The document-bound legal-status kinds a signed document of this compliance
+/// kind covers: a DSGVO consent covers `dsgvo`, a confidentiality release
+/// `confidentiality_release`, and a minor's Einverständniserklärung both.
+pub(crate) fn legal_status_kinds_of_signed_document(
+    compliance_kind: &str,
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> Vec<&'static str> {
+    match compliance_kind {
+        "dsgvo" if is_child_consent_form(generated_template_id, art) => {
+            vec!["dsgvo", "confidentiality_release"]
+        }
+        "dsgvo" => vec!["dsgvo"],
+        "confidentiality_release" => vec!["confidentiality_release"],
+        _ => Vec::new(),
+    }
+}
+
+/// One `legal_status` item a signed document sets, with the consent the
+/// signature grants and, for DSGVO consent and the confidentiality release,
+/// the key that records a revocation of that consent.
+struct SignedDocumentLegalEffect {
+    key: &'static str,
+    value: Value,
+    consent_type: Option<&'static str>,
+    revoked_key: Option<&'static str>,
+}
+
+/// What a signed document sets on the patient's `legal_status`. `other` and
+/// `enhanced_due_diligence` touch no compliance flag.
+fn legal_status_effects_of_signed_document(
+    kind: &str,
+    generated_template_id: Option<&str>,
+    art: &str,
+) -> Vec<SignedDocumentLegalEffect> {
+    let mut effects = legal_status_kinds_of_signed_document(kind, generated_template_id, art)
+        .into_iter()
+        .filter_map(|covered| {
+            super::patients::DOCUMENT_BOUND_LEGAL_ITEMS
+                .iter()
+                .find(|item| item.compliance_kind == covered)
+        })
+        .map(|item| SignedDocumentLegalEffect {
+            key: item.key,
+            value: Value::Bool(true),
+            consent_type: Some(item.consent_type),
+            revoked_key: Some(item.revoked_key),
+        })
+        .collect::<Vec<_>>();
     match kind {
-        "dsgvo" => Some(("dsgvo_signed", Value::Bool(true))),
-        "confidentiality_release" => Some(("confidentiality_release_signed", Value::Bool(true))),
-        "identity" => Some(("identity_verified", Value::Bool(true))),
-        "framework_contract" => Some(("contract_status", Value::String("signed".to_string()))),
-        _ => None,
+        "identity" => effects.push(SignedDocumentLegalEffect {
+            key: "identity_verified",
+            value: Value::Bool(true),
+            consent_type: None,
+            revoked_key: None,
+        }),
+        "framework_contract" => effects.push(SignedDocumentLegalEffect {
+            key: "contract_status",
+            value: Value::String("signed".to_string()),
+            consent_type: consent_type_for_compliance_kind(kind),
+            revoked_key: None,
+        }),
+        _ => {}
+    }
+    effects
+}
+
+#[cfg(test)]
+mod signed_document_legal_effect_tests {
+    use super::{
+        is_child_consent_form, legal_status_effects_of_signed_document,
+        legal_status_kinds_of_signed_document,
+    };
+
+    #[test]
+    fn a_signed_child_consent_form_covers_both_items() {
+        // Owner decision 2026-10-12: the Einverständniserklärung for a minor
+        // carries the Schweigepflichtsentbindung clause.
+        for template in ["consent_data_release_child", "consent_data_release_single"] {
+            assert!(is_child_consent_form(
+                Some(template),
+                "consent_data_release"
+            ));
+            assert_eq!(
+                legal_status_kinds_of_signed_document(
+                    "dsgvo",
+                    Some(template),
+                    "consent_data_release"
+                ),
+                vec!["dsgvo", "confidentiality_release"]
+            );
+            let effects = legal_status_effects_of_signed_document(
+                "dsgvo",
+                Some(template),
+                "consent_data_release",
+            );
+            let keys = effects.iter().map(|effect| effect.key).collect::<Vec<_>>();
+            assert_eq!(keys, ["dsgvo_signed", "confidentiality_release_signed"]);
+            let consents = effects
+                .iter()
+                .filter_map(|effect| effect.consent_type)
+                .collect::<Vec<_>>();
+            assert_eq!(consents, ["dsgvo_data_transfer", "schweigepflicht_release"]);
+        }
+        // An uploaded child form is known by its type.
+        assert!(is_child_consent_form(None, "consent_data_release"));
+        assert!(is_child_consent_form(Some("  "), "consent_data_release"));
+        // The adult consent covers DSGVO only; the release covers itself.
+        assert!(!is_child_consent_form(
+            Some("privacy_consents"),
+            "privacy_consents"
+        ));
+        assert_eq!(
+            legal_status_kinds_of_signed_document(
+                "dsgvo",
+                Some("privacy_consents"),
+                "privacy_consents"
+            ),
+            vec!["dsgvo"]
+        );
+        assert_eq!(
+            legal_status_kinds_of_signed_document(
+                "confidentiality_release",
+                Some("confidentiality_release"),
+                "confidentiality_release"
+            ),
+            vec!["confidentiality_release"]
+        );
+        assert!(legal_status_kinds_of_signed_document("identity", None, "passport").is_empty());
+        let identity = legal_status_effects_of_signed_document("identity", None, "passport");
+        assert_eq!(identity.len(), 1);
+        assert_eq!(identity[0].key, "identity_verified");
+        assert!(identity[0].revoked_key.is_none());
+        let contract = legal_status_effects_of_signed_document(
+            "framework_contract",
+            Some("framework_contract"),
+            "framework_contract",
+        );
+        assert_eq!(contract.len(), 1);
+        assert_eq!(contract[0].consent_type, Some("treatment_contract"));
+        assert!(legal_status_effects_of_signed_document("other", None, "other").is_empty());
     }
 }
 
@@ -2014,91 +2166,100 @@ impl From<sqlx::Error> for DocumentSignatureRecordError {
 
 /// Records a signed document as compliance evidence in the caller's
 /// transaction: the document's signature fields, the patient's `legal_status`
-/// flag, a consent record and the lead's compliance status. Returns whether a
-/// compliance flag changed.
+/// flags, the consent records and the lead's compliance status. Returns
+/// whether a compliance flag changed.
+///
+/// A signed Einverständniserklärung for a minor sets DSGVO consent and the
+/// confidentiality release. After the patient revoked one of these consents
+/// (`withdraw_document_bound_items`), only a signature given after the
+/// revocation sets it again and grants the consent anew (owner decision
+/// 2026-10-12); the scan of an older signature changes nothing there.
 pub(crate) async fn record_document_signature_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &DocumentSignatureRecord<'_>,
 ) -> Result<bool, DocumentSignatureRecordError> {
     let kind = record.compliance_kind;
-    sqlx::query(
+    let signed_document = sqlx::query(
         r#"UPDATE documents
            SET signed_at = $2,
                signed_by = $3,
                compliance_kind = $4,
                status = CASE WHEN status = 'draft' THEN 'active' ELSE status END,
                updated_at = now()
-           WHERE id = $1"#,
+           WHERE id = $1
+           RETURNING generated_template_id, COALESCE(art, '') AS art"#,
     )
     .bind(record.document_id)
     .bind(record.signed_at)
     .bind(record.signed_by)
     .bind(kind)
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await?;
+    let template = signed_document
+        .as_ref()
+        .and_then(|row| {
+            row.try_get::<Option<String>, _>("generated_template_id")
+                .ok()
+        })
+        .flatten();
+    let art = signed_document
+        .as_ref()
+        .and_then(|row| row.try_get::<String, _>("art").ok())
+        .unwrap_or_default();
 
     let mut compliance_updated = false;
-    if let (Some(pid), Some((key, value))) = (
-        record.patient_id,
-        legal_status_flag_for_compliance_kind(kind),
-    ) {
-        sqlx::query(
-            r#"UPDATE patients
-               SET legal_status = jsonb_set(COALESCE(legal_status, '{}'::jsonb), $2::text[], $3::jsonb, true),
-                   updated_at = now()
-               WHERE id = $1"#,
-        )
-        .bind(pid)
-        .bind(vec![key.to_string()])
-        .bind(value.to_string())
-        .execute(&mut **tx)
-        .await?;
-        compliance_updated = true;
-    }
-    if let (Some(pid), Some(consent_type)) =
-        (record.patient_id, consent_type_for_compliance_kind(kind))
-    {
-        sqlx::query(
-            r#"WITH existing_evidence AS (
-                   SELECT EXISTS (
-                       SELECT 1
-                       FROM consent_records
-                       WHERE patient_id = $1
-                         AND consent_type = $2
-                         AND granted = true
-                         AND revoked_at IS NULL
-                         AND context->>'source_document_id' = $3::text
-                   ) AS found
-               ), closed AS (
-                   UPDATE consent_records
-                   SET revoked_at = GREATEST($4, COALESCE(granted_at, created_at))
-                   WHERE patient_id = $1
-                     AND consent_type = $2
-                     AND granted = true
-                     AND revoked_at IS NULL
-                     AND NOT (SELECT found FROM existing_evidence)
-                   RETURNING id
-               )
-               INSERT INTO consent_records (
-                   patient_id, user_id, consent_type, granted,
-                   granted_at, expires_at, context
-               )
-               SELECT $1, $5, $2, true, $4, $4 + INTERVAL '1 year',
-                      $7::jsonb || jsonb_build_object(
-                        'source_document_id', $3,
-                        'compliance_kind', $6
-                      )
-               WHERE NOT (SELECT found FROM existing_evidence)"#,
-        )
-        .bind(pid)
-        .bind(consent_type)
-        .bind(record.document_id)
-        .bind(record.signed_at)
-        .bind(record.actor_id)
-        .bind(kind)
-        .bind(&record.consent_context)
-        .execute(&mut **tx)
-        .await?;
+    let mut granted_consents = Vec::new();
+    if let Some(pid) = record.patient_id {
+        let effects = legal_status_effects_of_signed_document(kind, template.as_deref(), &art);
+        let stored: Value = if effects.iter().any(|effect| effect.revoked_key.is_some()) {
+            sqlx::query_scalar::<_, Option<Value>>(
+                "SELECT legal_status FROM patients WHERE id = $1 FOR UPDATE",
+            )
+            .bind(pid)
+            .fetch_optional(&mut **tx)
+            .await?
+            .flatten()
+            .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        };
+        let mut patch = serde_json::Map::new();
+        let mut cleared = Vec::new();
+        for effect in effects {
+            let revoked_at = effect
+                .revoked_key
+                .and_then(|key| stored.get(key))
+                .and_then(Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| value.with_timezone(&chrono::Utc));
+            if revoked_at.is_some_and(|revoked_at| record.signed_at <= revoked_at) {
+                continue;
+            }
+            patch.insert(effect.key.to_string(), effect.value);
+            if let Some(revoked_key) = effect.revoked_key {
+                cleared.push(revoked_key.to_string());
+            }
+            if let Some(consent_type) = effect.consent_type {
+                granted_consents.push(consent_type);
+            }
+        }
+        if !patch.is_empty() {
+            sqlx::query(
+                r#"UPDATE patients
+                   SET legal_status = (COALESCE(legal_status, '{}'::jsonb) || $2) - $3::text[],
+                       updated_at = now()
+                   WHERE id = $1"#,
+            )
+            .bind(pid)
+            .bind(Value::Object(patch))
+            .bind(&cleared)
+            .execute(&mut **tx)
+            .await?;
+            compliance_updated = true;
+        }
+        for consent_type in granted_consents {
+            record_signed_consent_tx(tx, pid, consent_type, record).await?;
+        }
     }
     if let Some(lead_id) = record.lead_id
         && kind == "dsgvo"
@@ -2118,6 +2279,58 @@ pub(crate) async fn record_document_signature_tx(
         }
     }
     Ok(compliance_updated)
+}
+
+/// The consent a signed document grants (Art. 7 Abs. 1 DSGVO evidence): the
+/// grant before it is closed unless this document already granted it.
+async fn record_signed_consent_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    pid: Uuid,
+    consent_type: &str,
+    record: &DocumentSignatureRecord<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"WITH existing_evidence AS (
+               SELECT EXISTS (
+                   SELECT 1
+                   FROM consent_records
+                   WHERE patient_id = $1
+                     AND consent_type = $2
+                     AND granted = true
+                     AND revoked_at IS NULL
+                     AND context->>'source_document_id' = $3::text
+               ) AS found
+           ), closed AS (
+               UPDATE consent_records
+               SET revoked_at = GREATEST($4, COALESCE(granted_at, created_at))
+               WHERE patient_id = $1
+                 AND consent_type = $2
+                 AND granted = true
+                 AND revoked_at IS NULL
+                 AND NOT (SELECT found FROM existing_evidence)
+               RETURNING id
+           )
+           INSERT INTO consent_records (
+               patient_id, user_id, consent_type, granted,
+               granted_at, expires_at, context
+           )
+           SELECT $1, $5, $2, true, $4, $4 + INTERVAL '1 year',
+                  $7::jsonb || jsonb_build_object(
+                    'source_document_id', $3,
+                    'compliance_kind', $6
+                  )
+           WHERE NOT (SELECT found FROM existing_evidence)"#,
+    )
+    .bind(pid)
+    .bind(consent_type)
+    .bind(record.document_id)
+    .bind(record.signed_at)
+    .bind(record.actor_id)
+    .bind(record.compliance_kind)
+    .bind(&record.consent_context)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 /// Record a document as the signed evidence for a compliance requirement, and

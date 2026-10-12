@@ -2794,6 +2794,7 @@ async fn get_patient(
 
             let policies = load_patient_field_policies(&state, &auth).await?;
             let contacts = load_patient_contacts(&state, patient_id).await?;
+            let stored_legal_status = r.try_get::<Value, _>("legal_status").unwrap_or(Value::Null);
             let mut patient_json = build_patient_detail_json(
                 &auth,
                 &policies,
@@ -3001,6 +3002,16 @@ async fn get_patient(
                             .unwrap_or_default()
                     ),
                 );
+            }
+            // Whoever sees the legal status sees which signed documents carry
+            // DSGVO consent and the confidentiality release (owner decision
+            // 2026-10-12).
+            if patient_json.get("legal_status").is_some() {
+                let evidence =
+                    load_legal_status_evidence(&state, patient_id, &stored_legal_status).await?;
+                if let Some(map) = patient_json.as_object_mut() {
+                    map.insert("legal_status_evidence".to_string(), evidence);
+                }
             }
             state.audit_sender.try_send(audit::domain_event(
                 "view_patient",
@@ -3810,11 +3821,20 @@ async fn update_patient(
         }
         None => current.try_get("passport_expiry").unwrap_or_default(),
     };
+    // DSGVO consent and the confidentiality release follow signed documents
+    // only (owner decision 2026-10-12): a changed value is refused for every
+    // role, and the stored one is kept.
     let legal_status = match body.legal_status {
-        Some(value) => match normalize_legal_status(value) {
-            Ok(value) => Some(SqlxJson(value)),
-            Err(response) => return response,
-        },
+        Some(value) => {
+            let refused = manual_document_bound_changes(&stored_legal_status, &value);
+            match normalize_legal_status(value) {
+                Ok(_) if !refused.is_empty() => {
+                    return legal_status_requires_signed_document(&refused);
+                }
+                Ok(value) => Some(SqlxJson(without_document_bound_items(value))),
+                Err(response) => return response,
+            }
+        }
         None => None,
     };
     let clinical_warnings_supplied = body.clinical_warnings.is_some();
@@ -6636,6 +6656,426 @@ mod profile_change_tests {
             vec!["dsgvo_signed", "notes"]
         );
     }
+
+    #[test]
+    fn document_bound_items_change_only_through_signed_documents() {
+        use super::{manual_document_bound_changes, without_document_bound_items};
+        // Owner decision 2026-10-12: ticking or unticking DSGVO consent or
+        // the confidentiality release is a manual change.
+        let fresh = json!({});
+        assert_eq!(
+            manual_document_bound_changes(&fresh, &json!({ "dsgvo_signed": true })),
+            vec!["dsgvo_signed"]
+        );
+        assert_eq!(
+            manual_document_bound_changes(
+                &fresh,
+                &json!({ "dsgvo_signed": true, "confidentiality_release_signed": true })
+            ),
+            vec!["dsgvo_signed", "confidentiality_release_signed"]
+        );
+        let legacy = json!({ "dsgvo_signed": true, "confidentiality_release_signed": true });
+        assert_eq!(
+            manual_document_bound_changes(
+                &legacy,
+                &json!({ "confidentiality_release_signed": false })
+            ),
+            vec!["confidentiality_release_signed"]
+        );
+        // The stored value re-sent, a key left out, the other items: no change.
+        assert!(manual_document_bound_changes(&legacy, &legacy).is_empty());
+        assert!(
+            manual_document_bound_changes(
+                &fresh,
+                &json!({ "dsgvo_signed": false, "confidentiality_release_signed": false })
+            )
+            .is_empty()
+        );
+        assert!(
+            manual_document_bound_changes(
+                &fresh,
+                &json!({ "identity_verified": true, "compliance_completed": true })
+            )
+            .is_empty()
+        );
+        // The merge never carries them.
+        let patch = without_document_bound_items(json!({
+            "dsgvo_signed": false, "confidentiality_release_signed": false,
+            "identity_verified": true, "contract_status": "sent", "notes": null
+        }));
+        assert_eq!(
+            patch,
+            json!({ "identity_verified": true, "contract_status": "sent", "notes": null })
+        );
+    }
+
+    #[test]
+    fn a_revoked_consent_stays_active_until_a_new_signature_sets_the_item() {
+        use super::{active_consent_revocations, consent_revocation_reason};
+        // Revoked in the evening of 11.10.2026 UTC: the Berlin day is the 12th.
+        let revoked = json!({
+            "dsgvo_signed": false,
+            "dsgvo_revoked_at": "2026-10-11T22:30:00+00:00",
+            "confidentiality_release_signed": true,
+        });
+        let active = active_consent_revocations(&revoked);
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].0.key, "dsgvo_signed");
+        assert_eq!(
+            consent_revocation_reason(active[0].0, active[0].1),
+            "DSGVO consent was revoked on 12.10.2026"
+        );
+        // Set again (a consent signed later, or a conversion): over.
+        let signed_again = json!({
+            "dsgvo_signed": true,
+            "dsgvo_revoked_at": "2026-10-11T22:30:00+00:00",
+        });
+        assert!(active_consent_revocations(&signed_again).is_empty());
+        assert!(active_consent_revocations(&json!({})).is_empty());
+        let both = json!({
+            "dsgvo_revoked_at": "2026-10-12T08:00:00Z",
+            "confidentiality_release_revoked_at": "2026-10-12T08:00:00Z",
+        });
+        let active = active_consent_revocations(&both);
+        assert_eq!(active.len(), 2);
+        assert_eq!(
+            consent_revocation_reason(active[1].0, active[1].1),
+            "Medical confidentiality release was revoked on 12.10.2026"
+        );
+    }
+}
+
+/// A legal-status item that follows signed documents only (owner decisions
+/// 2026-10-11 "signed only with proof" and 2026-10-12): the key in
+/// `legal_status`, the compliance kind of the document that sets it and the
+/// template the card offers when the patient has no such document yet.
+/// `record_document_signature_tx` sets the key when a paper-signature scan, a
+/// QES or a signed upload of the kind is recorded; staff cannot change it on
+/// the card, whatever their role. Revoking the matching consent in the
+/// register (`consent_type`, Widerruf) unticks it and records when
+/// (`revoked_key`); only a consent signed after that sets it again (owner
+/// decision 2026-10-12).
+pub(crate) struct DocumentBoundLegalItem {
+    pub(crate) key: &'static str,
+    pub(crate) compliance_kind: &'static str,
+    pub(crate) template_id: &'static str,
+    pub(crate) consent_type: &'static str,
+    pub(crate) revoked_key: &'static str,
+    /// The re-check's blocking reason while the consent stays revoked.
+    revoked_reason: &'static str,
+}
+
+pub(crate) static DOCUMENT_BOUND_LEGAL_ITEMS: [DocumentBoundLegalItem; 2] = [
+    DocumentBoundLegalItem {
+        key: "dsgvo_signed",
+        compliance_kind: "dsgvo",
+        template_id: "privacy_consents",
+        consent_type: "dsgvo_data_transfer",
+        revoked_key: "dsgvo_revoked_at",
+        revoked_reason: "DSGVO consent was revoked on",
+    },
+    DocumentBoundLegalItem {
+        key: "confidentiality_release_signed",
+        compliance_kind: "confidentiality_release",
+        template_id: "confidentiality_release",
+        consent_type: "schweigepflicht_release",
+        revoked_key: "confidentiality_release_revoked_at",
+        revoked_reason: "Medical confidentiality release was revoked on",
+    },
+];
+
+/// Revoking DSGVO consent (`dsgvo_data_transfer`) or the confidentiality
+/// release (`schweigepflicht_release`) in the consent register unticks the
+/// matching legal-status item and records when (owner decision 2026-10-12):
+/// new orders stay blocked until a consent signed after that exists. Nothing
+/// is sent to anyone. Returns the unticked keys.
+pub(crate) async fn withdraw_document_bound_items<'e, E>(
+    executor: E,
+    patient_id: Uuid,
+    consent_types: &[&str],
+    revoked_at: chrono::DateTime<chrono::Utc>,
+) -> Result<Vec<&'static str>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let mut patch = Map::new();
+    let mut withdrawn = Vec::new();
+    for item in DOCUMENT_BOUND_LEGAL_ITEMS
+        .iter()
+        .filter(|item| consent_types.contains(&item.consent_type))
+    {
+        patch.insert(item.key.to_string(), Value::Bool(false));
+        patch.insert(
+            item.revoked_key.to_string(),
+            Value::String(revoked_at.to_rfc3339()),
+        );
+        withdrawn.push(item.key);
+    }
+    if withdrawn.is_empty() {
+        return Ok(withdrawn);
+    }
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = COALESCE(legal_status, '{}'::jsonb) || $2,
+               updated_at = now()
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .bind(Value::Object(patch))
+    .execute(executor)
+    .await?;
+    Ok(withdrawn)
+}
+
+/// The document-bound consents the patient revoked and has not signed again:
+/// the item and when it was revoked. A revocation stays active until a consent
+/// signed after it sets the item again (and clears `revoked_key`).
+fn active_consent_revocations(
+    legal_status: &Value,
+) -> Vec<(
+    &'static DocumentBoundLegalItem,
+    chrono::DateTime<chrono::Utc>,
+)> {
+    DOCUMENT_BOUND_LEGAL_ITEMS
+        .iter()
+        .filter(|item| legal_status.get(item.key).and_then(Value::as_bool) != Some(true))
+        .filter_map(|item| {
+            legal_status
+                .get(item.revoked_key)
+                .and_then(Value::as_str)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                .map(|value| (item, value.with_timezone(&chrono::Utc)))
+        })
+        .collect()
+}
+
+/// "DSGVO consent was revoked on 12.10.2026" (the Berlin day); the UI
+/// translates it (`orders/model/blocking-reasons.ts`).
+fn consent_revocation_reason(
+    item: &DocumentBoundLegalItem,
+    revoked_at: chrono::DateTime<chrono::Utc>,
+) -> String {
+    format!(
+        "{} {}",
+        item.revoked_reason,
+        crate::app_time::date_of(revoked_at).format("%d.%m.%Y")
+    )
+}
+
+/// The document-bound items a legal-status patch would change by hand: a key
+/// sent with a value other than the stored one (a missing stored flag is
+/// `false`). Re-sending the stored value, as an older profile editor does with
+/// every save, changes nothing and is accepted; a key left out keeps the
+/// stored value.
+pub(crate) fn manual_document_bound_changes(stored: &Value, sent: &Value) -> Vec<&'static str> {
+    DOCUMENT_BOUND_LEGAL_ITEMS
+        .iter()
+        .filter(|item| {
+            sent.get(item.key)
+                .and_then(Value::as_bool)
+                .is_some_and(|flag| {
+                    stored
+                        .get(item.key)
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                        != flag
+                })
+        })
+        .map(|item| item.key)
+        .collect()
+}
+
+/// The refusal of [`manual_document_bound_changes`], for every role.
+fn legal_status_requires_signed_document(items: &[&str]) -> axum::response::Response {
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "legal_status_requires_signed_document",
+            "message": "DSGVO consent and the confidentiality release are set only by a signed document (paper-signature scan or electronic signature), not by hand",
+            "items": items,
+        })),
+    )
+        .into_response()
+}
+
+/// A normalized legal-status patch without the document-bound items: the
+/// merge keeps what the signed documents set.
+fn without_document_bound_items(mut value: Value) -> Value {
+    if let Value::Object(map) = &mut value {
+        for item in &DOCUMENT_BOUND_LEGAL_ITEMS {
+            map.remove(item.key);
+        }
+    }
+    value
+}
+
+/// What the card shows for the document-bound legal-status items, keyed by
+/// compliance kind: the stored flag (`set`), the signed document that carries
+/// it, the newest document of the kind still to be signed (the target of
+/// "Подписано на бумаге") and the template to generate when there is none.
+/// `state`: `signed` — the flag and a current signed document; `manual` —
+/// the flag without a current signed document (ticked by hand before
+/// 2026-10-12, or its signed document archived since): it keeps counting for
+/// the gates, the card flags it; `revoked` — unticked by a revoked consent
+/// (`revoked_at`), new orders wait for a consent signed after it; `missing` —
+/// not set.
+async fn load_legal_status_evidence(
+    state: &AppState,
+    patient_id: Uuid,
+    legal_status: &Value,
+) -> Result<Value, axum::response::Response> {
+    let failed = |error: sqlx::Error| {
+        tracing::error!(%error, %patient_id, "load legal status evidence");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load patient legal status",
+        )
+    };
+    let kinds = DOCUMENT_BOUND_LEGAL_ITEMS
+        .iter()
+        .map(|item| item.compliance_kind.to_string())
+        .collect::<Vec<_>>();
+    // Newest first; a signed Einverständniserklärung for a minor carries both
+    // items (`legal_status_kinds_of_signed_document`).
+    let signed_rows = sqlx::query(
+        r#"SELECT d.compliance_kind, d.generated_template_id, d.art,
+                  d.id, d.document_number, d.signed_at,
+                  COALESCE(NULLIF(btrim(d.auto_name), ''), d.original_filename, 'Document') AS name,
+                  CASE WHEN d.ursprung = 'paper_signature' THEN 'paper_signature'
+                       WHEN d.signed_by IS NULL THEN 'electronic_signature'
+                       ELSE 'signed_document' END AS source
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.compliance_kind = ANY($2)
+             AND d.signed_at IS NOT NULL
+             AND d.status = 'active'
+             AND d.file_deleted_at IS NULL
+           ORDER BY d.signed_at DESC, d.created_at DESC
+           LIMIT 200"#,
+    )
+    .bind(patient_id)
+    .bind(&kinds)
+    .fetch_all(&state.db)
+    .await
+    .map_err(failed)?;
+    // The current version of an unsigned, non-archived document; its kind
+    // follows its template or type as when it is signed.
+    let unsigned_rows = sqlx::query(
+        r#"SELECT d.id, d.document_number, d.generated_template_id, d.art,
+                  COALESCE(NULLIF(btrim(d.auto_name), ''), d.original_filename, 'Document') AS name,
+                  EXISTS(
+                      SELECT 1 FROM document_signature_requests request
+                      WHERE request.status IN ('submitting', 'submission_unknown', 'pending')
+                        AND (request.source_document_id = d.id
+                             OR EXISTS(SELECT 1 FROM document_signature_members member
+                                       WHERE member.request_id = request.id
+                                         AND member.document_id = d.id))
+                  ) AS signature_pending
+           FROM documents d
+           WHERE d.patient_id = $1
+             AND d.signed_at IS NULL
+             AND d.status <> 'archived'
+             AND d.file_deleted_at IS NULL
+             AND COALESCE(d.is_medical, false) = false
+             AND NOT EXISTS (
+                 SELECT 1 FROM documents newer WHERE newer.replaces_document_id = d.id
+             )
+           ORDER BY d.created_at DESC, d.id DESC
+           LIMIT 500"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(failed)?;
+
+    let covers = |row: &PgRow, compliance_kind: Option<&str>, item: &DocumentBoundLegalItem| {
+        let template = row
+            .try_get::<Option<String>, _>("generated_template_id")
+            .ok()
+            .flatten();
+        let art = row.try_get::<String, _>("art").unwrap_or_default();
+        compliance_kind.is_some_and(|kind| {
+            super::documents::legal_status_kinds_of_signed_document(kind, template.as_deref(), &art)
+                .contains(&item.compliance_kind)
+        })
+    };
+    let revocations = active_consent_revocations(legal_status);
+
+    let mut evidence = serde_json::Map::new();
+    for item in &DOCUMENT_BOUND_LEGAL_ITEMS {
+        let set = legal_status
+            .get(item.key)
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let revoked_at = revocations
+            .iter()
+            .find(|(revoked, _)| revoked.key == item.key)
+            .map(|(_, at)| *at);
+        let signed_document = signed_rows
+            .iter()
+            .find(|row| {
+                let kind = row
+                    .try_get::<Option<String>, _>("compliance_kind")
+                    .ok()
+                    .flatten();
+                covers(row, kind.as_deref(), item)
+            })
+            .map(|row| {
+                json!({
+                    "id": row.try_get::<Uuid, _>("id").ok(),
+                    "document_number": row.try_get::<Option<String>, _>("document_number").ok().flatten(),
+                    "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                    "signed_at": row
+                        .try_get::<chrono::DateTime<chrono::Utc>, _>("signed_at")
+                        .ok()
+                        .map(|value| value.to_rfc3339()),
+                    "source": row.try_get::<String, _>("source").unwrap_or_default(),
+                })
+            });
+        let pending_document = unsigned_rows
+            .iter()
+            .find(|row| {
+                let template = row
+                    .try_get::<Option<String>, _>("generated_template_id")
+                    .ok()
+                    .flatten();
+                let art = row.try_get::<String, _>("art").unwrap_or_default();
+                let kind = super::documents::compliance_kind_for_signed_document(
+                    template.as_deref(),
+                    &art,
+                );
+                covers(row, kind, item)
+            })
+            .map(|row| {
+                json!({
+                    "id": row.try_get::<Uuid, _>("id").ok(),
+                    "document_number": row.try_get::<Option<String>, _>("document_number").ok().flatten(),
+                    "name": row.try_get::<String, _>("name").unwrap_or_default(),
+                    "generated_template_id": row.try_get::<Option<String>, _>("generated_template_id").ok().flatten(),
+                    "signature_pending": row.try_get::<bool, _>("signature_pending").unwrap_or(false),
+                })
+            });
+        // A revoked consent shows the document it revoked only as history.
+        let state_label = match (set, signed_document.is_some(), revoked_at.is_some()) {
+            (true, true, _) => "signed",
+            (true, false, _) => "manual",
+            (false, _, true) => "revoked",
+            (false, _, false) => "missing",
+        };
+        evidence.insert(
+            item.compliance_kind.to_string(),
+            json!({
+                "key": item.key,
+                "set": set,
+                "state": state_label,
+                "revoked_at": revoked_at.map(|value| value.to_rfc3339()),
+                "signed_document": signed_document,
+                "pending_document": pending_document,
+                "template_id": item.template_id,
+            }),
+        );
+    }
+    Ok(Value::Object(evidence))
 }
 
 fn normalize_legal_status(value: Value) -> Result<Value, axum::response::Response> {
@@ -8112,20 +8552,59 @@ pub(crate) async fn load_patient_recheck_readiness(
             .try_get::<bool, _>("has_invoices")
             .unwrap_or(false);
 
+    // A revoked DSGVO consent or confidentiality release blocks new orders
+    // until a consent signed after it exists (owner decision 2026-10-12),
+    // also for a patient the existing-customer re-check does not apply to.
+    let revocations = active_consent_revocations(&legal_status);
+    let revocation_reasons = revocations
+        .iter()
+        .map(|(item, revoked_at)| consent_revocation_reason(item, *revoked_at))
+        .collect::<Vec<_>>();
+    let revoked = |key: &str| revocations.iter().any(|(item, _)| item.key == key);
+    let consent_revocations = json!({
+        "dsgvo": revocations
+            .iter()
+            .find(|(item, _)| item.compliance_kind == "dsgvo")
+            .map(|(_, at)| at.to_rfc3339()),
+        "confidentiality_release": revocations
+            .iter()
+            .find(|(item, _)| item.compliance_kind == "confidentiality_release")
+            .map(|(_, at)| at.to_rfc3339()),
+    });
+
     if !requires_recheck {
         // Passport validity is independent of whether an existing-customer
         // re-check is due, so report it even on the minimal payload (#6).
         let (passport_status, passport_days_until_expiry) =
             passport_compliance_status(passport_expiry, crate::app_time::today());
+        let can_create_order = revocation_reasons.is_empty();
+        let checks = revocations
+            .iter()
+            .map(|(item, revoked_at)| {
+                // The same check keys as the full re-check below.
+                let check_key = if item.compliance_kind == "dsgvo" {
+                    "compliance"
+                } else {
+                    "confidentiality_release"
+                };
+                json!({
+                    "key": check_key,
+                    "label": consent_revocation_reason(item, *revoked_at),
+                    "passed": false,
+                    "blocking_for": "create_order",
+                    "revoked_at": revoked_at.to_rfc3339(),
+                })
+            })
+            .collect::<Vec<_>>();
         return Ok(Some(PatientRecheckReadiness {
-            can_create_order: true,
-            blocking_reasons: Vec::new(),
+            can_create_order,
+            blocking_reasons: revocation_reasons.clone(),
             payload: json!({
                 "requires_recheck": false,
-                "can_create_order": true,
+                "can_create_order": can_create_order,
                 "base_data_ready": true,
-                "compliance_ready": true,
-                "confidentiality_release_ready": true,
+                "compliance_ready": !revoked("dsgvo_signed"),
+                "confidentiality_release_ready": !revoked("confidentiality_release_signed"),
                 "identity_ready": true,
                 "document_pack_ready": true,
                 "contract_ready": true,
@@ -8137,8 +8616,9 @@ pub(crate) async fn load_patient_recheck_readiness(
                 "passport_days_until_expiry": passport_days_until_expiry,
                 "overdue_invoice_count": 0,
                 "base_data_missing_fields": [],
-                "blocking_reasons": [],
-                "checks": [],
+                "blocking_reasons": revocation_reasons,
+                "checks": checks,
+                "consent_revocations": consent_revocations,
                 "reason": "Existing-customer re-check is not required before the first operational order",
                 "patient": {
                     "id": patient_uuid,
@@ -8358,6 +8838,8 @@ pub(crate) async fn load_patient_recheck_readiness(
     if !confidentiality_release_signed {
         blocking_reasons.push("Medical confidentiality release is not signed".to_string());
     }
+    // Why the item is unticked: the consent was revoked on that day.
+    blocking_reasons.extend(revocation_reasons);
     if !identity_verified {
         blocking_reasons.push("Identity is not verified".to_string());
     }
@@ -8405,6 +8887,7 @@ pub(crate) async fn load_patient_recheck_readiness(
             "base_data_missing_fields": base_data_missing_fields,
             "blocking_reasons": blocking_reasons,
             "checks": checks,
+            "consent_revocations": consent_revocations,
             "patient": {
                 "id": patient_uuid,
                 "patient_id": patient_pid,

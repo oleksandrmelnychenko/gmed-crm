@@ -154,6 +154,64 @@ pub async fn seed_signed_framework_contract_document(
     document_id
 }
 
+/// A patient's consent signed on paper, as "Подписано на бумаге" leaves it
+/// (owner decision 2026-10-12: DSGVO consent and the confidentiality release
+/// follow signed documents only): the signed scan of the generated document
+/// with its compliance kind, and the matching `legal_status` flag set in the
+/// same statement like `record_document_signature_tx` does. `kind`: `dsgvo`
+/// (Einverständniserklärung) or `confidentiality_release`
+/// (Schweigepflichtsentbindung).
+#[allow(dead_code)]
+pub async fn seed_signed_consent_document(
+    pool: &PgPool,
+    patient_id: Uuid,
+    kind: &str,
+    uploaded_by: Uuid,
+) -> Uuid {
+    let (template, name, flag) = match kind {
+        "dsgvo" => (
+            "privacy_consents",
+            "Einverständniserklärung zur Datenübermittlung",
+            "dsgvo_signed",
+        ),
+        "confidentiality_release" => (
+            "confidentiality_release",
+            "Schweigepflichtsentbindung",
+            "confidentiality_release_signed",
+        ),
+        other => panic!("not a document-bound legal status kind: {other}"),
+    };
+    let document_id = Uuid::new_v4();
+    sqlx::query(
+        r#"WITH signed AS (
+               INSERT INTO documents (
+                   id, patient_id, auto_name, original_filename, art, category,
+                   status, visibility, is_medical, mime_type, generated_template_id, ursprung,
+                   version_root_document_id, version_number, uploaded_by,
+                   signed_at, signed_by, compliance_kind
+               ) VALUES (
+                   $1, $2, $3, 'consent-scan.pdf', $4, 'consent', 'active', 'internal', false,
+                   'application/pdf', $4, 'paper_signature', $1, 1, $5, now(), $5, $6
+               )
+               RETURNING patient_id
+           )
+           UPDATE patients
+           SET legal_status = jsonb_set(COALESCE(legal_status, '{}'::jsonb), ARRAY[$7], 'true'::jsonb, true)
+           WHERE id = (SELECT patient_id FROM signed)"#,
+    )
+    .bind(document_id)
+    .bind(patient_id)
+    .bind(name)
+    .bind(template)
+    .bind(uploaded_by)
+    .bind(kind)
+    .bind(flag)
+    .execute(pool)
+    .await
+    .expect("seed signed consent document");
+    document_id
+}
+
 #[allow(dead_code)]
 pub async fn wait_until<F, Fut>(description: &str, mut predicate: F)
 where

@@ -990,6 +990,10 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
     assert_eq!(body["message"], "Existing customer re-check is incomplete");
     assert_eq!(body["recheck"]["can_create_order"], false);
 
+    // DSGVO consent and the confidentiality release follow signed documents
+    // only (owner decision 2026-10-12): the consent is signed on paper here,
+    // the release is still missing.
+    support::seed_signed_consent_document(&pool, patient_id, "dsgvo", pm_id).await;
     let (status, _) = json_request(
         &app,
         "POST",
@@ -999,8 +1003,6 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
             "residence_country": "Germany",
             "languages": ["de"],
             "legal_status": {
-                "dsgvo_signed": true,
-                "confidentiality_release_signed": false,
                 "identity_verified": true,
                 "document_pack_complete": true,
                 "compliance_completed": true,
@@ -1066,7 +1068,8 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
         "Existing customer re-check is incomplete"
     );
 
-    let (status, _) = json_request(
+    // Ticking the release by hand is refused; the signed scan sets it.
+    let (status, refused) = json_request(
         &app,
         "POST",
         &format!("/api/v1/patients/{patient_id}/update"),
@@ -1084,7 +1087,11 @@ async fn create_order_is_blocked_until_existing_customer_recheck_passes() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "legal_status_requires_signed_document");
+    assert_eq!(refused["items"], json!(["confidentiality_release_signed"]));
+    support::seed_signed_consent_document(&pool, patient_id, "confidentiality_release", pm_id)
+        .await;
 
     let (status, recheck) = json_request(
         &app,

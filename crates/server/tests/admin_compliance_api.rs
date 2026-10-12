@@ -1135,6 +1135,16 @@ async fn third_party_revoke_request_can_be_executed_by_patient_manager_and_revok
         .unwrap();
     assert_eq!(legal_status["third_party_sharing_request_id"], request_id);
     assert_eq!(legal_status["third_party_document_shares_revoked_count"], 1);
+    // The withdrawn DSGVO data transfer and Schweigepflichtsentbindung untick
+    // their legal-status items until consents signed later exist (owner
+    // decision 2026-10-12).
+    assert_eq!(legal_status["dsgvo_signed"], false, "{legal_status}");
+    assert_eq!(
+        legal_status["confidentiality_release_signed"], false,
+        "{legal_status}"
+    );
+    assert!(legal_status["dsgvo_revoked_at"].is_string());
+    assert!(legal_status["confidentiality_release_revoked_at"].is_string());
 
     let active_provider_share_count: i64 = sqlx::query_scalar(
         r#"SELECT count(*)

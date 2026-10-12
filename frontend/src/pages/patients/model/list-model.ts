@@ -77,6 +77,12 @@ export type PatientDetail = PatientSummary & {
   passport_expiring?: boolean;
   passport_days_until_expiry?: number | null;
   legal_status?: unknown;
+  /**
+   * The signed documents behind DSGVO consent and the confidentiality
+   * release, keyed by compliance kind (`normalizePatientLegalStatusEvidence`);
+   * sent with `legal_status` only.
+   */
+  legal_status_evidence?: unknown;
   clinical_warnings?: string | null;
   notes?: string | null;
   /**

@@ -141,11 +141,28 @@ function followupCompletionReason(reason: string): OrderBlockingReasonTranslatio
   return null;
 }
 
+// A consent the patient revoked (owner decision 2026-10-12): the re-check
+// names the Berlin day of the revocation (patients.rs `consent_revocation_reason`).
+const CONSENT_REVOKED_REASON =
+  /^(DSGVO consent|Medical confidentiality release) was revoked on (\d{2}\.\d{2}\.\d{4})$/;
+const CONSENT_REVOKED_REASON_KEYS: Record<string, string> = {
+  "DSGVO consent": "orders_blocking_dsgvo_consent_revoked",
+  "Medical confidentiality release": "orders_blocking_confidentiality_release_revoked",
+};
+
 export function resolveOrderBlockingReason(
   reason: string,
 ): OrderBlockingReasonTranslation | null {
   const exactKey = EXACT_REASON_KEYS[reason];
   if (exactKey) return { key: exactKey };
+
+  const consentRevoked = reason.match(CONSENT_REVOKED_REASON);
+  if (consentRevoked) {
+    return {
+      key: CONSENT_REVOKED_REASON_KEYS[consentRevoked[1]],
+      values: { date: consentRevoked[2] },
+    };
+  }
 
   const followupCompletion = followupCompletionReason(reason);
   if (followupCompletion) return followupCompletion;

@@ -842,6 +842,7 @@ function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceCo
                 canViewDocuments,
                 canViewInvoices,
                 canViewLeads,
+                canManageDocuments,
               }}
               complianceExportBusy={complianceExportBusy}
               detail={detail}

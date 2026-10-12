@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
-import { getLang, type Translations } from "@/lib/i18n";
+import { getLang, useLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
 import {
@@ -44,7 +44,13 @@ import {
 } from "../../data/patient-detail-mutations";
 import { patientRelationTypeLabel } from "../../model/detail-model";
 import type { DocumentItem, RelationItem } from "../../model/detail-tab-types";
-import type { PatientLegalStatus } from "../../model/legal-status";
+import {
+  DOCUMENT_BOUND_LEGAL_STATUS_ITEMS,
+  normalizePatientLegalStatusEvidence,
+  type PatientLegalStatus,
+} from "../../model/legal-status";
+import type { PatientOption as DocumentPatientOption } from "@/pages/documents/model/types";
+import { LegalStatusDocumentItem } from "./legal-status-document-item";
 import { patientFieldHidden, type PatientDetail } from "../../model/list-model";
 import {
   createPatientLeadOrigin,
@@ -56,6 +62,12 @@ import { PatientPayerSummaryCard } from "./patient-payer-summary";
 
 const loadPatientLegalStatusSheet = () => import("../sheets/patient-legal-status-sheet");
 const loadPatientNotesSheet = () => import("../sheets/patient-notes-sheet");
+
+// The generator of a missing consent or confidentiality release (owner decision 2026-10-12).
+const LazyPatientDocumentGenerateDialog = lazy(async () => {
+  const mod = await import("../sheets/patient-document-generate-dialog");
+  return { default: mod.PatientDocumentGenerateDialog };
+});
 
 const LazyPatientLegalStatusSheet = lazy(async () => {
   const mod = await loadPatientLegalStatusSheet();
@@ -495,6 +507,11 @@ type PatientProfileTabProps = {
     canViewInvoices: boolean;
     /** `leads.view`: the source lead opens as a link; otherwise it is plain text. */
     canViewLeads?: boolean;
+    /**
+     * `documents.manage`: with `canEditPatientProfile`, the paper signature
+     * and the generator of DSGVO consent and the confidentiality release.
+     */
+    canManageDocuments?: boolean;
   };
   complianceExportBusy: boolean;
   detail: PatientDetail;
@@ -559,8 +576,32 @@ function usePatientProfileTabContent({
     canViewDocuments,
     canViewInvoices,
     canViewLeads = false,
+    canManageDocuments = false,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
+  const { lang } = useLang();
+  // DSGVO consent and the confidentiality release follow signed documents
+  // only (owner decision 2026-10-12): read-only, with the paper signature or
+  // the generator for staff who may edit the card and manage its documents.
+  const legalStatusEvidence = useMemo(
+    () => normalizePatientLegalStatusEvidence(detail.legal_status_evidence, legalStatus),
+    [detail.legal_status_evidence, legalStatus],
+  );
+  const canActOnLegalDocuments = canEditPatientProfile && canManageDocuments;
+  const [legalDocumentTemplateId, setLegalDocumentTemplateId] = useState<string | null>(null);
+  const legalDocumentPatient = useMemo<DocumentPatientOption | undefined>(
+    () =>
+      id
+        ? {
+            id,
+            patient_id: detail.patient_id,
+            first_name: detail.first_name ?? undefined,
+            last_name: detail.last_name ?? undefined,
+            languages: detail.languages ?? undefined,
+          }
+        : undefined,
+    [detail.first_name, detail.languages, detail.last_name, detail.patient_id, id],
+  );
   const [identityDocumentsState, setIdentityDocumentsState] = useState<{
     patientId: string;
     documents: DocumentItem[] | null;
@@ -1177,21 +1218,54 @@ function usePatientProfileTabContent({
         </div>
 
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card">
-          {legalStatusChecklist.map((item) => (
-            <ProfileDetailTile
-              key={item.key}
-              label={item.label}
-              value={item.done ? t.common_completed : t.common_pending}
-              done={item.done}
-            >
-              {item.done ? (
-                <CheckCircle2 className="size-4" />
-              ) : (
-                <AlertTriangle className="size-4" />
-              )}
-            </ProfileDetailTile>
-          ))}
+          {legalStatusChecklist.map((item) => {
+            const documentBound = DOCUMENT_BOUND_LEGAL_STATUS_ITEMS.find(
+              (entry) => entry.checklistKey === item.key,
+            );
+            if (documentBound) {
+              return (
+                <LegalStatusDocumentItem
+                  key={item.key}
+                  kind={documentBound.kind}
+                  label={item.label}
+                  evidence={legalStatusEvidence[documentBound.kind]}
+                  lang={lang}
+                  canAct={canActOnLegalDocuments}
+                  onCreateDocument={setLegalDocumentTemplateId}
+                  onSigned={reload}
+                />
+              );
+            }
+            return (
+              <ProfileDetailTile
+                key={item.key}
+                label={item.label}
+                value={item.done ? t.common_completed : t.common_pending}
+                done={item.done}
+              >
+                {item.done ? (
+                  <CheckCircle2 className="size-4" />
+                ) : (
+                  <AlertTriangle className="size-4" />
+                )}
+              </ProfileDetailTile>
+            );
+          })}
         </div>
+        {id && canActOnLegalDocuments && legalDocumentTemplateId ? (
+          <Suspense fallback={null}>
+            <LazyPatientDocumentGenerateDialog
+              open
+              patientId={id}
+              patient={legalDocumentPatient}
+              initialTemplateId={legalDocumentTemplateId}
+              onOpenChange={(open) => {
+                if (!open) setLegalDocumentTemplateId(null);
+              }}
+              onGenerated={reload}
+            />
+          </Suspense>
+        ) : null}
 
         {legalStatus.notes ? (
           <ProfileRecordShell
@@ -1261,6 +1335,7 @@ function usePatientProfileTabContent({
           <LazyPatientLegalStatusSheet
             patientId={id}
             initial={legalStatus}
+            evidence={legalStatusEvidence}
             open={legalStatusSheetOpen}
             onOpenChange={handleLegalStatusSheetOpenChange}
             onSaved={reload}

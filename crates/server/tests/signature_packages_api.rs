@@ -785,6 +785,18 @@ async fn package_is_signed_once_and_members_link_to_the_canonical_bundle() {
             "treatment_contract"
         ]
     );
+    // The QES sets the card's DSGVO and confidentiality items (owner decision
+    // 2026-10-12: they follow signed documents only).
+    let legal_status: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id=$1")
+        .bind(patient)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(legal_status["dsgvo_signed"], true, "{legal_status}");
+    assert_eq!(
+        legal_status["confidentiality_release_signed"], true,
+        "{legal_status}"
+    );
     let evidence: Value = sqlx::query_scalar("SELECT context FROM consent_records WHERE patient_id=$1 AND consent_type='dsgvo_data_transfer'")
         .bind(patient).fetch_one(&env.pool).await.unwrap();
     assert_eq!(evidence["level"], "QES");
@@ -2120,6 +2132,87 @@ async fn minor_lead_package_uses_the_guardians_declaration_and_both_guardians() 
         .await
         .unwrap();
     assert_eq!(compliance, "signed");
+    // The child's Einverständniserklärung carries the Schweigepflichtsentbindung:
+    // the conversion counts it for both requirements (owner decision 2026-10-12).
+    let (status, detail) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/leads/{lead}"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    let passed = |key: &str| {
+        detail["readiness"]["checks"]
+            .as_array()
+            .and_then(|checks| checks.iter().find(|check| check["key"] == key))
+            .and_then(|check| check["passed"].as_bool())
+    };
+    assert_eq!(passed("dsgvo_document_signed"), Some(true), "{detail}");
+    assert_eq!(
+        passed("confidentiality_release_signed"),
+        Some(true),
+        "{detail}"
+    );
+}
+
+/// Owner decision 2026-10-12: a QES of the minor's Einverständniserklärung
+/// sets DSGVO consent and the confidentiality release on the patient card and
+/// grants both consents.
+#[tokio::test]
+async fn qes_of_a_child_consent_form_sets_both_legal_status_items() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "2016-03-03").await;
+    let child = upload(&env, patient, Doc::new("consent_data_release_child", 1)).await;
+    let id = send_package(
+        &env,
+        json!({
+            "document_ids": [child],
+            "signers": [signer("Anna", "anna@example.org", "client")],
+        }),
+    )
+    .await;
+    until_pending(&env, id).await;
+    env.mock.set_status(id, "SIGNED");
+    assert!(poll_request_now(&env.state, id).await.unwrap());
+    assert_eq!(status_of(&env.pool, id).await, "completed");
+
+    let legal_status: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id=$1")
+        .bind(patient)
+        .fetch_one(&env.pool)
+        .await
+        .unwrap();
+    assert_eq!(legal_status["dsgvo_signed"], true, "{legal_status}");
+    assert_eq!(
+        legal_status["confidentiality_release_signed"], true,
+        "{legal_status}"
+    );
+    let consent_types: Vec<String> = sqlx::query_scalar(
+        "SELECT consent_type FROM consent_records
+         WHERE patient_id=$1 AND granted AND revoked_at IS NULL ORDER BY consent_type",
+    )
+    .bind(patient)
+    .fetch_all(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        consent_types,
+        ["dsgvo_data_transfer", "schweigepflicht_release"]
+    );
+    // The signed version of the form keeps the compliance kind `dsgvo`.
+    let kinds: Vec<String> = sqlx::query_scalar(
+        "SELECT compliance_kind FROM documents
+         WHERE patient_id=$1 AND signed_at IS NOT NULL AND compliance_kind IS NOT NULL
+           AND COALESCE(version_root_document_id, id) = $2",
+    )
+    .bind(patient)
+    .bind(child)
+    .fetch_all(&env.pool)
+    .await
+    .unwrap();
+    assert!(!kinds.is_empty(), "the child form is signed");
+    assert!(kinds.iter().all(|kind| kind == "dsgvo"), "{kinds:?}");
 }
 
 /// Phase 3b (owner decisions 2026-10-06): the payer's own documents — the

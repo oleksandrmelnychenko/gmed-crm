@@ -1532,6 +1532,30 @@ async fn upsert_patient_consent(
     } else {
         RevokedConsentShares::default()
     };
+    // A revoked DSGVO consent or Schweigepflichtsentbindung unticks its
+    // legal-status item until a consent signed after it exists (owner
+    // decision 2026-10-12). Internal only: nobody else is told.
+    let legal_status_items_withdrawn = if action == "revoke" {
+        match super::patients::withdraw_document_bound_items(
+            &mut *tx,
+            patient_id,
+            &[consent_type.as_str()],
+            happened_at,
+        )
+        .await
+        {
+            Ok(keys) => keys,
+            Err(e) => {
+                tracing::error!(error = %e, patient_id = %patient_id, "untick the legal status of a withdrawn consent");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to save patient consent",
+                );
+            }
+        }
+    } else {
+        Vec::new()
+    };
     if let Err(e) = tx.commit().await {
         tracing::error!(error = %e, patient_id = %patient_id, "commit patient consent");
         return err(
@@ -1557,6 +1581,7 @@ async fn upsert_patient_consent(
             "expires_at": expires_at.as_ref().map(|value| value.to_rfc3339()),
             "revoked_share_count": revoked_shares.share_ids.len(),
             "third_party_sharing_revoked": revoked_shares.third_party_sharing_revoked,
+            "legal_status_items_withdrawn": legal_status_items_withdrawn,
         }),
     ));
     if !revoked_shares.share_ids.is_empty() {
@@ -1608,6 +1633,7 @@ async fn upsert_patient_consent(
             "created_at": created.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "revoked_share_count": revoked_shares.share_ids.len(),
             "third_party_sharing_revoked": revoked_shares.third_party_sharing_revoked,
+            "legal_status_items_withdrawn": legal_status_items_withdrawn,
         })),
     )
         .into_response()
@@ -3917,6 +3943,23 @@ async fn revoke_third_party_consents(
             "Failed to persist third-party revoke status",
         )
     })?;
+    // The request withdraws the DSGVO data transfer and the
+    // Schweigepflichtsentbindung: both legal-status items are unticked until
+    // a consent signed after it exists (owner decision 2026-10-12).
+    let legal_status_items_withdrawn = super::patients::withdraw_document_bound_items(
+        &state.db,
+        patient_id,
+        &["dsgvo_data_transfer", "schweigepflicht_release"],
+        revoked_at,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "untick the legal status after a third-party revoke");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to persist third-party revoke status",
+        )
+    })?;
 
     state.audit_sender.try_send(audit::domain_event(
         "consent_revoked",
@@ -3930,6 +3973,7 @@ async fn revoke_third_party_consents(
             "revoked_types": revoked_types,
             "revoked_count": revoked_count,
             "revoked_at": revoked_at.to_rfc3339(),
+            "legal_status_items_withdrawn": legal_status_items_withdrawn,
         }),
     ));
 

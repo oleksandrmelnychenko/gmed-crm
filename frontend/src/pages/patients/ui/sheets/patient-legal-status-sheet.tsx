@@ -1,6 +1,6 @@
 import { hasFormChanges } from "@/lib/form-changes";
 import { useReducer, useState, type FormEvent, type SetStateAction } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, FileSignature, LoaderCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -15,18 +15,21 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
+  legalStatusDocumentStateText,
+  normalizePatientLegalStatusEvidence,
   patientContractStatusLabel,
   serializePatientLegalStatus,
   type PatientLegalStatus,
+  type PatientLegalStatusEvidence,
 } from "../../model/legal-status";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 const legalNotesTextareaClassName = cn(textareaClass, "min-h-[80px]");
 
+// DSGVO consent and the confidentiality release are not toggled here: they
+// follow signed documents only (owner decision 2026-10-12).
 type ChecklistKey =
-  | "dsgvoSigned"
-  | "confidentialityReleaseSigned"
   | "identityVerified"
   | "documentPackComplete"
   | "complianceCompleted";
@@ -43,12 +46,15 @@ function legalStatusFormReducer(
 export function PatientLegalStatusSheet({
   patientId,
   initial,
+  evidence,
   open,
   onOpenChange,
   onSaved,
 }: {
   patientId: string;
   initial: PatientLegalStatus;
+  /** The signed documents behind DSGVO consent and the confidentiality release. */
+  evidence?: PatientLegalStatusEvidence;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
@@ -58,6 +64,7 @@ export function PatientLegalStatusSheet({
       key={`${patientId}:${open ? "open" : "closed"}:${serializePatientLegalStatus(initial)}`}
       patientId={patientId}
       initial={initial}
+      evidence={evidence ?? normalizePatientLegalStatusEvidence(undefined, initial)}
       open={open}
       onOpenChange={onOpenChange}
       onSaved={onSaved}
@@ -68,17 +75,19 @@ export function PatientLegalStatusSheet({
 function PatientLegalStatusSheetContent({
   patientId,
   initial,
+  evidence,
   open,
   onOpenChange,
   onSaved,
 }: {
   patientId: string;
   initial: PatientLegalStatus;
+  evidence: PatientLegalStatusEvidence;
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useReducer(legalStatusFormReducer, initial);
   const [busy, setBusy] = useState(false);
@@ -87,12 +96,11 @@ function PatientLegalStatusSheetContent({
     setForm((current) => ({ ...current, [key]: !current[key] }));
   }
 
+  const documentBoundItems = [
+    { kind: "dsgvo" as const, label: t.patient_legal_check_dsgvo },
+    { kind: "confidentiality_release" as const, label: t.patient_legal_check_confidentiality },
+  ];
   const checklist: Array<{ key: ChecklistKey; label: string }> = [
-    { key: "dsgvoSigned", label: t.patient_legal_check_dsgvo },
-    {
-      key: "confidentialityReleaseSigned",
-      label: t.patient_legal_check_confidentiality,
-    },
     { key: "identityVerified", label: t.patient_legal_check_identity },
     { key: "documentPackComplete", label: t.patient_legal_check_document_pack },
     { key: "complianceCompleted", label: t.patient_legal_check_compliance },
@@ -171,6 +179,36 @@ function PatientLegalStatusSheetContent({
 
       <FormSection title={t.patient_legal_sheet_checklist}>
         <div className="space-y-2">
+          {documentBoundItems.map((item) => {
+            const itemEvidence = evidence[item.kind];
+            const signed = itemEvidence.state === "signed";
+            return (
+              <div
+                key={item.kind}
+                data-testid={`legal-status-sheet-document-${item.kind}`}
+                aria-readonly="true"
+                className={cn(
+                  "flex w-full items-start justify-between gap-3 rounded-lg border px-3 py-2.5 text-left text-[13px]",
+                  signed
+                    ? "border-emerald-200 bg-emerald-50/60 text-emerald-900"
+                    : itemEvidence.state === "revoked"
+                      ? "border-rose-200 bg-rose-50/60 text-rose-900"
+                      : "border-amber-200 bg-amber-50/60 text-amber-900",
+                )}
+              >
+                <span className="min-w-0 space-y-0.5">
+                  <span className="block">{item.label}</span>
+                  <span className="block break-words text-xs text-muted-foreground">
+                    {legalStatusDocumentStateText(itemEvidence, lang)}
+                  </span>
+                </span>
+                <FileSignature aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              </div>
+            );
+          })}
+          <p className="text-xs leading-5 text-muted-foreground">
+            {l("patient_legal_doc_read_only_hint")}
+          </p>
           {checklist.map((item) => {
             const active = form[item.key];
             return (

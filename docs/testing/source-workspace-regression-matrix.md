@@ -540,7 +540,13 @@ Covers:
   `docs/backlog/01_mvp-backlog_ua.md:40`
   `docs/diagrams/system-diagrams.md:85`
   Covers:
-  patient profile persists structured legal and compliance state for DSGVO, Schweigepflicht, identity verification, document completeness, contract readiness and operational functional labels such as `vip` / `high_risk`.
+  patient profile persists structured legal and compliance state for DSGVO, Schweigepflicht, identity verification, document completeness, contract readiness and operational functional labels such as `vip` / `high_risk`. Since 2026-10-12 DSGVO and Schweigepflicht come from signed documents (the test seeds signed consents) and the card names them in `legal_status_evidence`.
+
+- `crates/server/tests/patient_legal_status_api.rs`
+  Source:
+  owner decision 2026-10-12 (`docs/architecture/statuses/03_records-access_ua.md`, §1 "Правовий статус картки")
+  Covers:
+  ticking or unticking DSGVO / Schweigepflichtsentbindung by hand is refused for CEO and patient manager (409 `legal_status_requires_signed_document`); the paper signature sets the item and the card names the signed document; an item ticked by hand before stays set, keeps counting for the re-check and is flagged `manual`; a revoked consent (register) unticks its item, blocks new orders with the dated reason until a consent signed after the revocation (an older scan does not count); a signed child consent form sets both items; lead readiness counts the child form for both and ignores consents older than the prospect patient's revocation. `admin_compliance_api.rs` (third-party revoke) checks that both items are unticked.
 
 - `patient_vitals_round_trip_and_clinical_warnings_flow_through_profile`
   Source:

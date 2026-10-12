@@ -528,6 +528,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   erasure_blocked_by_retention: "api_erasure_blocked_by_retention",
   // Portal release of an archived or file-less document (documents.rs).
   document_archived_not_releasable: "api_document_archived_not_releasable",
+  // DSGVO consent and the confidentiality release follow signed documents only (patients.rs).
+  legal_status_requires_signed_document: "api_patients_legal_status_requires_signed_document",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

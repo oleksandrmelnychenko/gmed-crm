@@ -35,9 +35,22 @@ describe("resolveOrderBlockingReason", () => {
       "Valid contract documentation is missing",
       "Patient is still in debt-management hold",
       "2 overdue invoice(s) keep the patient in debt-management hold",
+      "DSGVO consent was revoked on 12.10.2026",
+      "Medical confidentiality release was revoked on 12.10.2026",
     ]) {
       expect(resolveOrderBlockingReason(reason), reason).not.toBeNull();
     }
+    // A revoked consent names the day (owner decision 2026-10-12).
+    expect(resolveOrderBlockingReason("DSGVO consent was revoked on 12.10.2026")).toEqual({
+      key: "orders_blocking_dsgvo_consent_revoked",
+      values: { date: "12.10.2026" },
+    });
+    expect(
+      resolveOrderBlockingReason("Medical confidentiality release was revoked on 01.11.2026"),
+    ).toEqual({
+      key: "orders_blocking_confidentiality_release_revoked",
+      values: { date: "01.11.2026" },
+    });
     expect(resolveOrderBlockingReason("Medical confidentiality release is not signed")).toEqual({
       key: "orders_blocking_confidentiality_release_unsigned",
     });

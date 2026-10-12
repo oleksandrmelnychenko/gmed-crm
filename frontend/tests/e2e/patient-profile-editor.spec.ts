@@ -46,6 +46,12 @@ for (const lang of ["ru", "de"]) {
       await page.screenshot({ path: `../artifacts/design-qa/patient-profile-editor-contacts-${lang}-${width}.png`, animations: "disabled" });
       await sheet.locator("textarea").last().scrollIntoViewIfNeeded();
       await page.screenshot({ path: `../artifacts/design-qa/patient-profile-editor-bottom-${lang}-${width}.png`, animations: "disabled" });
+      // DSGVO consent and the confidentiality release are read-only here.
+      for (const name of lang === "de"
+        ? ["DSGVO unterschrieben", "Schweigepflicht freigegeben"]
+        : ["DSGVO подписано", "Снятие врачебной тайны"]) {
+        await expect(sheet.getByRole("checkbox", { name, exact: true })).toBeDisabled();
+      }
       await cancel.click();
       await expect(sheet).toBeHidden();
       await expect(page.getByRole("alertdialog")).toHaveCount(0);
@@ -72,6 +78,10 @@ for (const lang of ["ru", "de"]) {
       await expect(page.getByRole("status", { name: "" }).filter({ hasText: "Profile saved" })).toBeVisible();
       expect(savedBody).toMatchObject({ first_name: "Alexandra", birth_date: "1976-07-06", languages: ["de", "uk", "en"] });
       expect(savedBody?.contacts).toHaveLength(2);
+      // DSGVO consent and the confidentiality release follow signed documents
+      // only (owner decision 2026-10-12): the editor never sends them.
+      expect(savedBody?.legal_status).not.toHaveProperty("dsgvo_signed");
+      expect(savedBody?.legal_status).not.toHaveProperty("confidentiality_release_signed");
       expect(errors).toEqual([]);
     });
   }

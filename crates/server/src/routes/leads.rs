@@ -1855,6 +1855,12 @@ async fn load_lead_conversion_readiness(
                         AND d.file_deleted_at IS NULL
                         AND d.compliance_kind = 'dsgvo'
                         AND d.signed_at IS NOT NULL
+                        -- After the patient revoked the consent only one signed
+                        -- later counts (owner decision 2026-10-12).
+                        AND d.signed_at > COALESCE(
+                            (SELECT (rp.legal_status->>'dsgvo_revoked_at')::timestamptz
+                             FROM patients rp WHERE rp.id = leads.prospect_patient_id),
+                            '-infinity'::timestamptz)
                   ) AS dsgvo_document_signed,
                   EXISTS (
                       SELECT 1 FROM documents d
@@ -1865,8 +1871,19 @@ async fn load_lead_conversion_readiness(
                             )
                         AND d.status = 'active'
                         AND d.file_deleted_at IS NULL
-                        AND d.compliance_kind = 'confidentiality_release'
+                        -- The Einverständniserklärung for a minor carries the
+                        -- Schweigepflichtsentbindung too (owner decision 2026-10-12).
+                        AND (d.compliance_kind = 'confidentiality_release'
+                             OR (d.compliance_kind = 'dsgvo'
+                                 AND COALESCE(NULLIF(btrim(d.generated_template_id), ''), btrim(d.art))
+                                     IN ('consent_data_release_child',
+                                         'consent_data_release_single',
+                                         'consent_data_release')))
                         AND d.signed_at IS NOT NULL
+                        AND d.signed_at > COALESCE(
+                            (SELECT (rp.legal_status->>'confidentiality_release_revoked_at')::timestamptz
+                             FROM patients rp WHERE rp.id = leads.prospect_patient_id),
+                            '-infinity'::timestamptz)
                   ) AS confidentiality_release_signed,
                   EXISTS (
                       SELECT 1 FROM documents d
@@ -6336,7 +6353,11 @@ async fn convert_lead(
                                    )),
                                true
                            ),
-                           legal_status = COALESCE(legal_status, '{}'::jsonb) || $5::jsonb,
+                           -- The conversion needs consents signed after any
+                           -- revocation, so a revocation is over (owner
+                           -- decision 2026-10-12).
+                           legal_status = (COALESCE(legal_status, '{}'::jsonb) || $5::jsonb)
+                               - ARRAY['dsgvo_revoked_at', 'confidentiality_release_revoked_at'],
                            notes = COALESCE(NULLIF(btrim(notes), ''), $6),
                            nationality = COALESCE($7, nationality),
                            passport_expiry = COALESCE($8, passport_expiry),
