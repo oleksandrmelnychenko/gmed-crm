@@ -355,7 +355,7 @@ fn complete_parent_details() -> Value {
 
 async fn audit_contexts(pool: &PgPool, action: &str, lead_id: Uuid) -> Vec<Value> {
     sqlx::query_scalar(
-        "SELECT context FROM audit_log WHERE action = $1 AND entity_id = $2 ORDER BY created_at",
+        "SELECT context FROM audit_log WHERE action = $1 AND entity_id = $2 ORDER BY id",
     )
     .bind(action)
     .bind(lead_id)
