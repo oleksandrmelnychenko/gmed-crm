@@ -396,7 +396,10 @@ export type InvoiceItem = {
   credit_transfers?: InvoiceCreditTransfer[];
   credit_transfer_targets?: InvoiceCreditTransferTarget[];
   paid_at: string | null;
+  /** Customer remark printed on the invoice ("Hinweise"). */
   notes: string | null;
+  /** Staff-only note (detail): never printed, never in the portal. */
+  internal_note?: string | null;
   portal_visible?: boolean;
   hide_amounts_from_patient?: boolean;
   line_items_visible_to_patient?: boolean;
@@ -544,7 +547,10 @@ export type CreateForm = {
   quoteId: string;
   invoiceType: InvoiceType;
   dueDate: string;
+  /** Customer remark, printed on the invoice. */
   notes: string;
+  /** Staff-only note, never printed. */
+  internalNote: string;
   selectedLineIndexes: number[];
   lineQuantities: Record<string, string>;
   /** Remarks typed for selected positions, by quote line index. */

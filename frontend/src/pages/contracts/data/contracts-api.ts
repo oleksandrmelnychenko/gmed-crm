@@ -112,6 +112,13 @@ export function updateQuoteStatus(quoteId: string, payload: JsonPayload) {
   return postJson<QuoteItem>(`/quotes/${quoteId}/status`, payload);
 }
 
+/** Sets or clears the staff-only internal note; writes no quote version. */
+export function updateQuoteInternalNote(quoteId: string, internalNote: string) {
+  return postJson<QuoteItem>(`/quotes/${quoteId}/internal-note`, {
+    internal_note: internalNote.trim() || null,
+  });
+}
+
 export function deleteQuote(quoteId: string) {
   return apiFetch<void>(`/quotes/${quoteId}`, {
     method: "DELETE",

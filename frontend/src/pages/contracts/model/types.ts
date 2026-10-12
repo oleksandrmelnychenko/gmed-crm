@@ -59,7 +59,10 @@ export type QuoteItem = {
   valid_until: string | null;
   paid_amount: unknown;
   paid_at: string | null;
+  /** Customer remark: printed on the cost estimate, copied into its invoices. */
   notes: string | null;
+  /** Staff-only note: never printed, never copied into invoices. */
+  internal_note?: string | null;
   version_count?: number;
   current_version_number?: number;
   /** The newer quote of the order that closed this one. */
@@ -146,6 +149,8 @@ export type QuoteFormState = {
   orderId: string;
   validUntil: string;
   notes: string;
+  /** Staff-only note, never printed. */
+  internalNote: string;
 };
 
 export type QuoteStatusFormState = {

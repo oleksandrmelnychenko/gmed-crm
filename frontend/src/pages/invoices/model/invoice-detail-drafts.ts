@@ -111,6 +111,8 @@ export type InvoiceDetailDraftState = {
   /** Free-text reasons typed for a reversal that has not been submitted. */
   reversalTexts: readonly string[];
   paymentCorrectionDirty: boolean;
+  /** The staff-only internal note was edited but not saved. */
+  internalNoteDirty?: boolean;
 };
 
 /**
@@ -125,7 +127,8 @@ export function invoiceDetailHasUnsavedInput(state: InvoiceDetailDraftState) {
     draftChanged(state.refund) ||
     draftChanged(state.prepayment) ||
     state.reversalTexts.some((text) => text !== "") ||
-    state.paymentCorrectionDirty
+    state.paymentCorrectionDirty ||
+    Boolean(state.internalNoteDirty)
   );
 }
 

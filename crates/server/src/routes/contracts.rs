@@ -75,6 +75,10 @@ pub fn router() -> Router<AppState> {
         .route("/quotes/{quote_id}", get(get_quote).delete(delete_quote))
         .route("/quotes/{quote_id}/versions", get(list_quote_versions))
         .route("/quotes/{quote_id}/status", post(update_quote_status))
+        .route(
+            "/quotes/{quote_id}/internal-note",
+            post(update_quote_internal_note),
+        )
 }
 
 #[derive(Deserialize)]
@@ -147,8 +151,18 @@ struct QuoteLineItemInput {
 #[derive(Deserialize)]
 struct CreateQuoteRequest {
     valid_until: Option<String>,
+    /// Customer remark, printed on the cost estimate and copied into its
+    /// invoices.
     notes: Option<String>,
+    /// Staff-only note: never printed, never copied into invoices.
+    internal_note: Option<String>,
     line_items: Option<Vec<QuoteLineItemInput>>,
+}
+
+#[derive(Deserialize)]
+struct UpdateQuoteInternalNoteRequest {
+    /// Empty or absent clears the note.
+    internal_note: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -3655,6 +3669,7 @@ async fn load_quote_detail(
     let row = sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, quote_recorded_cash_paid(q.id) AS paid_amount, quote_recorded_cash_received_at(q.id) AS paid_at, q.line_items, q.notes,
+                  q.internal_note,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM quote_line_invoiced_quantities(q.id) allocated
@@ -3745,6 +3760,8 @@ async fn load_quote_detail(
             &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
         ),
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        // Staff only: quotes are never served to the patient portal or a payer.
+        "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
         "version_count": row.try_get::<i64, _>("version_count").unwrap_or(0),
         "current_version_number": row.try_get::<i32, _>("current_version_number").unwrap_or(0),
         "superseded_by_quote_id": row.try_get::<Option<Uuid>, _>("superseded_by_quote_id").unwrap_or_default(),
@@ -3776,6 +3793,7 @@ async fn list_quotes(
     match sqlx::query(
         r#"SELECT q.id, q.order_id, q.quote_number, q.total_net, q.total_vat, q.total_gross,
                   q.status, q.valid_until, quote_recorded_cash_paid(q.id) AS paid_amount, quote_recorded_cash_received_at(q.id) AS paid_at, q.line_items, q.notes,
+                  q.internal_note,
                   COALESCE((
                       SELECT jsonb_object_agg(allocated.quote_line_index::text, allocated.quantity)
                       FROM quote_line_invoiced_quantities(q.id) allocated
@@ -3894,6 +3912,7 @@ async fn list_quotes(
                         &row.try_get::<Value, _>("invoiced_quantities").unwrap_or_else(|_| serde_json::json!({})),
                     ),
                     "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+                    "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
                     "superseded_by_quote_id": row.try_get::<Option<Uuid>, _>("superseded_by_quote_id").unwrap_or_default(),
                     "superseded_by_quote_number": row.try_get::<Option<String>, _>("superseded_by_quote_number").unwrap_or_default(),
                     "superseded_at": row.try_get::<Option<DateTime<Utc>>, _>("superseded_at").unwrap_or_default().map(|v| v.to_rfc3339()),
@@ -3971,6 +3990,11 @@ async fn create_quote(
             "The quote validity date cannot be in the past",
         );
     }
+    let internal_note =
+        match crate::routes::invoices::normalize_internal_note(body.internal_note.as_deref()) {
+            Ok(value) => value,
+            Err(_) => return crate::routes::invoices::internal_note_too_long(),
+        };
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -4094,9 +4118,10 @@ async fn create_quote(
     let row = match sqlx::query(
         r#"INSERT INTO quotes (
                 order_id, quote_number, total_net, total_vat, total_gross,
-                valid_until, paid_amount, paid_at, line_items, notes, created_by
+                valid_until, paid_amount, paid_at, line_items, notes, created_by,
+                internal_note
            ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
            )
            RETURNING id, created_at, updated_at"#,
     )
@@ -4111,6 +4136,7 @@ async fn create_quote(
     .bind(line_items_value.clone())
     .bind(body.notes.clone())
     .bind(auth.user_id)
+    .bind(&internal_note)
     .fetch_one(&mut *tx)
     .await
     {
@@ -4282,6 +4308,7 @@ async fn create_quote(
             "paid_at": carried_paid_at.map(|value| value.to_rfc3339()),
             "line_items": line_items,
             "notes": body.notes,
+            "internal_note": internal_note,
             "version_count": 1,
             "current_version_number": 1,
             "superseded_by_quote_id": Value::Null,
@@ -4786,6 +4813,98 @@ async fn update_quote_status(
         }),
     )
     .await;
+
+    match load_quote_detail(&state, quote_id, &auth).await {
+        Ok(Some(value)) => Json(value).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(resp) => resp,
+    }
+}
+
+/// Staff-only internal note of a quote (`POST /quotes/{id}/internal-note`).
+/// It is not part of the cost estimate the patient receives, so it is
+/// editable in every status (also superseded, expired or accepted quotes) and
+/// writes no quote version; the old and new text are audited in the same
+/// transaction.
+async fn update_quote_internal_note(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(quote_id): Path<Uuid>,
+    Json(body): Json<UpdateQuoteInternalNoteRequest>,
+) -> axum::response::Response {
+    if !can_manage_contracts(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let internal_note =
+        match crate::routes::invoices::normalize_internal_note(body.internal_note.as_deref()) {
+            Ok(value) => value,
+            Err(_) => return crate::routes::invoices::internal_note_too_long(),
+        };
+    let subject = match load_quote_subject(&state, quote_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(resp) => return resp,
+    };
+    if let Err(resp) = ensure_subject_access(&state, &auth, subject).await {
+        return resp;
+    }
+
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "begin quote internal note update");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let current = match sqlx::query(
+        "SELECT quote_number, order_id, internal_note FROM quotes WHERE id = $1 FOR UPDATE",
+    )
+    .bind(quote_id)
+    .fetch_optional(&mut *tx)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Quote not found"),
+        Err(error) => {
+            tracing::error!(%error, %quote_id, "lock quote for internal note");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    };
+    let previous = current
+        .try_get::<Option<String>, _>("internal_note")
+        .unwrap_or_default();
+    if previous != internal_note {
+        if let Err(error) = sqlx::query("UPDATE quotes SET internal_note = $2 WHERE id = $1")
+            .bind(quote_id)
+            .bind(&internal_note)
+            .execute(&mut *tx)
+            .await
+        {
+            tracing::error!(%error, %quote_id, "update quote internal note");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+        let event = audit::AuditEvent {
+            user_id: Some(auth.user_id),
+            action: "update_quote_internal_note".to_string(),
+            entity_type: "quote".to_string(),
+            entity_id: Some(quote_id),
+            context: json!({
+                "quote_number": current.try_get::<String, _>("quote_number").unwrap_or_default(),
+                "order_id": current.try_get::<Uuid, _>("order_id").unwrap_or_default(),
+            }),
+            old_value: Some(json!({ "internal_note": previous })),
+            new_value: Some(json!({ "internal_note": internal_note })),
+            ip_hash: None,
+        };
+        if let Err(error) = audit::write_in_transaction(&mut tx, &event).await {
+            tracing::error!(%error, %quote_id, "audit quote internal note");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+        }
+    }
+    if let Err(error) = tx.commit().await {
+        tracing::error!(%error, %quote_id, "commit quote internal note");
+        return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update quote");
+    }
 
     match load_quote_detail(&state, quote_id, &auth).await {
         Ok(Some(value)) => Json(value).into_response(),

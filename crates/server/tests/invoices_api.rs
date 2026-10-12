@@ -5340,3 +5340,279 @@ async fn sales_and_concierge_cannot_access_invoice_workspace() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+/// Internal notes (owner 2026-10-12): the printed remark goes to the customer,
+/// the internal note stays with staff — never printed, never copied from the
+/// quote, never in the portal, editable and audited after release. New
+/// invoices from old lines print the German catalogue texts.
+#[tokio::test]
+async fn internal_notes_stay_with_staff_and_old_catalogue_lines_print_in_german() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("invoice-internal-note");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+    let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
+
+    // An order line created before the catalogue got German texts.
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    seed_order_leistung(&pool, order_id, "Interpreter support", 95.0, "approved").await;
+
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({
+            "notes": "Bitte vor Behandlungsbeginn überweisen.",
+            "internal_note": "  Angebot nur nach Rücksprache mit Ben Muster senden.  "
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{quote}");
+    assert_eq!(
+        quote["internal_note"],
+        "Angebot nur nach Rücksprache mit Ben Muster senden."
+    );
+    let quote_id = quote["id"].as_str().unwrap().to_string();
+    // The quote keeps the wording it was created with.
+    assert_eq!(quote["line_items"][0]["description"], "Interpreter support");
+
+    let quote_note_path = format!("/api/v1/quotes/{quote_id}/internal-note");
+    let (status, updated_quote) = json_request(
+        &app,
+        "POST",
+        &quote_note_path,
+        &pm_bearer,
+        Some(json!({ "internal_note": "Zahlung in zwei Raten zugesagt." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{updated_quote}");
+    assert_eq!(
+        updated_quote["internal_note"],
+        "Zahlung in zwei Raten zugesagt."
+    );
+    assert_eq!(
+        updated_quote["notes"],
+        "Bitte vor Behandlungsbeginn überweisen."
+    );
+    // A note is no new quote version.
+    assert_eq!(updated_quote["version_count"], 1);
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &quote_note_path,
+        &assistant_bearer,
+        Some(json!({ "internal_note": "read-only role" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let quote_audit: (Value, Value) = sqlx::query_as(
+        r#"SELECT old_value, new_value FROM audit_log
+           WHERE action = 'update_quote_internal_note' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(Uuid::parse_str(&quote_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        quote_audit.0["internal_note"],
+        "Angebot nur nach Rücksprache mit Ben Muster senden."
+    );
+    assert_eq!(
+        quote_audit.1["internal_note"],
+        "Zahlung in zwei Raten zugesagt."
+    );
+
+    // The invoice copies the printed remark, not the quote's internal note,
+    // and prints the German catalogue name.
+    let (status, draft) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing_bearer,
+        Some(json!({ "invoice_type": "final", "internal_note": "Mahnung erst nach Rückruf." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{draft}");
+    assert_eq!(draft["notes"], "Bitte vor Behandlungsbeginn überweisen.");
+    assert_eq!(draft["internal_note"], "Mahnung erst nach Rückruf.");
+    assert_eq!(
+        draft["line_items"][0]["description"],
+        "Dolmetscherbetreuung"
+    );
+    let invoice_id = draft["id"].as_str().unwrap().to_string();
+
+    // A draft prepared before the fix still carries the English text: the
+    // release stores and prints the German one.
+    sqlx::query(
+        r#"UPDATE invoices
+           SET line_items = jsonb_set(line_items, '{0,description}', '"Interpreter support"')
+           WHERE id = $1"#,
+    )
+    .bind(Uuid::parse_str(&invoice_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let released = release_invoice(&app, &billing_bearer, &invoice_id).await;
+    assert_eq!(
+        released["line_items"][0]["description"],
+        "Dolmetscherbetreuung"
+    );
+    let invoice_number = released["invoice_number"].as_str().unwrap().to_string();
+    let (status, _, pdf) = binary_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}/pdf"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let pdf_text = pdf_extract::extract_text_from_mem(&pdf).unwrap();
+    assert!(pdf_text.contains("Dolmetscherbetreuung"), "{pdf_text}");
+    assert!(!pdf_text.contains("Interpreter support"), "{pdf_text}");
+    assert!(!pdf_text.contains("Rückruf"), "{pdf_text}");
+    assert!(!pdf_text.contains("zwei Raten"), "{pdf_text}");
+
+    // Editable after release: it is not part of the issued document.
+    let invoice_note_path = format!("/api/v1/invoices/{invoice_id}/internal-note");
+    let (status, noted) = json_request(
+        &app,
+        "POST",
+        &invoice_note_path,
+        &billing_bearer,
+        Some(json!({ "internal_note": "Rückruf erfolgt, Zahlung zugesagt." })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{noted}");
+    assert_eq!(noted["internal_note"], "Rückruf erfolgt, Zahlung zugesagt.");
+    assert_eq!(noted["invoice_number"], invoice_number);
+    assert_eq!(noted["status"], "sent");
+    let invoice_audit: (Value, Value) = sqlx::query_as(
+        r#"SELECT old_value, new_value FROM audit_log
+           WHERE action = 'update_invoice_internal_note' AND entity_id = $1
+           ORDER BY created_at DESC LIMIT 1"#,
+    )
+    .bind(Uuid::parse_str(&invoice_id).unwrap())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        invoice_audit.0["internal_note"],
+        "Mahnung erst nach Rückruf."
+    );
+    assert_eq!(
+        invoice_audit.1["internal_note"],
+        "Rückruf erfolgt, Zahlung zugesagt."
+    );
+
+    let (status, too_long) = json_request(
+        &app,
+        "POST",
+        &invoice_note_path,
+        &billing_bearer,
+        Some(json!({ "internal_note": "x".repeat(4001) })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{too_long}");
+    assert_eq!(too_long["error"], "internal_note_too_long");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &invoice_note_path,
+        &assistant_bearer,
+        Some(json!({ "internal_note": "read-only role" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // The patient portal never receives it.
+    let (status, portal_invoice) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/me/invoices/{invoice_id}"),
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{portal_invoice}");
+    assert!(
+        portal_invoice.get("internal_note").is_none(),
+        "{portal_invoice}"
+    );
+    assert!(!portal_invoice.to_string().contains("Rückruf"));
+
+    // Art. 15: the staff handler's data export carries the internal notes
+    // (personal data about the patient); the patient's own portal export not.
+    let (status, staff_export) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export?format=json"),
+        &pm_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{staff_export}");
+    let exported_invoice = staff_export["invoices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|invoice| invoice["id"] == invoice_id.as_str())
+        .expect("exported invoice");
+    assert_eq!(
+        exported_invoice["internal_note"],
+        "Rückruf erfolgt, Zahlung zugesagt."
+    );
+    let exported_quote = staff_export["quotes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|quote| quote["id"] == quote_id.as_str())
+        .expect("exported quote");
+    assert_eq!(
+        exported_quote["internal_note"],
+        "Zahlung in zwei Raten zugesagt."
+    );
+    let (status, own_export) = json_request(
+        &app,
+        "GET",
+        "/api/v1/me/export?format=json",
+        &patient_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{own_export}");
+    assert!(
+        own_export["invoices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|invoice| invoice.get("internal_note").is_none()),
+        "{own_export}"
+    );
+    assert!(!own_export.to_string().contains("Rückruf"));
+    assert!(!own_export.to_string().contains("zwei Raten"));
+
+    // An empty note clears it.
+    let (status, cleared) = json_request(
+        &app,
+        "POST",
+        &invoice_note_path,
+        &billing_bearer,
+        Some(json!({ "internal_note": "   " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert!(cleared["internal_note"].is_null(), "{cleared}");
+}

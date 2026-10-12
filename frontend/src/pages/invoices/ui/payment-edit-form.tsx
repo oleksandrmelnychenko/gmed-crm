@@ -135,7 +135,7 @@ export function PaymentEditForm({
             className={inputClass}
           />
         </Field>
-        <Field label={de ? "Interne Notiz" : "Внутренняя заметка"} className="sm:col-span-2">
+        <Field label={de ? "Interner Vermerk zur Zahlung" : "Комментарий к оплате (для сотрудников)"} className="sm:col-span-2">
           <Input
             value={form.note}
             onChange={(event) => set({ note: event.target.value })}

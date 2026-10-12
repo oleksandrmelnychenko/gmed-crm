@@ -1,4 +1,5 @@
 ﻿import { uiText } from "@/lib/i18n";
+import { BILLING_API_ERROR_KEYS } from "@/lib/billing-api-errors";
 import { ORDER_API_ERROR_KEYS } from "@/lib/order-api-errors";
 
 import {
@@ -529,6 +530,8 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   document_archived_not_releasable: "api_document_archived_not_releasable",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
+  // Internal notes and re-billing waivers (lib/billing-api-errors.ts).
+  ...BILLING_API_ERROR_KEYS,
 };
 
 /** The text and number fields of an error body, as placeholders of its localized message (e.g. {order_total_label}). */

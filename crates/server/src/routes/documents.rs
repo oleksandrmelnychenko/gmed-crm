@@ -6248,6 +6248,10 @@ fn parse_quote_line_items(value: &Value) -> Vec<GeneratedContractLineItem> {
         .into_iter()
         .flatten()
         .filter_map(|item| {
+            // A new document prints the German catalogue texts, also for
+            // quote lines created with the former English demo texts.
+            let mut item = item.clone();
+            crate::order_document_texts::germanize_legacy_catalog_line(&mut item);
             let object = item.as_object()?;
             let description = object
                 .get("description")

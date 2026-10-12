@@ -378,3 +378,94 @@ async fn provider_settlements_are_partial_retry_safe_reversible_and_account_boun
         1
     );
 }
+
+/// A supplier payment from a cash account (Kasse) never takes it below zero,
+/// like transfers (QA 2026-10-11 follow-up).
+#[tokio::test]
+async fn provider_payment_from_a_cash_account_needs_the_cash() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let billing_id = seed_user(&ctx.pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let cash_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO company_financial_accounts (
+               name, account_type, currency, opening_balance, opening_balance_on,
+               is_default, is_active, created_by
+           ) VALUES ($1, 'cash', 'EUR', 50, '2020-01-01', false, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Kasse {tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    let external_invoice_id = seed_external_invoice(&ctx.pool, ctx.admin_id, &tag, "cash").await;
+    let path = format!("/api/v1/company-provider-liabilities/{external_invoice_id}/settlements");
+    let payment = |amount: &str| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "financial_account_id": cash_id,
+            "amount_gross": amount,
+            "paid_on": gmed_server::app_time::today().to_string(),
+            "payment_method": "cash",
+        })
+    };
+
+    let (status, refused) = request_json(
+        &ctx.app,
+        Method::POST,
+        &path,
+        &billing,
+        Some(payment("80.00")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(refused["error"], "cash_account_insufficient_balance");
+    assert_eq!(
+        refused["available_balance"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(50, 0)
+    );
+    let recorded: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM external_invoice_provider_payment_transactions WHERE external_invoice_id = $1",
+    )
+    .bind(external_invoice_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(recorded, 0);
+
+    // The whole cash may leave, nothing more.
+    let (status, paid) = request_json(
+        &ctx.app,
+        Method::POST,
+        &path,
+        &billing,
+        Some(payment("50.00")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{paid:?}");
+    let (status, refused) = request_json(
+        &ctx.app,
+        Method::POST,
+        &path,
+        &billing,
+        Some(payment("0.01")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(refused["error"], "cash_account_insufficient_balance");
+    assert_eq!(
+        refused["available_balance"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::ZERO
+    );
+}

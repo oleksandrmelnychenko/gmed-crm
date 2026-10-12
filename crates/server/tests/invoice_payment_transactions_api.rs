@@ -1261,3 +1261,158 @@ async fn released_final_invoice_takes_paid_advances_and_to_pay_figures_are_net()
     assert_eq!(final_item["advance_credit"], "300");
     assert_eq!(final_item["amount_due"], "100");
 }
+
+fn money(value: &Value) -> Decimal {
+    value.as_str().unwrap().parse::<Decimal>().unwrap()
+}
+
+/// When the default account of the currency is a cash account (Kasse), a
+/// refund, a payment reversal or a lower corrected receipt never takes it
+/// below zero; receipts only add money (2026-10-12).
+#[tokio::test]
+async fn refunds_and_payment_reversals_from_a_cash_default_account_need_the_cash() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("cash-default");
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice_id = seed_invoice(
+        &pool, order_id, patient_id, admin_id, &tag, "interim", 100, false,
+    )
+    .await;
+    // A new, empty Kasse becomes the default EUR account (the seeded bank
+    // account keeps its own movements).
+    sqlx::query(
+        "UPDATE company_financial_accounts SET is_default = false WHERE currency = 'EUR' AND is_default",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let kasse: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO company_financial_accounts (
+               name, account_type, currency, opening_balance, opening_balance_on,
+               is_default, is_active, created_by
+           ) VALUES ($1, 'cash', 'EUR', 0, '2020-01-01', true, true, $2)
+           RETURNING id"#,
+    )
+    .bind(format!("Kasse {tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let today = gmed_server::app_time::today().to_string();
+
+    // 150 in cash for a 100 invoice (50 patient credit), then 120 leave the
+    // Kasse: 30 are left.
+    let (status, paid) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "150",
+            "payment_method": "cash",
+            "received_on": today,
+            "accept_overpayment": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{paid:?}");
+    let payment_id = paid["payment_transaction_id"].as_str().unwrap().to_string();
+    sqlx::query(
+        r#"INSERT INTO company_financial_account_adjustments (
+               financial_account_id, transaction_type, request_id, direction,
+               amount, effective_on, reason, created_by
+           ) VALUES ($1, 'adjustment', $2, 'outflow', 120, CURRENT_DATE, 'Barauszahlung', $3)"#,
+    )
+    .bind(kasse)
+    .bind(Uuid::new_v4())
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let refund = |amount: &str| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "cash",
+            "refunded_on": today,
+            "reason": "Überzahlung bar zurück"
+        })
+    };
+    let refunds_path = format!("/api/v1/invoices/{invoice_id}/refunds");
+    let (status, refused) =
+        json_request(&app, "POST", &refunds_path, &billing, Some(refund("50"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(refused["error"], "cash_account_insufficient_balance");
+    assert_eq!(money(&refused["available_balance"]), Decimal::new(30, 0));
+    let refund_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM invoice_refund_transactions WHERE invoice_id = $1",
+    )
+    .bind(invoice_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(refund_count, 0);
+
+    // Reversing the whole receipt would take 150 out of a Kasse holding 30.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/reversal"),
+        &billing,
+        Some(json!({ "note": "Falsch erfasst" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(refused["error"], "cash_account_insufficient_balance");
+
+    // A correction 150 -> 140 takes 10 out: allowed; 140 -> 100 more than is left.
+    let correction = |amount: &str| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": amount,
+            "payment_method": "cash",
+            "received_on": today,
+            "reason": "Betrag korrigiert",
+            "accept_overpayment": true,
+        })
+    };
+    let (status, corrected) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments/{payment_id}/correction"),
+        &billing,
+        Some(correction("140")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{corrected:?}");
+    let corrected_id = corrected["payment_transaction_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/payments/{corrected_id}/correction"),
+        &billing,
+        Some(correction("100")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(money(&refused["available_balance"]), Decimal::new(20, 0));
+
+    // The 20 left may leave as a refund, not a cent more.
+    let (status, refunded) =
+        json_request(&app, "POST", &refunds_path, &billing, Some(refund("20"))).await;
+    assert_eq!(status, StatusCode::CREATED, "{refunded:?}");
+    let (status, refused) =
+        json_request(&app, "POST", &refunds_path, &billing, Some(refund("0.01"))).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
+    assert_eq!(money(&refused["available_balance"]), Decimal::ZERO);
+}

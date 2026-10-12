@@ -43,6 +43,10 @@ const STATEMENT_STATE_LABELS: Record<string, Pair> = {
     "GMED-Kosten – über die Auftragsleistung berechnet",
     "Расход GMED — пациенту выставляется услуга заказа",
   ],
+  rebilling_waived: [
+    "Trägt GMED – nicht weiterberechnet",
+    "За счёт GMED — не перевыставляется",
+  ],
   provider_unpaid_patient_due: [
     "Anbieter offen – Patient schuldet nach Leistung",
     "Поставщику не оплачено — долг пациента за оказанную услугу",
@@ -71,6 +75,7 @@ const MOVEMENT_KIND_LABELS: Record<PatientAccountMovement["kind"], Pair> = {
   external_receivable: ["Externe Forderung", "Внешний долг"],
   external_allocation: ["Forderung zugeordnet", "Долг распределён"],
   external_allocation_reversal: ["Zuordnung storniert", "Сторно распределения"],
+  external_rebilling_waived: ["Kosten trägt GMED", "Расход за счёт GMED"],
   termination_uninvoiced: [
     "Kündigung: angefallen, noch nicht berechnet",
     "Расторжение: набежало, ещё не выставлено",

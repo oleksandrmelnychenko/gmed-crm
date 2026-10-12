@@ -215,6 +215,79 @@ pub(crate) async fn account_balance(
     .await
 }
 
+/// The default active GMED account of a currency: invoice payments and
+/// refunds are booked on it (the accounting-entry trigger assigns it).
+pub(crate) async fn default_account_id(
+    conn: &mut sqlx::PgConnection,
+    currency: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar::<_, Uuid>(
+        r#"SELECT id FROM company_financial_accounts
+           WHERE currency = UPPER($1) AND is_default AND is_active
+           LIMIT 1"#,
+    )
+    .bind(currency)
+    .fetch_optional(conn)
+    .await
+}
+
+/// Cash accounts (Kasse) a booking may take money from, locked for the
+/// transaction with their balance before the booking. After the booking,
+/// [`CashAccountGuard::refused`] says whether it took one of them below zero
+/// (2026-10-12: refunds, payment reversals and corrections follow the same
+/// rule as transfers and supplier payments). Bank, card and other accounts
+/// are not checked. A cash account that was already negative is not blocked
+/// by a booking that does not lower it further.
+pub(crate) struct CashAccountGuard {
+    accounts: Vec<(Uuid, Decimal)>,
+}
+
+impl CashAccountGuard {
+    pub(crate) async fn lock(
+        conn: &mut sqlx::PgConnection,
+        account_ids: &[Uuid],
+    ) -> Result<Self, sqlx::Error> {
+        let mut ids = account_ids.to_vec();
+        ids.sort();
+        ids.dedup();
+        if ids.is_empty() {
+            return Ok(Self {
+                accounts: Vec::new(),
+            });
+        }
+        // Locked in id order, so two bookings never wait for each other's lock.
+        let cash_ids = sqlx::query_scalar::<_, Uuid>(
+            r#"SELECT id FROM company_financial_accounts
+               WHERE id = ANY($1) AND account_type = 'cash'
+               ORDER BY id
+               FOR UPDATE"#,
+        )
+        .bind(&ids)
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut accounts = Vec::with_capacity(cash_ids.len());
+        for id in cash_ids {
+            accounts.push((id, account_balance(conn, id).await?));
+        }
+        Ok(Self { accounts })
+    }
+
+    /// The balance a cash account had before the booking, when the booking
+    /// took it below zero; `None` when every guarded cash account is fine.
+    pub(crate) async fn refused(
+        &self,
+        conn: &mut sqlx::PgConnection,
+    ) -> Result<Option<Decimal>, sqlx::Error> {
+        for (id, before) in &self.accounts {
+            let after = account_balance(conn, *id).await?;
+            if after < Decimal::ZERO && after < *before {
+                return Ok(Some(*before));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// 422 for a cash account that would go below zero, with the balance it has.
 pub(crate) fn cash_account_insufficient_balance(available: Decimal) -> axum::response::Response {
     (

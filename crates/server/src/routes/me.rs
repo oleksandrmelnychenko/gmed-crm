@@ -404,11 +404,14 @@ async fn export_my_data(
             Err(resp) => return resp,
         };
 
+    // The patient's own download: staff-only internal notes stay out (the
+    // staff handler of an Art. 15 request exports them).
     match crate::routes::admin_compliance::export_patient_data_response(
         &state,
         patient_id,
         auth.user_id,
         format,
+        crate::routes::admin_compliance::PatientExportAudience::PatientPortal,
     )
     .await
     {

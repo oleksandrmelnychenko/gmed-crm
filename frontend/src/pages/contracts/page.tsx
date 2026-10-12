@@ -121,9 +121,12 @@ import {
   fetchQuotes,
   saveAgencyService,
   updateContractStatus,
+  updateQuoteInternalNote,
   updateQuoteStatus,
 } from "./data/contracts-api";
 import { ContractTerminationNote, TerminateContractDialog } from "./ui/terminate-contract-dialog";
+import { InternalNoteEditor } from "@/components/internal-note-editor";
+import { INTERNAL_NOTE_MAX_LENGTH } from "@/lib/internal-note";
 import type {
   AgencyServiceFilters,
   AgencyServiceFormState,
@@ -639,6 +642,8 @@ function useContractsPageContent() {
   const [terminateContractTarget, setTerminateContractTarget] = useState<ContractItem | null>(null);
   const [quoteDeleteConfirmOpen, setQuoteDeleteConfirmOpen] = useState(false);
   const [quoteDeleteBusy, setQuoteDeleteBusy] = useState(false);
+  // An internal note typed in the quote sheet but not saved yet.
+  const [quoteInternalNoteDirty, setQuoteInternalNoteDirty] = useState(false);
   const setContracts = (nextValue: SetStateAction<ContractItem[]>) =>
     dispatchContractsWorkspaceState((current) => ({
       contracts: resolveStateAction(nextValue, current.contracts),
@@ -1812,6 +1817,7 @@ function useContractsPageContent() {
       const result = await createQuote(createQuoteForm.orderId, {
         valid_until: toOptional(createQuoteForm.validUntil),
         notes: toOptional(createQuoteForm.notes),
+        internal_note: toOptional(createQuoteForm.internalNote),
       });
       setCreateQuoteOpen(false);
       setCreateQuoteForm(blankQuoteForm(quoteFilters.orderId));
@@ -2850,6 +2856,21 @@ function useContractsPageContent() {
                       <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
                     </Field>
                   </div>
+                  <div className="mt-5">
+                    {/* Staff only: never printed, never copied into the
+                        invoices (owner 2026-10-12). */}
+                    <Field label={t.finance_internal_note}>
+                      <textarea
+                        className={textareaClassName}
+                        value={createQuoteForm.internalNote}
+                        maxLength={INTERNAL_NOTE_MAX_LENGTH}
+                        onChange={(event) =>
+                          setCreateQuoteForm((current) => ({ ...current, internalNote: event.target.value }))
+                        }
+                      />
+                      <p className="text-xs text-muted-foreground">{t.finance_internal_note_hint}</p>
+                    </Field>
+                  </div>
                 </section>
               </div>
             </AdminSheetScaffold>
@@ -3069,7 +3090,7 @@ function useContractsPageContent() {
       </Sheet>
 
       <Sheet
-        dirty={quoteStatusDirty}
+        dirty={quoteStatusDirty || quoteInternalNoteDirty}
         open={Boolean(selectedQuoteId)}
         onOpenChange={(open) => {
           if (!open) {
@@ -3141,6 +3162,18 @@ function useContractsPageContent() {
                           {quoteDetail.notes || t.common_not_set}
                         </div>
                       </div>
+                      {/* Staff only, not part of the cost estimate: editable in
+                          every status and without a new quote version. */}
+                      <InternalNoteEditor
+                        value={quoteDetail.internal_note}
+                        canEdit={permissions.canManageQuote}
+                        onDirtyChange={setQuoteInternalNoteDirty}
+                        testId="quote-internal-note"
+                        onSave={async (note) => {
+                          await updateQuoteInternalNote(quoteDetail.id, note);
+                          setQuotesReloadToken((current) => current + 1);
+                        }}
+                      />
                     </div>
                   </section>
 

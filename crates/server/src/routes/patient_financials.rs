@@ -344,10 +344,13 @@ async fn load_patient_settlement_ledger(
                -- Supplier invoices that are a patient receivable. One that a
                -- billed order service covers is GMED's cost of that service:
                -- neither it nor a manual link of it to a patient invoice is
-               -- part of the patient's account (receivable view is 0).
+               -- part of the patient's account (receivable view is 0). The
+               -- receivable is shown as booked; a part GMED absorbs (re-billing
+               -- waiver) follows as its own credit movement.
                SELECT external.*, orders.order_number,
                       COALESCE(expense.vendor_name, provider.name) AS provider_name,
-                      receivable.patient_receivable_gross AS receivable_gross
+                      receivable.patient_receivable_gross
+                          + receivable.waived_receivable_gross AS receivable_gross
                FROM external_invoices external
                JOIN external_invoice_receivable_balances receivable
                  ON receivable.external_invoice_id = external.id
@@ -361,7 +364,8 @@ async fn load_patient_settlement_ledger(
                WHERE external.patient_id = $1
                  AND $5::boolean = false
                  AND external.status <> 'cancelled'
-                 AND receivable.patient_receivable_gross > 0
+                 AND receivable.patient_receivable_gross
+                     + receivable.waived_receivable_gross > 0
                  AND ($3::uuid IS NULL OR external.order_id = $3)
                  AND ($4::uuid IS NULL OR EXISTS (
                         SELECT 1
@@ -683,6 +687,26 @@ async fn load_patient_settlement_ledger(
              AND patient_invoice.status IN ('draft', 'cancelled')
              AND patient_invoice.updated_at >= allocation.created_at
              AND ($2::date IS NULL OR patient_invoice.updated_at::date <= $2)
+
+           UNION ALL
+
+           -- GMED absorbs this part of the cost instead of re-billing it
+           -- (active re-billing waivers; a reversed one never counted).
+           SELECT 'external-rebilling-waiver:' || waiver.id::text,
+                  'external_rebilling_waived'::text,
+                  waiver.created_at::date,
+                  waiver.created_at,
+                  external.order_id,
+                  external.order_number,
+                  external.external_invoice_number,
+                  waiver.reason,
+                  0::numeric,
+                  waiver.amount_gross
+           FROM external_invoice_rebilling_waivers waiver
+           JOIN scoped_external external
+             ON external.id = waiver.external_invoice_id
+           WHERE waiver.reversed_at IS NULL
+             AND ($2::date IS NULL OR waiver.created_at::date <= $2)
 
            ORDER BY entry_date, occurred_at, movement_id"#,
     )
@@ -1251,6 +1275,7 @@ async fn load_patient_account_statement(
                       external.service_delivered, external.amount_gross,
                       external.currency, balance.patient_receivable_gross,
                       balance.order_service_billed,
+                      balance.waived_receivable_gross,
                       external.patient_receivable_gross AS source_receivable_gross,
                       CASE WHEN $3::date IS NULL THEN balance.allocated_receivable_gross ELSE COALESCE((
                           SELECT SUM(allocation.amount_gross)
@@ -1261,8 +1286,17 @@ async fn load_patient_account_statement(
                             AND (allocation.reversed_at IS NULL OR allocation.reversed_at::date > $3)
                             AND patient_invoice.status NOT IN ('draft', 'cancelled')
                       ), 0) END AS allocated_receivable_gross,
+                      -- As of a past date, waivers recorded later do not count yet.
                       CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
-                          balance.patient_receivable_gross - COALESCE((
+                          balance.patient_receivable_gross + balance.waived_receivable_gross
+                          - LEAST(balance.waived_receivable_gross, COALESCE((
+                              SELECT SUM(waiver.amount_gross)
+                              FROM external_invoice_rebilling_waivers waiver
+                              WHERE waiver.external_invoice_id = external.id
+                                AND waiver.reversed_at IS NULL
+                                AND waiver.created_at::date <= $3
+                          ), 0))
+                          - COALESCE((
                               SELECT SUM(allocation.amount_gross)
                               FROM external_invoice_patient_invoice_allocations allocation
                               JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id
@@ -1330,10 +1364,21 @@ async fn load_patient_account_statement(
             let source_receivable = row
                 .try_get::<Decimal, _>("source_receivable_gross")
                 .unwrap_or(Decimal::ZERO);
+            let waived_receivable = row
+                .try_get::<Decimal, _>("waived_receivable_gross")
+                .unwrap_or(Decimal::ZERO);
             let payment_state = if order_service_billed && source_receivable > Decimal::ZERO {
                 // GMED's cost of a service the patient is billed for.
                 "order_service_cost"
-            } else if receivable > Decimal::ZERO && remaining_receivable <= Decimal::ZERO {
+            } else if waived_receivable > Decimal::ZERO
+                && remaining_receivable <= Decimal::ZERO
+                && allocated_receivable <= Decimal::ZERO
+            {
+                // GMED bears the whole cost; nothing is re-billed.
+                "rebilling_waived"
+            } else if (receivable > Decimal::ZERO || waived_receivable > Decimal::ZERO)
+                && remaining_receivable <= Decimal::ZERO
+            {
                 "reconciled_to_patient_invoice"
             } else {
                 match paid_by.as_str() {
@@ -1369,6 +1414,8 @@ async fn load_patient_account_statement(
                 "patient_receivable": decimal_to_string(receivable),
                 "allocated_receivable": decimal_to_string(allocated_receivable),
                 "remaining_receivable": decimal_to_string(remaining_receivable),
+                // Part GMED bears instead of re-billing it.
+                "waived_receivable": decimal_to_string(waived_receivable),
                 "provider_liability": decimal_to_string(liability),
                 "amount_due": decimal_to_string(remaining_receivable),
                 "currency": row.try_get::<String, _>("currency").unwrap_or_else(|_| "EUR".to_string()),
@@ -1730,7 +1777,15 @@ async fn get_patient_financial_summary(
                   CASE WHEN UPPER(external.currency) = $6
                              AND (receivable_order.id IS NULL OR UPPER(receivable_order.currency) = $6)
                        THEN CASE WHEN $3::date IS NULL THEN balance.remaining_receivable_gross ELSE GREATEST(
-                       balance.patient_receivable_gross - COALESCE((
+                       balance.patient_receivable_gross + balance.waived_receivable_gross
+                       - LEAST(balance.waived_receivable_gross, COALESCE((
+                          SELECT SUM(waiver.amount_gross)
+                          FROM external_invoice_rebilling_waivers waiver
+                          WHERE waiver.external_invoice_id = external.id
+                            AND waiver.reversed_at IS NULL
+                            AND waiver.created_at::date <= $3
+                       ), 0))
+                       - COALESCE((
                           SELECT SUM(allocation.amount_gross)
                           FROM external_invoice_patient_invoice_allocations allocation
                           JOIN invoices patient_invoice ON patient_invoice.id = allocation.patient_invoice_id

@@ -21,6 +21,7 @@ import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 import { UnassignedInvoiceCorrection } from "./unassigned-invoice-correction";
 import { canCorrectUnassignedInvoice } from "./unassigned-invoice-model";
@@ -304,7 +305,13 @@ export function ProviderSettlementDialog({
       }));
       onChanged();
     } catch (error) {
-      setPaymentError(error instanceof Error ? error.message : text.saveFailed);
+      // A cash account (Kasse) cannot pay more than it holds: the translated
+      // text names the available cash.
+      setPaymentError(
+        companyFinanceErrorCode(error) === "cash_account_insufficient_balance"
+          ? localizeCompanyFinanceError(error, lang, text.saveFailed, settlement?.currency ?? "EUR")
+          : error instanceof Error ? error.message : text.saveFailed,
+      );
     } finally {
       setPaymentBusy(false);
     }

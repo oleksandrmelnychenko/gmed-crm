@@ -1714,6 +1714,9 @@ async fn create_termination_final_invoice(
     }
     invoiced_service_ids.sort();
     invoiced_service_ids.dedup();
+    // Order lines created with the former English catalogue texts are billed
+    // with the German ones; the order lines themselves stay as created.
+    crate::order_document_texts::germanize_legacy_catalog_lines(&mut snapshot.line_items);
 
     // The draft gets its invoice number when it is released.
     let payer =

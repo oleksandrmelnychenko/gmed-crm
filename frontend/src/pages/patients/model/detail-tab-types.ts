@@ -167,9 +167,19 @@ export type InvoiceItem = {
   display_status?: string;
   issued_at: string;
   due_date?: string | null;
+  currency?: string | null;
+  /** Total as issued, before credit notes. */
   total_gross?: string | null;
+  credited_amount?: string | null;
+  /** Total after credit notes. */
+  adjusted_total_gross?: string | null;
+  /** Cash received (journal), without credited advances. */
   paid_amount?: string | null;
+  /** Advance money credited into this invoice. */
+  prepayment_applied_amount?: string | null;
   balance_due?: string | null;
+  /** Money beyond the corrected total (patient credit). */
+  credit_balance?: string | null;
   order_number?: string | null;
   quote_number?: string | null;
   portal_visible?: boolean;
@@ -284,6 +294,8 @@ export type PatientAccountStatementItem = {
   patient_receivable?: string | null;
   allocated_receivable?: string | null;
   remaining_receivable?: string | null;
+  /** Part of a supplier cost GMED bears instead of re-billing it. */
+  waived_receivable?: string | null;
   provider_liability?: string | null;
   amount_due?: string | null;
   quantity?: string | null;
@@ -307,6 +319,8 @@ export type PatientAccountMovement = {
     | "external_receivable"
     | "external_allocation"
     | "external_allocation_reversal"
+    /** Part of a supplier cost GMED bears instead of re-billing it (re-billing waiver). */
+    | "external_rebilling_waived"
     /** Accrued but not yet invoiced amount of an open termination settlement. */
     | "termination_uninvoiced"
     /** Cancellation document (Stornorechnung) of a cancelled released invoice. */

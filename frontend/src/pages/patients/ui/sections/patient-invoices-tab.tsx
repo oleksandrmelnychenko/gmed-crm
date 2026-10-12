@@ -77,6 +77,7 @@ import {
   patientInvoiceLedgerCategoryLabel,
   patientInvoiceLedgerDirectionLabel,
 } from "../../model/portal-shared";
+import { patientInvoiceAmounts } from "../../model/patient-invoice-amounts";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -1335,53 +1336,88 @@ function usePatientInvoicesTabContent({
           </span>
         ),
       },
+      // Итого − Оплачено/зачтено = Баланс on every row, as in the invoice
+      // list (QA D-33): the total after credit notes, paid including the
+      // advance money credited into the invoice.
       {
         id: "total_gross",
         label: t.patient_invoices_total,
-        accessor: (invoice) => moneyValueNumber(invoice.total_gross),
+        accessor: (invoice) => patientInvoiceAmounts(invoice).total,
         sortable: true,
         filterType: "number",
-        width: 130,
-        render: (invoice) => (
-          <span className="block text-right font-mono text-xs font-medium tabular-nums text-foreground">
-            {formatMoney(invoice.total_gross)}
-          </span>
-        ),
+        width: 150,
+        render: (invoice) => {
+          const amounts = patientInvoiceAmounts(invoice);
+          const currency = invoice.currency ?? undefined;
+          return (
+            <span className="block text-right font-mono text-xs font-medium tabular-nums text-foreground">
+              {formatMoney(String(amounts.total), currency)}
+              {amounts.credited > 0 ? (
+                <span className="block font-sans text-[11px] font-normal text-muted-foreground">
+                  {t.finance_invoice_after_credit_notes
+                    .replace("{issued}", formatMoney(String(amounts.issuedTotal), currency))
+                    .replace("{credited}", formatMoney(String(amounts.credited), currency))}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         id: "paid_amount",
-        label: t.patient_invoices_paid,
-        accessor: (invoice) => moneyValueNumber(invoice.paid_amount),
+        label: t.finance_invoice_settled_column,
+        accessor: (invoice) => patientInvoiceAmounts(invoice).settled,
         sortable: true,
         filterType: "number",
-        width: 130,
-        render: (invoice) => (
-          <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {formatMoney(invoice.paid_amount)}
-          </span>
-        ),
+        width: 150,
+        render: (invoice) => {
+          const amounts = patientInvoiceAmounts(invoice);
+          const currency = invoice.currency ?? undefined;
+          return (
+            <span className="block text-right font-mono text-xs tabular-nums text-foreground">
+              {formatMoney(String(amounts.settled), currency)}
+              {amounts.prepayment > 0 ? (
+                <span className="block font-sans text-[11px] text-muted-foreground">
+                  {t.finance_invoice_prepayment_part.replace(
+                    "{amount}",
+                    formatMoney(String(amounts.prepayment), currency),
+                  )}
+                </span>
+              ) : null}
+            </span>
+          );
+        },
       },
       {
         id: "balance_due",
-        label: t.patient_invoices_open,
-        accessor: (invoice) => moneyValueNumber(invoice.balance_due),
+        label: t.invoices_workspace_balance,
+        accessor: (invoice) => patientInvoiceAmounts(invoice).balance,
         sortable: true,
         filterType: "number",
         width: 140,
         render: (invoice) => {
-          const balance = moneyValueNumber(invoice.balance_due);
+          const amounts = patientInvoiceAmounts(invoice);
+          const currency = invoice.currency ?? undefined;
           return (
             <span
               className={cn(
                 "block text-right font-mono text-xs font-semibold tabular-nums",
-                balance > 0
+                amounts.balance > 0
                   ? invoice.status === "overdue"
                     ? "text-rose-600"
                     : "text-amber-700"
                   : "text-foreground",
               )}
             >
-              {formatMoney(invoice.balance_due)}
+              {formatMoney(String(amounts.balance), currency)}
+              {amounts.credit > 0 ? (
+                <span className="block font-sans text-[11px] font-normal text-amber-700">
+                  {t.finance_invoice_overpaid.replace(
+                    "{amount}",
+                    formatMoney(String(amounts.credit), currency),
+                  )}
+                </span>
+              ) : null}
             </span>
           );
         },

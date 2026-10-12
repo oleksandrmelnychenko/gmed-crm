@@ -175,6 +175,16 @@ export function updateInvoicePayer(invoiceId: string, payload: JsonPayload) {
   return postJson<InvoiceItem>(`/invoices/${invoiceId}/payer`, payload);
 }
 
+/**
+ * Sets or clears the staff-only internal note: never printed, never shown in
+ * the portal; editable in every status (not part of the issued document).
+ */
+export function updateInvoiceInternalNote(invoiceId: string, internalNote: string) {
+  return postJson<InvoiceItem>(`/invoices/${invoiceId}/internal-note`, {
+    internal_note: internalNote.trim() || null,
+  });
+}
+
 /** Sets or clears the remarks of positions of a draft invoice. */
 export function updateInvoiceLineComments(
   invoiceId: string,

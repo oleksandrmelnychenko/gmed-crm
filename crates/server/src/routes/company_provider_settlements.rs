@@ -810,11 +810,14 @@ async fn create_provider_payment(
             "External invoice is not approved for payment",
         );
     }
+    // Locked for update: a payment from a cash account checks its balance
+    // below, and no other movement may slip in between (see
+    // `company_financial_accounts::account_balance`).
     let account = match sqlx::query(
-        r#"SELECT currency, opening_balance_on, is_active
+        r#"SELECT currency, opening_balance_on, is_active, account_type
            FROM company_financial_accounts
            WHERE id = $1
-           FOR SHARE"#,
+           FOR UPDATE"#,
     )
     .bind(body.financial_account_id)
     .fetch_optional(&mut *transaction)
@@ -858,6 +861,31 @@ async fn create_provider_payment(
             StatusCode::CONFLICT,
             "Provider payment exceeds the outstanding amount",
         );
+    }
+    // A cash box never pays out more than it holds (same rule as transfers
+    // and reconciliation outflows).
+    if account
+        .try_get::<String, _>("account_type")
+        .unwrap_or_default()
+        == "cash"
+    {
+        let balance = match crate::routes::company_financial_accounts::account_balance(
+            &mut transaction,
+            body.financial_account_id,
+        )
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => {
+                tracing::error!(error = %error, "load provider payment cash balance");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+        };
+        if balance - input.amount_gross < Decimal::ZERO {
+            return crate::routes::company_financial_accounts::cash_account_insufficient_balance(
+                balance,
+            );
+        }
     }
 
     let payment_id = Uuid::new_v4();

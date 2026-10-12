@@ -136,11 +136,13 @@ import {
   reverseInvoicePayment,
   reverseInvoiceCreditNote,
   reverseInvoiceRefund,
+  updateInvoiceInternalNote,
   updateInvoiceLineComments,
   updateInvoicePayer,
   updateInvoiceStatus,
   updateInvoiceVisibility,
 } from "./data/invoice-api";
+import { InternalNoteEditor } from "@/components/internal-note-editor";
 import {
   DEFAULT_FILTERS,
   DEFAULT_INVOICE_PAGE_SIZE,
@@ -698,7 +700,8 @@ function useStaffInvoicesPageContent() {
     paymentMethod: lang === "de" ? "Zahlungsart" : "Способ оплаты",
     paymentReference: lang === "de" ? "Referenz" : "Референс",
     paymentDate: lang === "de" ? "Eingangsdatum" : "Дата поступления",
-    paymentNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    // Journal remark of one payment; not the invoice's internal note.
+    paymentNote: lang === "de" ? "Interner Vermerk zur Zahlung" : "Комментарий к оплате (для сотрудников)",
     importedOpeningPaymentNote:
       lang === "de"
         ? "Übernommener Anfangsbestand der Zahlungen"
@@ -719,7 +722,7 @@ function useStaffInvoicesPageContent() {
     refundAmount: lang === "de" ? "Rückzahlung brutto" : "Сумма возврата брутто",
     refundDate: lang === "de" ? "Auszahlungsdatum" : "Дата возврата",
     refundReason: lang === "de" ? "Grund der Rückzahlung" : "Причина возврата",
-    refundNote: lang === "de" ? "Interne Notiz" : "Внутренняя заметка",
+    refundNote: lang === "de" ? "Interner Vermerk zur Rückzahlung" : "Комментарий к возврату (для сотрудников)",
     noRefunds: lang === "de" ? "Noch keine Rückzahlungen." : "Возвратов пока нет.",
     reverseRefund: lang === "de" ? "Rückzahlung stornieren" : "Сторнировать возврат",
     paymentMethods: {
@@ -1029,6 +1032,8 @@ function useStaffInvoicesPageContent() {
   const refundForm = refundDraft.draft;
   const [refundBusy, setRefundBusy] = useState(false);
   const [refundError, setRefundError] = useState<string | null>(null);
+  // An internal note typed in the detail sheet but not saved yet.
+  const [internalNoteDirty, setInternalNoteDirty] = useState(false);
   const [reversingRefundId, setReversingRefundId] = useState("");
   const [refundReversalReason, setRefundReversalReason] = useState("");
   const deferredSearch = useDeferredValue(filters.search);
@@ -1868,12 +1873,14 @@ function useStaffInvoicesPageContent() {
             advance_basis: "prepayment",
             due_date: createForm.dueDate || null,
             notes: createForm.notes.trim() || null,
+            internal_note: createForm.internalNote.trim() || null,
           }
         : {
             invoice_type: createForm.invoiceType,
             ...(createForm.invoiceType === "advance" ? { advance_basis: "positions" } : {}),
             due_date: createForm.dueDate || null,
             notes: createForm.notes.trim() || null,
+            internal_note: createForm.internalNote.trim() || null,
             line_items: selectedLines,
           });
       clearApiCache();
@@ -2134,6 +2141,7 @@ function useStaffInvoicesPageContent() {
     },
     reversalTexts: [reversalNote, creditNoteReversalReason, refundReversalReason],
     paymentCorrectionDirty: editingPaymentId !== "" && paymentCorrectionDirty,
+    internalNoteDirty,
   });
 
   async function handleSaveStatus(confirmed: Record<string, boolean> = {}) {
@@ -2997,6 +3005,18 @@ function useStaffInvoicesPageContent() {
                         {detail.notes}
                       </div>
                     </div> : null}
+                    {/* Staff only, not part of the issued document: editable
+                        in every status (owner 2026-10-12). */}
+                    <InternalNoteEditor
+                      value={detail.internal_note}
+                      canEdit={access.canCreate || access.canManage}
+                      onDirtyChange={setInternalNoteDirty}
+                      testId="invoice-internal-note"
+                      onSave={async (note) => {
+                        await updateInvoiceInternalNote(detail.id, note);
+                        setReloadToken((current) => current + 1);
+                      }}
+                    />
                   </div>
                 </SectionCard>
 

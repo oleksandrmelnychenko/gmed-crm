@@ -79,6 +79,18 @@ export interface FinanceBalancesTranslations {
   /** Quote notes: printed on the cost estimate and copied into its invoices. */
   finance_quote_printed_notes: string;
   finance_printed_notes_hint: string;
+  /** Staff-only note of a quote or an invoice: never printed or shown to the patient/payer. */
+  finance_internal_note: string;
+  finance_internal_note_hint: string;
+  finance_internal_note_save: string;
+  finance_internal_note_saved: string;
+  finance_internal_note_too_long: string;
+  finance_internal_note_empty: string;
+  /** Invoice money columns (list and patient card, QA D-33). */
+  finance_invoice_settled_column: string;
+  finance_invoice_prepayment_part: string;
+  finance_invoice_overpaid: string;
+  finance_invoice_after_credit_notes: string;
 }
 
 export const financeBalancesRu: FinanceBalancesTranslations = {
@@ -163,7 +175,18 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
     "Итог = выставлено (за вычетом кредит-нот) + не выставлено − оплачено (включая авансы). Так же считается сальдо в карточке пациента.",
   finance_quote_printed_notes: "Примечание для клиента (печатается в предложении и счетах)",
   finance_printed_notes_hint:
-    "Этот текст видит клиент: он печатается в документе и переносится в счета. Внутренние заметки сюда не вносите.",
+    "Этот текст видит клиент: он печатается в документе и переносится в счета. Внутренние заметки — в поле «Внутренняя заметка».",
+  finance_internal_note: "Внутренняя заметка (не печатается)",
+  finance_internal_note_hint:
+    "Только для сотрудников: не печатается, не переносится в счета, не показывается пациенту и плательщику. Можно менять и после выпуска счёта; каждое изменение записывается в журнал.",
+  finance_internal_note_save: "Сохранить заметку",
+  finance_internal_note_saved: "Заметка сохранена.",
+  finance_internal_note_too_long: "Внутренняя заметка — не более 4000 символов.",
+  finance_internal_note_empty: "Внутренней заметки нет.",
+  finance_invoice_settled_column: "Оплачено / зачтено",
+  finance_invoice_prepayment_part: "в т.ч. предоплата {amount}",
+  finance_invoice_overpaid: "Переплата {amount}",
+  finance_invoice_after_credit_notes: "{issued} − кредит-ноты {credited}",
 };
 
 export const financeBalancesDe: FinanceBalancesTranslations = {
@@ -250,5 +273,16 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
     "Saldo = berechnet (abzüglich Rechnungskorrekturen) + nicht berechnet − bezahlt (inklusive Anzahlungen). Genauso wird der Saldo in der Patientenakte berechnet.",
   finance_quote_printed_notes: "Hinweis für den Kunden (wird auf Angebot und Rechnungen gedruckt)",
   finance_printed_notes_hint:
-    "Diesen Text sieht der Kunde: Er wird auf das Dokument gedruckt und in die Rechnungen übernommen. Keine internen Notizen eintragen.",
+    "Diesen Text sieht der Kunde: Er wird auf das Dokument gedruckt und in die Rechnungen übernommen. Interne Notizen gehören in das Feld „Interne Notiz“.",
+  finance_internal_note: "Interne Notiz (wird nicht gedruckt)",
+  finance_internal_note_hint:
+    "Nur für Mitarbeitende: wird nicht gedruckt, nicht in Rechnungen übernommen und weder dem Patienten noch dem Zahler angezeigt. Auch nach Ausstellung der Rechnung änderbar; jede Änderung wird protokolliert.",
+  finance_internal_note_save: "Notiz speichern",
+  finance_internal_note_saved: "Notiz gespeichert.",
+  finance_internal_note_too_long: "Die interne Notiz darf höchstens 4000 Zeichen haben.",
+  finance_internal_note_empty: "Keine interne Notiz.",
+  finance_invoice_settled_column: "Bezahlt / angerechnet",
+  finance_invoice_prepayment_part: "davon Vorauszahlung {amount}",
+  finance_invoice_overpaid: "Guthaben {amount}",
+  finance_invoice_after_credit_notes: "{issued} − Gutschriften {credited}",
 };

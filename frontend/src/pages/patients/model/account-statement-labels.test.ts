@@ -28,6 +28,18 @@ describe("accountStatementStateLabel", () => {
       "Расход GMED — пациенту выставляется услуга заказа",
     );
   });
+
+  it("labels a supplier cost GMED bears instead of re-billing it", () => {
+    expect(accountStatementStateLabel("rebilling_waived", "ru")).toBe(
+      "За счёт GMED — не перевыставляется",
+    );
+    expect(accountStatementStateLabel("rebilling_waived", "de")).toBe(
+      "Trägt GMED – nicht weiterberechnet",
+    );
+    expect(
+      accountMovementKindLabel({ kind: "external_rebilling_waived", description: "Kulanz" }, "ru"),
+    ).toBe("Расход за счёт GMED");
+  });
 });
 
 describe("credit transfers in the statement", () => {

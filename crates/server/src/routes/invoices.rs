@@ -41,6 +41,7 @@ mod dunning_blocks;
 mod dunning_letters;
 pub(crate) mod line_comments;
 pub mod payer;
+pub(crate) mod rebilling_waivers;
 mod release;
 pub(crate) mod service_reversal;
 mod stored_documents;
@@ -72,6 +73,7 @@ const DEFAULT_AUTO_DUNNING_GRACE_DAYS: i64 = 7;
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(termination_settlements::router())
+        .merge(rebilling_waivers::router())
         .route("/me/invoices", get(list_my_invoices))
         .route("/me/invoices/{invoice_id}", get(get_my_invoice))
         .route(
@@ -180,6 +182,10 @@ pub fn router() -> Router<AppState> {
             post(line_comments::update_invoice_line_comments),
         )
         .route(
+            "/invoices/{invoice_id}/internal-note",
+            post(update_invoice_internal_note),
+        )
+        .route(
             "/invoices/{invoice_id}/prepayment-allocations",
             post(apply_invoice_prepayment),
         )
@@ -250,6 +256,8 @@ struct CreateInvoiceRequest {
     invoice_type: Option<String>,
     due_date: Option<String>,
     notes: Option<String>,
+    /// Staff-only note, see [`normalize_internal_note`].
+    internal_note: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
     /// Advance invoices only: `prepayment` bills the order's required
     /// prepayment as "Anzahlung" lines; `positions` (default) bills the
@@ -266,8 +274,47 @@ struct CreatePatientBillingInvoiceRequest {
     invoice_type: Option<String>,
     due_date: Option<String>,
     notes: Option<String>,
+    /// Staff-only note, see [`normalize_internal_note`].
+    internal_note: Option<String>,
     line_items: Option<Vec<CreateInvoiceLineSelection>>,
     external_invoice_ids: Vec<Uuid>,
+}
+
+#[derive(Deserialize)]
+struct UpdateInvoiceInternalNoteRequest {
+    /// Empty or absent clears the note.
+    internal_note: Option<String>,
+}
+
+/// Longest staff-only note on a quote or an invoice (DB check as well).
+pub(crate) const INTERNAL_NOTE_MAX_CHARS: usize = 4000;
+/// Error code: the staff-only note is longer than [`INTERNAL_NOTE_MAX_CHARS`].
+pub(crate) const INTERNAL_NOTE_TOO_LONG: &str = "internal_note_too_long";
+
+/// The staff-only note of a quote or an invoice: trimmed, empty means none.
+/// It is never printed, never copied into another document and never given
+/// to the patient portal or a payer, so it is not part of the issued (GoBD)
+/// invoice and stays editable after release.
+pub(crate) fn normalize_internal_note(value: Option<&str>) -> Result<Option<String>, &'static str> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    if value.chars().count() > INTERNAL_NOTE_MAX_CHARS {
+        return Err(INTERNAL_NOTE_TOO_LONG);
+    }
+    Ok(Some(value.to_string()))
+}
+
+pub(crate) fn internal_note_too_long() -> axum::response::Response {
+    (
+        StatusCode::UNPROCESSABLE_ENTITY,
+        Json(json!({
+            "error": INTERNAL_NOTE_TOO_LONG,
+            "message": "The internal note can have at most 4000 characters",
+            "max_length": INTERNAL_NOTE_MAX_CHARS,
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Deserialize)]
@@ -893,13 +940,14 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 }
 
 /// Staff working context in the invoice detail that the patient portal must
-/// not receive: internal visibility notes, advances available for crediting,
-/// the supporting documents list, the contract link, the credit-note form
-/// data, credit transfers (internal notes, other invoices) and the patient's
-/// relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 12] = [
+/// not receive: internal visibility notes, the staff-only internal note,
+/// advances available for crediting, the supporting documents list, the
+/// contract link, the credit-note form data, credit transfers (internal
+/// notes, other invoices) and the patient's relatives offered as payers.
+const STAFF_ONLY_INVOICE_KEYS: [&str; 13] = [
     "dunning_block",
     "visibility_note",
+    "internal_note",
     "available_prepayments",
     "supporting_documents",
     "contract_id",
@@ -1589,6 +1637,42 @@ async fn insert_invoice_refund_accounting_entries(
         true,
     )
     .await
+}
+
+/// Locks the GMED cash accounts an invoice cash booking may take money
+/// from: the default account of the invoice currency (new payments and
+/// refunds are booked there) and, for a reversal or correction, the accounts
+/// the original payment was booked on. See
+/// [`crate::routes::company_financial_accounts::CashAccountGuard`].
+async fn lock_invoice_cash_accounts(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    context: &InvoicePaymentContext,
+    original_payment_id: Option<Uuid>,
+) -> Result<crate::routes::company_financial_accounts::CashAccountGuard, sqlx::Error> {
+    let mut account_ids = Vec::new();
+    if let Some(account_id) = crate::routes::company_financial_accounts::default_account_id(
+        transaction,
+        &context.currency,
+    )
+    .await?
+    {
+        account_ids.push(account_id);
+    }
+    if let Some(payment_id) = original_payment_id {
+        account_ids.extend(
+            sqlx::query_scalar::<_, Uuid>(
+                r#"SELECT DISTINCT financial_account_id
+                   FROM accounting_entries
+                   WHERE source_invoice_payment_transaction_id = $1
+                     AND financial_account_id IS NOT NULL"#,
+            )
+            .bind(payment_id)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    crate::routes::company_financial_accounts::CashAccountGuard::lock(transaction, &account_ids)
+        .await
 }
 
 pub async fn sync_external_invoice_accounting_entries_from_current_state(
@@ -3574,6 +3658,13 @@ async fn load_quote_invoice_context(
     let Some(row) = row else {
         return Ok(None);
     };
+    // Quote lines keep the wording they were created with; a new invoice
+    // prints the German text of the seeded catalogue instead of its former
+    // English demo texts. The quote itself is not rewritten.
+    let mut line_items = row
+        .try_get::<Value, _>("line_items")
+        .unwrap_or_else(|_| serde_json::json!([]));
+    crate::order_document_texts::germanize_legacy_catalog_lines(&mut line_items);
 
     Ok(Some(QuoteInvoiceContext {
         quote_id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -3594,9 +3685,7 @@ async fn load_quote_invoice_context(
         total_gross: row
             .try_get::<Decimal, _>("total_gross")
             .unwrap_or(Decimal::ZERO),
-        line_items: row
-            .try_get::<Value, _>("line_items")
-            .unwrap_or_else(|_| serde_json::json!([])),
+        line_items,
         notes: row
             .try_get::<Option<String>, _>("notes")
             .unwrap_or_default(),
@@ -4380,6 +4469,7 @@ async fn load_invoice_detail(
         r#"SELECT i.id, i.quote_id, i.order_id, i.patient_id, i.invoice_number, i.invoice_type,
                   i.status, i.issued_at, i.due_date, i.total_net, i.total_vat, i.total_gross,
                   i.paid_amount, i.credited_amount, i.prepayment_applied_amount, i.paid_at, i.line_items, i.notes,
+                  i.internal_note,
                   i.created_at, i.updated_at, i.released_at,
                   i.portal_visible, i.hide_amounts_from_patient, i.line_items_visible_to_patient,
                   i.pdf_visible_to_patient, i.visibility_note, i.visibility_updated_at,
@@ -4937,6 +5027,8 @@ async fn load_invoice_detail(
             "updated_at": row.try_get::<Option<DateTime<Utc>>, _>("payer_updated_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         },
         "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
+        // Staff only (removed for the portal, see STAFF_ONLY_INVOICE_KEYS).
+        "internal_note": row.try_get::<Option<String>, _>("internal_note").unwrap_or_default(),
         "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
         "updated_at": row.try_get::<DateTime<Utc>, _>("updated_at").map(|v| v.to_rfc3339()).unwrap_or_default(),
     })))
@@ -5003,9 +5095,15 @@ async fn load_invoice_pdf_context_on(
     };
 
     let patient_id = row.try_get::<Uuid, _>("patient_id").unwrap_or_default();
-    let line_items = row
+    let mut line_items = row
         .try_get::<Value, _>("line_items")
         .unwrap_or_else(|_| serde_json::json!([]));
+    // A draft previews the German catalogue texts its release will store
+    // (`release::refresh_draft_catalog_texts`); an issued invoice prints what
+    // it was issued with.
+    if !row.try_get::<bool, _>("released").unwrap_or(false) {
+        crate::order_document_texts::germanize_legacy_catalog_lines(&mut line_items);
+    }
     let languages = row
         .try_get::<Vec<String>, _>("languages")
         .unwrap_or_default();
@@ -6691,6 +6789,22 @@ async fn get_patient_billing_workspace(
                     'allocated_receivable_gross', receivable.allocated_receivable_gross::text,
                     'remaining_receivable_gross', receivable.remaining_receivable_gross::text,
                     'order_service_billed', receivable.order_service_billed,
+                    -- Parts GMED bears instead of re-billing (rebilling_waivers).
+                    'waived_receivable_gross', receivable.waived_receivable_gross::text,
+                    'rebilling_waivers', COALESCE((
+                        SELECT jsonb_agg(jsonb_build_object(
+                            'id', waiver.id,
+                            'amount_gross', waiver.amount_gross::text,
+                            'reason', waiver.reason,
+                            'created_at', waiver.created_at,
+                            'created_by_name', creator.name,
+                            'reversed_at', waiver.reversed_at,
+                            'reversal_reason', waiver.reversal_reason
+                        ) ORDER BY waiver.created_at, waiver.id)
+                        FROM external_invoice_rebilling_waivers waiver
+                        LEFT JOIN users creator ON creator.id = waiver.created_by
+                        WHERE waiver.external_invoice_id = external.id
+                    ), '[]'::jsonb),
                     'source_order_id', external.order_id,
                     'source_order_number', source_order.order_number,
                     'latest_patient_invoice_id', allocation_summary.latest_invoice_id,
@@ -6795,6 +6909,10 @@ async fn create_patient_billing_invoice(
     let due_date = match parse_optional_date(body.due_date.as_deref()) {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, message),
+    };
+    let internal_note = match normalize_internal_note(body.internal_note.as_deref()) {
+        Ok(value) => value,
+        Err(_) => return internal_note_too_long(),
     };
 
     let quote_context = if let Some(quote_id) = body.quote_id {
@@ -7092,8 +7210,9 @@ async fn create_patient_billing_invoice(
     let invoice_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_type, status, currency,
-                due_date, total_net, total_vat, total_gross, line_items, notes, created_by
-           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12)
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
+                internal_note
+           ) VALUES ($1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12, $13)
            RETURNING id"#,
     )
     .bind(body.quote_id)
@@ -7108,6 +7227,7 @@ async fn create_patient_billing_invoice(
     .bind(snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
+    .bind(&internal_note)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -7349,8 +7469,13 @@ async fn create_invoice_from_quote(
     }
 
     // Drafts carry no invoice number; it is assigned when the invoice is
-    // released (see `release`).
+    // released (see `release`). The quote's printed remark is copied, its
+    // staff-only internal note is not.
     let notes = body.notes.clone().or(ctx.notes.clone());
+    let internal_note = match normalize_internal_note(body.internal_note.as_deref()) {
+        Ok(value) => value,
+        Err(_) => return internal_note_too_long(),
+    };
     let mut transaction = match state.db.begin().await {
         Ok(transaction) => transaction,
         Err(e) => {
@@ -7381,9 +7506,10 @@ async fn create_invoice_from_quote(
     match sqlx::query(
         r#"INSERT INTO invoices (
                 quote_id, order_id, patient_id, invoice_type, status,
-                due_date, total_net, total_vat, total_gross, line_items, notes, created_by
+                due_date, total_net, total_vat, total_gross, line_items, notes, created_by,
+                internal_note
            ) VALUES (
-                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11
+                $1, $2, $3, $4, 'draft', $5, $6, $7, $8, $9, $10, $11, $12
            ) RETURNING id"#,
     )
     .bind(ctx.quote_id)
@@ -7397,6 +7523,7 @@ async fn create_invoice_from_quote(
     .bind(invoice_snapshot.line_items.clone())
     .bind(notes)
     .bind(auth.user_id)
+    .bind(&internal_note)
     .fetch_one(&mut *transaction)
     .await
     {
@@ -9369,6 +9496,20 @@ async fn reverse_invoice_payment(
             "Refunds and applied advances must be reversed or released before this payment can be reversed",
         );
     }
+    // The reversal takes the money back out of the account it was booked on;
+    // a cash account (Kasse) that spent it cannot go below zero.
+    let cash_guard = match lock_invoice_cash_accounts(&mut transaction, &context, Some(payment_id))
+        .await
+    {
+        Ok(guard) => guard,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "lock payment reversal cash account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
+    };
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_payment_transactions (
                 invoice_id, transaction_type, reverses_transaction_id,
@@ -9420,6 +9561,21 @@ async fn reverse_invoice_payment(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to reverse payment",
         );
+    }
+    match cash_guard.refused(&mut transaction).await {
+        Ok(None) => {}
+        Ok(Some(available)) => {
+            return crate::routes::company_financial_accounts::cash_account_insufficient_balance(
+                available,
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "check payment reversal cash account");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to reverse payment",
+            );
+        }
     }
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after reversal");
@@ -9791,6 +9947,17 @@ async fn correct_invoice_payment(
         );
     }
 
+    // A lower corrected receipt takes money back out of the account: a cash
+    // account (Kasse) that spent it cannot go below zero.
+    let cash_guard = match lock_invoice_cash_accounts(&mut transaction, &context, Some(payment_id))
+        .await
+    {
+        Ok(guard) => guard,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %payment_id, "lock payment correction cash accounts");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
+    };
     // The reversal is dated today: the correction happens now, while the
     // corrected receipt keeps the real value date entered by billing.
     let reversal_id = match sqlx::query_scalar::<_, Uuid>(
@@ -9888,6 +10055,18 @@ async fn correct_invoice_payment(
     {
         tracing::error!(error = %e, invoice_id = %invoice_id, payment_id = %corrected_id, "insert corrected payment accounting entries");
         return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+    }
+    match cash_guard.refused(&mut transaction).await {
+        Ok(None) => {}
+        Ok(Some(available)) => {
+            return crate::routes::company_financial_accounts::cash_account_insufficient_balance(
+                available,
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "check payment correction cash accounts");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
+        }
     }
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after payment correction");
@@ -11268,6 +11447,15 @@ async fn create_invoice_refund(
             "Refund exceeds the refundable cash credit",
         );
     }
+    // The refund leaves the default account of the currency: a cash account
+    // (Kasse) never pays out more than it holds.
+    let cash_guard = match lock_invoice_cash_accounts(&mut transaction, &context, None).await {
+        Ok(guard) => guard,
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "lock refund cash account");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
+    };
 
     let refund_id = match sqlx::query_scalar::<_, Uuid>(
         r#"INSERT INTO invoice_refund_transactions (
@@ -11321,6 +11509,18 @@ async fn create_invoice_refund(
     {
         tracing::error!(error = %e, invoice_id = %invoice_id, refund_id = %refund_id, "insert refund accounting entries");
         return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+    }
+    match cash_guard.refused(&mut transaction).await {
+        Ok(None) => {}
+        Ok(Some(available)) => {
+            return crate::routes::company_financial_accounts::cash_account_insufficient_balance(
+                available,
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, invoice_id = %invoice_id, "check refund cash account");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to record refund");
+        }
     }
     if let Err(e) = recompute_invoice_settlement_status(&mut transaction, invoice_id).await {
         tracing::error!(error = %e, invoice_id = %invoice_id, "recompute invoice after refund");
@@ -12762,6 +12962,107 @@ async fn download_my_dunning_letter(
     dunning_letter_response(bytes, &file_name, source)
 }
 
+/// Staff-only internal note of an invoice (`POST /invoices/{id}/internal-note`).
+/// Not part of the issued document, so it is editable in every status,
+/// including released and cancelled invoices; the old and new text are
+/// audited in the same transaction. Who prepares or settles invoices (CEO,
+/// Billing, patient managers) may write it.
+async fn update_invoice_internal_note(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(invoice_id): Path<Uuid>,
+    Json(body): Json<UpdateInvoiceInternalNoteRequest>,
+) -> axum::response::Response {
+    if !can_create_invoices(auth.role) && !can_manage_invoice_finance(auth.role) {
+        return err(StatusCode::FORBIDDEN, "Insufficient permissions");
+    }
+    let internal_note = match normalize_internal_note(body.internal_note.as_deref()) {
+        Ok(value) => value,
+        Err(_) => return internal_note_too_long(),
+    };
+
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "begin invoice internal note update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
+    };
+    let current = match sqlx::query(
+        "SELECT patient_id, invoice_number, internal_note FROM invoices WHERE id = $1 FOR UPDATE",
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "lock invoice for internal note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
+    };
+    let patient_id = current.try_get::<Uuid, _>("patient_id").unwrap_or_default();
+    if let Err(response) = ensure_patient_access(&state, &auth, patient_id).await {
+        return response;
+    }
+    let previous = current
+        .try_get::<Option<String>, _>("internal_note")
+        .unwrap_or_default();
+    if previous != internal_note {
+        if let Err(error) = sqlx::query("UPDATE invoices SET internal_note = $2 WHERE id = $1")
+            .bind(invoice_id)
+            .bind(&internal_note)
+            .execute(&mut *transaction)
+            .await
+        {
+            tracing::error!(%error, %invoice_id, "update invoice internal note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
+        let event = audit::AuditEvent {
+            user_id: Some(auth.user_id),
+            action: "update_invoice_internal_note".to_string(),
+            entity_type: "invoice".to_string(),
+            entity_id: Some(invoice_id),
+            context: json!({
+                "patient_id": patient_id,
+                "invoice_number": current.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+            }),
+            old_value: Some(json!({ "internal_note": previous })),
+            new_value: Some(json!({ "internal_note": internal_note })),
+            ip_hash: None,
+        };
+        if let Err(error) = audit::write_in_transaction(&mut transaction, &event).await {
+            tracing::error!(%error, %invoice_id, "audit invoice internal note");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
+        }
+    }
+    if let Err(error) = transaction.commit().await {
+        tracing::error!(%error, %invoice_id, "commit invoice internal note");
+        return err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to update invoice",
+        );
+    }
+    match load_invoice_detail(&state, invoice_id, &auth).await {
+        Ok(Some(invoice)) => Json(invoice).into_response(),
+        Ok(None) => err(StatusCode::NOT_FOUND, "Invoice not found"),
+        Err(response) => response,
+    }
+}
+
 async fn update_invoice_visibility(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
@@ -13415,6 +13716,16 @@ async fn update_invoice_status(
                     "Failed to update invoice",
                 );
             }
+        }
+        // A draft built from lines with the former English catalogue texts
+        // is issued with the German ones.
+        if let Err(error) = release::refresh_draft_catalog_texts(&mut transaction, invoice_id).await
+        {
+            tracing::error!(%error, %invoice_id, "refresh draft catalogue texts");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update invoice",
+            );
         }
     }
 
@@ -14339,6 +14650,8 @@ mod patient_invoice_redaction_tests {
             "invoice_number": "INV-1",
             "total_gross": "1612",
             "visibility_note": "internal",
+            "notes": "Bitte überweisen Sie bis zum Fälligkeitsdatum.",
+            "internal_note": "Patient will in Raten zahlen – mit CEO klären",
             "available_prepayments": [{ "invoice_number": "INV-A", "available_amount": "700" }],
             "supporting_documents": [{ "auto_name": "Hotel original.pdf" }],
             "contract_id": "c",
@@ -14366,6 +14679,7 @@ mod patient_invoice_redaction_tests {
 
         for key in [
             "visibility_note",
+            "internal_note",
             "available_prepayments",
             "supporting_documents",
             "contract_id",
@@ -14373,6 +14687,11 @@ mod patient_invoice_redaction_tests {
         ] {
             assert!(invoice.get(key).is_none(), "{key}");
         }
+        // The printed customer remark stays: it is on the invoice anyway.
+        assert_eq!(
+            invoice["notes"],
+            "Bitte überweisen Sie bis zum Fälligkeitsdatum."
+        );
         assert!(invoice["payer"].get("notes").is_none());
         assert_eq!(invoice["payer"]["contact_name"], "Ivan");
         assert_eq!(invoice["total_gross"], "1612");

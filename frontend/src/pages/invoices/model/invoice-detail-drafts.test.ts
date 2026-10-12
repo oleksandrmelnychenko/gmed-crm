@@ -63,6 +63,11 @@ describe("invoiceDetailHasUnsavedInput", () => {
     expect(invoiceDetailHasUnsavedInput(state)).toBe(false);
   });
 
+  it("flags an internal note typed but not saved", () => {
+    expect(invoiceDetailHasUnsavedInput({ ...pristine(), internalNoteDirty: true })).toBe(true);
+    expect(invoiceDetailHasUnsavedInput({ ...pristine(), internalNoteDirty: false })).toBe(false);
+  });
+
   it("flags a changed payment amount or date", () => {
     const amount = pristine();
     amount.payment = { ...amount.payment, draft: { ...amount.payment.draft, amountGross: "1000" } };

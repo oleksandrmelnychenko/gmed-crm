@@ -37,6 +37,40 @@ pub(crate) async fn issuer_tax_registration_configured(
     .await
 }
 
+/// A draft prepared from order or quote lines that still carry the former
+/// English demo texts of the seeded catalogue ("Interpreter support") is
+/// refreshed to the German catalogue texts right before it is released, so
+/// the issued invoice, its archived PDF and its e-invoice print German. Only
+/// an unreleased draft is touched; issued invoices keep what they printed.
+/// Returns whether the draft changed.
+pub(super) async fn refresh_draft_catalog_texts(
+    conn: &mut PgConnection,
+    invoice_id: uuid::Uuid,
+) -> Result<bool, sqlx::Error> {
+    let Some(mut line_items) = sqlx::query_scalar::<_, serde_json::Value>(
+        r#"SELECT line_items FROM invoices
+           WHERE id = $1 AND status = 'draft' AND released_at IS NULL"#,
+    )
+    .bind(invoice_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    else {
+        return Ok(false);
+    };
+    if !crate::order_document_texts::germanize_legacy_catalog_lines(&mut line_items) {
+        return Ok(false);
+    }
+    sqlx::query(
+        r#"UPDATE invoices SET line_items = $2
+           WHERE id = $1 AND status = 'draft' AND released_at IS NULL"#,
+    )
+    .bind(invoice_id)
+    .bind(&line_items)
+    .execute(&mut *conn)
+    .await?;
+    Ok(true)
+}
+
 /// `system_settings.invoice_payment_term_days`, else the default.
 pub(super) async fn load_invoice_payment_term_days(
     conn: &mut PgConnection,

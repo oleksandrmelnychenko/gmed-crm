@@ -291,16 +291,65 @@ async fn export_patient_data(
         Err(resp) => return resp,
     };
 
-    match export_patient_data_response(&state, patient_id, auth.user_id, format).await {
+    match export_patient_data_response(
+        &state,
+        patient_id,
+        auth.user_id,
+        format,
+        PatientExportAudience::StaffHandler,
+    )
+    .await
+    {
         Ok(response) => response,
         Err(resp) => resp,
     }
+}
+
+/// Who receives a patient data export (Art. 15 DSGVO).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PatientExportAudience {
+    /// The staff member handling the access request (CEO, patient manager),
+    /// who reviews the export before handing it over: it includes the
+    /// staff-only internal notes of quotes and invoices, which are personal
+    /// data about the patient too (owner 2026-10-12).
+    StaffHandler,
+    /// The patient's own download in the portal: no staff-only internal
+    /// notes, which the patient never sees directly.
+    PatientPortal,
+}
+
+impl PatientExportAudience {
+    fn includes_internal_notes(self) -> bool {
+        self == Self::StaffHandler
+    }
+}
+
+/// Adds the staff-only `internal_note` of a quote or an invoice to its export
+/// row for the staff handler of an access request.
+fn with_internal_note(
+    mut item: Value,
+    row: &sqlx::postgres::PgRow,
+    audience: PatientExportAudience,
+) -> Value {
+    if audience.includes_internal_notes()
+        && let Some(object) = item.as_object_mut()
+    {
+        object.insert(
+            "internal_note".to_string(),
+            json!(
+                row.try_get::<Option<String>, _>("internal_note")
+                    .unwrap_or_default()
+            ),
+        );
+    }
+    item
 }
 
 pub(crate) async fn build_patient_export_payload(
     state: &AppState,
     patient_id: Uuid,
     actor_id: Uuid,
+    audience: PatientExportAudience,
 ) -> Result<Value, axum::response::Response> {
     let patient = sqlx::query!(
         r#"SELECT id, patient_id, first_name, last_name, birth_date, gender, email,
@@ -370,7 +419,7 @@ pub(crate) async fn build_patient_export_payload(
         sqlx::query(
             r#"SELECT id, quote_id, order_id, invoice_number, invoice_type, status, issued_at,
                   due_date, total_net, total_vat, total_gross, paid_amount, paid_at,
-                  line_items, notes, created_at, updated_at
+                  line_items, notes, internal_note, created_at, updated_at
            FROM invoices
            WHERE patient_id = $1
            ORDER BY issued_at DESC, created_at DESC"#,
@@ -400,7 +449,7 @@ pub(crate) async fn build_patient_export_payload(
         sqlx::query(
             r#"SELECT q.id, q.order_id, q.quote_number, q.status, q.valid_until,
                   q.total_net, q.total_vat, q.total_gross, q.paid_amount, q.paid_at,
-                  q.line_items, q.notes, q.created_at, q.updated_at
+                  q.line_items, q.notes, q.internal_note, q.created_at, q.updated_at
            FROM quotes q
            JOIN orders o ON o.id = q.order_id
            WHERE o.patient_id = $1
@@ -729,7 +778,7 @@ pub(crate) async fn build_patient_export_payload(
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         })).collect::<Vec<_>>(),
-        "invoices": invoices.into_iter().map(|row| serde_json::json!({
+        "invoices": invoices.into_iter().map(|row| with_internal_note(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "quote_id": row.try_get::<Option<Uuid>, _>("quote_id").unwrap_or_default(),
             "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
@@ -747,7 +796,7 @@ pub(crate) async fn build_patient_export_payload(
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        })).collect::<Vec<_>>(),
+        }), &row, audience)).collect::<Vec<_>>(),
         "invoice_dunning_events": invoice_dunning_events.into_iter().map(|row| serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "invoice_id": row.try_get::<Uuid, _>("invoice_id").unwrap_or_else(|_| Uuid::nil()),
@@ -758,7 +807,7 @@ pub(crate) async fn build_patient_export_payload(
             "sent_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("sent_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
         })).collect::<Vec<_>>(),
-        "quotes": quotes.into_iter().map(|row| serde_json::json!({
+        "quotes": quotes.into_iter().map(|row| with_internal_note(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "order_id": row.try_get::<Uuid, _>("order_id").unwrap_or_else(|_| Uuid::nil()),
             "quote_number": row.try_get::<String, _>("quote_number").unwrap_or_default(),
@@ -773,7 +822,7 @@ pub(crate) async fn build_patient_export_payload(
             "notes": row.try_get::<Option<String>, _>("notes").unwrap_or_default(),
             "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
             "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-        })).collect::<Vec<_>>(),
+        }), &row, audience)).collect::<Vec<_>>(),
         "tasks": tasks.into_iter().map(|row| serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
             "title": row.try_get::<String, _>("title").unwrap_or_default(),
@@ -851,7 +900,10 @@ pub(crate) async fn build_patient_export_payload(
         Some(actor_id),
         "patient",
         Some(patient_id),
-        json!({ "article": "Art. 15" }),
+        json!({
+            "article": "Art. 15",
+            "internal_notes_included": audience.includes_internal_notes(),
+        }),
     ));
 
     Ok(export)
@@ -862,8 +914,9 @@ pub(crate) async fn export_patient_data_response(
     patient_id: Uuid,
     actor_id: Uuid,
     format: PatientExportFormat,
+    audience: PatientExportAudience,
 ) -> Result<axum::response::Response, axum::response::Response> {
-    let payload = build_patient_export_payload(state, patient_id, actor_id).await?;
+    let payload = build_patient_export_payload(state, patient_id, actor_id, audience).await?;
     match format {
         PatientExportFormat::Json => Ok(Json(payload).into_response()),
         PatientExportFormat::Zip => {

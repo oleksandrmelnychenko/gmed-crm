@@ -4,6 +4,8 @@
  * anything unknown is shown as sent, which still names the reason.
  */
 
+import { formatMoneyAmount } from "@/lib/money";
+
 type Pair = [de: string, ru: string];
 
 const EXACT: Record<string, Pair> = {
@@ -478,6 +480,16 @@ function errorMessage(error: unknown) {
 }
 
 export function localizeInvoiceError(error: unknown, lang: string, fallback: string) {
+  // A refund, payment reversal or lower corrected receipt booked on a cash
+  // default account (Kasse) never takes it below zero (2026-10-12).
+  if (errorCode(error) === "cash_account_insufficient_balance") {
+    const raw = errorBody(error)?.available_balance;
+    const available =
+      typeof raw === "string" || typeof raw === "number" ? formatMoneyAmount(raw) : "–";
+    return lang === "de"
+      ? `Die Kasse (Standardkonto für Zahlungen) kann nicht ins Minus gehen. Verfügbar: ${available}.`
+      : `Касса (счёт по умолчанию для оплат) не может уйти в минус. Доступно: ${available}.`;
+  }
   const coded = CODES[errorCode(error)];
   if (coded) {
     const text = lang === "de" ? coded[0] : coded[1];

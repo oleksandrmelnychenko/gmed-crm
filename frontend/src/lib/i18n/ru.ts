@@ -6,6 +6,7 @@ import { casesClinicalRu } from "./catalogs/cases-clinical";
 import { clinicalRu } from "./catalogs/clinical";
 import { extractedUiRu } from "./catalogs/extracted-ui";
 import { ordersUiRu } from "./catalogs/orders-ui";
+import { billingUiRu } from "./catalogs/billing-ui";
 import { financeBalancesRu } from "./catalogs/finance-balances";
 import { gwgTrainingRu } from "./catalogs/gwg-training";
 import { operationsRu } from "./catalogs/operations";
@@ -18,7 +19,7 @@ import { staffAccessRu } from "./catalogs/staff-access";
 
 export const ru = {
   // Audit labels first: a label already in the extracted catalog wins.
-  uiText: { ...auditActivityUiTextRu, ...extractedUiRu, ...ordersUiRu },
+  uiText: { ...auditActivityUiTextRu, ...extractedUiRu, ...ordersUiRu, ...billingUiRu },
   staffAccess: staffAccessRu,
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",

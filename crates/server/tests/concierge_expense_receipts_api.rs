@@ -1912,3 +1912,104 @@ async fn receipts_of_an_appointment_task_land_on_its_order_and_gmed_paid_ones_ne
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
 }
+
+/// An agency-paid expense booked on a cash account (Kasse) never takes it
+/// below zero, like transfers and supplier payments.
+#[tokio::test]
+async fn agency_paid_expense_from_a_cash_account_needs_the_cash() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let concierge_id = seed_user(&context.pool, "concierge", &format!("cash-{tag}")).await;
+    let billing_id = seed_user(&context.pool, "billing", &format!("cash-{tag}")).await;
+    let (_patient_id, _provider_id, service_id, order_id, order_leistung_id) =
+        seed_financial_fixture(&context.pool, context.admin_id, concierge_id, &tag).await;
+    let cash_account = |name: String, opening: i64| {
+        let pool = context.pool.clone();
+        let admin_id = context.admin_id;
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                r#"INSERT INTO company_financial_accounts (
+                       name, account_type, currency, opening_balance, opening_balance_on,
+                       is_default, is_active, created_by
+                   ) VALUES ($1, 'cash', 'EUR', $2, '2020-01-01', false, true, $3)
+                   RETURNING id"#,
+            )
+            .bind(name)
+            .bind(Decimal::new(opening, 0))
+            .bind(admin_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let small_cash = cash_account(format!("Kasse klein {tag}"), 100).await;
+    let large_cash = cash_account(format!("Kasse groß {tag}"), 200).await;
+    let concierge = auth_header(concierge_id, "concierge");
+    let billing = auth_header(billing_id, "billing");
+    let expense_date = gmed_server::app_time::today() - Duration::days(1);
+
+    let (status, submitted) = submit_fixture_expense(
+        &context.app,
+        &concierge,
+        service_id,
+        Uuid::new_v4(),
+        "agency",
+        true,
+        expense_date,
+        &format!("cash-{tag}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{submitted}");
+    let expense_id = submitted["item"]["id"].as_str().unwrap().to_string();
+    let post_path = format!("/api/v1/concierge-services/{service_id}/expenses/{expense_id}/post");
+    let post_body = |account_id: Uuid| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "order_id": order_id,
+            "order_leistung_id": order_leistung_id,
+            "financial_account_id": account_id,
+            "paid_on": expense_date,
+            "payment_method": "cash"
+        })
+    };
+
+    // 119,00 € from a Kasse holding 100,00 €: refused, nothing posted.
+    let (status, refused) = json_request(
+        &context.app,
+        "POST",
+        &post_path,
+        &billing,
+        Some(post_body(small_cash)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
+    assert_eq!(refused["error"], "cash_account_insufficient_balance");
+    assert_eq!(
+        refused["available_balance"]
+            .as_str()
+            .unwrap()
+            .parse::<Decimal>()
+            .unwrap(),
+        Decimal::new(100, 0)
+    );
+    let posted_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM external_invoices WHERE source_concierge_expense_id = $1",
+    )
+    .bind(Uuid::parse_str(&expense_id).unwrap())
+    .fetch_one(&context.pool)
+    .await
+    .unwrap();
+    assert_eq!(posted_count, 0);
+
+    let (status, posted) = json_request(
+        &context.app,
+        "POST",
+        &post_path,
+        &billing,
+        Some(post_body(large_cash)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{posted}");
+}

@@ -6,6 +6,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { CountBadge, checkboxClass, inputClass, selectClass, textareaClass, tokens } from "@/components/ui-shell";
+import { INTERNAL_NOTE_MAX_LENGTH } from "@/lib/internal-note";
 import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -315,6 +316,13 @@ export function CreateInvoiceDialog({ open, busy, dirty, optionsBusy, error, opt
                     placeholder={t.invoices_workspace_billing_note_placeholder} />
                   {/* Printed on the issued, immutable invoice (QA D-62). */}
                   <p className="text-xs text-muted-foreground">{t.finance_printed_notes_hint}</p>
+                </FormField>
+                <FormField label={t.finance_internal_note}>
+                  <textarea rows={2} className={cn(textareaClass, "min-h-20")} value={form.internalNote}
+                    maxLength={INTERNAL_NOTE_MAX_LENGTH}
+                    onChange={(event) => onFormChange((current) => ({ ...current, internalNote: event.target.value }))} />
+                  {/* Staff only: never printed, never in the portal (owner 2026-10-12). */}
+                  <p className="text-xs text-muted-foreground">{t.finance_internal_note_hint}</p>
                 </FormField>
               </fieldset>
 

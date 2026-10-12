@@ -71,6 +71,110 @@ pub(crate) fn unit_price_label_de(price: Decimal, currency: &str, unit: &str) ->
     }
 }
 
+/// English demo texts the seeded agency catalogue carried until migration
+/// 20261012000300 replaced them with German texts, and those German texts.
+/// Order and quote lines created before keep the English wording (they are
+/// snapshots), so a line built from them for a new document is translated
+/// here (QA 2026-10-12: "Interpreter support" on a new invoice).
+const LEGACY_CATALOG_TEXTS: [(&str, &str); 8] = [
+    ("Treatment organization", "Organisation der Behandlung"),
+    ("Interpreter support", "Dolmetscherbetreuung"),
+    ("Airport transfer coordination", "Flughafentransfer"),
+    ("Companion support", "Concierge-Begleitung"),
+    (
+        "Agency coordination and treatment scheduling.",
+        "Agenturkoordination und Behandlungsplanung.",
+    ),
+    (
+        "Medical interpretation billed per hour.",
+        "Medizinische Verdolmetschung mit Abrechnung pro Stunde.",
+    ),
+    (
+        "Airport pickup or hotel transfer handled by concierge.",
+        "Abholung am Flughafen oder Hoteltransfer durch den Concierge-Service.",
+    ),
+    (
+        "Additional family coordination and on-site support.",
+        "Zusätzliche Familienkoordination und Begleitung vor Ort.",
+    ),
+];
+
+/// The German catalogue text for one of the seeded English demo texts (exact
+/// text, surrounding blanks ignored). Any other text, such as a name the
+/// agency entered itself, has none.
+pub(crate) fn german_catalog_text(text: &str) -> Option<&'static str> {
+    let trimmed = text.trim();
+    LEGACY_CATALOG_TEXTS
+        .iter()
+        .find(|(english, _)| *english == trimmed)
+        .map(|(_, german)| *german)
+}
+
+/// Translates the seeded English catalogue texts of one stored order, quote
+/// or invoice line for a new document: `description`, every
+/// `description_items[].text`, and the catalogue description that starts the
+/// internal `notes`. Other texts stay as they are. Returns whether the line
+/// changed.
+pub(crate) fn germanize_legacy_catalog_line(line: &mut serde_json::Value) -> bool {
+    let Some(object) = line.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    if let Some(german) = object
+        .get("description")
+        .and_then(serde_json::Value::as_str)
+        .and_then(german_catalog_text)
+    {
+        object.insert("description".to_string(), german.into());
+        changed = true;
+    }
+    if let Some(items) = object
+        .get_mut("description_items")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for item in items
+            .iter_mut()
+            .filter_map(serde_json::Value::as_object_mut)
+        {
+            if let Some(german) = item
+                .get("text")
+                .and_then(serde_json::Value::as_str)
+                .and_then(german_catalog_text)
+            {
+                item.insert("text".to_string(), german.into());
+                changed = true;
+            }
+        }
+    }
+    if let Some(notes) = object.get("notes").and_then(serde_json::Value::as_str) {
+        let (first, rest) = match notes.split_once('\n') {
+            Some((first, rest)) => (first, Some(rest)),
+            None => (notes, None),
+        };
+        if let Some(german) = german_catalog_text(first) {
+            let translated = match rest {
+                Some(rest) => format!("{german}\n{rest}"),
+                None => german.to_string(),
+            };
+            object.insert("notes".to_string(), translated.into());
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// [`germanize_legacy_catalog_line`] for every line of a stored line array.
+pub(crate) fn germanize_legacy_catalog_lines(lines: &mut serde_json::Value) -> bool {
+    let Some(items) = lines.as_array_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for item in items.iter_mut() {
+        changed |= germanize_legacy_catalog_line(item);
+    }
+    changed
+}
+
 /// Prepayment terms of the order a Kostenvoranschlag belongs to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KvPaymentTerms {
@@ -215,6 +319,63 @@ mod tests {
             "Der angegebene Gesamtbetrag ist als Vorauszahlung vor Behandlungs-/Auftragsbeginn zu überweisen an:"
         );
         assert_eq!(kv_remainder_note(&terms), None);
+    }
+
+    #[test]
+    fn seeded_english_catalogue_texts_are_printed_in_german() {
+        assert_eq!(
+            german_catalog_text(" Interpreter support "),
+            Some("Dolmetscherbetreuung")
+        );
+        assert_eq!(
+            german_catalog_text("Treatment organization"),
+            Some("Organisation der Behandlung")
+        );
+        // The agency's own texts and texts already in German stay.
+        assert_eq!(german_catalog_text("Interpreter support (night)"), None);
+        assert_eq!(german_catalog_text("interpreter support"), None);
+        assert_eq!(german_catalog_text("Dolmetscherbetreuung"), None);
+
+        let mut lines = serde_json::json!([
+            {
+                "description": "Interpreter support",
+                "description_items": [
+                    { "id": "a", "text": "Medical interpretation billed per hour." },
+                    { "id": "b", "text": "Termine nach Absprache" }
+                ],
+                "notes": "Medical interpretation billed per hour.\nNur vormittags",
+                "quantity": "2"
+            },
+            { "description": "Klinikrechnung", "notes": "Agency coordination and treatment scheduling." },
+            { "description": "Eigene Leistung", "notes": "Interne Notiz" },
+            "not a line"
+        ]);
+        assert!(germanize_legacy_catalog_lines(&mut lines));
+        assert_eq!(lines[0]["description"], "Dolmetscherbetreuung");
+        assert_eq!(
+            lines[0]["description_items"][0]["text"],
+            "Medizinische Verdolmetschung mit Abrechnung pro Stunde."
+        );
+        assert_eq!(
+            lines[0]["description_items"][1]["text"],
+            "Termine nach Absprache"
+        );
+        assert_eq!(
+            lines[0]["notes"],
+            "Medizinische Verdolmetschung mit Abrechnung pro Stunde.\nNur vormittags"
+        );
+        assert_eq!(lines[0]["quantity"], "2");
+        assert_eq!(lines[1]["description"], "Klinikrechnung");
+        assert_eq!(
+            lines[1]["notes"],
+            "Agenturkoordination und Behandlungsplanung."
+        );
+        assert_eq!(lines[2]["description"], "Eigene Leistung");
+        assert_eq!(lines[2]["notes"], "Interne Notiz");
+
+        let mut german = serde_json::json!([{ "description": "Dolmetscherbetreuung" }]);
+        assert!(!germanize_legacy_catalog_lines(&mut german));
+        assert!(!germanize_legacy_catalog_lines(&mut serde_json::json!({})));
     }
 
     #[test]

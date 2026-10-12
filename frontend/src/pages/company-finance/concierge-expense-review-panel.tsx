@@ -33,6 +33,7 @@ import { Banner as ShellBanner, selectClass as shellSelectClassName } from "@/co
 import { appDateKey, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 
 import {
@@ -708,7 +709,12 @@ export function ConciergeExpenseReviewPanel({
       setSuccessMessage(text.approvedSuccess);
       onChanged();
     } catch (error) {
-      setMutationError(error instanceof Error ? error.message : text.postFailed);
+      // A cash account (Kasse) cannot pay more than it holds.
+      setMutationError(
+        companyFinanceErrorCode(error) === "cash_account_insufficient_balance"
+          ? localizeCompanyFinanceError(error, lang, text.postFailed, selected.currency)
+          : error instanceof Error ? error.message : text.postFailed,
+      );
     } finally {
       setMutationBusy(null);
     }

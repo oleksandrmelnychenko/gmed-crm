@@ -411,6 +411,293 @@ async fn external_receivable_allocations_are_explicit_reversible_and_balance_saf
     assert_eq!(forbidden_status, StatusCode::FORBIDDEN);
 }
 
+fn money(value: &Value) -> Decimal {
+    value.as_str().unwrap().parse::<Decimal>().unwrap()
+}
+
+/// A re-billed supplier cost that is not (or no longer) on a patient invoice
+/// can be dropped from re-billing: GMED bears it, with a reason, audited and
+/// reversible; it leaves the patient's debt everywhere (owner 2026-10-12).
+#[tokio::test]
+async fn unbilled_supplier_cost_can_be_absorbed_by_gmed_and_put_back() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let manager_id = seed_user(&ctx.pool, "patient_manager", &tag).await;
+    let billing_id = seed_user(&ctx.pool, "billing", &tag).await;
+    let patient_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patients (
+               patient_id, first_name, last_name, birth_date, gender, created_by
+           ) VALUES ($1, 'Mia', 'Muster', '1990-01-01', 'diverse', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("WAIVE-PT-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(manager_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let order_id = seed_order(&ctx.pool, patient_id, ctx.admin_id, &format!("w-{tag}")).await;
+    let invoice_id = seed_patient_invoice(
+        &ctx.pool,
+        order_id,
+        patient_id,
+        ctx.admin_id,
+        &format!("PAT-W-{tag}"),
+        150,
+    )
+    .await;
+    let external_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO external_invoices (
+               order_id, patient_id, external_invoice_number,
+               amount_net, amount_vat, amount_gross, currency,
+               status, paid_by, service_delivered, created_by
+           ) VALUES ($1, $2, $3, 100, 0, 100, 'EUR', 'paid', 'agency', true, $4)
+           RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("EXT-W-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let billing = auth_header_for(billing_id, "billing");
+    let allocations =
+        format!("/api/v1/orders/{order_id}/external-invoices/{external_invoice_id}/allocations");
+    // 40 of the 100 stay re-billed (e.g. after a credit note reversed the
+    // rest of the allocation, QA D-64); 60 are patient debt again.
+    let (status, allocation) = request_json(
+        &ctx.app,
+        "POST",
+        &allocations,
+        &manager,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "patient_invoice_id": invoice_id,
+            "amount_gross": "40"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{allocation}");
+    let statement_path =
+        format!("/api/v1/patients/{patient_id}/account-statement?currency=EUR&order_id={order_id}");
+    let (status, before) = request_json(&ctx.app, "GET", &statement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{before}");
+    assert_eq!(
+        money(&before["summary"]["external_receivable"]),
+        Decimal::new(60, 0)
+    );
+
+    let waivers = format!("/api/v1/external-invoices/{external_invoice_id}/rebilling-waivers");
+    let (status, _) = request_json(
+        &ctx.app,
+        "POST",
+        &waivers,
+        &manager,
+        Some(json!({ "request_id": Uuid::new_v4(), "reason": "Kulanz" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, missing_reason) = request_json(
+        &ctx.app,
+        "POST",
+        &waivers,
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "reason": " " })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{missing_reason}");
+    assert_eq!(missing_reason["error"], "rebilling_waiver_reason_required");
+
+    let request_id = Uuid::new_v4();
+    let reason = "Kulanz: GMED trägt den Rest der Hotelrechnung";
+    let (status, waiver) = request_json(
+        &ctx.app,
+        "POST",
+        &waivers,
+        &billing,
+        Some(json!({ "request_id": request_id, "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{waiver}");
+    assert_eq!(money(&waiver["amount_gross"]), Decimal::new(60, 0));
+    assert_eq!(waiver["reason"], reason);
+    let waiver_id = waiver["id"].as_str().unwrap().to_string();
+    let (status, replay) = request_json(
+        &ctx.app,
+        "POST",
+        &waivers,
+        &billing,
+        Some(json!({ "request_id": request_id, "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["id"], waiver_id);
+    assert_eq!(replay["idempotent_replay"], true);
+    let (status, nothing) = request_json(
+        &ctx.app,
+        "POST",
+        &waivers,
+        &billing,
+        Some(json!({ "request_id": Uuid::new_v4(), "reason": reason })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{nothing}");
+    assert_eq!(nothing["error"], "rebilling_waiver_nothing_to_waive");
+
+    // The cost is no patient debt any more: statement, re-billing list and
+    // the manual allocation bound agree.
+    let (status, after) = request_json(&ctx.app, "GET", &statement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{after}");
+    assert_eq!(
+        money(&after["summary"]["external_receivable"]),
+        Decimal::ZERO
+    );
+    assert_eq!(after["summary"]["reconciliation_required"], false);
+    assert_eq!(money(&after["summary"]["total_due"]), Decimal::new(150, 0));
+    assert_eq!(
+        money(&after["summary"]["closing_balance"]),
+        Decimal::new(150, 0)
+    );
+    let waived_movement = after["movements"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|movement| movement["kind"] == "external_rebilling_waived")
+        .expect("waiver movement");
+    assert_eq!(waived_movement["direction"], "credit");
+    assert_eq!(money(&waived_movement["credit"]), Decimal::new(60, 0));
+    assert_eq!(waived_movement["description"], reason);
+    let external_item = after["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == external_invoice_id.to_string())
+        .unwrap();
+    assert_eq!(
+        money(&external_item["waived_receivable"]),
+        Decimal::new(60, 0)
+    );
+    assert_eq!(money(&external_item["remaining_receivable"]), Decimal::ZERO);
+    assert_eq!(
+        external_item["payment_state"],
+        "reconciled_to_patient_invoice"
+    );
+
+    let (status, workspace) = request_json(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/billing-workspace"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{workspace}");
+    let expense = workspace["expenses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|expense| expense["id"] == external_invoice_id.to_string())
+        .unwrap();
+    assert_eq!(money(&expense["remaining_receivable_gross"]), Decimal::ZERO);
+    assert_eq!(
+        money(&expense["waived_receivable_gross"]),
+        Decimal::new(60, 0)
+    );
+    assert_eq!(expense["billable"], false);
+    assert_eq!(expense["rebilling_waivers"][0]["reason"], reason);
+
+    let (status, over) = request_json(
+        &ctx.app,
+        "POST",
+        &allocations,
+        &manager,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "patient_invoice_id": invoice_id,
+            "amount_gross": "0.01"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{over}");
+
+    let audited: i64 = sqlx::query_scalar(
+        r#"SELECT COUNT(*) FROM audit_log
+           WHERE action = 'waive_external_invoice_rebilling'
+             AND entity_id = $1 AND context->>'reason' = $2"#,
+    )
+    .bind(external_invoice_id)
+    .bind(reason)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    // Append-only: a waiver is reversed, never edited or deleted.
+    let waiver_uuid = Uuid::parse_str(&waiver_id).unwrap();
+    assert!(
+        sqlx::query("DELETE FROM external_invoice_rebilling_waivers WHERE id = $1")
+            .bind(waiver_uuid)
+            .execute(&ctx.pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE external_invoice_rebilling_waivers SET amount_gross = 1 WHERE id = $1")
+            .bind(waiver_uuid)
+            .execute(&ctx.pool)
+            .await
+            .is_err()
+    );
+
+    // Reversed with a reason, the 60 are patient debt again.
+    let reversal = format!("{waivers}/{waiver_id}/reversal");
+    let (status, reversed) = request_json(
+        &ctx.app,
+        "POST",
+        &reversal,
+        &billing,
+        Some(json!({ "reason": "Patient zahlt doch selbst" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{reversed}");
+    assert!(reversed["reversed_at"].is_string(), "{reversed}");
+    let (status, again) = request_json(
+        &ctx.app,
+        "POST",
+        &reversal,
+        &billing,
+        Some(json!({ "reason": "Patient zahlt doch selbst" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{again}");
+    assert_eq!(again["error"], "rebilling_waiver_already_reversed");
+    let (status, reopened) = request_json(&ctx.app, "GET", &statement_path, &billing, None).await;
+    assert_eq!(status, StatusCode::OK, "{reopened}");
+    assert_eq!(
+        money(&reopened["summary"]["external_receivable"]),
+        Decimal::new(60, 0)
+    );
+    assert!(
+        reopened["movements"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|movement| movement["kind"] != "external_rebilling_waived")
+    );
+}
+
 #[tokio::test]
 async fn supplier_invoice_with_active_allocations_cannot_be_cancelled() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

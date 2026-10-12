@@ -23,7 +23,7 @@ async function prepare(page: Page, lang = "ru") {
   ];
   const order = { id: orderId, order_number: "A-TEST-1", patient_id: patientId, patient_name: "Anna Beispiel", patient_pid: "P-TEST-1", process_gates: { billing_release_status: "granted", billing_release_note: null, package_coverage_status: "not_covered" }, leistungen: lines.map(line => ({ id: line.source_order_leistung_id, status: "approved" })) };
   const invoice = { ...quote, id: invoiceId, invoice_number: "INV-TEST-1", quote_id: quoteId, invoice_type: "final", status: "draft", issued_at: "2026-09-07T10:00:00Z", created_at: "2026-09-07T10:00:00Z", updated_at: "2026-09-07T10:00:00Z", total_net: "1200", total_vat: "228", total_gross: "1428", paid_amount: "0", balance_due: "1428", due_date: null, paid_at: null, notes: null, available_prepayments: [], prepayment_allocations: [] };
-  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], commentWrites: [] as unknown[], pdfReads: 0, errors: [] as string[] };
+  const fixture = { quote, quotes, order, invoice, postError: "", quotesError: false, writes: [] as unknown[], commentWrites: [] as unknown[], noteWrites: [] as unknown[], pdfReads: 0, errors: [] as string[] };
   page.on("pageerror", error => fixture.errors.push(error.message));
   await page.addInitScript(language => {
     localStorage.setItem("gmed_access_token", "invoice-test-token");
@@ -41,6 +41,12 @@ async function prepare(page: Page, lang = "ru") {
       const body = route.request().postDataJSON() as { comments: { line_index: number; comment: string | null }[] };
       fixture.commentWrites.push(body);
       for (const { line_index, comment } of body.comments) Object.assign(invoice.line_items[line_index], { comment });
+      return route.fulfill({ json: invoice });
+    }
+    if (path === `/invoices/${invoiceId}/internal-note` && route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { internal_note: string | null };
+      fixture.noteWrites.push(body);
+      Object.assign(invoice, { internal_note: body.internal_note });
       return route.fulfill({ json: invoice });
     }
     if (path === `/invoices/${invoiceId}/pdf`) { fixture.pdfReads++; return route.fulfill({ contentType: "application/pdf", body: previewPdf }); }
@@ -104,7 +110,7 @@ test("an unapproved order service does not block creating the final invoice", as
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  expect(fixture.writes).toEqual([{ invoice_type: "final", due_date: null, notes: null, line_items: fixture.quote.line_items.map((_, line_index) => ({ line_index, quantity: 1 })) }]);
+  expect(fixture.writes).toEqual([{ invoice_type: "final", due_date: null, notes: null, internal_note: null, line_items: fixture.quote.line_items.map((_, line_index) => ({ line_index, quantity: 1 })) }]);
   expect(fixture.errors).toEqual([]);
 });
 
@@ -142,7 +148,7 @@ test("an advance invoice bills the order's required prepayment unless positions 
   await expect(dialog.getByRole("checkbox", { name: "Позиция: Service 1", exact: true })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Создать счёт", exact: true }).click();
   await expect(dialog).toHaveCount(0);
-  expect(fixture.writes).toEqual([{ invoice_type: "advance", advance_basis: "prepayment", due_date: null, notes: null }]);
+  expect(fixture.writes).toEqual([{ invoice_type: "advance", advance_basis: "prepayment", due_date: null, notes: null, internal_note: null }]);
 
   await page.goto(`/invoices?patient=${patientId}&order=${orderId}&quote=${quoteId}&invoice_type=advance&create=1`);
   const again = page.getByRole("dialog", { name: "Новый счёт", exact: true });
@@ -219,14 +225,47 @@ test("refreshing exhausted quote scope clears the stale selection", async ({ pag
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeDisabled();
 });
 
+// Owner 2026-10-12: the staff-only note is saved on its own, also on an issued
+// invoice, and is never the printed customer remark.
+test("the internal note is saved apart from the printed remark, also after release", async ({ page }) => {
+  const fixture = await prepare(page);
+  Object.assign(fixture.invoice, { status: "sent", released_at: "2026-09-07T10:00:00Z", notes: "Bitte überweisen Sie bis zum Fälligkeitsdatum." });
+  await page.goto(`/invoices?invoice=${invoiceId}`);
+  const sheet = page.getByRole("dialog");
+  const editor = sheet.getByTestId("invoice-internal-note");
+  await editor.scrollIntoViewIfNeeded();
+  await expect(editor).toContainText("Внутренняя заметка (не печатается)");
+  const save = editor.getByRole("button", { name: "Сохранить заметку", exact: true });
+  await expect(save).toBeDisabled();
+  const note = editor.getByRole("textbox", { name: "Внутренняя заметка (не печатается)", exact: true });
+  await note.fill("  Пациент просит рассрочку  ");
+  // An unsaved internal note keeps the sheet from closing silently.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("alertdialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(note).toHaveValue("  Пациент просит рассрочку  ");
+  await save.click();
+  await expect.poll(() => fixture.noteWrites).toEqual([{ internal_note: "Пациент просит рассрочку" }]);
+  // The reloaded invoice carries the saved note; nothing is left to save.
+  await expect(sheet.getByTestId("invoice-internal-note").getByRole("textbox", { name: "Внутренняя заметка (не печатается)", exact: true })).toHaveValue("Пациент просит рассрочку");
+  await expect(sheet.getByTestId("invoice-internal-note").getByRole("button", { name: "Сохранить заметку", exact: true })).toBeDisabled();
+  await expect(sheet.getByText("Bitte überweisen Sie bis zum Fälligkeitsdatum.", { exact: true })).toBeVisible();
+  expect(fixture.errors).toEqual([]);
+});
+
 test("final invoice refresh uses the new remainder without losing notes", async ({ page }) => {
   const fixture = await prepare(page);
   const dialog = await openCreate(page);
-  await dialog.locator("textarea").fill("Keep this note");
+  // The printed customer remark comes first; the staff-only internal note follows.
+  const notes = dialog.locator("textarea").first();
+  const internalNote = dialog.getByRole("textbox", { name: "Внутренняя заметка (не печатается)" });
+  await notes.fill("Keep this note");
+  await internalNote.fill("Keep this internal note");
   fixture.quote.line_items[0].remaining_quantity = "0.5";
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(dialog.getByRole("spinbutton", { name: "Количество: Service 1", exact: true })).toHaveValue("0.5");
-  await expect(dialog.locator("textarea")).toHaveValue("Keep this note");
+  await expect(notes).toHaveValue("Keep this note");
+  await expect(internalNote).toHaveValue("Keep this internal note");
   await expect(dialog.getByRole("button", { name: "Создать счёт", exact: true })).toBeEnabled();
 });
 
@@ -255,7 +294,7 @@ for (const lang of ["ru", "de"]) {
       const dialog = await openCreate(page, lang);
       await expect(dialog.getByRole("button", { name: lang === "de" ? "Rechnung erstellen" : "Создать счёт", exact: true })).toBeEnabled();
       await page.screenshot({ path: `../artifacts/design-qa/invoice-create-${lang}-${width}.png`, animations: "disabled" });
-      await dialog.locator("textarea").fill("Invoice note");
+      await dialog.locator("textarea").first().fill("Invoice note");
       await dialog.getByRole("button", { name: lang === "de" ? "Rechnung erstellen" : "Создать счёт", exact: true }).click();
       const alert = dialog.getByTestId("invoice-create-footer").getByRole("alert");
       // The server's conflict is shown in the interface language, never as raw English.

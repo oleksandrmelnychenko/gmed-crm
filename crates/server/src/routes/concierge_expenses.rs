@@ -2739,9 +2739,10 @@ async fn post_expense_for_scope(
                 }
             }
         };
+        // Locked for update: a cash account's balance is checked below.
         let account = match sqlx::query(
-            r#"SELECT currency, opening_balance_on, is_active
-               FROM company_financial_accounts WHERE id = $1 FOR SHARE"#,
+            r#"SELECT currency, opening_balance_on, is_active, account_type
+               FROM company_financial_accounts WHERE id = $1 FOR UPDATE"#,
         )
         .bind(account_id)
         .fetch_optional(&mut *transaction)
@@ -2769,6 +2770,31 @@ async fn post_expense_for_scope(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "Financial account must be active, use the same currency, and cover the expense date",
             );
+        }
+        // A cash box never pays out more than it holds (same rule as
+        // transfers and supplier payments).
+        if account
+            .try_get::<String, _>("account_type")
+            .unwrap_or_default()
+            == "cash"
+        {
+            let balance = match crate::routes::company_financial_accounts::account_balance(
+                &mut transaction,
+                account_id,
+            )
+            .await
+            {
+                Ok(value) => value,
+                Err(error) => {
+                    tracing::error!(error = %error, "load expense cash account balance");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to post expense");
+                }
+            };
+            if balance - expense.amount_gross < Decimal::ZERO {
+                return crate::routes::company_financial_accounts::cash_account_insufficient_balance(
+                    balance,
+                );
+            }
         }
         Some(account_id)
     } else {

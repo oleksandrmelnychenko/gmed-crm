@@ -19,6 +19,17 @@ describe("localizeInvoiceError", () => {
     ).toContain("Steuernummer");
   });
 
+  it("names the cash left when a refund would take the Kasse below zero", () => {
+    const error = Object.assign(new Error("A cash account cannot go below zero"), {
+      code: "cash_account_insufficient_balance",
+      body: { error: "cash_account_insufficient_balance", available_balance: "30" },
+    });
+    const ru = localizeInvoiceError(error, "ru", "Ошибка");
+    expect(ru).toContain("Касса");
+    expect(ru).toContain("30,00");
+    expect(localizeInvoiceError(error, "de", "Fehler")).toContain("Kasse");
+  });
+
   it("says a credit note was already reversed in the UI language", () => {
     const error = new Error("Credit note was already reversed");
     expect(localizeInvoiceError(error, "ru", "Ошибка")).toBe("Эта кредит-нота уже сторнирована.");

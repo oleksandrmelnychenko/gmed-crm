@@ -252,6 +252,7 @@ export function blankCreateForm(quoteId = ""): CreateForm {
     invoiceType: "final",
     dueDate: "",
     notes: "",
+    internalNote: "",
     selectedLineIndexes: [],
     lineQuantities: {},
     lineComments: {},

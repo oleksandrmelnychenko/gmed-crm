@@ -388,6 +388,7 @@ export function blankQuoteForm(orderId = ""): QuoteFormState {
     orderId,
     validUntil: "",
     notes: "",
+    internalNote: "",
   };
 }
 

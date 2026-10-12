@@ -7881,11 +7881,18 @@ async fn create_external_invoice_allocation(
             );
         }
     };
-    // Bounded by the stored payer-based receivable. For a cost that a billed
-    // order service covers, the link stays possible but changes no patient
-    // figure: the receivable view counts neither the cost nor its links.
+    // Bounded by the stored payer-based receivable less what GMED absorbs
+    // (active re-billing waivers). For a cost that a billed order service
+    // covers, the link stays possible but changes no patient figure: the
+    // receivable view counts neither the cost nor its links.
     let external = match sqlx::query(
-        r#"SELECT patient_id, currency, status, patient_receivable_gross
+        r#"SELECT patient_id, currency, status,
+                  patient_receivable_gross - COALESCE((
+                      SELECT SUM(waiver.amount_gross)
+                      FROM external_invoice_rebilling_waivers waiver
+                      WHERE waiver.external_invoice_id = external_invoices.id
+                        AND waiver.reversed_at IS NULL
+                  ), 0) AS patient_receivable_gross
            FROM external_invoices
            WHERE id = $1 AND order_id = $2
            FOR UPDATE"#,
