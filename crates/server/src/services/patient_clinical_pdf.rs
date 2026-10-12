@@ -708,7 +708,9 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 context,
                 row,
                 &[
-                    ("wirkstoff", "ACT-значение", "ACT-Bedeutung"),
+                    // The active ingredient, as the pharmacist says it
+                    // (QA 2026-10-12 B2-03), not the BMP attribute name.
+                    ("wirkstoff", "Действующее вещество", "Wirkstoff"),
                     ("staerke", "Дозировка", "Stärke"),
                 ],
             );
@@ -1107,37 +1109,49 @@ impl Layout<'_> {
         }
         Ok(())
     }
+    /// The height an entry needs on the current page before it starts: a
+    /// short entry stays on one page with its source lines; a long one
+    /// starts where its title and first lines still fit.
+    fn entry_start_height(&self, entry: &Entry) -> f32 {
+        let text_width = WIDTH - 6.0 - entry.indent;
+        let title_height = if entry.title.is_empty() {
+            0.0
+        } else {
+            self.wrap(&entry.title, 10.5, text_width, true).len() as f32 * 4.8
+        };
+        let body_height: f32 = entry
+            .lines
+            .iter()
+            .map(|line| self.wrap(line, 10.0, text_width, false).len() as f32 * 4.8)
+            .chain(
+                entry
+                    .source
+                    .iter()
+                    .map(|line| self.wrap(line, 8.3, text_width, false).len() as f32 * 4.1),
+            )
+            .sum();
+        let entry_height = title_height + body_height + 1.0;
+        if entry_height <= 60.0 {
+            entry_height.max(14.0)
+        } else {
+            (title_height + 5.0).clamp(14.0, 50.0)
+        }
+    }
     fn section(&mut self, section: Section) -> Result<(), &'static str> {
         self.current_section.clear();
-        self.ensure(30.0)?;
+        // The heading stays with its first entry: it never ends a page alone
+        // while its content starts on the next one as "(continued)" (QA
+        // 2026-10-12 B2-03).
+        let first_entry = section
+            .entries
+            .first()
+            .map_or(0.0, |entry| self.entry_start_height(entry));
+        self.ensure((12.0 + first_entry).max(30.0))?;
         self.current_section = section.title.clone();
         self.section_heading(&section.title);
         for entry in section.entries {
-            let text_width = WIDTH - 6.0 - entry.indent;
-            let title_height = if entry.title.is_empty() {
-                0.0
-            } else {
-                self.wrap(&entry.title, 10.5, text_width, true).len() as f32 * 4.8
-            };
-            let body_height: f32 = entry
-                .lines
-                .iter()
-                .map(|line| self.wrap(line, 10.0, text_width, false).len() as f32 * 4.8)
-                .chain(
-                    entry
-                        .source
-                        .iter()
-                        .map(|line| self.wrap(line, 8.3, text_width, false).len() as f32 * 4.1),
-                )
-                .sum();
-            // A short entry stays on one page with its source lines; a long
-            // one starts where its title and first lines still fit.
-            let entry_height = title_height + body_height + 1.0;
-            self.ensure(if entry_height <= 60.0 {
-                entry_height.max(14.0)
-            } else {
-                (title_height + 5.0).clamp(14.0, 50.0)
-            })?;
+            let start_height = self.entry_start_height(&entry);
+            self.ensure(start_height)?;
             if !entry.title.is_empty() {
                 self.indented_paragraph(&entry.title, 10.5, true, false, entry.indent)?;
             }
@@ -1206,6 +1220,59 @@ pub fn build_clinical_report_pdf(context: &ClinicalReportContext) -> Result<Vec<
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// QA 2026-10-12 B2-03: a heading near the page bottom moves to the next
+    /// page with its first entry instead of ending the page alone while the
+    /// entry starts there as "(Fortsetzung)"; the ingredient reads "Wirkstoff".
+    #[test]
+    fn a_section_heading_stays_with_its_first_entry() {
+        let context = example(false);
+        let mut document = PdfDocument::new("Medizinische Zusammenfassung");
+        let (regular, bold) = add_unicode_pdf_fonts(&mut document).unwrap();
+        let mut layout = Layout {
+            context: &context,
+            regular,
+            bold,
+            metrics: [
+                unicode_pdf_font_face(false).unwrap(),
+                unicode_pdf_font_face(true).unwrap(),
+            ],
+            ops: Vec::new(),
+            pages: Vec::new(),
+            // Room for the heading, not for the heading and the entry.
+            y: BOTTOM + 40.0,
+            current_section: String::new(),
+        };
+        let entry = Entry {
+            title: "Präparat - DEMO".into(),
+            lines: (1..=6).map(|line| format!("Zeile {line}")).collect(),
+            ..Entry::default()
+        };
+        layout
+            .section(Section {
+                title: "Aktuelle Medikation".into(),
+                entries: vec![entry],
+            })
+            .unwrap();
+        assert_eq!(layout.pages.len(), 1, "one page break before the heading");
+        let bytes = document
+            .with_pages(layout.finish())
+            .save(&pdf_text_save_options(), &mut Vec::new());
+        let text = pdf_extract::extract_text_from_mem(&bytes).unwrap();
+        assert!(text.contains("Aktuelle Medikation"), "{text}");
+        assert!(!text.contains("Fortsetzung"), "{text}");
+
+        let report = pdf_extract::extract_text_from_mem(
+            &build_clinical_report_pdf(&example(false)).unwrap(),
+        )
+        .unwrap();
+        assert!(report.contains("Wirkstoff:"), "{report}");
+        assert!(!report.contains("ACT-Bedeutung"));
+        let russian =
+            pdf_extract::extract_text_from_mem(&build_clinical_report_pdf(&example(true)).unwrap())
+                .unwrap();
+        assert!(russian.contains("Действующее вещество"), "{russian}");
+    }
 
     fn example(russian: bool) -> ClinicalReportContext {
         ClinicalReportContext {

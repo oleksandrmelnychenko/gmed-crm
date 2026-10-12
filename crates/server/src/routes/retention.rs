@@ -30,6 +30,9 @@ pub struct RetentionSweepReport {
     pub flagged: u64,
     /// Privacy requests whose hold ended and that are back in the queue.
     pub requeued: u64,
+    /// Erasures that waited for open orders and invoices, back in the queue
+    /// because nothing is open any more ([`requeue_closed_business_holds`]).
+    pub business_requeued: u64,
 }
 
 async fn numeric_setting(state: &AppState, key: &str, fallback: i64) -> Result<i64, sqlx::Error> {
@@ -50,6 +53,7 @@ pub async fn flag_expired_patient_files(
     // Holds that ended first: such a file has an open request again and is
     // not flagged a second time below.
     let requeued = requeue_expired_retention_holds(state).await?;
+    let business_requeued = requeue_closed_business_holds(state).await?;
     let retention_days =
         numeric_setting(state, "patient_file_retention_days", DEFAULT_RETENTION_DAYS).await?;
     let due_days =
@@ -67,6 +71,7 @@ pub async fn flag_expired_patient_files(
             retention_days,
             flagged: 0,
             requeued,
+            business_requeued,
         });
     };
 
@@ -149,6 +154,7 @@ pub async fn flag_expired_patient_files(
         retention_days,
         flagged: flagged.len() as u64,
         requeued,
+        business_requeued,
     })
 }
 
@@ -326,4 +332,146 @@ pub async fn requeue_expired_retention_holds(state: &AppState) -> Result<u64, sq
         .await;
     }
     Ok(requeued.len() as u64)
+}
+
+/// Brings an erasure held only for open orders and invoices
+/// (`context.hold_reason = 'open_business'`, no `retention_until`; QA
+/// 2026-10-12 B2-10) back to the queue once the patient has no open order,
+/// no open invoice and no invoice draft left: it becomes `requested` with a
+/// new deadline, the step is added to its decision history and audited, and
+/// the compliance handlers are told, as when a dated hold ends. A restriction
+/// of processing the handler chose for the hold stays until the request is
+/// executed or decided otherwise. Runs with the sweep and every hour, next to
+/// [`requeue_expired_retention_holds`].
+pub async fn requeue_closed_business_holds(state: &AppState) -> Result<u64, sqlx::Error> {
+    let candidates: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT pr.id
+           FROM patient_privacy_requests pr
+           JOIN patients p ON p.id = pr.patient_id
+           WHERE pr.status = 'retention_hold'
+             AND pr.context->>'hold_reason' = 'open_business'
+             AND (p.legal_status->>'anonymized_at') IS NULL
+           ORDER BY pr.updated_at, pr.id
+           LIMIT 200"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+    let due_days =
+        numeric_setting(state, "patient_erasure_due_days", DEFAULT_ERASURE_DUE_DAYS).await?;
+    let due_at = Utc::now() + Duration::days(due_days.max(1));
+    let due_date = crate::app_time::local(due_at)
+        .format("%Y-%m-%d")
+        .to_string();
+
+    let mut requeued: u64 = 0;
+    for request_id in candidates {
+        let mut tx = state.db.begin().await?;
+        let held: Option<(Uuid, String)> = sqlx::query_as(
+            r#"SELECT patient_id, request_type
+               FROM patient_privacy_requests
+               WHERE id = $1
+                 AND status = 'retention_hold'
+                 AND context->>'hold_reason' = 'open_business'
+               FOR UPDATE SKIP LOCKED"#,
+        )
+        .bind(request_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((patient_id, request_type)) = held else {
+            tx.rollback().await?;
+            continue;
+        };
+        let open = super::admin_compliance::load_open_business_in_tx(&mut tx, patient_id).await?;
+        if !open.is_empty() {
+            tx.rollback().await?;
+            continue;
+        }
+        let patient_label: String = sqlx::query_scalar(
+            r#"UPDATE patient_privacy_requests pr
+               SET status = 'requested',
+                   due_at = $2,
+                   decision_reason = NULL,
+                   updated_at = now(),
+                   context = COALESCE(pr.context, '{}'::jsonb)
+                             || jsonb_build_object(
+                                    'hold_reason', NULL::text,
+                                    'requeued_at', now(),
+                                    'decision_history',
+                                    COALESCE(pr.context->'decision_history', '[]'::jsonb)
+                                        || jsonb_build_array(jsonb_build_object(
+                                            'action', 'requeue',
+                                            'from_status', 'retention_hold',
+                                            'to_status', 'requested',
+                                            'reason', 'open_business_closed',
+                                            'by', NULL::uuid,
+                                            'at', now())))
+               WHERE pr.id = $1
+               RETURNING (SELECT trim(concat_ws(' · ', NULLIF(p.patient_id, ''),
+                                 NULLIF(trim(concat_ws(' ', p.first_name, p.last_name)), '')))
+                          FROM patients p WHERE p.id = pr.patient_id)"#,
+        )
+        .bind(request_id)
+        .bind(due_at)
+        .fetch_one(&mut *tx)
+        .await?;
+        sqlx::query(
+            r#"INSERT INTO user_notifications (user_id, kind, title, body, entity_type, entity_id, params)
+               SELECT u.id, 'privacy_request', $1, $2, 'patient', $3, $4
+               FROM users u
+               WHERE u.role IN ('ceo', 'it_admin') AND u.is_active = true"#,
+        )
+        .bind(format!(
+            "Hold ended: {request_type} request of {patient_label} is due"
+        ))
+        .bind(format!(
+            "The patient's orders and invoices are closed. The request is back in the DSGVO queue. Due by {due_date}."
+        ))
+        .bind(patient_id)
+        .bind(json!({
+            "origin": "retention_hold_ended",
+            "hold_reason": "open_business",
+            "request_type": request_type,
+            "patient_label": patient_label,
+            "retention_until": serde_json::Value::Null,
+            "due_date": due_date,
+        }))
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        requeued += 1;
+
+        state.audit_sender.try_send(audit::domain_event(
+            "privacy_request_requeued",
+            None,
+            "patient",
+            Some(patient_id),
+            json!({
+                "request_id": request_id,
+                "request_type": request_type,
+                "previous_status": "retention_hold",
+                "status": "requested",
+                "due_at": due_at.to_rfc3339(),
+                "origin": "open_business_closed",
+            }),
+        ));
+        crate::realtime::publish_privacy_request_event(
+            state,
+            None,
+            "privacy_request.reviewed",
+            request_id,
+            json!({
+                "patient_id": patient_id,
+                "request_type": request_type,
+                "review_action": "requeue",
+                "previous_status": "retention_hold",
+                "status": "requested",
+                "due_at": due_at.to_rfc3339(),
+            }),
+        )
+        .await;
+    }
+    Ok(requeued)
 }

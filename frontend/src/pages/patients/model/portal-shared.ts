@@ -558,6 +558,8 @@ export type PortalPrivacyRequest = {
   executed_at: string | null;
   /** Why the request was refused or put on hold (Art. 12 Abs. 4 DSGVO). */
   decision_reason?: string | null;
+  /** A hold that waits for running orders, not a retention period. */
+  hold_reason?: string | null;
 };
 
 export type PortalFeedbackItem = {

@@ -2408,6 +2408,16 @@ export function ClinicalDocumentImportSheet({
 
   const reviewReady = documentImport?.status === "review_required";
   const applyingReady = documentImport?.status === "applying";
+  // Once the file is uploaded the import runs on the server: closing the sheet
+  // loses nothing, so it closes without "Close without saving?" (QA
+  // 2026-10-12 B2-01). A selected file not yet uploaded and edits of a draft
+  // under review still ask.
+  const importKeepsRunningOnServer = Boolean(
+    documentImport &&
+      ["queued", "processing", "applying", "applied", "failed", "abandoned"].includes(
+        documentImport.status,
+      ),
+  );
   const snapshotReady = reviewReady || applyingReady || documentImport?.status === "applied";
   const snapshotReadOnly = applyingReady || documentImport?.status === "applied";
   const identityImportBlocked = requiresCurrentIdentityDecision
@@ -2423,6 +2433,7 @@ export function ClinicalDocumentImportSheet({
     <PatientSheetScaffold
       open={open}
       onOpenChange={handleOpenChange}
+      dirty={importKeepsRunningOnServer ? false : undefined}
       maxWidthClassName="overflow-hidden sm:!top-1 sm:!bottom-1 sm:!right-1 sm:!w-[calc(100vw-8px)] sm:!max-w-[calc(100vw-8px)] sm:!rounded-2xl"
       title={(
         <span className="flex min-w-0 items-center gap-2">

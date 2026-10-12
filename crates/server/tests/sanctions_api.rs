@@ -2553,6 +2553,17 @@ async fn a_paying_relations_blocked_country_holds_until_the_ceo_lifts_it_for_the
     assert_eq!(item["blocking"], json!(["RU"]), "{item}");
     assert_eq!(item["name"], "Anna Muster", "{item}");
     assert!(item["patient_number"].is_string(), "{item}");
+    // It names who triggers the block (QA 2026-10-12 B2-11): the paying
+    // relation with its role and country — not the patient, not the friend.
+    let subjects = item["subjects"]
+        .as_array()
+        .unwrap_or_else(|| panic!("subjects: {item}"));
+    assert_eq!(subjects.len(), 1, "{item}");
+    assert_eq!(subjects[0]["kind"], "patient_relation", "{item}");
+    assert_eq!(subjects[0]["role"], "default_payer", "{item}");
+    assert_eq!(subjects[0]["name"], "Viktor Zahler", "{item}");
+    assert_eq!(subjects[0]["countries"], json!(["RU"]), "{item}");
+    assert_eq!(subjects[0]["organisation"], false, "{item}");
     let (code, _) = request(&app, "GET", "/sanctions/country-blocks", &app.pm(), None).await;
     assert_eq!(code, StatusCode::FORBIDDEN);
 

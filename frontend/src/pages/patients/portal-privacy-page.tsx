@@ -43,6 +43,15 @@ type RequestType =
   | "portability"
   | "objection";
 
+/**
+ * An erasure that waits for running orders and invoices: the patient reads a
+ * neutral "carried out once current orders are completed", not a retention
+ * block (QA 2026-10-12 B2-10).
+ */
+function waitsForOpenBusiness(item: Pick<PortalPrivacyRequest, "status" | "hold_reason">) {
+  return item.status === "retention_hold" && item.hold_reason === "open_business";
+}
+
 function privacyStatusBadgeTone(status: string): StatusTone {
   if (status === "executed" || status === "completed") return "success";
   if (status === "rejected") return "error";
@@ -301,9 +310,16 @@ export function PatientPrivacyPage() {
                       </p>
                     </div>
                     <StatusBadge status={item.status} tone={privacyStatusBadgeTone(item.status)}>
-                      {portalStatusLabel(item.status)}
+                      {waitsForOpenBusiness(item)
+                        ? uiText("portal_privacy_status_open_business_hold", lang)
+                        : portalStatusLabel(item.status)}
                     </StatusBadge>
                   </div>
+                  {waitsForOpenBusiness(item) ? (
+                    <p className="text-sm text-muted-foreground" data-testid="privacy-open-business-hint">
+                      {uiText("portal_privacy_open_business_hint", lang)}
+                    </p>
+                  ) : null}
 
                   <div className="mt-4 grid gap-3 md:grid-cols-2">
                     <InfoRow className={cn("rounded-lg px-3 py-2", tokens.surface.mutedCard)} label={t.portal_privacy_due} value={formatPortalDate(item.due_at)} />

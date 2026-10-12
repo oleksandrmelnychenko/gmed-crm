@@ -218,16 +218,18 @@ export function patientLabelFormatLabel(format: PatientLabelFormat) {
 
 /*
  * The patient sub-resources behind the workspace tabs authorize by explicit
- * role lists on the server, which are narrower than the capability registry:
- * e.g. the CEO assistant holds orders/appointments/documents.view yet
- * `/patients/{id}/orders` answers 403. A tab is shown only when the role
- * holds the capability AND the server admits it, so no role lands on a
- * section that can only render "Insufficient permissions" over an empty table.
+ * role lists on the server, which are narrower than the capability registry
+ * (e.g. billing holds no `/patients/{id}/appointments`). A tab is shown only
+ * when the role holds the capability AND the server admits it, so no role
+ * lands on a section that can only render "Insufficient permissions" over an
+ * empty table. The CEO assistant reads every tab read-only (owner decision
+ * 2026-10-11): the server admits it to all of these reads.
  */
 
 /** `/patients/{id}/relations`, `/documents`, `/workflow-checklist`. */
 const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
+  "ceo_assistant",
   "patient_manager",
   "billing",
   "teamlead_interpreter",
@@ -241,6 +243,7 @@ const PATIENT_RECORD_SERVER_ROLES: ReadonlySet<string> = new Set([
  */
 const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
+  "ceo_assistant",
   "patient_manager",
   "billing",
   "teamlead_interpreter",
@@ -256,6 +259,7 @@ const PATIENT_CARE_HISTORY_SERVER_ROLES: ReadonlySet<string> = new Set([
  */
 const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
+  "ceo_assistant",
   "patient_manager",
   "teamlead_interpreter",
   "concierge",
@@ -265,6 +269,7 @@ const PATIENT_APPOINTMENTS_SERVER_ROLES: ReadonlySet<string> = new Set([
 /** `/patients/{id}/assignments` (the curators tab). */
 const PATIENT_ASSIGNMENT_SERVER_ROLES: ReadonlySet<string> = new Set([
   "ceo",
+  "ceo_assistant",
   "patient_manager",
   "teamlead_interpreter",
   "interpreter",

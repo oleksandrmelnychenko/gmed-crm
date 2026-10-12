@@ -12,12 +12,46 @@ import {
   hydrateDocumentBindings,
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
+  isAdultOn,
   isLeadOnlyDocumentTemplate,
+  isTemplateForPatientAge,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   prefillDocumentBindingsFromText,
   validateEnhancedDueDiligenceBindings,
 } from "./document-bindings";
+
+describe("child consent forms only for a minor (QA 2026-10-12 B2-05)", () => {
+  it("tells an adult from a minor on the Berlin date", () => {
+    expect(isAdultOn("1988-05-12", "2026-10-12")).toBe(true);
+    expect(isAdultOn("2008-10-12", "2026-10-12")).toBe(true);
+    expect(isAdultOn("2008-10-13", "2026-10-12")).toBe(false);
+    expect(isAdultOn("2016-05-01", "2026-10-12")).toBe(false);
+    expect(isAdultOn(null, "2026-10-12")).toBe(false);
+  });
+
+  it("hides the child forms for an adult, keeps the other templates", () => {
+    for (const template of ["consent_data_release_child", "consent_data_release_single"]) {
+      expect(isTemplateForPatientAge(template, "1988-05-12", "2026-10-12")).toBe(false);
+      expect(isTemplateForPatientAge(template, "2016-05-01", "2026-10-12")).toBe(true);
+      // Without a birth date nothing is hidden; the server checks.
+      expect(isTemplateForPatientAge(template, null, "2026-10-12")).toBe(true);
+    }
+    expect(isTemplateForPatientAge("privacy_consents", "1988-05-12", "2026-10-12")).toBe(true);
+  });
+
+  it("explains the refusal in RU and DE, and says 'приём', not 'термин'", () => {
+    const refused = { code: "child_consent_for_adult", message: "The consent forms for a child are generated only for a minor patient" };
+    expect(formatDocumentGenerationError(refused, "ru")).toContain("несовершеннолетнего");
+    expect(formatDocumentGenerationError(refused, "de")).toContain("minderjährige");
+    expect(
+      formatDocumentGenerationError(
+        new Error("Treatment plan template requires at least one appointment"),
+        "ru",
+      ),
+    ).not.toMatch(/термин/i);
+  });
+});
 
 describe("document template binding payloads", () => {
   it("casts order sequence bindings to numbers", () => {

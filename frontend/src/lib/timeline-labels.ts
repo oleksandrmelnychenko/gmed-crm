@@ -86,7 +86,121 @@ const CATEGORY_MAP: Record<string, string> = {
   lifecycle: "timeline_category_lifecycle",
   // A profile edit of the patient card (`changed_fields` of `update_patient`).
   profile: "timeline_category_profile",
+  // Codes of the other timeline rows (patients.rs `get_patient_timeline`,
+  // QA 2026-10-12 B-26b): order services, contracts, relations, invoice
+  // types, appointment types, translation request sources, recommendation
+  // types and the patient checklists.
+  leistung: "timeline_category_service",
+  framework_contract: "timeline_category_framework_contract",
+  relation: "timeline_category_relation",
+  advance: "timeline_category_invoice_advance",
+  interim: "timeline_category_invoice_interim",
+  final: "timeline_category_invoice_final",
+  non_medical: "timeline_category_appointment_non_medical",
+  staff: "timeline_category_request_staff",
+  patient_portal: "timeline_category_request_patient_portal",
+  follow_up: "timeline_category_recommendation_follow_up",
+  consultation: "timeline_category_recommendation_consultation",
+  lab_test: "timeline_category_recommendation_lab_test",
+  medication_review: "timeline_category_recommendation_medication_review",
+  patient_intake: "timeline_source_patient_intake",
+  patient_custom: "timeline_source_patient_custom",
+  other: "timeline_category_other",
 };
+
+/**
+ * Category codes that mean different things for different rows ("medical" is
+ * an appointment type and a document category): the row's entity type picks
+ * the label.
+ */
+const ENTITY_CATEGORY_MAP: Record<string, Record<string, string>> = {
+  appointment: {
+    medical: "timeline_category_appointment_medical",
+    non_medical: "timeline_category_appointment_non_medical",
+    internal: "timeline_category_appointment_internal",
+  },
+  recommendation: {
+    imaging: "timeline_category_recommendation_imaging",
+    document: "timeline_category_recommendation_document",
+  },
+};
+
+/**
+ * Categories of clinical card rows (card entries, medical orders, risk
+ * scores): their labels live under the keys of the card forms.
+ */
+const CLINICAL_CATEGORY_KEY_PREFIXES = [
+  "patients_label_card_",
+  "patients_label_order_",
+  "patients_label_score_",
+];
+
+// Statuses of timeline rows that the general status labels of the card do
+// not name; `localizeTimelineStatus` returns "" for the others.
+const STATUS_MAP: Record<string, string> = {
+  recorded: "timeline_status_recorded",
+  logged: "timeline_status_logged",
+  inactive: "timeline_status_inactive",
+  superseded: "timeline_status_superseded",
+  discontinued: "timeline_status_discontinued",
+  abgesetzt: "timeline_status_discontinued",
+  aktiv: "patients_detail_active",
+  pausiert: "timeline_status_paused",
+  geplant: "timeline_status_planned",
+  accepted: "timeline_status_accepted",
+  approved: "timeline_status_approved",
+  delivered: "timeline_status_delivered",
+  invoiced: "timeline_status_invoiced",
+  hidden: "timeline_status_hidden",
+  amounts_hidden: "timeline_status_amounts_hidden",
+  visible: "timeline_status_visible",
+  changed: "timeline_status_changed",
+  verified: "timeline_status_verified",
+  candidate: "timeline_status_candidate",
+  curated: "timeline_status_curated",
+  chronic: "timeline_status_chronic",
+  resolved: "timeline_status_resolved",
+  answered: "timeline_status_answered",
+  done: "timeline_status_done",
+  dismissed: "timeline_status_dismissed",
+  declined: "timeline_status_declined",
+  preferred: "timeline_status_preferred",
+  avoid: "timeline_status_avoid",
+  neutral: "timeline_status_neutral",
+  external: "timeline_status_external",
+  unknown: "timeline_status_unknown",
+  requested: "timeline_status_requested",
+  executed: "timeline_status_executed",
+  reviewed: "timeline_status_reviewed",
+  failed: "timeline_status_failed",
+  no_show: "timeline_status_no_show",
+  waived: "timeline_status_waived",
+  ready: "timeline_status_ready",
+  // Allergy severity (free text, usually one of these).
+  low: "timeline_status_severity_low",
+  medium: "timeline_status_severity_medium",
+  high: "timeline_status_severity_high",
+  critical: "timeline_status_severity_critical",
+  mild: "timeline_status_severity_mild",
+  leicht: "timeline_status_severity_mild",
+  moderate: "timeline_status_severity_moderate",
+  mittel: "timeline_status_severity_moderate",
+  severe: "timeline_status_severity_severe",
+  schwer: "timeline_status_severity_severe",
+};
+
+/**
+ * The label of a timeline status the card's general status labels do not
+ * name (clinical "recorded", service "delivered", quote "accepted", …), or ""
+ * so the caller falls back to them.
+ */
+export function localizeTimelineStatus(value: string | null | undefined, l: L): string {
+  const code = value?.trim().toLowerCase() ?? "";
+  const key = STATUS_MAP[code];
+  if (!key) return "";
+  const localized = l(key);
+  return localized === key ? "" : localized;
+}
 
 /**
  * The fields a profile edit names (`changed_fields` of the `update_patient`
@@ -137,6 +251,7 @@ const COMPLIANCE_TITLE_KEYS: Record<string, string> = {
   "Privacy request approved": "timeline_title_privacy_request_approved",
   "Privacy request rejected": "timeline_title_privacy_request_rejected",
   "Privacy request put on retention hold": "timeline_title_privacy_request_hold",
+  "Privacy request held until open business is closed": "timeline_title_privacy_request_open_business_hold",
   "Processing restriction applied": "timeline_title_restriction_applied",
   "Third-party sharing revoked": "timeline_title_third_party_revoked",
   "Privacy request executed": "timeline_title_privacy_request_executed",
@@ -168,7 +283,41 @@ const SOURCE_MAP: Record<string, string> = {
   medical: "timeline_source_medical",
   payment: "timeline_source_payment",
   "medical report": "timeline_source_medical_report",
-  "patient visible": "timeline_source_patient_visible",
+  // The visibility of a document row: the document card's own wording, so a
+  // draft reads "may be released to the patient", not "seen by the patient"
+  // (QA 2026-10-12 B-26b).
+  "patient visible": "patients_patient_visible",
+  // Relation types (`patient_relations.relation_type`).
+  spouse: "timeline_source_relation_spouse",
+  child: "timeline_source_relation_child",
+  sibling: "timeline_source_relation_sibling",
+  relative: "timeline_source_relation_relative",
+  guardian: "timeline_source_relation_guardian",
+  caregiver: "timeline_source_relation_caregiver",
+  friend: "timeline_source_relation_friend",
+  other: "timeline_source_relation_other",
+  // Privacy requests: type and review action of the compliance rows.
+  erasure: "timeline_source_privacy_erasure",
+  restriction: "timeline_source_privacy_restriction",
+  "third party revoke": "timeline_source_privacy_third_party_revoke",
+  access: "timeline_source_privacy_access",
+  export: "timeline_source_privacy_export",
+  portability: "timeline_source_privacy_export",
+  rectification: "timeline_source_privacy_rectification",
+  objection: "timeline_source_privacy_objection",
+  approve: "timeline_source_review_approve",
+  reject: "timeline_source_review_reject",
+  hold: "timeline_source_review_hold",
+  // Recommendation priorities.
+  low: "timeline_source_priority_low",
+  normal: "timeline_source_priority_normal",
+  high: "timeline_source_priority_high",
+  urgent: "timeline_source_priority_urgent",
+  // Staff roles of checklist owners and assignments.
+  "ceo assistant": "timeline_source_role_ceo_assistant",
+  "teamlead interpreter": "timeline_source_role_teamlead_interpreter",
+  sales: "timeline_source_role_sales",
+  cave: "timeline_source_cave",
   // Document visibility codes (`documents.visibility`) the document rows send.
   "released internal": "timeline_source_released_internal",
   "released external": "timeline_source_released_external",
@@ -230,8 +379,28 @@ export function localizeTimelineCategory(
     const documentLabel = knownDocumentCodeLabel(code, l);
     // An untranslated catalog key comes back as the key itself.
     if (documentLabel && !/^[a-z0-9_]+$/.test(documentLabel)) return documentLabel;
+    for (const prefix of CLINICAL_CATEGORY_KEY_PREFIXES) {
+      const key = `${prefix}${code}`;
+      const label = l(key);
+      if (label !== key) return label;
+    }
   }
   return lookupOrHumanize(CATEGORY_MAP, value, l);
+}
+
+/** The category of one timeline row, read with the row's entity type. */
+export function localizeTimelineItemCategory(
+  entityType: string | null | undefined,
+  value: string | null | undefined,
+  l: L,
+): string {
+  const code = value?.trim().toLowerCase() ?? "";
+  const key = ENTITY_CATEGORY_MAP[entityType?.trim().toLowerCase() ?? ""]?.[code];
+  if (key) {
+    const localized = l(key);
+    if (localized !== key) return localized;
+  }
+  return localizeTimelineCategory(value, l);
 }
 
 /** The field names of a profile edit, in the UI language. */
@@ -255,9 +424,76 @@ export function localizeTimelineSource(
   if (!value) return "";
   return value
     .split("·")
-    .map((part) => lookupOrHumanize(SOURCE_MAP, part, l))
+    .map((part) => {
+      // A consent row names its consent type (`dsgvo_data_transfer`, …).
+      const code = part.trim().toLowerCase();
+      if (/^[a-z0-9_]+$/.test(code) && !SOURCE_MAP[code] && !SOURCE_MAP[code.replace(/_/g, " ")]) {
+        const consentKey = `consents_type_${code}`;
+        const consentLabel = l(consentKey);
+        if (consentLabel !== consentKey) return consentLabel;
+      }
+      return lookupOrHumanize(SOURCE_MAP, part, l);
+    })
     .filter(Boolean)
     .join(" · ");
+}
+
+/**
+ * Fixed titles the server writes for timeline rows: the clinical record
+ * activity in German, placeholders in English (QA 2026-10-12 B-26b).
+ */
+const EXACT_TITLE_KEYS: Record<string, string> = {
+  "Diagnosen aktualisiert": "timeline_title_clinical_diagnoses_updated",
+  "Medikation aktualisiert": "timeline_title_clinical_medications_updated",
+  "Befunde aktualisiert": "timeline_title_clinical_examinations_updated",
+  "Therapie aktualisiert": "timeline_title_clinical_procedures_updated",
+  "Allergien/CAVE aktualisiert": "timeline_title_clinical_warnings_updated",
+  "Anamnese aktualisiert": "timeline_title_clinical_anamnesis_updated",
+  "Anamnese gelöscht": "timeline_title_clinical_anamnesis_deleted",
+  "Verlauf aktualisiert": "timeline_title_clinical_course_updated",
+  "Klinisches Profil aktualisiert": "timeline_title_clinical_profile_updated",
+  Anamnese: "timeline_title_anamnesis",
+  "Blocked medical slot": "appointments_blocked_slot",
+  Communication: "timeline_title_communication",
+  "Related person": "timeline_title_related_person",
+  Document: "timeline_title_document",
+  "Package consumption": "timeline_title_package_consumption",
+  Medication: "timeline_title_medication",
+};
+
+/** "Prefix: rest" titles; the rest is a number or a name and stays. */
+const TITLE_PREFIX_KEYS: Array<[string, string]> = [
+  ["Invoice visibility:", "timeline_title_invoice_visibility"],
+  ["Translation request:", "timeline_title_translation_request"],
+  ["Package change:", "timeline_title_package_change"],
+  ["Dunning collections:", "timeline_title_dunning_collections"],
+];
+
+function localizedOrNull(key: string, l: L): string | null {
+  const localized = l(key);
+  return localized === key ? null : localized;
+}
+
+/** "Interpreter preference: <name> -> <preference>". */
+function localizeInterpreterPreferenceTitle(value: string, l: L): string | null {
+  const match = /^Interpreter preference:\s*(.*?)\s*->\s*([a-z_]+)$/.exec(value);
+  if (!match) return null;
+  const prefix = localizedOrNull("timeline_title_interpreter_preference", l);
+  if (!prefix) return null;
+  const name = match[1] === "Interpreter" ? (localizedOrNull("timeline_title_interpreter", l) ?? match[1]) : match[1];
+  const preference = localizeTimelineStatus(match[2], l) || humanizeFallback(match[2]);
+  return `${prefix}: ${name} → ${preference}`;
+}
+
+/** "Drug match <status>: <medication>". */
+function localizeDrugMatchTitle(value: string, l: L): string | null {
+  const match = /^Drug match ([a-z_]+):\s*(.*)$/.exec(value);
+  if (!match) return null;
+  const prefix = localizedOrNull("timeline_title_drug_match", l);
+  if (!prefix) return null;
+  const status = localizeTimelineStatus(match[1], l) || humanizeFallback(match[1]);
+  const medication = match[2] === "medication" ? (localizedOrNull("timeline_title_medication", l) ?? match[2]) : match[2];
+  return `${prefix} (${status}): ${medication}`;
 }
 
 export function localizeTimelineTitle(
@@ -285,6 +521,22 @@ export function localizeTimelineTitle(
     const localized = l(complianceKey);
     if (localized !== complianceKey) return localized;
   }
+
+  const exactTitleKey = EXACT_TITLE_KEYS[value];
+  if (exactTitleKey) {
+    const localized = localizedOrNull(exactTitleKey, l);
+    if (localized) return localized;
+  }
+  for (const [prefix, key] of TITLE_PREFIX_KEYS) {
+    if (value.startsWith(prefix)) {
+      const localized = localizedOrNull(key, l);
+      if (localized) return `${localized}: ${value.slice(prefix.length).trim()}`;
+    }
+  }
+  const preferenceTitle = localizeInterpreterPreferenceTitle(value, l);
+  if (preferenceTitle) return preferenceTitle;
+  const drugMatchTitle = localizeDrugMatchTitle(value, l);
+  if (drugMatchTitle) return drugMatchTitle;
 
   // "Consent: <type>" — the consent type is a key such as dsgvo_data_transfer.
   const consentMatch = /^Consent:\s*([a-z0-9_]+)$/.exec(value);

@@ -340,6 +340,17 @@ async fn country_blocks(
                     .bind(flag.lead_id)
                     .fetch_optional(&state.db)
                     .await?;
+            // Who carries the blocked country: the lead's patient, guardian,
+            // payer or invoice recipient (QA 2026-10-12 B2-11).
+            let subjects: Vec<gate::CountrySubject> =
+                screening::load_leads_subjects(&state.db, &[flag.lead_id])
+                    .await?
+                    .into_iter()
+                    .flat_map(|lead| lead.subjects)
+                    .filter_map(|record| {
+                        gate::country_subject(&record, record.kind.as_str(), &status.country.found)
+                    })
+                    .collect();
             leads.push(json!({
                 "lead_id": flag.lead_id,
                 "name": name.map(|(first, last)| format!("{first} {last}")),
@@ -347,6 +358,7 @@ async fn country_blocks(
                 "found": status.country.found,
                 "blocking": status.country.blocking,
                 "lift": status.country.lift,
+                "subjects": subjects,
             }));
         }
         // Every patient (2026-10-12): its own countries, those of the
@@ -375,6 +387,7 @@ async fn country_blocks(
                 "found": flag.found,
                 "blocking": flag.blocking,
                 "lift": flag.lift,
+                "subjects": flag.subjects,
             }));
         }
         Ok::<_, sqlx::Error>((leads, patients))

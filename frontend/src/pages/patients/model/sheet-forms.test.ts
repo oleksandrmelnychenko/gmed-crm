@@ -2,11 +2,43 @@ import { describe, expect, it } from "vitest";
 
 import type { RelationItem } from "./detail-tab-types";
 import {
+  blankDocumentUploadForm,
   blankRelationForm,
+  buildPatientDocumentUploadFormData,
   relationFormToPayload,
   relationNameSuggestsOrganisation,
   relationToForm,
 } from "./sheet-forms";
+
+describe("buildPatientDocumentUploadFormData (QA 2026-10-12 B2-04)", () => {
+  const file = new Blob(["%PDF-1.4"], { type: "application/pdf" });
+
+  it("sends an unticked medical flag and no default type", () => {
+    const form = { ...blankDocumentUploadForm(), isMedical: false };
+    const body = buildPatientDocumentUploadFormData(form, "patient-1", file);
+    expect(body.get("is_medical")).toBe("false");
+    expect(body.has("art")).toBe(false);
+    expect(body.get("patient_id")).toBe("patient-1");
+    expect(body.get("visibility")).toBe("internal");
+  });
+
+  it("sends the chosen type and a ticked flag", () => {
+    const form = {
+      ...blankDocumentUploadForm(),
+      art: " arztbrief ",
+      category: "medical",
+      isMedical: true,
+    };
+    const body = buildPatientDocumentUploadFormData(form, "patient-1", file);
+    expect(body.get("is_medical")).toBe("true");
+    expect(body.get("art")).toBe("arztbrief");
+    expect(body.get("category")).toBe("medical");
+  });
+
+  it("starts without the former default type 'report'", () => {
+    expect(blankDocumentUploadForm().art).toBe("");
+  });
+});
 
 function relation(overrides: Partial<RelationItem> = {}): RelationItem {
   return {

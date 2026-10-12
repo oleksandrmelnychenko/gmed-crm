@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import type { ColumnDef } from "@/components/data-table/types";
 import { t as translateCatalog, useLang } from "@/lib/i18n";
+import { sectionLoadErrorText } from "@/lib/section-load-error";
 import {
   fetchPatientPain,
   fetchPatientSymptoms,
@@ -80,13 +81,13 @@ export function PatientSymptomsPainSections({
           setSymptoms(symptomResult.value);
           setSymptomError("");
         } else {
-          setSymptomError(String(symptomResult.reason));
+          setSymptomError(sectionLoadErrorText(symptomResult.reason, lang));
         }
         if (painResult.status === "fulfilled") {
           setPain(painResult.value);
           setPainError("");
         } else {
-          setPainError(String(painResult.reason));
+          setPainError(sectionLoadErrorText(painResult.reason, lang));
         }
       })
       .finally(() => {
@@ -95,7 +96,7 @@ export function PatientSymptomsPainSections({
     return () => {
       active = false;
     };
-  }, [patientId, refreshKey]);
+  }, [lang, patientId, refreshKey]);
 
   const saveSymptoms = useCallback(async (next: PatientSymptomItem[]) => {
     setBusy("symptoms");

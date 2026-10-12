@@ -53,7 +53,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use super::policy::{self, CountryOverride};
-use super::screening;
+use super::screening::{self, SubjectRecord};
 use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
@@ -236,16 +236,89 @@ async fn payer_patient_countries(
     payer_patient_ids: &[Uuid],
 ) -> Result<Vec<String>, sqlx::Error> {
     let mut countries: Vec<String> = Vec::new();
-    for payer in payer_patient_ids {
-        if let Some(subject) = screening::load_patient_subject(db, *payer).await? {
-            for code in subject.countries() {
-                if !countries.contains(&code) {
-                    countries.push(code);
-                }
+    for subject in payer_patient_subjects(db, payer_patient_ids).await? {
+        for code in subject.countries() {
+            if !countries.contains(&code) {
+                countries.push(code);
             }
         }
     }
     Ok(countries)
+}
+
+/// The person of each patient record that pays ([`Scope::payer_patient_ids`]).
+async fn payer_patient_subjects(
+    db: &gmed_db::DbPool,
+    payer_patient_ids: &[Uuid],
+) -> Result<Vec<SubjectRecord>, sqlx::Error> {
+    let mut subjects = Vec::new();
+    for payer in payer_patient_ids {
+        if let Some(subject) = screening::load_patient_subject(db, *payer).await? {
+            subjects.push(subject);
+        }
+    }
+    Ok(subjects)
+}
+
+/// A person or organisation whose citizenship or residence is a blocked
+/// country, for the CEO's «Страны» tab: the CEO sees who triggers the block
+/// before lifting it (QA 2026-10-12 B2-11).
+#[derive(Debug, Clone, Serialize)]
+pub struct CountrySubject {
+    /// `patient`, `patient_relation`, `payer_contact`, `paying_patient`, or a
+    /// lead's subject (`lead_patient`, `lead_guardian`, `lead_payer`,
+    /// `lead_recipient`).
+    pub kind: &'static str,
+    pub name: String,
+    /// The role of a relation (`default_payer`, `invoice_payer`,
+    /// `legal_representative`), of a guardian as entered, or `payer_contact`.
+    pub role: Option<String>,
+    pub organisation: bool,
+    /// The blocked countries of this subject among those found.
+    pub countries: Vec<String>,
+}
+
+/// The subject as a [`CountrySubject`] if it carries one of `found`.
+pub fn country_subject(
+    record: &SubjectRecord,
+    kind: &'static str,
+    found: &[String],
+) -> Option<CountrySubject> {
+    let countries: Vec<String> = record
+        .countries()
+        .into_iter()
+        .filter(|code| found.contains(code))
+        .collect();
+    if countries.is_empty() {
+        return None;
+    }
+    let subject = &record.subject;
+    let name = if subject.organisation {
+        subject.last_name.trim().to_string()
+    } else {
+        [
+            subject.first_name.as_str(),
+            subject.middle_name.as_deref().unwrap_or_default(),
+            subject.last_name.as_str(),
+        ]
+        .into_iter()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+    };
+    Some(CountrySubject {
+        kind,
+        name,
+        role: record
+            .relation
+            .as_deref()
+            .map(str::trim)
+            .filter(|role| !role.is_empty())
+            .map(ToOwned::to_owned),
+        organisation: subject.organisation,
+        countries,
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -1040,6 +1113,10 @@ pub struct PatientCountryFlag {
     pub found: Vec<String>,
     pub blocking: Vec<String>,
     pub lift: Option<CountryOverride>,
+    /// Who carries the found countries: the patient, a paying relation or
+    /// payer organisation, a payer contact, a paying patient record or a
+    /// subject of the patient's lead.
+    pub subjects: Vec<CountrySubject>,
 }
 
 /// Every active or inactive patient a blocked country concerns (2026-10-12):
@@ -1077,18 +1154,11 @@ pub async fn patient_country_flags(
     .fetch_all(&state.db)
     .await?;
     let lead_ids: Vec<Uuid> = lead_rows.iter().map(|(id, _, _)| *id).collect();
-    let lead_countries: Vec<(Uuid, Vec<String>)> =
+    let lead_subjects: Vec<(Uuid, Vec<SubjectRecord>)> =
         screening::load_leads_subjects(&state.db, &lead_ids)
             .await?
             .into_iter()
-            .map(|lead| {
-                let countries = lead
-                    .subjects
-                    .iter()
-                    .flat_map(|subject| subject.countries())
-                    .collect();
-                (lead.lead_id, countries)
-            })
+            .map(|lead| (lead.lead_id, lead.subjects))
             .collect();
     let overrides = policy::active_overrides(&state.db, &lead_ids, &patient_ids).await?;
     let mut paying = paying_patients_by_patient(&state.db, &patient_ids).await?;
@@ -1102,24 +1172,21 @@ pub async fn patient_country_flags(
             .map(|(lead_id, _, _)| *lead_id)
             .collect();
         let mut countries: Vec<String> = Vec::new();
-        let patient_codes = subjects
-            .remove(&patient_id)
-            .unwrap_or_default()
-            .iter()
-            .flat_map(|subject| subject.countries())
-            .collect::<Vec<_>>();
+        let patient_subjects = subjects.remove(&patient_id).unwrap_or_default();
         // The patient records that pay for the patient.
-        let payer_codes =
-            payer_patient_countries(&state.db, &paying.remove(&patient_id).unwrap_or_default())
+        let payer_subjects =
+            payer_patient_subjects(&state.db, &paying.remove(&patient_id).unwrap_or_default())
                 .await?;
-        let lead_codes = lead_countries
+        let own_lead_subjects: Vec<&SubjectRecord> = lead_subjects
             .iter()
             .filter(|(lead_id, _)| own_leads.contains(lead_id))
-            .flat_map(|(_, codes)| codes.iter().cloned());
-        for code in patient_codes
-            .into_iter()
-            .chain(lead_codes)
-            .chain(payer_codes)
+            .flat_map(|(_, records)| records.iter())
+            .collect();
+        for code in patient_subjects
+            .iter()
+            .chain(own_lead_subjects.iter().copied())
+            .chain(payer_subjects.iter())
+            .flat_map(SubjectRecord::countries)
         {
             if !countries.contains(&code) {
                 countries.push(code);
@@ -1139,6 +1206,25 @@ pub async fn patient_country_flags(
         if evaluation.found.is_empty() {
             continue;
         }
+        let found = &evaluation.found;
+        let mut country_subjects: Vec<CountrySubject> = Vec::new();
+        for record in &patient_subjects {
+            country_subjects.extend(country_subject(record, record.kind.as_str(), found));
+        }
+        for record in &payer_subjects {
+            country_subjects.extend(country_subject(record, "paying_patient", found));
+        }
+        for record in own_lead_subjects {
+            // The lead's patient is the patient: named once.
+            if record.kind == screening::SubjectKind::LeadPatient
+                && country_subjects
+                    .iter()
+                    .any(|subject| subject.kind == "patient")
+            {
+                continue;
+            }
+            country_subjects.extend(country_subject(record, record.kind.as_str(), found));
+        }
         flags.push(PatientCountryFlag {
             patient_id,
             flag: if evaluation.blocking.is_empty() {
@@ -1146,9 +1232,10 @@ pub async fn patient_country_flags(
             } else {
                 "blocked_country"
             },
-            found: evaluation.found,
+            found: evaluation.found.clone(),
             blocking: evaluation.blocking,
             lift: patient_overrides.into_iter().next(),
+            subjects: country_subjects,
         });
     }
     Ok(flags)

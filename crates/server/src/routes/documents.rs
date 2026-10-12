@@ -5012,6 +5012,34 @@ mod medical_classification_tests {
     }
 }
 
+/// Categories and document types of an identity document (the `PERS` branch
+/// of the category tree and the classification suggestion `passport_scan`).
+const IDENTITY_DOCUMENT_CODES: &[&str] = &[
+    "identity",
+    "personal",
+    "passport",
+    "passport_scan",
+    "personal_passport",
+    "personal_residence_permit",
+    "personal_birth_certificate",
+    "residence_permit",
+    "birth_certificate",
+    "id_card",
+    "identity_card",
+];
+
+/// Whether a document is an identity document by its category or type, and
+/// its type does not name medical content (an Arztbrief filed under
+/// "identity" by mistake stays medical).
+fn is_identity_document_classification(art: &str, category: Option<&str>) -> bool {
+    let code = |value: &str| value.trim().to_lowercase();
+    let art_code = code(art);
+    let category_code = category.map(code).unwrap_or_default();
+    (IDENTITY_DOCUMENT_CODES.contains(&art_code.as_str())
+        || IDENTITY_DOCUMENT_CODES.contains(&category_code.as_str()))
+        && !document_fields_imply_medical(&art_code, None)
+}
+
 fn document_fields_imply_medical(art: &str, category: Option<&str>) -> bool {
     let searchable = format!(
         "{} {}",
@@ -6341,7 +6369,7 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_permanent") => "Dauermedikation",
         (_, "medication_temporary") => "Temporäre Medikation",
         (_, "medication_name") => "Medikament",
-        (_, "ingredient") => "ACT-Bedeutung",
+        (_, "ingredient") => "Wirkstoff",
         (_, "dose") => "Dosis",
         (_, "schedule") => "Einnahmeschema",
         (_, "dosage_form") => "Darreichungsform",
@@ -15721,6 +15749,34 @@ async fn generate_document(
             }
         }
     };
+
+    // The Einverständniserklärung for a child is signed by the parents of a
+    // minor: never generated for an adult, where it would read "von meinem
+    // Kind: … geb. 1988" (QA 2026-10-12 B2-05).
+    if matches!(
+        template.id,
+        "consent_data_release_child" | "consent_data_release_single"
+    ) {
+        let birth_date = patient_row
+            .try_get::<Option<NaiveDate>, _>("birth_date")
+            .ok()
+            .flatten();
+        if birth_date.is_some()
+            && !crate::services::contracting_party::is_minor_on(
+                birth_date,
+                crate::app_time::today(),
+            )
+        {
+            return (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "child_consent_for_adult",
+                    "message": "The consent forms for a child are generated only for a minor patient",
+                })),
+            )
+                .into_response();
+        }
+    }
 
     let patient_pid = patient_row
         .try_get::<String, _>("patient_id")
@@ -27158,6 +27214,9 @@ async fn list_document_intake_queue(
                   d.file_deleted_at, d.file_deleted_by, d.file_delete_reason,
                   p.patient_id AS patient_pid,
                   trim(concat_ws(' ', p.first_name, p.last_name)) AS patient_name,
+                  -- A lead-cabinet upload names its lead, as in the document
+                  -- list (QA 2026-10-12 B2-12).
+                  NULLIF(trim(concat_ws(' ', l.first_name, l.last_name)), '') AS lead_name,
                   o.order_number,
                   a.title AS appointment_title,
                   a.interpreter_id AS appointment_interpreter_id,
@@ -27211,6 +27270,7 @@ async fn list_document_intake_queue(
                   ) AS has_active_patient_portal_user
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
+           LEFT JOIN leads l ON l.id = d.lead_id
            LEFT JOIN orders o ON o.id = d.order_id
            LEFT JOIN appointments a ON a.id = d.appointment_id
            LEFT JOIN users u ON u.id = d.uploaded_by
@@ -31383,6 +31443,19 @@ async fn upload_document_with_mode(
                 document_fields_imply_medical(&resolved_art, resolved_category.as_deref())
             })
     });
+    // An identity document (passport, ID card, residence permit, birth
+    // certificate) is not medical data, whatever the upload form's default
+    // "medical document" tick sent: Billing opens a passport scan uploaded by
+    // staff like the one the patient uploaded in the portal (owner decision
+    // 2026-10-06, QA 2026-10-12 B2-04).
+    let identity_document =
+        is_identity_document_classification(&resolved_art, resolved_category.as_deref());
+    let requested_is_medical = requested_is_medical && !identity_document;
+    let access_category = if identity_document && access_category.as_deref() == Some("medical") {
+        None
+    } else {
+        access_category
+    };
     let requested_access_category = access_category.clone().unwrap_or_else(|| {
         infer_document_access_category(
             resolved_category.as_deref(),
@@ -34125,6 +34198,7 @@ async fn list_document_categories(
                   c.short_code,
                   c.access_category,
                   c.aliases,
+                  c.selectable,
                   parent.name_de AS parent_name_de,
                   parent.name_en AS parent_name_en
            FROM ref_document_categories c
@@ -34152,6 +34226,9 @@ async fn list_document_categories(
                     "short_code": row.try_get::<Option<String>, _>("short_code").unwrap_or_default(),
                     "access_category": row.try_get::<Option<String>, _>("access_category").unwrap_or_default(),
                     "aliases": row.try_get::<Vec<String>, _>("aliases").unwrap_or_default(),
+                    // A legacy duplicate documents keep but staff no longer
+                    // choose (QA 2026-10-12 B-12).
+                    "selectable": row.try_get::<bool, _>("selectable").unwrap_or(true),
                     "breadcrumb_label": match row.try_get::<Option<String>, _>("parent_name_en").unwrap_or_default() {
                         Some(parent) if !parent.is_empty() => format!("{} / {}", parent, row.try_get::<String, _>("name_en").unwrap_or_default()),
                         _ => row.try_get::<String, _>("name_en").unwrap_or_default(),

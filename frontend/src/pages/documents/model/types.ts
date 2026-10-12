@@ -231,6 +231,8 @@ export type CategoryOption = {
   short_code?: string | null;
   access_category?: DocumentAccessCategory | null;
   aliases?: string[];
+  /** false: a legacy duplicate that documents keep but the picker no longer offers. */
+  selectable?: boolean;
   breadcrumb_label?: string;
   breadcrumb_label_de?: string;
 };

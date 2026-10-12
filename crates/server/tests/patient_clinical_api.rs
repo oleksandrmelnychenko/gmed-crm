@@ -5884,13 +5884,23 @@ async fn ceo_assistant_reads_the_clinical_record_but_never_writes_it() {
         let (status, _) = json_request(&app, "POST", &path, &assistant, Some(body)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "assistant POST {path}");
     }
+    // The import history is part of the card the assistant reads (owner
+    // decision 2026-10-11, QA 2026-10-12 E2-02); starting an import is a
+    // write and stays closed.
+    for path in [
+        format!("/api/v1/patients/{patient_id}/clinical-document-imports"),
+        format!("/api/v1/patients/{patient_id}/medication-import-history"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "assistant GET {path}: {body}");
+    }
     let (status, _) = json_request(
         &app,
-        "GET",
+        "POST",
         &format!("/api/v1/patients/{patient_id}/clinical-document-imports"),
         &assistant,
-        None,
+        Some(json!({ "document_id": Uuid::new_v4() })),
     )
     .await;
-    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(status, StatusCode::FORBIDDEN, "assistant starts no import");
 }

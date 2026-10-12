@@ -46,6 +46,8 @@ export type PatientDocumentContext = {
 };
 
 export type PatientDocumentProfile = {
+  /** The child consent forms are offered only for a minor. */
+  birth_date?: string | null;
   address_city?: string | null;
   address_country?: string | null;
   address_street?: string | null;

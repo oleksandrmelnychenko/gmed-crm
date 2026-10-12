@@ -61,6 +61,12 @@ import {
   reviewCompliancePrivacyRequest,
 } from "@/pages/admin/data/admin-api";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
+import {
+  openBusinessHoldReasonText,
+  patientTextLanguage,
+  patientTextLanguageName,
+  retentionHoldReasonText,
+} from "@/lib/privacy-decision-texts";
 import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
@@ -119,6 +125,10 @@ interface PrivacyRequestRecord {
   identity_verification?: PrivacyRequestStepFacts["identity_verification"];
   deadline_extension?: PrivacyRequestStepFacts["deadline_extension"];
   subject_notification?: PrivacyRequestStepFacts["subject_notification"];
+  /** Why a held request waits: the retention, open business or a date. */
+  hold_reason?: "retention" | "open_business" | "date" | null;
+  /** The languages the patient speaks: the reason is written in the first known one. */
+  patient_languages?: string[] | null;
 }
 
 type PrivacyRequestType =
@@ -190,6 +200,21 @@ function privacyRequestTypeLabel(
     default:
       return formatUnknownValue(requestType, t);
   }
+}
+
+/**
+ * The status of a request; a hold that waits only for open orders and
+ * invoices is not a retention hold (QA 2026-10-12 B2-10).
+ */
+function privacyRecordStatusLabel(
+  record: Pick<PrivacyRequestRecord, "status" | "hold_reason">,
+  t: Translations,
+  lang: Lang,
+) {
+  if (record.status === "retention_hold" && record.hold_reason === "open_business") {
+    return uiText("privacy_status_open_business_hold", lang);
+  }
+  return privacyStatusLabel(record.status, t);
 }
 
 function privacyStatusLabel(status: string, t: Translations) {
@@ -506,6 +531,9 @@ function useAdminCompliancePageContent() {
 
   const [decisionReason, setDecisionReason] = useState("");
   const [reviewNote, setReviewNote] = useState("");
+  // Restrict processing (Art. 18) while an erasure waits for open business:
+  // only when the handler ticks it (QA 2026-10-12 B2-10).
+  const [restrictDuringBusinessHold, setRestrictDuringBusinessHold] = useState(false);
   const [patientOptions, setPatientOptions] = useState<
     Array<{ id: string; label: string }>
   >([]);
@@ -688,9 +716,11 @@ function useAdminCompliancePageContent() {
         action,
         reason: action === "approve" ? undefined : decisionReason.trim() || undefined,
         note: reviewNote.trim() || undefined,
+        restrict_processing: action === "hold" ? restrictDuringBusinessHold : undefined,
       });
       setDecisionReason("");
       setReviewNote("");
+      setRestrictDuringBusinessHold(false);
 
       await Promise.all([
         loadPrivacyQueue(),
@@ -767,6 +797,8 @@ function useAdminCompliancePageContent() {
       latestReviewRecord.patient_retention_until,
   );
   const retentionDate = compactDt(latestReviewRecord?.patient_retention_until);
+  // The reason the patient reads is written in the patient's language.
+  const patientReasonLanguage = patientTextLanguage(latestReviewRecord?.patient_languages);
   // Holding an erasure restricts processing until the retention ends.
   const holdLabel = retentionBlocksErasure
     ? uiText("privacy_hold_restrict", lang, { date: retentionDate })
@@ -842,12 +874,12 @@ function useAdminCompliancePageContent() {
     {
       id: "status",
       label: t.compliance_col_status,
-      accessor: (record) => privacyStatusLabel(record.status, t),
+      accessor: (record) => privacyRecordStatusLabel(record, t, lang),
       width: 190,
       render: (record) => (
         <div className="flex min-w-0 items-center gap-1.5">
           <Badge className={privacyStatusBadgeClass(record.status)}>
-            {privacyStatusLabel(record.status, t)}
+            {privacyRecordStatusLabel(record, t, lang)}
           </Badge>
           {record.manual_override ? (
             <span className="truncate text-xs text-slate-500">
@@ -943,12 +975,12 @@ function useAdminCompliancePageContent() {
     {
       id: "status",
       label: t.compliance_col_status,
-      accessor: (record) => privacyStatusLabel(record.status, t),
+      accessor: (record) => privacyRecordStatusLabel(record, t, lang),
       width: 190,
       render: (record) => (
         <div className="flex min-w-0 items-center gap-1.5">
           <Badge className={privacyStatusBadgeClass(record.status)}>
-            {privacyStatusLabel(record.status, t)}
+            {privacyRecordStatusLabel(record, t, lang)}
           </Badge>
           {record.is_overdue &&
           (record.status === "requested" || record.status === "approved") ? (
@@ -1014,6 +1046,11 @@ function useAdminCompliancePageContent() {
               disabled={privacyActionBusy !== null}
               onClick={(event) => {
                 event.stopPropagation();
+                // A refusal of another request is not this request's error
+                // (QA 2026-10-12 B2-13): each sheet opens without it.
+                setActionError("");
+                setDecisionReason("");
+                setRestrictDuringBusinessHold(false);
                 setReviewSheetRecord(record);
               }}
             >
@@ -1325,7 +1362,7 @@ function useAdminCompliancePageContent() {
                     <AdminSectionTitle>{t.compliance_privacy_review_queue}</AdminSectionTitle>
                     <div className="flex flex-wrap items-center gap-2">
                       <Badge className={privacyStatusBadgeClass(reviewSheetRecord.status)}>
-                        {privacyStatusLabel(reviewSheetRecord.status, t)}
+                        {privacyRecordStatusLabel(reviewSheetRecord, t, lang)}
                       </Badge>
                       <Badge className="bg-slate-500/15 text-slate-700">
                         {privacyRequestTypeLabel(reviewSheetRecord.request_type, t)}
@@ -1393,21 +1430,61 @@ function useAdminCompliancePageContent() {
                           />
                         </Field>
                         {retentionBlocksErasure ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 rounded-lg"
-                            onClick={() =>
-                              setDecisionReason(
-                                uiText("privacy_retention_reason_template", lang, {
-                                  date: retentionDate,
-                                }),
-                              )
-                            }
-                          >
-                            {uiText("privacy_retention_reason_insert", lang)}
-                          </Button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-8 rounded-lg"
+                              data-testid="privacy-insert-retention-reason"
+                              onClick={() =>
+                                setDecisionReason(
+                                  retentionHoldReasonText(patientReasonLanguage, retentionDate),
+                                )
+                              }
+                            >
+                              {uiText("privacy_retention_reason_insert", lang)}
+                            </Button>
+                            <span className="text-xs text-muted-foreground">
+                              {uiText("privacy_reason_patient_language", lang, {
+                                language: patientTextLanguageName(patientReasonLanguage, lang),
+                              })}
+                            </span>
+                          </div>
+                        ) : reviewSheetRecord.request_type === "erasure" ? (
+                          <div className="space-y-2" data-testid="privacy-open-business-hold">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 rounded-lg"
+                                data-testid="privacy-insert-open-business-reason"
+                                onClick={() =>
+                                  setDecisionReason(openBusinessHoldReasonText(patientReasonLanguage))
+                                }
+                              >
+                                {uiText("privacy_open_business_reason_insert", lang)}
+                              </Button>
+                              <span className="text-xs text-muted-foreground">
+                                {uiText("privacy_reason_patient_language", lang, {
+                                  language: patientTextLanguageName(patientReasonLanguage, lang),
+                                })}
+                              </span>
+                            </div>
+                            <label className="flex items-start gap-2 text-xs text-foreground">
+                              <input
+                                type="checkbox"
+                                className="mt-0.5"
+                                checked={restrictDuringBusinessHold}
+                                onChange={(event) => setRestrictDuringBusinessHold(event.target.checked)}
+                              />
+                              <span>{uiText("privacy_open_business_restrict", lang)}</span>
+                            </label>
+                            <p className="text-xs text-muted-foreground">
+                              {uiText("privacy_open_business_hold_hint", lang)}
+                            </p>
+                          </div>
                         ) : null}
                         <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint", lang)}</p>
                         <Field label={uiText("privacy_internal_note", lang)} htmlFor="privacy-review-note">

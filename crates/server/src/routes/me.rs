@@ -146,7 +146,9 @@ async fn list_my_privacy_requests(
         r#"SELECT id, request_type, source, status, reason, due_at, retention_until,
                   requested_at, reviewed_at, executed_at,
                   CASE WHEN status IN ('rejected', 'retention_hold') THEN decision_reason END
-                      AS decision_reason
+                      AS decision_reason,
+                  CASE WHEN status = 'retention_hold' THEN context->>'hold_reason' END
+                      AS hold_reason
            FROM patient_privacy_requests
            WHERE patient_id = $1
            ORDER BY created_at DESC"#,
@@ -172,6 +174,9 @@ async fn list_my_privacy_requests(
                         // Art. 12 Abs. 4 DSGVO: why the request was refused or
                         // put on hold. The internal review note is not shown.
                         "decision_reason": row.try_get::<Option<String>, _>("decision_reason").unwrap_or_default(),
+                        // `open_business`: the erasure waits for running orders
+                        // and invoices, not for a retention period (QA 2026-10-12 B2-10).
+                        "hold_reason": row.try_get::<Option<String>, _>("hold_reason").unwrap_or_default(),
                     })
                 })
                 .collect::<Vec<_>>(),

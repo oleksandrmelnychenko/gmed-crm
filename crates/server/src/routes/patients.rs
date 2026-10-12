@@ -1356,7 +1356,39 @@ struct RequiredDocumentCandidate<'a> {
     art: &'a str,
     generated_template_id: &'a str,
     category: &'a str,
+    /// The compliance requirement its signature satisfied (`dsgvo`,
+    /// `confidentiality_release`, …), normalised; empty when unsigned.
+    compliance_kind: &'a str,
     signed: bool,
+}
+
+/// The DSGVO consent family: the Einverständniserklärung zur
+/// Datenübermittlung in all its templates (adult, child, single custody), the
+/// codes a consent scan is typed with, and `dsgvo`, the compliance kind of a
+/// signed DSGVO consent and the type a converted lead's consent carries. A
+/// signed document of the family fulfils every rule that names one of these
+/// codes — the same documents set "DSGVO" in the legal status (QA 2026-10-12
+/// B2-07).
+const DSGVO_CONSENT_DOCUMENT_CODES: &[&str] = &[
+    "dsgvo",
+    "privacy_consents",
+    "consent_data_release",
+    "consent_data_release_child",
+    "consent_data_release_single",
+    "consent_form",
+    "einverstaendniserklaerung",
+    "gdpr_consent",
+    "consent",
+];
+
+/// Whether a document is a DSGVO consent: signed as one (compliance kind
+/// `dsgvo`), or typed or generated as one of the family. A
+/// Schweigepflichtsentbindung (`confidentiality_release`) is not.
+fn is_dsgvo_consent_candidate(document: &RequiredDocumentCandidate<'_>) -> bool {
+    document.compliance_kind == "dsgvo"
+        || [document.art, document.generated_template_id]
+            .into_iter()
+            .any(|code| !code.is_empty() && DSGVO_CONSENT_DOCUMENT_CODES.contains(&code))
 }
 
 /// A document code (type, template, category or a rule's matcher) in the one
@@ -5426,7 +5458,7 @@ async fn list_patient_card_entries(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    auth.require_any_role(CLINICAL_SECTION_READ_ROLES)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -5573,7 +5605,7 @@ async fn list_patient_medical_orders(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    auth.require_any_role(CLINICAL_SECTION_READ_ROLES)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -5876,7 +5908,7 @@ async fn list_patient_risk_scores(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager])?;
+    auth.require_any_role(CLINICAL_SECTION_READ_ROLES)?;
 
     if !has_patient_access(&state, &auth, patient_uuid).await? {
         return Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"));
@@ -7517,8 +7549,11 @@ async fn list_assignments(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> impl IntoResponse {
+    // The CEO assistant reads the curators read-only (owner decision
+    // 2026-10-11); assigning and revoking stay with CEO and patient manager.
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -7582,6 +7617,7 @@ async fn list_patient_cases(
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -7638,9 +7674,12 @@ async fn list_patient_orders(
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Vec<Value>>, axum::response::Response> {
     // The interpreter works on its own appointments only; the patient's
-    // orders (and their totals) are not part of that scope.
+    // orders (and their totals) are not part of that scope. The CEO
+    // assistant reads them read-only, as `/orders?patient_id=` (owner
+    // decision 2026-10-11).
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -7705,10 +7744,12 @@ async fn list_patient_appointments(
     // card (read-only here; its orders and timeline stay closed to the role).
     // Billing holds no `appointments.view`: it learns about medical visits
     // from the billing handoff (task), not from the patient's calendar, the
-    // same as `/appointments` answers it 403.
+    // same as `/appointments` answers it 403. The CEO assistant reads them
+    // read-only, as `/appointments?patient_id=` (owner decision 2026-10-11).
     auth.require_capability(Capability::AppointmentsView)?;
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::TeamleadInterpreter,
         Role::Interpreter,
@@ -8139,11 +8180,20 @@ async fn evaluate_patient_document_alerts(
         return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
     };
 
-    let stored_document_pack_complete = patient_row
+    let legal_status = patient_row
         .try_get::<Value, _>("legal_status")
-        .ok()
-        .and_then(|value| value.get("document_pack_complete").and_then(Value::as_bool))
+        .unwrap_or(Value::Null);
+    let stored_document_pack_complete = legal_status
+        .get("document_pack_complete")
+        .and_then(Value::as_bool)
         .unwrap_or(false);
+    // A DSGVO consent revoked in the consent register (Widerruf) and not
+    // signed again: the consents signed before the revocation no longer count,
+    // as in the legal status and the order re-check.
+    let dsgvo_revoked_at = active_consent_revocations(&legal_status)
+        .into_iter()
+        .find(|(item, _)| item.compliance_kind == "dsgvo")
+        .map(|(_, revoked_at)| revoked_at);
 
     // Only the current version of an active document counts: a draft (a
     // generated form before it is signed, a scan before its review) is not a
@@ -8155,6 +8205,8 @@ async fn evaluate_patient_document_alerts(
                   d.art,
                   d.category,
                   d.generated_template_id,
+                  d.compliance_kind,
+                  d.signed_at,
                   d.signed_at IS NOT NULL AS signed,
                   d.status
            FROM documents d
@@ -8200,12 +8252,27 @@ async fn evaluate_patient_document_alerts(
                     .unwrap_or_default()
                     .unwrap_or_default(),
             );
-            let candidate = RequiredDocumentCandidate {
+            let compliance_kind = normalized_document_code(
+                &row.try_get::<Option<String>, _>("compliance_kind")
+                    .unwrap_or_default()
+                    .unwrap_or_default(),
+            );
+            let mut candidate = RequiredDocumentCandidate {
                 art: &art,
                 generated_template_id: &generated_template_id,
                 category: &category,
+                compliance_kind: &compliance_kind,
                 signed: row.try_get::<bool, _>("signed").unwrap_or(false),
             };
+            if let Some(revoked_at) = dsgvo_revoked_at
+                && candidate.signed
+                && is_dsgvo_consent_candidate(&candidate)
+            {
+                let signed_at = row
+                    .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
+                    .unwrap_or_default();
+                candidate.signed = signed_at.is_some_and(|signed_at| signed_at > revoked_at);
+            }
 
             if required_document_rule_matches(rule, &candidate) {
                 matching_documents.push(json!({
@@ -8275,7 +8342,15 @@ fn required_document_rule_matches(
     let matches_art = matches_code(document.art) || matches_code(document.generated_template_id);
     let matches_category = !document.category.is_empty()
         && rule.category.iter().any(|value| value == document.category);
-    matches_art || matches_category
+    // A signed DSGVO consent of any template or type (a converted lead's
+    // consent is typed `dsgvo`) fulfils a rule that asks for one of the family.
+    let matches_dsgvo_consent = document.signed
+        && is_dsgvo_consent_candidate(document)
+        && rule
+            .art
+            .iter()
+            .any(|value| DSGVO_CONSENT_DOCUMENT_CODES.contains(&value.as_str()));
+    matches_art || matches_category || matches_dsgvo_consent
 }
 
 pub(crate) fn patient_document_alerts_payload(summary: &PatientDocumentAlertsSummary) -> Value {
@@ -8923,6 +8998,7 @@ async fn get_patient_document_alerts(
 ) -> Result<Json<Value>, axum::response::Response> {
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -8950,7 +9026,12 @@ async fn get_patient_recheck(
     Extension(auth): Extension<AuthUser>,
     Path(patient_uuid): Path<Uuid>,
 ) -> Result<Json<Value>, axum::response::Response> {
-    auth.require_any_role(&[Role::Ceo, Role::PatientManager, Role::Billing])?;
+    auth.require_any_role(&[
+        Role::Ceo,
+        Role::CeoAssistant,
+        Role::PatientManager,
+        Role::Billing,
+    ])?;
     ensure_patient_visible(&state, &auth, patient_uuid).await?;
 
     let Some(readiness) = load_patient_recheck_readiness(&state, patient_uuid).await? else {
@@ -9912,8 +9993,10 @@ async fn get_patient_timeline(
 ) -> Result<Json<Value>, axum::response::Response> {
     // The timeline replays the patient's whole history (every appointment,
     // order and document); the interpreter's scope is its own appointments.
+    // The CEO assistant reads it read-only (owner decision 2026-10-11).
     auth.require_any_role(&[
         Role::Ceo,
+        Role::CeoAssistant,
         Role::PatientManager,
         Role::Billing,
         Role::TeamleadInterpreter,
@@ -10117,7 +10200,9 @@ async fn get_patient_timeline(
                        relation.related_name,
                        'Related person'
                    ) AS title,
-                   'care'::text AS category,
+                   -- A relation (relative, payer, organisation) is not care
+                   -- (QA 2026-10-12 B-26b).
+                   'relation'::text AS category,
                    'active'::text AS status,
                    relation.created_at AS happened_at,
                    relation.relation_type AS source_label
@@ -10532,6 +10617,7 @@ async fn get_patient_timeline(
                        WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'erasure' THEN 'Privacy erasure requested'
                        WHEN al.action = 'privacy_request_created' THEN 'Privacy request created'
                        WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'reject' THEN 'Privacy request rejected'
+                       WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'hold' AND al.context->>'hold_reason' = 'open_business' THEN 'Privacy request held until open business is closed'
                        WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'hold' THEN 'Privacy request put on retention hold'
                        WHEN al.action = 'privacy_request_reviewed' AND al.context->>'review_action' = 'approve' THEN 'Privacy request approved'
                        WHEN al.action = 'privacy_request_reviewed' THEN 'Privacy request reviewed'
@@ -10683,8 +10769,15 @@ async fn get_patient_timeline(
     // Clinical-record activity (from the audit log) is only woven into the timeline
     // for the roles that can actually open the clinical profile, so it is never
     // surfaced to billing / interpreter / concierge who cannot see clinical data.
-    let can_view_clinical = matches!(auth.role, Role::Ceo | Role::PatientManager);
-    let can_view_financial = matches!(auth.role, Role::Ceo | Role::PatientManager | Role::Billing);
+    // The CEO assistant reads both read-only (owner decision 2026-10-11).
+    let can_view_clinical = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager
+    );
+    let can_view_financial = matches!(
+        auth.role,
+        Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
+    );
     const CLINICAL_TIMELINE_BRANCH: &str = r#"
             UNION ALL
 
@@ -11333,6 +11426,13 @@ async fn ensure_related_patient_usable(
 fn can_read_clinical_record(auth: &AuthUser) -> bool {
     auth.can(Capability::PatientsMedicalView) && auth.role != Role::Interpreter
 }
+
+/// Who reads the clinical card sections (card entries, medical orders, risk
+/// scores): the roles that write them plus the CEO assistant, who reads the
+/// whole patient card read-only (owner decision 2026-10-11). The write routes
+/// keep `Ceo` and `PatientManager` only.
+pub(crate) const CLINICAL_SECTION_READ_ROLES: &[Role] =
+    &[Role::Ceo, Role::PatientManager, Role::CeoAssistant];
 
 /// 403 unless [`can_read_clinical_record`].
 #[allow(clippy::result_large_err)]
@@ -17447,8 +17547,63 @@ mod required_document_rule_tests {
             art,
             generated_template_id,
             category,
+            compliance_kind: "",
             signed,
         }
+    }
+
+    /// QA 2026-10-12 B2-07: a converted lead's signed consent (type and
+    /// compliance kind `dsgvo`) and any signed document of the DSGVO family
+    /// fulfil the consent form, as they set "DSGVO" in the legal status; a
+    /// signed Schweigepflichtsentbindung does not.
+    #[test]
+    fn every_signed_dsgvo_consent_fulfils_the_consent_form() {
+        let (passport, consent) = default_rules();
+        let converted = RequiredDocumentCandidate {
+            art: "dsgvo",
+            generated_template_id: "",
+            category: "",
+            compliance_kind: "dsgvo",
+            signed: true,
+        };
+        assert!(required_document_rule_matches(&consent, &converted));
+        assert!(!required_document_rule_matches(&passport, &converted));
+        // Signed as a DSGVO consent, typed by hand as something else.
+        let scan = RequiredDocumentCandidate {
+            art: "uploaded_document",
+            generated_template_id: "",
+            category: "administrative",
+            compliance_kind: "dsgvo",
+            signed: true,
+        };
+        assert!(required_document_rule_matches(&consent, &scan));
+        // Unsigned it fulfils nothing.
+        let draft = RequiredDocumentCandidate {
+            signed: false,
+            ..converted
+        };
+        assert!(!required_document_rule_matches(&consent, &draft));
+        let release = RequiredDocumentCandidate {
+            art: "confidentiality_release",
+            generated_template_id: "confidentiality_release",
+            category: "consent",
+            compliance_kind: "confidentiality_release",
+            signed: true,
+        };
+        assert!(!required_document_rule_matches(&consent, &release));
+        // A rule configured with only one code of the family still accepts
+        // the whole family.
+        let narrow = parse_required_patient_document_rules(&json!([
+            { "key": "consent_form", "label": "EW", "art": ["einverstaendniserklaerung"], "signed": true }
+        ]))
+        .unwrap_or_else(|_| panic!("narrow rule parses"))
+        .pop()
+        .unwrap();
+        assert!(required_document_rule_matches(&narrow, &converted));
+        assert!(required_document_rule_matches(
+            &narrow,
+            &document("privacy_consents", "privacy_consents", "consent", true)
+        ));
     }
 
     #[test]

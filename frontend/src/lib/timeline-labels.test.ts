@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { t as translateCatalog } from "./i18n";
 import {
   localizeTimelineCategory,
+  localizeTimelineItemCategory,
   localizeTimelineSource,
+  localizeTimelineStatus,
   localizeTimelineTitle,
 } from "./timeline-labels";
 
@@ -11,6 +14,7 @@ const labels: Record<string, string> = {
   timeline_source_medical_report: "Медицинский отчёт",
   timeline_source_patient_intake: "Приём пациента",
   timeline_source_patient_visible: "Виден пациенту",
+  patients_patient_visible: "Можно выпустить пациенту",
   timeline_source_concierge: "Консьерж",
   timeline_entity_contract: "Договор",
   timeline_title_dunning_first: "Первое напоминание",
@@ -31,7 +35,7 @@ describe("timeline labels", () => {
       "Медицинский отчёт · Внутренний",
     );
     expect(localizeTimelineSource("Contract · Patient Visible", l)).toBe(
-      "Договор · Виден пациенту",
+      "Договор · Можно выпустить пациенту",
     );
   });
 
@@ -96,7 +100,7 @@ describe("timeline labels", () => {
 
   it("localizes raw visibility codes and document categories (QA B-26)", () => {
     const ru: Record<string, string> = {
-      timeline_source_patient_visible: "Виден пациенту",
+      patients_patient_visible: "Можно выпустить пациенту",
       document_category_provider_template: "Памятка клиники",
       document_category_finance_cost_coverage: "Гарантия оплаты расходов",
       document_category_visa_invitation_letter: "Приглашение для визы",
@@ -104,7 +108,7 @@ describe("timeline labels", () => {
       timeline_category_profile: "Профиль",
     };
     const lr = (key: string) => ru[key] ?? key;
-    expect(localizeTimelineSource("patient_visible", lr)).toBe("Виден пациенту");
+    expect(localizeTimelineSource("patient_visible", lr)).toBe("Можно выпустить пациенту");
     expect(localizeTimelineCategory("provider_template", lr)).toBe("Памятка клиники");
     expect(localizeTimelineCategory("finance_cost_coverage", lr)).toBe("Гарантия оплаты расходов");
     expect(localizeTimelineCategory("visa_invitation_letter", lr)).toBe("Приглашение для визы");
@@ -134,4 +138,69 @@ describe("timeline labels", () => {
       "Проверить объём заказа",
     );
   });
+
+  // QA 2026-10-12 B-26b: every code the patient timeline receives reads in
+  // the UI language — statuses, the German clinical titles, relation types,
+  // privacy request types, invoice types and the document visibility.
+  for (const lang of ["ru", "de"] as const) {
+    const catalog = translateCatalog(lang).uiText;
+    const lx = (key: string) => catalog[key] ?? key;
+    const expected = {
+      ru: {
+        recorded: "Записано",
+        delivered: "Оказано",
+        accepted: "Принято",
+        diagnoses: "Диагнозы обновлены",
+        relation: "Связь",
+        other: "Другая связь",
+        erasure: "CEO Muster · Удаление данных (ст. 17)",
+        advance: "Авансовый счёт",
+        medical: "Медицинский приём",
+        visible: "Можно выпустить пациенту",
+        interpreter: "Предпочтение переводчика: Переводчик → Предпочтителен",
+      },
+      de: {
+        recorded: "Erfasst",
+        delivered: "Erbracht",
+        accepted: "Angenommen",
+        diagnoses: "Diagnosen aktualisiert",
+        relation: "Beziehung",
+        other: "Sonstige Beziehung",
+        erasure: "CEO Muster · Löschung (Art. 17)",
+        advance: "Vorkasse",
+        medical: "Medizinischer Termin",
+        visible: "Zur Patientenfreigabe bereit",
+        interpreter: "Dolmetscherpräferenz: Dolmetscher → Bevorzugt",
+      },
+    }[lang];
+
+    it(`names every timeline code in ${lang}`, () => {
+      expect(localizeTimelineStatus("recorded", lx)).toBe(expected.recorded);
+      expect(localizeTimelineStatus("delivered", lx)).toBe(expected.delivered);
+      expect(localizeTimelineStatus("accepted", lx)).toBe(expected.accepted);
+      // Statuses the card's general labels name fall back to them.
+      expect(localizeTimelineStatus("completed", lx)).toBe("");
+      expect(localizeTimelineTitle("Diagnosen aktualisiert", lx)).toBe(expected.diagnoses);
+      expect(localizeTimelineItemCategory("relation", "relation", lx)).toBe(expected.relation);
+      expect(localizeTimelineSource("other", lx)).toBe(expected.other);
+      expect(localizeTimelineSource("CEO Muster · erasure", lx)).toBe(expected.erasure);
+      expect(localizeTimelineItemCategory("invoice", "advance", lx)).toBe(expected.advance);
+      expect(localizeTimelineItemCategory("appointment", "medical", lx)).toBe(expected.medical);
+      // "medical" of a document is its category, not an appointment type.
+      expect(localizeTimelineItemCategory("document", "medical", lx)).not.toBe(expected.medical);
+      expect(localizeTimelineSource("patient_visible", lx)).toBe(expected.visible);
+      expect(
+        localizeTimelineTitle("Interpreter preference: Interpreter -> preferred", lx),
+      ).toBe(expected.interpreter);
+      for (const raw of ["Advance", "Erasure", "Other", "Unbekannter Wert"]) {
+        expect(
+          [
+            localizeTimelineSource("other", lx),
+            localizeTimelineSource("erasure", lx),
+            localizeTimelineItemCategory("invoice", "advance", lx),
+          ],
+        ).not.toContain(raw);
+      }
+    });
+  }
 });

@@ -8,6 +8,7 @@ import { extractedUiRu } from "./catalogs/extracted-ui";
 import { ordersUiRu } from "./catalogs/orders-ui";
 import { billingUiRu } from "./catalogs/billing-ui";
 import { legalStatusUiRu } from "./catalogs/legal-status-ui";
+import { patientRecordUiRu } from "./catalogs/patient-record-ui";
 import { financeBalancesRu } from "./catalogs/finance-balances";
 import { gwgTrainingRu } from "./catalogs/gwg-training";
 import { operationsRu } from "./catalogs/operations";
@@ -28,6 +29,7 @@ export const ru = {
     ...billingUiRu,
     ...legalStatusUiRu,
     ...securityReviewUiRu,
+    ...patientRecordUiRu,
   },
   staffAccess: staffAccessRu,
   app_name: "GMED CONSOLE",

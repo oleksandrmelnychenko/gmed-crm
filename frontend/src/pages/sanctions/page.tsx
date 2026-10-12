@@ -12,13 +12,15 @@ import { Banner, PageHeader, StatusBadge, SuccessBanner, TabLoader, tokens } fro
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { copyText, selectElementText } from "@/lib/copy-text";
-import { formatUiText, useLang, type Translations } from "@/lib/i18n";
+import { formatUiText, useLang, type Lang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
   sanctionsApi,
   type CountryBlocksResponse,
   type CountryLift,
+  type CountrySubject,
+  type SubjectKind,
   type HitStatus,
   type HitsResponse,
   type SanctionsHit,
@@ -386,7 +388,20 @@ type CountryBlockItem = {
   flag: "blocked_country" | "country_lifted";
   found: string[];
   lift: CountryLift | null;
+  subjects: CountrySubject[];
 };
+
+/** "Default payer: Beispiel GmbH (organisation) — Russia". */
+function countrySubjectLine(subject: CountrySubject, t: Translations, lang: Lang): string {
+  const role =
+    subject.kind === "paying_patient"
+      ? (t.uiText.sanctions_country_subject_paying_patient ?? subject.kind)
+      : subjectKindLabel(subject.kind as SubjectKind, t, null, subject.role) ?? subject.kind;
+  const organisation = subject.organisation
+    ? ` (${t.uiText.sanctions_country_subject_organisation ?? ""})`
+    : "";
+  return `${role}: ${subject.name}${organisation} — ${countryList(subject.countries, lang)}`;
+}
 
 function countryBlockItems(data: CountryBlocksResponse): { leads: CountryBlockItem[]; patients: CountryBlockItem[] } {
   return {
@@ -399,6 +414,7 @@ function countryBlockItems(data: CountryBlocksResponse): { leads: CountryBlockIt
       flag: item.flag,
       found: item.found,
       lift: item.lift,
+      subjects: item.subjects ?? [],
     })),
     patients: data.patients.map((item) => ({
       kind: "patient",
@@ -409,6 +425,7 @@ function countryBlockItems(data: CountryBlocksResponse): { leads: CountryBlockIt
       flag: item.flag,
       found: item.found,
       lift: item.lift,
+      subjects: item.subjects ?? [],
     })),
   };
 }
@@ -455,6 +472,18 @@ function CountriesTab() {
           ) : null}
           <span className="text-sm text-muted-foreground">{countryList(item.found, lang)}</span>
         </div>
+        {item.subjects.length > 0 ? (
+          <ul className="space-y-0.5" data-testid={`sanctions-country-${item.kind}-subjects`}>
+            {item.subjects.map((subject) => (
+              <li
+                key={`${subject.kind}-${subject.role ?? ""}-${subject.name}`}
+                className="text-xs text-foreground"
+              >
+                {countrySubjectLine(subject, t, lang)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {item.lift ? (
           <p className="text-xs text-muted-foreground">
             {formatUiText(t.sanctions_banner_country_lifted, {

@@ -352,12 +352,19 @@ fn spawn_patient_retention_sweeper(state: state::AppState) {
             ticker.tick().await;
             if hour.is_multiple_of(24) {
                 match gmed_server::routes::retention::flag_expired_patient_files(&state).await {
-                    Ok(report) if report.flagged > 0 || report.requeued > 0 => tracing::info!(
-                        retention_days = report.retention_days,
-                        flagged = report.flagged,
-                        requeued = report.requeued,
-                        "Patient file retention sweep raised or requeued privacy requests"
-                    ),
+                    Ok(report)
+                        if report.flagged > 0
+                            || report.requeued > 0
+                            || report.business_requeued > 0 =>
+                    {
+                        tracing::info!(
+                            retention_days = report.retention_days,
+                            flagged = report.flagged,
+                            requeued = report.requeued,
+                            business_requeued = report.business_requeued,
+                            "Patient file retention sweep raised or requeued privacy requests"
+                        )
+                    }
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "Patient file retention sweep failed"),
                 }
@@ -370,6 +377,16 @@ fn spawn_patient_retention_sweeper(state: state::AppState) {
                     ),
                     Ok(_) => {}
                     Err(e) => tracing::warn!(error = %e, "Retention hold requeue failed"),
+                }
+                // An erasure that waited for open orders and invoices comes
+                // back once they are closed (QA 2026-10-12 B2-10).
+                match gmed_server::routes::retention::requeue_closed_business_holds(&state).await {
+                    Ok(requeued) if requeued > 0 => tracing::info!(
+                        requeued,
+                        "Erasure requests returned to the queue after their open business closed"
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "Open-business hold requeue failed"),
                 }
             }
             hour = hour.wrapping_add(1);

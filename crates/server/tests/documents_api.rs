@@ -171,6 +171,30 @@ async fn seed_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
     .unwrap()
 }
 
+/// A patient under 18: the child consent forms are generated only for a
+/// minor (QA 2026-10-12 B2-05).
+async fn seed_minor_patient(pool: &PgPool, created_by: Uuid, tag: &str) -> Uuid {
+    let patient_id = seed_patient(pool, created_by, tag).await;
+    make_minor(pool, patient_id).await;
+    patient_id
+}
+
+async fn make_minor(pool: &PgPool, patient_id: Uuid) {
+    sqlx::query("UPDATE patients SET birth_date = DATE '2015-01-01' WHERE id = $1")
+        .bind(patient_id)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// Whether the template is one of the child consent forms.
+fn is_child_consent_template(template_id: &str) -> bool {
+    matches!(
+        template_id,
+        "consent_data_release_child" | "consent_data_release_single"
+    )
+}
+
 async fn configure_agency_identity_profile(pool: &PgPool, agency_name: &str, owner_name: &str) {
     for (key, value) in [("agency_name", agency_name), ("agency_care_of", owner_name)] {
         sqlx::query(
@@ -5071,9 +5095,14 @@ async fn concierge_and_billing_are_refused_the_translation_of_a_consent_document
     assert_eq!(status, StatusCode::OK, "CEO: {body}");
 }
 
+/// Owner decision 2026-10-11 (QA 2026-10-12 B2-06): the CEO assistant reads
+/// every document of a patient — released or not, identity scans uploaded by
+/// staff and in the portal, internal and imported medical documents, the
+/// patient's medical portal upload — in both lists and as a download; it
+/// changes none of them.
 #[tokio::test]
-async fn ceo_assistant_only_sees_released_medical_documents() {
-    let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
+async fn ceo_assistant_reads_every_patient_document_read_only() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
         return;
     };
     let tag = unique_tag("doc-ceo-assistant");
@@ -5084,18 +5113,10 @@ async fn ceo_assistant_only_sees_released_medical_documents() {
         seed_appointment(&pool, patient_id, provider_id, doctor_id, admin_id, &tag).await;
     let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
     let assistant_bearer = auth_header_for(assistant_id, "ceo_assistant");
+    let patient_user_id = seed_user(&pool, &format!("{tag}-portal"), "patient").await;
+    seed_patient_assignment(&pool, patient_id, patient_user_id, admin_id).await;
+    let patient_bearer = auth_header_for(patient_user_id, "patient");
 
-    let internal_id = seed_document(
-        &pool,
-        admin_id,
-        patient_id,
-        appointment_id,
-        "internal",
-        true,
-        "arztbrief",
-        &format!("{tag}-internal"),
-    )
-    .await;
     let released_id = seed_document(
         &pool,
         admin_id,
@@ -5108,25 +5129,100 @@ async fn ceo_assistant_only_sees_released_medical_documents() {
     )
     .await;
 
-    // The global list and the patient card's documents tab follow the same
-    // rule (RBAC matrix, CEO Assistant: documents "read only what is
-    // allowed"; owner decision 2026-10-11, QA B-14).
+    // Staff uploads with a stored file: an internal doctor letter, an internal
+    // non-medical report and a passport scan.
+    let mut staff_uploads = Vec::new();
+    for (art, category, is_medical, file) in [
+        ("arztbrief", "medical", "true", "arztbrief"),
+        (
+            "internal_report",
+            "administrative",
+            "false",
+            "internal-report",
+        ),
+        ("passport_scan", "identity", "false", "reisepass"),
+    ] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &admin_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("{file} {tag}")),
+                ("art", art.to_string()),
+                ("category", category.to_string()),
+                ("status", "active".to_string()),
+                ("visibility", "internal".to_string()),
+                ("is_medical", is_medical.to_string()),
+            ],
+            &format!("{file}-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-assistant-reads%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{art}: {body}");
+        staff_uploads.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    // The patient's own uploads in the portal: an identity document and a
+    // medical finding.
+    let mut portal_uploads = Vec::new();
+    for (kind, file) in [("general", "reisepass"), ("conclusion", "befund")] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/me/documents/upload",
+            &patient_bearer,
+            &[
+                ("upload_kind", kind.to_string()),
+                ("auto_name", format!("{file} {tag}")),
+            ],
+            &format!("{file}-portal-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-portal-upload%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{kind}: {body}");
+        portal_uploads.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+
+    let every_document: Vec<Uuid> = std::iter::once(released_id)
+        .chain(staff_uploads.iter().copied())
+        .chain(portal_uploads.iter().copied())
+        .collect();
     for path in [
         format!("/api/v1/documents?patient_id={patient_id}"),
         format!("/api/v1/patients/{patient_id}/documents"),
     ] {
         let (status, body) = json_request(&app, "GET", &path, &assistant_bearer, None).await;
         assert_eq!(status, StatusCode::OK, "{path}: {body}");
-        let ids: Vec<_> = body
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter_map(|item| item["id"].as_str())
-            .collect();
-        assert!(ids.contains(&released_id.to_string().as_str()), "{path}");
-        assert!(!ids.contains(&internal_id.to_string().as_str()), "{path}");
+        let ids = listed_ids(&body);
+        for document_id in &every_document {
+            assert!(
+                ids.contains(&document_id.to_string()),
+                "{path}: {document_id} in {body}"
+            );
+        }
     }
-    // Read-only: the assistant changes no document.
+    for document_id in staff_uploads.iter().chain(&portal_uploads) {
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}"),
+            &assistant_bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "detail {document_id}: {body}");
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &assistant_bearer,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "download {document_id}");
+    }
+
+    // Read-only: the assistant changes, uploads and deletes nothing.
     let (status, _) = json_request(
         &app,
         "POST",
@@ -5136,6 +5232,292 @@ async fn ceo_assistant_only_sees_released_medical_documents() {
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
+    let (status, _) = multipart_upload(
+        &app,
+        "/api/v1/documents/upload",
+        &assistant_bearer,
+        &[("patient_id", patient_id.to_string())],
+        &format!("assistant-{tag}.pdf"),
+        "application/pdf",
+        b"%PDF-assistant-upload%",
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// QA 2026-10-12 B2-04: "Upload document" in the patient card honours an
+/// unticked "medical document" and sends no default type; a passport scan
+/// uploaded by staff is never medical — Billing opens it like the one the
+/// patient uploaded — while a doctor letter stays medical whatever the form
+/// sent.
+#[tokio::test]
+async fn staff_upload_honours_the_medical_flag_and_keeps_id_scans_non_medical() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("staff-upload-flag");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let upload = |file: String, auto_name: String, is_medical: &'static str| {
+        let app = app.clone();
+        let admin_bearer = admin_bearer.clone();
+        async move {
+            let (status, body) = multipart_upload(
+                &app,
+                "/api/v1/documents/upload",
+                &admin_bearer,
+                &[
+                    ("patient_id", patient_id.to_string()),
+                    ("auto_name", auto_name),
+                    ("status", "active".to_string()),
+                    ("visibility", "internal".to_string()),
+                    ("is_medical", is_medical.to_string()),
+                ],
+                &file,
+                "application/pdf",
+                b"%PDF-staff-upload%",
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{file}: {body}");
+            Uuid::parse_str(body["id"].as_str().unwrap()).unwrap()
+        }
+    };
+    let detail = |document_id: Uuid| {
+        let app = app.clone();
+        let admin_bearer = admin_bearer.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{document_id}"),
+                &admin_bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body
+        }
+    };
+
+    // Unticked, no type: a plain scan is stored as it was sent.
+    let scan = upload(
+        format!("scan-{tag}.pdf"),
+        format!("Scan Mia {tag}"),
+        "false",
+    )
+    .await;
+    let body = detail(scan).await;
+    assert_eq!(body["is_medical"], false, "{body}");
+    assert_ne!(body["art"], "report", "{body}");
+
+    // The default tick on a passport scan: an identity document, not medical.
+    let passport = upload(
+        format!("reisepass-{tag}.pdf"),
+        format!("Reisepass {tag}"),
+        "true",
+    )
+    .await;
+    let body = detail(passport).await;
+    assert_eq!(body["is_medical"], false, "{body}");
+    assert_eq!(body["category"], "identity", "{body}");
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{passport}/download"),
+        &billing_bearer,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "billing opens the staff ID scan");
+
+    // A doctor letter stays medical although the form sent "false".
+    let letter = upload(
+        format!("arztbrief-{tag}.pdf"),
+        format!("Arztbrief {tag}"),
+        "false",
+    )
+    .await;
+    let body = detail(letter).await;
+    assert_eq!(body["is_medical"], true, "{body}");
+    let (status, _) = bytes_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{letter}/download"),
+        &billing_bearer,
+    )
+    .await;
+    assert!(
+        matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+        "billing does not open medical documents: {status}"
+    );
+}
+
+/// QA 2026-10-12 B2-05: the consent forms for a child are not generated for
+/// an adult patient.
+#[tokio::test]
+async fn child_consent_forms_are_refused_for_an_adult_patient() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("child-consent-adult");
+    let adult_id = seed_patient(&pool, admin_id, &tag).await;
+    for template_id in ["consent_data_release_child", "consent_data_release_single"] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            "/api/v1/documents/generate",
+            &admin_bearer,
+            Some(json!({
+                "template_id": template_id,
+                "patient_id": adult_id,
+                "language": "de",
+                "bindings": {
+                    "child_name": "Mia Muster",
+                    "guardian_name": "Anna Muster"
+                }
+            })),
+        )
+        .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{template_id}: {body}"
+        );
+        assert_eq!(body["error"], "child_consent_for_adult", "{body}");
+    }
+}
+
+/// QA 2026-10-12 B2-07: a converted lead's signed DSGVO consent (type and
+/// compliance kind `dsgvo`) fulfils the consent form, as it sets "DSGVO" in
+/// the legal status; after a revocation only a consent signed later does.
+#[tokio::test]
+async fn a_signed_dsgvo_consent_of_any_type_fulfils_the_consent_form() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("dsgvo-consent-form");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by, compliance_kind, signed_at, signed_by
+           ) VALUES (
+                $3, $1, 'DSGVO-Einwilligung', 'dsgvo.pdf', 'dsgvo', NULL, 'active', 'internal',
+                false, 'application/pdf', 1234, $3, 1,
+                $2, 'dsgvo', now() - interval '2 days', $2
+           )"#,
+    )
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(Uuid::new_v4())
+    .execute(&pool)
+    .await
+    .unwrap();
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+
+    // Revoked in the consent register after it was signed: no longer counted.
+    sqlx::query(
+        r#"UPDATE patients
+           SET legal_status = COALESCE(legal_status, '{}'::jsonb)
+                   || jsonb_build_object('dsgvo_signed', false,
+                                         'dsgvo_revoked_at', to_jsonb(now() - interval '1 day'))
+           WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let alerts = required_document_alerts(&app, &admin_bearer, patient_id).await;
+    assert!(!rule_fulfilled(&alerts, "consent_form"), "{alerts}");
+}
+
+/// QA 2026-10-12 B2-12: an upload of a lead cabinet waiting in the intake
+/// queue names its lead; B-12: the legacy duplicate categories are not
+/// offered for a new choice.
+#[tokio::test]
+async fn intake_queue_names_the_lead_and_legacy_categories_are_not_selectable() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("intake-lead-name");
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, created_by)
+           VALUES ('Nora', $1, $2, $3)
+           RETURNING id"#,
+    )
+    .bind(format!("Muster{tag}"))
+    .bind(format!("{tag}@example.com"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let document_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, version_root_document_id, version_number,
+                uploaded_by
+           ) VALUES ($3, $1, 'befund-lead.pdf', 'befund-lead.pdf', 'patient_upload', NULL,
+                     'active', 'internal', false, 'application/pdf', 1234, $3, 1, $2)
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(admin_id)
+    .bind(Uuid::new_v4())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/intake-queue",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == document_id.to_string())
+        .unwrap_or_else(|| panic!("lead upload in the intake queue: {body}"));
+    assert_eq!(row["lead_name"], format!("Nora Muster{tag}"), "{row}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/documents/meta/categories",
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let selectable = |key: &str| {
+        body["categories"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["key"] == key)
+            .unwrap_or_else(|| panic!("category {key} in {body}"))["selectable"]
+            .clone()
+    };
+    for legacy in ["medical_report", "conclusion", "lab_analysis"] {
+        assert_eq!(selectable(legacy), false, "{legacy}");
+    }
+    for kept in [
+        "medical_bericht",
+        "medical_befund",
+        "medical_lab",
+        "personal_passport",
+    ] {
+        assert_eq!(selectable(kept), true, "{kept}");
+    }
 }
 
 #[tokio::test]
@@ -5331,6 +5713,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
     };
     let tag = unique_tag("admin-docs");
     let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let minor_id = seed_minor_patient(&pool, admin_id, &format!("{tag}-minor")).await;
     let contract_id = seed_framework_contract(&pool, patient_id, admin_id, &tag).await;
     let order_id = seed_order_with_contract(&pool, patient_id, contract_id, admin_id, &tag).await;
     let _quote_id = seed_quote_for_order(&pool, order_id, admin_id, &tag).await;
@@ -5433,7 +5816,7 @@ async fn ceo_can_generate_admin_document_templates_as_pdf() {
         let expected_bindings = bindings.clone();
         let mut payload = json!({
             "template_id": template_id,
-            "patient_id": patient_id,
+            "patient_id": if is_child_consent_template(template_id) { minor_id } else { patient_id },
             "language": "de",
             "bindings": bindings,
         });
@@ -5659,7 +6042,7 @@ async fn consent_child_autofills_guardians_from_patient_relations() {
         return;
     };
     let tag = unique_tag("consent-guardian-autofill");
-    let child_id = seed_patient(&pool, admin_id, &tag).await;
+    let child_id = seed_minor_patient(&pool, admin_id, &tag).await;
 
     // The child has two unlinked guardians recorded as relations. Their roles must
     // remain neutral because no related patient gender is available.
@@ -5727,7 +6110,7 @@ async fn consent_child_keeps_linked_parent_people_without_relationship_labels() 
         return;
     };
     let tag = unique_tag("consent-guardian-gender");
-    let child_id = seed_patient(&pool, admin_id, &format!("{tag}-child")).await;
+    let child_id = seed_minor_patient(&pool, admin_id, &format!("{tag}-child")).await;
     let father_id = seed_patient(&pool, admin_id, &format!("{tag}-father")).await;
     let mother_id = seed_patient(&pool, admin_id, &format!("{tag}-mother")).await;
     sqlx::query("UPDATE patients SET gender = 'male' WHERE id = $1")
@@ -6150,10 +6533,11 @@ async fn ceo_can_generate_every_builtin_document_template_as_pdf() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(body["message"], "Free text document requires document text");
 
+    let minor_id = seed_minor_patient(&pool, admin_id, &format!("{tag}-minor")).await;
     for case in cases {
         let mut payload = json!({
             "template_id": case.template_id,
-            "patient_id": patient_id,
+            "patient_id": if is_child_consent_template(case.template_id) { minor_id } else { patient_id },
             "language": "de",
             "bindings": case.bindings,
             "text_block_keys": case.text_block_keys,
@@ -7728,7 +8112,7 @@ async fn generated_document_replacement_requires_exact_template_id() {
         return;
     };
     let tag = unique_tag("doc-template-exact-version");
-    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_id = seed_minor_patient(&pool, admin_id, &tag).await;
 
     let (status, first_body) = json_request(
         &app,

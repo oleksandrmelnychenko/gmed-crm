@@ -134,6 +134,31 @@ export function isLeadOnlyDocumentTemplate(template: { id: string; lead_only?: b
   return template.lead_only === true || LEAD_ONLY_TEMPLATE_IDS.has(template.id);
 }
 
+/**
+ * The Einverständniserklärung for a child (two custodians, sole custody): a
+ * parent signs for a minor, so the forms are offered only for a patient under
+ * 18; the server refuses them for an adult (QA 2026-10-12 B2-05).
+ */
+const MINOR_ONLY_TEMPLATE_IDS = new Set(["consent_data_release_child", "consent_data_release_single"]);
+
+/** Whether the patient born on `birthDate` is 18 or older on `todayKey` (YYYY-MM-DD, Berlin). */
+export function isAdultOn(birthDate: string | null | undefined, todayKey: string): boolean {
+  const birth = /^(\d{4})-(\d{2})-(\d{2})/.exec(birthDate ?? "");
+  const today = /^(\d{4})-(\d{2})-(\d{2})/.exec(todayKey);
+  if (!birth || !today) return false;
+  const eighteenth = `${String(Number(birth[1]) + 18).padStart(4, "0")}-${birth[2]}-${birth[3]}`;
+  return eighteenth <= `${today[1]}-${today[2]}-${today[3]}`;
+}
+
+/** Whether the template may be generated for a patient born on `birthDate`. */
+export function isTemplateForPatientAge(
+  templateId: string,
+  birthDate: string | null | undefined,
+  todayKey: string,
+): boolean {
+  return !MINOR_ONLY_TEMPLATE_IDS.has(templateId) || !isAdultOn(birthDate, todayKey);
+}
+
 export function isFixedLegalDocumentTemplate(templateId: string) {
   return FIXED_LEGAL_TEMPLATE_IDS.has(templateId);
 }
@@ -389,7 +414,7 @@ const DOCUMENT_GENERATION_ERRORS: Array<{
   },
   {
     match: ["Treatment plan template requires at least one appointment"],
-    ru: "Для плана лечения нужен хотя бы один термин пациента: выберите заказ или термин с назначенными приёмами.",
+    ru: "Для плана лечения нужен хотя бы один приём пациента: выберите заказ или приём с назначенными визитами.",
     de: "Für den Behandlungsplan ist mindestens ein Termin erforderlich: Wählen Sie einen Auftrag oder Termin mit geplanten Terminen.",
   },
   {
@@ -469,12 +494,12 @@ const DOCUMENT_GENERATION_ERRORS: Array<{
   },
   {
     match: ["Provider template must match", "Provider template doctor must match"],
-    ru: "Шаблон провайдера не подходит к выбранному термину.",
+    ru: "Шаблон провайдера не подходит к выбранному приёму.",
     de: "Die Provider-Vorlage passt nicht zum gewählten Termin.",
   },
   {
     match: ["context do not match", "cannot use lead context", "cannot use patient and lead context", "must use its patient context"],
-    ru: "Заказ или термин не относится к этому пациенту.",
+    ru: "Заказ или приём не относится к этому пациенту.",
     de: "Auftrag oder Termin gehört nicht zu diesem Patienten.",
   },
   {
@@ -489,8 +514,14 @@ const DOCUMENT_GENERATION_ERRORS: Array<{
   },
   {
     match: ["Replacement document must"],
-    ru: "Новая версия должна сохранить пациента, заказ, термин и шаблон документа.",
+    ru: "Новая версия должна сохранить пациента, заказ, приём и шаблон документа.",
     de: "Die neue Version muss Patient, Auftrag, Termin und Vorlage des Dokuments beibehalten.",
+  },
+  {
+    // QA 2026-10-12 B2-05: the child forms are signed by the parents of a minor.
+    match: ["child_consent_for_adult", "generated only for a minor patient"],
+    ru: "Согласие для ребёнка оформляется только для несовершеннолетнего пациента. Для взрослого выберите «Einverständniserklärung zur Datenübermittlung».",
+    de: "Die Einverständniserklärung für ein Kind wird nur für minderjährige Patienten erstellt. Für Erwachsene wählen Sie „Einverständniserklärung zur Datenübermittlung“.",
   },
   {
     match: ["Unknown document template"],
@@ -499,7 +530,7 @@ const DOCUMENT_GENERATION_ERRORS: Array<{
   },
   {
     match: ["Patient not found", "Lead not found", "Order not found", "Appointment not found", "Replacement document not found"],
-    ru: "Пациент, лид, заказ, термин или документ не найден.",
+    ru: "Пациент, лид, заказ, приём или документ не найден.",
     de: "Patient, Anfrage, Auftrag, Termin oder Dokument nicht gefunden.",
   },
   {

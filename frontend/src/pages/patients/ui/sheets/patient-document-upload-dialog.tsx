@@ -30,6 +30,7 @@ import type {
 } from "../../model/detail-tab-types";
 import {
   blankDocumentUploadForm,
+  buildPatientDocumentUploadFormData,
   type DocumentUploadFormState,
 } from "../../model/sheet-forms";
 import { FormSection } from "../shared/patient-form-primitives";
@@ -142,7 +143,7 @@ function PatientDocumentUploadDialog({
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!patientId || !form.file || !form.art.trim()) {
+      if (!patientId || !form.file) {
         onError(dictionary.common_failed_create);
         return;
       }
@@ -150,19 +151,7 @@ function PatientDocumentUploadDialog({
       setBusy(true);
       onError("");
       try {
-        const formData = new FormData();
-        formData.append("file", form.file);
-        formData.append("patient_id", patientId);
-        if (form.orderId) formData.append("order_id", form.orderId);
-        if (form.appointmentId) formData.append("appointment_id", form.appointmentId);
-        if (form.autoName.trim()) formData.append("auto_name", form.autoName.trim());
-        formData.append("art", form.art.trim());
-        if (form.category.trim()) formData.append("category", form.category.trim());
-        formData.append("status", form.status);
-        formData.append("visibility", form.visibility);
-        if (form.isMedical) formData.append("is_medical", "true");
-        if (form.notes.trim()) formData.append("notes", form.notes.trim());
-        await uploadPatientDocument(formData);
+        await uploadPatientDocument(buildPatientDocumentUploadFormData(form, patientId, form.file));
         toast.success(dictionary.common_active);
         onOpenChange(false);
         onSaved();

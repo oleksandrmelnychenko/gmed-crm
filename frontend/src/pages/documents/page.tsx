@@ -113,6 +113,7 @@ import {
   type Lang,
   useLanguageBound,
 } from "@/lib/i18n";
+import { pluralWord, type PluralWords } from "@/lib/i18n/plural";
 import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -240,6 +241,23 @@ import {
 import { DocumentTemplateBindingFields } from "./ui/document-template-binding-fields";
 import { DocumentWorkspaceNav } from "./ui/document-workspace-nav";
 
+/**
+ * The categories a picker offers: a legacy duplicate (medical_report,
+ * conclusion, lab_analysis) only to the document already filed under it
+ * (QA 2026-10-12 B-12).
+ */
+function selectableCategories<T extends { key: string; selectable?: boolean }>(
+  categories: readonly T[],
+  current: string | null | undefined,
+): T[] {
+  return categories.filter((category) => category.selectable !== false || category.key === current);
+}
+
+/** "1 активный портальный релиз", "2 … релиза", "5 … релизов" (QA 2026-10-12 B2-02). */
+const ACTIVE_PORTAL_RELEASE_WORDS: PluralWords = {
+  ru: ["активный портальный релиз", "активных портальных релиза", "активных портальных релизов"],
+  de: ["aktive Portalfreigabe", "aktive Portalfreigaben"],
+};
 const selectClassName = shellSelectClassName;
 const textareaClassName = shellTextareaClass;
 const DEFAULT_GENERATE_TEMPLATE_ID = "patient_sticker_compact";
@@ -3243,6 +3261,9 @@ function StaffDocumentsPage({
         setEditForm(detailToEditForm(response.document));
         setShares(freshShares);
         setDetailVersions(freshVersions);
+        // The extracted text went with the file: no stale "Completed" card
+        // until a reload (QA 2026-10-12 B2-13).
+        setTextExtraction(null);
       }
       if (deleteTarget?.fromIntake) {
         setMetadataEditOpen(false);
@@ -3261,6 +3282,7 @@ function StaffDocumentsPage({
         if (detail?.id === targetId) {
           setDetail(fresh);
           setEditForm(detailToEditForm(fresh));
+          setTextExtraction(null);
         }
         if (deleteTarget?.fromIntake) {
           setMetadataEditOpen(false);
@@ -4937,7 +4959,7 @@ function StaffDocumentsPage({
                         className={selectClassName}
                       >
                         <option value="">{t.documents_no_category}</option>
-                        {categories.map((category) => (
+                        {selectableCategories(categories, uploadForm.category).map((category) => (
                           <option key={category.key} value={category.key}>
                             {documentCategoryOptionLabel(category, lang, true)}
                           </option>
@@ -5725,7 +5747,7 @@ function StaffDocumentsPage({
                       className={selectClassName}
                     >
                       <option value="">{t.documents_no_category}</option>
-                      {categories.map((category) => (
+                      {selectableCategories(categories, editForm.category).map((category) => (
                         <option key={category.key} value={category.key}>
                           {documentCategoryOptionLabel(category, lang, true)}
                         </option>
@@ -7000,7 +7022,9 @@ function StaffDocumentsPage({
                           </span>
                           {formatTranslationStatusLabel("completed", t)}
                         </span>
-                        {canRequestTranslation ? (
+                        {/* A document without its file is neither translated nor
+                            shared (QA 2026-10-12 B2-13). */}
+                        {canRequestTranslation && detail?.has_stored_file ? (
                           <Button
                             type="button"
                             size="sm"
@@ -7581,7 +7605,7 @@ function StaffDocumentsPage({
                             className={selectClassName}
                           >
                             <option value="">{t.documents_choose_category}</option>
-                            {categories.map((category) => (
+                            {selectableCategories(categories, editForm.category).map((category) => (
                               <option key={category.key} value={category.key}>
                                 {documentCategoryOptionLabel(category, lang, true)}
                               </option>
@@ -7669,7 +7693,7 @@ function StaffDocumentsPage({
                         <span className="font-semibold tabular-nums text-foreground">
                           {activePortalShares.length}
                         </span>
-                        {t.documents_active_portal_releases}
+                        {pluralWord(lang, activePortalShares.length, ACTIVE_PORTAL_RELEASE_WORDS)}
                       </span>
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-1 text-[11px] text-muted-foreground shadow-sm">
                         <span className="font-semibold tabular-nums text-emerald-700">
@@ -7840,7 +7864,7 @@ function StaffDocumentsPage({
                           </span>
                           {t.documents_waiting_confirmation}
                         </span>
-                        {canManage ? (
+                        {canManage && detail?.has_stored_file && detail.status !== "archived" ? (
                           <Button
                             type="button"
                             size="sm"
@@ -8102,7 +8126,8 @@ function DocumentIntakeQueueTable({
       {
         id: "patient",
         label: t.orders_patient,
-        accessor: (item) => `${item.patient_pid ?? ""} ${item.patient_name ?? ""}`.trim(),
+        accessor: (item) =>
+          `${item.patient_pid ?? ""} ${item.patient_name ?? ""} ${item.lead_name ?? ""}`.trim(),
         searchable: true,
         sortable: true,
         width: 220,
@@ -8113,6 +8138,12 @@ function DocumentIntakeQueueTable({
                 {item.patient_name ?? item.patient_pid ?? t.common_not_set}
               </span>
             </div>
+          ) : item.lead_name ? (
+            // A lead-cabinet upload names its lead, as the document list does
+            // (QA 2026-10-12 B2-12).
+            <span className="block truncate text-xs text-foreground" title={item.lead_name}>
+              {l("documents_grid_lead")}: {item.lead_name}
+            </span>
           ) : (
             <span className="text-xs text-muted-foreground">
               {t.documents_unlinked_document}

@@ -1057,3 +1057,160 @@ async fn deactivating_staff_revokes_patient_links_and_lists_open_work() {
             .any(|reason| reason["key"] == "appointments_attention_reason_owner_deactivated")
     );
 }
+
+/// QA 2026-10-12 B2-10: an erasure that only waits for an open order is held
+/// without a date and without an Art. 18 restriction (unless the handler asks
+/// for one), the patient reads a neutral "waits for running orders", and the
+/// sweep returns the request to the queue once nothing is open any more.
+#[tokio::test]
+async fn an_erasure_held_for_open_business_waits_for_the_orders_not_ten_years() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool, admin_id) = (ctx.app.clone(), ctx.pool.clone(), ctx.admin_id);
+    let t = tag("hold-open-business");
+    let ceo = bearer(admin_id, "ceo");
+    let patient_id = seed_patient(&pool, admin_id, &format!("{t}-a")).await;
+    let restricted_patient = seed_patient(&pool, admin_id, &format!("{t}-b")).await;
+    let patient_user = seed_user(&pool, &format!("{t}-patient"), "patient").await;
+    assign(&pool, patient_id, patient_user, admin_id).await;
+    let patient = bearer(patient_user, "patient");
+    let mut orders = Vec::new();
+    for (suffix, patient) in [("a", patient_id), ("b", restricted_patient)] {
+        let order_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+               VALUES ($1, $2, 'execution', 'active', $3)
+               RETURNING id"#,
+        )
+        .bind(format!("A-{t}-{suffix}"))
+        .bind(patient)
+        .bind(admin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        orders.push(order_id);
+    }
+
+    let hold = |patient: Uuid, restrict: Option<bool>| {
+        let app = app.clone();
+        let ceo = ceo.clone();
+        async move {
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/admin/compliance/patient/{patient}/privacy-requests"),
+                &ceo,
+                Some(json!({
+                    "request_type": "erasure",
+                    "source": "admin_intake",
+                    "reason": "Synthetic erasure request",
+                })),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED, "{body}");
+            let request_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+            let mut review = json!({
+                "action": "hold",
+                "reason": "Ihr Löschantrag wird nach Abschluss laufender Aufträge ausgeführt.",
+            });
+            if let Some(restrict) = restrict {
+                review["restrict_processing"] = json!(restrict);
+            }
+            let (status, body) = json_request(
+                &app,
+                "POST",
+                &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review"),
+                &ceo,
+                Some(review),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            (request_id, body)
+        }
+    };
+    let legal_status = |patient: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Value>("SELECT legal_status FROM patients WHERE id = $1")
+                .bind(patient)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    // No date and no restriction by default.
+    let (request_id, body) = hold(patient_id, None).await;
+    assert_eq!(body["status"], "retention_hold", "{body}");
+    assert_eq!(body["hold_reason"], "open_business", "{body}");
+    assert_eq!(body["retention_until"], Value::Null, "{body}");
+    assert_eq!(
+        body["hold_open_business"]["orders"],
+        json!([format!("A-{t}-a")]),
+        "{body}"
+    );
+    // The register names the patient's languages: the reason the patient
+    // reads is written in one of them (QA 2026-10-12 B2-08).
+    assert!(body["patient_languages"].is_array(), "{body}");
+    let status = legal_status(patient_id).await;
+    assert_ne!(status["processing_restricted"], true, "{status}");
+
+    // The patient reads that the request waits for the running orders.
+    let (status, body) =
+        json_request(&app, "GET", "/api/v1/me/privacy-requests", &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let mine = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == request_id.to_string())
+        .cloned()
+        .unwrap();
+    assert_eq!(mine["status"], "retention_hold", "{mine}");
+    assert_eq!(mine["hold_reason"], "open_business", "{mine}");
+
+    // A restriction only when the handler asks for it.
+    let (_, body) = hold(restricted_patient, Some(true)).await;
+    assert_eq!(body["hold_reason"], "open_business", "{body}");
+    let status = legal_status(restricted_patient).await;
+    assert_eq!(status["processing_restricted"], true, "{status}");
+    assert_eq!(
+        status["processing_restriction_basis"], "erasure_open_business_hold",
+        "{status}"
+    );
+
+    // While the order is open the request stays on hold.
+    gmed_server::routes::retention::requeue_closed_business_holds(&ctx.state)
+        .await
+        .unwrap();
+    let request_status = || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (String, Option<String>)>(
+                "SELECT status, context->>'hold_reason' FROM patient_privacy_requests WHERE id = $1",
+            )
+            .bind(request_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(request_status().await.0, "retention_hold");
+
+    // The order is done: the request is due again, without a hold reason.
+    sqlx::query("UPDATE orders SET status = 'completed' WHERE id = $1")
+        .bind(orders[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+    gmed_server::routes::retention::requeue_closed_business_holds(&ctx.state)
+        .await
+        .unwrap();
+    let (status, hold_reason) = request_status().await;
+    assert_eq!(status, "requested");
+    assert_eq!(hold_reason, None);
+    assert_eq!(
+        audit_count(&pool, "privacy_request_requeued", patient_id, 1).await,
+        1
+    );
+}

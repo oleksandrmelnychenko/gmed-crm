@@ -424,7 +424,7 @@ async fn list_patient_workflow_checklist(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(resp) = require_workflow_view_role(&auth) {
+    if let Err(resp) = require_workflow_read_role(&auth) {
         return resp;
     }
     if let Err(resp) = ensure_patient_scope_visible(&state, &auth, patient_id).await {
@@ -927,6 +927,16 @@ fn require_workflow_view_role(auth: &AuthUser) -> Result<(), axum::response::Res
         Role::Interpreter,
         Role::Concierge,
     ])
+}
+
+/// Reading a patient's checklist: the workflow roles plus the CEO assistant,
+/// who reads the whole patient card read-only (owner decision 2026-10-11).
+/// Completing an item keeps [`require_workflow_view_role`].
+fn require_workflow_read_role(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if auth.role == Role::CeoAssistant {
+        return Ok(());
+    }
+    require_workflow_view_role(auth)
 }
 
 fn require_workflow_manage_role(auth: &AuthUser) -> Result<(), axum::response::Response> {

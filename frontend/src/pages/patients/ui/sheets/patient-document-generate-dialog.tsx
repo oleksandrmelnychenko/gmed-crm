@@ -25,9 +25,11 @@ import {
   formatDocumentGenerationError,
   isDesignedAgencyDocumentTemplate,
   isLeadOnlyDocumentTemplate,
+  isTemplateForPatientAge,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
 } from "@/pages/documents/model/document-bindings";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import {
   buildGeneratedDocumentManualTextDraft,
   buildGenerateDocumentAutoName,
@@ -270,7 +272,7 @@ export function PatientDocumentGenerateDialog({
           addresseePerson: tx("Адресат: персона", "Adressat: Person"),
           ordersPatient: tx("Пациент", "Patient"),
           ordersTitle: tx("Заказ", "Auftrag"),
-          appointmentsTitle: tx("Термин", "Termin"),
+          appointmentsTitle: tx("Приём", "Termin"),
           sectionBindings: tx("Поля шаблона", "Vorlagenfelder"),
           textBlocks: tx("Текстовые блоки", "Textbausteine"),
         },
@@ -398,7 +400,13 @@ export function PatientDocumentGenerateDialog({
                 ? tx("Выберите шаблон", "Vorlage wählen")
                 : tx("Загрузка…", "Laden…")}
           </option>
-          {templates.map((template) => (
+          {templates
+            .filter(
+              (template) =>
+                template.id === form.templateId ||
+                isTemplateForPatientAge(template.id, patientProfile?.birth_date, appDateKey()),
+            )
+            .map((template) => (
             <option key={template.id} value={template.id}>
               {template.provider_name ? `${template.label} · ${template.provider_name}` : template.label}
             </option>
@@ -541,7 +549,7 @@ export function PatientDocumentGenerateDialog({
               {selectedTemplateSupportsAppointment ? (
               <label className="block">
                 <span className="mb-1 block text-[11px] font-medium text-muted-foreground">
-                  {tx("Термин", "Termin")}
+                  {tx("Приём", "Termin")}
                 </span>
                 <NativeComboboxSelect
                   value={form.appointmentId}
@@ -554,11 +562,11 @@ export function PatientDocumentGenerateDialog({
                   }
                 >
                   <option value="">
-                    {tx("Без привязки к термину", "Ohne Terminbezug")}
+                    {tx("Без привязки к приёму", "Ohne Terminbezug")}
                   </option>
                   {appointments.map((appointment) => (
                     <option key={appointment.id} value={appointment.id}>
-                      {appointment.title} · {appointment.date}
+                      {appointment.title} · {formatAppDate(appointment.date) || appointment.date}
                     </option>
                   ))}
                 </NativeComboboxSelect>

@@ -15,7 +15,6 @@ import {
   localizeTimelineCategory,
   localizeTimelineEntityType,
   localizeTimelineSource,
-  localizeTimelineTitle,
   timelineEntityTypeBadgeClass,
 } from "@/lib/timeline-labels";
 import { cn } from "@/lib/utils";
@@ -25,6 +24,7 @@ import {
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
 } from "../../model/detail-model";
+import { patientTimelineItemLabels } from "../../model/timeline-item-labels";
 
 type LocalizeFn = (key: string) => string;
 type StatusLabelFn = (status: string) => string;
@@ -262,6 +262,7 @@ export function PatientTimelineTab({
                       canViewInvoices,
                       canOpenComplianceWorkspace,
                     });
+                    const labels = patientTimelineItemLabels(item, l, statusLabel);
 
                     return (
                       <button
@@ -299,16 +300,14 @@ export function PatientTimelineTab({
                             statusColors[item.status] ?? "border-border/60 bg-muted/25 text-muted-foreground",
                           )}
                         >
-                          {statusLabel(item.status)}
+                          {labels.status}
                         </Badge>
                         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
-                          {localizeTimelineTitle(item.title, l)}
+                          {labels.title}
                         </span>
                         <span className="hidden shrink-0 truncate text-xs text-muted-foreground lg:block lg:max-w-[260px]">
-                          {localizeTimelineCategory(item.category, l)}
-                          {item.source_label
-                            ? ` · ${localizeTimelineSource(item.source_label, l)}`
-                            : ""}
+                          {labels.category}
+                          {labels.source ? ` · ${labels.source}` : ""}
                         </span>
                         <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
                           {formatDateTime(item.happened_at)}

@@ -31,14 +31,16 @@ describe("formatDocumentSourceLabel", () => {
     }
     expect(formatDocumentSourceLabel("paper_signature", ru)).toBe("Подписан на бумаге (скан)");
     // A known template is named (QA 2026-10-11).
+    // An origin reads "generated from …", not the button "Generate from …"
+    // (QA 2026-10-12 B2-13).
     expect(formatDocumentSourceLabel("template:confidentiality_release", ru)).toBe(
-      `${ru.documents_generate_from_template}: Освобождение от врачебной тайны`,
+      "Сгенерирован из шаблона: Освобождение от врачебной тайны",
     );
     expect(formatDocumentSourceLabel("template:discharge_letter", ru)).toBe(
-      ru.documents_generate_from_template,
+      "Сгенерирован из шаблона",
     );
     expect(formatDocumentSourceLabel("auto_preparation:abc:def", de)).toBe(
-      de.documents_generate_from_template,
+      "Aus Vorlage erstellt",
     );
   });
 

@@ -211,12 +211,28 @@ export type UploadResponse = {
   rescreen: { leads: number; patients: number; new_hits: number; errors: number } | null;
 };
 
+/**
+ * A person or organisation whose citizenship or residence is a blocked country: the CEO sees who
+ * triggers the block before lifting it (QA 2026-10-12 B2-11). `kind` is a subject kind of a hit
+ * or `paying_patient` (a patient record that pays the orders or invoices); `role` the relation's
+ * role (`default_payer`, `invoice_payer`, `legal_representative`) or `payer_contact`.
+ */
+export type CountrySubject = {
+  kind: string;
+  name: string;
+  role: string | null;
+  organisation: boolean;
+  countries: string[];
+};
+
 type CountryBlockEntry = {
   name: string | null;
   flag: "blocked_country" | "country_lifted";
   found: string[];
   blocking: string[];
   lift: CountryLift | null;
+  /** An older server answers without it. */
+  subjects?: CountrySubject[];
 };
 
 /**

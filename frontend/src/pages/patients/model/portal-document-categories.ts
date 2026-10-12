@@ -3,6 +3,7 @@ import type { PortalDocumentItem } from "./portal-shared";
 export type PortalDocumentCategoryKey =
   | "all"
   | "correspondence"
+  | "consents"
   | "analyses"
   | "conclusions"
   | "invoices"
@@ -19,6 +20,10 @@ export const PORTAL_DOCUMENT_CATEGORY_TABS: Array<{
   {
     key: "correspondence",
     labelKey: "portal_documents_category_correspondence",
+  },
+  {
+    key: "consents",
+    labelKey: "portal_documents_category_consents",
   },
   {
     key: "analyses",
@@ -50,6 +55,21 @@ export function portalDocumentCategoryKey(
     raw.includes("ubersetzung")
   ) {
     return "translations";
+  }
+
+  // Consents, the confidentiality release, the privacy information and
+  // contracts are legal documents, not correspondence (QA 2026-10-12 B2-13).
+  if (
+    raw.includes("consent") ||
+    raw.includes("confidentiality_release") ||
+    raw.includes("privacy") ||
+    raw.includes("einverst") ||
+    raw.includes("dsgvo") ||
+    raw.includes("gdpr") ||
+    raw.includes("contract") ||
+    raw.includes("vertrag")
+  ) {
+    return "consents";
   }
 
   if (

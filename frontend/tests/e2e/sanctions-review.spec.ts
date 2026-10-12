@@ -391,6 +391,16 @@ test("the CEO lifts a patient's country block from the countries tab", async ({ 
             flag: lifted ? "country_lifted" : "blocked_country",
             found: ["RU"],
             blocking: lifted ? [] : ["RU"],
+            // Who triggers the block (QA 2026-10-12 B2-11).
+            subjects: [
+              {
+                kind: "patient_relation",
+                name: "Beispiel GmbH",
+                role: "default_payer",
+                organisation: true,
+                countries: ["RU"],
+              },
+            ],
             lift: lifted
               ? {
                   id: "lift-1",
@@ -416,6 +426,10 @@ test("the CEO lifts a patient's country block from the countries tab", async ({ 
   await expect(item).toContainText("Anna Muster");
   await expect(item).toContainText("P-0042");
   await expect(item).toContainText("Страна");
+  // The entry names the paying organisation that carries the country.
+  await expect(page.getByTestId("sanctions-country-patient-subjects")).toContainText(
+    "Beispiel GmbH (организация) — Россия",
+  );
   await expect(item.getByRole("link", { name: "Anna Muster" })).toHaveAttribute(
     "href",
     `/patients?patient=${PATIENT_ID}`,

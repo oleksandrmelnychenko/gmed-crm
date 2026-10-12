@@ -20,7 +20,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Lang } from "@/lib/i18n";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import { appDateKey, appDateKeyOf, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -2284,6 +2285,12 @@ function localizedClinicalSeverity(severity: string | null | undefined, tx: Bili
   }
 }
 
+/** "1 линия", "3 линии", "5 линий" (QA 2026-10-12 B2-02). */
+const MEDICATION_SERIES_WORDS: PluralWords = {
+  ru: ["линия", "линии", "линий"],
+  de: ["Serie", "Serien"],
+};
+
 function MedicationHistoryTree({
   series,
   total,
@@ -2322,7 +2329,9 @@ function MedicationHistoryTree({
             <h3 className="text-sm font-semibold text-foreground">
               {tx("История медикаментов", "Medikationsverlauf")}
             </h3>
-            <CountBadge>{series.length} {tx("линий", "Serien")}</CountBadge>
+            <CountBadge>
+              {formatCount(tx("ru", "de") as Lang, series.length, MEDICATION_SERIES_WORDS)}
+            </CountBadge>
           </div>
           <p className="mt-0.5 max-w-3xl text-xs leading-4 text-muted-foreground">
             {tx(
@@ -2350,7 +2359,8 @@ function MedicationHistoryTree({
           const currentRegimen = current
             ? [
                 current.staerke,
-                current.form,
+                // The form as in the medication table ("Tabletten"), not its code TABL.
+                darreichungsformLabel(current.form),
                 localizedMedicationRoute(current.einnahmeform, tx),
                 [current.dose_morgens, current.dose_mittags, current.dose_abends, current.dose_nachts]
                   .some(Boolean)
@@ -3342,7 +3352,7 @@ export function PatientClinicalTab({
           medication: medications.map((item, index) => ({
             id: item.id ?? `medication-${index}`,
             primary: [item.handelsname, item.wirkstoff].filter(Boolean).join(" · "),
-            secondary: [item.staerke, item.form].filter(Boolean).join(" · ") || null,
+            secondary: [item.staerke, darreichungsformLabel(item.form)].filter(Boolean).join(" · ") || null,
             medicationSeriesId: item.medication_series_id,
             medicationIdentity: item.wirkstoff,
           })),

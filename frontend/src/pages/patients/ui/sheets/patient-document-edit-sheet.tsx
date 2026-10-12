@@ -293,8 +293,12 @@ function mergeCategories(
   currentCategory: string,
   lang: "de" | "ru",
 ) {
-  const merged = [...categories];
-  const knownKeys = new Set(merged.map((item) => item.key));
+  // A legacy duplicate (medical_report, conclusion, lab_analysis) is offered
+  // only to the document already filed under it (QA 2026-10-12 B-12).
+  const merged = categories.filter(
+    (category) => category.selectable !== false || category.key === currentCategory,
+  );
+  const knownKeys = new Set(categories.map((item) => item.key));
   const knownCodes = new Set(
     merged.map((item) => item.short_code?.toUpperCase()).filter(Boolean),
   );

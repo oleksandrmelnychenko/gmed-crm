@@ -1600,6 +1600,37 @@ async fn require_patient_clinical_access(
     ensure_patient_access(state, auth, patient_id).await
 }
 
+/// Reading the symptoms and pain records: the writers above plus the CEO
+/// assistant, who reads the whole patient card read-only without an
+/// assignment (owner decision 2026-10-11). Saving keeps
+/// [`require_patient_clinical_access`].
+async fn require_patient_clinical_read_access(
+    state: &AppState,
+    auth: &AuthUser,
+    patient_id: Uuid,
+) -> Result<(), axum::response::Response> {
+    if auth.role != Role::CeoAssistant {
+        return require_patient_clinical_access(state, auth, patient_id).await;
+    }
+    let exists =
+        sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM patients WHERE id = $1)")
+            .bind(patient_id)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|error| {
+                tracing::error!(error = %error, patient_id = %patient_id, "load patient subject");
+                err(StatusCode::INTERNAL_SERVER_ERROR, "Failed")
+            })?;
+    if !exists {
+        return Err(err(StatusCode::NOT_FOUND, "Patient not found"));
+    }
+    if crate::routes::patients::has_patient_access(state, auth, patient_id).await? {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
 async fn load_patient_owned_case_section<'e, E>(
     executor: E,
     patient_id: Uuid,
@@ -1675,7 +1706,7 @@ async fn get_patient_pain_records(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+    if let Err(response) = require_patient_clinical_read_access(&state, &auth, patient_id).await {
         return response;
     }
     match load_patient_owned_case_section(&state.db, patient_id, "pain_records").await {
@@ -1813,7 +1844,7 @@ async fn get_patient_symptoms(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(response) = require_patient_clinical_access(&state, &auth, patient_id).await {
+    if let Err(response) = require_patient_clinical_read_access(&state, &auth, patient_id).await {
         return response;
     }
     match load_patient_owned_case_section(&state.db, patient_id, "symptome").await {

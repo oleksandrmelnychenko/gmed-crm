@@ -36,6 +36,11 @@ use gmed_domain::role::Role;
 // frontend mirror `CLINICAL_IMPORT_SERVER_ROLES` (patients/model/detail-model.ts)
 // aligned.
 const IMPORT_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager];
+/// Reading the imports and the medication import history: the importers and
+/// the CEO assistant, who reads the whole patient card read-only (owner
+/// decision 2026-10-11). The frontend offers the import entry points to the
+/// importers only (`CLINICAL_IMPORT_SERVER_ROLES`).
+const IMPORT_READ_ROLES: &[Role] = &[Role::Ceo, Role::PatientManager, Role::CeoAssistant];
 const UNSUPPORTED_IMPORT_FILE: &str = "Clinical import supports only PDF, PNG, and JPEG documents";
 const MAX_IMPORT_FILE_BYTES: usize = 25 * 1024 * 1024;
 
@@ -1180,7 +1185,7 @@ async fn ensure_access(
     auth: &AuthUser,
     patient_id: Uuid,
 ) -> Result<(), axum::response::Response> {
-    auth.require_any_role(IMPORT_ROLES)?;
+    auth.require_any_role(IMPORT_READ_ROLES)?;
     match crate::routes::patients::has_patient_access(state, auth, patient_id).await {
         Ok(true) => Ok(()),
         Ok(false) => Err(err(StatusCode::FORBIDDEN, "Insufficient permissions")),

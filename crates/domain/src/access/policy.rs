@@ -66,14 +66,11 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
     let sensitivity_allowed = match role {
         Role::Ceo => true,
 
-        Role::CeoAssistant => match data_sensitivity {
-            DataSensitivity::General => true,
-            DataSensitivity::Internal => true,
-            DataSensitivity::PatientIdentity => is_released(*share_status),
-            DataSensitivity::Medical => is_released(*share_status),
-            DataSensitivity::Financial => is_released(*share_status),
-            DataSensitivity::Service => is_released(*share_status),
-        },
+        // Owner decision 2026-10-11: the CEO assistant reads everything the
+        // CEO reads — identity scans, medical and internal documents,
+        // financial and service data — whether or not it was released. It
+        // writes nothing: every mutation route leaves the role out.
+        Role::CeoAssistant => true,
 
         Role::PatientManager => true,
 
@@ -170,25 +167,7 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
             }
         }
 
-        Role::CeoAssistant => {
-            let needs_release = match data_sensitivity {
-                DataSensitivity::PatientIdentity => true,
-                DataSensitivity::Medical => true,
-                DataSensitivity::Financial => true,
-                DataSensitivity::General => false,
-                DataSensitivity::Internal => false,
-                DataSensitivity::Service => false,
-            };
-            if needs_release {
-                if is_released(*share_status) {
-                    AccessDecision::allow("Data released for CEO assistant")
-                } else {
-                    AccessDecision::deny("Data not released for CEO assistant")
-                }
-            } else {
-                AccessDecision::allow("General/internal access for CEO assistant")
-            }
-        }
+        Role::CeoAssistant => AccessDecision::allow("CEO assistant reads everything read-only"),
 
         Role::Ceo => AccessDecision::allow("CEO has full access"),
         Role::PatientManager => AccessDecision::allow("Access granted by role and sensitivity"),
@@ -199,16 +178,6 @@ pub fn check_access(ctx: &AccessContext) -> AccessDecision {
         Role::Billing => AccessDecision::allow("Access granted by role and sensitivity"),
         Role::Sales => AccessDecision::allow("Access granted by role and sensitivity"),
         Role::ItAdmin => AccessDecision::deny("Legacy IT admin role is disabled"),
-    }
-}
-
-fn is_released(status: Option<ShareStatus>) -> bool {
-    match status {
-        Some(ShareStatus::ReleasedInternal) => true,
-        Some(ShareStatus::ReleasedExternal) => true,
-        Some(ShareStatus::PatientVisible) => true,
-        Some(ShareStatus::InternalOnly) => false,
-        None => false,
     }
 }
 
@@ -470,27 +439,6 @@ mod tests {
         }
     }
 
-    fn ceo_assistant_expected(sens: DataSensitivity, share: Option<ShareStatus>) -> bool {
-        let needs_release = matches!(
-            sens,
-            DataSensitivity::PatientIdentity
-                | DataSensitivity::Medical
-                | DataSensitivity::Financial
-                | DataSensitivity::Service
-        );
-        if !needs_release {
-            return true;
-        }
-        matches!(
-            share,
-            Some(
-                ShareStatus::ReleasedInternal
-                    | ShareStatus::ReleasedExternal
-                    | ShareStatus::PatientVisible
-            )
-        )
-    }
-
     #[test]
     fn rbac_matrix_ceo_always_allows() {
         for assigned in [false, true] {
@@ -630,14 +578,15 @@ mod tests {
     }
 
     #[test]
-    fn rbac_matrix_ceo_assistant_release_gating_independent_of_assignment() {
+    /// Owner decision 2026-10-11: the CEO assistant reads everything, released
+    /// or not, without an assignment (read-only; writes are refused by role).
+    fn rbac_matrix_ceo_assistant_reads_everything_independent_of_assignment() {
         for assigned in [false, true] {
             for sens in ALL_SENSITIVITIES {
                 for share in ALL_SHARES {
                     let got = check_access(&ctx(Role::CeoAssistant, assigned, sens, share)).allowed;
-                    let exp = ceo_assistant_expected(sens, share);
-                    assert_eq!(
-                        got, exp,
+                    assert!(
+                        got,
                         "ceo_assistant assigned={assigned} sens={sens:?} share={share:?}"
                     );
                 }

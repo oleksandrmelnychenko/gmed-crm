@@ -107,7 +107,20 @@ struct ReviewPrivacyRequestRequest {
     /// reject a request and to revise an approved one; shown in the portal.
     reason: Option<String>,
     retention_days: Option<i64>,
+    /// A hold of an erasure that waits only for open orders or invoices
+    /// restricts processing (Art. 18 DSGVO) only when the handler asks for it:
+    /// the open order still has to be carried out (QA 2026-10-12 B2-10). A
+    /// retention hold always restricts.
+    restrict_processing: Option<bool>,
 }
+
+/// Why a request is on hold (`context.hold_reason` of a `retention_hold`):
+/// the retention of the medical documentation (until its end), open orders or
+/// invoices (until they are closed, re-checked by the retention sweep), or a
+/// date the handler chose (or the configured default).
+const HOLD_REASON_RETENTION: &str = "retention";
+const HOLD_REASON_OPEN_BUSINESS: &str = "open_business";
+const HOLD_REASON_DATE: &str = "date";
 
 struct PrivacyRequestMeta {
     id: Uuid,
@@ -142,7 +155,8 @@ const PRIVACY_REQUEST_COLUMNS: &str = r#"pr.id, pr.patient_id, p.patient_id AS p
                   pr.retention_until, pr.review_note, pr.decision_reason, pr.requested_at,
                   pr.reviewed_at, pr.executed_at, pr.context,
                   CASE WHEN p.clinical_retention_until > now()
-                       THEN p.clinical_retention_until END AS patient_retention_until"#;
+                       THEN p.clinical_retention_until END AS patient_retention_until,
+                  p.languages AS patient_languages"#;
 
 /// The snapshot a new request takes of the patient's retention (`$1` is the
 /// patient): the end of the medical documentation's retention while it runs.
@@ -196,7 +210,7 @@ fn erasure_blocked_by_retention(retention_until: DateTime<Utc>) -> axum::respons
 /// The business with a patient that is still open (audit 2026-10-01, item 6):
 /// running orders and invoices with an amount still to settle.
 #[derive(Debug, Default)]
-struct OpenBusiness {
+pub(crate) struct OpenBusiness {
     /// Numbers of the orders still `active` or `paused`.
     orders: Vec<String>,
     /// Numbers of issued invoices with an open amount, or paid advances not
@@ -207,9 +221,20 @@ struct OpenBusiness {
 }
 
 impl OpenBusiness {
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.orders.is_empty() && self.invoices.is_empty() && self.invoice_drafts == 0
     }
+}
+
+/// [`load_open_business_in_tx`] outside a decision: a read of its own.
+pub(crate) async fn load_open_business(
+    state: &AppState,
+    patient_id: Uuid,
+) -> Result<OpenBusiness, sqlx::Error> {
+    let mut tx = state.db.begin().await?;
+    let open = load_open_business_in_tx(&mut tx, patient_id).await?;
+    tx.rollback().await?;
+    Ok(open)
 }
 
 /// The patient's open business, read in the erasure transaction: orders not
@@ -217,7 +242,7 @@ impl OpenBusiness {
 /// settled by credit notes, payments and applied advances (a draft too), and
 /// advance invoices whose paid amount is not yet applied to a final invoice
 /// (the patient's money the agency still holds).
-async fn load_open_business_in_tx(
+pub(crate) async fn load_open_business_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     patient_id: Uuid,
 ) -> Result<OpenBusiness, sqlx::Error> {
@@ -2153,12 +2178,46 @@ async fn review_privacy_request(
         return erasure_blocked_by_retention(retention_until);
     }
 
+    // An erasure held without a running retention and without a chosen date
+    // waits for the open orders and invoices instead (QA 2026-10-12 B2-10):
+    // no date (the retention sweep re-checks the business and returns the
+    // request to the queue once nothing is open), and a restriction of
+    // processing only if the handler asks for it.
+    let open_business = if action == "hold"
+        && is_erasure
+        && patient_retention.is_none()
+        && body.retention_days.is_none()
+    {
+        match load_open_business(&state, request.patient_id).await {
+            Ok(open) => Some(open).filter(|open| !open.is_empty()),
+            Err(e) => {
+                tracing::error!(error = %e, request_id = %request_id, "load open business for hold");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to review privacy request",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let hold_reason = (action == "hold").then(|| {
+        if open_business.is_some() {
+            HOLD_REASON_OPEN_BUSINESS
+        } else if patient_retention.is_some() && body.retention_days.is_none() {
+            HOLD_REASON_RETENTION
+        } else {
+            HOLD_REASON_DATE
+        }
+    });
+
     // Approving or rejecting refreshes the retention snapshot (or keeps the
     // old one); a hold lasts until the retention ends, an explicit number of
-    // days, or the configured default.
+    // days, or the configured default — a hold for open business has no date.
     let (next_status, retention_until) = match action.as_str() {
         "approve" => ("approved", patient_retention),
         "reject" => ("rejected", patient_retention),
+        "hold" if open_business.is_some() => ("retention_hold", None),
         "hold" => {
             let until = match (body.retention_days, patient_retention) {
                 (Some(days), _) => reviewed_at + Duration::days(days.max(1)),
@@ -2174,8 +2233,12 @@ async fn review_privacy_request(
         _ => unreachable!(),
     };
     // An erasure that waits for the retention to end is a restriction of
-    // processing in the meantime (§ 35 Abs. 3 BDSG with Art. 18 DSGVO).
-    let restrict_processing = is_erasure && next_status == "retention_hold";
+    // processing in the meantime (§ 35 Abs. 3 BDSG with Art. 18 DSGVO); one
+    // that waits for open business only when the handler chose it.
+    let restrict_processing = is_erasure
+        && next_status == "retention_hold"
+        && (open_business.is_none() || body.restrict_processing == Some(true));
+    let clear_retention_until = open_business.is_some();
     // Approving clears an earlier hold reason; it no longer applies.
     let next_decision_reason = if action == "approve" {
         None
@@ -2183,11 +2246,21 @@ async fn review_privacy_request(
         reason.clone()
     };
 
+    let open_business_json = open_business.as_ref().map(|open| {
+        json!({
+            "orders": open.orders,
+            "invoices": open.invoices,
+            "invoice_drafts": open.invoice_drafts,
+        })
+    });
     let decision_entry = json!({
         "action": action,
         "from_status": request.status,
         "to_status": next_status,
         "reason": next_decision_reason,
+        "hold_reason": hold_reason,
+        "open_business": open_business_json,
+        "processing_restricted": restrict_processing,
         "by": auth.user_id,
         "at": reviewed_at.to_rfc3339(),
     });
@@ -2195,6 +2268,9 @@ async fn review_privacy_request(
         "review_action": action,
         "reviewed_at": reviewed_at.to_rfc3339(),
         "retention_until": retention_until.map(|value| value.to_rfc3339()),
+        // Null after an approval or rejection: only a hold has a reason.
+        "hold_reason": hold_reason,
+        "hold_open_business": open_business_json,
     });
 
     let failed = |e: sqlx::Error| {
@@ -2212,7 +2288,8 @@ async fn review_privacy_request(
     let updated = sqlx::query(
         r#"UPDATE patient_privacy_requests
            SET status = $2,
-               retention_until = COALESCE($3, retention_until),
+               retention_until = CASE WHEN $11 THEN NULL
+                                      ELSE COALESCE($3, retention_until) END,
                review_note = COALESCE($4, review_note),
                reviewed_by = $5,
                reviewed_at = $6,
@@ -2236,6 +2313,7 @@ async fn review_privacy_request(
     .bind(next_decision_reason.clone())
     .bind(&decision_entry)
     .bind(&request.status)
+    .bind(clear_retention_until)
     .execute(&mut *tx)
     .await;
 
@@ -2272,7 +2350,11 @@ async fn review_privacy_request(
             "processing_restricted_at": reviewed_at.to_rfc3339(),
             "processing_restriction_request_id": request.id.to_string(),
             "processing_restriction_by": auth.user_id.to_string(),
-            "processing_restriction_basis": "erasure_retention_hold",
+            "processing_restriction_basis": if open_business.is_some() {
+                "erasure_open_business_hold"
+            } else {
+                "erasure_retention_hold"
+            },
             "processing_restricted_until": retention_until.map(|value| value.to_rfc3339()),
         }))
         .execute(&mut *tx)
@@ -2306,6 +2388,7 @@ async fn review_privacy_request(
             "review_note": review_note,
             "decision_reason": next_decision_reason,
             "processing_restricted": restrict_processing,
+            "hold_reason": hold_reason,
         }),
     ));
 
@@ -4778,6 +4861,19 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "deadline_extension": context.get("deadline_extension").cloned(),
         "subject_notification": context.get("subject_notification").cloned(),
         "recipients_notification": context.get("recipients_notification").cloned(),
+        // Why a held request waits: `retention`, `open_business` or `date`.
+        "hold_reason": (status == "retention_hold")
+            .then(|| context.get("hold_reason").and_then(Value::as_str))
+            .flatten(),
+        "hold_open_business": (status == "retention_hold")
+            .then(|| context.get("hold_open_business").cloned())
+            .flatten(),
+        // The languages the patient speaks: the reason told to the patient is
+        // written in the first one the templates know (QA 2026-10-12 B2-08).
+        "patient_languages": row
+            .try_get::<Option<Vec<String>>, _>("patient_languages")
+            .unwrap_or_default()
+            .unwrap_or_default(),
     })
 }
 

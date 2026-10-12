@@ -1498,3 +1498,150 @@ async fn interpreter_team_lead_reviews_team_reports_without_patient_assignment()
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
 }
+
+/// Owner decision 2026-10-11 (QA 2026-10-12 B2-06, E2-02): the CEO assistant
+/// reads every tab of a patient card without an assignment — appointments
+/// (a medical one in full), orders, the timeline with its clinical and
+/// financial events, curators, cases, the workflow checklist, the
+/// document alerts and re-check, symptoms, pain, card entries, medical orders,
+/// risk scores and the clinical import history — and writes none of them.
+#[tokio::test]
+async fn ceo_assistant_reads_every_patient_tab_read_only() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("patient-assistant-tabs");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let provider_id = seed_provider(&pool, &tag).await;
+    let medical_title = format!("Cardiology consult {tag}");
+    let medical_appointment_id = seed_appointment(
+        &pool,
+        patient_id,
+        provider_id,
+        admin_id,
+        "medical",
+        &medical_title,
+        "2026-04-15",
+    )
+    .await;
+    seed_case(
+        &pool,
+        patient_id,
+        admin_id,
+        &tag,
+        &format!("Chest pain {tag}"),
+    )
+    .await;
+    let (order_id, invoice_id) =
+        seed_order_with_invoice(&pool, patient_id, admin_id, &tag, &[]).await;
+    let manager_id = seed_staff_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let assistant_id = seed_staff_user(&pool, &tag, "ceo_assistant").await;
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+
+    for tab in [
+        "appointments",
+        "orders",
+        "timeline",
+        "assignments",
+        "cases",
+        "relations",
+        "workflow-checklist",
+        "document-alerts",
+        "recheck",
+        "symptoms",
+        "pain",
+        "card-entries",
+        "medical-orders",
+        "risk-scores",
+        "clinical-document-imports",
+        "medication-import-history",
+        "clinical",
+    ] {
+        let path = format!("/api/v1/patients/{patient_id}/{tab}");
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+
+    let (_, appointments) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/appointments"),
+        &assistant,
+        None,
+    )
+    .await;
+    let medical = find_resource(&appointments, medical_appointment_id);
+    assert_eq!(medical["title"], medical_title, "{medical}");
+    assert_eq!(medical["is_blocked"], false);
+    let (_, orders) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/orders"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert!(response_contains_resource(&orders, order_id), "{orders}");
+    let (_, timeline) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert!(timeline_contains_entity(&timeline, order_id), "{timeline}");
+    assert!(
+        timeline_contains_entity(&timeline, invoice_id),
+        "{timeline}"
+    );
+    assert!(
+        timeline_contains_entity(&timeline, medical_appointment_id),
+        "{timeline}"
+    );
+    assert!(timeline.to_string().contains(&medical_title), "{timeline}");
+    let (_, curators) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/assignments"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert!(
+        curators.to_string().contains(&manager_id.to_string()),
+        "{curators}"
+    );
+
+    // Read-only: every write stays closed.
+    for (path, body) in [
+        (
+            format!("/api/v1/patients/{patient_id}/assign"),
+            json!({ "user_id": assistant_id }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/symptoms"),
+            json!({ "items": [] }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/pain"),
+            json!({ "items": [] }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/risk-scores"),
+            json!({ "computed_at": "2026-10-12T10:00:00Z", "score_type": "other", "score_value": 1.0 }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/workflow-checklist"),
+            json!({ "item_text": "Assistant item" }),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/update"),
+            json!({ "notes": "Assistant note" }),
+        ),
+    ] {
+        let (status, response) = json_request(&app, "POST", &path, &assistant, Some(body)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
+    }
+}

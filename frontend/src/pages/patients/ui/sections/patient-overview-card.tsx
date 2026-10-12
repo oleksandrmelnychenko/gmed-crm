@@ -9,7 +9,8 @@ import {
   formatAppDate,
   parseDateKey,
 } from "@/lib/app-time-zone";
-import { useLang } from "@/lib/i18n";
+import { useLang, type Lang } from "@/lib/i18n";
+import { formatCount } from "@/lib/i18n/plural";
 import { cn } from "@/lib/utils";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
@@ -644,7 +645,10 @@ export function PatientOverviewCard({
       storageKey="patient-overview-medications"
       footer={(
         <span className="tabular-nums text-muted-foreground">
-          {profileMedications.length} {tx("препаратов", "Medikamente")}
+          {formatCount(tx("ru", "de") as Lang, profileMedications.length, {
+            ru: ["препарат", "препарата", "препаратов"],
+            de: ["Medikament", "Medikamente"],
+          })}
         </span>
       )}
       className="w-full min-w-0 shadow-none"

@@ -1,6 +1,14 @@
 import type { Translations } from "@/lib/i18n";
 import { knownDocumentCodeLabel } from "@/lib/required-document-labels";
 
+/**
+ * "Generated from a template" as an origin (a past participle), not the
+ * button "Generate from template" (QA 2026-10-12 B2-13).
+ */
+function generatedFromTemplate(tr: Translations): string {
+  return tr.uiText.documents_origin_generated_from_template ?? tr.documents_generate_from_template;
+}
+
 /** Localize system origins while preserving names entered by staff. */
 export function formatDocumentSourceLabel(source: string | null | undefined, tr: Translations) {
   const value = source?.trim();
@@ -22,7 +30,7 @@ export function formatDocumentSourceLabel(source: string | null | undefined, tr:
     case "generated":
     case "document_generation":
     case "template":
-      return tr.documents_generate_from_template;
+      return generatedFromTemplate(tr);
     case "translation":
     case "translation_request":
       return tr.documents_translation_requests;
@@ -44,10 +52,10 @@ export function formatDocumentSourceLabel(source: string | null | undefined, tr:
     ? knownDocumentCodeLabel(template, (key) => tr.uiText[key] ?? key)
     : undefined;
   if (templateName) {
-    return `${tr.documents_generate_from_template}: ${templateName}`;
+    return `${generatedFromTemplate(tr)}: ${templateName}`;
   }
   if (/^(template|provider_template|auto_preparation):/.test(origin)) {
-    return tr.documents_generate_from_template;
+    return generatedFromTemplate(tr);
   }
   return tr.uiText[`documents_origin_${origin}`] ?? value;
 }

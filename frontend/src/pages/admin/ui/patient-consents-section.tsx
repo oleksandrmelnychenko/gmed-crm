@@ -2,11 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Banner, Field, Section, selectClass } from "@/components/ui-shell";
+import { Banner, Field, Section, selectClass, textareaClass } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 import { fetchPatientConsents, savePatientConsent } from "@/pages/admin/data/admin-api";
 
 type ConsentRecord = {
@@ -38,13 +47,15 @@ function day(value: string | null) {
   return value ? formatAppDate(value) || value : "—";
 }
 
-export type ConsentRowStatus = "active" | "expired" | "superseded" | "revoked";
+export type ConsentRowStatus = "active" | "expired" | "superseded" | "ended" | "revoked";
 
 /**
  * State of one history row. A revoke writes its own row (granted = false) and
  * closes the grant before it; a renewed grant closes the previous grant too,
  * so `revoked_at` alone cannot tell "withdrawn" from "replaced". The row that
- * followed decides: the newest grant is active until it expires.
+ * followed decides: the newest grant is active until it expires. The grant a
+ * revocation closed reads "valid until revoked", so the revocation is listed
+ * once, as its own row (QA 2026-10-12 B2-13).
  */
 export function consentRowStatus(
   consent: Pick<ConsentRecord, "granted" | "revoked_at" | "expires_at">,
@@ -52,7 +63,7 @@ export function consentRowStatus(
   now: number = Date.now(),
 ): ConsentRowStatus {
   if (!consent.granted) return "revoked";
-  if (newer) return newer.granted ? "superseded" : "revoked";
+  if (newer) return newer.granted ? "superseded" : "ended";
   if (consent.revoked_at) return "revoked";
   if (consent.expires_at && new Date(consent.expires_at).getTime() <= now) return "expired";
   return "active";
@@ -62,8 +73,113 @@ const CONSENT_STATUS_BADGE: Record<ConsentRowStatus, string> = {
   active: "bg-emerald-500/15 text-emerald-700",
   expired: "bg-amber-500/15 text-amber-800",
   superseded: "bg-slate-500/15 text-slate-700",
+  ended: "bg-slate-500/15 text-slate-700",
   revoked: "bg-red-500/15 text-red-700",
 };
+
+/** How the patient's revocation reached GMED (Art. 7 Abs. 3 DSGVO evidence). */
+const REVOCATION_CHANNELS = ["letter", "email", "portal", "in_person", "phone"] as const;
+type RevocationChannel = (typeof REVOCATION_CHANNELS)[number];
+
+/** The consents whose revocation blocks new orders until a newer signed one. */
+const ORDER_BLOCKING_CONSENTS = new Set(["dsgvo_data_transfer", "schweigepflicht_release"]);
+
+/** The note a revocation is recorded with: channel and reason, at most 500 characters. */
+export function revocationNote(channelLabel: string, reason: string): string {
+  return `${channelLabel}: ${reason.trim()}`.slice(0, 500);
+}
+
+/**
+ * "Revoke" asks before it records anything: how the revocation was received
+ * and why (at least 10 characters), and what it changes (QA 2026-10-12 B2-13).
+ */
+function ConsentRevokeDialog({
+  consentType,
+  typeLabel,
+  l,
+  onClose,
+  onConfirm,
+}: {
+  consentType: string | null;
+  typeLabel: (value: string) => string;
+  l: (key: string) => string;
+  onClose: () => void;
+  onConfirm: (note: string) => Promise<void>;
+}) {
+  const [channel, setChannel] = useState<RevocationChannel | "">("");
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (consentType) {
+      setChannel("");
+      setReason("");
+    }
+  }, [consentType]);
+  const valid = channel !== "" && reason.trim().length >= 10;
+  return (
+    <Dialog open={consentType !== null} onOpenChange={(next) => (!next ? onClose() : undefined)} dirty={Boolean(reason || channel)}>
+      <DialogContent className="sm:max-w-[520px]" data-testid="consent-revoke-dialog">
+        <DialogHeader>
+          <DialogTitle>
+            {l("consents_revoke_title")}: {consentType ? typeLabel(consentType) : ""}
+          </DialogTitle>
+          <DialogDescription>
+            {consentType && ORDER_BLOCKING_CONSENTS.has(consentType)
+              ? l("consents_revoke_blocks_orders")
+              : l("consents_revoke_hint")}
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="grid gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!valid || !channel) return;
+            setBusy(true);
+            void onConfirm(revocationNote(l(`consents_revoke_channel_${channel}`), reason)).finally(() =>
+              setBusy(false),
+            );
+          }}
+        >
+          <Field label={l("consents_revoke_channel")} htmlFor="consent-revoke-channel" required>
+            <select
+              id="consent-revoke-channel"
+              className={selectClass}
+              value={channel}
+              disabled={busy}
+              onChange={(event) => setChannel(event.target.value as RevocationChannel | "")}
+            >
+              <option value="">{l("consents_revoke_channel_choose")}</option>
+              {REVOCATION_CHANNELS.map((value) => (
+                <option key={value} value={value}>
+                  {l(`consents_revoke_channel_${value}`)}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={l("consents_revoke_reason")} htmlFor="consent-revoke-reason" required>
+            <textarea
+              id="consent-revoke-reason"
+              className={cn(textareaClass, "min-h-20")}
+              maxLength={440}
+              value={reason}
+              disabled={busy}
+              onChange={(event) => setReason(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">{l("consents_revoke_reason_hint")}</p>
+          </Field>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose} disabled={busy}>
+              {l("consents_revoke_cancel")}
+            </Button>
+            <Button type="submit" variant="destructive" disabled={busy || !valid}>
+              {l("consents_revoke_confirm")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /**
  * Consent history of one patient with grant and revoke. A consent must be as
@@ -83,6 +199,7 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [revoking, setRevoking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!patientId) return;
@@ -105,8 +222,10 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
       clearApiCache();
       setNote("");
       await load();
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -188,7 +307,7 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
                   variant="outline"
                   className="ml-auto h-8 rounded-lg"
                   disabled={busy}
-                  onClick={() => void save(consent.consent_type, "revoke", l("consents_revoke_note"))}
+                  onClick={() => setRevoking(consent.consent_type)}
                 >
                   {l("consents_revoke")}
                 </Button>
@@ -197,6 +316,17 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
           );
         })}
       </div>
+      <ConsentRevokeDialog
+        consentType={revoking}
+        typeLabel={typeLabel}
+        l={l}
+        onClose={() => setRevoking(null)}
+        onConfirm={async (revocation) => {
+          if (!revoking) return;
+          const ok = await save(revoking, "revoke", revocation);
+          if (ok) setRevoking(null);
+        }}
+      />
     </Section>
   );
 }

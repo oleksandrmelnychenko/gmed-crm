@@ -165,11 +165,39 @@ export function relationFormToPayload(
   };
 }
 
+/**
+ * The multipart body of "Upload document" in the patient card. The medical
+ * flag is always sent as chosen ("false" when unticked): without it the server
+ * classified the upload itself. An empty type is left out, so the server
+ * classifies the file (e.g. a passport scan as an identity document, which is
+ * never medical) instead of storing the former default type "report", a
+ * medical report (QA 2026-10-12 B2-04).
+ */
+export function buildPatientDocumentUploadFormData(
+  form: DocumentUploadFormState,
+  patientId: string,
+  file: Blob,
+): FormData {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("patient_id", patientId);
+  if (form.orderId) formData.append("order_id", form.orderId);
+  if (form.appointmentId) formData.append("appointment_id", form.appointmentId);
+  if (form.autoName.trim()) formData.append("auto_name", form.autoName.trim());
+  if (form.art.trim()) formData.append("art", form.art.trim());
+  if (form.category.trim()) formData.append("category", form.category.trim());
+  formData.append("status", form.status);
+  formData.append("visibility", form.visibility);
+  formData.append("is_medical", form.isMedical ? "true" : "false");
+  if (form.notes.trim()) formData.append("notes", form.notes.trim());
+  return formData;
+}
+
 export function blankDocumentUploadForm(): DocumentUploadFormState {
   return {
     file: null,
     autoName: "",
-    art: "report",
+    art: "",
     category: "",
     status: "active",
     visibility: "internal",

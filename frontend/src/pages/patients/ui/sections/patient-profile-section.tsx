@@ -1098,7 +1098,10 @@ function usePatientProfileTabContent({
           {canViewDocuments ? (
             <ProfileSummaryLine
               label={l("required_doc_passport_scan")}
-              value={identityDocuments == null ? (
+              // A role the passport is hidden from (the interpreter) reads
+              // "Hidden", not "not set": the scans exist but are closed to it
+              // (QA 2026-10-12 B2-13).
+              value={isHidden("passport") ? t.access_hidden : identityDocuments == null ? (
                 <LoaderCircle className="size-4 animate-spin text-muted-foreground" aria-label={t.common_loading} />
               ) : identityDocuments.length > 0 ? (
                 <button

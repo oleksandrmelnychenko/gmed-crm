@@ -23,6 +23,7 @@ import {
 import {
   canLoadPatientAssignableStaff,
   canViewPatientAssignmentsSurface,
+  isPatientDetailTabReadOnly,
 } from "../model/detail-model";
 
 describe("canManagePatientProfile", () => {
@@ -324,16 +325,15 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientInvoicesSurface("concierge")).toBe(false);
   });
 
-  it("shows the ceo assistant only the surfaces the server serves to the role (read-only)", () => {
-    // Refused by the server role lists: relations, workflow, assignments
-    // (curators), orders, appointments and the timeline.
-    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(false);
-    expect(canViewPatientAssignmentsSurface("ceo_assistant")).toBe(false);
-    expect(canViewPatientCareHistorySurface("ceo_assistant")).toBe(false);
-    expect(canViewPatientAppointmentsSurface("ceo_assistant")).toBe(false);
+  it("shows the ceo assistant every tab of the card, read-only (owner decision 2026-10-11, QA B2-06)", () => {
+    // The server serves every read to the role: relations, workflow,
+    // curators, orders, appointments and the timeline included.
+    expect(canViewPatientOperationalSurface("ceo_assistant")).toBe(true);
+    expect(canViewPatientAssignmentsSurface("ceo_assistant")).toBe(true);
+    expect(canViewPatientCareHistorySurface("ceo_assistant")).toBe(true);
+    expect(canViewPatientAppointmentsSurface("ceo_assistant")).toBe(true);
+    // No staff picker: the assistant assigns nobody.
     expect(canLoadPatientAssignableStaff("ceo_assistant")).toBe(false);
-    // Served: profile, documents (read-only, owner decision 2026-10-11),
-    // clinical profile, contracts, invoices and finance.
     expect(canViewPatientDocumentsSurface("ceo_assistant")).toBe(true);
     expect(canOpenPatientDocumentsWorkspace("ceo_assistant")).toBe(true);
     expect(canViewPatientClinicalProfile("ceo_assistant")).toBe(true);
@@ -341,20 +341,32 @@ describe("patient surface access helpers", () => {
     expect(canViewPatientInvoicesSurface("ceo_assistant")).toBe(true);
     expect(canManagePatientProfile("ceo_assistant")).toBe(false);
     const access = {
-      canViewOperationalSurface: false,
-      canViewCareHistory: false,
-      canViewAssignments: false,
+      canViewOperationalSurface: canViewPatientOperationalSurface("ceo_assistant"),
+      canViewCareHistory: canViewPatientCareHistorySurface("ceo_assistant"),
+      canViewAppointments: canViewPatientAppointmentsSurface("ceo_assistant"),
+      canViewAssignments: canViewPatientAssignmentsSurface("ceo_assistant"),
       canViewDocuments: canViewPatientDocumentsSurface("ceo_assistant"),
       canViewContracts: true,
       canViewInvoices: true,
       canViewClinical: true,
     };
-    for (const tab of ["relations", "appointments", "orders", "timeline", "curators", "workflow"]) {
-      expect(normalizePatientDetailTab(tab, access)).toBe("profile");
+    for (const tab of [
+      "relations",
+      "appointments",
+      "orders",
+      "timeline",
+      "curators",
+      "workflow",
+      "documents",
+      "contracts",
+      "clinical",
+    ]) {
+      expect(normalizePatientDetailTab(tab, access)).toBe(tab);
     }
-    expect(normalizePatientDetailTab("documents", access)).toBe("documents");
-    expect(normalizePatientDetailTab("contracts", access)).toBe("contracts");
-    expect(normalizePatientDetailTab("clinical", access)).toBe("clinical");
+    // Every tab is read-only for the role.
+    for (const tab of ["relations", "appointments", "orders", "workflow", "curators", "clinical", "documents"]) {
+      expect(isPatientDetailTabReadOnly("ceo_assistant", tab)).toBe(true);
+    }
   });
 
   it("hides the curators tab from Billing (no access to patient assignments)", () => {

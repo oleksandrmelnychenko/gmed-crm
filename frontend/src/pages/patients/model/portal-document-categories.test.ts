@@ -21,6 +21,18 @@ describe("portalDocumentCategoryKey", () => {
     ).toBe("analyses");
   });
 
+  it("files consents and contracts under their own chip, not correspondence (QA 2026-10-12 B2-13)", () => {
+    for (const [art, category] of [
+      ["confidentiality_release", "consent"],
+      ["privacy_consents", "consent"],
+      ["consent_data_release", "consent"],
+      ["dsgvo", null],
+      ["framework_contract", "contract"],
+    ] as const) {
+      expect(portalDocumentCategoryKey({ art, category, is_medical: false }), art).toBe("consents");
+    }
+  });
+
   it("classifies conclusions, invoices and translations explicitly", () => {
     expect(
       portalDocumentCategoryKey({
