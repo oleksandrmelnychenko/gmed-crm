@@ -75,8 +75,7 @@ import {
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 import { FormSection } from "../shared/patient-form-primitives";
 import {
-  patientInvoiceLedgerCategoryLabel,
-  patientInvoiceLedgerDirectionLabel,
+  usePortalLabels,
 } from "../../model/portal-shared";
 import { patientInvoiceAmounts } from "../../model/patient-invoice-amounts";
 
@@ -651,6 +650,10 @@ function usePatientInvoicesTabContent({
   moneyValueNumber,
   invoiceTypeLabel,
 }: PatientInvoicesTabProps) {
+  const {
+    patientInvoiceLedgerCategoryLabel,
+    patientInvoiceLedgerDirectionLabel,
+  } = usePortalLabels();
   const { t, lang } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();

@@ -209,6 +209,7 @@ export const ru = {
   access_entity: "Сущность",
   access_field: "Поле",
   access_full: "Полный доступ",
+  access_read_only: "Только чтение",
   access_masked: "Маскировано",
   access_hidden: "Скрыто",
   access_conditional: "Условный",

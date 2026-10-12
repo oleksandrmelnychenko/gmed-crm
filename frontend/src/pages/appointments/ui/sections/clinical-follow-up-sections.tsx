@@ -41,10 +41,10 @@ import {
 } from "@/pages/appointments/appearance/surface-appearance";
 import {
   CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
-  closedWithoutCompletionLabel,
+  useClosureLabels,
 } from "@/pages/appointments/model/closure";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
   blankFindingsFollowUpForm,
   blankIncomingDataForm,
@@ -57,17 +57,10 @@ import {
   TASK_PRIORITY_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  appointmentText,
-  checklistPhaseLabel,
-  findingsArtifactLabel,
-  incomingDataCategoryLabel,
-  incomingDataSourceLabel,
-  roleLabel,
-  taskPriorityLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatAppointmentSlotLabel as slotLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   appointmentAnchorDateTime,
@@ -216,6 +209,20 @@ function useAppointmentIncomingDataSectionContent({
   onRefresh,
   onError,
 }: AppointmentIncomingDataSectionProps) {
+  const {
+    appointmentText,
+    checklistPhaseLabel,
+    incomingDataCategoryLabel,
+    incomingDataSourceLabel,
+    roleLabel,
+    taskPriorityLabel,
+  } = useAppointmentLabels();
+  const { closedWithoutCompletionLabel } = useClosureLabels();
+  const {
+    formatAppointmentDateTimeLabel: formatDateTimeLabel,
+    formatAppointmentSlotLabel: slotLabel,
+  } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();
@@ -891,6 +898,19 @@ function useAppointmentFindingsSectionContent({
   onRefresh,
   onError,
 }: AppointmentFindingsSectionProps) {
+  const {
+    appointmentText,
+    checklistPhaseLabel,
+    findingsArtifactLabel,
+    roleLabel,
+    taskPriorityLabel,
+  } = useAppointmentLabels();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { closedWithoutCompletionLabel } = useClosureLabels();
+  const {
+    formatAppointmentDateTimeLabel: formatDateTimeLabel,
+    formatAppointmentSlotLabel: slotLabel,
+  } = useAppointmentFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();

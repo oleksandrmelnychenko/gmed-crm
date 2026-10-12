@@ -103,7 +103,15 @@ import { appDateKey, dateKeyToDate, formatAppDate, formatAppDateTime } from "@/l
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
-import { formatUnknownValue, getLang, t as translateCatalog, uiText, useLang } from "@/lib/i18n";
+import {
+  formatUnknownValue,
+  getLang,
+  t as translateCatalog,
+  uiText,
+  useLang,
+  type Lang,
+  useLanguageBound,
+} from "@/lib/i18n";
 import { formatDocumentSourceLabel } from "@/lib/document-source-labels";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -246,46 +254,51 @@ type IntakeUploadItem = {
   status: IntakeUploadStatus;
 };
 
-function runtimeTranslations() {
-  return translateCatalog(getLang());
+// The label helpers take the language of the rendering component (useLang):
+// React Compiler would otherwise keep the old language after a live switch.
+function runtimeTranslations(lang: Lang = getLang()) {
+  return translateCatalog(lang);
 }
 
-function formatRoleLabel(role?: string | null) {
-  const tr = runtimeTranslations();
+function formatRoleLabel(role: string | null | undefined, lang: Lang) {
+  const tr = runtimeTranslations(lang);
   if (!role) return tr.common_unknown;
   const translated = tr[`role_${role}` as keyof typeof tr];
   return typeof translated === "string" ? translated : formatUnknownValue(role, tr);
 }
 
-function formatLanguageLabel(language?: string | null) {
+function formatLanguageLabel(language: string | null | undefined, lang: Lang) {
   const normalized = normalizeTemplateLanguage(language) ?? language?.trim().toLowerCase();
   switch (normalized) {
     case "de":
-      return uiText("documents_language_de");
+      return uiText("documents_language_de", lang);
     case "en":
-      return uiText("documents_language_en");
+      return uiText("documents_language_en", lang);
     case "uk":
-      return uiText("documents_language_uk");
+      return uiText("documents_language_uk", lang);
     case "ru":
-      return uiText("documents_language_ru");
+      return uiText("documents_language_ru", lang);
     case "de-ru":
-      return getLang() === "ru" ? "Немецкий + русский" : "Deutsch + Russisch";
+      return lang === "ru" ? "Немецкий + русский" : "Deutsch + Russisch";
     default: {
       const option = normalized
         ? LANGUAGE_OPTIONS.find((item) => item.value === normalized)
         : undefined;
       if (option) {
-        return getLang() === "ru" ? option.labelRu : option.labelDe;
+        return lang === "ru" ? option.labelRu : option.labelDe;
       }
-      return language ? formatUnknownValue(language, runtimeTranslations()) : runtimeTranslations().common_not_set;
+      return language
+        ? formatUnknownValue(language, runtimeTranslations(lang))
+        : runtimeTranslations(lang).common_not_set;
     }
   }
 }
 
 function optionLabel(
   option: { labelRu: string; labelDe: string },
+  lang: Lang,
 ) {
-  return getLang() === "ru" ? option.labelRu : option.labelDe;
+  return lang === "ru" ? option.labelRu : option.labelDe;
 }
 
 function documentCategoryOptionLabel(
@@ -309,7 +322,7 @@ function documentCategoryValueLabel(
   lang: string,
   l: (key: string) => string,
 ) {
-  if (!value) return runtimeTranslations().common_not_set;
+  if (!value) return runtimeTranslations(lang === "de" ? "de" : "ru").common_not_set;
   const category = categories.find((item) => item.key === value);
   return category
     ? documentCategoryOptionLabel(category, lang)
@@ -319,10 +332,11 @@ function documentCategoryValueLabel(
 function labelFromOptions<T extends string>(
   value: T | "" | null | undefined,
   options: Array<{ value: T; labelRu: string; labelDe: string }>,
+  lang: Lang,
 ) {
-  if (!value) return runtimeTranslations().common_not_set;
+  if (!value) return runtimeTranslations(lang).common_not_set;
   const option = options.find((item) => item.value === value);
-  return option ? optionLabel(option) : formatUnknownValue(value, runtimeTranslations());
+  return option ? optionLabel(option, lang) : formatUnknownValue(value, runtimeTranslations(lang));
 }
 
 const TRANSLATION_LANGUAGE_OPTIONS = ["de", "ru", "uk", "en"] as const;
@@ -445,47 +459,51 @@ function groupTemplatesForSelect(
   );
 }
 
-function formatSensitivityLabel(value?: string | null) {
+function formatSensitivityLabel(value: string | null | undefined, lang: Lang) {
   const normalized = value?.trim().toLowerCase();
   switch (normalized) {
     case "general":
-      return uiText("documents_sensitivity_general");
+      return uiText("documents_sensitivity_general", lang);
     case "patient identity":
     case "patient_identity":
-      return uiText("documents_sensitivity_patient_identity");
+      return uiText("documents_sensitivity_patient_identity", lang);
     case "medical":
-      return uiText("documents_sensitivity_medical");
+      return uiText("documents_sensitivity_medical", lang);
     case "financial":
-      return uiText("documents_sensitivity_financial");
+      return uiText("documents_sensitivity_financial", lang);
     case "internal":
-      return uiText("documents_sensitivity_internal");
+      return uiText("documents_sensitivity_internal", lang);
     case "service":
-      return uiText("documents_sensitivity_service");
+      return uiText("documents_sensitivity_service", lang);
     default:
-      return value ? formatUnknownValue(value, runtimeTranslations()) : runtimeTranslations().common_not_set;
+      return value
+        ? formatUnknownValue(value, runtimeTranslations(lang))
+        : runtimeTranslations(lang).common_not_set;
   }
 }
 
-function formatShareChannelLabel(channel?: string | null) {
+function formatShareChannelLabel(channel: string | null | undefined, lang: Lang) {
   const normalized = channel?.trim().toLowerCase();
   switch (normalized) {
     case "email":
-      return uiText("documents_share_channel_email");
+      return uiText("documents_share_channel_email", lang);
     case "phone":
-      return uiText("documents_share_channel_phone");
+      return uiText("documents_share_channel_phone", lang);
     case "portal":
     case "patient_portal":
-      return uiText("documents_share_channel_patient_portal");
+      return uiText("documents_share_channel_patient_portal", lang);
     case "postal_mail":
-      return uiText("documents_share_channel_postal_mail");
+      return uiText("documents_share_channel_postal_mail", lang);
     case "fax":
-      return uiText("documents_share_channel_fax");
+      return uiText("documents_share_channel_fax", lang);
     case "whatsapp":
-      return uiText("documents_share_channel_whatsapp");
+      return uiText("documents_share_channel_whatsapp", lang);
     case "other":
-      return uiText("documents_share_channel_other");
+      return uiText("documents_share_channel_other", lang);
     default:
-      return channel ? formatUnknownValue(channel, runtimeTranslations()) : runtimeTranslations().common_not_set;
+      return channel
+        ? formatUnknownValue(channel, runtimeTranslations(lang))
+        : runtimeTranslations(lang).common_not_set;
   }
 }
 
@@ -525,10 +543,10 @@ function providerShareChannelValues(provider?: ProviderOption | null) {
   return values;
 }
 
-function shareChannelOptions(values: readonly string[]) {
+function shareChannelOptions(values: readonly string[], lang: Lang) {
   return values.map((value) => ({
     value,
-    label: formatShareChannelLabel(value),
+    label: formatShareChannelLabel(value, lang),
   }));
 }
 
@@ -590,23 +608,25 @@ function formatCreateShareError(
   return error.message;
 }
 
-function formatExtractionMethodLabel(method?: string | null) {
+function formatExtractionMethodLabel(method: string | null | undefined, lang: Lang) {
   const normalized = method?.trim().toLowerCase();
   switch (normalized) {
     case "html_text":
-      return uiText("documents_extraction_method_html_text");
+      return uiText("documents_extraction_method_html_text", lang);
     case "pdf_text":
-      return uiText("documents_extraction_method_pdf_text");
+      return uiText("documents_extraction_method_pdf_text", lang);
     case "text_utf8":
-      return uiText("documents_extraction_method_text_utf8");
+      return uiText("documents_extraction_method_text_utf8", lang);
     case "windows_ocr":
-      return uiText("documents_extraction_method_windows_ocr");
+      return uiText("documents_extraction_method_windows_ocr", lang);
     case "tesseract_cli":
-      return uiText("documents_extraction_method_tesseract_cli");
+      return uiText("documents_extraction_method_tesseract_cli", lang);
     case "ocr_unavailable":
-      return uiText("documents_extraction_method_ocr_unavailable");
+      return uiText("documents_extraction_method_ocr_unavailable", lang);
     default:
-      return method ? formatUnknownValue(method, runtimeTranslations()) : runtimeTranslations().common_not_set;
+      return method
+        ? formatUnknownValue(method, runtimeTranslations(lang))
+        : runtimeTranslations(lang).common_not_set;
   }
 }
 
@@ -875,6 +895,7 @@ function StaffDocumentsPage({
   routeDocumentId,
   routeMode = "documents",
 }: StaffDocumentsPageProps) {
+  const { formatDate, formatDateTime, formatFileSize } = useLanguageHelpers();
   const { user } = useAuth();
   const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
@@ -1381,11 +1402,11 @@ function StaffDocumentsPage({
     [providers, shareProviderContextIdSet, shareTargetsRequireMedicalProvider],
   );
   const internalShareChannelOptions = useMemo(
-    () => shareChannelOptions(INTERNAL_SHARE_CHANNEL_VALUES),
+    () => shareChannelOptions(INTERNAL_SHARE_CHANNEL_VALUES, lang),
     [lang],
   );
   const providerShareChannelOptions = useMemo(
-    () => shareChannelOptions(providerShareChannelValues(selectedShareProvider)),
+    () => shareChannelOptions(providerShareChannelValues(selectedShareProvider), lang),
     [lang, selectedShareProvider],
   );
 
@@ -3635,7 +3656,7 @@ function StaffDocumentsPage({
               <option value="">{metaText.allDirections}</option>
               {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {optionLabel(option)}
+                  {optionLabel(option, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -3653,7 +3674,7 @@ function StaffDocumentsPage({
               <option value="">{metaText.allVariants}</option>
               {DOCUMENT_VARIANT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {optionLabel(option)}
+                  {optionLabel(option, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -3671,7 +3692,7 @@ function StaffDocumentsPage({
               <option value="">{metaText.allAccessCategories}</option>
               {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {optionLabel(option)}
+                  {optionLabel(option, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -3689,7 +3710,7 @@ function StaffDocumentsPage({
               <option value="">{metaText.allFinancialStatuses}</option>
               {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {optionLabel(option)}
+                  {optionLabel(option, lang)}
                 </option>
               ))}
             </NativeComboboxSelect>
@@ -3806,7 +3827,7 @@ function StaffDocumentsPage({
             formatVisibilityLabel={(value, portalReleased) =>
               formatVisibilityLabel(value, t, portalReleased)
             }
-            formatSensitivityLabel={formatSensitivityLabel}
+            formatSensitivityLabel={(value) => formatSensitivityLabel(value, lang)}
             formatDateTime={formatDateTime}
           />
         )}
@@ -3952,7 +3973,7 @@ function StaffDocumentsPage({
                   {(selectedTemplate?.supported_languages ?? ["de"]).map(
                     (language) => (
                       <option key={language} value={language}>
-                        {formatLanguageLabel(language)}
+                        {formatLanguageLabel(language, lang)}
                       </option>
                     ),
                   )}
@@ -4195,7 +4216,7 @@ function StaffDocumentsPage({
                 >
                   {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {optionLabel(option)}
+                      {optionLabel(option, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -4213,7 +4234,7 @@ function StaffDocumentsPage({
                 >
                   {DOCUMENT_VARIANT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {optionLabel(option)}
+                      {optionLabel(option, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -4231,7 +4252,7 @@ function StaffDocumentsPage({
                 >
                   {["de", "en", "uk", "ru"].map((language) => (
                     <option key={language} value={language}>
-                      {formatLanguageLabel(language)}
+                      {formatLanguageLabel(language, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -4249,7 +4270,7 @@ function StaffDocumentsPage({
                 >
                   {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {optionLabel(option)}
+                      {optionLabel(option, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -4329,7 +4350,7 @@ function StaffDocumentsPage({
                   <option value="">{metaText.notFinancial}</option>
                   {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {optionLabel(option)}
+                      {optionLabel(option, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -4374,7 +4395,7 @@ function StaffDocumentsPage({
                   <option value="">{metaText.noPaymentMethod}</option>
                   {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {optionLabel(option)}
+                      {optionLabel(option, lang)}
                     </option>
                   ))}
                 </NativeComboboxSelect>
@@ -5002,7 +5023,7 @@ function StaffDocumentsPage({
                       >
                         {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {optionLabel(option)}
+                            {optionLabel(option, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5020,7 +5041,7 @@ function StaffDocumentsPage({
                       >
                         {DOCUMENT_VARIANT_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {optionLabel(option)}
+                            {optionLabel(option, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5039,7 +5060,7 @@ function StaffDocumentsPage({
                         <option value="">{t.common_not_set}</option>
                         {["de", "en", "uk", "ru"].map((language) => (
                           <option key={language} value={language}>
-                            {formatLanguageLabel(language)}
+                            {formatLanguageLabel(language, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5057,7 +5078,7 @@ function StaffDocumentsPage({
                       >
                         {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {optionLabel(option)}
+                            {optionLabel(option, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5137,7 +5158,7 @@ function StaffDocumentsPage({
                         <option value="">{metaText.notFinancial}</option>
                         {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {optionLabel(option)}
+                            {optionLabel(option, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5182,7 +5203,7 @@ function StaffDocumentsPage({
                         <option value="">{metaText.noPaymentMethod}</option>
                         {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
-                            {optionLabel(option)}
+                            {optionLabel(option, lang)}
                           </option>
                         ))}
                       </NativeComboboxSelect>
@@ -5265,7 +5286,7 @@ function StaffDocumentsPage({
                   >
                     {TRANSLATION_LANGUAGE_OPTIONS.map((language) => (
                       <option key={language} value={language}>
-                        {formatLanguageLabel(language)}
+                        {formatLanguageLabel(language, lang)}
                       </option>
                     ))}
                   </NativeComboboxSelect>
@@ -5378,7 +5399,7 @@ function StaffDocumentsPage({
                             <option value="">{t.documents_select_user}</option>
                             {staff.map((item) => (
                               <option key={item.id} value={item.id}>
-                                {item.name} · {formatRoleLabel(item.role)}
+                                {item.name} · {formatRoleLabel(item.role, lang)}
                               </option>
                             ))}
                           </NativeComboboxSelect>
@@ -5808,7 +5829,7 @@ function StaffDocumentsPage({
                     >
                       {DOCUMENT_DIRECTION_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {optionLabel(option)}
+                          {optionLabel(option, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -5830,7 +5851,7 @@ function StaffDocumentsPage({
                     >
                       {DOCUMENT_VARIANT_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {optionLabel(option)}
+                          {optionLabel(option, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -5850,7 +5871,7 @@ function StaffDocumentsPage({
                       <option value="">{t.common_not_set}</option>
                       {["de", "en", "uk", "ru"].map((language) => (
                         <option key={language} value={language}>
-                          {formatLanguageLabel(language)}
+                          {formatLanguageLabel(language, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -5872,7 +5893,7 @@ function StaffDocumentsPage({
                     >
                       {DOCUMENT_ACCESS_CATEGORY_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {optionLabel(option)}
+                          {optionLabel(option, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -5964,7 +5985,7 @@ function StaffDocumentsPage({
                       <option value="">{metaText.notFinancial}</option>
                       {DOCUMENT_FINANCIAL_STATUS_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {optionLabel(option)}
+                          {optionLabel(option, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -6015,7 +6036,7 @@ function StaffDocumentsPage({
                       <option value="">{metaText.noPaymentMethod}</option>
                       {DOCUMENT_PAYMENT_METHOD_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {optionLabel(option)}
+                          {optionLabel(option, lang)}
                         </option>
                       ))}
                     </NativeComboboxSelect>
@@ -6362,7 +6383,7 @@ function StaffDocumentsPage({
                           )}
                         </StatusBadge>
                         <StatusBadge tone={documentSensitivityTone(detail.data_sensitivity)}>
-                          {formatSensitivityLabel(detail.data_sensitivity)}
+                          {formatSensitivityLabel(detail.data_sensitivity, lang)}
                         </StatusBadge>
                       </div>
                       <p className="mt-0.5 break-words text-sm text-muted-foreground">
@@ -6599,6 +6620,7 @@ function StaffDocumentsPage({
                             value={labelFromOptions(
                               detail.document_direction,
                               DOCUMENT_DIRECTION_OPTIONS,
+                              lang,
                             )}
                           />
                           <DocumentMetaFact
@@ -6606,17 +6628,19 @@ function StaffDocumentsPage({
                             value={labelFromOptions(
                               detail.document_variant,
                               DOCUMENT_VARIANT_OPTIONS,
+                              lang,
                             )}
                           />
                           <DocumentMetaFact
                             label={metaText.documentLanguage}
-                            value={formatLanguageLabel(detail.document_language)}
+                            value={formatLanguageLabel(detail.document_language, lang)}
                           />
                           <DocumentMetaFact
                             label={metaText.accessCategory}
                             value={labelFromOptions(
                               detail.access_category,
                               DOCUMENT_ACCESS_CATEGORY_OPTIONS,
+                              lang,
                             )}
                           />
                           <DocumentMetaFact
@@ -6649,6 +6673,7 @@ function StaffDocumentsPage({
                             value={labelFromOptions(
                               detail.financial_status,
                               DOCUMENT_FINANCIAL_STATUS_OPTIONS,
+                              lang,
                             )}
                           />
                           <DocumentMetaFact
@@ -6664,6 +6689,7 @@ function StaffDocumentsPage({
                             value={labelFromOptions(
                               detail.payment_method,
                               DOCUMENT_PAYMENT_METHOD_OPTIONS,
+                              lang,
                             )}
                           />
                         </div>
@@ -6845,7 +6871,7 @@ function StaffDocumentsPage({
                   ) : null}
                   {!detail.has_stored_file && detail.file_deleted_at ? (
                     <p className="px-1 py-1 text-sm text-muted-foreground">
-                      {uiText("documents_text_removed_with_file")}
+                      {uiText("documents_text_removed_with_file", lang)}
                     </p>
                   ) : null}
                   <div className="space-y-2.5">
@@ -6881,7 +6907,7 @@ function StaffDocumentsPage({
                             {textExtraction?.method ? (
                               <>
                                 <span className="size-1 rounded-full bg-muted-foreground/35" />
-                                <span>{formatExtractionMethodLabel(textExtraction.method)}</span>
+                                <span>{formatExtractionMethodLabel(textExtraction.method, lang)}</span>
                               </>
                             ) : null}
                             <span className="size-1 rounded-full bg-muted-foreground/35" />
@@ -6928,7 +6954,7 @@ function StaffDocumentsPage({
                           {textExtraction?.method ? (
                             <>
                               <span className="size-1 rounded-full bg-muted-foreground/35" />
-                              <span>{formatExtractionMethodLabel(textExtraction.method)}</span>
+                              <span>{formatExtractionMethodLabel(textExtraction.method, lang)}</span>
                             </>
                           ) : null}
                         </div>
@@ -7250,7 +7276,7 @@ function StaffDocumentsPage({
                                       variant="outline"
                                       className="rounded-full border-0 bg-[#f9fdff] px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                     >
-                                      {formatLanguageLabel(request.requested_language)}
+                                      {formatLanguageLabel(request.requested_language, lang)}
                                     </Badge>
                                     {request.translated_document_name ? (
                                       <Badge
@@ -7301,7 +7327,7 @@ function StaffDocumentsPage({
                                             <option value="">{t.common_not_set}</option>
                                             {LANGUAGE_OPTIONS.map((language) => (
                                               <option key={language.value} value={language.value}>
-                                                {formatLanguageLabel(language.value)}
+                                                {formatLanguageLabel(language.value, lang)}
                                               </option>
                                             ))}
                                           </NativeComboboxSelect>
@@ -7337,7 +7363,7 @@ function StaffDocumentsPage({
                                               )
                                               .map((member) => (
                                                 <option key={member.id} value={member.id}>
-                                                  {member.name} / {formatRoleLabel(member.role)}
+                                                  {member.name} / {formatRoleLabel(member.role, lang)}
                                                 </option>
                                               ))}
                                           </NativeComboboxSelect>
@@ -7694,7 +7720,7 @@ function StaffDocumentsPage({
                     <div className="rounded-lg bg-amber-50/70 px-4 py-3 text-sm text-amber-900/80">
                       {!selectedDocumentReleasable ? (
                         <p className="font-medium text-amber-700">
-                          {uiText("documents_release_unavailable_archived")}
+                          {uiText("documents_release_unavailable_archived", lang)}
                         </p>
                       ) : null}
                       {!detail.patient_id ? (
@@ -7860,7 +7886,7 @@ function StaffDocumentsPage({
                           const targetKind = isProviderShare
                             ? t.documents_provider_target
                             : share.target_user_role
-                              ? formatRoleLabel(share.target_user_role)
+                              ? formatRoleLabel(share.target_user_role, lang)
                               : t.common_not_set;
                           const canCurrentUserConfirm =
                             !share.confirmed &&
@@ -7922,7 +7948,7 @@ function StaffDocumentsPage({
                                           variant="outline"
                                           className="rounded-full border-0 bg-sky-50 px-2 py-0.5 text-[10px] font-medium text-sky-700"
                                         >
-                                          {formatShareChannelLabel(share.channel)}
+                                          {formatShareChannelLabel(share.channel, lang)}
                                         </Badge>
                                         </>
                                       ) : null}
@@ -8023,6 +8049,7 @@ function DocumentIntakeQueueTable({
   t: DocumentsPageTranslations;
   text: DocumentsPageText;
 }) {
+  const { formatDateTime } = useLanguageHelpers();
   const intakeQueuePagination = useDataTablePagination(
     rows,
     String(rows.length),
@@ -8308,6 +8335,8 @@ function DocumentTranslationRequestsTable({
   rows: TranslationRequest[];
   t: DocumentsPageTranslations;
 }) {
+  const { formatDateTime } = useLanguageHelpers();
+  const { lang } = useLang();
   const translationRequestsPagination = useDataTablePagination(
     rows,
     String(rows.length),
@@ -8407,7 +8436,7 @@ function DocumentTranslationRequestsTable({
             variant="outline"
             className="rounded-full border-border/60 bg-card text-[10px] text-foreground"
           >
-            {formatLanguageLabel(request.requested_language)}
+            {formatLanguageLabel(request.requested_language, lang)}
           </Badge>
         ),
       },
@@ -8503,6 +8532,7 @@ function DocumentTranslationRequestsTable({
       canUpdateTranslation,
       currentUserId,
       l,
+      lang,
       loading,
       onPreviewDocument,
       onUpdateRequest,
@@ -9123,4 +9153,18 @@ function Field({
       {content}
     </div>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  formatDate,
+  formatDateTime,
+  formatFileSize,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

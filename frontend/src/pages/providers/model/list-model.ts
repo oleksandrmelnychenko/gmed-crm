@@ -24,6 +24,7 @@ import {
   t as translateCatalog,
   type Lang,
   type TranslationKey,
+  useLanguageBound,
 } from "@/lib/i18n";
 
 const PROVIDER_TYPE_LABEL_KEYS = {
@@ -1829,4 +1830,25 @@ export function patientLabel(patient: LinkedPatient) {
 
 export function providerMeta(provider: ProviderSummary | ProviderDetail) {
   return [provider.address_city, provider.address_country].filter(Boolean).join(", ");
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useProviderListLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PROVIDER_LIST_LANGUAGE_HELPERS = {
+  doctorRelationshipTypeLabel,
+  doctorRoleLabel,
+  humanizeCode,
+  personGenderLabel,
+  providerContractStatusLabel,
+  providerLoadErrorMessage,
+  providerOrganizationLevelLabel,
+  providerTypeLabel,
+  servicePriceLabel,
+};
+
+export function useProviderListLabels() {
+  return useLanguageBound(PROVIDER_LIST_LANGUAGE_HELPERS);
 }

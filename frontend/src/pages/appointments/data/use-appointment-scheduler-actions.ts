@@ -6,16 +6,14 @@ import {
   updateAppointmentSchedule,
   updateAppointmentStatus,
 } from "@/pages/appointments/data/appointment-mutations";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import {
   billingReversalRequestFromError,
   requestAppointmentBillingReversal,
 } from "@/pages/appointments/model/billing-reversal-request";
 import { statusActionKey } from "@/pages/appointments/model/form-factories";
 import {
-  buildLocalScheduleWarnings,
-  buildScheduleNotice,
-  formatScheduleConflictError,
+  useScheduleWarnings,
 } from "@/pages/appointments/model/schedule-warnings";
 import { toDateInput, toTimeInput } from "@/pages/appointments/model/date-time";
 import { canRescheduleAppointmentItem } from "@/pages/appointments/model/selectors";
@@ -52,6 +50,12 @@ export function useAppointmentSchedulerActions({
   onRefreshDetail,
   onDismissQuickActionMenu,
 }: UseAppointmentSchedulerActionsOptions) {
+  const {
+    buildLocalScheduleWarnings,
+    buildScheduleNotice,
+    formatScheduleConflictError,
+  } = useScheduleWarnings();
+  const { appointmentText } = useAppointmentLabels();
   const [actionBusy, setActionBusy] = useState("");
 
   const resetAppointmentSchedulerActionState = useCallback(() => {

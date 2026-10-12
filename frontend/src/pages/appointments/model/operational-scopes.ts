@@ -10,6 +10,7 @@ import type {
   OperationalScope,
   OperationalScopeOption,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 export function matchesOperationalScope(
   item: AppointmentListItem,
@@ -147,4 +148,18 @@ export function operationalScopeOptions(
   }
 
   return options;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useOperationalScopeLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const OPERATIONAL_SCOPE_LANGUAGE_HELPERS = {
+  operationalScopeOptions,
+  operationalScopeReason,
+};
+
+export function useOperationalScopeLabels() {
+  return useLanguageBound(OPERATIONAL_SCOPE_LANGUAGE_HELPERS);
 }

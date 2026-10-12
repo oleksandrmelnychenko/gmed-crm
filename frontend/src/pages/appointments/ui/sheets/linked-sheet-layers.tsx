@@ -4,7 +4,7 @@ import type { PatientDetailSheetProps } from "@/pages/patients";
 import type { LinkedDocumentsSheetProps } from "@/pages/appointments/ui/sheets/linked-documents-sheet";
 import type { LinkedProviderSheetProps } from "@/pages/appointments/ui/sheets/linked-provider-sheet";
 import type { LinkedRecordsSheetProps } from "@/pages/appointments/ui/sheets/linked-records-sheet";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheetLoadingState } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 const loadPatientDetailSheet = () => import("@/pages/patients");
@@ -80,6 +80,7 @@ export function LinkedPatientSheetLayer({
   onOpenChange,
   ...sheetProps
 }: LinkedPatientSheetLayerProps) {
+  const { appointmentText } = useAppointmentLabels();
   if (!open) return null;
 
   return (
@@ -110,6 +111,7 @@ export function LinkedProviderSheetLayer({
   fallbackTitle,
   formatDateTimeLabel,
 }: LinkedProviderSheetLayerProps) {
+  const { appointmentText } = useAppointmentLabels();
   if (!open) return null;
 
   return (
@@ -147,6 +149,7 @@ export function LinkedDocumentsSheetLayer({
   items,
   formatDateTime,
 }: LinkedDocumentsSheetLayerProps) {
+  const { appointmentText } = useAppointmentLabels();
   if (!open) return null;
 
   return (
@@ -186,6 +189,7 @@ export function LinkedRecordsSheetLayer({
   payload,
   kind,
 }: LinkedRecordsSheetLayerProps) {
+  const { appointmentText } = useAppointmentLabels();
   if (!open) return null;
 
   return (

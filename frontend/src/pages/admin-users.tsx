@@ -329,7 +329,7 @@ const INITIAL_EDIT_FIELDS = {
 } satisfies Partial<AdminUsersState>;
 
 function useAdminUsersPageContent() {
-  const { t } = useLang();
+  const { lang, t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
   const [adminUsersState, dispatchAdminUsersState] = useReducer(
@@ -1472,18 +1472,18 @@ function useAdminUsersPageContent() {
           <div className="space-y-1 text-sm" data-testid="user-deactivation-report">
             <p>
               {deactivationReport.name}:{" "}
-              {uiText("users_deactivated_summary", undefined, {
+              {uiText("users_deactivated_summary", lang, {
                 count: deactivationReport.result.revoked_patient_assignments,
               })}
             </p>
             {deactivationReport.result.open_tasks.length > 0 ||
             deactivationReport.result.owned_appointments.length > 0 ? (
               <>
-                <p>{uiText("users_deactivated_open_work")}</p>
+                <p>{uiText("users_deactivated_open_work", lang)}</p>
                 {deactivationReport.result.open_tasks.length > 0 ? (
                   <div>
                     <p className="font-medium">
-                      {uiText("users_deactivated_open_tasks")} ({deactivationReport.result.open_tasks.length})
+                      {uiText("users_deactivated_open_tasks", lang)} ({deactivationReport.result.open_tasks.length})
                     </p>
                     <ul className="list-disc pl-5">
                       {deactivationReport.result.open_tasks.map((task) => (
@@ -1498,7 +1498,7 @@ function useAdminUsersPageContent() {
                 {deactivationReport.result.owned_appointments.length > 0 ? (
                   <div>
                     <p className="font-medium">
-                      {uiText("users_deactivated_owned_appointments")} (
+                      {uiText("users_deactivated_owned_appointments", lang)} (
                       {deactivationReport.result.owned_appointments.length})
                     </p>
                     <ul className="list-disc pl-5">

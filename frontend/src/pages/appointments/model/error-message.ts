@@ -8,6 +8,7 @@ import {
   INTERPRETER_REPORT_SELF_REVIEW_CODE,
 } from "@/pages/appointments/model/completion-rules";
 import { appointmentText } from "@/pages/appointments/model/labels";
+import { useLanguageBound } from "@/lib/i18n";
 
 const LOCALIZED_TRANSPORT_CODES = new Set(["aborted", "network", "timeout"]);
 
@@ -82,4 +83,17 @@ export function appointmentActionErrorMessage(
   return error instanceof Error && error.message.trim()
     ? error.message
     : localizedFallback;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useAppointmentErrorMessages()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const APPOINTMENT_ERROR_LANGUAGE_HELPERS = {
+  appointmentActionErrorMessage,
+};
+
+export function useAppointmentErrorMessages() {
+  return useLanguageBound(APPOINTMENT_ERROR_LANGUAGE_HELPERS);
 }

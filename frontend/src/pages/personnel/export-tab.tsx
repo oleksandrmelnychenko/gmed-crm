@@ -13,12 +13,13 @@ import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelEmployeeRow, type PersonnelExportInput } from "./api";
 import { formatMonth, monthKeyOf, monthOptions } from "./model";
-import { errorMessage } from "./personnel-ui";
+import { usePersonnelLabels } from "./personnel-ui";
 
 const MONTHS_BACK = 120;
 
 /** ZIP export for an auditor (Betriebsprüfung) or the tax adviser. */
 export function ExportTab() {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [employees, setEmployees] = useState<PersonnelEmployeeRow[]>([]);

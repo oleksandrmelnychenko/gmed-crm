@@ -2,7 +2,7 @@ import { memo } from "react";
 
 import { EmptyCell, Section } from "@/components/ui-shell";
 import {
-  appointmentText,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
@@ -58,6 +58,7 @@ function AppointmentClinicalSection({
   onRefresh,
   onError,
 }: AppointmentClinicalSectionProps) {
+  const { appointmentText } = useAppointmentLabels();
   const clinicalEmpty = appointmentText("appointments_no_clinical_surfaces_are_available_for_this_appointment");
   // Incoming results and findings belong to medical visits, not to a
   // restaurant, transfer or other non-medical booking.

@@ -11,9 +11,8 @@ import {
 import { localizeTimelineTitle } from "@/lib/timeline-labels";
 
 import {
-  formatDay,
-  formatMonth,
   formatShortDate,
+  useDashboardFormatters,
 } from "../../model/staff-dashboard-formatters";
 import type { TaskItem, UpcomingAppointment } from "../../model/staff-dashboard-types";
 import {
@@ -46,6 +45,7 @@ export function StaffDashboardActivitySection({
   tr: DashboardTranslations;
   upcoming: UpcomingAppointment[];
 }) {
+  const { formatDay, formatMonth } = useDashboardFormatters();
   return (
     <>
       <div className="grid gap-3 lg:grid-cols-2">

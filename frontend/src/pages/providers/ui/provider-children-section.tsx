@@ -6,8 +6,7 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
-  providerOrganizationLevelLabel,
-  providerTypeLabel,
+  useProviderListLabels,
 } from "../model/list-model";
 import type { ProviderDetail } from "../model/types";
 import { ProviderStatusPill } from "./provider-status-pill";
@@ -27,6 +26,7 @@ export function ProviderChildrenSection({
   className,
   onOpenProvider,
 }: ProviderChildrenSectionProps) {
+  const { providerOrganizationLevelLabel, providerTypeLabel } = useProviderListLabels();
   const { lang, t } = useLang();
   const labels = t as unknown as Record<string, string>;
   const title = t.uiText.providers_children ?? localizedFallback(lang, "Untereinheiten", "Дочерние подразделения");

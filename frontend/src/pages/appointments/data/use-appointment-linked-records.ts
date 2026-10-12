@@ -1,9 +1,9 @@
 import { useEffect, useReducer } from "react";
 
 import { apiFetch } from "@/lib/api";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import { normalizeLinkedPreviewPayload } from "@/pages/appointments/model/linked-preview";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { sortLinkedDocuments } from "@/pages/appointments/model/query-builders";
 import type {
   AppointmentDetail,
@@ -72,6 +72,8 @@ export function useAppointmentLinkedRecords({
   linkedDocumentsOpen,
   failedLoadMessage,
 }: UseAppointmentLinkedRecordsOptions) {
+  const { appointmentText } = useAppointmentLabels();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const [linkedRecordsState, dispatchLinkedRecordsState] = useReducer(
     linkedRecordsReducer,
     undefined,

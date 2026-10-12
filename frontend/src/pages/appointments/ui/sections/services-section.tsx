@@ -1,7 +1,7 @@
 import { memo } from "react";
 
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
   ConciergeServiceEntry,
@@ -60,6 +60,7 @@ function AppointmentServicesSection({
   onRefresh,
   onError,
 }: AppointmentServicesSectionProps) {
+  const { appointmentText } = useAppointmentLabels();
   const {
     canShowConciergeSection,
     canShowBillingHandoffSection,

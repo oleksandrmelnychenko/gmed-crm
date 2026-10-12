@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { useLang } from "@/lib/i18n";
 import { localizeDocumentCode } from "@/lib/required-document-labels";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type { LinkedDocumentItem } from "@/pages/appointments/model/types";
 import {
   linkedDocumentSensitivityBadge,
@@ -47,6 +47,7 @@ function LinkedDocumentsSheet({
   items,
   formatDateTime,
 }: LinkedDocumentsSheetProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   const [preview, setPreview] = useState<{
     contentType: string;

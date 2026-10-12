@@ -9,6 +9,7 @@ import type {
   AppointmentKind,
   CalendarEventExtendedProps,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 type CalendarEventContentDictionary = Record<string, string>;
 type CalendarEventRuntimeProps = Partial<CalendarEventExtendedProps>;
@@ -100,4 +101,17 @@ export function renderStaticCalendarEventContent(
       "</div>",
     ].join(""),
   };
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useCalendarEventContent()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const CALENDAR_EVENT_LANGUAGE_HELPERS = {
+  renderStaticCalendarEventContent,
+};
+
+export function useCalendarEventContent() {
+  return useLanguageBound(CALENDAR_EVENT_LANGUAGE_HELPERS);
 }

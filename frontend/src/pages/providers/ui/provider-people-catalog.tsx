@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { WritableScope } from "@/components/read-only-scope";
 import { Input } from "@/components/ui/input";
-import { useLang, type Lang } from "@/lib/i18n";
+import { useLang, type Lang, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { ProviderTaxonomyCascadeSelect } from "./provider-taxonomy-cascade-select";
 
@@ -29,7 +29,7 @@ import {
   compactDateTime,
   doctorListDisplayName,
   doctorRoleLabel,
-  providerTypeLabel,
+  useProviderListLabels,
 } from "../model/list-model";
 import {
   DEFAULT_PROVIDER_PEOPLE_FILTERS,
@@ -481,6 +481,7 @@ function ProviderTypeBadge({
   labels: Record<string, string>;
   providerType: ProviderType;
 }) {
+  const { providerTypeLabel } = useProviderListLabels();
   return (
     <Badge
       variant="outline"
@@ -1010,6 +1011,8 @@ function FiltersBar({
   onFiltersChange: (filters: ProviderPeopleFilters) => void;
   onResetFilters?: () => void;
 }) {
+  const { buildRoleOptions } = useLanguageHelpers();
+  const { providerTypeLabel } = useProviderListLabels();
   const allLabel = labels.providers_all ?? localizedFallback(lang, "Alle", "Все");
   const effectiveProviderType: ProviderPeopleFilters["providerType"] = forceNonMedical
     ? "non_medical"
@@ -1428,6 +1431,7 @@ function MobilePeopleCards({
   onOpenPerson: (personId: string, row: ProviderPeopleRow) => void;
   onOpenProvider: (providerId: string, row: ProviderPeopleRow) => void;
 }) {
+  const { roleLabel } = useLanguageHelpers();
   if (loading) {
     return (
       <div className="space-y-2 md:hidden">
@@ -1591,6 +1595,7 @@ export function ProviderPeopleCatalog({
   onResetFilters,
   onRetry,
 }: ProviderPeopleCatalogProps) {
+  const { buildPeopleColumns } = useLanguageHelpers();
   const { lang, t } = useLang();
   const labels = t as unknown as Record<string, string>;
   const uiText = t.uiText as Record<string, string>;
@@ -1784,4 +1789,18 @@ export function ProviderPeopleCatalog({
       />
     </section>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  buildPeopleColumns,
+  buildRoleOptions,
+  roleLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

@@ -9,7 +9,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import {
   CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
-  closedWithoutCompletionLabel,
+  useClosureLabels,
 } from "@/pages/appointments/model/closure";
 import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
@@ -17,12 +17,9 @@ import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
 import { cn } from "@/lib/utils";
 
 import {
-  appointmentText,
-  roleLabel,
-  taskPriorityLabel,
-  taskStatusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
-import { formatAppointmentDateTimeLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import type { ReminderEntry, TaskEntry } from "@/pages/appointments/model/types";
 
 function taskStatusChipClass(status: string) {
@@ -102,6 +99,9 @@ export function AppointmentRemindersTable({
   rowActions?: (item: ReminderEntry) => ReactNode;
   rowActionsWidth?: number;
 }) {
+  const { appointmentText } = useAppointmentLabels();
+  const { formatAppointmentDateTimeLabel } = useAppointmentFormatters();
+  const { closedWithoutCompletionLabel } = useClosureLabels();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const pagination = useDataTablePagination(
@@ -236,6 +236,8 @@ export function AppointmentTasksTable({
   rowActions?: (item: TaskEntry) => ReactNode;
   rowActionsWidth?: number;
 }) {
+  const { appointmentText, roleLabel, taskPriorityLabel, taskStatusLabel } = useAppointmentLabels();
+  const { formatAppointmentDateTimeLabel } = useAppointmentFormatters();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const pagination = useDataTablePagination(

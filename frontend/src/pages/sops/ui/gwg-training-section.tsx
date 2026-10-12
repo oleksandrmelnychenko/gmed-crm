@@ -21,7 +21,7 @@ import { formatUiText, useLang, type Translations } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { personnelApi } from "@/pages/personnel/api";
-import { FilePreviewDialog, errorMessage } from "@/pages/personnel/personnel-ui";
+import { FilePreviewDialog, usePersonnelLabels } from "@/pages/personnel/personnel-ui";
 
 import { gwgTrainingApi } from "../data/gwg-training-api";
 import {
@@ -558,6 +558,7 @@ function SectionHeader({ title, intro, accessory }: { title: string; intro: stri
 }
 
 function GwgTrainingManager() {
+  const { errorMessage } = usePersonnelLabels();
   const { user } = useAuth();
   const { t } = useLang();
   const canWrite = hasCapability(user, "personnel.upload");
@@ -769,6 +770,7 @@ function GwgTrainingManager() {
 }
 
 function GwgOwnTrainingsView() {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const [data, setData] = useState<GwgOwnTrainings | null>(null);
   const [error, setError] = useState("");

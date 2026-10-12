@@ -11,6 +11,7 @@ import type {
   AppointmentTimelineKind,
   AppointmentTimelineTone,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 export function appointmentTimelineToneBadgeClassName(
   tone: AppointmentTimelineTone,
@@ -151,4 +152,19 @@ export function appointmentTimelineDateGroupLabel(
     dateOrInstant(key),
   );
   return `${weekday}, ${formatAppDate(key)}`;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useTimelineAppearanceLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const TIMELINE_APPEARANCE_LANGUAGE_HELPERS = {
+  appointmentTimelineDateGroupLabel,
+  appointmentTimelineKindLabel,
+  appointmentTimelineToneLabel,
+};
+
+export function useTimelineAppearanceLabels() {
+  return useLanguageBound(TIMELINE_APPEARANCE_LANGUAGE_HELPERS);
 }

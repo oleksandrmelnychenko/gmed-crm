@@ -43,6 +43,7 @@ import {
   getLang,
   t as translateCatalog,
   useLang,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -59,7 +60,6 @@ import {
 import { canPickInvoiceStatus } from "@/pages/invoices/model/invoice-model";
 
 import {
-  buildPatientLabelPrintHtml,
   canImportPatientClinicalDocuments,
   canManagePatientProfile,
   canLoadPatientAssignableStaff,
@@ -80,6 +80,7 @@ import {
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
   isPatientDetailTabReadOnly,
+  usePatientDetailLabels,
 } from "./model/detail-model";
 import {
   patientPermissions,
@@ -116,9 +117,8 @@ import { usePatientDetailTabData } from "./data/use-patient-detail-tab-data";
 import { usePatientInvoiceDunningEvents } from "./data/use-patient-invoice-dunning-events";
 import { PatientDetailWorkspaceContent } from "./ui/workspace/patient-detail-workspace-content";
 import {
-  getPatientLegalStatusChecklist,
-  getPatientLegalStatusCompletion,
   normalizePatientLegalStatus,
+  useLegalStatusLabels,
 } from "./model/legal-status";
 
 const loadPatientDetailOverlayLayers = () => import("./ui/workspace/patient-detail-overlay-layers");
@@ -930,6 +930,27 @@ function createPatientDetailPageFieldPatch<K extends keyof PatientDetailPageStat
 }
 
 function usePatientDetailPageContent() {
+  const {
+    appointmentCarePathKindLabel,
+    appointmentTypeLabel,
+    computeVitalBmi,
+    fmtMoney,
+    invoiceTypeLabel,
+    orderPhaseLabel,
+    parseOptionalIntegerInput,
+    patientDetailStatusLabel,
+    patientDetailText,
+    priorityLabel,
+    relationTypeLabel,
+    timelineDateGroupLabel,
+    timelineRangeOptions,
+    workflowChecklistLabel,
+  } = useLanguageHelpers();
+  const {
+    getPatientLegalStatusChecklist,
+    getPatientLegalStatusCompletion,
+  } = useLegalStatusLabels();
+  const { buildPatientLabelPrintHtml } = usePatientDetailLabels();
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { staffGo, canStaffPath } = useStaffNavigate();
@@ -2268,4 +2289,29 @@ export function PatientDetailPage(...args: Parameters<typeof usePatientDetailPag
       {content}
     </ReadOnlyScope>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  appointmentCarePathKindLabel,
+  appointmentTypeLabel,
+  computeVitalBmi,
+  fmtMoney,
+  invoiceTypeLabel,
+  orderPhaseLabel,
+  parseOptionalIntegerInput,
+  patientDetailStatusLabel,
+  patientDetailText,
+  priorityLabel,
+  relationTypeLabel,
+  timelineDateGroupLabel,
+  timelineRangeOptions,
+  workflowChecklistLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

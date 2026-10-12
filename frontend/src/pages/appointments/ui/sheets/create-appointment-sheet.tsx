@@ -40,20 +40,14 @@ import {
 } from "@/pages/appointments/data/use-patient-order-options";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
-  appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
   doctorLabel,
   patientName,
   providerLabel,
-  recurrenceFrequencyLabel,
-  staffLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import {
-  buildLocalScheduleWarnings,
-  buildScheduleNotice,
-  formatScheduleConflictError,
+  useScheduleWarnings,
 } from "@/pages/appointments/model/schedule-warnings";
 import {
   providerSelectionFitsAppointmentScope,
@@ -173,6 +167,18 @@ function useCreateAppointmentSheetContent({
   onDraftDiscard,
   onCreated,
 }: CreateAppointmentSheetProps) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    recurrenceFrequencyLabel,
+    staffLabel,
+  } = useAppointmentLabels();
+  const {
+    buildLocalScheduleWarnings,
+    buildScheduleNotice,
+    formatScheduleConflictError,
+  } = useScheduleWarnings();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const interpreterFieldLabel = appointmentText("appointments_interpreter");

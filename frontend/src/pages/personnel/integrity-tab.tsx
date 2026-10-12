@@ -13,7 +13,7 @@ import { formatUiText, useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { personnelApi, type PersonnelAnchor, type PersonnelIntegrity, type PersonnelIntegrityRun } from "./api";
-import { RowIconAction, errorMessage } from "./personnel-ui";
+import { RowIconAction, usePersonnelLabels } from "./personnel-ui";
 
 /**
  * Proof of integrity: the weekly (or manual) re-check of every file against
@@ -21,6 +21,7 @@ import { RowIconAction, errorMessage } from "./personnel-ui";
  * RFC 3161 time stamps.
  */
 export function IntegrityTab({ canManage }: { canManage: boolean }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [data, setData] = useState<PersonnelIntegrity | null>(null);

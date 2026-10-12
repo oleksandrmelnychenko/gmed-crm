@@ -19,23 +19,18 @@ import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
 import {
-  appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
-  responseLabel,
-  statusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   currentRecurringLineageHistory,
-  recurrenceCadenceLabel,
-  recurrenceFrequencyLabel,
   recurrenceLineageBadge,
   recurrenceLineageText,
   recurringLineageRelationLabel,
   recurringLineageSplitLabel,
+  useRecurrenceLabels,
 } from "@/pages/appointments/model/recurrence";
-import { formatAppointmentSlotLabel } from "@/pages/appointments/model/runtime-formatters";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
 import {
   appointmentStatusBadgeClassName,
@@ -57,6 +52,16 @@ function AppointmentOverviewSection({
   onDelete?: () => Promise<void>;
   onOpenDetail: (id: string) => void;
 }) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    recurrenceFrequencyLabel,
+    responseLabel,
+    statusLabel,
+  } = useAppointmentLabels();
+  const { formatAppointmentSlotLabel } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const { user } = useAuth();
   const canSeeOrder = hasCapability(user, "orders.view");
@@ -244,6 +249,8 @@ function RecurringSeriesDetails({
   detail: AppointmentDetail;
   onOpenDetail: (id: string) => void;
 }) {
+  const { recurrenceCadenceLabel } = useRecurrenceLabels();
+  const { recurrenceFrequencyLabel } = useAppointmentLabels();
   const { t } = useLang();
   const recurrenceFrequency = detail.recurrence_frequency;
   const detailLineageText = recurrenceLineageText(detail, t);

@@ -7,6 +7,7 @@ import type {
   LocalScheduleWarning,
   LocalScheduleWarningScope,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 type ScheduleWarningPayload = {
   appointmentId?: string;
@@ -299,4 +300,19 @@ export function formatScheduleConflictError(error: unknown, fallback: string) {
     return appointmentText("appointments_schedule_conflict_generic");
   }
   return appointmentActionErrorMessage(error, fallback);
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useScheduleWarnings()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const SCHEDULE_WARNING_LANGUAGE_HELPERS = {
+  buildLocalScheduleWarnings,
+  buildScheduleNotice,
+  formatScheduleConflictError,
+};
+
+export function useScheduleWarnings() {
+  return useLanguageBound(SCHEDULE_WARNING_LANGUAGE_HELPERS);
 }

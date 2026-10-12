@@ -15,12 +15,10 @@ import { apiFetch } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
-  reportApprovalLabel,
-  reportHoursText,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  formatAppointmentDateTimeLabel,
-  formatAppointmentSlotLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import type { OwnInterpreterReport } from "@/pages/appointments/model/types";
 
@@ -43,6 +41,8 @@ export function OwnInterpreterReportsList({
   reports: OwnInterpreterReport[];
   onOpenAppointment: (appointmentId: string) => void;
 }) {
+  const { formatAppointmentDateTimeLabel, formatAppointmentSlotLabel } = useAppointmentFormatters();
+  const { reportApprovalLabel, reportHoursText } = useAppointmentLabels();
   const { t } = useLang();
 
   if (reports.length === 0) {

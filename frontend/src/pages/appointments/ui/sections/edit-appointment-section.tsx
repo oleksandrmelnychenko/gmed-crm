@@ -31,7 +31,7 @@ import {
 } from "@/pages/appointments/model/completion-rules";
 import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
 import { usePatientOrderOptions } from "@/pages/appointments/data/use-patient-order-options";
-import { useLang } from "@/lib/i18n";
+import { useLang, useLanguageBound } from "@/lib/i18n";
 import {
   appointmentSelectControlClassName,
   appointmentSlateInputClassName,
@@ -54,24 +54,15 @@ import {
 } from "@/pages/appointments/model/edit-payload";
 import { hasValidAppointmentTimeRange } from "@/pages/appointments/model/date-time";
 import {
-  appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
-  checklistPhaseLabel,
   doctorLabel,
   normalizeCarePathKindForAppointmentType,
-  roleLabel,
-  statusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  buildLocalScheduleWarnings,
-  buildScheduleNotice,
   formatScheduleConflictError,
+  useScheduleWarnings,
 } from "@/pages/appointments/model/schedule-warnings";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
-import {
-  recurrenceFrequencyLabel,
-} from "@/pages/appointments/model/recurrence";
 import type {
   AppointmentCarePathKind,
   AppointmentDetail,
@@ -289,6 +280,17 @@ function useEditAppointmentSectionContentContent({
   onOpenChange,
   onSaved,
 }: EditAppointmentSectionProps) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    checklistPhaseLabel,
+    recurrenceFrequencyLabel,
+    roleLabel,
+    statusLabel,
+  } = useAppointmentLabels();
+  const { buildLocalScheduleWarnings, buildScheduleNotice } = useScheduleWarnings();
+  const { formatEditAppointmentError } = useLanguageHelpers();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const patientOrders = usePatientOrderOptions(detail.patient_id);
@@ -1458,3 +1460,15 @@ function EditAppointmentSectionContent(...args: Parameters<typeof useEditAppoint
 }
 
 export const MemoizedEditAppointmentSection = memo(EditAppointmentSection);
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  formatEditAppointmentError,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
+}

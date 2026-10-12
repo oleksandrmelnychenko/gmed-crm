@@ -23,11 +23,11 @@ import { resolvePatientBalancePresentation } from "../../model/account-balance";
 import type { PatientNavigationItem } from "../../model/patient-navigation";
 import {
   PATIENT_LABEL_FORMAT_OPTIONS,
-  patientLabelFormatLabel,
   type PatientLabelFormatId,
   type PatientTimelineItem,
   type PatientTimelineRangeFilter,
   type PatientTimelineSummary,
+  usePatientDetailLabels,
 } from "../../model/detail-model";
 import type {
   AppointmentItem,
@@ -404,6 +404,7 @@ type PatientDetailWorkspaceContentProps = {
 };
 
 function usePatientDetailWorkspaceContentContent(props: PatientDetailWorkspaceContentProps) {
+  const { patientLabelFormatLabel } = usePatientDetailLabels();
   const {
     activeTab,
     activeWorkflowAssignees,

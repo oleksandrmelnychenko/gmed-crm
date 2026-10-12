@@ -5,7 +5,7 @@ import { Section } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { hasCapability } from "@/lib/permissions";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentDetail,
   LinkedPreviewKind,
@@ -18,6 +18,7 @@ function AppointmentLinksSection({
   detail: AppointmentDetail;
   onOpenPreview: (kind: LinkedPreviewKind, label: string) => void;
 }) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   const { user } = useAuth();
   // The order tile only helps people who may open orders (an interpreter

@@ -125,6 +125,8 @@ describe("timeline labels", () => {
     expect(localizeTimelineTitle("Profile updated: some_new_field", lr)).toBe(
       "Профиль изменён: Some New Field",
     );
+    // A profile save audited before the field names were kept (legacy row).
+    expect(localizeTimelineTitle("Profile updated:", lr)).toBe("Профиль изменён");
   });
 
   it("localizes workflow keys returned as task titles", () => {

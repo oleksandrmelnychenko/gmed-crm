@@ -2,7 +2,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
-import { uiText, type Translations } from "@/lib/i18n";
+import { uiText, useLang, type Translations } from "@/lib/i18n";
 import { recordCompliancePrivacyRequestStep } from "@/pages/admin/data/admin-api";
 
 export type PrivacyRequestStepFacts = {
@@ -33,6 +33,7 @@ function day(value?: string) {
  * two-month extension, and telling the data subject the outcome.
  */
 export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }: Props) {
+  const { lang } = useLang();
   const [local, setLocal] = useState<PrivacyRequestStepFacts>({});
   // Recorded steps are evidence: the method and the channel are chosen, never
   // pre-selected (QA B-23 e).
@@ -96,7 +97,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               value={identityMethod}
               onChange={(event) => setIdentityMethod(event.target.value)}
             >
-              <option value="">{uiText("privacy_steps_choose_method")}</option>
+              <option value="">{uiText("privacy_steps_choose_method", lang)}</option>
               {IDENTITY_METHODS.map((method) => (
                 <option key={method} value={method}>
                   {t[`compliance_steps_method_${method}`]}
@@ -161,7 +162,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               value={notifyChannel}
               onChange={(event) => setNotifyChannel(event.target.value)}
             >
-              <option value="">{uiText("privacy_steps_choose_channel")}</option>
+              <option value="">{uiText("privacy_steps_choose_channel", lang)}</option>
               {NOTIFY_CHANNELS.map((channel) => (
                 <option key={channel} value={channel}>
                   {t[`compliance_steps_channel_${channel}`]}
@@ -196,7 +197,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
               value={recipientsChannel}
               onChange={(event) => setRecipientsChannel(event.target.value)}
             >
-              <option value="">{uiText("privacy_steps_choose_channel")}</option>
+              <option value="">{uiText("privacy_steps_choose_channel", lang)}</option>
               {NOTIFY_CHANNELS.map((channel) => (
                 <option key={channel} value={channel}>
                   {t[`compliance_steps_channel_${channel}`]}

@@ -5579,8 +5579,11 @@ async fn ceo_assistant_reads_the_catalogues_and_tabs_its_pages_use() {
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
+/// Owner decision 2026-10-11: the CEO Assistant reads the whole patient card
+/// (insurance, labels, address, passport, emergency contact, legal status,
+/// notes) and changes nothing.
 #[tokio::test]
-async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
+async fn ceo_assistant_reads_the_whole_patient_card_and_changes_nothing() {
     let Some((app, pool, admin_id, _)) = test_context().await else {
         return;
     };
@@ -5599,7 +5602,11 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
                insurance_number = $9,
                insurance_type = $10,
                legal_status = $11,
-               notes = $12
+               notes = $12,
+               address_street = 'Musterstr. 1',
+               address_city = 'Berlin',
+               emergency_contact_name = 'Ben Muster',
+               passport_number = 'C01X00T47'
            WHERE id = $1"#,
     )
     .bind(patient_id)
@@ -5613,7 +5620,7 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
     .bind("POL-123")
     .bind("private")
     .bind(json!({ "restriction_hold": true }))
-    .bind("Internal notes must stay hidden")
+    .bind("Internal note for the assistant")
     .execute(&pool)
     .await
     .unwrap();
@@ -5633,9 +5640,9 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
     assert_eq!(summary["first_name"], format!("First {tag}"));
     assert_eq!(summary["email"], "assistant-visible@example.com");
     assert_eq!(summary["phone_primary"], "+49 123 4567");
-    assert_eq!(summary["insurance_provider"], Value::Null);
-    assert_eq!(summary["insurance_type"], Value::Null);
-    assert!(summary.get("functional_labels").is_none());
+    assert_eq!(summary["insurance_provider"], "AOK");
+    assert_eq!(summary["insurance_type"], "private");
+    assert_eq!(summary["functional_labels"], json!(["vip", "high_risk"]));
 
     let (status, detail) = json_request(
         &app,
@@ -5654,32 +5661,36 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
     assert_eq!(detail["residence_country"], "Germany");
     assert_eq!(detail["languages"][0], "de");
     assert_eq!(detail["languages"][1], "en");
-    assert_eq!(detail["insurance_provider"], Value::Null);
-    assert_eq!(detail["insurance_number"], Value::Null);
-    assert_eq!(detail["insurance_type"], Value::Null);
-    assert!(detail.get("functional_labels").is_none());
-    assert!(detail.get("legal_status").is_none());
-    assert!(detail.get("notes").is_none());
-    assert!(detail.get("address_street").is_none());
-    assert!(detail.get("emergency_contact_name").is_none());
-    // QA E-29: the card names what is hidden for the assistant.
+    assert_eq!(detail["insurance_provider"], "AOK");
+    assert_eq!(detail["insurance_number"], "POL-123");
+    assert_eq!(detail["insurance_type"], "private");
+    assert_eq!(detail["functional_labels"], json!(["vip", "high_risk"]));
+    assert_eq!(detail["legal_status"]["restriction_hold"], true);
+    assert_eq!(detail["notes"], "Internal note for the assistant");
+    assert_eq!(detail["address_street"], "Musterstr. 1");
+    assert_eq!(detail["emergency_contact_name"], "Ben Muster");
+    assert_eq!(detail["passport_number"], "C01X00T47");
+    // Nothing of the card is hidden from the assistant any more (QA E-29 named
+    // the hidden groups before the owner opened the whole card).
     let hidden = detail["hidden_fields"].as_array().expect("hidden_fields");
-    for group in [
-        "insurance",
-        "functional_labels",
-        "address",
-        "emergency_contact",
-        "legal_status",
-    ] {
-        assert!(
-            hidden.iter().any(|field| field == group),
-            "{group}: {hidden:?}"
-        );
-    }
-    assert!(
-        hidden.iter().all(|field| field != "languages"),
-        "{hidden:?}"
-    );
+    assert!(hidden.is_empty(), "{hidden:?}");
+
+    // Read-only: the server refuses every change of the card.
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/patients/{patient_id}/update"),
+        &assistant_bearer,
+        Some(json!({ "notes": "changed by the assistant" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let notes: Option<String> = sqlx::query_scalar("SELECT notes FROM patients WHERE id = $1")
+        .bind(patient_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(notes.as_deref(), Some("Internal note for the assistant"));
 
     support::wait_until("ceo assistant patient view audit context", || async {
         let exists: Option<Value> = sqlx::query_scalar(
@@ -5718,23 +5729,20 @@ async fn ceo_assistant_can_read_patient_registry_with_role_filtered_fields() {
         .expect("visible_fields array");
     assert!(visible_fields.iter().any(|field| field == "email"));
     assert!(visible_fields.iter().any(|field| field == "phone_primary"));
-    assert!(
-        visible_fields
-            .iter()
-            .all(|field| field != "insurance_provider")
-    );
-    assert!(
-        visible_fields
-            .iter()
-            .all(|field| field != "insurance_number")
-    );
-    assert!(
-        visible_fields
-            .iter()
-            .all(|field| field != "functional_labels")
-    );
-    assert!(visible_fields.iter().all(|field| field != "legal_status"));
-    assert!(visible_fields.iter().all(|field| field != "notes"));
+    for field in [
+        "insurance_provider",
+        "insurance_number",
+        "functional_labels",
+        "legal_status",
+        "notes",
+        "address_street",
+        "passport_number",
+    ] {
+        assert!(
+            visible_fields.iter().any(|visible| visible == field),
+            "{field}: {visible_fields:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -13207,6 +13215,66 @@ async fn profile_edit_names_the_changed_fields_and_is_no_legal_status_change() {
             .all(|item| item["title"] != "Legal/compliance status updated"),
         "{items:?}"
     );
+}
+
+/// Profile saves audited before the timeline named the changed fields (no
+/// `changed_fields`, `legal_status_updated` set on every save of the editor)
+/// read as a plain profile edit; a legacy save that changed the contract
+/// status still reads as a legal-status change.
+#[tokio::test]
+async fn legacy_profile_saves_read_as_profile_edits_unless_the_legal_status_changed() {
+    let Some((app, pool, admin_id, bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("legacy-profile-timeline");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, created_at)
+           VALUES
+                ($1, 'update_patient', 'patient', $2,
+                 '{"legal_status_updated":true,"contract_status":"not_started","compliance_completed":false}'::jsonb,
+                 now() - interval '30 minute'),
+                ($1, 'update_patient', 'patient', $2,
+                 '{"legal_status_updated":true,"contract_status":"not_started","compliance_completed":false}'::jsonb,
+                 now() - interval '20 minute'),
+                ($1, 'update_patient', 'patient', $2,
+                 '{"legal_status_updated":true,"contract_status":"signed","compliance_completed":false}'::jsonb,
+                 now() - interval '10 minute')"#,
+    )
+    .bind(admin_id)
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/patients/{patient_id}/timeline"),
+        &bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let items = body["items"].as_array().expect("timeline array");
+    let profile_rows = items
+        .iter()
+        .filter(|item| {
+            item["entity_type"] == "patient"
+                && item["category"] == "profile"
+                && item["title"] == "Profile updated:"
+        })
+        .count();
+    let legal_rows = items
+        .iter()
+        .filter(|item| {
+            item["entity_type"] == "compliance"
+                && item["category"] == "legal_status"
+                && item["title"] == "Legal/compliance status updated"
+        })
+        .count();
+    assert_eq!(profile_rows, 2, "{items:?}");
+    assert_eq!(legal_rows, 1, "{items:?}");
 }
 
 #[tokio::test]

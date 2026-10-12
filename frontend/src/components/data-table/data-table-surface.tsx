@@ -299,6 +299,7 @@ export function DataTableSurface<T>({
           rows={rows}
           filters={filters}
           onChange={setFilters}
+          groupLabels={groupLabels}
           translations={{
             addFilter: labels.table_filter,
             clearAll: labels.table_sort_clear,

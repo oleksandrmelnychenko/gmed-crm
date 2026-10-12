@@ -22,9 +22,9 @@ import {
   FilePreviewDialog,
   ReasonDialog,
   RowIconAction,
-  errorMessage,
   previewColumn,
   sourceLabel,
+  usePersonnelLabels,
 } from "./personnel-ui";
 
 /**
@@ -32,6 +32,7 @@ import {
  * intake (several at once when a paper archive is digitised).
  */
 export function IntakeUploadButton({ onUploaded }: { onUploaded: () => void }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const [uploading, setUploading] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -103,6 +104,7 @@ export function IntakeTab({
   /** Changes after an upload from the page header. */
   reloadKey: number;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [items, setItems] = useState<PersonnelIntakeItem[]>([]);

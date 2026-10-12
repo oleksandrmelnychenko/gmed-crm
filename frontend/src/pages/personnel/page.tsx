@@ -26,7 +26,7 @@ import { ExportTab } from "./export-tab";
 import { IntakeTab, IntakeUploadButton } from "./intake-tab";
 import { IntegrityTab } from "./integrity-tab";
 import { resolvePersonnelTab, type PersonnelTab } from "./model";
-import { errorMessage } from "./personnel-ui";
+import { usePersonnelLabels } from "./personnel-ui";
 import { SettingsTab } from "./settings-tab";
 
 const TAB_ICONS: Record<PersonnelTab, LucideIcon> = {
@@ -44,6 +44,7 @@ const TAB_ICONS: Record<PersonnelTab, LucideIcon> = {
  * Tabs follow the capabilities `personnel.*`; the server checks them again.
  */
 export function PersonnelPage() {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();

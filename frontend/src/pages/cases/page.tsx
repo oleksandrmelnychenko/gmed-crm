@@ -54,6 +54,7 @@ import {
   t as translateCatalog,
   type Translations,
   useLang,
+  useLanguageBound,
 } from "@/lib/i18n";
 import {
   CASE_SNIPPET_CATEGORY_LABEL_KEYS,
@@ -382,6 +383,13 @@ function createCasesPageFieldPatch<K extends keyof CasesPageState>(
 }
 
 function useCasesPageContent() {
+  const {
+    caseText,
+    closeReasonLabel,
+    formatDateTime,
+    patientLabel,
+    snippetCategoryLabel,
+  } = useLanguageHelpers();
   const { t, lang } = useLang();
   const { user } = useAuth();
   const { staffGo } = useStaffNavigate();
@@ -1413,4 +1421,20 @@ function EmptyPanel({ title, text, action }: EmptyPanelProps) {
       </div>
     </div>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  caseText,
+  closeReasonLabel,
+  formatDateTime,
+  patientLabel,
+  snippetCategoryLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

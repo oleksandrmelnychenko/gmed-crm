@@ -7,10 +7,9 @@ import { cn } from "@/lib/utils";
 
 import {
   compactDateTime,
-  providerContractStatusLabel,
   providerPeopleCount,
   providerPeopleCountLabel,
-  providerTypeLabel,
+  useProviderListLabels,
 } from "../model/list-model";
 import { specializationSummaryForItems } from "../model/specialization-labels";
 import { ProviderCategoryIcon } from "./provider-category-icon";
@@ -233,6 +232,7 @@ function ProviderTypeBadge({
   provider: ProviderSummary;
   tr: Record<string, string>;
 }) {
+  const { providerTypeLabel } = useProviderListLabels();
   return (
     <Badge
       variant="outline"
@@ -260,6 +260,7 @@ function ContractBadge({
   hasContract: boolean | null | undefined;
   tr: Record<string, string>;
 }) {
+  const { providerContractStatusLabel } = useProviderListLabels();
   const label = providerContractStatusLabel(hasContract, tr);
   if (!label) {
     return <span className="text-xs text-muted-foreground">{commonNotSet(tr)}</span>;

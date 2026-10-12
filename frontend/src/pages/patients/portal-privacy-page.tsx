@@ -21,18 +21,15 @@ import {
   type StatusTone,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { uiText, useLang } from "@/lib/i18n";
+import { uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalPrivacyRequest,
   fetchPortalPrivacyRequests,
 } from "@/pages/patients/data/portal-api";
 import {
-  formatPortalDate,
-  formatPortalDateTime,
-  portalStatusLabel,
-  privacyRequestLabel,
   privacyRequestSourceLabel as sharedPrivacyRequestSourceLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalPrivacyRequest } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
@@ -105,7 +102,14 @@ function privacyRequestSourceLabel(
 }
 
 export function PatientPrivacyPage() {
-  const { t } = useLang();
+  const {
+    formatPortalDate,
+    formatPortalDateTime,
+    portalStatusLabel,
+    privacyRequestLabel,
+  } = usePortalLabels();
+  const { privacyRequestSourceLabel } = useLanguageHelpers();
+  const { lang, t } = useLang();
   const [privacyState, dispatchPrivacyState] = useReducer(
     patientPrivacyReducer,
     INITIAL_PATIENT_PRIVACY_STATE,
@@ -245,7 +249,7 @@ export function PatientPrivacyPage() {
                 }
                 className={selectClass}
               >
-                <option value="">{uiText("portal_privacy_request_type_choose")}</option>
+                <option value="">{uiText("portal_privacy_request_type_choose", lang)}</option>
                 <option value="restriction">{t.portal_privacy_request_restriction}</option>
                 <option value="erasure">{t.portal_privacy_request_erasure}</option>
                 <option value="third_party_revoke">{t.portal_privacy_request_third_party_revoke}</option>
@@ -318,7 +322,7 @@ export function PatientPrivacyPage() {
                       className={cn("mt-2 rounded-lg px-4 py-3 text-sm text-foreground", tokens.surface.mutedCard)}
                       data-testid="privacy-decision-reason"
                     >
-                      <span className="font-medium">{uiText("privacy_decision_reason_label")}:</span>{" "}
+                      <span className="font-medium">{uiText("privacy_decision_reason_label", lang)}:</span>{" "}
                       {item.decision_reason}
                     </div>
                   ) : null}
@@ -330,4 +334,16 @@ export function PatientPrivacyPage() {
       </section>
     </div>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  privacyRequestSourceLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

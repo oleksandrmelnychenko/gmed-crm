@@ -42,11 +42,7 @@ import {
   fetchPortalServices,
 } from "@/pages/patients/data/portal-api";
 import {
-  conciergeServiceKindLabel,
-  conciergeServiceSourceLabel,
-  formatPortalCurrency,
-  formatPortalDateTime,
-  portalStatusLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalConciergeServiceItem } from "@/pages/patients/model/portal-shared";
 import { fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
@@ -309,6 +305,13 @@ function PatientServicesRequestSection({
 }
 
 export function PatientServicesPage() {
+  const {
+    conciergeServiceKindLabel,
+    conciergeServiceSourceLabel,
+    formatPortalCurrency,
+    formatPortalDateTime,
+    portalStatusLabel,
+  } = usePortalLabels();
   const { lang, t } = useLang();
   const [pageState, dispatchPageState] = useReducer(
     patientServicesReducer,

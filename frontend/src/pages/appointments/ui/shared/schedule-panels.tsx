@@ -1,11 +1,12 @@
 import { ShieldAlert } from "lucide-react";
 
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { appointmentText, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
 import type {
   ConflictSummary,
   LocalScheduleWarning,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 type ScopedConflictItem = ConflictSummary["patient_conflicts"][number] & {
   scopes: string[];
@@ -78,6 +79,8 @@ export function ConflictPanel({
 }: {
   conflicts: ConflictSummary | null;
 }) {
+  const { conflictMetaLine, mergeScopedConflictItems } = useLanguageHelpers();
+  const { appointmentText } = useAppointmentLabels();
   if (!conflicts) return null;
   const scopedItems = mergeScopedConflictItems(conflicts);
   const items = scopedItems.slice(0, 6);
@@ -128,6 +131,8 @@ export function ScheduleWarningsPanel({
 }: {
   warnings: LocalScheduleWarning[];
 }) {
+  const { appointmentText } = useAppointmentLabels();
+  const { localWarningItemLine } = useLanguageHelpers();
   if (warnings.length === 0) return null;
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
@@ -166,4 +171,18 @@ export function ScheduleWarningsPanel({
       </div>
     </div>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  conflictMetaLine,
+  localWarningItemLine,
+  mergeScopedConflictItems,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

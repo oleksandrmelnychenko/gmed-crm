@@ -14,7 +14,7 @@ import {
   daysBetweenDateKeys,
   formatAppDate,
 } from "@/lib/app-time-zone";
-import { formatUiText, getLang } from "@/lib/i18n";
+import { formatUiText, getLang, useLanguageBound } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -678,4 +678,17 @@ function StatusPill({ active, tr }: StatusPillProps) {
       {active ? translatedOrUiText(tr, "common_active") : translatedOrUiText(tr, "common_inactive")}
     </span>
   );
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `usePatientColumnLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PATIENT_COLUMN_LANGUAGE_HELPERS = {
+  buildPatientColumns,
+};
+
+export function usePatientColumnLabels() {
+  return useLanguageBound(PATIENT_COLUMN_LANGUAGE_HELPERS);
 }

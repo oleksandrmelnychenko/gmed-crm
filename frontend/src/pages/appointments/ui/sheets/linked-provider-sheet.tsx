@@ -13,10 +13,10 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { countryNameForDisplay } from "@/components/ui/country-select";
-import { getLang, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
+import { uiText, useLang, type Lang, type TranslationKey, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { appointmentText, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 import { specializationSummaryForItems } from "@/pages/providers/model/specialization-labels";
 import type { ProviderDetail as ProviderSheetDetail } from "@/pages/providers";
@@ -104,8 +104,8 @@ function linkedInteractionNoteLabel(value: string | null | undefined, lang: "de"
   return note;
 }
 
-function linkedProviderAddress(detail: ProviderSheetDetail) {
-  const notSet = appointmentText("appointments_not_set");
+function linkedProviderAddress(detail: ProviderSheetDetail, lang: Lang) {
+  const notSet = uiText("appointments_not_set", lang);
   const cityLine = [detail.address_zip, detail.address_city]
     .filter(Boolean)
     .join(" ")
@@ -113,7 +113,7 @@ function linkedProviderAddress(detail: ProviderSheetDetail) {
   return [
     detail.address_street,
     cityLine,
-    countryNameForDisplay(detail.address_country, getLang()),
+    countryNameForDisplay(detail.address_country, lang),
   ]
     .filter(Boolean)
     .join(", ") || notSet;
@@ -135,6 +135,7 @@ function LinkedProviderOverviewSection({
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
 }) {
+  const { appointmentText } = useAppointmentLabels();
   const { t, lang } = useLang();
   const providerTypeLabel =
     detail.provider_type === "medical"
@@ -195,7 +196,7 @@ function LinkedProviderOverviewSection({
         <div className={appointmentPreviewInfoCardClassName}>
           <InfoRow
             label={appointmentText("appointments_location")}
-            value={linkedProviderAddress(detail)}
+            value={linkedProviderAddress(detail, lang)}
           />
         </div>
         <div className={appointmentPreviewInfoCardClassName}>
@@ -239,6 +240,7 @@ function LinkedProviderPatientsSection({
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
 }) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   return (
     <Section
@@ -295,6 +297,12 @@ function LinkedProviderInteractionsSection({
   detail: ProviderSheetDetail;
   formatDateTimeLabel: (value?: string | null) => string;
 }) {
+  const { appointmentText } = useAppointmentLabels();
+  const {
+    linkedInteractionKindLabel,
+    linkedInteractionStatusLabel,
+    linkedInteractionTypeLabel,
+  } = useLanguageHelpers();
   const notSet = appointmentText("appointments_not_set");
   const { lang, t } = useLang();
 
@@ -393,6 +401,7 @@ function LinkedProviderSheet({
   fallbackTitle,
   formatDateTimeLabel,
 }: LinkedProviderSheetProps) {
+  const { appointmentText } = useAppointmentLabels();
   return (
     <AppointmentPreviewSheet
       open={open}
@@ -433,3 +442,17 @@ function LinkedProviderSheet({
 }
 
 export const MemoizedLinkedProviderSheet = memo(LinkedProviderSheet);
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  linkedInteractionKindLabel,
+  linkedInteractionStatusLabel,
+  linkedInteractionTypeLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
+}

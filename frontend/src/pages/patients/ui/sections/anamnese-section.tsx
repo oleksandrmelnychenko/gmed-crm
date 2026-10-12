@@ -75,6 +75,45 @@ export const NARRATIVE_FIELD_TEMPLATES = {
   anamnese_sozial: "Familienstand:\nKinder:\nWohnsituation:\nBildung:\nBeruf:",
 } as const;
 
+const NARRATIVE_TEMPLATE_LABELS = new Set(
+  Object.values(NARRATIVE_FIELD_TEMPLATES).flatMap((template) =>
+    template
+      .split("\n")
+      .map((line) => line.trim().replace(/:$/, "").trim().toLowerCase())
+      .filter(Boolean),
+  ),
+);
+
+function isNarrativeTemplateLabel(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.endsWith(":") &&
+    NARRATIVE_TEMPLATE_LABELS.has(trimmed.slice(0, -1).trim().toLowerCase())
+  );
+}
+
+/**
+ * An anamnesis block as the card reads it: the template labels nobody filled
+ * in are left out, a block of unfilled labels only becomes empty. A label
+ * counts as filled when text follows it on its line or on the lines below
+ * (before the next template label). Mirrors `without_unfilled_template_labels`
+ * of the medical summary PDF; the editor keeps the full template.
+ */
+export function withoutUnfilledTemplateLabels(text: string | null | undefined): string {
+  if (!text) return "";
+  const lines = text.split(/\r?\n/);
+  const kept: string[] = [];
+  lines.forEach((line, index) => {
+    if (isNarrativeTemplateLabel(line)) {
+      const next = lines.slice(index + 1).find((candidate) => candidate.trim() !== "");
+      if (next === undefined || isNarrativeTemplateLabel(next)) return;
+    }
+    if (line.trim() === "" && (kept.length === 0 || kept[kept.length - 1].trim() === "")) return;
+    kept.push(line);
+  });
+  return kept.join("\n").trim();
+}
+
 /** A blank version: no id (new INSERT), active by default, the standard points pre-written. */
 function blankVersion(): ClinicalNarrative {
   return {
@@ -171,9 +210,9 @@ export function narrativeSpecializationChecklist(
 /** First non-empty field, used as a one-line preview in the history list. */
 function versionSnippet(version: ClinicalNarrative): string {
   for (const key of NARRATIVE_READ_ORDER) {
-    const value = version[key];
-    if (value && value.trim()) {
-      const flat = value.trim().replace(/\s+/g, " ");
+    const value = withoutUnfilledTemplateLabels(version[key]);
+    if (value) {
+      const flat = value.replace(/\s+/g, " ");
       return flat.length > 120 ? `${flat.slice(0, 120)}…` : flat;
     }
   }
@@ -339,11 +378,13 @@ export function AnamneseSection({
   }
 
   // The saved version reads in clinical order: the family anamnesis belongs
-  // to the anamnesis blocks, before the assessment.
+  // to the anamnesis blocks, before the assessment. Unfilled template labels
+  // ("Appetit:", "Familienstand:" …) are not shown (QA B-04 follow-up).
   const activeNonEmpty = active
     ? NARRATIVE_READ_ORDER.flatMap((key) => {
         const field = fields.find((item) => item.key === key);
-        return field && active[key]?.trim() ? [field] : [];
+        const text = withoutUnfilledTemplateLabels(active[key]);
+        return field && text ? [{ ...field, text }] : [];
       })
     : [];
   const currentMissing = Boolean(
@@ -464,7 +505,7 @@ export function AnamneseSection({
                   >
                     <dt className="text-[11px] font-medium text-muted-foreground">{field.label}</dt>
                     <dd className="whitespace-pre-line break-words text-sm text-foreground">
-                      {active[field.key]}
+                      {field.text}
                     </dd>
                   </div>
                 ))}

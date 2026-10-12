@@ -926,6 +926,50 @@ test.describe("patient portal smoke flows", () => {
     await page.screenshot({ path: testInfo.outputPath("patient-documents-after-passport.png"), fullPage: true });
   });
 
+  test("a list read that answers after the upload does not hide the sent file (QA B-10 d)", async ({ page }) => {
+    let holdNextUploadsList = false;
+    let markStaleAnswered: () => void = () => {};
+    const staleAnswered = new Promise<void>((resolve) => {
+      markStaleAnswered = resolve;
+    });
+    await page.route("**/api/v1/me/documents/uploads", async (route) => {
+      if (!holdNextUploadsList || route.request().method() !== "GET") return route.fallback();
+      holdNextUploadsList = false;
+      // The list as it was before the upload, delivered after it.
+      await new Promise((resolve) => setTimeout(resolve, 1_500));
+      await json(route, []);
+      markStaleAnswered();
+    });
+
+    await page.goto("/documents");
+    const uploadsCount = page.locator("#topbar-page-slot").getByText(/Meine hochgeladenen Dateien:\s*\d+/);
+    await expect(uploadsCount).toHaveText(/:\s*1$/);
+    await page.getByLabel(/Titel/i).fill("Befund Mia Muster");
+    await page.locator("#portal-document-upload-file").setInputFiles({
+      name: "befund-mia.pdf",
+      mimeType: "application/pdf",
+      buffer: Buffer.from("befund"),
+    });
+
+    // "Aktualisieren" asks the server (not the client cache); its answer is late.
+    holdNextUploadsList = true;
+    const staleRequest = page.waitForRequest((request) =>
+      request.method() === "GET" && request.url().endsWith("/api/v1/me/documents/uploads"),
+    );
+    await page.getByRole("button", { name: "Aktualisieren", exact: true }).click();
+    await staleRequest;
+    await page.getByRole("button", { name: "Datei senden", exact: true }).click();
+    await expect(page.getByText("Datei wurde an das Betreuungsteam gesendet.")).toBeVisible();
+    const sent = page.locator("article").filter({ hasText: "Befund Mia Muster" });
+    await expect(sent).toBeVisible();
+
+    await staleAnswered;
+    // Well before the page reads the list again (3.5 s): the late answer changed nothing.
+    await page.waitForTimeout(300);
+    await expect(sent).toBeVisible({ timeout: 500 });
+    await expect(uploadsCount).toHaveText(/:\s*2$/, { timeout: 500 });
+  });
+
   test("dashboard header fits the top bar on wide and narrow desktops", async ({ page }, testInfo) => {
     const topbar = page.locator("header").filter({ has: page.locator("#topbar-page-slot") });
     const slot = page.locator("#topbar-page-slot");

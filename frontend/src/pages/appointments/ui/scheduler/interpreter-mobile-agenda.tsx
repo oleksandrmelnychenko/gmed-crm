@@ -23,12 +23,10 @@ import {
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
 import {
-  appointmentText,
-  responseLabel,
-  statusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
-import { recurrenceCadenceLabel } from "@/pages/appointments/model/recurrence";
-import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useRecurrenceLabels } from "@/pages/appointments/model/recurrence";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import type {
   AppointmentListItem,
   OperationalScope,
@@ -144,6 +142,9 @@ function MobileAgendaCard({
   item: AppointmentListItem;
   onOpen: () => void;
 }) {
+  const { appointmentText, responseLabel, statusLabel } = useAppointmentLabels();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
+  const { recurrenceCadenceLabel } = useRecurrenceLabels();
   const summary =
     item.doctor_name ||
     item.provider_name ||
@@ -255,6 +256,7 @@ export function InterpreterMobileAgenda({
   emptyText,
   onOpenDetail,
 }: InterpreterMobileAgendaProps) {
+  const { appointmentText } = useAppointmentLabels();
   return (
     <div className="space-y-4">
       <section className={appointmentSectionCardClassName("p-4")}>

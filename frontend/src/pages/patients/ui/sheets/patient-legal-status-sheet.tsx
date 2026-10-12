@@ -17,10 +17,10 @@ import {
   PATIENT_CONTRACT_STATUS_OPTIONS,
   legalStatusDocumentStateText,
   normalizePatientLegalStatusEvidence,
-  patientContractStatusLabel,
   serializePatientLegalStatus,
   type PatientLegalStatus,
   type PatientLegalStatusEvidence,
+  useLegalStatusLabels,
 } from "../../model/legal-status";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -87,6 +87,7 @@ function PatientLegalStatusSheetContent({
   onOpenChange: (v: boolean) => void;
   onSaved: () => void;
 }) {
+  const { patientContractStatusLabel } = useLegalStatusLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const [form, setForm] = useReducer(legalStatusFormReducer, initial);

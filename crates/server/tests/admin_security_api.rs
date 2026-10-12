@@ -669,6 +669,59 @@ async fn interpreter_clinical_fields_are_locked_hidden() {
     }
 }
 
+/// Owner decision 2026-10-11: the CEO Assistant reads everything (read-only),
+/// the clinical record, insurance, internal notes and labels included. The
+/// matrix shows those fields as read access, system locked, and nobody can
+/// hide or change them there.
+#[tokio::test]
+async fn ceo_assistant_fields_show_locked_read_access() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let ceo_id = seed_user(&app.suite.pool, "admin_security_api", "ceo").await;
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/access-policies?entity_type=patient",
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    for field in [
+        "insurance",
+        "diagnosis",
+        "medications",
+        "allergies",
+        "vitals",
+        "internal_notes",
+        "functional_labels",
+    ] {
+        let policy = body
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|policy| policy["role"] == "ceo_assistant" && policy["field_name"] == field)
+            .unwrap_or_else(|| panic!("ceo_assistant {field}"));
+        assert_eq!(policy["access_level"], "full", "{policy}");
+        assert_eq!(policy["is_system_locked"], true, "{policy}");
+        let (status, response) = json_request(
+            &app,
+            "POST",
+            "/api/v1/access-policies/update",
+            &auth_header_for("ceo", ceo_id),
+            Some(json!({
+                "role": "ceo_assistant",
+                "entity_type": "patient",
+                "field_name": field,
+                "access_level": "hidden"
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{field}: {response}");
+    }
+}
+
 #[tokio::test]
 async fn access_policy_matrix_exposes_it_admin_as_locked_hidden() {
     let Some(app) = test_context().await else {

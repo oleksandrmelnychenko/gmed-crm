@@ -4,10 +4,9 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import {
-  appointmentRuntimeLocale,
-  formatAppointmentDateTimeLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import type {
   AppointmentTimelineEvent,
@@ -15,12 +14,10 @@ import type {
 } from "@/pages/appointments/model/types";
 import {
   appointmentTimelineDateGroupKey,
-  appointmentTimelineDateGroupLabel,
   appointmentTimelineKindBadgeClassName,
   appointmentTimelineKindDotClassName,
-  appointmentTimelineKindLabel,
   appointmentTimelineToneBadgeClassName,
-  appointmentTimelineToneLabel,
+  useTimelineAppearanceLabels,
 } from "@/pages/appointments/appearance/timeline-appearance";
 
 const TIMELINE_FILTERS = [
@@ -37,6 +34,13 @@ function AppointmentTimelineSection({
 }: {
   timelineEvents: AppointmentTimelineEvent[];
 }) {
+  const {
+    appointmentTimelineDateGroupLabel,
+    appointmentTimelineKindLabel,
+    appointmentTimelineToneLabel,
+  } = useTimelineAppearanceLabels();
+  const { appointmentRuntimeLocale, formatAppointmentDateTimeLabel } = useAppointmentFormatters();
+  const { appointmentText } = useAppointmentLabels();
   const { lang } = useLang();
   const [timelineFilter, setTimelineFilter] = useState<
     "all" | AppointmentTimelineKind

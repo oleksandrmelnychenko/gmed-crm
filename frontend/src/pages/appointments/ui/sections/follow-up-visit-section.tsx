@@ -36,7 +36,7 @@ import {
   shiftAppointmentSlot,
   shiftLocalDateTime,
 } from "@/pages/appointments/model/date-time";
-import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import { buildConflictQuery } from "@/pages/appointments/model/query-builders";
 import {
   buildFollowUpVisitForm,
@@ -46,18 +46,12 @@ import {
   providerSelectionFitsAppointmentScope,
 } from "@/pages/appointments/model/provider-taxonomy";
 import {
-  appointmentText as appointmentTextBase,
-  carePathKindLabel,
   doctorLabel,
-  followUpPresetLabel,
-  followUpPresetTitle,
   normalizeCarePathKindForAppointmentType,
-  roleLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  buildLocalScheduleWarnings,
-  buildScheduleNotice,
-  formatScheduleConflictError,
+  useScheduleWarnings,
 } from "@/pages/appointments/model/schedule-warnings";
 import {
   toRfc3339,
@@ -92,7 +86,6 @@ import {
   Field,
 } from "@/pages/appointments/ui/shared/workspace-primitives";
 import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
-import { statusLabel as appointmentStatusLabel } from "@/pages/appointments/model/labels";
 import {
   ConflictPanel,
   ScheduleWarningsPanel,
@@ -155,6 +148,20 @@ function useAppointmentFollowUpVisitSectionContent({
   currentUserRole,
   onCreated,
 }: AppointmentFollowUpVisitSectionProps) {
+  const {
+    statusLabel: appointmentStatusLabel,
+    appointmentText: appointmentTextBase,
+    carePathKindLabel,
+    followUpPresetLabel,
+    followUpPresetTitle,
+    roleLabel,
+  } = useAppointmentLabels();
+  const {
+    buildLocalScheduleWarnings,
+    buildScheduleNotice,
+    formatScheduleConflictError,
+  } = useScheduleWarnings();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [sheetOpen, setSheetOpen] = useState(false);

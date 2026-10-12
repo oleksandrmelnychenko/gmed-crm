@@ -53,20 +53,14 @@ export function currentGwgSheet(
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
 }
 
-/** The document name of a sheet that is not the patient's own. */
-function gwgSheetAutoName(subject: GwgSheetSubject, personName: string | null | undefined): string | undefined {
-  if (subject === "payer") return "Dokumentationsbogen natürliche Personen – Kostenübernehmer";
-  if (!isRepresentativeSubject(subject)) return undefined;
-  const name = personName?.trim();
-  return name ? `Dokumentationsbogen natürliche Personen – ${name}` : undefined;
-}
-
-/** Request body of `POST /documents/generate` for the sheet of a lead. */
+/**
+ * Request body of `POST /documents/generate` for the sheet of a lead. The
+ * server names the document after the person on the sheet ("Dokumentations-
+ * bogen natürliche Personen · <name> · <date>"), so no name is sent.
+ */
 export function gwgSheetRequest(input: {
   leadId: string;
   subject: GwgSheetSubject;
-  /** The name of the representative the sheet is for; it names the document. */
-  personName?: string | null;
   orderId?: string | null;
   orderNumber?: string | null;
   /**
@@ -90,7 +84,6 @@ export function gwgSheetRequest(input: {
     document_variant: "original",
     access_category: "patient",
     status: "active",
-    auto_name: gwgSheetAutoName(input.subject, input.personName),
     bindings: {
       order_number: orderNumber ?? undefined,
       gwg_identification: { subject: input.subject },

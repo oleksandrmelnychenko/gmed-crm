@@ -24,18 +24,14 @@ import {
   shiftLocalDateTime,
   toDateTimeLocalInput,
 } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
-  formatAppointmentSlotLabel as slotLabel,
   formatInterpreterHours,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankBillingHandoffForm } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText as appointmentTextBase,
-  billingHandoffKindLabel,
-  reportApprovalLabel,
-  roleLabel,
-  taskPriorityLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   appointmentAnchorDateTime,
@@ -135,6 +131,15 @@ function useAppointmentBillingHandoffSectionContentContent({
   onRefresh,
   onError,
 }: AppointmentBillingHandoffSectionProps) {
+  const {
+    appointmentText: appointmentTextBase,
+    billingHandoffKindLabel,
+    reportApprovalLabel,
+    roleLabel,
+    taskPriorityLabel,
+  } = useAppointmentLabels();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const appointmentText = appointmentTextBase;

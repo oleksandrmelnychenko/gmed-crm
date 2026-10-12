@@ -30,21 +30,16 @@ import {
   appointmentWhiteInputClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
-  formatAppointmentDateLabel as formatDateLabel,
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatAppointmentSlotLabel as slotLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   blankDoctorFollowUpForm,
   blankPackageEndFollowUpForm,
 } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText,
-  roleLabel,
-  taskPriorityLabel,
-  taskStatusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   appointmentAnchorDateTime,
@@ -133,6 +128,9 @@ function AppointmentDoctorFollowUpSectionContent({
   onRefresh,
   onError,
 }: AppointmentDoctorFollowUpSectionProps) {
+  const { appointmentText } = useAppointmentLabels();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const buildDefaultForm = useCallback(
@@ -323,6 +321,7 @@ function DoctorFollowUpCreateForm({
   setForm: DoctorFollowUpFormSetter;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const { roleLabel, taskPriorityLabel } = useAppointmentLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
@@ -457,6 +456,13 @@ function AppointmentPackageEndSectionContent({
   onRefresh,
   onError,
 }: AppointmentPackageEndSectionProps) {
+  const { appointmentText, roleLabel, taskPriorityLabel, taskStatusLabel } = useAppointmentLabels();
+  const {
+    formatAppointmentDateLabel: formatDateLabel,
+    formatAppointmentDateTimeLabel: formatDateTimeLabel,
+    formatAppointmentSlotLabel: slotLabel,
+  } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const buildDefaultForm = useCallback(

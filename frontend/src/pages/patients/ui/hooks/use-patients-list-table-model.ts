@@ -5,7 +5,7 @@ import { buildSearchIndex, searchWithIndex } from "@/components/data-table/searc
 import { applySort } from "@/components/data-table/sort-logic";
 import type { ColumnDef, FilterPredicate, SortStack } from "@/components/data-table/types";
 
-import { buildPatientColumns, type PatientRowExpansion } from "../patients-columns";
+import { type PatientRowExpansion, usePatientColumnLabels } from "../patients-columns";
 import type { PatientSummary } from "../../model/list-model";
 
 type UsePatientsListTableModelArgs = {
@@ -36,6 +36,7 @@ export function usePatientsListTableModel({
   sortStack,
   tr,
 }: UsePatientsListTableModelArgs) {
+  const { buildPatientColumns } = usePatientColumnLabels();
   const metrics = useMemo<PatientsMetrics>(() => {
     return patients.reduce(
       (acc, patient) => {

@@ -4,6 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import noBareUiText from './eslint-rules/no-bare-ui-text.js'
 
 export default defineConfig([
   // Native mobile toolchains copy third-party bridge bundles into generated
@@ -66,6 +67,17 @@ export default defineConfig([
             'Use appDateTimeFormat(locale, options).format(date) from @/lib/app-time-zone (German time, Europe/Berlin).',
         },
       ],
+    },
+  },
+  {
+    // React Compiler caches what a component computes without reactive
+    // inputs: uiText(key) and getLang() inside a component keep the old
+    // language after a live RU/DE switch. Components pass `lang` from useLang().
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.{ts,tsx}'],
+    plugins: { gmed: { rules: { 'no-bare-ui-text': noBareUiText } } },
+    rules: {
+      'gmed/no-bare-ui-text': 'error',
     },
   },
   {

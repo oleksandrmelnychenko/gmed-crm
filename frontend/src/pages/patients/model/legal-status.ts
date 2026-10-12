@@ -6,6 +6,7 @@ import {
   uiText,
   type Lang,
   type TranslationKey,
+  useLanguageBound,
 } from "@/lib/i18n";
 
 export type PatientLegalStatus = {
@@ -292,4 +293,21 @@ export function getPatientLegalStatusSummary(status: PatientLegalStatus) {
   return translations.patient_legal_summary_progress
     .replace("{completed}", String(completion.completed))
     .replace("{total}", String(completion.total));
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useLegalStatusLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const LEGAL_STATUS_LANGUAGE_HELPERS = {
+  getPatientLegalStatusChecklist,
+  getPatientLegalStatusCompletion,
+  getPatientLegalStatusSummary,
+  isPatientLegalStatusComplete,
+  patientContractStatusLabel,
+};
+
+export function useLegalStatusLabels() {
+  return useLanguageBound(LEGAL_STATUS_LANGUAGE_HELPERS);
 }

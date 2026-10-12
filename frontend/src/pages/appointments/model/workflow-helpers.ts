@@ -1,5 +1,5 @@
 import { berlinLocalInputToIso } from "@/lib/app-time-zone";
-import { getLang } from "@/lib/i18n";
+import { getLang, useLanguageBound } from "@/lib/i18n";
 import { localizeTaskNote } from "@/lib/task-labels";
 import { toDateTimeLocalInput } from "@/pages/appointments/model/date-time";
 import { appointmentText } from "@/pages/appointments/model/labels";
@@ -125,4 +125,18 @@ export function buildHandoffStakeholders(
   return Array.from(items.values()).sort((left, right) =>
     `${left.role}:${left.name}`.localeCompare(`${right.role}:${right.name}`),
   );
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useAppointmentWorkflowHelpers()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const APPOINTMENT_WORKFLOW_LANGUAGE_HELPERS = {
+  buildHandoffStakeholders,
+  buildServiceDraft,
+};
+
+export function useAppointmentWorkflowHelpers() {
+  return useLanguageBound(APPOINTMENT_WORKFLOW_LANGUAGE_HELPERS);
 }

@@ -365,6 +365,7 @@ export function DocumentsGrid({
   paginated = false,
   paginationResetKey = "",
 }: DocumentsGridProps) {
+  const { lang } = useLang();
   const {
     preview: previewLabel,
     filename: filenameLabel,
@@ -422,7 +423,7 @@ export function DocumentsGrid({
         <div
           className="flex min-w-0 items-center gap-2"
           style={{ paddingLeft: translationIndent(tree.depthById.get(item.id)) }}
-          title={`${item.original_filename ?? unclassifiedLabel} · ${uiText("common_version_prefix")}${item.version_number}${item.is_latest_version ? ` · ${currentVersionLabel}` : ""}`}
+          title={`${item.original_filename ?? unclassifiedLabel} · ${uiText("common_version_prefix", lang)}${item.version_number}${item.is_latest_version ? ` · ${currentVersionLabel}` : ""}`}
         >
           {tree.depthById.get(item.id) ? (
             <span aria-hidden className="shrink-0 font-mono text-xs text-muted-foreground">└</span>
@@ -571,6 +572,7 @@ export function DocumentsGrid({
     formatSensitivityLabel,
     formatStatusLabel,
     formatVisibilityLabel,
+    lang,
     leadLabel,
     localizeCode,
     needsCategorization,

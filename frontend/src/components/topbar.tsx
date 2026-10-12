@@ -34,7 +34,6 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   markTopbarChatRead,
-  localizedNotificationCopy,
   notificationHrefForRole,
   sendTopbarChatMessage,
   type ActiveAnnouncement,
@@ -45,6 +44,7 @@ import {
   fetchNewLeadQueue,
   isAnnouncementDismissible,
   type NewLeadQueueItem,
+  useTopbarLabels,
 } from "@/components/topbar-data";
 import { GmedWordmark } from "@/components/gmed-wordmark";
 import { BuildReleaseWidget } from "@/components/build-release-widget";
@@ -753,6 +753,7 @@ function NotificationPanel({
   staffRole: string;
   staffCapabilities: readonly string[] | null;
 }) {
+  const { localizedNotificationCopy } = useTopbarLabels();
   const navigate = useNavigate();
   const { lang, t } = useLang();
   const [notifs, setNotifs] = useState<Notification[]>([]);

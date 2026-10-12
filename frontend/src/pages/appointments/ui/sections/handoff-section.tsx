@@ -22,13 +22,10 @@ import { apiFetch } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
-import { formatAppointmentSlotLabel as slotLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import {
-  appointmentText,
-  followUpPresetLabel,
-  followUpPresetTitle,
-  roleLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import { appointmentAnchorDateTime, toRfc3339 } from "@/pages/appointments/model/workflow-helpers";
 import type {
@@ -85,6 +82,14 @@ function AppointmentHandoffSectionContent({
   onRefresh,
   onError,
 }: AppointmentHandoffSectionProps) {
+  const {
+    appointmentText,
+    followUpPresetLabel,
+    followUpPresetTitle,
+    roleLabel,
+  } = useAppointmentLabels();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();

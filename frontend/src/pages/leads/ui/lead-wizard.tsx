@@ -243,16 +243,10 @@ import {
   leadIntakeTypeFromLead,
   leadErrorBlockingReasons,
   leadErrorMessage,
-  knownLeadProgramServiceLabel,
-  leadLocationDetailedLabel,
-  leadLocationLabel,
-  leadPreferredLocationLabel,
-  leadProgramServiceLabel,
-  leadSourceLabel,
-  leadVisitTimingLabel,
   normalizeLeadServiceSelection,
   normalizeLeadServiceValue,
   updateLeadServiceSelection,
+  useLeadLabels,
 } from "@/pages/leads/model/leads-model";
 
 import {
@@ -665,7 +659,9 @@ function amlEnhancedCheckHints({
 
 function blankAmlEnhancedDueDiligence(): AmlEnhancedDueDiligenceDraft {
   return {
-    internalRiskAnalysis: true,
+    // Ticked only when the enhanced check is required (see `openAmlSheet`):
+    // a voluntary check is the finding of the individual review (QA 2026-10-11).
+    internalRiskAnalysis: false,
     individualReview: false,
     riskReason: "",
     assetOrigin: "",
@@ -1182,7 +1178,7 @@ function amlEnhancedDueDiligenceFromLead(lead: LeadDetail): AmlEnhancedDueDilige
   const stored = recordFromUnknown(lead.wizard_state?.["aml_enhanced_due_diligence"]);
   const defaults = blankAmlEnhancedDueDiligence();
   return {
-    internalRiskAnalysis: stored["internalRiskAnalysis"] !== false,
+    internalRiskAnalysis: stored["internalRiskAnalysis"] === true,
     individualReview: stored["individualReview"] === true,
     riskReason: inputString(stored["riskReason"]),
     assetOrigin: inputString(stored["assetOrigin"]),
@@ -3043,6 +3039,15 @@ export function LeadWizard({
   onShowDetails,
   onOrderCreated,
 }: LeadWizardProps) {
+  const {
+    knownLeadProgramServiceLabel,
+    leadLocationDetailedLabel,
+    leadLocationLabel,
+    leadPreferredLocationLabel,
+    leadProgramServiceLabel,
+    leadSourceLabel,
+    leadVisitTimingLabel,
+  } = useLeadLabels();
   const { lang, t } = useLang();
   const tx: Tx = useCallback((ru, de) => (lang === "de" ? de : ru), [lang]);
   const [createdLeadId, setCreatedLeadId] = useState<string | null>(null);
@@ -3206,6 +3211,10 @@ export function LeadWizard({
   const savedMinorRef = useRef(false);
   const [amlSheetOpen, setAmlSheetOpen] = useState(false);
   const [amlSheetError, setAmlSheetError] = useState("");
+  // Staff set the boxes of section 1 ("Interne Risikoanalyse", "Individuelle
+  // Prüfung") themselves while the wizard is open: opening the check again
+  // keeps that choice.
+  const amlRiskFindingTouchedRef = useRef(false);
   const [documentPreview, setDocumentPreview] = useState<WizardDocumentPreview | null>(null);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
   const [touchedMasterFields, setTouchedMasterFields] = useState<Set<MasterFieldKey>>(
@@ -5031,6 +5040,9 @@ export function LeadWizard({
     value: AmlEnhancedDueDiligenceDraft[K],
   ) => {
     setAmlSheetError("");
+    if (key === "internalRiskAnalysis" || key === "individualReview") {
+      amlRiskFindingTouchedRef.current = true;
+    }
     setDraft((current) => current ? {
       ...current,
       amlEnhancedDueDiligence: {
@@ -5066,6 +5078,11 @@ export function LeadWizard({
     const affectedThirdCountry = nextRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
+    // A new black-list country requires the check: the internal risk
+    // analysis established the risk (see `openAmlSheet`).
+    const internalRiskByRule = newBlacklistCountry
+      && !amlRiskFindingTouchedRef.current
+      && wizardDocuments.enhanced_due_diligence.length === 0;
     setError("");
     clearServerValidation();
     setDraft((current) => current ? {
@@ -5074,6 +5091,7 @@ export function LeadWizard({
       ...(change.citizenships ? { citizenships: normalizeCitizenships(change.citizenships) } : {}),
       amlEnhancedDueDiligence: nextRisk ? {
         ...current.amlEnhancedDueDiligence,
+        ...(internalRiskByRule ? { internalRiskAnalysis: true } : {}),
         affectedThirdCountry,
         highRiskCountryResident: boxes.resident,
         highRiskCountryTransaction: boxes.transaction || current.amlEnhancedDueDiligence.highRiskCountryTransaction,
@@ -5134,6 +5152,12 @@ export function LeadWizard({
     const affectedThirdCountry = amlRisk?.countries
       .map((code) => countryLabel(code, "de"))
       .join(", ") ?? "";
+    // "Interne Risikoanalyse" is ticked only when the enhanced check is
+    // required; a voluntary check is the finding of the individual review
+    // (QA 2026-10-11, as the server prints it). Until a check document
+    // exists — and unless staff set the boxes themselves — they follow the rule.
+    const riskFindingFollowsRule = !amlRiskFindingTouchedRef.current
+      && wizardDocuments.enhanced_due_diligence.length === 0;
     setDraft((current) => {
       if (!current) return current;
       // Residence only for the patient's own country (QA 2026-10-10 B4).
@@ -5142,6 +5166,12 @@ export function LeadWizard({
         ...current,
         amlEnhancedDueDiligence: {
           ...current.amlEnhancedDueDiligence,
+          ...(riskFindingFollowsRule
+            ? {
+                internalRiskAnalysis: amlRequired,
+                individualReview: !amlRequired || current.amlEnhancedDueDiligence.individualReview,
+              }
+            : {}),
           affectedThirdCountry: current.amlEnhancedDueDiligence.affectedThirdCountry || affectedThirdCountry,
           ...(amlRisk ? {
             highRiskCountryResident: boxes.resident,
@@ -5664,7 +5694,7 @@ export function LeadWizard({
    * lead, so the wizard is saved first; a new sheet replaces the current one
    * of the same person as its next version.
    */
-  async function generateGwgIdentificationSheet({ subject, personName }: GwgSheetButton) {
+  async function generateGwgIdentificationSheet({ subject }: GwgSheetButton) {
     if (!draft) return;
     setBusy(gwgSheetBusyKey(subject));
     setError("");
@@ -5676,7 +5706,6 @@ export function LeadWizard({
         gwgSheetRequest({
           leadId: targetLeadId,
           subject,
-          personName,
           orderId: order?.id,
           orderNumber: order?.order_number,
           replaceDocument: currentGwgSheet(wizardDocuments.gwg_identification, subject),

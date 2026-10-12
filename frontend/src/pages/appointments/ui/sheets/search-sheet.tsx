@@ -16,13 +16,9 @@ import {
   TYPE_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
   doctorLabel,
   patientName,
-  roleLabel,
-  statusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   providerSelectionFitsAppointmentScope,
@@ -79,6 +75,13 @@ function SearchSheet({
   onProviderChange,
   onDoctorChange,
 }: SearchSheetProps) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    roleLabel,
+    statusLabel,
+  } = useAppointmentLabels();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
 

@@ -2,12 +2,12 @@ import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
-  getPatientLegalStatusCompletion,
-  isPatientLegalStatusComplete,
   type PatientLegalStatus,
+  useLegalStatusLabels,
 } from "../../model/legal-status";
 
 export function LegalStatusPill({ status }: { status: PatientLegalStatus }) {
+  const { getPatientLegalStatusCompletion, isPatientLegalStatusComplete } = useLegalStatusLabels();
   const { t } = useLang();
   const lp = (key: string) => t.uiText[key] ?? key;
   const completion = getPatientLegalStatusCompletion(status);

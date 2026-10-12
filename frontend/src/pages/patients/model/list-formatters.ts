@@ -1,4 +1,4 @@
-import { getLang, t as translateCatalog } from "@/lib/i18n";
+import { getLang, t as translateCatalog, useLanguageBound } from "@/lib/i18n";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 
 import type {
@@ -81,4 +81,19 @@ export function getPatientFieldValue(
   const nextFallback = fallback ?? localizedNotSetFallback();
   if (Array.isArray(value)) return value.length ? value.join(", ") : nextFallback;
   return value && value.trim() ? value : nextFallback;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `usePatientListFormatters()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PATIENT_LIST_LANGUAGE_HELPERS = {
+  formatPatientDate,
+  formatPatientDateTime,
+  getPatientFieldValue,
+};
+
+export function usePatientListFormatters() {
+  return useLanguageBound(PATIENT_LIST_LANGUAGE_HELPERS);
 }

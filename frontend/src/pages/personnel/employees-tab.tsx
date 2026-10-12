@@ -21,9 +21,10 @@ import {
   formatMonth,
   type EmployeeStatusFilter,
 } from "./model";
-import { categoryLabel, errorMessage } from "./personnel-ui";
+import { categoryLabel, usePersonnelLabels } from "./personnel-ui";
 
 export function EmployeesTab({ onOpenIntake }: { onOpenIntake: () => void }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const { staffGo } = useStaffNavigate();

@@ -1,5 +1,5 @@
 import { appDateTimeFormat, appWallClock, dateOrInstant, formatAppDate } from "@/lib/app-time-zone";
-import { getLang } from "@/lib/i18n";
+import { getLang, useLanguageBound } from "@/lib/i18n";
 
 const MONTH_FORMATTERS = {
   "de-DE": appDateTimeFormat("de-DE", { month: "short" }),
@@ -93,4 +93,18 @@ export function apptStatusToChart(by: Record<string, number> | undefined, tr: Re
     { name: tr.appt_completed ?? tr.common_unknown, value: by.completed ?? 0 },
     { name: tr.appt_cancelled ?? tr.common_unknown, value: by.cancelled ?? 0 },
   ];
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useDashboardFormatters()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const DASHBOARD_FORMATTER_LANGUAGE_HELPERS = {
+  formatDay,
+  formatMonth,
+};
+
+export function useDashboardFormatters() {
+  return useLanguageBound(DASHBOARD_FORMATTER_LANGUAGE_HELPERS);
 }

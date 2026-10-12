@@ -1,13 +1,13 @@
 import { memo, useMemo } from "react";
 
 import { Banner, EmptyCell, InfoRow, ListItem } from "@/components/ui-shell";
-import { formatUnknownValue, useLang, type Translations } from "@/lib/i18n";
+import { formatUnknownValue, useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { appointmentPreviewInfoCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import {
   linkedPreviewText,
   readLinkedPreviewValue,
 } from "@/pages/appointments/model/linked-preview";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { appointmentText, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   LinkedPreviewKind,
   LinkedPreviewPayload,
@@ -110,6 +110,8 @@ function LinkedRecordsSheet({
   payload,
   kind,
 }: LinkedRecordsSheetProps) {
+  const { appointmentText } = useAppointmentLabels();
+  const { linkedCategoryLabel, linkedStatusLabel, linkedTypeLabel } = useLanguageHelpers();
   const { t } = useLang();
 
   const content = useMemo(() => {
@@ -301,3 +303,17 @@ function LinkedRecordsSheet({
 }
 
 export const MemoizedLinkedRecordsSheet = memo(LinkedRecordsSheet);
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  linkedCategoryLabel,
+  linkedStatusLabel,
+  linkedTypeLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
+}

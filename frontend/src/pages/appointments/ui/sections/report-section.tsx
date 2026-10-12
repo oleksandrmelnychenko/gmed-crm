@@ -34,18 +34,16 @@ import {
   isInterpreterReportStatusOpen,
   isInterpreterReportTooEarly,
 } from "@/pages/appointments/model/completion-rules";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
   blankReportForm,
 } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText,
   interpreterReportBillingSyncLabel,
-  reportApprovalLabel,
-  reportHoursText,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   parseValidInterpreterReportHours,
@@ -149,6 +147,9 @@ function useAppointmentReportSectionContent({
   onRefresh,
   onError,
 }: AppointmentReportSectionProps) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText, reportApprovalLabel, reportHoursText } = useAppointmentLabels();
+  const { formatAppointmentDateTimeLabel: formatDateTimeLabel } = useAppointmentFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [reportState, dispatchReportState] = useReducer(

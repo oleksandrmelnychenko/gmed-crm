@@ -1,4 +1,4 @@
-import { formatUiText, type Translations } from "@/lib/i18n";
+import { formatUiText, type Translations, useLanguageBound } from "@/lib/i18n";
 import {
   appointmentPluralText,
   appointmentText,
@@ -148,3 +148,17 @@ export function currentRecurringLineageHistory(detail: AppointmentDetail) {
 }
 
 export { recurrenceFrequencyLabel };
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useRecurrenceLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const RECURRENCE_LANGUAGE_HELPERS = {
+  recurrenceCadenceLabel,
+  recurringOccurrenceLabel,
+};
+
+export function useRecurrenceLabels() {
+  return useLanguageBound(RECURRENCE_LANGUAGE_HELPERS);
+}

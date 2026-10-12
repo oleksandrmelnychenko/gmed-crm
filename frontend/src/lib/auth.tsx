@@ -258,6 +258,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const applyPreferredLanguage = useCallback(
     (me: User | null) => {
       const preferred = me?.preferred_language;
+      // Runs after sign-in, not during render: it compares with the stored
+      // language of that moment, and a `lang` dependency would re-run the
+      // session bootstrap on every manual language switch.
+      // eslint-disable-next-line gmed/no-bare-ui-text
       if ((preferred === "ru" || preferred === "de") && preferred !== getLang()) {
         setLang(preferred);
       }

@@ -75,6 +75,7 @@ import {
   type Lang,
   type Translations,
   type TranslationKey,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -87,6 +88,7 @@ import {
   conciergeServiceStatusTone,
   formatPortalCurrency,
   formatPortalDateTime,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import { fetchProviderDetail, fetchProviderTaxonomy } from "@/pages/providers/data/provider-api";
 import type { ProviderTaxonomyNode, ServiceItem } from "@/pages/providers/model/types";
@@ -1009,6 +1011,8 @@ function createStaffServicesFieldAction<K extends keyof StaffServicesPageState>(
 }
 
 function useStaffServicesPageContent() {
+  const { buildServiceColumns, providerServiceOptionLabel } = useLanguageHelpers();
+  const { formatPortalCurrency, formatPortalDateTime } = usePortalLabels();
   const { lang, t } = useLang();
   const { user } = useAuth();
   const [
@@ -2840,4 +2844,17 @@ export function ServicesPage() {
       <StaffServicesPage />
     </ReadOnlyScope>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  buildServiceColumns,
+  providerServiceOptionLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

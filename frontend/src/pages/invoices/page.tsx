@@ -107,7 +107,7 @@ import {
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
-import { patientRelationTypeLabel } from "@/pages/patients/model/detail-model";
+import { usePatientDetailLabels } from "@/pages/patients/model/detail-model";
 import { cn } from "@/lib/utils";
 import {
   dunningLevelTone,
@@ -511,6 +511,7 @@ function createInvoiceUiFieldAction<K extends keyof InvoiceUiState>(
 }
 
 function useStaffInvoicesPageContent() {
+  const { patientRelationTypeLabel } = usePatientDetailLabels();
   const { t, lang } = useLang();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();

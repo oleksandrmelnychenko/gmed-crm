@@ -59,7 +59,7 @@ import {
   Sheet,
   SheetContent,
 } from "@/components/ui/sheet";
-import { formatUiText, uiText, useLang, type TranslationKey, type Translations } from "@/lib/i18n";
+import { formatUiText, uiText, useLang, type TranslationKey, type Translations, useLanguageBound } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -120,8 +120,6 @@ import {
   doctorToForm,
   doctorListDisplayName,
   doctorRelationshipTargetLabel,
-  doctorRelationshipTypeLabel,
-  doctorRoleLabel,
   formatWeeklyAvailabilityValue,
   humanizeCode,
   joinDoctorTitleValue,
@@ -131,16 +129,11 @@ import {
   normalizeDoctorTitleKey,
   parseWeeklyAvailability,
   patientLabel,
-  personGenderLabel,
-  providerLoadErrorMessage,
-  providerOrganizationLevelLabel,
   providerPermissions,
   providerToForm,
-  providerTypeLabel,
   existingDoctorLinkOptions,
   outgoingDoctorRelationships,
   serviceToForm,
-  servicePriceLabel,
   staffToForm,
   splitDoctorTitleValue,
   taxonomyAttributeValue,
@@ -151,6 +144,7 @@ import {
   toStaffPayload,
   updateTaxonomyAttributeValue,
   weeklyAvailabilityDayLabel,
+  useProviderListLabels,
 } from "./model/list-model";
 import {
   normalizeSpecializationLabelKey,
@@ -1697,6 +1691,8 @@ function providerPeopleFiltersEqual(
 }
 
 function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}) {
+  const { providerLoadErrorMessage } = useProviderListLabels();
+  const { taxonomyAttributeLabel } = useLanguageHelpers();
   const { user } = useAuth();
   const { t, lang } = useLang();
   const tr = { ...t.uiText, ...t } as unknown as Record<string, string>;
@@ -4653,6 +4649,7 @@ function taxonomyAttributeReadOnlyRows(detail: ProviderDetail, lang: "de" | "ru"
 }
 
 function ProviderProfileReadOnlySection({ detail }: { detail: ProviderDetail }) {
+  const { taxonomyAttributeReadOnlyRows } = useLanguageHelpers();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const fallback = t.common_not_set;
@@ -4717,6 +4714,11 @@ function ProviderDoctorDetailSheet({
   onNewRelationship: (doctor: DoctorSummary) => void;
   onDeleteRelationship: (sourceDoctorId: string, relationshipId: string, doctorName: string) => void;
 }) {
+  const {
+    doctorRelationshipTypeLabel,
+    doctorRoleLabel,
+    personGenderLabel,
+  } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   if (!view) return null;
@@ -5154,6 +5156,8 @@ function ProviderStaffDetailSheet({
   onOpenChange: (open: boolean) => void;
   onEdit: (view: StaffDetailView) => void;
 }) {
+  const { staffRoleLabel } = useLanguageHelpers();
+  const { humanizeCode, personGenderLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   if (!view) return null;
@@ -5457,6 +5461,7 @@ function ProviderDoctorRelationshipFormSheet({
   onChange: (patch: Partial<DoctorRelationshipFormState>) => void;
   onTargetProviderChange: (providerId: string) => void;
 }) {
+  const { doctorRelationshipTypeLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const sourceDoctor = sourceDoctors.find((doctor) => doctor.id === form.sourceDoctorId);
@@ -6586,6 +6591,8 @@ function ProviderSheetHero({
   onDelete: () => void;
   onEdit?: () => void;
 }) {
+  const { taxonomyLeafLabel } = useLanguageHelpers();
+  const { providerOrganizationLevelLabel, providerTypeLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
@@ -6949,6 +6956,7 @@ function ProviderDoctorsTable({
   onEditRelationship: (sourceDoctorId: string, relationship: DoctorRelationship) => void;
   onNewRelationship: (sourceDoctorId: string) => void;
 }) {
+  const { doctorRelationshipTypeLabel, doctorRoleLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
@@ -7308,6 +7316,7 @@ function ContactPersonsTable({
   onEdit: (doctor: DoctorSummary) => void;
   onDelete: (doctorId: string, doctorName: string) => void;
 }) {
+  const { personGenderLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
@@ -7499,6 +7508,8 @@ function StaffSection({
   onEdit: (staff: ProviderStaff) => void;
   onDelete: (staffId: string, staffName: string) => void;
 }) {
+  const { staffRoleLabel } = useLanguageHelpers();
+  const { humanizeCode } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
@@ -7704,6 +7715,7 @@ function providerWorkTypePrice(workType: SpecializationWorkType) {
 }
 
 function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
+  const { providerLoadErrorMessage } = useProviderListLabels();
   const { t, lang } = useLang();
   const l2 = (key: string) => t.uiText[key] ?? key;
   const [workTypes, setWorkTypes] = useState<SpecializationWorkType[]>([]);
@@ -7916,6 +7928,8 @@ function ServiceSection({
   onEdit: (service: ServiceItem) => void;
   onDelete: (serviceId: string, serviceName: string) => void;
 }) {
+  const { serviceTaxonomyLabel } = useLanguageHelpers();
+  const { servicePriceLabel } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
 
@@ -8170,6 +8184,11 @@ function InteractionHistorySection({
 }: {
   detail: ProviderDetail;
 }) {
+  const {
+    interactionKindLabel,
+    interactionStatusLabel,
+    interactionTypeLabel,
+  } = useLanguageHelpers();
   const { lang, t } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   type InteractionRow = ProviderDetail["interactions"][number];
@@ -8482,6 +8501,7 @@ function ProviderProfileFields({
   onChange: (field: keyof ProviderFormState, value: string) => void;
   onManageSpecializations?: () => void;
 }) {
+  const { taxonomyAttributeLabel } = useLanguageHelpers();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const selectedTaxonomyNode = taxonomyNodes.find((node) => node.id === form.taxonomyNodeId);
@@ -9555,6 +9575,8 @@ function StaffFormFields({
   onChange: (field: keyof StaffFormState, value: string) => void;
   onContactsChange: (contacts: StaffFormState["contacts"]) => void;
 }) {
+  const { staffRoleLabel } = useLanguageHelpers();
+  const { humanizeCode } = useProviderListLabels();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const selectableRoles = staffRoles.filter((role) => role.is_active || role.code === form.role);
@@ -9710,6 +9732,7 @@ function ServiceFormFields({
   taxonomyNodes: ProviderTaxonomyNode[];
   onChange: (field: keyof ServiceFormState, value: string) => void;
 }) {
+  const { taxonomyAttributeLabel } = useLanguageHelpers();
   const { t, lang } = useLang();
   const l = (key: string) => t.uiText[key] ?? key;
   const priceType = form.priceType || "fixed";
@@ -9889,3 +9912,22 @@ function ProviderDetailPage() {
 }
 
 export { ProviderDetailPage, ProvidersPage };
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  interactionKindLabel,
+  interactionStatusLabel,
+  interactionTypeLabel,
+  serviceTaxonomyLabel,
+  staffRoleLabel,
+  taxonomyAttributeLabel,
+  taxonomyAttributeReadOnlyRows,
+  taxonomyLeafLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
+}

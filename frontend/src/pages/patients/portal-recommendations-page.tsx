@@ -25,7 +25,7 @@ import {
 import { apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
-import { useLang } from "@/lib/i18n";
+import { useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   decidePortalRecommendation,
@@ -34,13 +34,8 @@ import {
 } from "@/pages/patients/data/portal-api";
 import {
   documentCategoryLabel,
-  formatPortalDateTime,
-  portalOrderPhaseLabel,
-  recommendationDecisionLabel,
-  recommendationPriorityLabel,
-  portalStatusLabel,
-  recommendationTypeLabel,
   recommendationStatusTone,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type { PortalRecommendationItem } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
@@ -91,6 +86,12 @@ function patientRecommendationsReducer(
 }
 
 export function PatientRecommendationsPage() {
+  const {
+    formatPortalDateTime,
+    portalStatusLabel,
+    recommendationDecisionLabel,
+    recommendationTypeLabel,
+  } = usePortalLabels();
   const { user } = useAuth();
   const { t } = useLang();
   const [recommendationsState, dispatchRecommendationsState] = useReducer(
@@ -482,6 +483,15 @@ function resolveStaffRecommendationsStateAction<T>(action: SetStateAction<T>, cu
 }
 
 function useStaffRecommendationsWorkspaceContent() {
+  const {
+    formatPortalDateTime,
+    portalOrderPhaseLabel,
+    portalStatusLabel,
+    recommendationDecisionLabel,
+    recommendationPriorityLabel,
+    recommendationTypeLabel,
+  } = usePortalLabels();
+  const { formatDocumentOption } = useLanguageHelpers();
   const { user } = useAuth();
   const { t, lang } = useLang();
   const [staffState, dispatchStaffState] = useReducer(
@@ -1131,4 +1141,16 @@ function ActionButton({
       {label}
     </Button>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  formatDocumentOption,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

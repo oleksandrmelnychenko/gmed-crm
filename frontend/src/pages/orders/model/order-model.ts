@@ -42,6 +42,7 @@ import {
   t as translateCatalog,
   uiText,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 
 type UnknownValueTranslations = Pick<
@@ -567,4 +568,18 @@ export function sumLeistungGross(items: Leistung[]) {
       0,
     ),
   );
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useOrderLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const ORDER_LANGUAGE_HELPERS = {
+  recheckMissingFieldLabel,
+  workflowChecklistLabel,
+};
+
+export function useOrderLabels() {
+  return useLanguageBound(ORDER_LANGUAGE_HELPERS);
 }

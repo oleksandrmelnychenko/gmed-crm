@@ -62,10 +62,10 @@ import {
 } from "@/pages/appointments/model/completion-rules";
 import {
   CLOSED_WITHOUT_COMPLETION_BADGE_CLASS,
-  closedWithoutCompletionLabel,
+  useClosureLabels,
 } from "@/pages/appointments/model/closure";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
   appointmentStatusBadgeClassName,
   interpreterResponseBadgeClassName,
@@ -78,24 +78,14 @@ import {
   statusActionKey,
 } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentPluralText,
-  appointmentText,
-  checklistPhaseLabel,
-  followUpPresetLabel,
-  followUpPresetTitle,
-  reportApprovalLabel,
-  responseLabel,
-  roleLabel,
-  statusLabel,
-  taskPriorityLabel,
-  taskStatusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
-  recurringOccurrenceLabel,
   recurringStatusTargetsForScope,
+  useRecurrenceLabels,
 } from "@/pages/appointments/model/recurrence";
 import {
   appointmentAnchorDateTime,
@@ -281,6 +271,7 @@ type AppointmentWorkflowOverviewSectionProps = {
 function AppointmentWorkflowOverviewSection({
   completionWarnings,
 }: AppointmentWorkflowOverviewSectionProps) {
+  const { appointmentText } = useAppointmentLabels();
   if (completionWarnings.length === 0) return null;
   return (
     <Banner tone="warning" withIcon>
@@ -321,6 +312,7 @@ function AppointmentWorkflowTab({
   onError,
   onNotice,
 }: AppointmentWorkflowTabProps) {
+  const { appointmentText, reportApprovalLabel } = useAppointmentLabels();
   const showCompletionSection = permissions.canManageStatus;
   const showStatusSection = permissions.canManageStatus;
   const showScheduleSection = permissions.canEditSchedule;
@@ -595,6 +587,8 @@ function AppointmentInterpreterSection({
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText } = useAppointmentLabels();
   const [
     {
       assignInterpreterId,
@@ -859,6 +853,7 @@ function InterpreterAssignmentManagement({
     preference: InterpreterPreference,
   ) => void | Promise<void>;
 }) {
+  const { appointmentText, responseLabel, roleLabel } = useAppointmentLabels();
   const { t } = useLang();
 
   const interpreterAssignmentColumns = useMemo<ColumnDef<AppointmentDetail>[]>(
@@ -1037,6 +1032,7 @@ function InterpreterResponseControls({
   savedComment: string | null;
   onResponse: (response: InterpreterResponse, comment: string) => void | Promise<void>;
 }) {
+  const { appointmentText, responseLabel } = useAppointmentLabels();
   const [comment, setComment] = useState(savedComment ?? "");
   useEffect(() => setComment(savedComment ?? ""), [savedComment]);
   const commentMissing = !comment.trim();
@@ -1147,6 +1143,10 @@ function AppointmentChecklistSection({
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText, checklistPhaseLabel } = useAppointmentLabels();
+  const { closedWithoutCompletionLabel } = useClosureLabels();
+  const { formatAppointmentDateTimeLabel: formatDateTimeLabel } = useAppointmentFormatters();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [{ form, sheetOpen, submitBusy, completingId }, dispatchChecklistState] =
@@ -1471,6 +1471,8 @@ function AppointmentRemindersSection({
   onRefresh: () => void;
   onError: (message: string) => void;
 }) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText, roleLabel } = useAppointmentLabels();
   const { t } = useLang();
   const recipients = useMemo(
     () =>
@@ -1750,6 +1752,14 @@ function AppointmentCompletionSectionContent({
   onError,
   onNotice,
 }: AppointmentCompletionSectionProps) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const {
+    appointmentPluralText,
+    appointmentText,
+    followUpPresetLabel,
+    followUpPresetTitle,
+    roleLabel,
+  } = useAppointmentLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [completionPlan, setCompletionPlan] = useState<Record<string, boolean>>(
@@ -1999,6 +2009,9 @@ function AppointmentStatusToggleControl({
   onError: (message: string) => void;
   className?: string;
 }) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText, statusLabel } = useAppointmentLabels();
+  const { recurringOccurrenceLabel } = useRecurrenceLabels();
   const { t } = useLang();
   const [statusRecurrenceScope, setStatusRecurrenceScope] =
     useState<AppointmentRecurringActionScope>("single");
@@ -2319,6 +2332,8 @@ function AppointmentTasksSectionContent({
   onRefresh,
   onError,
 }: AppointmentTasksSectionProps) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { appointmentText, taskStatusLabel } = useAppointmentLabels();
   const { t } = useLang();
   const { user } = useAuth();
   const [form, setForm] = useState<TaskFormState>(() =>
@@ -2502,6 +2517,7 @@ function AppointmentTaskEditorSheet({
   ) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const { appointmentText, roleLabel, taskPriorityLabel } = useAppointmentLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 

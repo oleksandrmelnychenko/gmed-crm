@@ -20,7 +20,7 @@ import {
   monthOptions,
   type CompletenessCode,
 } from "./model";
-import { categoryLabel, categoryShortLabel, errorMessage } from "./personnel-ui";
+import { categoryLabel, categoryShortLabel, usePersonnelLabels } from "./personnel-ui";
 
 const MONTHS_BACK = 120;
 const CELL_CLASS = "inline-flex items-center justify-center rounded border text-[11px] font-semibold";
@@ -31,6 +31,7 @@ const CELL_CLASS = "inline-flex items-center justify-center rounded border text-
  * or not employed in that month.
  */
 export function CompletenessTab() {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [range, setRange] = useState(() => defaultMonthRange());

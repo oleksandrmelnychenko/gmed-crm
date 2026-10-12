@@ -197,6 +197,8 @@ export interface Translations
   access_entity: string;
   access_field: string;
   access_full: string;
+  /** "full" for a role that only reads (CEO Assistant). */
+  access_read_only: string;
   access_masked: string;
   access_hidden: string;
   access_conditional: string;
@@ -1815,4 +1817,36 @@ export function useLang() {
   const translations = useMemo(() => t(lang), [lang]);
 
   return { lang, setLang: changeLang, t: translations };
+}
+
+/**
+ * Copies of `helpers` for one language. The helpers read the UI language
+ * themselves (`getLang()`, `uiText(key)`); the copies are new functions for
+ * every language, so what a component computes with them depends on the
+ * language.
+ */
+export function bindToLanguage<T extends object>(helpers: T, lang: Lang): T {
+  void lang; // Only the identity of the copies depends on it.
+  const bound: Record<string, unknown> = {};
+  for (const [name, helper] of Object.entries(helpers)) {
+    bound[name] =
+      typeof helper === "function"
+        ? (...args: unknown[]) => (helper as (...values: unknown[]) => unknown)(...args)
+        : helper;
+  }
+  return bound as T;
+}
+
+/**
+ * The module's language-reading helpers (its `*_LANGUAGE_HELPERS`) for a
+ * component or hook. React Compiler caches what a component computes without
+ * reactive inputs, so `statusLabel(x)` imported straight from a module kept
+ * the old language after a live RU→DE switch. The copies returned here change
+ * with the language: everything computed with them follows the switch without
+ * a reload. The lint rule `gmed/no-bare-ui-text` keeps components from using
+ * the module functions directly.
+ */
+export function useLanguageBound<T extends object>(helpers: T): T {
+  const { lang } = useLang();
+  return useMemo(() => bindToLanguage(helpers, lang), [helpers, lang]);
 }

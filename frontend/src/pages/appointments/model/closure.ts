@@ -1,4 +1,5 @@
 import { appointmentText } from "@/pages/appointments/model/labels";
+import { useLanguageBound } from "@/lib/i18n";
 
 /**
  * Why an appointment checklist item or reminder was closed without being
@@ -38,3 +39,16 @@ export function closedWithoutCompletionLabel(item: Closable): string | null {
 
 export const CLOSED_WITHOUT_COMPLETION_BADGE_CLASS =
   "inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-[10px] font-medium text-slate-600";
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useClosureLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const CLOSURE_LANGUAGE_HELPERS = {
+  closedWithoutCompletionLabel,
+};
+
+export function useClosureLabels() {
+  return useLanguageBound(CLOSURE_LANGUAGE_HELPERS);
+}

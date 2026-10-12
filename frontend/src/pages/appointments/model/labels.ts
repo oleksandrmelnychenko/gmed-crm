@@ -7,6 +7,7 @@ import {
   type UiTextValues,
   type TranslationKey,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { doctorSpecialtyLabel, type SpecializationLabelLang } from "@/pages/providers/model/specialization-labels";
 import type {
@@ -580,4 +581,48 @@ export function interpreterSuggestionReasonLabel(value: string) {
       value as keyof typeof INTERPRETER_REASON_LABEL_KEYS
     ];
   return labelKey ? tr[labelKey] : value;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useAppointmentLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const APPOINTMENT_LABEL_LANGUAGE_HELPERS = {
+  appointmentPluralText,
+  appointmentText,
+  appointmentTypeLabel,
+  attentionIssueLabel,
+  attentionReasonLabel,
+  billingHandoffKindLabel,
+  billingStatusLabel,
+  carePathKindLabel,
+  checklistPhaseLabel,
+  communicationChannelLabel,
+  communicationDirectionLabel,
+  communicationStatusLabel,
+  communicationTargetLabel,
+  findingsArtifactLabel,
+  followUpPresetLabel,
+  followUpPresetTitle,
+  incomingDataCategoryLabel,
+  incomingDataSourceLabel,
+  interpreterLanguageStatusLabel,
+  interpreterPreferenceLabel,
+  interpreterSuggestionReasonLabel,
+  recurrenceFrequencyLabel,
+  reportApprovalLabel,
+  reportHoursText,
+  responseLabel,
+  roleLabel,
+  serviceKindLabel,
+  serviceStatusLabel,
+  staffLabel,
+  statusLabel,
+  taskPriorityLabel,
+  taskStatusLabel,
+};
+
+export function useAppointmentLabels() {
+  return useLanguageBound(APPOINTMENT_LABEL_LANGUAGE_HELPERS);
 }

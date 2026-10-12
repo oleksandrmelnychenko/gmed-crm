@@ -7,6 +7,7 @@ import {
   t as translateCatalog,
   type TranslationKey,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { hasCapability, type Actor } from "@/lib/permissions";
 
@@ -1163,4 +1164,40 @@ export function filterLeadsByContact(
     const phoneMatches = !phoneNeedle || leadPhone.includes(phoneNeedle);
     return emailMatches && phoneMatches;
   });
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useLeadLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const LEAD_LANGUAGE_HELPERS = {
+  complianceStatusLabel,
+  computeLeadConversionGate,
+  dashOrValue,
+  failedOutcomeLabel,
+  formatDate,
+  formatDateTime,
+  knownLeadProgramServiceLabel,
+  leadInsuranceCoverageLabel,
+  leadLanguageLabel,
+  leadLocationDetailedLabel,
+  leadLocationLabel,
+  leadMedicalRecordsLabel,
+  leadPreferredLocationLabel,
+  leadProgramServiceLabel,
+  leadReadinessCheckLabel,
+  leadReadinessReasonLabel,
+  leadSourceLabel,
+  leadStageLabel,
+  leadTransitionKindLabel,
+  leadTypeLabel,
+  leadVisitTimingLabel,
+  legalSexLabel,
+  statusLabel,
+  yesNo,
+};
+
+export function useLeadLabels() {
+  return useLanguageBound(LEAD_LANGUAGE_HELPERS);
 }

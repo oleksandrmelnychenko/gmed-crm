@@ -36,6 +36,7 @@ import {
   formatUnknownValue,
   useLang,
   type TranslationKey,
+  type Translations,
 } from "@/lib/i18n";
 import {
   Banner,
@@ -166,6 +167,54 @@ const ADMIN_ACCESS_REALTIME_EVENTS = [
   "access_policy.updated",
   "access_policy.reset",
 ] as const;
+
+/**
+ * Roles that read and never write (owner rule: the CEO Assistant is
+ * read-only everywhere). Their "full" is read access, not "visibility and
+ * editing" as for the other roles.
+ */
+const READ_ONLY_ROLES: ReadonlySet<string> = new Set(["ceo_assistant"]);
+
+type AccessCellTexts = Pick<
+  Translations,
+  | "access_full"
+  | "access_read_only"
+  | "access_masked"
+  | "access_hidden"
+  | "access_conditional"
+  | "access_system_locked"
+  | "common_unknown"
+  | "common_unknown_value"
+>;
+
+/**
+ * What a cell of the matrix says: the effective access of the role, and for a
+ * system-locked cell also that a system rule fixes it ("Скрыто · Системное
+ * правило"), so a locked cell no longer reads as hidden whatever it holds
+ * (the CEO Assistant's medical fields are read access, QA 2026-10-11).
+ */
+export function accessCellText(
+  t: AccessCellTexts,
+  role: string,
+  level: string,
+  locked: boolean,
+): string {
+  const label = (() => {
+    switch (level) {
+      case "full":
+        return READ_ONLY_ROLES.has(role) ? t.access_read_only : t.access_full;
+      case "masked":
+        return t.access_masked;
+      case "hidden":
+        return t.access_hidden;
+      case "conditional":
+        return t.access_conditional;
+      default:
+        return formatUnknownValue(level, t);
+    }
+  })();
+  return locked ? `${label} · ${t.access_system_locked}` : label;
+}
 
 function nextAccessLevel(current: string): string {
   const idx = ACCESS_CYCLE.indexOf(current as (typeof ACCESS_CYCLE)[number]);
@@ -334,21 +383,10 @@ function useAdminAccessPageContent() {
     return `${t.access_conditional}: ${conditional} - ${t.access_system_locked}: ${locked}`;
   }, [selectedField, selectedFieldPolicies, t.access_conditional, t.access_system_locked]);
 
-  const levelLabel = useCallback((level: string, locked: boolean) => {
-    if (locked) return t.access_system_locked;
-    switch (level) {
-      case "full":
-        return t.access_full;
-      case "masked":
-        return t.access_masked;
-      case "hidden":
-        return t.access_hidden;
-      case "conditional":
-        return t.access_conditional;
-      default:
-        return formatUnknownValue(level, t);
-    }
-  }, [t]);
+  const levelLabel = useCallback(
+    (role: string, level: string, locked: boolean) => accessCellText(t, role, level, locked),
+    [t],
+  );
 
   const updatePolicy = useCallback(async (role: string, field: string) => {
     const existing = policies.find(
@@ -429,6 +467,7 @@ function useAdminAccessPageContent() {
           (item) => item.role === role && item.field_name === row.field,
         );
         return levelLabel(
+          role,
           policy?.access_level ?? "hidden",
           policy?.is_system_locked ?? false,
         );
@@ -440,20 +479,20 @@ function useAdminAccessPageContent() {
         );
         const level = policy?.access_level ?? "hidden";
         const locked = policy?.is_system_locked ?? false;
-        const cfg = locked
-          ? LEVEL_CONFIG.locked
-          : LEVEL_CONFIG[level] ?? LEVEL_CONFIG.hidden;
-        const Icon = cfg.icon;
+        // A locked cell keeps the colour of its access and shows a lock.
+        const cfg = LEVEL_CONFIG[level] ?? LEVEL_CONFIG.hidden;
+        const Icon = locked ? Lock : cfg.icon;
         const busy = saveBusyToken === `${role}:${row.field}`;
 
         return (
           <div className="flex justify-center">
             <button
               type="button"
+              aria-label={levelLabel(role, level, locked)}
               title={
                 locked
-                  ? t.access_system_locked
-                  : `${levelLabel(level, false)} - ${t.admin_system_click_to_change}`
+                  ? levelLabel(role, level, true)
+                  : `${levelLabel(role, level, false)} - ${t.admin_system_click_to_change}`
               }
               disabled={locked || busy}
               onClick={(event) => {
@@ -464,7 +503,7 @@ function useAdminAccessPageContent() {
                 "inline-flex size-6 items-center justify-center rounded-full border transition-colors",
                 cfg.buttonClass,
                 locked
-                  ? "cursor-not-allowed opacity-60"
+                  ? "cursor-not-allowed opacity-75"
                   : "hover:brightness-95 active:scale-95",
               )}
             >
@@ -680,8 +719,8 @@ function useAdminAccessPageContent() {
                     const level = policy?.access_level ?? "hidden";
                     const locked = policy?.is_system_locked ?? false;
                     const busy = saveBusyToken === `${role}:${selectedField}`;
-                    const config = LEVEL_CONFIG[locked ? "locked" : level] ?? LEVEL_CONFIG.hidden;
-                    const Icon = config.icon;
+                    const config = LEVEL_CONFIG[level] ?? LEVEL_CONFIG.hidden;
+                    const Icon = locked ? Lock : config.icon;
                     const nextLevel = locked ? null : nextAccessLevel(level);
                     return (
                       <div
@@ -700,8 +739,8 @@ function useAdminAccessPageContent() {
                             disabled={locked || busy}
                             title={
                               locked
-                                ? t.access_system_locked
-                                : `${t.admin_system_click_to_change} → ${levelLabel(nextLevel ?? level, false)}`
+                                ? levelLabel(role, level, true)
+                                : `${t.admin_system_click_to_change} → ${levelLabel(role, nextLevel ?? level, false)}`
                             }
                             onClick={() => void updatePolicy(role, selectedField)}
                           >
@@ -710,7 +749,7 @@ function useAdminAccessPageContent() {
                             ) : (
                               <Icon className="size-3.5" />
                             )}
-                            {levelLabel(level, locked)}
+                            {levelLabel(role, level, locked)}
                           </Button>
                         </div>
                       </div>

@@ -27,7 +27,7 @@ import {
   type PersonnelSettings,
 } from "./api";
 import { documentSortKey, formatDocumentPeriod } from "./model";
-import { ReasonDialog, RowIconAction, categoryLabel, errorMessage } from "./personnel-ui";
+import { ReasonDialog, RowIconAction, categoryLabel, usePersonnelLabels } from "./personnel-ui";
 
 type DueDocument = PersonnelRetentionDue["documents"][number];
 
@@ -42,6 +42,7 @@ export function SettingsTab({
   categories: readonly PersonnelCategory[];
   onCategoriesChanged: () => void;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [settings, setSettings] = useState<PersonnelSettings | null>(null);

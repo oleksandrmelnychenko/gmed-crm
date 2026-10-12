@@ -4,7 +4,7 @@ import { LoaderCircle } from "lucide-react";
 import { Banner, Section } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentAttentionItem,
   AppointmentCommunicationEntry,
@@ -225,6 +225,7 @@ function useAppointmentDesktopDetailWorkspaceContentContent({
   onDeleteAppointment,
   onFollowUpVisitCreated,
 }: AppointmentDesktopDetailWorkspaceContentProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const [overviewEditAppointmentId, setOverviewEditAppointmentId] = useState<string | null>(null);

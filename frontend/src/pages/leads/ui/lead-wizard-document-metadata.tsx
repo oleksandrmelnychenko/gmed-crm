@@ -3,7 +3,7 @@ import { STATUS_TONE } from "@/components/ui-shell";
 import type { Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
-import { formatDateTime } from "@/pages/leads/model/leads-model";
+import { useLeadLabels } from "@/pages/leads/model/leads-model";
 import type { DocumentItem } from "@/pages/documents/model/types";
 
 import { PatientUploadMark } from "./lead-wizard-portal-intake";
@@ -88,6 +88,7 @@ export function LeadWizardDocumentMetadata({
   document,
   lang,
 }: LeadWizardDocumentMetadataProps) {
+  const { formatDateTime } = useLeadLabels();
   const sizeLabel = formatFileSize(document.file_size, lang);
   const versionNumber = Number(document.document_number?.match(/-V(\d+)$/i)?.[1])
     || document.version_number

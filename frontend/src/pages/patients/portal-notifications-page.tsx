@@ -3,11 +3,11 @@ import { Bell, CheckCheck, ExternalLink, LoaderCircle, RefreshCw } from "lucide-
 
 import {
   fetchUserNotifications,
-  localizedNotificationCopy,
   markAllNotificationsRead,
   markNotificationRead,
   notificationHrefForRole,
   type Notification,
+  useTopbarLabels,
 } from "@/components/topbar-data";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -25,7 +25,7 @@ import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { formatPortalDateTime } from "@/pages/patients/model/portal-shared";
+import { usePortalLabels } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 
 const PORTAL_NOTIFICATION_EVENTS = [
@@ -97,6 +97,8 @@ function notificationCategory(item: Notification, lang: "de" | "ru") {
 }
 
 export function PatientNotificationsPage() {
+  const { localizedNotificationCopy } = useTopbarLabels();
+  const { formatPortalDateTime } = usePortalLabels();
   const { user } = useAuth();
   const { lang } = useLang();
   const { staffGo } = useStaffNavigate();

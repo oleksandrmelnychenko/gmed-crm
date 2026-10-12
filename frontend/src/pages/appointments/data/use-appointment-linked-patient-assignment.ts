@@ -6,7 +6,7 @@ import {
 } from "react";
 
 import { assignLinkedPatient } from "@/pages/appointments/data/appointment-mutations";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 
 type UseAppointmentLinkedPatientAssignmentOptions = {
   linkedPatientDetailId: string | null;
@@ -47,6 +47,7 @@ export function useAppointmentLinkedPatientAssignment({
   failedAssignMessage,
   onAssigned,
 }: UseAppointmentLinkedPatientAssignmentOptions) {
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const [assignmentState, dispatchAssignmentState] = useReducer(
     linkedPatientAssignmentReducer,
     undefined,

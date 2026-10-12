@@ -55,15 +55,13 @@ import {
   useLang,
   type TranslationKey,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
 import {
-  formatPortalAverage,
   formatPortalDate,
-  formatPortalDateTime,
-  npsBandLabel,
-  portalNotSetLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAppointmentItem,
@@ -304,6 +302,7 @@ function EmptyState({
 }
 
 function FeedbackSummaryLine({ label, value }: { label: string; value?: string | null }) {
+  const { portalNotSetLabel } = usePortalLabels();
   return (
     <div className="flex min-w-0 items-center gap-2 px-3 py-1.5">
       <span className="min-w-0 break-words text-xs font-medium text-muted-foreground">
@@ -337,6 +336,7 @@ function FeedbackTextSection({
 }
 
 function FeedbackReviewHeaderVariants({ item, t }: { item: PortalFeedbackItem; t: Translations }) {
+  const { formatPortalDateTime, npsBandLabel } = usePortalLabels();
   const title = item.patient_name || t.feedback_patient_feedback;
   const context =
     [item.patient_pid, item.appointment_title, item.provider_name, item.doctor_name]
@@ -878,6 +878,8 @@ function PatientFeedbackContent({
   setVersion,
   onSubmit,
 }: PatientFeedbackContentProps) {
+  const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
+  const { appointmentOptionLabel } = useLanguageHelpers();
   return (
     <div className="space-y-4">
       <PageHeader
@@ -1018,6 +1020,7 @@ function PatientFeedbackContent({
 }
 
 function PatientFeedbackWorkspace() {
+  const { formatPortalDateTime, npsBandLabel, portalNotSetLabel } = usePortalLabels();
   const { t } = useLang();
   const [patientState, dispatchPatientState] = useReducer(
     (
@@ -1306,6 +1309,8 @@ function PatientFeedbackWorkspace() {
 }
 
 function useStaffFeedbackWorkspaceContent() {
+  const { formatPortalAverage, formatPortalDateTime, portalNotSetLabel } = usePortalLabels();
+  const { appointmentOptionLabel } = useLanguageHelpers();
   const { user } = useAuth();
   const { t } = useLang();
   const feedbackSelectPatientError = t.feedback_select_patient_error;
@@ -2186,4 +2191,16 @@ function useStaffFeedbackWorkspaceContent() {
 
 function StaffFeedbackWorkspace(...args: Parameters<typeof useStaffFeedbackWorkspaceContent>) {
   return useStaffFeedbackWorkspaceContent(...args);
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  appointmentOptionLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

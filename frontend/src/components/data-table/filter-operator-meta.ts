@@ -2,6 +2,7 @@ import {
   getLang,
   t as translateCatalog,
   type TranslationKey,
+  useLanguageBound,
 } from "@/lib/i18n";
 import type {
   FilterFieldType,
@@ -124,4 +125,17 @@ export function labelForOperator(
   overrides?: FilterOperatorLabels,
 ): string {
   return overrides?.[operator] ?? defaultOperatorLabel(operator);
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useFilterOperatorLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const FILTER_OPERATOR_LANGUAGE_HELPERS = {
+  labelForOperator,
+};
+
+export function useFilterOperatorLabels() {
+  return useLanguageBound(FILTER_OPERATOR_LANGUAGE_HELPERS);
 }

@@ -3,10 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Banner, CountBadge, Section, tokens } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import {
-  interpreterLanguageStatusLabel,
-  interpreterPreferenceLabel,
-  interpreterSuggestionReasonLabel,
-  roleLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import type {
   InterpreterHistoryItem,
@@ -49,6 +46,12 @@ export function InterpreterSuggestionsPanel({
   onSelect,
   onSetPreference,
 }: InterpreterSuggestionsPanelProps) {
+  const {
+    interpreterLanguageStatusLabel,
+    interpreterPreferenceLabel,
+    interpreterSuggestionReasonLabel,
+    roleLabel,
+  } = useAppointmentLabels();
   const { t } = useLang();
   const topSuggestion = suggestions[0] ?? null;
   const preferredCount = history.filter(
@@ -286,6 +289,7 @@ function PreferenceButtons({
   disabled?: boolean;
   onSelectPreference: (preference: InterpreterPreference) => void;
 }) {
+  const { interpreterPreferenceLabel } = useAppointmentLabels();
   const { t } = useLang();
   return (
     <div className="flex flex-wrap gap-1.5 md:justify-end">

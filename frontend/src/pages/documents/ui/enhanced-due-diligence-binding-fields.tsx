@@ -12,6 +12,7 @@ import {
 } from "@/pages/documents/model/asset-origin-evidence";
 import {
   ASSET_ORIGIN_EVIDENCE_BINDING_KEY,
+  enhancedDueDiligenceTierRequiresCheck,
   parseEnhancedDueDiligenceCountries,
   type DocumentBindingForm,
 } from "@/pages/documents/model/document-bindings";
@@ -132,7 +133,16 @@ export function EnhancedDueDiligenceBindingFields({
           <AmlField required label={tx("Уровень риска", "Risikostufe")}>
             <NativeComboboxSelect
               value={riskTier}
-              onChange={(event) => onChange("riskTier", event.target.value)}
+              onChange={(event) => {
+                const tier = event.target.value;
+                const required = enhancedDueDiligenceTierRequiresCheck(tier);
+                onChange("riskTier", tier);
+                // The finding follows the tier: "Interne Risikoanalyse" only
+                // when the rule requires the check, otherwise the individual
+                // review of the case (QA 2026-10-11, as the server prints it).
+                onChange("internalRiskAnalysis", String(required));
+                onChange("individualReview", String(Boolean(tier) && !required));
+              }}
               className={inputClassName}
               aria-required="true"
             >

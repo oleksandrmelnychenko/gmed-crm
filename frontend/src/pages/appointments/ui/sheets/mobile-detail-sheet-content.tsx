@@ -7,7 +7,7 @@ import {
   SheetContent,
 } from "@/components/ui/sheet";
 import { useLang } from "@/lib/i18n";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentAttentionItem,
   AppointmentCommunicationEntry,
@@ -195,6 +195,7 @@ function useAppointmentMobileDetailSheetContentContent({
   onEditSaved,
   onDeleteAppointment,
 }: AppointmentMobileDetailSheetContentProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   const [overviewEditAppointmentId, setOverviewEditAppointmentId] = useState<string | null>(null);
   const overviewEditOpen = Boolean(

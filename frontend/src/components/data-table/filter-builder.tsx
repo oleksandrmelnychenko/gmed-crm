@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useLang } from "@/lib/i18n";
+import { useLang, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { FilterValueInput } from "./filter-value-input";
@@ -15,6 +15,7 @@ import {
   labelForOperator,
   operatorTakesValue,
   type FilterOperatorLabels,
+  useFilterOperatorLabels,
 } from "./filter-operator-meta";
 import type {
   ColumnDef,
@@ -113,12 +114,30 @@ export type FilterBuilderTranslations = {
   operatorLabels?: FilterOperatorLabels;
 };
 
+/**
+ * The group a field belongs to, as the field picker shows it: the table's
+ * translated group name (the same names as the columns menu). A group key
+ * without a name ("identity", "audit") is left out instead of being printed
+ * raw (QA 2026-10-11, N-17 for every table).
+ */
+export function filterColumnGroupLabel(
+  group: string | undefined,
+  groupLabels?: Readonly<Record<string, string>>,
+): string | null {
+  if (!group) return null;
+  const label = groupLabels?.[group]?.trim();
+  if (label) return label;
+  return /^[a-z0-9_-]+$/.test(group) ? null : group;
+}
+
 export type FilterBuilderProps<T> = {
   columns: readonly ColumnDef<T>[];
   rows: readonly T[];
   filters: readonly FilterPredicate[];
   onChange: (next: FilterPredicate[]) => void;
   translations?: FilterBuilderTranslations;
+  /** Translated names of the column groups (`ColumnDef.group` → name). */
+  groupLabels?: Readonly<Record<string, string>>;
   className?: string;
 };
 
@@ -128,6 +147,7 @@ export function FilterBuilder<T>({
   filters,
   onChange,
   translations,
+  groupLabels,
   className,
 }: FilterBuilderProps<T>) {
   const { t } = useLang();
@@ -303,20 +323,23 @@ export function FilterBuilder<T>({
                   {resolvedTranslations.noFields}
                 </div>
               ) : (
-                pickerOptions.map((col) => (
-                  <button
-                    key={col.id}
-                    type="button"
-                    role="menuitem"
-                    onClick={() => handleAdd(col)}
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
-                  >
-                    <span className="truncate">{col.label}</span>
-                    {col.group ? (
-                      <span className="ml-auto text-[10px] uppercase text-muted-foreground">{col.group}</span>
-                    ) : null}
-                  </button>
-                ))
+                pickerOptions.map((col) => {
+                  const groupLabel = filterColumnGroupLabel(col.group, groupLabels);
+                  return (
+                    <button
+                      key={col.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => handleAdd(col)}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted"
+                    >
+                      <span className="truncate">{col.label}</span>
+                      {groupLabel ? (
+                        <span className="ml-auto text-[10px] uppercase text-muted-foreground">{groupLabel}</span>
+                      ) : null}
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
@@ -354,6 +377,8 @@ function FilterChip<T>({
   onClose,
   translations,
 }: ChipProps<T>) {
+  const { labelForOperator } = useFilterOperatorLabels();
+  const { valueSummary } = useLanguageHelpers();
   const chipRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const editorPosition = useFixedDropdownPosition(chipRef, editorRef, isEditing);
@@ -445,4 +470,16 @@ function FilterChip<T>({
       ) : null}
     </div>
   );
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  valueSummary,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

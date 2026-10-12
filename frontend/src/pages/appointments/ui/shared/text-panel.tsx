@@ -1,7 +1,7 @@
 import { memo } from "react";
 
 import { useLang } from "@/lib/i18n";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 
 type AppointmentTextPanelProps = {
   title: string;
@@ -12,6 +12,7 @@ function AppointmentTextPanel({
   title,
   text,
 }: AppointmentTextPanelProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
 
   return (

@@ -18,7 +18,7 @@ import {
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentStatusBadgeClassName } from "@/pages/appointments/appearance/status-appearance";
-import { statusLabel as appointmentStatusLabel } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type { AppointmentStatus } from "@/pages/appointments/model/types";
 
 import type { AppointmentItem } from "../../model/detail-tab-types";
@@ -66,6 +66,7 @@ export function PatientAppointmentsTab({
   t,
   tabLoading,
 }: PatientAppointmentsTabProps) {
+  const { statusLabel: appointmentStatusLabel } = useAppointmentLabels();
   const { t: dict } = useLang();
   const appointmentPagination = useDataTablePagination(
     appointments,

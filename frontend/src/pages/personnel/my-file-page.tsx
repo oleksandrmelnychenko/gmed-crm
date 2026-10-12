@@ -9,7 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { personnelApi, type PersonnelCategory, type PersonnelDocument, type PersonnelOwnFile } from "./api";
 import { PersonnelDocumentsTable } from "./documents-list";
 import { formatEmploymentPeriod } from "./model";
-import { FilePreviewDialog, MutedNote, RowIconAction, errorMessage } from "./personnel-ui";
+import { FilePreviewDialog, MutedNote, RowIconAction, usePersonnelLabels } from "./personnel-ui";
 
 /**
  * The signed-in employee's own personnel file (§ 83 BetrVG, Art. 15 DSGVO):
@@ -17,6 +17,7 @@ import { FilePreviewDialog, MutedNote, RowIconAction, errorMessage } from "./per
  * of the file by the server.
  */
 export function MyPersonnelFilePage() {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const [file, setFile] = useState<PersonnelOwnFile | null>(null);
   const [categories, setCategories] = useState<PersonnelCategory[]>([]);

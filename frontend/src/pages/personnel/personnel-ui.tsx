@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { downloadBlob } from "@/lib/api";
-import { getLang, useLang, type Translations } from "@/lib/i18n";
+import { getLang, useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import { canPreviewInline } from "./model";
@@ -195,6 +195,7 @@ export function FilePreviewDialog({
   /** Shown after the MIME type, e.g. that the access is logged. */
   note?: ReactNode;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const [file, setFile] = useState<LoadedFile | null>(null);
   const [url, setUrl] = useState<string | null>(null);
@@ -316,6 +317,7 @@ export function ReasonDialog({
   onConfirm: (reason: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const reasonId = useId();
   const [reason, setReason] = useState("");
@@ -408,4 +410,17 @@ export function FormSection({ title, hint, children }: { title: ReactNode; hint?
       {children}
     </section>
   );
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `usePersonnelLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PERSONNEL_LANGUAGE_HELPERS = {
+  errorMessage,
+};
+
+export function usePersonnelLabels() {
+  return useLanguageBound(PERSONNEL_LANGUAGE_HELPERS);
 }

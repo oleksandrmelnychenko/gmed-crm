@@ -20,7 +20,7 @@ import {
   textareaClass,
 } from "@/components/ui-shell";
 import { formatAppDate } from "@/lib/app-time-zone";
-import { useLang } from "@/lib/i18n";
+import { useLang, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { appointmentTimeOfDayLabel } from "@/pages/patients/model/portal-shared";
 import { getProviderDoctors } from "@/pages/appointments/data/provider-doctors";
@@ -31,18 +31,15 @@ import {
 } from "@/pages/appointments/model/form-factories";
 import { filterAppointmentOwnerOptions } from "@/pages/appointments/model/staff-roles";
 import {
-  operationalScopeReason,
+  useOperationalScopeLabels,
 } from "@/pages/appointments/model/operational-scopes";
 import {
-  formatAppointmentSlotLabel as slotLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
   appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
   doctorLabel,
-  staffLabel,
-  statusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   currentDateInput,
@@ -123,6 +120,7 @@ function CancelRequestControl({
   disabled: boolean;
   onCancel: (reason: string) => Promise<void> | void;
 }) {
+  const { appointmentText } = useAppointmentLabels();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const valid = reason.trim().length >= 3;
@@ -323,6 +321,16 @@ function useQueueSheetContent({
   onConvertRequest,
   onCancelRequest,
 }: QueueSheetProps) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    staffLabel,
+    statusLabel,
+  } = useAppointmentLabels();
+  const { preferredWindowLabel, requestStatusLabel } = useLanguageHelpers();
+  const { formatAppointmentSlotLabel: slotLabel } = useAppointmentFormatters();
+  const { operationalScopeReason } = useOperationalScopeLabels();
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
   const hasAppointmentRequests = appointmentRequests.length > 0;
@@ -1108,3 +1116,16 @@ function QueueSheet(...args: Parameters<typeof useQueueSheetContent>) {
 }
 
 export const MemoizedQueueSheet = memo(QueueSheet);
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  preferredWindowLabel,
+  requestStatusLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
+}

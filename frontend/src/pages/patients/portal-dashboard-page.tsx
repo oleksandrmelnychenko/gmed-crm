@@ -41,23 +41,14 @@ import {
 } from "@/pages/patients/data/portal-api";
 import {
   appointmentStatusTone,
-  conciergeServiceKindLabel,
   conciergeServiceStatusTone,
-  feedbackStatusLabel,
   feedbackStatusTone,
-  formatPortalCurrency,
-  formatPortalDate,
-  formatPortalDateTime,
   invoiceStatusTone,
   nextActionTone,
   portalAppointmentPlaceLabel,
-  portalDocumentTypeLabels,
-  portalStatusLabel,
-  privacyRequestLabel,
   privacyStatusTone,
-  recommendationPriorityLabel,
   recommendationStatusTone,
-  recommendationTypeLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
 import {
@@ -192,6 +183,18 @@ function patientDashboardReducer(
 }
 
 function usePatientDashboardPageContent() {
+  const {
+    conciergeServiceKindLabel,
+    feedbackStatusLabel,
+    formatPortalCurrency,
+    formatPortalDate,
+    formatPortalDateTime,
+    portalDocumentTypeLabels,
+    portalStatusLabel,
+    privacyRequestLabel,
+    recommendationPriorityLabel,
+    recommendationTypeLabel,
+  } = usePortalLabels();
   const { user } = useAuth();
   const { lang, t } = useLang();
   // Portal routes are checked against the patient whitelist.

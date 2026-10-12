@@ -272,5 +272,24 @@ test.describe("appointments overview detail", () => {
     await expect(linkedSection.getByRole("button", { name: /^Fälle\b/ })).toHaveCount(0);
     await expect(linkedSection).not.toContainText("Arbeitsbereich öffnen");
     await expect(linkedSection).not.toContainText("Schnellvorschau");
+
+    // A live switch to Russian (no reload) re-renders the labels the
+    // appointment helpers produce (React Compiler kept them in German before).
+    await page.getByRole("button", { name: "Sprache wechseln", exact: true }).click();
+    const main = page.locator("main");
+    await expect(main).toContainText("Статус и ответственные");
+    await expect(main).toContainText("Переводчик");
+    await expect(main).toContainText("Завершён");
+    await expect(main).toContainText("1 открытый пункт");
+    for (const german of [
+      "Status und Zuständigkeiten",
+      "Dolmetscher",
+      "Abgeschlossen",
+      "offener Punkt",
+      "Operative Nachsorge offen",
+      "Nächster Prüfpunkt",
+    ]) {
+      await expect(main).not.toContainText(german);
+    }
   });
 });

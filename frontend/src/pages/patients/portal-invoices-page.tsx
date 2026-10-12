@@ -38,17 +38,13 @@ import {
   uploadPortalPaymentProof,
 } from "@/pages/patients/data/portal-api";
 import {
-  formatPortalCurrency,
-  formatPortalDate,
-  formatPortalDateTime,
-  invoiceTypeLabel,
   downloadPortalCreditNotePdf,
   downloadPortalStornoPdf,
   downloadPortalInvoicePdf,
   downloadPortalDunningLetter,
   openPortalInvoicePdf,
   portalStatementOpenAmount,
-  portalStatusLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalAccountStatement,
@@ -183,6 +179,13 @@ function patientInvoicesReducer(
 }
 
 function usePatientInvoicesPageContent() {
+  const {
+    formatPortalCurrency,
+    formatPortalDate,
+    formatPortalDateTime,
+    invoiceTypeLabel,
+    portalStatusLabel,
+  } = usePortalLabels();
   const { t, lang } = useLang();
   const [accountStatementCurrency, setAccountStatementCurrency] = useState("");
   const [invoicesState, dispatchInvoicesState] = useReducer(
@@ -1235,6 +1238,7 @@ export function PatientInvoicesPage(...args: Parameters<typeof usePatientInvoice
 }
 
 function InvoiceLineCard({ line, currency }: { line: PortalInvoiceLineItem; currency?: string }) {
+  const { formatPortalCurrency } = usePortalLabels();
   const { t } = useLang();
   const description = agencyServiceNameLabel(undefined, line.description, t);
   return (

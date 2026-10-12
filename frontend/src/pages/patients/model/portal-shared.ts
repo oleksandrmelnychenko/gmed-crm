@@ -7,6 +7,7 @@ import {
   t as translateCatalog,
   type TranslationKey,
   uiText,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { knownDocumentCodeLabel } from "@/lib/required-document-labels";
 
@@ -1238,4 +1239,39 @@ export async function downloadPortalDunningLetter(
 ) {
   const blob = await fetchPortalBlob(`/me/invoices/${invoiceId}/dunning/${letter.id}/pdf`);
   downloadBlob(blob, letter.file_name || "mahnung.pdf");
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `usePortalLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PORTAL_LANGUAGE_HELPERS = {
+  appointmentCarePathKindLabel,
+  appointmentTimeOfDayLabel,
+  appointmentTypeLabel,
+  conciergeServiceKindLabel,
+  conciergeServiceSourceLabel,
+  feedbackStatusLabel,
+  formatPortalAverage,
+  formatPortalCurrency,
+  formatPortalDate,
+  formatPortalDateTime,
+  formatPortalFileSize,
+  invoiceTypeLabel,
+  npsBandLabel,
+  patientInvoiceLedgerCategoryLabel,
+  patientInvoiceLedgerDirectionLabel,
+  portalDocumentTypeLabels,
+  portalNotSetLabel,
+  portalOrderPhaseLabel,
+  portalStatusLabel,
+  privacyRequestLabel,
+  recommendationDecisionLabel,
+  recommendationPriorityLabel,
+  recommendationTypeLabel,
+};
+
+export function usePortalLabels() {
+  return useLanguageBound(PORTAL_LANGUAGE_HELPERS);
 }

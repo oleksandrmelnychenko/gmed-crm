@@ -3,7 +3,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { notifyChatRead } from "@/lib/chat-read-events";
 import { formatMoneyAmount } from "@/lib/money";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { formatUiText, t as translationsFor, uiText } from "@/lib/i18n";
+import { formatUiText, t as translationsFor, uiText, useLanguageBound } from "@/lib/i18n";
 import { notificationCopyFromFacts } from "@/lib/notification-copy";
 import { localizeTaskTitle } from "@/lib/task-labels";
 
@@ -877,4 +877,17 @@ export function sendTopbarChatMessage(userId: string, message: string) {
     method: "POST",
     body: JSON.stringify({ message }),
   });
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useTopbarLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const TOPBAR_LANGUAGE_HELPERS = {
+  localizedNotificationCopy,
+};
+
+export function useTopbarLabels() {
+  return useLanguageBound(TOPBAR_LANGUAGE_HELPERS);
 }

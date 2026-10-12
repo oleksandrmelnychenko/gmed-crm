@@ -221,11 +221,10 @@ import {
   orderPlanningToForm,
   orderProcessGatesToForm,
   patientLabel,
-  recheckMissingFieldLabel,
   leistungLineAmounts,
   leistungVatLabel,
   summarizeLeistungMetrics,
-  workflowChecklistLabel,
+  useOrderLabels,
 } from "./model/order-model";
 import type {
   CreateOrderFormState,
@@ -632,6 +631,7 @@ function createOrdersPageFieldPatch<K extends keyof OrdersPageState>(
 }
 
 function useOrdersPageContent() {
+  const { recheckMissingFieldLabel, workflowChecklistLabel } = useOrderLabels();
   const { t, lang } = useLang();
   const tx = t as unknown as Record<string, string>;
   const { user } = useAuth();

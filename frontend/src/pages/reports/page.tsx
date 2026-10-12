@@ -27,7 +27,7 @@ import { agencyServiceNameLabel } from "@/lib/agency-service-labels";
 import { clearApiCache } from "@/lib/api";
 import { Banner as ShellBanner, PageHeader, StatusBadge, selectClass as shellSelectClassName, tokens } from "@/components/ui-shell";
 import { useAuth } from "@/lib/auth";
-import { formatEnumLabelFromKeys, formatUnknownValue, type TranslationKey, useLang } from "@/lib/i18n";
+import { formatEnumLabelFromKeys, formatUnknownValue, type TranslationKey, useLang, useLanguageBound } from "@/lib/i18n";
 import { getRevenueReportsText } from "@/lib/i18n/catalogs/revenue";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
@@ -718,6 +718,7 @@ function createReportsFieldAction<K extends keyof ReportsPageState>(
 }
 
 function useReportsPageContent() {
+  const { reportBackendLabel } = useLanguageHelpers();
   const { user } = useAuth();
   const { lang, t } = useLang();
   const locale = lang === "de" ? "de-DE" : "ru-RU";
@@ -2429,4 +2430,16 @@ function useReportsPageContent() {
 
 export function ReportsPage(...args: Parameters<typeof useReportsPageContent>) {
   return useReportsPageContent(...args);
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  reportBackendLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

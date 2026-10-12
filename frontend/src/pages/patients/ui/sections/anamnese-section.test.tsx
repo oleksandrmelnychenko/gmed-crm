@@ -8,7 +8,9 @@ import {
   copyNarrativeVersion,
   editNarrativeVersion,
   narrativeSpecializationChecklist,
+  NARRATIVE_FIELD_TEMPLATES,
   selectedNarrativeSpecializations,
+  withoutUnfilledTemplateLabels,
 } from "./anamnese-section";
 
 function narrative(overrides: Partial<ClinicalNarrative> = {}): ClinicalNarrative {
@@ -196,6 +198,45 @@ describe("AnamneseSection", () => {
 
     expect(html).toContain("Из документа");
     expect(html).toContain("Arztbrief.pdf");
+  });
+
+  it("drops unfilled template labels and keeps filled ones", () => {
+    expect(withoutUnfilledTemplateLabels(NARRATIVE_FIELD_TEMPLATES.anamnese_vegetative)).toBe("");
+    expect(withoutUnfilledTemplateLabels(NARRATIVE_FIELD_TEMPLATES.anamnese_vorgeschichte)).toBe("");
+    expect(
+      withoutUnfilledTemplateLabels(
+        "Familienstand: verheiratet\nKinder:\nWohnsituation:\nmit Familie\nBildung:\nBeruf:",
+      ),
+    ).toBe("Familienstand: verheiratet\nWohnsituation:\nmit Familie");
+    // Labels of the clinic's own text are not template labels.
+    expect(withoutUnfilledTemplateLabels("Beschwerden:\nThoraxschmerz seit 2 Tagen")).toBe(
+      "Beschwerden:\nThoraxschmerz seit 2 Tagen",
+    );
+    expect(withoutUnfilledTemplateLabels(null)).toBe("");
+  });
+
+  it("shows only the filled template labels of the active version", () => {
+    const html = renderToStaticMarkup(
+      <AnamneseSection
+        active={narrative({
+          anamnese_vorgeschichte: NARRATIVE_FIELD_TEMPLATES.anamnese_vorgeschichte,
+          anamnese_vegetative: NARRATIVE_FIELD_TEMPLATES.anamnese_vegetative,
+          anamnese_sozial: "Familienstand: verheiratet\nKinder:\nWohnsituation:\nBildung:\nBeruf:",
+        })}
+        canManage
+        lang="de"
+        loadHistory={async () => []}
+        onSave={async () => undefined}
+      />,
+    );
+
+    expect(html).toContain("Familienstand: verheiratet");
+    expect(html).toContain("Sozialanamnese");
+    for (const label of ["Vorerkrankungen:", "Risikofaktoren:", "Appetit:", "Kinder:", "Beruf:"]) {
+      expect(html).not.toContain(label);
+    }
+    expect(html).not.toContain("Weitere Vorgeschichte");
+    expect(html).not.toContain("Vegetative Anamnese");
   });
 
   it("renders red flags and per-specialization narrative details", () => {

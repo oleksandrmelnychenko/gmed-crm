@@ -92,7 +92,8 @@ describe("GwG identification sheet", () => {
       status: "active",
       bindings: { gwg_identification: { subject: "contract_partner" } },
     });
-    expect(gwgSheetRequest({ leadId: "lead-1", subject: "contract_partner" }).auto_name).toBeUndefined();
+    // The server names the sheet after the person on it.
+    expect(gwgSheetRequest({ leadId: "lead-1", subject: "contract_partner" })).not.toHaveProperty("auto_name");
     const payer = gwgSheetRequest({
       leadId: "lead-1",
       subject: "payer",
@@ -103,9 +104,9 @@ describe("GwG identification sheet", () => {
     expect(payer).toMatchObject({
       order_id: "order-1",
       replace_document_id: "doc-9",
-      auto_name: "Dokumentationsbogen natürliche Personen – Kostenübernehmer",
       bindings: { order_number: "A-1", gwg_identification: { subject: "payer" } },
     });
+    expect(payer).not.toHaveProperty("auto_name");
   });
 
   it("keeps the order context of the sheet it replaces, whoever made it", () => {
@@ -132,27 +133,21 @@ describe("GwG identification sheet", () => {
     expect(gwgSheetRequest({ leadId: "lead-1", subject: "contract_partner", orderId: "order-1" }).order_id).toBe("order-1");
   });
 
-  it("asks for the sheet of a legal representative, named after that person", () => {
+  it("asks for the sheet of a legal representative by that person's subject", () => {
     const request = gwgSheetRequest({
       leadId: "lead-1",
       subject: ANNA,
-      personName: " Anna Muster ",
       replaceDocument: { id: "anna-new", order_id: null },
     });
     expect(request).toMatchObject({
       template_id: "gwg_identification",
       lead_id: "lead-1",
       replace_document_id: "anna-new",
-      auto_name: "Dokumentationsbogen natürliche Personen – Anna Muster",
       bindings: { gwg_identification: { subject: `representative:${ANNA_ID}` } },
     });
-    // Without a name the server names the document.
-    expect(gwgSheetRequest({ leadId: "lead-1", subject: BEN }).auto_name).toBeUndefined();
-    // A name never renames the patient's or the payer's sheet.
-    expect(gwgSheetRequest({ leadId: "lead-1", subject: "contract_partner", personName: "Anna Muster" }).auto_name).toBeUndefined();
-    expect(gwgSheetRequest({ leadId: "lead-1", subject: "payer", personName: "Anna Muster" }).auto_name).toBe(
-      "Dokumentationsbogen natürliche Personen – Kostenübernehmer",
-    );
+    // The server names the document after the representative.
+    expect(request).not.toHaveProperty("auto_name");
+    expect(gwgSheetRequest({ leadId: "lead-1", subject: BEN })).not.toHaveProperty("auto_name");
   });
 });
 

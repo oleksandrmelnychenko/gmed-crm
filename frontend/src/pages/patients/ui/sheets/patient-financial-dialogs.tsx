@@ -12,15 +12,15 @@ import {
   selectClass,
 } from "@/components/ui-shell";
 
-import { getLang, t as translateCatalog } from "@/lib/i18n";
+import { t as translateCatalog, useLang, type Lang } from "@/lib/i18n";
 
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
 
 /** Dunning levels read as on the invoices page, never as raw keys. */
-function dunningLevelLabel(level: string) {
-  const tr = translateCatalog(getLang());
+function dunningLevelLabel(level: string, lang: Lang) {
+  const tr = translateCatalog(lang);
   switch (level) {
     case "first":
       return tr.revenue_dunning_level_first;
@@ -136,6 +136,7 @@ function DunningEventsList({
   formatMoney,
   l,
 }: DunningEventsListProps) {
+  const { lang } = useLang();
   return (
     <div className="mt-4 space-y-3">
       {dunningEvents.length === 0 ? (
@@ -145,7 +146,7 @@ function DunningEventsList({
           <div key={event.id} className="rounded-xl border border-slate-200 bg-white px-4 py-3">
             <div className="flex items-center justify-between gap-3">
               <Badge variant="outline" className="rounded-full text-[10px]">
-                {dunningLevelLabel(event.level)}
+                {dunningLevelLabel(event.level, lang)}
               </Badge>
               <span className="text-xs text-slate-400">{formatDateTime(event.sent_at)}</span>
             </div>
@@ -379,6 +380,7 @@ function InvoiceManagerDialog({
   patientDetailStatusLabel,
   textareaClassName,
 }: InvoiceManagerDialogProps) {
+  const { lang } = useLang();
   return (
     <PatientSheetScaffold
       requireChanges
@@ -471,7 +473,7 @@ function InvoiceManagerDialog({
               disabled={dunningBusy}
             >
               {dunningBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
-              {l("patients_send")}: {dunningLevelLabel(nextDunningLevel(dunningEvents) ?? "")}
+              {l("patients_send")}: {dunningLevelLabel(nextDunningLevel(dunningEvents) ?? "", lang)}
             </Button>
           ) : null
         }

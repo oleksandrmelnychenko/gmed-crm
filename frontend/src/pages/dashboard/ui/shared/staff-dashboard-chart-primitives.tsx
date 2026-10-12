@@ -5,10 +5,11 @@ import type { ColumnDef } from "@/components/data-table/types";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
-  getLang,
   t as translateCatalog,
+  type Lang,
   type TranslationKey,
   uiText,
+  useLang,
 } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { orderPhaseTextKey } from "@/lib/workflow-labels";
@@ -136,9 +137,9 @@ const SERVICE_TYPE_LABEL_KEYS = {
   cost_passthrough: "orders_cost_pass_through_badge",
 } as const satisfies Partial<Record<string, TranslationKey>>;
 
-function orderPhaseLabel(phase: string) {
+function orderPhaseLabel(phase: string, lang: Lang) {
   const key = orderPhaseTextKey(phase);
-  return key ? uiText(key) : formatUnknownValue(phase, translateCatalog(getLang()));
+  return key ? uiText(key, lang) : formatUnknownValue(phase, translateCatalog(lang));
 }
 
 type TopProviderRow = {
@@ -246,6 +247,7 @@ export function ServiceMixTable({
   loading: boolean;
   tr: DashboardTranslations;
 }) {
+  const { lang } = useLang();
   if (loading) return <div className="py-8"><ChartSkeleton /></div>;
   if (rows.length === 0) return <EmptyChart label={tr.dash_no_data ?? tr.common_unknown} />;
 
@@ -261,7 +263,7 @@ export function ServiceMixTable({
               {formatEnumLabelFromKeys(
                 row.service_type,
                 SERVICE_TYPE_LABEL_KEYS,
-                translateCatalog(getLang()),
+                translateCatalog(lang),
               )}
             </div>
             <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted/60">
@@ -289,6 +291,7 @@ export function OrdersValuedBars({
   loading: boolean;
   emptyLabel: string;
 }) {
+  const { lang } = useLang();
   if (loading) return <div style={{ height: 220 }}><ChartSkeleton /></div>;
   if (data.length === 0) return <div style={{ height: 220 }}><EmptyChart label={emptyLabel} /></div>;
 
@@ -302,7 +305,7 @@ export function OrdersValuedBars({
         return (
           <div key={item.phase} className="flex items-center gap-3">
             <div className="w-[100px] shrink-0 capitalize text-[13px] text-foreground">
-              {orderPhaseLabel(item.phase)}
+              {orderPhaseLabel(item.phase, lang)}
             </div>
             <div className="flex-1">
               <div className="relative h-5 overflow-hidden rounded-md bg-muted/50">
@@ -316,7 +319,7 @@ export function OrdersValuedBars({
               </div>
             </div>
             <div className="w-[60px] shrink-0 text-right text-[11.5px] tabular-nums text-muted-foreground">
-              {item.count} {translateCatalog(getLang()).dash_order_count_suffix}
+              {item.count} {translateCatalog(lang).dash_order_count_suffix}
             </div>
             <div className="w-[110px] shrink-0 text-right text-[12.5px] font-medium tabular-nums text-foreground">
               {formatMoneyAmount(value, "EUR")}
@@ -416,7 +419,7 @@ export function TopProvidersTable({
   tr: DashboardTranslations;
   onOpen: (id: string) => void;
 }) {
-  const lang = getLang();
+  const { lang } = useLang();
   const rankedRows = useMemo<RankedTopProviderRow[]>(
     () => rows.map((row, index) => ({ ...row, rank: index + 1 })),
     [rows],

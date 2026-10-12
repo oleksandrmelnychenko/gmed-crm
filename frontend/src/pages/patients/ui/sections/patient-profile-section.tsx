@@ -16,23 +16,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
-import { getLang, useLang, type Translations } from "@/lib/i18n";
+import { useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
 import { formatMoneyLabel, formatMoneyRange } from "@/lib/money";
 import {
-  knownLeadProgramServiceLabel,
-  leadInsuranceCoverageLabel,
   leadIntakeTypeFromLead,
-  leadLanguageLabel,
-  leadLocationDetailedLabel,
-  leadLocationLabel,
-  leadMedicalRecordsLabel,
-  leadPreferredLocationLabel,
-  leadProgramServiceLabel,
-  leadSourceLabel,
-  leadTypeLabel,
-  leadVisitTimingLabel,
+  useLeadLabels,
 } from "@/pages/leads/model/leads-model";
 import { isOtherPersonUploadArt } from "@/pages/leads/model/gwg-identification";
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
@@ -43,7 +33,7 @@ import { PATIENT_RELATIONS_UPDATED_EVENT } from "../../data/patient-detail-mutat
 import {
   fetchPatientRelations,
 } from "../../data/patient-detail-mutations";
-import { patientRelationTypeLabel } from "../../model/detail-model";
+import { usePatientDetailLabels } from "../../model/detail-model";
 import type { DocumentItem, RelationItem } from "../../model/detail-tab-types";
 import {
   DOCUMENT_BOUND_LEGAL_STATUS_ITEMS,
@@ -336,6 +326,7 @@ function PatientEmergencyContactSummary({
   formatDate: DateFormatter;
   t: Translations;
 }) {
+  const { patientRelationTypeLabel } = usePatientDetailLabels();
   const liveRelations = useLivePatientRelations(detail.id);
   const emergencyRelations = liveRelations.items.filter((relation) => relation.is_emergency_contact);
   const hasStoredEmergencyContact = Boolean(
@@ -570,6 +561,22 @@ function usePatientProfileTabContent({
   tr,
 }: PatientProfileTabProps) {
   const {
+    knownLeadProgramServiceLabel,
+    leadInsuranceCoverageLabel,
+    leadLanguageLabel,
+    leadLocationDetailedLabel,
+    leadLocationLabel,
+    leadMedicalRecordsLabel,
+    leadPreferredLocationLabel,
+    leadProgramServiceLabel,
+    leadSourceLabel,
+    leadTypeLabel,
+    leadVisitTimingLabel,
+  } = useLeadLabels();
+  const { intakeDiscoverySourceLabel, intakeFlowDisplay } = useLanguageHelpers();
+  // Country names follow a live language switch (React Compiler).
+  const { lang } = useLang();
+  const {
     canCreateTasks,
     canEditPatientProfile,
     canExportPatientCompliance,
@@ -581,7 +588,6 @@ function usePatientProfileTabContent({
     canManageDocuments = false,
   } = profileControls;
   const editAction = canEditPatientProfile ? openProfileEditor : undefined;
-  const { lang } = useLang();
   // DSGVO consent and the confidentiality release follow signed documents
   // only (owner decision 2026-10-12): read-only, with the paper signature or
   // the generator for staff who may edit the card and manage its documents.
@@ -737,8 +743,8 @@ function usePatientProfileTabContent({
             label={t.patients_nationality}
             value={hiddenOr("nationality", fieldValue(
               detail.citizenships?.length
-                ? detail.citizenships.map((code) => countryNameForDisplay(code, getLang())).join(", ")
-                : nationalityNameForDisplay(detail.nationality, getLang()),
+                ? detail.citizenships.map((code) => countryNameForDisplay(code, lang)).join(", ")
+                : nationalityNameForDisplay(detail.nationality, lang),
               t.common_not_set,
             ))}
             onEdit={editAction}
@@ -747,7 +753,7 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine
             label={t.patients_residence_country}
             value={hiddenOr("nationality", fieldValue(
-              countryNameForDisplay(detail.residence_country, getLang()),
+              countryNameForDisplay(detail.residence_country, lang),
               t.common_not_set,
             ))}
             onEdit={editAction}
@@ -853,7 +859,7 @@ function usePatientProfileTabContent({
           <ProfileSummaryLine
             label={t.patients_address_country}
             value={hiddenOr("address", fieldValue(
-              countryNameForDisplay(detail.address_country, getLang()),
+              countryNameForDisplay(detail.address_country, lang),
               t.common_not_set,
             ))}
             onEdit={editAction}
@@ -1474,4 +1480,17 @@ function patientProfileContactRows(
       note: null,
     },
   ];
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  intakeDiscoverySourceLabel,
+  intakeFlowDisplay,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

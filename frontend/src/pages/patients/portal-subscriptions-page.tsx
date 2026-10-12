@@ -22,12 +22,10 @@ import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { cn } from "@/lib/utils";
 import { fetchPortalSubscriptions } from "@/pages/patients/data/portal-api";
 import {
-  formatPortalCurrency,
-  formatPortalDate,
-  portalStatusLabel,
   type PortalSubscriptionFinancial,
   type PortalSubscriptionItem,
   type PortalSubscriptionService,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 
 const SUBSCRIPTION_REALTIME_EVENTS = [
@@ -247,6 +245,7 @@ function SubscriptionSection({
 }
 
 function SubscriptionCard({ subscription }: { subscription: PortalSubscriptionItem }) {
+  const { formatPortalCurrency, formatPortalDate, portalStatusLabel } = usePortalLabels();
   const { t } = useLang();
   const period = subscription.starts_on
     ? `${t.portal_subscriptions_from} ${formatPortalDate(subscription.starts_on)} · ${

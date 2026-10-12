@@ -23,7 +23,7 @@ import {
   appointmentWhiteSelectControlClassName,
   appointmentWhiteTextareaControlClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
   blankConciergeServiceForm,
 } from "@/pages/appointments/model/form-factories";
@@ -31,21 +31,18 @@ import {
   CONCIERGE_SERVICE_KIND_OPTIONS,
 } from "@/pages/appointments/model/constants";
 import {
-  billingStatusLabel,
-  serviceKindLabel,
-  serviceStatusLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   providerMatchesTaxonomyFilter,
   providerOptionLabel,
 } from "@/pages/appointments/model/provider-taxonomy";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatAppointmentMoneyLabel as formatMoneyLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import {
-  buildServiceDraft,
   toRfc3339,
+  useAppointmentWorkflowHelpers,
 } from "@/pages/appointments/model/workflow-helpers";
 import {
   conciergeBillingStatusOptions,
@@ -163,6 +160,13 @@ function useAppointmentConciergeSectionContent({
   onRefresh,
   onError,
 }: AppointmentConciergeSectionProps) {
+  const { buildServiceDraft } = useAppointmentWorkflowHelpers();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { billingStatusLabel, serviceKindLabel, serviceStatusLabel } = useAppointmentLabels();
+  const {
+    formatAppointmentDateTimeLabel: formatDateTimeLabel,
+    formatAppointmentMoneyLabel: formatMoneyLabel,
+  } = useAppointmentFormatters();
   const { lang, t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const appointmentText = (key: string) => t.uiText[key] ?? key;

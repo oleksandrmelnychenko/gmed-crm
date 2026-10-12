@@ -19,7 +19,7 @@ import {
   type AppointmentDetailResourceGroup,
 } from "@/pages/appointments/model/detail-resource-needs";
 import { resolveFollowUpDefaultAssignee } from "@/pages/appointments/model/form-factories";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { appointmentText, useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentCommunicationEntry,
   AppointmentDetail,
@@ -32,6 +32,7 @@ import type {
   ReportSummary,
   TaskEntry,
 } from "@/pages/appointments/model/types";
+import { useLanguageBound } from "@/lib/i18n";
 
 export function createDetailResourceKeyState() {
   return APPOINTMENT_DETAIL_RESOURCE_GROUPS.reduce<
@@ -295,6 +296,8 @@ export function useAppointmentDetail({
   isMobile,
   permissions,
 }: UseAppointmentDetailOptions) {
+  const { appointmentText } = useAppointmentLabels();
+  const { settleAppointmentDetailResourceResults } = useLanguageHelpers();
   const [detailState, dispatchDetailState] = useReducer(
     appointmentDetailReducer,
     undefined,
@@ -579,4 +582,16 @@ export function useAppointmentDetail({
     detailDefaultAssigneeId,
     resetAppointmentDetailState,
   };
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  settleAppointmentDetailResourceResults,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

@@ -235,6 +235,7 @@ export function PatientsListToolbar({
           rows={rows}
           filters={filterPredicates}
           onChange={onFiltersChange}
+          groupLabels={groupLabels}
           translations={{
             addFilter: t.table_filter,
             clearAll: t.table_sort_clear,

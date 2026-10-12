@@ -29,20 +29,13 @@ import {
   appointmentWhiteInputClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import { shiftLocalDateTime } from "@/pages/appointments/model/date-time";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
-  formatAppointmentSlotLabel as slotLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 import { blankExternalHandoffForm } from "@/pages/appointments/model/form-factories";
 import {
-  appointmentText as appointmentTextBase,
-  communicationChannelLabel,
-  communicationDirectionLabel,
-  communicationStatusLabel,
-  communicationTargetLabel,
-  roleLabel,
-  taskPriorityLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
   appointmentAnchorDateTime,
@@ -158,6 +151,20 @@ function useAppointmentExternalHandoffSectionContent({
   onRefresh,
   onError,
 }: AppointmentExternalHandoffSectionProps) {
+  const {
+    appointmentText: appointmentTextBase,
+    communicationChannelLabel,
+    communicationDirectionLabel,
+    communicationStatusLabel,
+    communicationTargetLabel,
+    roleLabel,
+    taskPriorityLabel,
+  } = useAppointmentLabels();
+  const {
+    formatAppointmentDateTimeLabel: formatDateTimeLabel,
+    formatAppointmentSlotLabel: slotLabel,
+  } = useAppointmentFormatters();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const appointmentText = (key: string, values?: UiTextValues) =>

@@ -2,14 +2,9 @@ import { memo } from "react";
 
 import { useLang } from "@/lib/i18n";
 import {
-  appointmentText,
-  appointmentTypeLabel,
-  carePathKindLabel,
-  checklistPhaseLabel,
-  responseLabel,
-  roleLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
-import { formatAppointmentDateTimeLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
 
 function AppointmentSnapshotSection({
@@ -17,6 +12,15 @@ function AppointmentSnapshotSection({
 }: {
   detail: AppointmentDetail;
 }) {
+  const {
+    appointmentText,
+    appointmentTypeLabel,
+    carePathKindLabel,
+    checklistPhaseLabel,
+    responseLabel,
+    roleLabel,
+  } = useAppointmentLabels();
+  const { formatAppointmentDateTimeLabel } = useAppointmentFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const summaryTitle = appointmentText("appointments_status_and_responsibilities");

@@ -38,6 +38,11 @@
    - UI/consumer
    - test або regression note
 
+4. Мова інтерфейсу в компонентах береться з `useLang()` і передається далі: `uiText(key, lang)`, а не `uiText(key)` чи `getLang()`. React Compiler кешує те, що компонент обчислює без реактивних входів, тож після перемикання RU→DE без перезавантаження такий текст лишався б старим.
+   - Допоміжні функції модуля, які читають мову самі (`appointmentText`, `statusLabel`, `formatPortalDate`, `patientDetailText` тощо), перелічено в об'єкті модуля `XXX_LANGUAGE_HELPERS`; хук модуля (`useAppointmentLabels()`, `usePortalLabels()`, `useLeadLabels()` …, для функцій лише власного файлу — `useLanguageHelpers()`) повертає їхні копії, прив'язані до поточної мови (`useLanguageBound` у `frontend/src/lib/i18n`). Компоненти й хуки беруть їх із хука: `const { statusLabel } = useAppointmentLabels();`.
+   - Нова функція, що читає мову й потрібна компонентам, додається до об'єкта свого модуля (або отримує `lang` параметром).
+   - Правило ESLint `gmed/no-bare-ui-text` (`frontend/eslint-rules/no-bare-ui-text.js`) забороняє в компонентах і хуках `uiText(key)` без мови, `getLang()` і пряме використання перелічених функцій; виняток — колбеки ефектів.
+
 ## Локальна перевірка
 
 Під час реалізації обирайте перевірки за зміненим кодом і ризиком:

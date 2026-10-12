@@ -1,11 +1,9 @@
 import { memo } from "react";
 
 import {
-  attentionIssueLabel,
-  appointmentText,
-  attentionReasonLabel,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
-import { formatAppointmentDateTimeLabel } from "@/pages/appointments/model/runtime-formatters";
+import { useAppointmentFormatters } from "@/pages/appointments/model/runtime-formatters";
 import type { AppointmentAttentionItem } from "@/pages/appointments/model/types";
 
 function AppointmentAttentionSection({
@@ -13,6 +11,8 @@ function AppointmentAttentionSection({
 }: {
   attention: AppointmentAttentionItem;
 }) {
+  const { appointmentText, attentionIssueLabel, attentionReasonLabel } = useAppointmentLabels();
+  const { formatAppointmentDateTimeLabel } = useAppointmentFormatters();
   const title = appointmentText("appointments_operational_follow_up_open");
   const subtitle = appointmentText("appointments_this_appointment_still_has_unresolved_operational_follow");
   const hasOverdueReminder =

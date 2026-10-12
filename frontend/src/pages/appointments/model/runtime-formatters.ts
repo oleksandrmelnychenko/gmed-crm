@@ -1,5 +1,5 @@
 import { appDateTimeFormat, dateOrInstant, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import { getLang, t as translateCatalog } from "@/lib/i18n";
+import { getLang, t as translateCatalog, useLanguageBound } from "@/lib/i18n";
 import { formatMoneyAmount, formatMoneyLabel } from "@/lib/money";
 
 function appointmentRuntimeTranslations() {
@@ -61,4 +61,21 @@ export function formatAppointmentMoneyLabel(
   } catch {
     return formatMoneyLabel(numeric, currency);
   }
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useAppointmentFormatters()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const APPOINTMENT_FORMATTER_LANGUAGE_HELPERS = {
+  appointmentRuntimeLocale,
+  formatAppointmentDateLabel,
+  formatAppointmentDateTimeLabel,
+  formatAppointmentMoneyLabel,
+  formatAppointmentSlotLabel,
+};
+
+export function useAppointmentFormatters() {
+  return useLanguageBound(APPOINTMENT_FORMATTER_LANGUAGE_HELPERS);
 }

@@ -45,7 +45,7 @@ import {
 import { ApiRequestError, apiFetch, downloadApiFile } from "@/lib/api";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { reportApprovalLabel } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import {
   buildInterpreterLanguagesPath,
   buildInterpreterListPath,
@@ -884,6 +884,7 @@ function OperationsList({
 }
 
 export function InterpretersPage() {
+  const { reportApprovalLabel } = useAppointmentLabels();
   const { lang, t } = useLang();
   const copy = useMemo(() => staffPageCopy(lang), [lang]);
   const profileCopy = copy.profile;

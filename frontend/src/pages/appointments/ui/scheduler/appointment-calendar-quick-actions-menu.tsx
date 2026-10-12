@@ -6,7 +6,7 @@ import { selectClass } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
 import { isAppointmentCompletionTooEarly } from "@/pages/appointments/model/completion-rules";
 import { statusActionKey } from "@/pages/appointments/model/form-factories";
-import { appointmentText, statusLabel } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import type {
   AppointmentListItem,
   AppointmentRecurringActionScope,
@@ -41,6 +41,7 @@ export function AppointmentCalendarQuickActionsMenu({
   onOpenDetail,
   onStatusChange,
 }: AppointmentCalendarQuickActionsMenuProps) {
+  const { appointmentText, statusLabel } = useAppointmentLabels();
   const completionTooEarly = isAppointmentCompletionTooEarly(item.date);
   return (
     <div

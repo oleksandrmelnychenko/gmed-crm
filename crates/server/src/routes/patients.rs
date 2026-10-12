@@ -10521,9 +10521,10 @@ async fn get_patient_timeline(
 
             UNION ALL
 
-            SELECT 'compliance'::text AS entity_type,
+            SELECT CASE WHEN legacy_update.profile_only THEN 'patient' ELSE 'compliance' END::text AS entity_type,
                    COALESCE(al.entity_id, $1) AS entity_id,
                    CASE
+                       WHEN legacy_update.profile_only THEN 'Profile updated:'
                        WHEN al.action = 'dsgvo_data_export' THEN 'DSGVO data export'
                        WHEN al.action = 'dsgvo_anonymize' THEN 'Patient anonymized'
                        WHEN al.action = 'privacy_request_created' AND COALESCE(al.context->>'request_type', 'erasure') = 'restriction' THEN 'Processing restriction requested'
@@ -10551,6 +10552,7 @@ async fn get_patient_timeline(
                        ELSE 'Legal/compliance status updated'
                    END AS title,
                    CASE
+                       WHEN legacy_update.profile_only THEN 'profile'
                        WHEN al.action = 'dsgvo_data_export' THEN 'dsgvo_export'
                        WHEN al.action = 'dsgvo_anonymize' THEN 'dsgvo_anonymize'
                        WHEN al.action LIKE 'privacy_request_%' THEN 'privacy_request'
@@ -10576,6 +10578,39 @@ async fn get_patient_timeline(
                    concat_ws(' · ', u.name, COALESCE(al.context->>'consent_type', al.context->>'request_type', al.context->>'review_action', al.context->>'article')) AS source_label
             FROM audit_log al
             LEFT JOIN users u ON u.id = al.user_id
+            -- A profile save audited before the timeline named the changed
+            -- fields (no `changed_fields` in its context) set
+            -- `legal_status_updated` whenever the editor re-sent the legal
+            -- status. Such a row reads as a plain profile edit unless its
+            -- contract status or compliance flag differs from the save before
+            -- it (QA B-26 follow-up, 2026-10-12). The append-only rows stay
+            -- as they are; only their timeline label changes.
+            LEFT JOIN LATERAL (
+                SELECT previous.context
+                FROM audit_log previous
+                WHERE al.action = 'update_patient'
+                  AND NOT (COALESCE(al.context, '{}'::jsonb) ? 'changed_fields')
+                  AND previous.entity_type = 'patient'
+                  AND previous.entity_id = al.entity_id
+                  AND previous.action = 'update_patient'
+                  AND previous.created_at < al.created_at
+                  -- The save before that carried a legal status.
+                  AND jsonb_typeof(previous.context->'contract_status') = 'string'
+                ORDER BY previous.created_at DESC
+                LIMIT 1
+            ) previous_update ON true
+            CROSS JOIN LATERAL (
+                SELECT COALESCE(
+                    al.action = 'update_patient'
+                    AND NOT (COALESCE(al.context, '{}'::jsonb) ? 'changed_fields')
+                    AND NULLIF(NULLIF(al.context->>'contract_status', ''), 'not_started')
+                        IS NOT DISTINCT FROM
+                        NULLIF(NULLIF(previous_update.context->>'contract_status', ''), 'not_started')
+                    AND COALESCE((al.context->>'compliance_completed')::boolean, false)
+                        = COALESCE((previous_update.context->>'compliance_completed')::boolean, false),
+                    false
+                ) AS profile_only
+            ) legacy_update
             WHERE al.entity_type = 'patient'
               AND al.entity_id = $1
               AND (
@@ -12054,8 +12089,13 @@ fn build_patient_detail_json(
             Value::String(patient.updated_at.to_rfc3339()),
         );
 
+        // The CEO Assistant reads the whole card, read-only (owner decision
+        // 2026-10-11); changes stay refused by `patients.edit`.
         if auth.role.has_full_access()
-            || matches!(auth.role, Role::PatientManager | Role::Concierge)
+            || matches!(
+                auth.role,
+                Role::PatientManager | Role::Concierge | Role::CeoAssistant
+            )
         {
             insert_optional_string(map, "address_street", patient.address_street);
             insert_optional_string(map, "address_city", patient.address_city);
@@ -12173,7 +12213,12 @@ fn patient_detail_hidden_fields(
             hidden.push(group);
         }
     }
-    if !(full_access || matches!(auth.role, Role::PatientManager | Role::Concierge)) {
+    if !(full_access
+        || matches!(
+            auth.role,
+            Role::PatientManager | Role::Concierge | Role::CeoAssistant
+        ))
+    {
         hidden.extend([
             "address",
             "passport",
@@ -12437,7 +12482,11 @@ fn insert_clinical_warnings_field(
     policies: &HashMap<String, FieldPolicy>,
     clinical_warnings: Option<String>,
 ) {
-    if !matches!(auth.role, Role::Ceo | Role::PatientManager) {
+    // The CEO Assistant reads the clinical record too (read-only).
+    if !matches!(
+        auth.role,
+        Role::Ceo | Role::PatientManager | Role::CeoAssistant
+    ) {
         return;
     }
 

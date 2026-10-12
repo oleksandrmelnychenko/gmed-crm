@@ -7,7 +7,7 @@ import {
 import { CaseWorkspaceModal } from "@/components/case-workspace-modal";
 import { Banner, EmptyCell } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { AppointmentPreviewSheet } from "@/pages/appointments/ui/shared/workspace-primitives";
 
 export type LinkedCasesSheetProps = {
@@ -29,6 +29,7 @@ function LinkedCasesSheet({
   patientId,
   formatDateTimeLabel,
 }: LinkedCasesSheetProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
   const [previewCaseId, setPreviewCaseId] = useState("");
   const [previewOpen, setPreviewOpen] = useState(false);

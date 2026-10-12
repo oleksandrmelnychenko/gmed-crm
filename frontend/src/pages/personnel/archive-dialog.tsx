@@ -28,7 +28,7 @@ import {
   validatePersonnelFile,
   type ArchiveTarget,
 } from "./model";
-import { ArchiveName, FormSection, categoryLabel, errorMessage } from "./personnel-ui";
+import { ArchiveName, FormSection, categoryLabel, usePersonnelLabels } from "./personnel-ui";
 
 type EmployeeChoice = { id: string; display_name: string; is_active: boolean };
 
@@ -74,6 +74,7 @@ export function ArchiveDialog({
   onClose: () => void;
   onArchived: (document: PersonnelDocument) => void;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const presetSupersedes = mode?.kind === "upload" ? mode.supersedes ?? null : null;
   // Identity of what is being filed; callers may pass a new mode object on every render.

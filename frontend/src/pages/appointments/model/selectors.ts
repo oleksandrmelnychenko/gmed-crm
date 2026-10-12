@@ -9,6 +9,7 @@ import {
   getLang,
   t as translateCatalog,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 import { isClosedAppointmentStatus } from "@/pages/appointments/model/completion-rules";
@@ -884,4 +885,18 @@ export function buildAppointmentTimelineEvents(args: {
   return events
     .filter((item) => Boolean(item.occurredAt))
     .toSorted((left, right) => instantOf(right.occurredAt) - instantOf(left.occurredAt));
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `useAppointmentSelectors()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const APPOINTMENT_SELECTOR_LANGUAGE_HELPERS = {
+  buildAppointmentTimelineEvents,
+  buildInterpreterMobileAgendaSections,
+};
+
+export function useAppointmentSelectors() {
+  return useLanguageBound(APPOINTMENT_SELECTOR_LANGUAGE_HELPERS);
 }

@@ -33,7 +33,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatPluralCount, uiText, useLang } from "@/lib/i18n";
+import { formatPluralCount, uiText, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   createPortalAppointmentRequest,
@@ -41,17 +41,12 @@ import {
   withdrawPortalAppointmentRequest,
 } from "@/pages/patients/data/portal-api";
 import {
-  appointmentCarePathKindLabel,
   appointmentRequestStatusTone,
   appointmentStatusTone,
-  appointmentTimeOfDayLabel,
-  appointmentTypeLabel,
   followupStatusTone,
-  formatPortalDate,
-  formatPortalDateTime,
   portalPreferredDateRange,
   portalOrderPhaseLabel as sharedPortalOrderPhaseLabel,
-  portalStatusLabel,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import { isUpcomingPortalAppointment } from "@/pages/appointments/model/portal-appointment-visibility";
 import type {
@@ -166,6 +161,7 @@ function WithdrawRequestButton({
   onWithdrawn: () => void;
   onError: (message: string) => void;
 }) {
+  const { lang } = useLang();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   async function withdraw() {
@@ -174,7 +170,7 @@ function WithdrawRequestButton({
       await withdrawPortalAppointmentRequest(requestId);
       onWithdrawn();
     } catch {
-      onError(uiText("portal_request_withdraw_failed"));
+      onError(uiText("portal_request_withdraw_failed", lang));
     } finally {
       setBusy(false);
       setConfirming(false);
@@ -191,13 +187,24 @@ function WithdrawRequestButton({
         onClick={() => (confirming ? void withdraw() : setConfirming(true))}
       >
         {busy ? <LoaderCircle className="mr-2 size-3.5 animate-spin" /> : null}
-        {confirming ? uiText("portal_request_withdraw_confirm") : uiText("portal_request_withdraw")}
+        {confirming
+          ? uiText("portal_request_withdraw_confirm", lang)
+          : uiText("portal_request_withdraw", lang)}
       </Button>
     </div>
   );
 }
 
 function usePatientAppointmentsPageContent() {
+  const {
+    appointmentCarePathKindLabel,
+    appointmentTimeOfDayLabel,
+    appointmentTypeLabel,
+    formatPortalDate,
+    formatPortalDateTime,
+    portalStatusLabel,
+  } = usePortalLabels();
+  const { portalOrderPhaseLabel } = useLanguageHelpers();
   const { lang, t } = useLang();
   const [pageState, dispatchPageState] = useReducer(
     patientAppointmentsReducer,
@@ -625,7 +632,7 @@ function usePatientAppointmentsPageContent() {
                       ) : null}
                       {item.status === "cancelled" && item.cancellation_reason ? (
                         <div className={cn("rounded-lg px-4 py-3 text-sm text-muted-foreground", tokens.surface.mutedCard)}>
-                          {uiText("portal_request_cancelled_reason")}: {item.cancellation_reason}
+                          {uiText("portal_request_cancelled_reason", lang)}: {item.cancellation_reason}
                         </div>
                       ) : null}
                       {item.status === "requested" || item.status === "approved" ? (
@@ -634,7 +641,7 @@ function usePatientAppointmentsPageContent() {
                           onWithdrawn={() => {
                             clearApiCache("/me/appointment-requests");
                             dispatchPageState((current) => ({
-                              notice: uiText("portal_request_withdrawn_notice"),
+                              notice: uiText("portal_request_withdrawn_notice", lang),
                               version: current.version + 1,
                             }));
                           }}
@@ -829,4 +836,16 @@ function usePatientAppointmentsPageContent() {
 
 export function PatientAppointmentsPage(...args: Parameters<typeof usePatientAppointmentsPageContent>) {
   return usePatientAppointmentsPageContent(...args);
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  portalOrderPhaseLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

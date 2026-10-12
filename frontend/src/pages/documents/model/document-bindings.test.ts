@@ -5,6 +5,7 @@ import {
   buildBindingsPayload,
   documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
+  enhancedDueDiligenceTierRequiresCheck,
   formatCostEstimateGenerationError,
   formatDocumentGenerationError,
   formatEnhancedDueDiligenceError,
@@ -321,6 +322,19 @@ describe("document template binding payloads", () => {
       hydrateDocumentBindings("enhanced_due_diligence", { aml_enhanced_due_diligence: { riskTier: "pep" } }, null)
         .assetOriginEvidence,
     ).toBeUndefined();
+  });
+
+  it("ticks the internal risk analysis only for a check the rule requires", () => {
+    // Nothing is pre-ticked before the risk tier is chosen (QA 2026-10-11).
+    expect(enhancedDueDiligenceBindingDefaults()).toMatchObject({
+      internalRiskAnalysis: "false",
+      individualReview: "false",
+    });
+    expect(enhancedDueDiligenceTierRequiresCheck("blacklist")).toBe(true);
+    expect(enhancedDueDiligenceTierRequiresCheck("sanctions")).toBe(true);
+    for (const tier of ["high_risk", "pep", "individual", "", null, undefined]) {
+      expect(enhancedDueDiligenceTierRequiresCheck(tier)).toBe(false);
+    }
   });
 
   it("validates common, country-risk, and PEP AML requirements in RU and DE", () => {

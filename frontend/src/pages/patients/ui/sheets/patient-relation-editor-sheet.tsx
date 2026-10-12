@@ -27,7 +27,7 @@ import { upsertPatientRelation } from "../../data/patient-detail-mutations";
 import {
   formatRelatedPatientName,
   formatRelatedPatientOption,
-  patientRelationTypeLabel,
+  usePatientDetailLabels,
 } from "../../model/detail-model";
 import type { RelationItem } from "../../model/detail-tab-types";
 import {
@@ -146,6 +146,7 @@ function PatientRelationEditorSheet({
   onSaved,
   onError,
 }: PatientRelationEditorSheetProps) {
+  const { patientRelationTypeLabel } = usePatientDetailLabels();
   const { t, lang } = useLang();
   const tx = (ru: string, de: string) => (lang === "de" ? de : ru);
   const l = (key: string) => t.uiText[key] ?? key;

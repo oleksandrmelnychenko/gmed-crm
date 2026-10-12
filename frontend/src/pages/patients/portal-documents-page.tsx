@@ -31,7 +31,7 @@ import {
   tokens,
 } from "@/components/ui-shell";
 import { clearApiCache } from "@/lib/api";
-import { formatPluralCount, useLang } from "@/lib/i18n";
+import { formatPluralCount, useLang, useLanguageBound } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { localizeRequiredDocumentLabel } from "@/lib/required-document-labels";
 import {
@@ -49,14 +49,11 @@ import {
   documentTone,
   downloadPortalDocument,
   downloadPortalUpload,
-  formatPortalDateTime,
-  formatPortalFileSize,
   portalDocumentSourceLabel as sharedPortalDocumentSourceLabel,
-  portalDocumentTypeLabels,
   portalDocumentValueLabel as sharedPortalDocumentValueLabel,
-  portalStatusLabel,
   translationRequestTone,
   uploadedDocumentTone,
+  usePortalLabels,
 } from "@/pages/patients/model/portal-shared";
 import type {
   PortalDocumentAlertsSummary,
@@ -180,8 +177,20 @@ function patientDocumentsReducer(
 }
 
 function usePatientDocumentsPageContent() {
+  const {
+    formatPortalDateTime,
+    formatPortalFileSize,
+    portalDocumentTypeLabels,
+    portalStatusLabel,
+  } = usePortalLabels();
+  const { portalDocumentSourceLabel, portalDocumentValueLabel } = useLanguageHelpers();
   const { lang, t } = useLang();
   const uploadFileInputRef = useRef<HTMLInputElement>(null);
+  // Every read of the documents workspace takes a number; only the newest
+  // answer is shown. A list request that started before an upload and answers
+  // after it no longer replaces the list with the new file by the old one
+  // (QA B-10 d: "Meine hochgeladenen Dateien" stayed empty after sending).
+  const workspaceRequestRef = useRef(0);
   const [documentsState, dispatchDocumentsState] = useReducer(
     patientDocumentsReducer,
     INITIAL_PATIENT_DOCUMENTS_STATE,
@@ -223,6 +232,7 @@ function usePatientDocumentsPageContent() {
     let cancelled = false;
 
     async function load() {
+      const request = ++workspaceRequestRef.current;
       dispatchDocumentsState((current) => ({
         refreshing: !current.loading,
         error: "",
@@ -230,7 +240,7 @@ function usePatientDocumentsPageContent() {
 
       try {
         const workspace = await fetchPortalDocumentsWorkspace();
-        if (cancelled) return;
+        if (cancelled || request !== workspaceRequestRef.current) return;
         startTransition(() =>
           dispatchDocumentsState({
             documents: workspace.releasedDocuments,
@@ -243,7 +253,7 @@ function usePatientDocumentsPageContent() {
           }),
         );
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || request !== workspaceRequestRef.current) return;
         dispatchDocumentsState({
           error: err instanceof Error ? err.message : t.portal_documents_failed_to_load_documents,
           loading: false,
@@ -313,18 +323,25 @@ function usePatientDocumentsPageContent() {
       });
       // Show the new file and the required-document state at once, past the
       // client cache and any list request that started before the upload.
+      const request = ++workspaceRequestRef.current;
       try {
         const workspace = await fetchPortalDocumentsWorkspace({ forceFresh: true });
-        startTransition(() =>
-          dispatchDocumentsState({
-            documents: workspace.releasedDocuments,
-            documentAlerts: workspace.documentAlerts,
-            uploads: workspace.uploadedDocuments,
-            translationRequests: workspace.translationRequests,
-          }),
-        );
+        if (request === workspaceRequestRef.current) {
+          startTransition(() =>
+            dispatchDocumentsState({
+              documents: workspace.releasedDocuments,
+              documentAlerts: workspace.documentAlerts,
+              uploads: workspace.uploadedDocuments,
+              translationRequests: workspace.translationRequests,
+              loading: false,
+              refreshing: false,
+            }),
+          );
+        }
       } catch {
-        dispatchDocumentsState((current) => ({ version: current.version + 1 }));
+        if (request === workspaceRequestRef.current) {
+          dispatchDocumentsState((current) => ({ version: current.version + 1 }));
+        }
       }
       // The automatic file name arrives a little later.
       window.setTimeout(
@@ -450,7 +467,17 @@ function usePatientDocumentsPageContent() {
             <CountBadge>
               {t.portal_documents_my_uploads}: {uploads.length}
             </CountBadge>
-            <Button variant="outline" className="h-9 rounded-lg" onClick={() => dispatchDocumentsState((current) => ({ version: current.version + 1 }))}>
+            <Button
+              variant="outline"
+              className="h-9 rounded-lg"
+              onClick={() => {
+                // "Aktualisieren" asks the server again, not the 15-second client cache.
+                clearApiCache("/me/documents");
+                clearApiCache("/me/document-alerts");
+                clearApiCache("/me/translation-requests");
+                dispatchDocumentsState((current) => ({ version: current.version + 1 }));
+              }}
+            >
               <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
               {t.portal_documents_refresh}
             </Button>
@@ -877,4 +904,17 @@ function usePatientDocumentsPageContent() {
 
 export function PatientDocumentsPage(...args: Parameters<typeof usePatientDocumentsPageContent>) {
   return usePatientDocumentsPageContent(...args);
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  portalDocumentSourceLabel,
+  portalDocumentValueLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

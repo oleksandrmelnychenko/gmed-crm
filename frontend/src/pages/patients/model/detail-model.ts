@@ -4,6 +4,7 @@ import {
   getLang,
   t as translateCatalog,
   type TranslationKey,
+  useLanguageBound,
 } from "@/lib/i18n";
 import { actorRole, hasAnyCapability, hasCapability, type Actor } from "@/lib/permissions";
 
@@ -827,4 +828,19 @@ export function buildPatientLabelPrintHtml(payload: PatientLabelPayload) {
     </script>
   </body>
 </html>`;
+}
+
+/**
+ * The helpers of this module that read the UI language themselves.
+ * Components and hooks take them from `usePatientDetailLabels()`, which binds them to
+ * the current language, so their text follows a live language switch.
+ */
+export const PATIENT_DETAIL_LANGUAGE_HELPERS = {
+  buildPatientLabelPrintHtml,
+  patientLabelFormatLabel,
+  patientRelationTypeLabel,
+};
+
+export function usePatientDetailLabels() {
+  return useLanguageBound(PATIENT_DETAIL_LANGUAGE_HELPERS);
 }

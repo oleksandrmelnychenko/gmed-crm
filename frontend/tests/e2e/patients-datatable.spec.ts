@@ -603,6 +603,14 @@ test.describe("patients data-table", () => {
     await page.getByRole("button", { name: /Filter|Фильтр/i }).click();
     const filterPicker = page.locator("[data-table-filter-picker]");
     await expect(filterPicker).toBeVisible();
+    // The field picker names the column groups in the UI language, never by
+    // their keys (N-17 for every table, not only the leads).
+    await expect(
+      filterPicker.getByRole("menuitem", { name: /Created|Создан|Erstellt/i }),
+    ).toContainText(/Audit|Аудит/);
+    await expect(
+      filterPicker.getByText(/^(identity|contact|insurance|metadata|financial|audit)$/),
+    ).toHaveCount(0);
     await filterPicker.getByRole("menuitem", { name: /Created|Создан|Erstellt/i }).click();
 
     const editor = page.locator("[data-table-filter-editor]");

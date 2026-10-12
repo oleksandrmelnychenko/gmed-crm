@@ -209,9 +209,21 @@ export const ENHANCED_DUE_DILIGENCE_BINDING_FIELDS: BindingFieldDef[] = [
   { key: "reviewDate", label: "Prüfdatum", labelRu: "Дата проверки", kind: "date" },
 ];
 
+/**
+ * Risk tiers whose check the owner's rule requires (2026-10-07: a black-list
+ * country or a confirmed sanctions hit). Only for them the higher risk is the
+ * finding of the internal risk analysis; a high-risk country, a PEP or a
+ * voluntary check ("Einzelfallprüfung") is the individual review's.
+ */
+export function enhancedDueDiligenceTierRequiresCheck(tier: string | null | undefined): boolean {
+  return tier === "blacklist" || tier === "sanctions";
+}
+
 export function enhancedDueDiligenceBindingDefaults(): DocumentBindingForm {
   return {
-    internalRiskAnalysis: "true",
+    // Ticked with a required risk tier only (QA 2026-10-11), see
+    // `enhancedDueDiligenceTierRequiresCheck`.
+    internalRiskAnalysis: "false",
     individualReview: "false",
     pepContractPartner: "false",
     pepBeneficialOwner: "false",

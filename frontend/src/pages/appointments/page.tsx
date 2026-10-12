@@ -27,10 +27,9 @@ import { ReadOnlyScope } from "@/components/read-only-scope";
 import { formatUiText, useLang } from "@/lib/i18n";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import {
-  buildInterpreterMobileAgendaSections,
-  buildAppointmentTimelineEvents,
   appointmentReportActions,
   normalizeAppointmentWorkspaceTab,
+  useAppointmentSelectors,
 } from "@/pages/appointments/model/selectors";
 import {
   appointmentPermissions,
@@ -47,7 +46,7 @@ import {
   startOfWeekInput,
 } from "@/pages/appointments/model/date-time";
 import {
-  formatAppointmentDateTimeLabel as formatDateTimeLabel,
+  useAppointmentFormatters,
 } from "@/pages/appointments/model/runtime-formatters";
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["planned", "confirmed", "in_progress"]);
@@ -60,15 +59,15 @@ import {
 import {
   buildAppointmentsQuery,
 } from "@/pages/appointments/model/query-builders";
-import { appointmentActionErrorMessage } from "@/pages/appointments/model/error-message";
-import { formatScheduleConflictError } from "@/pages/appointments/model/schedule-warnings";
+import { useAppointmentErrorMessages } from "@/pages/appointments/model/error-message";
+import { useScheduleWarnings } from "@/pages/appointments/model/schedule-warnings";
 import {
   activePatientAssigneeIds,
   canRemindAboutAppointment,
   isAppointmentTaskAssignableRole,
 } from "@/pages/appointments/model/staff-roles";
 import { toCalendarEvent } from "@/pages/appointments/model/calendar-events";
-import { renderStaticCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
+import { useCalendarEventContent } from "@/pages/appointments/model/calendar-event-content";
 import { useAppointmentDetail } from "@/pages/appointments/data/use-appointment-detail";
 import { useAppointmentLinkedPatientAssignment } from "@/pages/appointments/data/use-appointment-linked-patient-assignment";
 import { useAppointmentLinkedRecords } from "@/pages/appointments/data/use-appointment-linked-records";
@@ -87,20 +86,18 @@ import {
 } from "@/pages/appointments/data/appointment-mutations";
 import {
   matchesOperationalScope,
-  operationalScopeOptions,
+  useOperationalScopeLabels,
 } from "@/pages/appointments/model/operational-scopes";
 import {
   appointmentFilterControlClassName,
   appointmentSectionCardClassName,
 } from "@/pages/appointments/appearance/surface-appearance";
 import {
-  appointmentPluralText,
-  appointmentText,
-  appointmentTypeLabel,
   patientName,
+  useAppointmentLabels,
 } from "@/pages/appointments/model/labels";
 import {
-  buildHandoffStakeholders,
+  useAppointmentWorkflowHelpers,
 } from "@/pages/appointments/model/workflow-helpers";
 import {
   useAppointmentQueryActions,
@@ -285,6 +282,17 @@ function createStaffAppointmentsPageFieldPatch<K extends keyof StaffAppointments
 }
 
 function useStaffAppointmentsPageContent() {
+  const { operationalScopeOptions } = useOperationalScopeLabels();
+  const { appointmentPluralText, appointmentText, appointmentTypeLabel } = useAppointmentLabels();
+  const { buildHandoffStakeholders } = useAppointmentWorkflowHelpers();
+  const { formatAppointmentDateTimeLabel: formatDateTimeLabel } = useAppointmentFormatters();
+  const {
+    buildAppointmentTimelineEvents,
+    buildInterpreterMobileAgendaSections,
+  } = useAppointmentSelectors();
+  const { appointmentActionErrorMessage } = useAppointmentErrorMessages();
+  const { formatScheduleConflictError } = useScheduleWarnings();
+  const { renderStaticCalendarEventContent } = useCalendarEventContent();
   const { user } = useAuth();
   const { t, lang } = useLang();
   const { staffGo } = useStaffNavigate();
@@ -2074,6 +2082,7 @@ function StaffAppointmentsPage(...args: Parameters<typeof useStaffAppointmentsPa
 }
 
 export function AppointmentsPage() {
+  const { appointmentText } = useAppointmentLabels();
   const { user } = useAuth();
 
   if (user?.role === "patient") {

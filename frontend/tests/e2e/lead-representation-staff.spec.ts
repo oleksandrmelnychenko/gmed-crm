@@ -533,11 +533,11 @@ test("one GwG sheet per parent, none for the child and none twice for a paying p
   expect(calls.generated[0]).toMatchObject({
     template_id: "gwg_identification",
     lead_id: leadId,
-    auto_name: "Dokumentationsbogen natürliche Personen – Anna Muster",
     bindings: { gwg_identification: { subject: ANNA } },
   });
-  // Her first sheet replaces nothing.
+  // Her first sheet replaces nothing; the server names it after her.
   expect(calls.generated[0]).not.toHaveProperty("replace_document_id");
+  expect(calls.generated[0]).not.toHaveProperty("auto_name");
   await expect(forBen).toBeEnabled();
 
   await forBen.click();
@@ -546,9 +546,9 @@ test("one GwG sheet per parent, none for the child and none twice for a paying p
     template_id: "gwg_identification",
     lead_id: leadId,
     replace_document_id: "doc-ben-sheet",
-    auto_name: "Dokumentationsbogen natürliche Personen – Ben Muster",
     bindings: { gwg_identification: { subject: BEN } },
   });
+  expect(calls.generated[1]).not.toHaveProperty("auto_name");
 
   // The wizard is saved before each sheet; staff did not touch the contacts,
   // so the saves leave the parents on the server alone.

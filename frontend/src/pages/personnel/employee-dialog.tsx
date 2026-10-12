@@ -15,7 +15,7 @@ import {
   employmentRangeValid,
   type EmployeeForm,
 } from "./model";
-import { FormSection, errorMessage } from "./personnel-ui";
+import { FormSection, usePersonnelLabels } from "./personnel-ui";
 
 /** Creates a personnel file or edits its master data (never its documents), in a right sheet. */
 export function EmployeeDialog({
@@ -30,6 +30,7 @@ export function EmployeeDialog({
   onClose: () => void;
   onSaved: (employee: PersonnelEmployee) => void;
 }) {
+  const { errorMessage } = usePersonnelLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string | undefined>;
   const original = useMemo(() => (employee ? employeeFormOf(employee) : undefined), [employee]);

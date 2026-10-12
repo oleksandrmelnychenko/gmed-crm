@@ -28,15 +28,13 @@ import {
   PATIENT_RELATIONS_UPDATED_EVENT,
   upsertPatientRelation,
 } from "../../data/patient-detail-mutations";
-import { getPatientLegalStatusSummary, normalizePatientLegalStatus } from "../../model/legal-status";
+import { normalizePatientLegalStatus, useLegalStatusLabels } from "../../model/legal-status";
 import {
   getPatientDisplayName,
-  getPatientFieldValue,
   getPatientGenderLabel,
   getPatientInsuranceLabel,
   getPatientRoleLabel,
-  formatPatientDate,
-  formatPatientDateTime,
+  usePatientListFormatters,
 } from "../../model/list-formatters";
 import {
   blankPatientForm,
@@ -110,6 +108,7 @@ function PatientOverviewSection({
   onOpenDocuments,
   hideActions = false,
 }: PatientOverviewSectionProps) {
+  const { formatPatientDate, getPatientFieldValue } = usePatientListFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
@@ -198,6 +197,8 @@ function PatientProfileSection({
   onContactsChange,
   onTrustedContactsChange,
 }: PatientProfileSectionProps) {
+  const { getPatientLegalStatusSummary } = useLegalStatusLabels();
+  const { formatPatientDate } = usePatientListFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
   const l = (key: string) => t.uiText[key] ?? key;
@@ -264,6 +265,7 @@ function AssignmentsSection({
   onAssigneeChange,
   onAssign,
 }: AssignmentsSectionProps) {
+  const { formatPatientDateTime } = usePatientListFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 

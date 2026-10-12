@@ -9,10 +9,9 @@ import { cn } from "@/lib/utils";
 
 import { ProviderCategoryIcon } from "./provider-category-icon";
 import {
-  providerContractStatusLabel,
   providerPeopleCount,
   providerPeopleCountLabel,
-  providerTypeLabel,
+  useProviderListLabels,
 } from "../model/list-model";
 import { specializationLabelForItem, specializationLabelForValue } from "../model/specialization-labels";
 import type { ProviderOrganizationLevel, ProviderSummary, SpecializationItem } from "../model/types";
@@ -432,6 +431,7 @@ function TimelineNode({
   selectedProviderId,
   tr,
 }: TimelineNodeProps) {
+  const { providerContractStatusLabel, providerTypeLabel } = useProviderListLabels();
   const { depth, isLast, node } = item;
   const { provider, children } = node;
   const hasChildren = children.length > 0;

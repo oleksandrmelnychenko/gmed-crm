@@ -117,6 +117,24 @@ for (const lang of ["ru", "de"] as const) {
   });
 }
 
+test("a live RU→DE switch leaves no Russian text on the task board and in the task", async ({ page }) => {
+  await mockTasks(page, "ru");
+  await page.goto("/task-manager");
+  await expect(page.getByRole("heading", { name: labels.ru.title, exact: true })).toBeVisible();
+  const cyrillic = /[А-Яа-яЁё]/;
+  expect(await page.locator("main").innerText()).toMatch(cyrillic);
+
+  // No reload: the language changes under the mounted page (React Compiler caches).
+  await page.getByRole("button", { name: "Переключить язык", exact: true }).click();
+  await expect(page.getByRole("heading", { name: labels.de.title, exact: true })).toBeVisible();
+  await expect.poll(async () => (await page.locator("main").innerText()).match(cyrillic)?.[0] ?? null).toBeNull();
+
+  await page.getByRole("heading", { name: labels.de.title, exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText(labels.de.note, { exact: true })).toBeVisible();
+  expect((await dialog.innerText()).match(cyrillic)).toBeNull();
+});
+
 test("failed task deletion leaves a visible error and a closable detail dialog", async ({ page }) => {
   await mockTasks(page, "ru");
   await page.route(`**/concierge-operational-items/${taskId}`, async (route) => {

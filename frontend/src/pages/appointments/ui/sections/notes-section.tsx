@@ -3,7 +3,7 @@ import { memo, useMemo } from "react";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
 import { useLang } from "@/lib/i18n";
-import { appointmentText } from "@/pages/appointments/model/labels";
+import { useAppointmentLabels } from "@/pages/appointments/model/labels";
 import { appointmentSectionCardClassName } from "@/pages/appointments/appearance/surface-appearance";
 import type { AppointmentDetail } from "@/pages/appointments/model/types";
 import { EmptyState } from "@/pages/appointments/ui/shared/workspace-primitives";
@@ -27,6 +27,7 @@ function AppointmentNotesSection({
   emptyText,
   hideWhenUnavailable = false,
 }: AppointmentNotesSectionProps) {
+  const { appointmentText } = useAppointmentLabels();
   const { t } = useLang();
 
   const rows = useMemo<NoteRow[]>(

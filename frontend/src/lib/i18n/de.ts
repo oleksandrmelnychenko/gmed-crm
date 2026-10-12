@@ -211,6 +211,7 @@ export const de = {
   access_entity: "Entität",
   access_field: "Feld",
   access_full: "Vollzugriff",
+  access_read_only: "Nur Lesen",
   access_masked: "Maskiert",
   access_hidden: "Ausgeblendet",
   access_conditional: "Bedingt",

@@ -57,11 +57,12 @@ import {
   ReasonDialog,
   RowIconAction,
   TableTitle,
-  errorMessage,
+  usePersonnelLabels,
 } from "./personnel-ui";
 
 /** One personnel file: master data, archived documents with versions, journal. */
 export function PersonnelEmployeePage() {
+  const { errorMessage } = usePersonnelLabels();
   const { employeeId = "" } = useParams<{ employeeId: string }>();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;

@@ -9,7 +9,7 @@ import { useLang } from "@/lib/i18n";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import {
   fetchNotificationPanelWorkspace,
-  localizedNotificationCopy,
+  useTopbarLabels,
 } from "@/components/topbar-data";
 
 const NOTIFICATION_PREFERENCE_KEY_PREFIX = "gmed:patient-portal:browser-notifications";
@@ -95,6 +95,7 @@ async function showPortalNotification(title: string, body: string, tag: string) 
 }
 
 export function PatientPortalMobileAccess() {
+  const { localizedNotificationCopy } = useTopbarLabels();
   const { user } = useAuth();
   const { lang } = useLang();
   const userId = user?.id ?? "";

@@ -34,8 +34,10 @@ import {
   formatUnknownValue,
   uiText,
   useLang,
+  type Lang,
   type TranslationKey,
   type Translations,
+  useLanguageBound,
 } from "@/lib/i18n";
 import {
   Banner,
@@ -252,12 +254,12 @@ function recordSummaryLabel(summary: RecordSummary | null | undefined, t: Transl
   ].join(" - ");
 }
 
-function privacyNotesLabel(record: PrivacyRequestRecord) {
+function privacyNotesLabel(record: PrivacyRequestRecord, lang: Lang) {
   const decisionReason = record.decision_reason?.trim();
   const parts = [
     record.reason?.trim(),
     decisionReason
-      ? `${uiText("privacy_decision_reason_label")}: ${decisionReason}`
+      ? `${uiText("privacy_decision_reason_label", lang)}: ${decisionReason}`
       : undefined,
     record.review_note?.trim(),
   ].filter(Boolean);
@@ -334,7 +336,8 @@ function createAdminComplianceFieldPatch<K extends keyof AdminComplianceState>(
 }
 
 function useAdminCompliancePageContent() {
-  const { t } = useLang();
+  const { privacySourceLabel } = useLanguageHelpers();
+  const { lang, t } = useLang();
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const patientParam = searchParams.get("patient") ?? "";
@@ -764,7 +767,7 @@ function useAdminCompliancePageContent() {
   const retentionDate = compactDt(latestReviewRecord?.patient_retention_until);
   // Holding an erasure restricts processing until the retention ends.
   const holdLabel = retentionBlocksErasure
-    ? uiText("privacy_hold_restrict", undefined, { date: retentionDate })
+    ? uiText("privacy_hold_restrict", lang, { date: retentionDate })
     : t.compliance_hold;
 
   const reviewSheetImpactSummary = useMemo(() => {
@@ -776,7 +779,7 @@ function useAdminCompliancePageContent() {
       `${t.compliance_col_retention_until}: ${compactDt(
         latestReviewRecord.patient_retention_until ?? latestReviewRecord.retention_until,
       )}`,
-      `${uiText("privacy_source_label")}: ${privacySourceLabel(
+      `${uiText("privacy_source_label", lang)}: ${privacySourceLabel(
         latestReviewRecord.source,
         t,
         latestReviewRecord.created_via,
@@ -785,7 +788,7 @@ function useAdminCompliancePageContent() {
         latestReviewRecord.record_summary,
         t,
       )}`,
-      `${t.compliance_col_notes}: ${privacyNotesLabel(latestReviewRecord)}`,
+      `${t.compliance_col_notes}: ${privacyNotesLabel(latestReviewRecord, lang)}`,
     ];
   }, [latestReviewRecord, t]);
 
@@ -891,11 +894,11 @@ function useAdminCompliancePageContent() {
     {
       id: "notes",
       label: t.compliance_col_notes,
-      accessor: (record) => privacyNotesLabel(record),
+      accessor: (record) => privacyNotesLabel(record, lang),
       width: 240,
       render: (record) => (
         <span className="truncate text-xs text-slate-600">
-          {privacyNotesLabel(record)}
+          {privacyNotesLabel(record, lang)}
         </span>
       ),
     },
@@ -975,11 +978,11 @@ function useAdminCompliancePageContent() {
     {
       id: "notes",
       label: t.compliance_col_notes,
-      accessor: (record) => privacyNotesLabel(record),
+      accessor: (record) => privacyNotesLabel(record, lang),
       width: 220,
       render: (record) => (
         <span className="truncate text-xs text-slate-600">
-          {privacyNotesLabel(record)}
+          {privacyNotesLabel(record, lang)}
         </span>
       ),
     },
@@ -1128,7 +1131,7 @@ function useAdminCompliancePageContent() {
             <AdminTableCard
               title={
                 activePatientId
-                  ? uiText("privacy_history_of", undefined, { patient: activePatientLabel })
+                  ? uiText("privacy_history_of", lang, { patient: activePatientLabel })
                   : t.compliance_privacy_history
               }
               description={t.compliance_privacy_requests_hint}
@@ -1245,7 +1248,7 @@ function useAdminCompliancePageContent() {
                       }
                       className="h-9 w-full rounded-lg bg-field"
                     >
-                      <option value="">{uiText("privacy_request_type_choose")}</option>
+                      <option value="">{uiText("privacy_request_type_choose", lang)}</option>
                       {PRIVACY_REQUEST_TYPE_VALUES.map((value) => (
                         <option key={value} value={value}>
                           {privacyRequestTypeLabel(value, t)}
@@ -1253,7 +1256,7 @@ function useAdminCompliancePageContent() {
                       ))}
                     </NativeComboboxSelect>
                   </Field>
-                  <Field label={uiText("privacy_source_label")} required>
+                  <Field label={uiText("privacy_source_label", lang)} required>
                     <NativeComboboxSelect
                       value={privacyRequestSource}
                       onChange={(event) =>
@@ -1261,9 +1264,9 @@ function useAdminCompliancePageContent() {
                       }
                       className="h-9 w-full rounded-lg bg-field"
                     >
-                      <option value="">{uiText("privacy_source_choose")}</option>
-                      <option value="patient_request">{uiText("privacy_source_option_patient")}</option>
-                      <option value="admin_intake">{uiText("privacy_source_option_agency")}</option>
+                      <option value="">{uiText("privacy_source_choose", lang)}</option>
+                      <option value="patient_request">{uiText("privacy_source_option_patient", lang)}</option>
+                      <option value="admin_intake">{uiText("privacy_source_option_agency", lang)}</option>
                     </NativeComboboxSelect>
                   </Field>
                   <Field label={t.compliance_request_reason} htmlFor="privacy-request-reason">
@@ -1342,11 +1345,11 @@ function useAdminCompliancePageContent() {
                       <Banner tone="warning" withIcon>
                         <div className="space-y-1" data-testid="privacy-retention-block">
                           <p>
-                            {uiText("privacy_erasure_blocked_by_retention", undefined, {
+                            {uiText("privacy_erasure_blocked_by_retention", lang, {
                               date: retentionDate,
                             })}
                           </p>
-                          <p className="text-xs">{uiText("privacy_hold_restrict_hint")}</p>
+                          <p className="text-xs">{uiText("privacy_hold_restrict_hint", lang)}</p>
                         </div>
                       </Banner>
                     ) : reviewSheetRecord.request_type === "erasure" ? (
@@ -1358,10 +1361,10 @@ function useAdminCompliancePageContent() {
                     {canDecide(reviewSheetRecord) ? (
                       <div className="space-y-2">
                         {reviewSheetRecord.status === "approved" ? (
-                          <p className="text-xs text-muted-foreground">{uiText("privacy_revise_hint")}</p>
+                          <p className="text-xs text-muted-foreground">{uiText("privacy_revise_hint", lang)}</p>
                         ) : null}
                         <Field
-                          label={uiText("privacy_decision_reason")}
+                          label={uiText("privacy_decision_reason", lang)}
                           htmlFor="privacy-decision-reason"
                         >
                           <textarea
@@ -1381,17 +1384,17 @@ function useAdminCompliancePageContent() {
                             className="h-8 rounded-lg"
                             onClick={() =>
                               setDecisionReason(
-                                uiText("privacy_retention_reason_template", undefined, {
+                                uiText("privacy_retention_reason_template", lang, {
                                   date: retentionDate,
                                 }),
                               )
                             }
                           >
-                            {uiText("privacy_retention_reason_insert")}
+                            {uiText("privacy_retention_reason_insert", lang)}
                           </Button>
                         ) : null}
-                        <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint")}</p>
-                        <Field label={uiText("privacy_internal_note")} htmlFor="privacy-review-note">
+                        <p className="text-xs text-muted-foreground">{uiText("privacy_decision_reason_hint", lang)}</p>
+                        <Field label={uiText("privacy_internal_note", lang)} htmlFor="privacy-review-note">
                           <textarea
                             id="privacy-review-note"
                             value={reviewNote}
@@ -1500,7 +1503,7 @@ function useAdminCompliancePageContent() {
                     ) : null}
 
                     {reviewSheetRecord.status === "approved" && identityMissing ? (
-                      <Banner tone="warning">{uiText("privacy_identity_required")}</Banner>
+                      <Banner tone="warning">{uiText("privacy_identity_required", lang)}</Banner>
                     ) : null}
 
                     {reviewSheetRecord.status === "approved" &&
@@ -1558,4 +1561,16 @@ function useAdminCompliancePageContent() {
 
 export function AdminCompliancePage(...args: Parameters<typeof useAdminCompliancePageContent>) {
   return useAdminCompliancePageContent(...args);
+}
+
+/**
+ * The helpers of this file that read the UI language themselves; its
+ * components take them from `useLanguageHelpers()` (bound to the current language).
+ */
+const LANGUAGE_HELPERS = {
+  privacySourceLabel,
+};
+
+function useLanguageHelpers() {
+  return useLanguageBound(LANGUAGE_HELPERS);
 }

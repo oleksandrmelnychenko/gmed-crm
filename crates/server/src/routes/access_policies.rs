@@ -280,14 +280,19 @@ const DEFAULT_PATIENT_POLICIES: &[DefaultPatientPolicy] = &[
     ("ceo_assistant", "email", "full", None, false),
     ("ceo_assistant", "nationality", "full", None, false),
     ("ceo_assistant", "languages", "full", None, false),
-    ("ceo_assistant", "insurance", "hidden", None, false),
-    ("ceo_assistant", "diagnosis", "hidden", None, true),
-    ("ceo_assistant", "medications", "hidden", None, true),
-    ("ceo_assistant", "allergies", "hidden", None, true),
-    ("ceo_assistant", "vitals", "hidden", None, true),
-    ("ceo_assistant", "internal_notes", "hidden", None, false),
+    // The CEO Assistant reads everything, the clinical record and the medical
+    // PDFs included (`patients.medical.view`), and changes nothing (no
+    // `patients.edit` / `patients.medical.edit`; owner decision 2026-10-11).
+    // The matrix shows that read access, system locked, so it cannot be
+    // narrowed or widened into something the server does not do.
+    ("ceo_assistant", "insurance", "full", None, true),
+    ("ceo_assistant", "diagnosis", "full", None, true),
+    ("ceo_assistant", "medications", "full", None, true),
+    ("ceo_assistant", "allergies", "full", None, true),
+    ("ceo_assistant", "vitals", "full", None, true),
+    ("ceo_assistant", "internal_notes", "full", None, true),
     ("ceo_assistant", "travel_data", "full", None, false),
-    ("ceo_assistant", "functional_labels", "hidden", None, false),
+    ("ceo_assistant", "functional_labels", "full", None, true),
 ];
 
 type DefaultPolicyColumns = (
@@ -725,6 +730,40 @@ mod tests {
             assert!(seen.insert((policy.0, policy.1)), "duplicate {policy:?}");
         }
         assert_eq!(seen.len(), roles.len() * PATIENT_FIELDS.len());
+    }
+
+    #[test]
+    fn ceo_assistant_reads_every_field_and_the_matrix_cannot_hide_it() {
+        use gmed_domain::access::capabilities::Capability;
+        use gmed_domain::role::Role;
+
+        let assistant: Vec<_> = DEFAULT_PATIENT_POLICIES
+            .iter()
+            .filter(|p| p.0 == "ceo_assistant")
+            .collect();
+        assert_eq!(assistant.len(), PATIENT_FIELDS.len());
+        for policy in &assistant {
+            assert_eq!(
+                policy.2, "full",
+                "the assistant reads everything: {policy:?}"
+            );
+            assert_eq!(policy.3, None, "{policy:?}");
+        }
+        for field in INTERPRETER_CLOSED_CLINICAL_FIELDS.iter().chain(&[
+            "insurance",
+            "internal_notes",
+            "functional_labels",
+        ]) {
+            let policy = assistant
+                .iter()
+                .find(|p| p.1 == *field)
+                .expect("default policy");
+            assert!(policy.4, "must be system locked: {policy:?}");
+        }
+        // The role reads and writes nothing.
+        assert!(Role::CeoAssistant.can(Capability::PatientsMedicalView));
+        assert!(!Role::CeoAssistant.can(Capability::PatientsMedicalEdit));
+        assert!(!Role::CeoAssistant.can(Capability::PatientsEdit));
     }
 
     #[test]
