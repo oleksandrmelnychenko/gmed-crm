@@ -70,7 +70,29 @@
   (за вирахуванням сторно), підпис «Зачёты переплат без движения денег».
 
 Бухгалтерський реєстр рахунків (`/invoices/accounting-ledger`) і далі показує
-обидві ноги заліку — це облік, а не каса.
+обидві ноги заліку — це облік, а не каса. З 2026-10-12 (QA D3-05) вони там
+названі заліком, а не поверненням і оплатою: `description` — «Credit applied
+to invoice …» / «Credit from invoice …» (UI: «Зачёт переплаты в другой счёт /
+из другого счёта»), поля `payment_method = credit_transfer` і
+`cash_effective = false`. Так само у виписці пацієнта (рухи `credit_transfer_out`
+/ `credit_transfer_in` і їхні сторно замість `refund` / `payment`; «Обзор по
+периодам» відносить їх до «Прочее», де обидві ноги взаємно гасяться) і в
+картці рахунку: список «Возвраты пациенту» показує лише реально виплачені
+гроші, залік — у блоці «Переплата и зачёты».
+
+**CSV реєстру (`/invoices/accounting-ledger/export`, з 2026-10-12)** — для
+бухгалтерії німецькою: розділювач `;`, UTF-8 з BOM, дати `DD.MM.YYYY`, суми
+з десятковою комою без розділювача тисяч («1234,56»). Колонки: Buchungsdatum,
+Buchungsart (Zahlungseingang, Rückerstattung, Guthabenumbuchung (abgehend /
+eingehend), Zahlung an Leistungserbringer, Zahlung an Concierge-Partner, їхні
+Storno), Zahlungswirksam (ja/nein — залік «nein»), Einnahme/Ausgabe, Kategorie
+(Erlöse Agenturleistungen, Weiterberechnete Kosten (Durchlaufposten), Guthaben
+des Patienten, Aufwand Leistungserbringer), Buchungstext (німецький текст із
+номерами рахунків), Rechnung, Gegenrechnung (інший рахунок заліку),
+Eingangsrechnung, Auftrag, Patientennummer, Patient, Netto, USt., Brutto,
+Währung, Rechnungsempfänger. Технічні англійські тексти («invoice_payment
+payment …», «Provider payment …») і технічний ідентифікатор отримувача
+(«name:…») у файл більше не потрапляють.
 
 ## 3. Рахунки GMED: залишок не може піти в мінус без підтвердження
 

@@ -64,6 +64,10 @@ const cashOperationLabels = {
     conciergePayment: "Оплата партнеру Concierge",
     conciergePaymentReversal: "Отмена оплаты партнеру Concierge",
     externalInvoicePayment: "Оплата счета поставщика",
+    creditTransferOut: "Зачёт переплаты в другой счёт",
+    creditTransferIn: "Зачёт переплаты из другого счёта",
+    creditTransferOutReversal: "Сторно зачёта переплаты в другой счёт",
+    creditTransferInReversal: "Сторно зачёта переплаты из другого счёта",
   },
   de: {
     invoicePayment: "Rechnungszahlung",
@@ -75,12 +79,22 @@ const cashOperationLabels = {
     conciergePayment: "Zahlung an Concierge-Partner",
     conciergePaymentReversal: "Storno der Concierge-Partnerzahlung",
     externalInvoicePayment: "Zahlung der Lieferantenrechnung",
+    creditTransferOut: "Guthabenumbuchung auf andere Rechnung",
+    creditTransferIn: "Guthabenumbuchung aus anderer Rechnung",
+    creditTransferOutReversal: "Storno der Guthabenumbuchung auf andere Rechnung",
+    creditTransferInReversal: "Storno der Guthabenumbuchung aus anderer Rechnung",
   },
 } as const;
 
 type CashOperationKey = keyof (typeof cashOperationLabels)["ru"];
 
+// A credit transfer between two invoices is no refund and no receipt (QA
+// D3-05): the ledger names it with the other invoice as reference.
 const cashOperationPatterns: ReadonlyArray<[RegExp, CashOperationKey]> = [
+  [/^Reversal of credit applied to invoice\s*(.*)$/i, "creditTransferOutReversal"],
+  [/^Reversal of credit from invoice\s*(.*)$/i, "creditTransferInReversal"],
+  [/^Credit applied to invoice\s*(.*)$/i, "creditTransferOut"],
+  [/^Credit from invoice\s*(.*)$/i, "creditTransferIn"],
   [/^invoice_payment payment\s*(.*)$/i, "invoicePayment"],
   [/^invoice_payment reversal\s*(.*)$/i, "invoicePaymentReversal"],
   [/^invoice_refund refund\s*(.*)$/i, "invoiceRefund"],

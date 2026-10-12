@@ -494,6 +494,8 @@ function leistungBillingStatusClass(status: LeistungBillingStatus) {
       return "border-violet-200 bg-violet-50 text-violet-700";
     case "not_invoiced":
       return "border-slate-200 bg-slate-50 text-slate-600";
+    case "credited":
+      return "border-rose-200 bg-rose-50 text-rose-700";
   }
 }
 
@@ -816,6 +818,10 @@ function useOrdersPageContent() {
         lang === "de" ? "Zahlung ausstehend" : "Ожидает оплаты",
       partially_paid: lang === "de" ? "Teilweise bezahlt" : "Частично оплачено",
       paid: lang === "de" ? "Vollständig bezahlt" : "Полностью оплачено",
+      credited:
+        lang === "de"
+          ? "Per Gutschrift korrigiert – nicht abgerechnet"
+          : "Скорректировано кредит-нотой — не выставлено",
     });
   const externalInvoiceStatusLabel = (value: string) =>
     labelFor(value, {
@@ -7211,11 +7217,14 @@ function useOrdersPageContent() {
                                             <button
                                               key={invoice.invoice_id}
                                               type="button"
-                                              className="rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-sky-700 hover:border-sky-300 hover:text-sky-800"
+                                              className={cn(
+                                                "rounded-full border border-border bg-background px-2 py-1 text-xs font-semibold text-sky-700 hover:border-sky-300 hover:text-sky-800",
+                                                invoice.line_credited && "text-muted-foreground line-through",
+                                              )}
                                               onClick={() =>
                                                 staffGo(`/invoices?invoice=${invoice.invoice_id}`)
                                               }
-                                              title={`${formatMoney(invoice.line_gross, leistung.currency)} · ${leistungBillingStatusLabel(billingStatus)}`}
+                                              title={`${formatMoney(invoice.line_gross, leistung.currency)} · ${leistungBillingStatusLabel(invoice.line_credited ? "credited" : billingStatus)}`}
                                             >
                                               {invoice.invoice_number ||
                                                 (lang === "de" ? "Rechnung" : "Счёт")}

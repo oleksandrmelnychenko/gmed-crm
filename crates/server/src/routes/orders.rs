@@ -3929,19 +3929,30 @@ async fn get_order(
            ) provider_taxonomy ON true
            LEFT JOIN agency_service_catalog catalog ON catalog.id = ol.agency_service_id
            LEFT JOIN LATERAL (
+               -- An invoice whose line for this service is credited in full
+               -- (the whole invoice, or the line by a line credit note) no
+               -- longer bills the service: it neither counts as invoiced nor
+               -- as paid (QA D3-07: a fully credited transfer read
+               -- "Полностью оплачено" from the stored invoice status).
                SELECT
-                   COALESCE(SUM(item.invoiced_quantity), 0) AS invoiced_quantity,
+                   COALESCE(SUM(item.invoiced_quantity) FILTER (WHERE NOT item.line_credited), 0)
+                       AS invoiced_quantity,
                    COUNT(*) AS invoice_count,
-                   COALESCE(BOOL_AND(item.balance_due <= 0), false) AS all_invoices_paid,
-                   COALESCE(BOOL_OR(item.settled_amount > 0), false) AS any_payment,
+                   COUNT(*) FILTER (WHERE NOT item.line_credited) AS billing_invoice_count,
+                   COALESCE(BOOL_AND(item.balance_due <= 0) FILTER (WHERE NOT item.line_credited), false)
+                       AS all_invoices_paid,
+                   COALESCE(BOOL_OR(item.settled_amount > 0) FILTER (WHERE NOT item.line_credited), false)
+                       AS any_payment,
                    COALESCE(
                        JSONB_AGG(
                            JSONB_BUILD_OBJECT(
                                'invoice_id', item.invoice_id,
                                'invoice_number', item.invoice_number,
                                'invoice_status', item.invoice_status,
+                               'invoice_display_status', item.invoice_display_status,
                                'line_quantity', item.invoiced_quantity,
                                'line_gross', item.line_gross,
+                               'line_credited', item.line_credited,
                                'invoice_balance_due', item.balance_due
                            )
                            ORDER BY item.issued_at, item.invoice_id
@@ -3953,9 +3964,26 @@ async fn get_order(
                        invoice.id AS invoice_id,
                        invoice.invoice_number,
                        invoice.status AS invoice_status,
+                       CASE
+                           WHEN invoice.total_gross > 0
+                                AND invoice.credited_amount >= invoice.total_gross
+                               THEN 'credited'
+                           ELSE invoice.status
+                       END AS invoice_display_status,
                        invoice.issued_at,
                        SUM(allocation.quantity) AS invoiced_quantity,
                        SUM(allocation.amount_gross_snapshot) AS line_gross,
+                       (invoice.total_gross > 0 AND invoice.credited_amount >= invoice.total_gross)
+                       OR (
+                           SUM(allocation.amount_gross_snapshot) > 0
+                           AND SUM(COALESCE(line_credit.amount_gross, 0))
+                               + CASE WHEN invoice.total_gross > 0
+                                      THEN SUM(allocation.amount_gross_snapshot)
+                                           * MAX(COALESCE(legacy_credit.amount_gross, 0))
+                                           / invoice.total_gross
+                                      ELSE 0 END
+                               >= SUM(allocation.amount_gross_snapshot)
+                       ) AS line_credited,
                        GREATEST(
                            invoice.total_gross
                                - invoice.credited_amount
@@ -3970,6 +3998,35 @@ async fn get_order(
                        ) AS settled_amount
                    FROM invoice_order_line_allocations allocation
                    JOIN invoices invoice ON invoice.id = allocation.invoice_id
+                   -- Credit notes with lines reduce only the credited lines.
+                   LEFT JOIN LATERAL (
+                       SELECT COALESCE(SUM(
+                                  CASE WHEN credit.transaction_type = 'credit_note' THEN 1 ELSE -1 END
+                                  * COALESCE(NULLIF(credited.value ->> 'line_gross', '')::NUMERIC, 0)
+                              ), 0) AS amount_gross
+                       FROM invoice_credit_note_transactions credit
+                       CROSS JOIN LATERAL jsonb_array_elements(credit.line_items) AS credited(value)
+                       WHERE credit.invoice_id = invoice.id
+                         AND credit.line_items IS NOT NULL
+                         AND jsonb_typeof(credit.line_items) = 'array'
+                         AND jsonb_typeof(invoice.line_items) = 'array'
+                         AND NULLIF(
+                                 invoice.line_items
+                                     -> ((credited.value ->> 'invoice_line_index')::INTEGER)
+                                     ->> 'quote_line_index',
+                                 ''
+                             )::INTEGER = allocation.quote_line_index
+                   ) line_credit ON true
+                   -- Credit notes without lines are spread over the invoice.
+                   LEFT JOIN LATERAL (
+                       SELECT COALESCE(SUM(
+                                  CASE WHEN credit.transaction_type = 'credit_note'
+                                       THEN credit.amount_gross ELSE -credit.amount_gross END
+                              ), 0) AS amount_gross
+                       FROM invoice_credit_note_transactions credit
+                       WHERE credit.invoice_id = invoice.id
+                         AND credit.line_items IS NULL
+                   ) legacy_credit ON true
                    WHERE allocation.order_leistung_id = ol.id
                      -- A draft only reserves the service; it is billed once
                      -- the invoice is released.
@@ -4010,10 +4067,17 @@ async fn get_order(
             .try_get::<rust_decimal::Decimal, _>("invoiced_quantity")
             .unwrap_or(rust_decimal::Decimal::ZERO);
         let invoice_count = l.try_get::<i64, _>("invoice_count").unwrap_or_default();
+        let billing_invoice_count = l
+            .try_get::<i64, _>("billing_invoice_count")
+            .unwrap_or_default();
         let all_invoices_paid = l.try_get::<bool, _>("all_invoices_paid").unwrap_or(false);
         let any_payment = l.try_get::<bool, _>("any_payment").unwrap_or(false);
+        // Payment state from the invoices that still bill the service after
+        // credit notes, never from a credited invoice's stored status.
         let billing_status = if invoice_count == 0 {
             "not_invoiced"
+        } else if billing_invoice_count == 0 {
+            "credited"
         } else if invoiced_quantity < quantity {
             "partially_invoiced"
         } else if all_invoices_paid {
@@ -4900,6 +4964,11 @@ async fn get_order_economics(
            SELECT service.id,
                   COALESCE(service.agency_service_name_snapshot, service.description) AS name,
                   service.description,
+                  -- The catalogue's key and Russian name: the UI shows the
+                  -- service in its language like the service list (QA D3-03).
+                  COALESCE(service.agency_service_key_snapshot, catalog.service_key) AS agency_service_key,
+                  catalog.service_name AS catalog_service_name,
+                  catalog.name_ru AS catalog_name_ru,
                   service.status,
                   service.is_cost_passthrough,
                   UPPER(service.currency) AS currency,
@@ -4942,6 +5011,7 @@ async fn get_order_economics(
            FROM order_leistungen service
            LEFT JOIN service_revenue revenue ON revenue.order_leistung_id = service.id
            LEFT JOIN service_cost cost ON cost.order_leistung_id = service.id
+           LEFT JOIN agency_service_catalog catalog ON catalog.id = service.agency_service_id
            WHERE service.order_id = $1
            ORDER BY service.created_at, service.id"#,
     )
@@ -5080,6 +5150,9 @@ async fn get_order_economics(
                 "order_leistung_id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "name": row.try_get::<String, _>("name").unwrap_or_default(),
                 "description": row.try_get::<String, _>("description").unwrap_or_default(),
+                "agency_service_key": row.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
+                "catalog_service_name": row.try_get::<Option<String>, _>("catalog_service_name").unwrap_or_default(),
+                "catalog_name_ru": row.try_get::<Option<String>, _>("catalog_name_ru").unwrap_or_default(),
                 "currency": service_currency,
                 "currency_matches_order": currency_matches_order,
                 "calculation_valid": calculation_valid,

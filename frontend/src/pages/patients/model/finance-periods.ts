@@ -49,6 +49,11 @@ function addMovement(period: PatientFinancePeriod, movement: PatientAccountMovem
     case "invoice": case "credit_note": case "credit_note_reversal": period.invoices += signed; break;
     case "payment": case "payment_reversal": period.payments -= signed; break;
     case "refund": case "refund_reversal": period.refunds += signed; break;
+    // A credit transfer between two invoices is neither a receipt nor a
+    // refund (QA D3-05): its two legs cancel out among the other movements.
+    case "credit_transfer_out": case "credit_transfer_in":
+    case "credit_transfer_out_reversal": case "credit_transfer_in_reversal":
+      period.adjustments += signed; break;
     default: period.adjustments += signed;
   }
   period.closing += signed;

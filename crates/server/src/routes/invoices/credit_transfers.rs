@@ -24,10 +24,10 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use super::{
-    InvoicePaymentContext, MoneyInput, can_manage_invoice_finance, coded_err, decimal_to_string,
-    ensure_patient_access, err, insert_invoice_payment_accounting_entries,
+    InvoicePaymentContext, JsonBody, MoneyInput, can_manage_invoice_finance, coded_err,
+    decimal_to_string, ensure_patient_access, err, insert_invoice_payment_accounting_entries,
     insert_invoice_refund_accounting_entries, invoice_balance_due, load_invoice_detail,
-    normalize_optional, parse_optional_date, recompute_invoice_settlement_status,
+    normalize_optional, parse_optional_date, read_json_body, recompute_invoice_settlement_status,
     run_paid_invoice_follow_up, write_invoice_audit_tx,
 };
 use crate::auth::middleware::AuthUser;
@@ -178,18 +178,39 @@ pub(crate) async fn load_invoice_credit_transfers(
         .collect())
 }
 
-/// Open invoices of the same patient and currency a credit balance can settle.
+/// The recipient (JSON) of the invoice aliased `alias`: the snapshot taken at
+/// release, else the recipient its payer fields resolve to.
+fn recipient_value(alias: &str) -> String {
+    format!(
+        "COALESCE({alias}.recipient_snapshot, invoice_recipient_resolve(
+            {alias}.patient_id, {alias}.payer_patient_id, {alias}.payer_patient_relation_id,
+            {alias}.payer_contact_name, {alias}.payer_contact_email,
+            {alias}.payer_address_street, {alias}.payer_address_zip, {alias}.payer_address_city,
+            {alias}.payer_address_country))"
+    )
+}
+
+/// Open invoices of the same patient and currency a credit balance can settle,
+/// each with its recipient and whether it is the source invoice's recipient
+/// (a move to another recipient needs billing's confirmation, QA D3-04).
 pub(crate) async fn load_credit_transfer_targets(
     state: &AppState,
     invoice_id: Uuid,
     patient_id: Uuid,
     currency: &str,
 ) -> Result<Vec<Value>, sqlx::Error> {
-    let rows = sqlx::query(
+    let rows = sqlx::query(&format!(
         r#"SELECT invoice.id, invoice.invoice_number, invoice.invoice_type, invoice.status,
                   invoice.issued_at, invoice.total_gross, invoice.credited_amount,
                   invoice.paid_amount, invoice.prepayment_applied_amount,
-                  orders.order_number
+                  orders.order_number,
+                  ({recipient}) ->> 'name' AS recipient_name,
+                  invoice_recipient_identity(invoice.recipient_snapshot)
+                      IS NOT DISTINCT FROM (
+                          SELECT invoice_recipient_identity(source.recipient_snapshot)
+                          FROM invoices source
+                          WHERE source.id = $2
+                      ) AS same_recipient
            FROM invoices invoice
            LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE invoice.patient_id = $1
@@ -199,7 +220,8 @@ pub(crate) async fn load_credit_transfer_targets(
              AND invoice.total_gross - invoice.credited_amount
                  - invoice.paid_amount - invoice.prepayment_applied_amount > 0
            ORDER BY invoice.issued_at, invoice.id"#,
-    )
+        recipient = recipient_value("invoice"),
+    ))
     .bind(patient_id)
     .bind(invoice_id)
     .bind(currency)
@@ -223,6 +245,8 @@ pub(crate) async fn load_credit_transfer_targets(
                 "invoice_type": row.try_get::<String, _>("invoice_type").unwrap_or_default(),
                 "order_number": row.try_get::<Option<String>, _>("order_number").unwrap_or_default(),
                 "balance_due": decimal_to_string(balance),
+                "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
+                "same_recipient": row.try_get::<bool, _>("same_recipient").unwrap_or(false),
             })
         })
         .collect())
@@ -254,12 +278,16 @@ pub(crate) async fn create_credit_transfer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<CreateCreditTransferRequest>,
+    body: JsonBody<CreateCreditTransferRequest>,
 ) -> axum::response::Response {
     const FAILED: &str = "Failed to transfer credit";
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid transfer amount");
     };
@@ -387,12 +415,17 @@ pub(crate) async fn create_credit_transfer(
     }
     // Credit belongs to whoever paid it: it moves between invoices of the same
     // recipient, otherwise only with billing's explicit confirmation.
-    let same_recipient = match sqlx::query_scalar::<_, bool>(
+    let recipients = match sqlx::query(&format!(
         r#"SELECT invoice_recipient_identity(source.recipient_snapshot)
                   IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
+                  AS same_recipient,
+                  ({source}) ->> 'name' AS source_recipient_name,
+                  ({target}) ->> 'name' AS target_recipient_name
            FROM invoices source, invoices target
            WHERE source.id = $1 AND target.id = $2"#,
-    )
+        source = recipient_value("source"),
+        target = recipient_value("target"),
+    ))
     .bind(invoice_id)
     .bind(body.target_invoice_id)
     .fetch_one(&mut *transaction)
@@ -404,12 +437,29 @@ pub(crate) async fn create_credit_transfer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
+    let same_recipient = recipients
+        .try_get::<bool, _>("same_recipient")
+        .unwrap_or(false);
     if !same_recipient && !body.confirm_recipient_mismatch {
+        // Both recipients and the amount, so the confirmation names what
+        // billing moves between two debtors (QA D3-04).
         return coded_err(
             StatusCode::CONFLICT,
             "credit_transfer_recipient_mismatch",
             "The invoices are addressed to different recipients; confirm to move the credit anyway",
-            json!({ "confirm_field": "confirm_recipient_mismatch" }),
+            json!({
+                "confirm_field": "confirm_recipient_mismatch",
+                "source_invoice_number": source.context.invoice_number,
+                "source_recipient_name": recipients
+                    .try_get::<Option<String>, _>("source_recipient_name")
+                    .unwrap_or_default(),
+                "target_invoice_number": target.context.invoice_number,
+                "target_recipient_name": recipients
+                    .try_get::<Option<String>, _>("target_recipient_name")
+                    .unwrap_or_default(),
+                "amount_gross": decimal_to_string(amount_gross),
+                "currency": source.context.currency.to_uppercase(),
+            }),
         );
     }
     if amount_gross > source.refundable_credit() {
@@ -634,12 +684,16 @@ pub(crate) async fn reverse_credit_transfer(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((invoice_id, transfer_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseCreditTransferRequest>,
+    body: JsonBody<ReverseCreditTransferRequest>,
 ) -> axum::response::Response {
     const FAILED: &str = "Failed to reverse credit transfer";
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(reason) = normalize_optional(Some(body.reason.as_str())) else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,

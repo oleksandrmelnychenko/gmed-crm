@@ -4114,8 +4114,12 @@ async fn ceo_assistant_can_read_accounting_ledger_export_and_sales_cannot() {
         Some("text/csv; charset=utf-8")
     );
     let csv = String::from_utf8(bytes).unwrap();
-    assert!(csv.contains("entry_date,direction,category"));
+    // German bookkeeping export: German columns and booking terms, no
+    // technical English (QA D3, ledger CSV remark).
+    assert!(csv.starts_with("\u{feff}Buchungsdatum;Buchungsart;Zahlungswirksam;"));
     assert!(csv.contains(invoice["invoice_number"].as_str().unwrap()));
+    assert!(csv.contains(";Zahlungseingang;ja;Einnahme;"), "{csv}");
+    assert!(!csv.contains("invoice_payment"), "{csv}");
 
     let (status, _) = json_request(
         &app,

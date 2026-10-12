@@ -2,7 +2,7 @@ use std::str::FromStr;
 
 use axum::{
     Json, Router,
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -691,11 +691,15 @@ async fn create_provider_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(external_invoice_id): Path<Uuid>,
-    Json(body): Json<CreateProviderPaymentRequest>,
+    body: Result<Json<CreateProviderPaymentRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_provider_settlements(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match crate::routes::company_financial_accounts::read_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let payment_method = body.payment_method.trim().to_lowercase();
     if !payment_method_is_valid(&payment_method) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment method");
@@ -1064,11 +1068,15 @@ async fn reverse_provider_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((external_invoice_id, payment_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseProviderPaymentRequest>,
+    body: Result<Json<ReverseProviderPaymentRequest>, JsonRejection>,
 ) -> axum::response::Response {
     if !can_manage_provider_settlements(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match crate::routes::company_financial_accounts::read_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let paid_on = match parse_date(&body.paid_on, "paid_on") {
         Ok(value) => value,
         Err(message) => return err(StatusCode::UNPROCESSABLE_ENTITY, &message),

@@ -787,3 +787,132 @@ async fn clinic_expense_payer_controls_receivable_liability_and_cash_ledger() {
     .await;
     assert!(direct_invalid.is_err());
 }
+
+/// QA D3-07: an order service whose invoice is credited reads "credited", not
+/// "paid": the payment state comes from the invoices that still bill the
+/// service after credit notes, never from a credited invoice's stored status.
+#[tokio::test]
+async fn credited_service_lines_are_not_shown_as_billed_or_paid() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("phase2-credited");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, manager_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let transfer_line = seed_order_line(&pool, order_id, "Flughafentransfer", 1, 180).await;
+    let interpreter_line = seed_order_line(&pool, order_id, "Dolmetscherbetreuung", 2, 95).await;
+    let manager = auth_header_for(manager_id, "patient_manager");
+    let billing = auth_header_for(billing_id, "billing");
+    let quote = create_quote(&app, &manager, order_id).await;
+    let quote_id = quote["id"].as_str().unwrap();
+
+    let (status, final_invoice) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{quote_id}/invoices"),
+        &billing,
+        Some(json!({
+            "invoice_type": "final",
+            "line_items": [
+                { "line_index": 0, "quantity": 1 },
+                { "line_index": 1, "quantity": 2 }
+            ]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{final_invoice:?}");
+    let invoice_id = final_invoice["id"].as_str().unwrap().to_string();
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+
+    let line_state = |order: &Value, line_id: Uuid| {
+        let line_id = line_id.to_string();
+        order["leistungen"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"].as_str() == Some(line_id.as_str()))
+            .cloned()
+            .unwrap()
+    };
+    let today = gmed_server::app_time::today().to_string();
+
+    // Credit only the transfer line: the transfer is credited, the
+    // interpreter hours stay billed and unpaid.
+    let (status, credited) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 0 }],
+            "reason": "Transfer nicht in Anspruch genommen",
+            "issued_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credited:?}");
+    let (status, order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order:?}");
+    let transfer = line_state(&order, transfer_line);
+    assert_eq!(transfer["billing_status"], "credited", "{transfer:?}");
+    assert_eq!(transfer["invoice_references"][0]["line_credited"], true);
+    let interpreter = line_state(&order, interpreter_line);
+    assert_eq!(
+        interpreter["billing_status"], "awaiting_payment",
+        "{interpreter:?}"
+    );
+    assert_eq!(interpreter["invoice_references"][0]["line_credited"], false);
+
+    // Crediting the rest closes the invoice: neither line is billed or paid,
+    // although the invoice's balance is 0.
+    let (status, credited) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "lines": [{ "line_index": 1 }],
+            "reason": "Dolmetscher nicht benötigt",
+            "issued_on": today,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{credited:?}");
+    let (status, order) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/orders/{order_id}"),
+        &manager,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{order:?}");
+    for line_id in [transfer_line, interpreter_line] {
+        let line = line_state(&order, line_id);
+        assert_eq!(line["billing_status"], "credited", "{line:?}");
+        assert_eq!(
+            line["invoice_references"][0]["invoice_display_status"],
+            "credited"
+        );
+    }
+}

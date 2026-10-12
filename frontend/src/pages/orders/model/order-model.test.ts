@@ -141,16 +141,16 @@ describe("sumLeistungTotals", () => {
 });
 
 describe("summarizeLeistungMetrics", () => {
-  const line = (status: Leistung["status"]) =>
-    ({ status, quantity: "1", unit_price: "100", vat_rate: "19", is_cost_passthrough: false }) as Leistung;
+  const line = (status: Leistung["status"], extra: Partial<Leistung> = {}) =>
+    ({ status, quantity: "1", unit_price: "100", vat_rate: "19", is_cost_passthrough: false, ...extra }) as Leistung;
 
-  it("counts approved and invoiced services as delivered and leaves cancelled lines out", () => {
+  it("counts delivered and approved services, also after invoicing, and leaves cancelled lines out", () => {
     expect(
       summarizeLeistungMetrics([
         line("planned"),
-        line("delivered"),
-        line("approved"),
-        line("invoiced"),
+        line("delivered", { delivered_at: "2026-10-01T10:00:00Z" }),
+        line("approved", { delivered_at: "2026-10-01T10:00:00Z", approved_at: "2026-10-02T10:00:00Z" }),
+        line("invoiced", { delivered_at: "2026-10-01T10:00:00Z", approved_at: "2026-10-02T10:00:00Z" }),
         line("cancelled"),
       ]),
     ).toEqual({
@@ -162,6 +162,14 @@ describe("summarizeLeistungMetrics", () => {
       net: 400,
       gross: 476,
     });
+  });
+
+  it("does not count a service invoiced in advance as delivered or approved (QA D3-07)", () => {
+    const metrics = summarizeLeistungMetrics([line("invoiced"), line("invoiced"), line("planned")]);
+    expect(metrics.total).toBe(3);
+    expect(metrics.delivered).toBe(0);
+    expect(metrics.approved).toBe(0);
+    expect(metrics.awaitingApproval).toBe(0);
   });
 });
 

@@ -900,7 +900,8 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
         vec![("service_revenue".to_string(), Decimal::new(50, 0))]
     );
     // The patient statement names the receiving leg a credit from the source
-    // invoice, not "Payment received": no money came in.
+    // invoice, not "Payment received": no money came in. Neither leg is a
+    // payment or a refund (QA D3-05): the transfer moves credit, no cash.
     let (status, statement) = json_request(
         &app,
         "GET",
@@ -914,13 +915,78 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
     let credit_legs = movements
         .iter()
         .filter(|movement| {
-            movement["kind"] == "payment"
+            movement["kind"] == "credit_transfer_in"
                 && movement["description"]
                     .as_str()
                     .is_some_and(|text| text.starts_with("Credit from invoice "))
         })
         .count();
     assert_eq!(credit_legs, 1, "{movements:?}");
+    let source_legs = movements
+        .iter()
+        .filter(|movement| {
+            movement["kind"] == "credit_transfer_out"
+                && movement["description"]
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("Credit applied to invoice "))
+        })
+        .count();
+    assert_eq!(source_legs, 1, "{movements:?}");
+    assert!(
+        !movements
+            .iter()
+            .any(|movement| movement["kind"] == "refund"),
+        "{movements:?}"
+    );
+
+    // The accounting ledger names both legs a credit transfer, not a refund
+    // and a receipt, and the CSV books them as a non-cash transfer.
+    let (status, ledger) = json_request(
+        &app,
+        "GET",
+        &format!(
+            "/api/v1/invoices/accounting-ledger?patient_id={patient_id}&year={}",
+            &today[..4]
+        ),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{ledger:?}");
+    let transfer_entries = ledger["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["payment_method"] == "credit_transfer")
+        .collect::<Vec<_>>();
+    assert!(!transfer_entries.is_empty(), "{ledger:?}");
+    assert!(transfer_entries.iter().all(|entry| {
+        entry["cash_effective"] == false
+            && entry["description"].as_str().is_some_and(|text| {
+                text.starts_with("Credit applied to invoice ")
+                    || text.starts_with("Credit from invoice ")
+            })
+    }));
+    let csv_request = axum::http::Request::builder()
+        .uri(format!(
+            "/api/v1/invoices/accounting-ledger/export?patient_id={patient_id}&year={}",
+            &today[..4]
+        ))
+        .header("Authorization", &billing)
+        .body(Body::empty())
+        .unwrap();
+    let csv_response = app.clone().oneshot(csv_request).await.unwrap();
+    assert_eq!(csv_response.status(), StatusCode::OK);
+    let csv = String::from_utf8(
+        axum::body::to_bytes(csv_response.into_body(), 1024 * 1024)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(csv.contains("Guthabenumbuchung"), "{csv}");
+    assert!(!csv.contains("invoice_refund"), "{csv}");
+    assert!(!csv.contains("Rückerstattung"), "{csv}");
 
     // A transfer leg cannot be reversed or corrected on its own.
     let target_payment_id: Uuid = sqlx::query_scalar(
@@ -1026,6 +1092,119 @@ async fn overpayment_becomes_patient_credit_that_can_be_moved_to_another_invoice
         category_totals(&pool, paid_invoice).await,
         vec![("service_revenue".to_string(), Decimal::new(100, 0))]
     );
+}
+
+/// QA D3-04: moving credit to another recipient's invoice names both
+/// recipients and the amount (target list and the 409 to confirm), so billing
+/// never confirms a move between two debtors blind.
+#[tokio::test]
+async fn credit_transfer_to_another_recipient_names_both_recipients() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("transfer-recipients");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_assignment(&pool, patient_id, billing_id, admin_id).await;
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let source = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-a"),
+        "interim",
+        100,
+        false,
+    )
+    .await;
+    let target: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                due_date, total_net, total_vat, total_gross, paid_amount,
+                line_items, notes, portal_visible, hide_amounts_from_patient,
+                created_by, recipient_snapshot
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', CURRENT_DATE + 14,
+                95, 18.05, 113.05, 0,
+                '[{"description":"Flughafentransfer","quantity":"1","unit_price":"95","vat_rate":"19","is_cost_passthrough":false,"line_net":"95","line_vat":"18.05","line_gross":"113.05"}]',
+                'Payment journal test', true, false, $4,
+                '{"kind":"payer","name":"Beispiel GmbH"}'::jsonb
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-b"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let billing = auth_header_for(billing_id, "billing");
+    let today = gmed_server::app_time::today().to_string();
+    let (status, overpaid) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{source}/payments"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "130",
+            "payment_method": "bank_transfer",
+            "received_on": today,
+            "accept_overpayment": true,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{overpaid:?}");
+    let targets = overpaid["invoice"]["credit_transfer_targets"]
+        .as_array()
+        .unwrap();
+    let listed = targets
+        .iter()
+        .find(|item| item["invoice_id"] == target.to_string())
+        .unwrap();
+    assert_eq!(listed["recipient_name"], "Beispiel GmbH");
+    assert_eq!(listed["same_recipient"], false);
+
+    let request = json!({
+        "request_id": Uuid::new_v4(),
+        "target_invoice_id": target,
+        "amount_gross": "30",
+        "transferred_on": today,
+    });
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{source}/credit-transfers"),
+        &billing,
+        Some(request.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused:?}");
+    assert_eq!(refused["error"], "credit_transfer_recipient_mismatch");
+    assert_eq!(refused["confirm_field"], "confirm_recipient_mismatch");
+    assert_eq!(refused["target_recipient_name"], "Beispiel GmbH");
+    assert_eq!(refused["target_invoice_number"], format!("INV-{tag}-b"));
+    assert_eq!(refused["source_invoice_number"], format!("INV-{tag}-a"));
+    assert_eq!(refused["amount_gross"], "30");
+    assert!(
+        refused["source_recipient_name"]
+            .as_str()
+            .is_some_and(|name| !name.is_empty()),
+        "{refused:?}"
+    );
+
+    let mut confirmed = request;
+    confirmed["confirm_recipient_mismatch"] = json!(true);
+    let (status, moved) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{source}/credit-transfers"),
+        &billing,
+        Some(confirmed),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{moved:?}");
 }
 
 /// Paid advances settle the final invoice as soon as it is released (oldest

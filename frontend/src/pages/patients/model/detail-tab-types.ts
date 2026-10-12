@@ -314,6 +314,11 @@ export type PatientAccountMovement = {
     | "payment_reversal"
     | "refund"
     | "refund_reversal"
+    /** Credit moved to / from another invoice of the patient: no money moved (QA D3-05). */
+    | "credit_transfer_out"
+    | "credit_transfer_in"
+    | "credit_transfer_out_reversal"
+    | "credit_transfer_in_reversal"
     | "balance_adjustment"
     | "balance_adjustment_reversal"
     | "external_receivable"

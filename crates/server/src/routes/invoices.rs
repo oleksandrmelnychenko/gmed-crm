@@ -39,6 +39,7 @@ mod credit_transfers;
 mod document;
 mod dunning_blocks;
 mod dunning_letters;
+mod ledger_text;
 pub(crate) mod line_comments;
 pub mod payer;
 pub(crate) mod rebilling_waivers;
@@ -50,6 +51,16 @@ pub(crate) mod termination_settlements;
 mod zugferd;
 
 pub(crate) use zugferd::line_exemption_reason;
+
+/// A JSON body the handler reads only after its permission check (QA D-45):
+/// a role without the right gets 403 even for an empty or malformed body; an
+/// allowed role keeps axum's own rejection (422/400/415).
+pub(crate) type JsonBody<T> = Result<Json<T>, axum::extract::rejection::JsonRejection>;
+
+#[allow(clippy::result_large_err)]
+pub(crate) fn read_json_body<T>(body: JsonBody<T>) -> Result<T, axum::response::Response> {
+    crate::routes::company_financial_accounts::read_body(body)
+}
 
 const INVOICE_PDF_PAGE_WIDTH_MM: f32 = 210.0;
 const INVOICE_PDF_PAGE_HEIGHT_MM: f32 = 297.0;
@@ -6207,14 +6218,6 @@ fn accounting_ledger_year(query: &AccountingLedgerQuery) -> i32 {
     query.year.unwrap_or_else(|| Utc::now().year())
 }
 
-fn csv_escape(value: &str) -> String {
-    if value.contains([',', '"', '\n']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
-    } else {
-        value.to_string()
-    }
-}
-
 /// `GET /invoices/issuer-tax-registration`: whether GMED's Steuernummer or
 /// USt-IdNr. is set, for the warning on the billing pages and the settings
 /// (no values, only the flag).
@@ -6277,6 +6280,7 @@ async fn get_accounting_ledger(
     }
     let rows = match sqlx::query(
         r#"SELECT ae.id, ae.entry_date, ae.direction, ae.category, ae.description,
+                  ae.entry_kind, ae.metadata,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
                   ae.source_invoice_id, ae.source_external_invoice_id,
                   ae.order_id, ae.patient_id,
@@ -6364,12 +6368,36 @@ async fn get_accounting_ledger(
         .collect::<Vec<_>>()
         .join(" ");
 
+        let entry_kind = row.try_get::<String, _>("entry_kind").unwrap_or_default();
+        let raw_description = row.try_get::<String, _>("description").unwrap_or_default();
+        let metadata = row
+            .try_get::<Option<Value>, _>("metadata")
+            .unwrap_or_default()
+            .unwrap_or(Value::Null);
+        let invoice_number = row
+            .try_get::<Option<String>, _>("invoice_number")
+            .unwrap_or_default();
+        let external_invoice_number = row
+            .try_get::<Option<String>, _>("external_invoice_number")
+            .unwrap_or_default();
+        let ledger_entry = ledger_text::LedgerEntry {
+            entry_kind: &entry_kind,
+            description: &raw_description,
+            metadata: &metadata,
+            invoice_number: invoice_number.as_deref(),
+            external_invoice_number: external_invoice_number.as_deref(),
+        };
+
         entries.push(serde_json::json!({
             "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
             "entry_date": entry_date.to_string(),
             "direction": direction,
             "category": category,
-            "description": row.try_get::<String, _>("description").unwrap_or_default(),
+            // A credit transfer names the other invoice, not a refund or a
+            // receipt (QA D3-05); the UI words it in RU/DE.
+            "description": ledger_text::display_description(&ledger_entry),
+            "payment_method": ledger_text::payment_method(&ledger_entry),
+            "cash_effective": ledger_text::is_cash_effective(&ledger_entry),
             "amount_net": decimal_to_string(amount_net),
             "amount_vat": decimal_to_string(amount_vat),
             "amount_gross": decimal_to_string(amount_gross),
@@ -6453,11 +6481,11 @@ async fn export_accounting_ledger(
     }
     let rows = match sqlx::query(
         r#"SELECT ae.entry_date, ae.direction, ae.category, ae.description,
+                  ae.entry_kind, ae.metadata,
                   ae.amount_net, ae.amount_vat, ae.amount_gross, ae.currency,
                   i.invoice_number, ei.external_invoice_number, o.order_number,
                   p.patient_id AS patient_pid, p.first_name, p.last_name,
-                  rcpt.value ->> 'name' AS recipient_name,
-                  invoice_recipient_identity(rcpt.value) AS recipient_identity
+                  rcpt.value ->> 'name' AS recipient_name
            FROM accounting_entries ae
            LEFT JOIN invoices i ON i.id = ae.source_invoice_id
            LEFT JOIN LATERAL (
@@ -6492,73 +6520,89 @@ async fn export_accounting_ledger(
         }
     };
 
+    // German bookkeeping export: German column names and booking terms,
+    // DD.MM.YYYY, decimal commas and `;` (German Excel opens it as is); a
+    // credit transfer is a non-cash "Guthabenumbuchung", never a refund (QA
+    // D3-05). The UTF-8 BOM keeps umlauts readable in Excel.
     let mut csv = String::from(
-        "entry_date,direction,category,description,invoice_number,external_invoice_number,order_number,patient_pid,patient_name,amount_net,amount_vat,amount_gross,currency,recipient_name,recipient_id\n",
+        "\u{feff}Buchungsdatum;Buchungsart;Zahlungswirksam;Einnahme/Ausgabe;Kategorie;Buchungstext;Rechnung;Gegenrechnung;Eingangsrechnung;Auftrag;Patientennummer;Patient;Netto;USt.;Brutto;Währung;Rechnungsempfänger\n",
     );
 
     for row in rows {
-        let patient_name = [
-            row.try_get::<Option<String>, _>("first_name")
-                .unwrap_or_default(),
-            row.try_get::<Option<String>, _>("last_name")
-                .unwrap_or_default(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
+        let text = |column: &str| {
+            row.try_get::<Option<String>, _>(column)
+                .unwrap_or_default()
+                .unwrap_or_default()
+        };
+        let patient_name = [text("first_name"), text("last_name")]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
         let entry_date: NaiveDate = row
             .try_get("entry_date")
             .unwrap_or_else(|_| crate::app_time::today());
         let amount_net: Decimal = row.try_get("amount_net").unwrap_or(Decimal::ZERO);
         let amount_vat: Decimal = row.try_get("amount_vat").unwrap_or(Decimal::ZERO);
         let amount_gross: Decimal = row.try_get("amount_gross").unwrap_or(Decimal::ZERO);
+        let entry_kind = row.try_get::<String, _>("entry_kind").unwrap_or_default();
+        let description = row.try_get::<String, _>("description").unwrap_or_default();
+        let metadata = row
+            .try_get::<Option<Value>, _>("metadata")
+            .unwrap_or_default()
+            .unwrap_or(Value::Null);
+        let invoice_number = text("invoice_number");
+        let external_invoice_number = text("external_invoice_number");
+        let entry = ledger_text::LedgerEntry {
+            entry_kind: &entry_kind,
+            description: &description,
+            metadata: &metadata,
+            invoice_number: Some(invoice_number.as_str()).filter(|value| !value.is_empty()),
+            external_invoice_number: Some(external_invoice_number.as_str())
+                .filter(|value| !value.is_empty()),
+        };
+        let booking = ledger_text::german_booking(&entry);
+        let counter_invoice = if ledger_text::is_credit_transfer(&entry) {
+            metadata
+                .get("payment_reference")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        } else {
+            String::new()
+        };
 
         let line = [
-            csv_escape(&entry_date.to_string()),
-            csv_escape(&row.try_get::<String, _>("direction").unwrap_or_default()),
-            csv_escape(&row.try_get::<String, _>("category").unwrap_or_default()),
-            csv_escape(&row.try_get::<String, _>("description").unwrap_or_default()),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("invoice_number")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("external_invoice_number")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("order_number")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("patient_pid")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
-            csv_escape(&patient_name),
-            csv_escape(&decimal_to_string(amount_net)),
-            csv_escape(&decimal_to_string(amount_vat)),
-            csv_escape(&decimal_to_string(amount_gross)),
-            csv_escape(
-                &row.try_get::<String, _>("currency")
-                    .unwrap_or_else(|_| "EUR".to_string()),
-            ),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("recipient_name")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
-            csv_escape(
-                &row.try_get::<Option<String>, _>("recipient_identity")
-                    .unwrap_or_default()
-                    .unwrap_or_default(),
-            ),
+            ledger_text::german_date(entry_date),
+            booking.kind,
+            if ledger_text::is_cash_effective(&entry) {
+                "ja".to_string()
+            } else {
+                "nein".to_string()
+            },
+            ledger_text::german_direction(
+                &row.try_get::<String, _>("direction").unwrap_or_default(),
+            )
+            .to_string(),
+            ledger_text::german_category(&row.try_get::<String, _>("category").unwrap_or_default()),
+            booking.text,
+            invoice_number,
+            counter_invoice,
+            external_invoice_number,
+            text("order_number"),
+            text("patient_pid"),
+            patient_name,
+            ledger_text::german_amount(amount_net),
+            ledger_text::german_amount(amount_vat),
+            ledger_text::german_amount(amount_gross),
+            row.try_get::<String, _>("currency")
+                .unwrap_or_else(|_| "EUR".to_string()),
+            text("recipient_name"),
         ]
-        .join(",");
+        .iter()
+        .map(|field| ledger_text::csv_field(field))
+        .collect::<Vec<_>>()
+        .join(";");
         csv.push_str(&line);
         csv.push('\n');
     }
@@ -7956,11 +8000,15 @@ async fn apply_invoice_prepayment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<ApplyInvoicePrepaymentRequest>,
+    body: JsonBody<ApplyInvoicePrepaymentRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -8960,11 +9008,15 @@ async fn create_invoice_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<CreateInvoicePaymentRequest>,
+    body: JsonBody<CreateInvoicePaymentRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
     };
@@ -9399,11 +9451,15 @@ async fn reverse_invoice_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((invoice_id, payment_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseInvoicePaymentRequest>,
+    body: JsonBody<ReverseInvoicePaymentRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let note = match normalize_optional(Some(body.note.as_str())) {
         Some(note) => note,
         None => {
@@ -9738,12 +9794,16 @@ async fn correct_invoice_payment(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((invoice_id, payment_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<CorrectInvoicePaymentRequest>,
+    body: JsonBody<CorrectInvoicePaymentRequest>,
 ) -> axum::response::Response {
     const FAILED: &str = "Failed to correct payment";
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid payment amount");
     };
@@ -10233,11 +10293,15 @@ async fn create_invoice_credit_note(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<CreateInvoiceCreditNoteRequest>,
+    body: JsonBody<CreateInvoiceCreditNoteRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(value) if value.chars().count() <= 1000 => value,
         _ => {
@@ -10890,11 +10954,15 @@ async fn reverse_invoice_credit_note(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((invoice_id, credit_note_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseInvoiceCreditNoteRequest>,
+    body: JsonBody<ReverseInvoiceCreditNoteRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(value) if value.chars().count() <= 1000 => value,
         _ => {
@@ -11361,11 +11429,15 @@ async fn create_invoice_refund(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<CreateInvoiceRefundRequest>,
+    body: JsonBody<CreateInvoiceRefundRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let Some(amount_gross) = body.amount_gross.parse_decimal() else {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid refund amount");
     };
@@ -11693,11 +11765,15 @@ async fn reverse_invoice_refund(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path((invoice_id, refund_id)): Path<(Uuid, Uuid)>,
-    Json(body): Json<ReverseInvoiceRefundRequest>,
+    body: JsonBody<ReverseInvoiceRefundRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     let reason = match normalize_optional(Some(body.reason.as_str())) {
         Some(reason) => reason,
         None => {
@@ -12669,11 +12745,15 @@ async fn create_dunning_event(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<CreateDunningEventRequest>,
+    body: JsonBody<CreateDunningEventRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     if !is_valid_dunning_level(&body.level) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid dunning level");
     }
@@ -13385,11 +13465,15 @@ async fn update_invoice_status(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
     Path(invoice_id): Path<Uuid>,
-    Json(body): Json<UpdateInvoiceStatusRequest>,
+    body: JsonBody<UpdateInvoiceStatusRequest>,
 ) -> axum::response::Response {
     if !can_manage_invoice_finance(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
+    let body = match read_json_body(body) {
+        Ok(body) => body,
+        Err(response) => return response,
+    };
     if !is_valid_invoice_status(&body.status) {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "Invalid invoice status");
     }

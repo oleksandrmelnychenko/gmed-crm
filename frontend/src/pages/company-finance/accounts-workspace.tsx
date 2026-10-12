@@ -40,6 +40,7 @@ import {
   deleteCompanyFinancialAccount,
   updateCompanyFinancialAccount,
 } from "./data";
+import { normalizeAmountInput } from "./amount-input";
 import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
 import type {
   CompanyFinancialAccount,
@@ -205,12 +206,6 @@ const copy = {
 
 function todayIso() {
   return appDateKey();
-}
-
-/** "1.234,56" / "1234,56" / "1234.56" as typed, in the API's "1234.56" form. */
-function normalizeAmountInput(value: string) {
-  const compact = value.trim().replace(/\s/g, "");
-  return compact.includes(",") ? compact.replace(/\./g, "").replace(",", ".") : compact;
 }
 
 function amountValue(value: string) {

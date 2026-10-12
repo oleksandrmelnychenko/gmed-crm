@@ -51,6 +51,10 @@ describe("describeCashMovement", () => {
     expect(describeCashMovement("Provider payment reversal FZKNO-2026-1013-77", "de")).toEqual({ label: "Storno der Lieferantenzahlung", reference: "FZKNO-2026-1013-77" });
     expect(describeCashMovement("Concierge partner payment reversal X-1", "ru")).toEqual({ label: "Отмена оплаты партнеру Concierge", reference: "X-1" });
     expect(describeCashMovement("External invoice payment R-7", "ru")).toEqual({ label: "Оплата счета поставщика", reference: "R-7" });
+    // QA D3-05: a credit transfer is no refund and no receipt.
+    expect(describeCashMovement("Credit applied to invoice INV-20261012-0009", "ru")).toEqual({ label: "Зачёт переплаты в другой счёт", reference: "INV-20261012-0009" });
+    expect(describeCashMovement("Credit from invoice INV-20261012-0002", "de")).toEqual({ label: "Guthabenumbuchung aus anderer Rechnung", reference: "INV-20261012-0002" });
+    expect(describeCashMovement("Reversal of credit applied to invoice INV-9", "ru")).toEqual({ label: "Сторно зачёта переплаты в другой счёт", reference: "INV-9" });
   });
 
   it("keeps unknown descriptions as they are", () => {

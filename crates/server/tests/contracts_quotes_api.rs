@@ -1487,6 +1487,235 @@ async fn order_created_with_a_required_prepayment_needs_a_quote_covering_it() {
     assert_eq!(quote["total_gross"], "238");
 }
 
+/// Order total as stored (`orders.total_estimated`) compared with `expected`.
+async fn order_estimate_is(pool: &PgPool, order_id: &str, expected: &str) -> bool {
+    sqlx::query_scalar("SELECT total_estimated = $2::numeric FROM orders WHERE id = $1")
+        .bind(Uuid::parse_str(order_id).unwrap())
+        .bind(expected)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// QA D3-06: an extra service on an order with a required prepayment is
+/// quoted on its own (the first quote is invoiced). The follow-up quote is
+/// smaller than the prepayment, but the prepayment is checked against the
+/// whole order, and the order estimate grows by the extra service instead of
+/// being replaced by the follow-up quote.
+#[tokio::test]
+async fn follow_up_quote_below_the_required_prepayment_adds_to_the_order() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("follow-up-prepayment");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+    let billing_bearer = auth_header_for(billing_id, "billing");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Mia Muster: treatment with a required prepayment",
+            "prepayment_required": true,
+            "prepayment_amount": "300"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().unwrap().to_string();
+
+    let add_service = |description: &'static str, quantity: f64, unit_price: f64| {
+        json!({
+            "description": description,
+            "quantity": quantity,
+            "unit_price": unit_price,
+            "vat_rate": 19.0
+        })
+    };
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(add_service("Concierge-Begleitung", 1.0, 420.0)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    let (status, first_quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {first_quote}");
+    assert_eq!(first_quote["total_gross"], "499.8");
+    assert!(order_estimate_is(&pool, &order_id, "499.80").await);
+
+    // The first quote is fully invoiced (released final invoice).
+    sqlx::query("UPDATE order_leistungen SET status = 'invoiced' WHERE order_id = $1")
+        .bind(Uuid::parse_str(&order_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(add_service("Dolmetscherbetreuung", 2.0, 95.0)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    // 226,10 € extra service next to the 300 € prepayment: accepted.
+    let (status, follow_up) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {follow_up}");
+    assert_eq!(follow_up["total_gross"], "226.1");
+    assert_eq!(follow_up["line_items"].as_array().unwrap().len(), 1);
+    // The order estimate is the whole order, not the follow-up quote.
+    assert!(order_estimate_is(&pool, &order_id, "725.90").await);
+
+    let follow_up_id = follow_up["id"].as_str().unwrap();
+    let (status, accepted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/quotes/{follow_up_id}/status"),
+        &billing_bearer,
+        Some(json!({ "status": "accepted" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "response: {accepted}");
+    assert_eq!(accepted["status"], "accepted");
+
+    // The prepayment can still go up to the order total, not beyond it.
+    for (amount, expected) in [
+        ("700", StatusCode::OK),
+        ("800", StatusCode::UNPROCESSABLE_ENTITY),
+    ] {
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/orders/{order_id}/commercial-basis"),
+            &pm_bearer,
+            Some(json!({
+                "prepayment_required": true,
+                "prepayment_amount": amount
+            })),
+        )
+        .await;
+        assert_eq!(status, expected, "prepayment {amount}: {body}");
+    }
+}
+
+/// QA D3-06: without a prepayment, a follow-up quote for an extra service
+/// left the order estimate at the follow-up quote's total. Every quote keeps
+/// the estimate at the order's services.
+#[tokio::test]
+async fn follow_up_quote_keeps_the_order_estimate_at_the_whole_order() {
+    let Some((app, pool, admin_id, _)) = test_context().await else {
+        return;
+    };
+
+    let tag = unique_tag("follow-up-estimate");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let pm_id = seed_user(&pool, &tag, "patient_manager").await;
+    seed_patient_assignment(&pool, patient_id, pm_id, admin_id).await;
+    let pm_bearer = auth_header_for(pm_id, "patient_manager");
+
+    let (status, order) = json_request(
+        &app,
+        "POST",
+        "/api/v1/orders",
+        &pm_bearer,
+        Some(json!({
+            "patient_id": patient_id,
+            "needs_description": "Ben Muster: order with an extra transfer"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {order}");
+    let order_id = order["id"].as_str().unwrap().to_string();
+
+    for (description, unit_price) in [("Organisation der Behandlung", 550.0), ("Hotel", 100.0)] {
+        let (status, service) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/orders/{order_id}/leistungen"),
+            &pm_bearer,
+            Some(json!({
+                "description": description,
+                "quantity": 1.0,
+                "unit_price": unit_price,
+                "vat_rate": 0.0
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "response: {service}");
+    }
+    let (status, quote) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {quote}");
+    assert!(order_estimate_is(&pool, &order_id, "650.00").await);
+
+    sqlx::query("UPDATE order_leistungen SET status = 'invoiced' WHERE order_id = $1")
+        .bind(Uuid::parse_str(&order_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, service) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/leistungen"),
+        &pm_bearer,
+        Some(json!({
+            "description": "Flughafentransfer",
+            "quantity": 1.0,
+            "unit_price": 95.0,
+            "vat_rate": 19.0
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {service}");
+
+    let (status, follow_up) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/quotes"),
+        &pm_bearer,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "response: {follow_up}");
+    assert_eq!(follow_up["total_gross"], "113.05");
+    // 650,00 € invoiced + 113,05 € extra, not 113,05 € alone.
+    assert!(order_estimate_is(&pool, &order_id, "763.05").await);
+}
+
 #[tokio::test]
 async fn quote_versions_capture_initial_and_status_update_snapshots() {
     let Some((app, pool, admin_id, _)) = test_context().await else {

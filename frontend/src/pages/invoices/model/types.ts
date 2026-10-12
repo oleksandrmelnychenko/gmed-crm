@@ -497,6 +497,10 @@ export type AccountingEntry = {
   order_number?: string | null;
   patient_pid?: string | null;
   patient_name?: string | null;
+  /** Payment method of the booked receipt/refund ("credit_transfer": moved credit). */
+  payment_method?: string | null;
+  /** False for a credit transfer between two invoices: no money moved (QA D3-05). */
+  cash_effective?: boolean;
 };
 
 export type AccountingLedgerPayload = {

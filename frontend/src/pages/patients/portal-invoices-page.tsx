@@ -1238,14 +1238,26 @@ function InvoiceLineCard({ line, currency }: { line: PortalInvoiceLineItem; curr
   const { formatPortalCurrency } = usePortalLabels();
   const { t } = useLang();
   const description = agencyServiceNameLabel(undefined, line.description, t);
+  // Only the figures the line has: an older invoice line may carry just its
+  // total (no "НДС % · Не указано" for the patient, QA D-51 remark).
+  const present = (value: unknown) => value !== null && value !== undefined && String(value).trim() !== "";
+  const decimal = (value: unknown) => {
+    const numeric = Number(String(value).trim());
+    return Number.isFinite(numeric) ? String(numeric).replace(".", ",") : String(value).trim();
+  };
+  const figures = [
+    present(line.quantity) ? `${t.portal_invoices_qty} ${decimal(line.quantity)}` : null,
+    present(line.unit_price) ? `${t.portal_invoices_unit} ${formatPortalCurrency(line.unit_price, currency)}` : null,
+    present(line.vat_rate) ? `${t.uiText.finance_catalog_vat_label} ${decimal(line.vat_rate)} %` : null,
+  ].filter(Boolean);
   return (
     <article className={cn("rounded-xl px-4 py-4", tokens.surface.mutedCard)}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-foreground">{description}</p>
-          <p className={cn("mt-1", tokens.text.muted)}>
-            {t.portal_invoices_qty} {line.quantity} · {t.portal_invoices_unit} {formatPortalCurrency(line.unit_price, currency)} · {t.uiText.finance_catalog_vat_label} {line.vat_rate}%
-          </p>
+          {figures.length > 0 ? (
+            <p className={cn("mt-1", tokens.text.muted)}>{figures.join(" · ")}</p>
+          ) : null}
         </div>
         <CountBadge>{formatPortalCurrency(line.line_gross, currency)}</CountBadge>
       </div>

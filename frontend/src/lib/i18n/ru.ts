@@ -1357,7 +1357,7 @@ export const ru = {
   invoices_workspace_selected_quote_snapshot: "Выбранный снимок предложения",
   invoices_workspace_choose_quote: "Выберите предложение",
   invoices_workspace_notes: "Примечание для клиента (печатается в счёте)",
-  invoices_workspace_billing_note_placeholder: "Примечание для бухгалтерии или инструкция по оплате",
+  invoices_workspace_billing_note_placeholder: "Текст для получателя счёта, например указание по оплате",
   invoices_workspace_detail_sheet_description: "Суммы, статус оплаты и снимок позиций для выбранного счёта.",
   invoices_workspace_no_invoice_selected: "Счёт не выбран",
   invoices_workspace_no_invoice_selected_description: "Выберите карточку счёта, чтобы открыть рабочее пространство бухгалтерии.",

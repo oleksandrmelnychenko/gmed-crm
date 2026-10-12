@@ -8445,7 +8445,7 @@ async fn purge_lead_and_prospect_in_tx(
     crate::routes::lead_portal_account::disable_for_lead_in_tx(tx, lead_id, processed_by).await?;
 
     let (result, scrubbed) = anonymize_lead_pii(
-        &mut **tx,
+        tx,
         lead_id,
         failed_from_status,
         reason,

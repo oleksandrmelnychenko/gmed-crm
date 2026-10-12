@@ -21,7 +21,8 @@ import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import { companyFinanceErrorCode, localizeCompanyFinanceError } from "./errors";
+import { amountInputText, amountInputValue, normalizeAmountInput } from "./amount-input";
+import { localizeCompanyFinanceError } from "./errors";
 import { useFinanceAutoRefresh } from "./use-finance-auto-refresh";
 import { UnassignedInvoiceCorrection } from "./unassigned-invoice-correction";
 import { canCorrectUnassignedInvoice } from "./unassigned-invoice-model";
@@ -88,6 +89,7 @@ const copy = {
     correction: "Исправить или отменить счёт без заказа",
     amountExceeds: (remaining: string) =>
       `Сумма больше, чем осталось выплатить по счёту (${remaining}).`,
+    amountInvalid: "Введите сумму больше нуля, например 119,00.",
     reversalReasonShown: "Причина отмены",
   },
   de: {
@@ -130,6 +132,7 @@ const copy = {
     correction: "Rechnung ohne Auftrag korrigieren oder stornieren",
     amountExceeds: (remaining: string) =>
       `Der Betrag übersteigt den noch zu zahlenden Rest der Rechnung (${remaining}).`,
+    amountInvalid: "Bitte einen Betrag größer als null eingeben, z. B. 119,00.",
     reversalReasonShown: "Stornogrund",
   },
 } as const;
@@ -250,7 +253,7 @@ export function ProviderSettlementDialog({
         setPaymentForm({
           requestId: crypto.randomUUID(),
           accountId: defaultAccount?.id ?? "",
-          amount: result.remaining_provider_liability_gross,
+          amount: amountInputText(result.remaining_provider_liability_gross),
           paidOn: todayIso(),
           method: "bank_transfer",
           reference: result.external_invoice_number,
@@ -288,7 +291,8 @@ export function ProviderSettlementDialog({
       await createCompanyProviderPayment(liability.id, {
         request_id: paymentForm.requestId,
         financial_account_id: paymentForm.accountId,
-        amount_gross: paymentForm.amount,
+        // Typed as "119,00" or "1.234,56" (QA D3-02); the API takes "119.00".
+        amount_gross: normalizeAmountInput(paymentForm.amount),
         paid_on: paymentForm.paidOn,
         payment_method: paymentForm.method,
         reference: paymentForm.reference.trim() || null,
@@ -299,18 +303,16 @@ export function ProviderSettlementDialog({
       setPaymentForm((current) => ({
         ...current,
         requestId: crypto.randomUUID(),
-        amount: updated.remaining_provider_liability_gross,
+        amount: amountInputText(updated.remaining_provider_liability_gross),
         reference: updated.external_invoice_number,
         note: "",
       }));
       onChanged();
     } catch (error) {
-      // A cash account (Kasse) cannot pay more than it holds: the translated
-      // text names the available cash.
+      // Every refusal in the UI language (QA D3-02: "Invalid amount"); a
+      // cash account (Kasse) names the cash it still holds.
       setPaymentError(
-        companyFinanceErrorCode(error) === "cash_account_insufficient_balance"
-          ? localizeCompanyFinanceError(error, lang, text.saveFailed, settlement?.currency ?? "EUR")
-          : error instanceof Error ? error.message : text.saveFailed,
+        localizeCompanyFinanceError(error, lang, text.saveFailed, settlement?.currency ?? "EUR"),
       );
     } finally {
       setPaymentBusy(false);
@@ -346,7 +348,7 @@ export function ProviderSettlementDialog({
       const updated = await reload(liability.id, true);
       setPaymentForm((current) => ({
         ...current,
-        amount: updated.remaining_provider_liability_gross,
+        amount: amountInputText(updated.remaining_provider_liability_gross),
       }));
       setReversal(null);
       setReversalDirty(false);
@@ -361,7 +363,8 @@ export function ProviderSettlementDialog({
 
   const currency = settlement?.currency ?? "EUR";
   const remaining = Number(settlement?.remaining_provider_liability_gross ?? 0);
-  const paymentAmount = Number(paymentForm.amount.trim().replace(",", "."));
+  const paymentAmount = amountInputValue(paymentForm.amount);
+  const paymentAmountInvalid = paymentForm.amount.trim() !== "" && !(paymentAmount > 0);
   const paymentExceedsRemaining = Number.isFinite(paymentAmount) && paymentAmount > remaining;
   // Read-only roles (CEO assistant) see the settlement, not the payment,
   // approval or reversal controls.
@@ -424,8 +427,10 @@ export function ProviderSettlementDialog({
                   </label>
                   <label className={paymentFieldClassName}>
                     <span>{text.amount}</span>
-                    <Input className={paymentInputClassName} required inputMode="decimal" aria-invalid={paymentExceedsRemaining || undefined} value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} />
-                    {paymentExceedsRemaining ? (
+                    <Input className={paymentInputClassName} required inputMode="decimal" aria-invalid={paymentExceedsRemaining || paymentAmountInvalid || undefined} value={paymentForm.amount} onChange={(event) => setPaymentForm((current) => ({ ...current, amount: event.target.value }))} />
+                    {paymentAmountInvalid ? (
+                      <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">{text.amountInvalid}</span>
+                    ) : paymentExceedsRemaining ? (
                       <span role="alert" className="font-normal text-rose-700 dark:text-rose-400">
                         {text.amountExceeds(formatMoney(settlement.remaining_provider_liability_gross, currency, locale))}
                       </span>
@@ -446,7 +451,7 @@ export function ProviderSettlementDialog({
                 <label className={paymentFieldClassName}><span>{text.note}</span><Input className={paymentInputClassName} maxLength={1000} value={paymentForm.note} onChange={(event) => setPaymentForm((current) => ({ ...current, note: event.target.value }))} /></label>
                 </div>
                 <div className="flex justify-stretch border-t border-border/60 bg-muted/20 px-3.5 py-3 sm:justify-end">
-                  <Button type="submit" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || Number(paymentForm.amount) <= 0 || Number(paymentForm.amount) > remaining}>
+                  <Button type="submit" size="sm" className="h-9 w-full rounded-md sm:h-8 sm:w-auto" disabled={loading || paymentBusy || Boolean(loadError) || !activeAccounts.some((account) => account.id === paymentForm.accountId) || !(paymentAmount > 0) || paymentAmount > remaining}>
                     {paymentBusy ? <LoaderCircle className="size-4 animate-spin" /> : null}{text.record}
                   </Button>
                 </div>

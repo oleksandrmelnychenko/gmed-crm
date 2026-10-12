@@ -110,6 +110,54 @@ async fn seed_finance_case(pool: &PgPool, admin_id: Uuid, tag: &str) -> (Uuid, U
     (patient_id, invoice_id)
 }
 
+/// QA D-45: a role without the finance right gets 403 before the body is
+/// read, also for an empty or malformed body; an allowed role still gets the
+/// body refusal (422).
+#[tokio::test]
+async fn finance_writes_check_the_permission_before_the_body() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = format!("permission-first-{}", Uuid::new_v4().simple());
+    let (_, invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let sales_id = seed_user(&ctx.pool, &tag, "sales").await;
+    let manager_id = seed_user(&ctx.pool, &format!("{tag}-manager"), "patient_manager").await;
+    let billing_id = seed_user(&ctx.pool, &format!("{tag}-billing"), "billing").await;
+    let unknown = Uuid::new_v4();
+    let paths = [
+        format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        format!("/api/v1/invoices/{invoice_id}/credit-notes/{unknown}/reversal"),
+        format!("/api/v1/invoices/{invoice_id}/payments"),
+        format!("/api/v1/invoices/{invoice_id}/payments/{unknown}/reversal"),
+        format!("/api/v1/invoices/{invoice_id}/refunds"),
+        format!("/api/v1/invoices/{invoice_id}/refunds/{unknown}/reversal"),
+        format!("/api/v1/invoices/{invoice_id}/credit-transfers"),
+        format!("/api/v1/invoices/{invoice_id}/dunning"),
+        format!("/api/v1/invoices/{invoice_id}/status"),
+        format!("/api/v1/company-provider-liabilities/{unknown}/settlements"),
+    ];
+    for bearer in [
+        auth_header(sales_id, "sales"),
+        auth_header(manager_id, "patient_manager"),
+    ] {
+        for path in &paths {
+            let (status, body) =
+                request_json(&ctx.app, "POST", path, &bearer, Some(json!({}))).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {body:?}");
+        }
+    }
+    let billing = auth_header(billing_id, "billing");
+    let (status, body) = request_json(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/credit-notes"),
+        &billing,
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body:?}");
+}
+
 #[tokio::test]
 async fn credit_note_is_idempotent_append_only_currency_safe_and_updates_balances() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

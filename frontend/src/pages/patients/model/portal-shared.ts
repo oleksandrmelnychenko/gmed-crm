@@ -274,6 +274,10 @@ export type PortalAccountMovement = {
     | "payment_reversal"
     | "refund"
     | "refund_reversal"
+    | "credit_transfer_out"
+    | "credit_transfer_in"
+    | "credit_transfer_out_reversal"
+    | "credit_transfer_in_reversal"
     | "balance_adjustment"
     | "balance_adjustment_reversal";
   direction: "debit" | "credit";

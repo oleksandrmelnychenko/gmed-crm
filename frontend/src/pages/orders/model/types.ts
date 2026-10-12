@@ -11,7 +11,9 @@ export type LeistungBillingStatus =
   | "partially_invoiced"
   | "awaiting_payment"
   | "partially_paid"
-  | "paid";
+  | "paid"
+  /** Every invoice of the service is credited for it: billed nothing (QA D3-07). */
+  | "credited";
 export type PackageCoverageStatus = "unknown" | "covered" | "not_covered";
 export type DebtManagementStatus =
   | "not_required"
@@ -148,8 +150,12 @@ export type Leistung = {
     invoice_id: string;
     invoice_number: string;
     invoice_status: string;
+    /** "credited" when credit notes cover the whole invoice (QA D3-07). */
+    invoice_display_status?: string;
     line_quantity: unknown;
     line_gross: unknown;
+    /** The invoice's line for this service is credited in full: it no longer bills it. */
+    line_credited?: boolean;
     invoice_balance_due: unknown;
   }>;
   external_document_id?: string | null;
@@ -302,8 +308,13 @@ export type OrderEconomicsAmounts = {
 
 export type OrderServiceEconomics = {
   order_leistung_id: string;
+  /** The line's stored (German document) name. */
   name: string;
   description: string;
+  /** Catalogue key and names, to show the service in the UI language (QA D3-03). */
+  agency_service_key?: string | null;
+  catalog_service_name?: string | null;
+  catalog_name_ru?: string | null;
   currency: string;
   currency_matches_order: boolean;
   calculation_valid: boolean;

@@ -644,3 +644,100 @@ async fn portal_statement_is_self_only_and_redacts_hidden_and_internal_items() {
     let (status, _) = request_json(&app, "/api/v1/me/account-statement", &billing).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }
+
+/// QA D3-01: an advance (1.000 €, 600 € paid, the open 400 € closed by a
+/// credit note) settled by the final invoice (1.000 €, 600 € of the advance
+/// applied). The services are worth 1.000 €: "invoiced" counts the advance
+/// only with the part no final invoice settled, not 1.600 €.
+#[tokio::test]
+async fn invoiced_total_counts_an_advance_settled_by_its_final_invoice_once() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = format!("advance-once-{}", Uuid::new_v4().simple());
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let patient_user_id = seed_user(&pool, &tag, "patient").await;
+    let manager_id = seed_user(&pool, &tag, "patient_manager").await;
+    assign(&pool, patient_id, patient_user_id, admin_id).await;
+    assign(&pool, patient_id, manager_id, admin_id).await;
+
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let advance_id = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("ADV-{tag}"),
+        "advance",
+        1000,
+        600,
+        false,
+    )
+    .await;
+    let final_id = seed_invoice(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("FIN-{tag}"),
+        "final",
+        1000,
+        0,
+        false,
+    )
+    .await;
+    sqlx::query(
+        r#"INSERT INTO invoice_prepayment_allocations (
+                advance_invoice_id, target_invoice_id, amount_gross, created_by
+           ) VALUES ($1, $2, 600, $3)"#,
+    )
+    .bind(advance_id)
+    .bind(final_id)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO invoice_credit_note_transactions (
+                invoice_id, transaction_type, request_id, document_number, reason,
+                amount_net, amount_vat, amount_gross, currency, issued_on,
+                portal_visible, created_by
+           ) VALUES ($1, 'credit_note', $2, $3, 'Restbetrag der Anzahlungsrechnung',
+                     400, 0, 400, 'EUR', CURRENT_DATE, true, $4)"#,
+    )
+    .bind(advance_id)
+    .bind(Uuid::new_v4())
+    .bind(format!("CN-{tag}"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (path, bearer) in [
+        (
+            "/api/v1/me/account-statement".to_string(),
+            auth_header_for(patient_user_id, "patient"),
+        ),
+        (
+            format!("/api/v1/patients/{patient_id}/account-statement"),
+            auth_header_for(manager_id, "patient_manager"),
+        ),
+    ] {
+        let (status, statement) = request_json(&app, &path, &bearer).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {statement:?}");
+        assert_eq!(statement["summary"]["invoiced_gross"], "1000", "{path}");
+        assert_eq!(statement["summary"]["cash_paid"], "600", "{path}");
+        assert_eq!(statement["summary"]["prepayment_applied"], "600", "{path}");
+        assert_eq!(statement["summary"]["amount_to_pay"], "400", "{path}");
+    }
+}

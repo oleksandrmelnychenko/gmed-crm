@@ -4209,11 +4209,19 @@ async fn create_quote(
         );
     }
 
+    // A quote covers the services not invoiced yet; a follow-up quote for an
+    // extra service therefore covers only that service. The order estimate
+    // is the whole order (every service that is not cancelled, invoiced ones
+    // included), and the required prepayment is checked against it — never
+    // against a follow-up quote alone (QA D3-06: a 226,10 € extra service was
+    // refused next to a 300 € prepayment, and the order estimate was
+    // overwritten with the follow-up quote's total).
     let updated_order = sqlx::query_scalar::<_, Uuid>(
         r#"UPDATE orders
-           SET total_estimated = $2
+           SET total_estimated = COALESCE(order_service_total_gross(id), $2)
            WHERE id = $1
-             AND (prepayment_amount IS NULL OR prepayment_amount <= $2)
+             AND (prepayment_amount IS NULL
+                  OR prepayment_amount <= COALESCE(order_service_total_gross(id), $2))
            RETURNING id"#,
     )
     .bind(order_id)
@@ -4226,7 +4234,7 @@ async fn create_quote(
             return coded_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "prepayment_exceeds_quote_total",
-                "prepayment_amount cannot exceed the current quote total",
+                "prepayment_amount cannot exceed the order total",
             );
         }
         Err(error) => {
@@ -4620,7 +4628,8 @@ async fn update_quote_status(
     };
 
     let quote_context = match sqlx::query(
-        r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items, o.total_estimated,
+        r#"SELECT q.order_id, q.status, q.total_gross, q.paid_amount, q.line_items,
+                  COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   q.valid_until,
                   o.status AS order_status,
                   EXISTS (
@@ -4732,12 +4741,15 @@ async fn update_quote_status(
             .try_get::<Value, _>("line_items")
             .unwrap_or_else(|_| json!([]));
         let current_total = compute_quote_totals(&persisted_line_items).total_gross;
+        // The quote covers the services not invoiced yet; the order total
+        // also holds the invoiced ones, so a follow-up quote is part of it
+        // (QA D3-06), never equal to it.
         let order_total = quote_context
             .try_get::<Option<Decimal>, _>("total_estimated")
             .unwrap_or_default();
         if !quote_lines_match_persisted(&stored_line_items, &persisted_line_items)
             || quote_total != current_total
-            || order_total != Some(current_total)
+            || order_total.is_none_or(|total| total < current_total)
         {
             return coded_err(
                 StatusCode::CONFLICT,

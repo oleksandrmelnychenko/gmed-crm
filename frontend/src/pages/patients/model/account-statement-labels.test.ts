@@ -107,3 +107,24 @@ describe("credit transfers in the statement", () => {
     expect(localizeFinancialDescription("Kulanz, Labor trägt GMED", "ru")).toBe("Kulanz, Labor trägt GMED");
   });
 });
+
+// QA D3-05: moving credit between two invoices is no refund.
+describe("credit transfers in the statement", () => {
+  it("names both legs as a credit transfer, never a refund or payment", () => {
+    expect(accountMovementKindLabel({ kind: "credit_transfer_out", description: "" }, "ru")).toBe(
+      "Зачёт переплаты в другой счёт",
+    );
+    expect(accountMovementKindLabel({ kind: "credit_transfer_in", description: "" }, "de")).toBe(
+      "Guthabenumbuchung aus anderer Rechnung",
+    );
+    expect(accountMovementKindLabel({ kind: "credit_transfer_out_reversal", description: "" }, "ru")).toBe(
+      "Сторно зачёта переплаты",
+    );
+    expect(localizeFinancialDescription("Reversal of credit applied to invoice INV-9", "ru")).toBe(
+      "Сторно зачёта переплаты в счёт INV-9",
+    );
+    expect(localizeFinancialDescription("Provider payment QA-D3-4711", "ru")).toBe(
+      "Оплата поставщику QA-D3-4711",
+    );
+  });
+});

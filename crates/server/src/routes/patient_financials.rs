@@ -492,7 +492,14 @@ async fn load_patient_settlement_ledger(
            UNION ALL
 
            SELECT 'payment:' || payment.id::text,
+                  -- The receiving leg of a credit transfer is no cash receipt
+                  -- (QA D3-05): its own kind, not "payment".
                   CASE
+                      WHEN payment.payment_method = 'credit_transfer'
+                           AND payment.transaction_type = 'reversal'
+                          THEN 'credit_transfer_in_reversal'
+                      WHEN payment.payment_method = 'credit_transfer'
+                          THEN 'credit_transfer_in'
                       WHEN payment.transaction_type = 'reversal'
                           THEN 'payment_reversal'
                       ELSE 'payment'
@@ -503,10 +510,12 @@ async fn load_patient_settlement_ledger(
                   invoice.order_number,
                   invoice.invoice_number,
                   CASE
+                      WHEN payment.payment_method = 'credit_transfer'
+                           AND payment.transaction_type = 'reversal'
+                          THEN 'Reversal of credit from invoice ' || COALESCE(payment.payment_reference, '')
                       WHEN payment.transaction_type = 'reversal'
                           THEN 'Payment reversal'
-                      -- The receiving leg of a credit transfer is no cash
-                      -- receipt; its reference is the source invoice.
+                      -- Its reference is the source invoice.
                       WHEN payment.payment_method = 'credit_transfer'
                           THEN 'Credit from invoice ' || COALESCE(payment.payment_reference, '')
                       WHEN invoice.invoice_type = 'advance'
@@ -530,7 +539,15 @@ async fn load_patient_settlement_ledger(
            UNION ALL
 
            SELECT 'refund:' || refund.id::text,
+                  -- The paying leg of a credit transfer moves credit to
+                  -- another invoice; no money leaves GMED, so it is no
+                  -- refund (QA D3-05).
                   CASE
+                      WHEN refund.payment_method = 'credit_transfer'
+                           AND refund.transaction_type = 'reversal'
+                          THEN 'credit_transfer_out_reversal'
+                      WHEN refund.payment_method = 'credit_transfer'
+                          THEN 'credit_transfer_out'
                       WHEN refund.transaction_type = 'reversal'
                           THEN 'refund_reversal'
                       ELSE 'refund'
@@ -540,7 +557,14 @@ async fn load_patient_settlement_ledger(
                   invoice.order_id,
                   invoice.order_number,
                   invoice.invoice_number,
-                  refund.reason,
+                  CASE
+                      WHEN refund.payment_method = 'credit_transfer'
+                           AND refund.transaction_type = 'reversal'
+                          THEN 'Reversal of credit applied to invoice ' || COALESCE(refund.payment_reference, '')
+                      WHEN refund.payment_method = 'credit_transfer'
+                          THEN 'Credit applied to invoice ' || COALESCE(refund.payment_reference, '')
+                      ELSE refund.reason
+                  END,
                   CASE
                       WHEN refund.transaction_type = 'refund'
                           THEN refund.amount_gross
@@ -1083,7 +1107,17 @@ async fn load_patient_account_statement(
             (paid + applied - (total_gross - credited)).max(Decimal::ZERO)
         };
         if amounts_visible {
-            invoiced_gross += (total_gross - credited).max(Decimal::ZERO);
+            // An advance invoice asks for money on account; the final invoice
+            // that settles it bills the services. Like the account statement
+            // (whose debits leave advance invoices out), "invoiced" counts
+            // the services once: an advance only with the part no final
+            // invoice has settled and no credit note has closed (QA D3-01:
+            // 1.000 € of services read as 1.600 € billed).
+            invoiced_gross += if invoice_type == "advance" {
+                (total_gross - credited - allocated).max(Decimal::ZERO)
+            } else {
+                (total_gross - credited).max(Decimal::ZERO)
+            };
             cash_paid += paid;
             prepayment_applied += applied;
             available_prepayment += advance_available;

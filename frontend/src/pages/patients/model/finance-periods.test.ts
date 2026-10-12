@@ -28,6 +28,12 @@ describe("patient finance periods", () => {
     const [period] = buildPatientFinancePeriods(statement(rows, "0", "35"), { from: "2026-09-01", to: "2026-09-30" });
     expect(period).toMatchObject({ invoices: 8500n, payments: 7000n, refunds: 1000n, adjustments: 1000n, closing: 3500n });
   });
+  it("keeps a credit transfer between invoices out of payments and refunds (QA D3-05)", () => {
+    const rows = [movement("invoice", "2026-10-01", "100"), movement("payment", "2026-10-02", "0", "130"),
+      movement("credit_transfer_out", "2026-10-03", "30"), movement("credit_transfer_in", "2026-10-03", "0", "30")];
+    const [period] = buildPatientFinancePeriods(statement(rows, "0", "-30"), { from: "2026-10-01", to: "2026-10-31" });
+    expect(period).toMatchObject({ invoices: 10000n, payments: 13000n, refunds: 0n, adjustments: 0n, closing: -3000n });
+  });
   it("sums cents exactly and preserves credit balances", () => {
     const [period] = buildPatientFinancePeriods(statement([movement("payment", "2026-09-01", "0", "0.10"), movement("payment", "2026-09-02", "0", "0.20")], "0", "-0.30"), { from: "", to: "2026-09-30" });
     expect(financeAmount(period.closing)).toBe("-0.30");

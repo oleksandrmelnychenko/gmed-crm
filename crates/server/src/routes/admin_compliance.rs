@@ -4181,7 +4181,7 @@ async fn anonymize_patient_record(
     })?;
     for lead_id in &source_lead_ids {
         super::leads::anonymize_lead_pii(
-            &mut *tx,
+            &mut tx,
             *lead_id,
             None,
             "dsgvo_erasure",

@@ -84,10 +84,17 @@ const MOVEMENT_KIND_LABELS: Record<PatientAccountMovement["kind"], Pair> = {
     "Kündigung: vorab berechnet, nicht erbracht (gutzuschreiben)",
     "Расторжение: выставлено авансом, не оказано (к сторнированию)",
   ],
+  // A credit transfer between two invoices moves credit, no money (QA D3-05).
+  credit_transfer_out: ["Guthabenumbuchung auf andere Rechnung", "Зачёт переплаты в другой счёт"],
+  credit_transfer_in: ["Guthabenumbuchung aus anderer Rechnung", "Зачёт переплаты из другого счёта"],
+  credit_transfer_out_reversal: ["Storno der Guthabenumbuchung", "Сторно зачёта переплаты"],
+  credit_transfer_in_reversal: ["Storno der Guthabenumbuchung", "Сторно зачёта переплаты"],
 };
 
 const CREDIT_TRANSFER_OUT = "Credit applied to invoice ";
 const CREDIT_TRANSFER_IN = "Credit from invoice ";
+const CREDIT_TRANSFER_OUT_REVERSAL = "Reversal of credit applied to invoice ";
+const CREDIT_TRANSFER_IN_REVERSAL = "Reversal of credit from invoice ";
 
 /**
  * A credit transfer between two invoices of the patient is stored as a refund
@@ -160,8 +167,14 @@ const FINANCIAL_DESCRIPTION_PREFIXES: Array<[string, Pair]> = [
   ["Cancellation of invoice ", ["Stornierung der Rechnung ", "Отмена счёта "]],
   ["Concierge partner payment reversal", ["Storno der Zahlung an Concierge-Partner", "Сторно оплаты партнёру консьержа"]],
   ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
+  [CREDIT_TRANSFER_OUT_REVERSAL, ["Storno der Guthabenverrechnung mit Rechnung ", "Сторно зачёта переплаты в счёт "]],
+  [CREDIT_TRANSFER_IN_REVERSAL, ["Storno des Guthabens aus Rechnung ", "Сторно зачёта переплаты из счёта "]],
   [CREDIT_TRANSFER_OUT, ["Guthaben verrechnet mit Rechnung ", "Переплата зачтена в счёт "]],
   [CREDIT_TRANSFER_IN, ["Guthaben aus Rechnung ", "Переплата из счёта "]],
+  // Supplier payouts in the patient card's accounting ledger (QA D2-05 remark).
+  ["Provider payment reversal ", ["Storno der Zahlung an Leistungserbringer ", "Сторно оплаты поставщику "]],
+  ["Provider payment ", ["Zahlung an Leistungserbringer ", "Оплата поставщику "]],
+  ["External invoice payment ", ["Zahlung der Eingangsrechnung ", "Оплата счёта поставщика "]],
   // Accounting ledger entries are described as "<kind> <transaction> <invoice>".
   ["invoice_payment payment ", ["Zahlung zu Rechnung ", "Оплата по счёту "]],
   ["invoice_payment reversal ", ["Zahlungsstorno zu Rechnung ", "Сторно оплаты по счёту "]],

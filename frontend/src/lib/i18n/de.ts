@@ -1361,7 +1361,7 @@ export const de = {
   invoices_workspace_selected_quote_snapshot: "Ausgewählter Angebots-Snapshot",
   invoices_workspace_choose_quote: "Angebot auswählen",
   invoices_workspace_notes: "Hinweis für den Kunden (wird auf der Rechnung gedruckt)",
-  invoices_workspace_billing_note_placeholder: "Abrechnungshinweis oder Zahlungsanweisung",
+  invoices_workspace_billing_note_placeholder: "Text für den Rechnungsempfänger, z. B. ein Zahlungshinweis",
   invoices_workspace_detail_sheet_description: "Summen, Zahlungsstatus und Positions-Snapshot für die ausgewählte Rechnung.",
   invoices_workspace_no_invoice_selected: "Keine Rechnung ausgewählt",
   invoices_workspace_no_invoice_selected_description: "Wähle eine Rechnungskarte aus, um den Abrechnungs-Workspace zu öffnen.",

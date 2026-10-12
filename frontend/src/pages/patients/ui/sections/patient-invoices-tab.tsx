@@ -2517,6 +2517,8 @@ function usePatientInvoicesTabContent({
                   <option value="payment_reversal">{accountMovementKindLabel({ kind: "payment_reversal", description: "" }, lang)}</option>
                   <option value="refund">{accountMovementKindLabel({ kind: "refund", description: "" }, lang)}</option>
                   <option value="refund_reversal">{accountMovementKindLabel({ kind: "refund_reversal", description: "" }, lang)}</option>
+                  <option value="credit_transfer_out">{accountMovementKindLabel({ kind: "credit_transfer_out", description: "" }, lang)}</option>
+                  <option value="credit_transfer_in">{accountMovementKindLabel({ kind: "credit_transfer_in", description: "" }, lang)}</option>
                   <option value="balance_adjustment">{accountMovementKindLabel({ kind: "balance_adjustment", description: "" }, lang)}</option>
                   <option value="balance_adjustment_reversal">{accountMovementKindLabel({ kind: "balance_adjustment_reversal", description: "" }, lang)}</option>
                   <option value="external_receivable">{accountMovementKindLabel({ kind: "external_receivable", description: "" }, lang)}</option>

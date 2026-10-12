@@ -71,6 +71,7 @@ import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registratio
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { openDocumentPreview } from "@/pages/documents/data/document-api";
 import { describeCashMovement } from "@/pages/company-finance/table-model";
+import { seedTaxProfileNameByText, seedTaxProfileText } from "@/lib/tax-profile-labels";
 import { InvoiceImportSheet } from "./ui/invoice-import-sheet";
 import { IncomingInvoices } from "./ui/incoming-invoices";
 import { TerminationSettlementQueue } from "./termination-settlement/queue";
@@ -790,7 +791,13 @@ function useStaffInvoicesPageContent() {
     source: string | null | undefined,
   ) => {
     const trimmedName = name?.trim();
-    if (trimmedName) return trimmedName;
+    // Seeded profiles carry English names ("Standard VAT"); shown in the UI
+    // language like in the finance catalogue (QA D-12/D-44).
+    if (trimmedName) {
+      return seedTaxProfileText(key, trimmedName, "name", lang)
+        ?? seedTaxProfileNameByText(trimmedName, lang)
+        ?? trimmedName;
+    }
     if (key?.trim()) return formatUnknownValue(key, t);
     if (source?.trim()) return vatSourceLabel(source);
     return text.vatSource;
@@ -867,6 +874,11 @@ function useStaffInvoicesPageContent() {
     accountingBusy,
     accountingError,
   } = workspaceState;
+  // "Refunds to the patient" lists money paid out. Moving credit to another
+  // invoice is shown under the credit balance, not as a refund (QA D3-05).
+  const cashRefundTransactions = refundTransactions.filter(
+    (refund) => refund.payment_method !== CREDIT_TRANSFER_METHOD,
+  );
   const setInvoicePage = (nextValue: SetStateAction<number>) => {
     dispatchWorkspaceState((current) => ({
       invoicePage:
@@ -3690,13 +3702,13 @@ function useStaffInvoicesPageContent() {
 
                     {refundError ? <ShellBanner tone="error">{refundError}</ShellBanner> : null}
 
-                    {refundTransactions.length === 0 ? (
+                    {cashRefundTransactions.length === 0 ? (
                       <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
                         {text.noRefunds}
                       </div>
                     ) : (
                       <div className="space-y-2">
-                        {refundTransactions.map((refund) => {
+                        {cashRefundTransactions.map((refund) => {
                           const isReversal = refund.transaction_type === "reversal";
                           const isCreditTransfer = refund.payment_method === CREDIT_TRANSFER_METHOD;
                           const canReverse =
@@ -4463,7 +4475,16 @@ function useStaffInvoicesPageContent() {
                           render: (row) => (
                             <div
                               className="min-w-0 w-full"
-                              title={row.line.vat_source_explanation || taxProfileLabel(row.line.tax_profile_name, row.line.tax_profile_key, row.line.vat_source)}
+                              title={[
+                                // The server's explanation is English; the
+                                // tooltip names source, profile and rate in
+                                // the UI language (QA D-12/D-44).
+                                row.line.vat_source ? vatSourceLabel(row.line.vat_source) : null,
+                                taxProfileLabel(row.line.tax_profile_name, row.line.tax_profile_key, row.line.vat_source),
+                                row.line.vat_rate && Number.isFinite(Number(row.line.vat_rate))
+                                  ? `${String(Number(row.line.vat_rate)).replace(".", ",")} %`
+                                  : null,
+                              ].filter(Boolean).join(" · ")}
                             >
                               <StatusBadge tone="brand" className="max-w-full normal-case tracking-normal">
                                 <span className="truncate">

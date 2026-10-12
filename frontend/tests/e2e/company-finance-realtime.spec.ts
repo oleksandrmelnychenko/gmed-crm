@@ -224,12 +224,13 @@ for (const lang of ["ru", "de"] as const) test(`incoming invoice approval and pa
   await expect(choice).toHaveCount(0);
   const dialog = page.getByRole("dialog");
   const amount = dialog.getByLabel(lang === "ru" ? "Сумма выплаты" : "Zahlungsbetrag", { exact: true });
-  await expect(amount).toHaveValue("100.00");
-  await amount.fill("40");
+  // Amounts read and typed the German way (QA D3-02): "100,00", "40,50".
+  await expect(amount).toHaveValue("100,00");
+  await amount.fill("39,50");
   await dialog.getByRole("button", { name: lang === "ru" ? "Записать выплату" : "Zahlung erfassen", exact: true }).click();
-  await expect(amount).toHaveValue("60.00");
+  await expect(amount).toHaveValue("60,50");
   expect(api.payments).toHaveLength(1);
-  expect(api.payments[0]).toMatchObject({ amount_gross: "40", financial_account_id: "account-1" });
+  expect(api.payments[0]).toMatchObject({ amount_gross: "39.50", financial_account_id: "account-1" });
   await dialog.getByRole("button", { name: lang === "ru" ? "Записать выплату" : "Zahlung erfassen", exact: true }).click();
   await expect(dialog.getByText(lang === "ru" ? "Счёт партнёра / исполнителя полностью оплачен." : "Die Rechnung des Partners / Leistungserbringers ist vollständig bezahlt.", { exact: true })).toBeVisible();
   expect(api.payments).toHaveLength(2);
@@ -310,7 +311,7 @@ test("provider settlements update without resetting a payment draft", async ({ p
   const api = await mockFinance(page);
   await page.goto("/company-finance?provider_invoice=liability-1");
   const dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("Zahlungsbetrag", { exact: true })).toHaveValue("100.00");
+  await expect(dialog.getByLabel("Zahlungsbetrag", { exact: true })).toHaveValue("100,00");
   await dialog.getByLabel("Zahlungsbetrag", { exact: true }).fill("23.45");
   await dialog.getByLabel("Interne Notiz", { exact: true }).fill("Keep this payment draft");
   const reads = api.state.settlementReads;

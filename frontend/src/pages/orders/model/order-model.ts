@@ -534,24 +534,31 @@ export function leistungVatLabel(item: Leistung, locale = "de-DE", lang = "ru") 
   return lang === "de" ? `0 % (Einkauf ${purchase})` : `0 % (закупка ${purchase})`;
 }
 
+/** Delivered: marked delivered (or approved), also when invoiced afterwards. */
+function leistungDelivered(item: Leistung) {
+  return item.status === "delivered" || item.status === "approved" || Boolean(item.delivered_at);
+}
+
+/** Approved: approved, also when invoiced afterwards. */
+function leistungApproved(item: Leistung) {
+  return item.status === "approved" || Boolean(item.approved_at);
+}
+
 /**
  * Counters of the order services. Cancelled lines are left out of the totals
- * and counted separately. "Delivered" includes approved and invoiced services
- * (they were delivered first); "awaiting approval" is delivered but not yet
- * approved.
+ * and counted separately. The counters read the same facts as each line
+ * ("Оказано" / "Утверждено"): an invoiced service counts as delivered or
+ * approved only when it was (QA D3-07: a service invoiced in advance is not
+ * delivered); "awaiting approval" is delivered but not yet approved.
  */
 export function summarizeLeistungMetrics(items: Leistung[]) {
   const active = items.filter((item) => item.status !== "cancelled");
   return {
     total: active.length,
     cancelled: items.length - active.length,
-    delivered: active.filter((item) =>
-      item.status === "delivered" || item.status === "approved" || item.status === "invoiced"
-    ).length,
-    awaitingApproval: active.filter((item) => item.status === "delivered").length,
-    approved: active.filter((item) =>
-      item.status === "approved" || item.status === "invoiced"
-    ).length,
+    delivered: active.filter(leistungDelivered).length,
+    awaitingApproval: active.filter((item) => leistungDelivered(item) && !leistungApproved(item)).length,
+    approved: active.filter(leistungApproved).length,
     net: roundCents(active.reduce((sum, item) => sum + leistungLineAmounts(item).net, 0)),
     gross: sumLeistungGross(items),
   };

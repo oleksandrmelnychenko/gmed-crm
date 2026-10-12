@@ -124,6 +124,65 @@ const MESSAGES: Record<string, Pair> = {
     "Дата перевода не может быть в будущем.",
   ],
   "value is too long": ["Ein Eingabewert ist zu lang.", "Одно из значений слишком длинное."],
+  // Payouts to partners / providers (QA D3-02: no raw English texts).
+  "invalid payment method": ["Ungültige Zahlungsart.", "Недопустимый способ оплаты."],
+  "invalid paid_on; expected yyyy-mm-dd": ["Bitte ein gültiges Zahlungsdatum angeben.", "Укажите корректную дату выплаты."],
+  "payment date cannot be in the future": [
+    "Das Zahlungsdatum darf nicht in der Zukunft liegen.",
+    "Дата выплаты не может быть в будущем.",
+  ],
+  "payment date precedes the account opening balance": [
+    "Das Zahlungsdatum liegt vor dem Anfangsbestand des Kontos.",
+    "Дата выплаты раньше даты начального остатка счёта.",
+  ],
+  "external invoice not found": [
+    "Die Eingangsrechnung wurde nicht gefunden. Seite neu laden.",
+    "Входящий счёт не найден. Обновите страницу.",
+  ],
+  "external invoice is not payable by the company": [
+    "Diese Rechnung zahlt nicht das Unternehmen (storniert oder vom Patienten bezahlt).",
+    "Этот счёт не оплачивается компанией (отменён или оплачен пациентом).",
+  ],
+  "external invoice is not approved for payment": [
+    "Die Rechnung ist noch nicht zur Zahlung freigegeben. Zuerst die Rechnung prüfen und freigeben.",
+    "Счёт ещё не подтверждён к оплате. Сначала проверьте и подтвердите счёт.",
+  ],
+  "financial account currency does not match": [
+    "Die Währung des Kontos passt nicht zur Rechnung.",
+    "Валюта счёта компании не совпадает с валютой счёта партнёра.",
+  ],
+  "financial account is inactive": [
+    "Das Konto ist deaktiviert.",
+    "Счёт компании отключён.",
+  ],
+  "provider payment exceeds the outstanding amount": [
+    "Der Betrag übersteigt den noch zu zahlenden Rest der Rechnung.",
+    "Сумма больше, чем осталось выплатить по счёту.",
+  ],
+  "provider payment was rejected": [
+    "Die Zahlung wurde nicht gebucht. Seite neu laden und erneut versuchen.",
+    "Выплата не записана. Обновите страницу и повторите.",
+  ],
+  "provider payment not found": [
+    "Die Zahlung wurde nicht gefunden. Seite neu laden.",
+    "Выплата не найдена. Обновите страницу.",
+  ],
+  "provider payment was already reversed": [
+    "Diese Zahlung wurde bereits storniert.",
+    "Эта выплата уже отменена.",
+  ],
+  "provider payment reversal was rejected": [
+    "Die Stornierung wurde nicht gebucht. Seite neu laden und erneut versuchen.",
+    "Отмена выплаты не записана. Обновите страницу и повторите.",
+  ],
+  "reversal cannot precede the original payment": [
+    "Das Storno darf nicht vor der Zahlung liegen.",
+    "Дата отмены не может быть раньше даты выплаты.",
+  ],
+  "request_id was already used with different data": [
+    "Diese Zahlung wurde bereits mit anderen Angaben gesendet. Seite neu laden.",
+    "Эта операция уже отправлена с другими данными. Обновите страницу.",
+  ],
 };
 
 function errorBody(error: unknown): Record<string, unknown> | null {

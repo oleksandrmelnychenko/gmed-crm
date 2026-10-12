@@ -1,6 +1,7 @@
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
 import type { ColumnDef } from "@/components/data-table/types";
-import type { Lang } from "@/lib/i18n";
+import { useLang, type Lang } from "@/lib/i18n";
+import { economicsServiceName } from "../model/order-economics-names";
 import type { OrderEconomics, OrderServiceEconomics } from "../model/types";
 
 export function OrderEconomicsTable({ economics, lang, formatMoney }: {
@@ -8,7 +9,9 @@ export function OrderEconomicsTable({ economics, lang, formatMoney }: {
   lang: Lang;
   formatMoney: (value: unknown, currency: string) => string;
 }) {
+  const { t } = useLang();
   const de = lang === "de";
+  const serviceName = (service: OrderServiceEconomics) => economicsServiceName(service, t, lang);
   const moneyColumn = (id: keyof OrderServiceEconomics, label: string, width: number, strong = false): ColumnDef<OrderServiceEconomics> => ({
     id, label, width, filterType: "number",
     accessor: service => {
@@ -30,8 +33,8 @@ export function OrderEconomicsTable({ economics, lang, formatMoney }: {
       : moneyMarginColumn.render?.(service),
   };
   const columns: ColumnDef<OrderServiceEconomics>[] = [
-    { id: "name", label: de ? "Leistung" : "Услуга", accessor: service => service.name, required: true, minWidth: 280,
-      render: service => <span className="block min-w-0 truncate font-medium" title={service.name}>{service.name}</span> },
+    { id: "name", label: de ? "Leistung" : "Услуга", accessor: service => serviceName(service), required: true, minWidth: 280,
+      render: service => <span className="block min-w-0 truncate font-medium" title={serviceName(service)}>{serviceName(service)}</span> },
     moneyColumn("planned_revenue_net", de ? "Geplanter Erlös" : "Плановый доход", 165),
     moneyColumn("actual_revenue_net", de ? "Abgerechneter Erlös" : "Выставленный доход", 180),
     ...(economics.margin_visible ? [
