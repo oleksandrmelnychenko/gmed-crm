@@ -40,7 +40,10 @@ import type {
 
 import {
   darreichungsformLabel,
+  einnahmeformLabel,
 } from "../../data/medication-options";
+import { allergySeverityLabel } from "../../model/allergy-severity";
+import { AllergySeveritySelect } from "./allergy-severity-select";
 
 import {
   createPatientRecommendation,
@@ -717,7 +720,7 @@ export function PatientMedicationTable({
                     </td>
                     <td className={cn(bodyCell, "whitespace-pre-line font-mono")}>{item.staerke || ""}</td>
                     <td className={cn(bodyCell, "whitespace-pre-line")}>
-                      {darreichungsformLabel(item.form)}
+                      {darreichungsformLabel(item.form, uiLang(tx))}
                     </td>
                     {item.on_hold ? (
                       <td colSpan={4} className="px-2.5 py-2 align-top text-left text-amber-800">
@@ -2224,7 +2227,7 @@ function medicationHistoryRegimen(snapshot: Record<string, unknown>, tx: Bilingu
     .some((key) => medicationHistoryText(snapshot, key));
   return [
     medicationHistoryText(snapshot, "staerke"),
-    medicationHistoryText(snapshot, "form"),
+    darreichungsformLabel(medicationHistoryText(snapshot, "form"), uiLang(tx)) || null,
     localizedMedicationRoute(medicationHistoryText(snapshot, "einnahmeform"), tx),
     hasDose
       ? `${dose}${medicationHistoryText(snapshot, "einheit") ? ` ${medicationHistoryText(snapshot, "einheit")}` : ""}`
@@ -2252,6 +2255,9 @@ function localizedMedicationStatus(status: string | null | undefined, tx: Biling
 }
 
 function localizedMedicationRoute(route: string | null | undefined, tx: Bilingual) {
+  // The routes of the picker in the UI language, as the form beside it (QA B3-03).
+  const known = einnahmeformLabel(route, uiLang(tx));
+  if (known) return known;
   switch (route?.trim().toLowerCase()) {
     case "oral":
       return tx("Перорально", "Oral");
@@ -2269,21 +2275,37 @@ function localizedMedicationRoute(route: string | null | undefined, tx: Bilingua
   }
 }
 
-function localizedClinicalSeverity(severity: string | null | undefined, tx: Bilingual) {
-  switch (severity?.trim().toLowerCase()) {
-    case "leicht":
-    case "mild":
-      return tx("Лёгкая", "Leicht");
-    case "mittel":
-    case "moderate":
-      return tx("Средняя", "Mittel");
-    case "schwer":
-    case "severe":
-      return tx("Тяжёлая", "Schwer");
-    default:
-      return severity ?? "";
-  }
+/** The UI language a bilingual picker answers in. */
+function uiLang(tx: Bilingual): "ru" | "de" {
+  return tx("ru", "de") === "de" ? "de" : "ru";
 }
+
+/** The allergy severity in the UI language; an old free text as entered (QA B3-03). */
+function localizedClinicalSeverity(severity: string | null | undefined, tx: Bilingual) {
+  return allergySeverityLabel(severity, uiLang(tx));
+}
+
+/** "0 записей", "1 запись", "3 записи" / "1 Eintrag" (QA 2026-10-12 B3-03). */
+const VITALS_ENTRY_WORDS: PluralWords = {
+  ru: ["запись", "записи", "записей"],
+  de: ["Eintrag", "Einträge"],
+};
+const EVENT_WORDS: PluralWords = {
+  ru: ["событие", "события", "событий"],
+  de: ["Ereignis", "Ereignisse"],
+};
+const PARAMETER_WORDS: PluralWords = {
+  ru: ["показатель", "показателя", "показателей"],
+  de: ["Parameter", "Parameter"],
+};
+const MEASUREMENT_WORDS: PluralWords = {
+  ru: ["измерение", "измерения", "измерений"],
+  de: ["Messung", "Messungen"],
+};
+const SCORE_WORDS: PluralWords = {
+  ru: ["оценка", "оценки", "оценок"],
+  de: ["Score", "Scores"],
+};
 
 /** "1 линия", "3 линии", "5 линий" (QA 2026-10-12 B2-02). */
 const MEDICATION_SERIES_WORDS: PluralWords = {
@@ -2341,7 +2363,7 @@ function MedicationHistoryTree({
           </p>
         </div>
         <Badge variant="outline" className="rounded-full border-sky-200 bg-sky-50 text-sky-800">
-          {total} {tx("событий", "Ereignisse")}
+          {formatCount(uiLang(tx), total, EVENT_WORDS)}
         </Badge>
       </header>
 
@@ -2359,8 +2381,9 @@ function MedicationHistoryTree({
           const currentRegimen = current
             ? [
                 current.staerke,
-                // The form as in the medication table ("Tabletten"), not its code TABL.
-                darreichungsformLabel(current.form),
+                // The form as in the medication table, in the UI language like
+                // the route next to it ("Таблетки · Перорально"), not TABL (B3-03).
+                darreichungsformLabel(current.form, uiLang(tx)),
                 localizedMedicationRoute(current.einnahmeform, tx),
                 [current.dose_morgens, current.dose_mittags, current.dose_abends, current.dose_nachts]
                   .some(Boolean)
@@ -2395,7 +2418,7 @@ function MedicationHistoryTree({
                 </div>
                 <div className="flex items-center gap-2 sm:justify-end">
                   <span className="text-xs text-muted-foreground">
-                    {group.events.length} {tx("событий", "Ereignisse")}
+                    {formatCount(uiLang(tx), group.events.length, EVENT_WORDS)}
                   </span>
                   <span aria-hidden className="text-base text-muted-foreground transition-transform group-open:rotate-90">›</span>
                 </div>
@@ -3239,11 +3262,12 @@ export function PatientClinicalTab({
               />
             </Field>
             <Field label={tx("Тяжесть", "Schweregrad")}>
-              <Input
-                value={draft.severity ?? ""}
-                onChange={(e) => set({ severity: blankToNull(e.target.value) })}
+              {/* A fixed choice, printed in each document's language (QA B3-03). */}
+              <AllergySeveritySelect
+                value={draft.severity}
+                lang={lang === "de" ? "de" : "ru"}
                 className={inputClass}
-                placeholder={tx("лёгкая / средняя / тяжёлая", "leicht / mittel / schwer")}
+                onChange={(severity) => set({ severity })}
               />
             </Field>
             <Field label={tx("Примечание", "Notiz")}>
@@ -3352,7 +3376,10 @@ export function PatientClinicalTab({
           medication: medications.map((item, index) => ({
             id: item.id ?? `medication-${index}`,
             primary: [item.handelsname, item.wirkstoff].filter(Boolean).join(" · "),
-            secondary: [item.staerke, darreichungsformLabel(item.form)].filter(Boolean).join(" · ") || null,
+            secondary:
+              [item.staerke, darreichungsformLabel(item.form, lang === "de" ? "de" : "ru")]
+                .filter(Boolean)
+                .join(" · ") || null,
             medicationSeriesId: item.medication_series_id,
             medicationIdentity: item.wirkstoff,
           })),
@@ -3897,7 +3924,7 @@ export function PatientClinicalTab({
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("История показателей", "Vitalwerte-Verlauf")}</h3>
             <Badge variant="outline" className="rounded-full border-border/60 bg-muted/25 text-foreground">
-              {vitalsHistory.length} {tx("Записи", "Einträge")}
+              {formatCount(lang, vitalsHistory.length, VITALS_ENTRY_WORDS)}
             </Badge>
           </div>
           {canManage ? (
@@ -3948,7 +3975,7 @@ export function PatientClinicalTab({
             <div className="flex items-center gap-2">
               <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
               <h3 className="text-sm font-semibold text-foreground">{tx("История анализов", "Laborverlauf")}</h3>
-              <CountBadge>{labResultGroups.length} {tx("показателей", "Parameter")}</CountBadge>
+              <CountBadge>{formatCount(uiLang(tx), labResultGroups.length, PARAMETER_WORDS)}</CountBadge>
             </div>
             <div className="flex flex-wrap items-center justify-end gap-2">
               <LabResultsPdfAction patientId={patientId} hasResults={labResults.length > 0} />
@@ -4037,7 +4064,7 @@ export function PatientClinicalTab({
                       <p className="truncate text-sm font-semibold text-foreground">{group.name}</p>
                       <div className="mt-1 flex flex-wrap items-center gap-1.5">
                         <span className="text-[11px] text-muted-foreground">
-                          {group.rows.length} {tx("измерений", "Messungen")}
+                          {formatCount(uiLang(tx), group.rows.length, MEASUREMENT_WORDS)}
                         </span>
                         <span className={datePillClass}>
                           {patientVitalDateTime(
@@ -4088,7 +4115,7 @@ export function PatientClinicalTab({
             <span aria-hidden className="size-2 shrink-0 rounded-full bg-[var(--brand)]" />
             <h3 className="text-sm font-semibold text-foreground">{tx("Риск-скоры", "Risikoscores")}</h3>
             <CountBadge>
-              {riskScores.length} {tx("Оценки", "Scores")}
+              {formatCount(uiLang(tx), riskScores.length, SCORE_WORDS)}
             </CountBadge>
           </div>
           {canManage ? (

@@ -1,5 +1,48 @@
 import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
 import type { Translations } from "@/lib/i18n";
+import { hasAnyCapability, type Actor } from "@/lib/permissions";
+
+/**
+ * Whether the user records and decides privacy requests and consents (CEO,
+ * IT admin, patient manager). The CEO Assistant opens the register with
+ * `compliance.view` only: everything is shown, no action is offered (owner
+ * rule "reads everything, writes nothing", QA 2026-10-12 B3-11).
+ */
+export function canWritePrivacyRegister(actor: Actor): boolean {
+  return hasAnyCapability(actor, ["admin.compliance", "patients.medical.edit"]);
+}
+
+/**
+ * Whether the review of an erasure offers the open-business hold (its
+ * justification text and hint): only while the patient still has running
+ * orders or invoices with an open amount, never for a patient without any
+ * (QA 2026-10-12 B3-05). A request that already waits for them keeps it.
+ */
+export function offersOpenBusinessHold(record: {
+  request_type: string;
+  hold_reason?: string | null;
+  patient_open_business?: boolean;
+}): boolean {
+  if (record.request_type !== "erasure") return false;
+  return record.patient_open_business === true || record.hold_reason === "open_business";
+}
+
+/**
+ * The patient the register acts on is the patient the page has loaded, and
+ * only once it is loaded: the picker selects and loads in one step, and every
+ * action waits until the history of that patient is there (QA 2026-10-12
+ * B3-02: a request was filed for the patient loaded before, not the one in
+ * the picker).
+ */
+export function registerPatientReady(state: {
+  activePatientId: string;
+  pickedPatientId: string;
+  loading: boolean;
+  error: string;
+}): boolean {
+  const active = state.activePatientId.trim();
+  return Boolean(active) && state.pickedPatientId.trim() === active && !state.loading && !state.error;
+}
 
 export type ConsentAction = "grant" | "revoke";
 

@@ -98,6 +98,7 @@ const ROLES_ADMIN = ["ceo"] as const satisfies readonly StaffRole[];
 
 const ROLES_COMPLIANCE = [
   "ceo",
+  "ceo_assistant",
 ] as const satisfies readonly StaffRole[];
 
 const ROLES_ADMIN_USERS = [
@@ -316,7 +317,8 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     match: "prefix",
     path: "/admin/compliance",
     roles: ROLES_COMPLIANCE,
-    capability: "admin.compliance",
+    // `compliance.view`: the read-only DSGVO register of the CEO Assistant (QA B3-11).
+    capability: ["admin.compliance", "compliance.view"],
     nav: { section: "dsgvo", labelKey: "nav_compliance" },
   },
   // EU sanctions list screening, CEO only (docs/architecture/sanctions-screening_ua.md).

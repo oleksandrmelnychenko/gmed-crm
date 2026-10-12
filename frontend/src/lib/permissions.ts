@@ -81,6 +81,7 @@ export const ALL_CAPABILITIES = [
   "admin.announcements",
   "admin.custom_fields",
   "admin.compliance",
+  "compliance.view",
   "admin.health",
   "admin.activity",
   "datev.admin",
@@ -115,6 +116,7 @@ const CEO_ASSISTANT: readonly KnownCapability[] = [
   "sops.view",
   "feedback.view",
   "reports.view",
+  "compliance.view",
   "tasks.use",
   "chat.use",
 ];

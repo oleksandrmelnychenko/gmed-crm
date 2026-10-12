@@ -461,7 +461,12 @@ export function PatientOverviewCard({
     const laterality = lateralityLabel(item.laterality, tx);
     const code = isProzedur ? item.ops_code : item.icd_code;
     const sub: string[] = [];
-    if (item.diagnosed_on) sub.push(`${isProzedur ? "" : "ED "}${formatAppDate(item.diagnosed_on) || item.diagnosed_on}`);
+    // "ED" is the German abbreviation of Erstdiagnose: written out, and in
+    // Russian in the Russian UI (QA 2026-10-12 B3-03).
+    if (item.diagnosed_on) {
+      const prefix = isProzedur ? "" : `${tx("Впервые выявлен", "Erstdiagnose")} `;
+      sub.push(`${prefix}${formatAppDate(item.diagnosed_on) || item.diagnosed_on}`);
+    }
     if (item.grade) sub.push(item.grade);
     const hasDocumentSource = Boolean(
       item.source_document_id || item.source_document_name || item.source_import_id,
@@ -567,11 +572,11 @@ export function PatientOverviewCard({
     {
       id: "form",
       label: tx("Форма", "Form"),
-      accessor: (row) => darreichungsformLabel(row.item.form),
+      accessor: (row) => darreichungsformLabel(row.item.form, lang === "de" ? "de" : "ru"),
       width: 210,
       cellClassName: "whitespace-normal",
       render: (row) => {
-        const label = darreichungsformLabel(row.item.form);
+        const label = darreichungsformLabel(row.item.form, lang === "de" ? "de" : "ru");
         return <span className="line-clamp-2" title={label}>{label || "—"}</span>;
       },
     },

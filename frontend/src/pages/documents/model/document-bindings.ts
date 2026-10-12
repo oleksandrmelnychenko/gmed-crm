@@ -64,6 +64,120 @@ export function patientPartyBindingDefaults(
   );
 }
 
+/** A relation of the patient as `GET /patients/{id}/relations` lists it. */
+export type DocumentRelationSource = {
+  related_name?: string | null;
+  related_display_name?: string | null;
+  relation_type?: string | null;
+  is_default_payer?: boolean | null;
+  email?: string | null;
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+  address_country?: string | null;
+  created_at?: string | null;
+};
+
+/** "Musterweg 1, 10115 Berlin" from the parts that are filled in. */
+function addressText(source: {
+  address_street?: string | null;
+  address_zip?: string | null;
+  address_city?: string | null;
+}): string {
+  const city = [source.address_zip?.trim(), source.address_city?.trim()].filter(Boolean).join(" ");
+  return [source.address_street?.trim(), city].filter(Boolean).join(", ");
+}
+
+function relationName(relation: DocumentRelationSource): string {
+  return (relation.related_display_name?.trim() || relation.related_name?.trim() || "");
+}
+
+function onlyFilled(values: DocumentBindingForm): DocumentBindingForm {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value));
+}
+
+/**
+ * The Kostenübernehmer of the Kostenübernahmeerklärung starts as the
+ * patient's default paying relation — a person or an organisation (QA
+ * 2026-10-12 B3-09). The server falls back to the same payer.
+ */
+export function defaultPayerBindings(
+  relations: readonly DocumentRelationSource[] | null | undefined,
+): DocumentBindingForm {
+  const payer = (relations ?? []).find((relation) => relation.is_default_payer === true);
+  if (!payer) return {};
+  return onlyFilled({
+    payer_name: relationName(payer),
+    payer_street: payer.address_street?.trim() ?? "",
+    payer_zip: payer.address_zip?.trim() ?? "",
+    payer_city: payer.address_city?.trim() ?? "",
+    payer_country: payer.address_country?.trim() ?? "",
+    payer_email: payer.email?.trim() ?? "",
+  });
+}
+
+/**
+ * The payer fields when the order of a Kostenübernahmeerklärung changes:
+ * with an order the default payer the user left unchanged gives way, so the
+ * server takes the order's (or its invoice's) payer and falls back to the
+ * default payer itself; without an order the default payer fills the empty
+ * fields again (QA 2026-10-12 B3-09).
+ */
+export function payerBindingsForOrder(
+  bindings: DocumentBindingForm,
+  orderId: string,
+  relations: readonly DocumentRelationSource[] | null | undefined,
+): DocumentBindingForm {
+  const defaults = defaultPayerBindings(relations);
+  if (orderId) {
+    return Object.fromEntries(
+      Object.entries(bindings).filter(([key, value]) => !(key in defaults) || defaults[key] !== value),
+    );
+  }
+  const next = { ...bindings };
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!next[key]?.trim()) next[key] = value;
+  }
+  return next;
+}
+
+/**
+ * The child's consent form starts with the child (the patient) and the
+ * parents or the guardian from the relations, in the order they were
+ * recorded — as the server fills the PDF (QA 2026-10-12 B3-06: the parent's
+ * address printed "Adresse: ____").
+ */
+export function childConsentBindingDefaults(
+  templateId: string,
+  child: {
+    name?: string | null;
+    birth_date?: string | null;
+    address_street?: string | null;
+    address_zip?: string | null;
+    address_city?: string | null;
+  } | null | undefined,
+  relations: readonly DocumentRelationSource[] | null | undefined,
+): DocumentBindingForm {
+  if (!MINOR_ONLY_TEMPLATE_IDS.has(templateId)) return {};
+  const guardians = (relations ?? [])
+    .filter((relation) => relation.relation_type === "parent" || relation.relation_type === "guardian")
+    .slice()
+    .sort((left, right) => (left.created_at ?? "").localeCompare(right.created_at ?? ""));
+  const [first, second] = guardians;
+  const values: DocumentBindingForm = {
+    child_name: child?.name?.trim() ?? "",
+    child_birth_date: /^\d{4}-\d{2}-\d{2}/.exec(child?.birth_date ?? "")?.[0] ?? "",
+    child_address: child ? addressText(child) : "",
+    guardian_name: first ? relationName(first) : "",
+  };
+  if (templateId === "consent_data_release_single") {
+    values.guardian_address = first ? addressText(first) : "";
+  } else {
+    values.guardian2_name = second ? relationName(second) : "";
+  }
+  return onlyFilled(values);
+}
+
 const PATIENT_PARTY_BINDING_KEYS = new Set([
   "party_street",
   "party_zip",
@@ -150,13 +264,27 @@ export function isAdultOn(birthDate: string | null | undefined, todayKey: string
   return eighteenth <= `${today[1]}-${today[2]}-${today[3]}`;
 }
 
+/**
+ * The adult forms the server refuses for a minor (`minor_consent_form_required`):
+ * for a child the parents declare on the child's form, which also carries the
+ * Schweigepflichtsentbindung (QA 2026-10-12 B3-06).
+ */
+const ADULT_ONLY_TEMPLATE_IDS = new Set(["privacy_consents", "confidentiality_release"]);
+
+/** Whether the patient born on `birthDate` is known to be under 18 on `todayKey`. */
+function isKnownMinorOn(birthDate: string | null | undefined, todayKey: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}/.test(birthDate ?? "") && !isAdultOn(birthDate, todayKey);
+}
+
 /** Whether the template may be generated for a patient born on `birthDate`. */
 export function isTemplateForPatientAge(
   templateId: string,
   birthDate: string | null | undefined,
   todayKey: string,
 ): boolean {
-  return !MINOR_ONLY_TEMPLATE_IDS.has(templateId) || !isAdultOn(birthDate, todayKey);
+  if (MINOR_ONLY_TEMPLATE_IDS.has(templateId)) return !isAdultOn(birthDate, todayKey);
+  if (ADULT_ONLY_TEMPLATE_IDS.has(templateId)) return !isKnownMinorOn(birthDate, todayKey);
+  return true;
 }
 
 export function isFixedLegalDocumentTemplate(templateId: string) {

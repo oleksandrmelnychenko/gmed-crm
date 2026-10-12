@@ -438,6 +438,11 @@ test("the CEO lifts a patient's country block from the countries tab", async ({ 
   await item.getByRole("button", { name: "Снять блокировку для пациента" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("Снять блокировку по стране для этого пациента");
+  // The dialog names the patient and who carries the country (QA 2026-10-12 B3-13).
+  const subject = dialog.getByTestId("sanctions-country-lift-subject");
+  await expect(subject).toContainText("Пациент: P-0042 · Anna Muster");
+  await expect(subject).toContainText("Блокировку вызывает");
+  await expect(subject).toContainText("Beispiel GmbH (организация) — Россия");
   await dialog.getByLabel("Причина").fill("Payer lives in Germany since 2001, checked");
   await dialog.getByRole("button", { name: "Снять блокировку для пациента" }).click();
   await expect(dialog).toHaveCount(0);

@@ -82,7 +82,8 @@ export const constructorFieldSpecs: Record<ClinicalDocumentImportTarget, Constru
     { key: "notes", label: { ru: "Примечание", de: "Hinweis" }, kind: "text", primary: true },
   ],
   medication: [
-    { key: "wirkstoff", label: { ru: "Действующее вещество", de: "Wirkstoff" }, kind: "text", required: true, primary: true },
+    // The owner's term for the field everywhere (commit 0809211e; QA 2026-10-12 B3-04).
+    { key: "wirkstoff", label: { ru: "ACT-значение", de: "ACT-Bedeutung" }, kind: "text", required: true, primary: true },
     { key: "handelsname", label: { ru: "Торговое название", de: "Handelsname" }, kind: "text" },
     { key: "staerke", label: { ru: "Дозировка", de: "Stärke" }, kind: "text", placeholder: { ru: "500 мг", de: "500 mg" } },
     { key: "dose_morgens", label: { ru: "Утро", de: "Morgens" }, kind: "text" },

@@ -17,6 +17,7 @@ import {
   localizeTimelineSource,
   timelineEntityTypeBadgeClass,
 } from "@/lib/timeline-labels";
+import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 import {
@@ -128,6 +129,7 @@ export function PatientTimelineTab({
   onResetTimelineFilters,
   onOpenRoute,
 }: PatientTimelineTabProps) {
+  const { lang } = useLang();
   const {
     hasTimelineFilters,
     canOpenDocumentsWorkspace,
@@ -262,7 +264,12 @@ export function PatientTimelineTab({
                       canViewInvoices,
                       canOpenComplianceWorkspace,
                     });
-                    const labels = patientTimelineItemLabels(item, l, statusLabel);
+                    const labels = patientTimelineItemLabels(
+                      item,
+                      l,
+                      statusLabel,
+                      lang === "de" ? "de" : "ru",
+                    );
 
                     return (
                       <button

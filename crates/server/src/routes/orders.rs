@@ -3899,7 +3899,7 @@ async fn get_order(
                   ol.unit_price_snapshot, ol.currency_snapshot, ol.vat_rate_snapshot,
                   ol.planned_partner_cost_net, ol.planned_partner_cost_vat,
                   ol.planned_partner_cost_gross,
-                  billing.invoiced_quantity, billing.invoice_count,
+                  billing.invoiced_quantity, billing.invoice_count, billing.billing_invoice_count,
                   billing.all_invoices_paid, billing.any_payment,
                   billing.invoice_references,
                   doc.auto_name AS external_document_auto_name,

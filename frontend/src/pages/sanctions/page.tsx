@@ -435,7 +435,9 @@ function CountriesTab() {
   const [data, setData] = useState<CountryBlocksResponse | null>(null);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
-  const [lifting, setLifting] = useState<{ kind: "lead" | "patient"; id: string } | null>(null);
+  // The whole row: the lift dialog names the patient or lead and who carries
+  // the blocked country (QA 2026-10-12 B3-13).
+  const [lifting, setLifting] = useState<CountryBlockItem | null>(null);
   const [revoking, setRevoking] = useState<{ overrideId: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -496,7 +498,7 @@ function CountriesTab() {
         ) : null}
       </div>
       {item.flag === "blocked_country" ? (
-        <Button type="button" size="sm" variant="outline" onClick={() => setLifting({ kind: item.kind, id: item.id })}>
+        <Button type="button" size="sm" variant="outline" onClick={() => setLifting(item)}>
           {item.kind === "patient" ? t.sanctions_country_lift_patient : t.sanctions_country_lift}
         </Button>
       ) : item.lift ? (
@@ -544,7 +546,43 @@ function CountriesTab() {
           await load();
         }}
         onClose={() => setLifting(null)}
-      />
+      >
+        {lifting ? (
+          // Whose block is lifted and who carries the country (QA 2026-10-12 B3-13).
+          <div
+            className="space-y-1.5 rounded-lg border border-border/60 bg-muted/20 px-3 py-2 text-sm"
+            data-testid="sanctions-country-lift-subject"
+          >
+            <p>
+              <span className="text-muted-foreground">
+                {t.uiText[
+                  liftingPatient ? "sanctions_country_lift_patient_label" : "sanctions_country_lift_lead_label"
+                ]}
+                :{" "}
+              </span>
+              <span className="font-semibold text-foreground">
+                {lifting.number && lifting.number !== lifting.name
+                  ? `${lifting.number} · ${lifting.name}`
+                  : lifting.name}
+              </span>
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t.uiText.sanctions_country_lift_subjects_label}:
+            </p>
+            {lifting.subjects.length > 0 ? (
+              <ul className="space-y-0.5 text-xs text-foreground">
+                {lifting.subjects.map((subject) => (
+                  <li key={`${subject.kind}-${subject.role ?? ""}-${subject.name}`}>
+                    {countrySubjectLine(subject, t, lang)}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-foreground">{countryList(lifting.found, lang)}</p>
+            )}
+          </div>
+        ) : null}
+      </SanctionsReasonDialog>
       <SanctionsReasonDialog
         open={revoking !== null}
         title={t.sanctions_country_revoke_title}

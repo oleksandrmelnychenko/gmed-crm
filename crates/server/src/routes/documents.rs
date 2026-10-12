@@ -6429,7 +6429,9 @@ fn translated_label(language: &str, key: &str) -> &'static str {
         (_, "medication_permanent") => "Dauermedikation",
         (_, "medication_temporary") => "Temporäre Medikation",
         (_, "medication_name") => "Medikament",
-        (_, "ingredient") => "Wirkstoff",
+        // The owner's term for the field everywhere (commit 0809211e,
+        // 2026-09-17); QA 2026-10-12 B3-04.
+        (_, "ingredient") => "ACT-Bedeutung",
         (_, "dose") => "Dosis",
         (_, "schedule") => "Einnahmeschema",
         (_, "dosage_form") => "Darreichungsform",
@@ -8166,9 +8168,11 @@ fn default_generated_document_name(
         }
         _ => template.default_auto_name,
     };
+    // DD.MM.YYYY like every date of the UI and the names the dialogs build
+    // (QA 2026-10-12 B3-10: "· 2026-10-12" for documents made via the API).
     format!(
         "{base} · {patient_name} · {}",
-        crate::app_time::local(generated_at).format("%Y-%m-%d")
+        crate::app_time::local(generated_at).format("%d.%m.%Y")
     )
 }
 
@@ -8842,6 +8846,13 @@ fn build_treatment_plan_pdf(
         .save(&save_options, &mut save_warnings))
 }
 
+/// The dosage form of the Medikamentenübersicht as its name in the document
+/// language ("Tabletten" / "Таблетки"), never the stored code `TABL`; a free
+/// text form stays as entered (QA 2026-10-12 B3-07).
+fn medication_summary_dosage_form(raw: &str, language: &str) -> String {
+    crate::services::medication_labels::dosage_form_label(raw, language == "ru")
+}
+
 fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) -> String {
     let title = context.title_override.clone().unwrap_or_else(|| {
         format!(
@@ -8947,10 +8958,14 @@ fn build_medication_summary_html(context: &GeneratedMedicationSummaryContext) ->
                 ));
             }
             if let Some(dosage_form) = dosage_form {
+                // The form's name, not its code TABL (QA 2026-10-12 B3-07).
                 meta.push(format!(
                     "{}: {}",
                     translated_label(&context.language, "dosage_form"),
-                    escape_html(dosage_form)
+                    escape_html(&medication_summary_dosage_form(
+                        dosage_form,
+                        &context.language
+                    ))
                 ));
             }
 
@@ -9407,11 +9422,12 @@ fn build_medication_summary_pdf(
                 );
             }
             if let Some(dosage_form) = dosage_form {
+                // The form's name, not its code TABL (QA 2026-10-12 B3-07).
                 layout.text_block(
                     &format!(
                         "{}: {}",
                         translated_label(&context.language, "dosage_form"),
-                        dosage_form
+                        medication_summary_dosage_form(dosage_form, &context.language)
                     ),
                     10.0,
                     false,
@@ -15243,11 +15259,12 @@ async fn generate_provider_document_from_template_internal(
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| {
+            // DD.MM.YYYY in names (QA 2026-10-12 B3-10).
             format!(
                 "{} · {} · {}",
                 template.default_auto_name,
                 patient_name,
-                crate::app_time::local(generated_at).format("%Y-%m-%d")
+                crate::app_time::local(generated_at).format("%d.%m.%Y")
             )
         });
     let manual_text = normalize_generated_manual_text(body.manual_text.as_deref())?;
@@ -17133,10 +17150,11 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let invoice_payer = match load_invoice_payer(&state, order_id, patient_uuid).await {
-                Ok(value) => value,
-                Err(resp) => return resp,
-            };
+            let invoice_payer =
+                match load_invoice_payer(&state, order_id, patient_uuid, false).await {
+                    Ok(value) => value,
+                    Err(resp) => return resp,
+                };
             let mut payer = merge_payer(payer_block_from_bindings(&bindings), invoice_payer);
             // The payer's copy names the third-party payer of the lead's
             // declaration (422 without one, like the Kostenübernahmeerklärung)
@@ -17389,7 +17407,10 @@ async fn generate_document(
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
-            let invoice_payer = match load_invoice_payer(&state, order_id, patient_uuid).await {
+            // The patient's default payer when nothing more specific names one
+            // (QA 2026-10-12 B3-09).
+            let invoice_payer = match load_invoice_payer(&state, order_id, patient_uuid, true).await
+            {
                 Ok(value) => value,
                 Err(resp) => return resp,
             };
@@ -18035,8 +18056,14 @@ async fn generate_document(
                         }
                     }
                 }
+                // The parent's address as the relation stores it, else the
+                // linked patient record's (QA 2026-10-12 B3-06: "Adresse: ____").
                 _ => sqlx::query(
-                    r#"SELECT pr.related_name, rp.birth_date
+                    r#"SELECT pr.related_name, rp.birth_date,
+                              COALESCE(NULLIF(btrim(pr.address_street), ''), rp.address_street) AS street,
+                              COALESCE(NULLIF(btrim(pr.address_zip), ''), rp.address_zip) AS zip,
+                              COALESCE(NULLIF(btrim(pr.address_city), ''), rp.address_city) AS city,
+                              COALESCE(NULLIF(btrim(pr.address_country), ''), rp.address_country) AS country
                        FROM patient_relations pr
                        LEFT JOIN patients rp ON rp.id = pr.related_patient_id
                        WHERE pr.patient_id = $1
@@ -18048,17 +18075,33 @@ async fn generate_document(
                 .await
                 .unwrap_or_default()
                 .iter()
-                .map(|row| ConsentGuardian {
-                    name: row
-                        .try_get::<String, _>("related_name")
-                        .ok()
-                        .map(|name| name.trim().to_string())
-                        .filter(|name| !name.is_empty()),
-                    birth_date: row
-                        .try_get::<Option<NaiveDate>, _>("birth_date")
-                        .ok()
-                        .flatten(),
-                    address: None,
+                .map(|row| {
+                    let text = |column: &str| {
+                        row.try_get::<Option<String>, _>(column)
+                            .ok()
+                            .flatten()
+                            .map(|value| value.trim().to_string())
+                            .filter(|value| !value.is_empty())
+                    };
+                    ConsentGuardian {
+                        name: row
+                            .try_get::<String, _>("related_name")
+                            .ok()
+                            .map(|name| name.trim().to_string())
+                            .filter(|name| !name.is_empty()),
+                        birth_date: row
+                            .try_get::<Option<NaiveDate>, _>("birth_date")
+                            .ok()
+                            .flatten(),
+                        address: DocPartyBlock {
+                            street: text("street"),
+                            zip: text("zip"),
+                            city: text("city"),
+                            country: text("country"),
+                            ..DocPartyBlock::default()
+                        }
+                        .address_line(),
+                    }
                 })
                 .collect(),
             };
@@ -20233,6 +20276,15 @@ fn cost_coverage_party_accusative(party: &DocPartyBlock) -> String {
 /// salutation form of the name (reference renders "Justus Geldgeber" plainly
 /// when no salutation is present). Mirrors `party_block_lines` otherwise.
 fn cost_coverage_payer_lines(party: &DocPartyBlock) -> Vec<String> {
+    // No payer known: lines the payer fills in by hand, instead of an empty
+    // party block between "zwischen" and "Kostenübernehmer" (QA 2026-10-12 B3-09).
+    if party.name.trim().is_empty() {
+        return vec![
+            "Name / Firma: ____________________________________________".to_string(),
+            "Anschrift: _______________________________________________".to_string(),
+            "E-Mail / Telefon: ________________________________________".to_string(),
+        ];
+    }
     let mut lines = vec![party.name_with_salutation()];
     if let Some(birth) = party.birth_date {
         lines.push(format!("geb. am {}", birth.format("%d.%m.%Y")));
@@ -21137,6 +21189,20 @@ fn appointment_nominative_salutation(party: &DocPartyBlock) -> &'static str {
     }
 }
 
+/// "die Patientin" / "der Patient" and their dative for the running text of
+/// the Terminbestätigung, from the patient's salutation (gender); both forms
+/// when it is unknown (QA 2026-10-12 B3-08: "der Patient" for Frau …).
+fn appointment_patient_noun(party: &DocPartyBlock) -> (&'static str, &'static str) {
+    match party.clean_salutation() {
+        Some(value) if value.eq_ignore_ascii_case("frau") => ("die Patientin", "der Patientin"),
+        Some(value) if value.eq_ignore_ascii_case("herr") => ("der Patient", "dem Patienten"),
+        _ => (
+            "die Patientin bzw. der Patient",
+            "der Patientin bzw. dem Patienten",
+        ),
+    }
+}
+
 fn build_appointment_confirmation_pdf(
     context: &GeneratedAppointmentConfirmationContext,
     document_reference: &str,
@@ -21144,7 +21210,10 @@ fn build_appointment_confirmation_pdf(
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, &context.agency, regular, bold);
 
-    // --- Header meta table (Datum / Seiten / Doc.-ID / Ersteller / Für / Project) ---
+    // --- Header meta table (Datum / Seiten / Ersteller / Für) ---
+    // The page header already prints "Dokument-Nr."; a "Doc.-ID" line only
+    // appears for a different, manually given ID, and the technical label
+    // "Project: TB-V2" of the template is gone (QA 2026-10-12 B3-08).
     let meta_date = if context.sign_date.is_some() {
         fmt_de_date(context.sign_date)
     } else {
@@ -21156,9 +21225,8 @@ fn build_appointment_confirmation_pdf(
         .doc_id
         .as_deref()
         .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .unwrap_or("____________")
-        .to_string();
+        .filter(|v| !v.is_empty() && *v != document_reference.trim())
+        .map(ToOwned::to_owned);
     let meta_originator = agency_responsible_person(&context.agency).to_string();
     let meta_for = {
         let name = context.patient.name.trim();
@@ -21168,14 +21236,13 @@ fn build_appointment_confirmation_pdf(
             name.to_string()
         }
     };
-    for (label, value) in [
-        ("Datum:", meta_date.as_str()),
-        ("Seiten:", "1"),
-        ("Doc.-ID:", meta_doc_id.as_str()),
-        ("Ersteller:", meta_originator.as_str()),
-        ("Für:", meta_for.as_str()),
-        ("Project:", "TB-V2"),
-    ] {
+    let mut meta_rows = vec![("Datum:", meta_date.as_str()), ("Seiten:", "1")];
+    if let Some(doc_id) = meta_doc_id.as_deref() {
+        meta_rows.push(("Doc.-ID:", doc_id));
+    }
+    meta_rows.push(("Ersteller:", meta_originator.as_str()));
+    meta_rows.push(("Für:", meta_for.as_str()));
+    for (label, value) in meta_rows {
         layout.text_block(
             &format!("{label} {value}"),
             9.0,
@@ -21292,10 +21359,13 @@ fn build_appointment_confirmation_pdf(
     );
 
     // --- Examination scheduling ---
+    // "finden am 17.11.2025 statt" with a date, "finden in Kürze statt"
+    // without one — never "am in Kürze" (QA 2026-10-12 B3-08).
     let first = context
         .first_examination
-        .map(|value| value.format("%d.%m.%Y").to_string())
+        .map(|value| format!("am {}", value.format("%d.%m.%Y")))
         .unwrap_or_else(|| "in Kürze".to_string());
+    let (patient_nominative, patient_dative) = appointment_patient_noun(&context.patient);
     let weeks = context
         .examination_weeks
         .as_deref()
@@ -21307,7 +21377,7 @@ fn build_appointment_confirmation_pdf(
         .unwrap_or_default();
     admin_block(
         &mut layout,
-        &format!("Die ersten Untersuchungen finden am {first} statt.{weeks}"),
+        &format!("Die ersten Untersuchungen finden {first} statt.{weeks}"),
         0.0,
         1.5,
     );
@@ -21320,14 +21390,16 @@ fn build_appointment_confirmation_pdf(
     admin_block(
         &mut layout,
         &format!(
-            "{continuation_statement} In München wird der Patient von unserer Agentur betreut und begleitet. Dolmetscher und Transfer sind organisiert."
+            "{continuation_statement} In München wird {patient_nominative} von unserer Agentur betreut und begleitet. Dolmetscher und Transfer sind organisiert."
         ),
         0.0,
         1.5,
     );
     admin_block(
         &mut layout,
-        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
+        &format!(
+            "Die Kostenfrage wurde mit {patient_dative} geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an."
+        ),
         0.0,
         1.5,
     );
@@ -27025,32 +27097,36 @@ async fn load_order_quote_summary(
 /// Kostenübernehmer, not where the lead wants the invoice sent: the chain
 /// ignores section 7 of the lead's form, and an invoice addressed to the
 /// party at another address (role `invoice_address`) names no payer here.
+///
+/// `with_default_payer`: when neither the order nor an invoice names a payer
+/// (or no order is chosen), the patient's default paying relation is the
+/// payer — the Kostenübernahmeerklärung starts from it (QA 2026-10-12 B3-09).
 async fn load_invoice_payer(
     state: &AppState,
     order_id: Option<Uuid>,
     patient_id: Uuid,
+    with_default_payer: bool,
 ) -> Result<Option<DocPartyBlock>, axum::response::Response> {
-    let Some(order_id) = order_id else {
+    if order_id.is_none() && !with_default_payer {
         return Ok(None);
-    };
+    }
     let failed = |error: sqlx::Error| {
-        tracing::error!(%error, %patient_id, %order_id, "load invoice payer");
+        tracing::error!(%error, %patient_id, ?order_id, "load invoice payer");
         err(
             StatusCode::INTERNAL_SERVER_ERROR,
             "Failed to load payer context",
         )
     };
     let mut conn = state.db.acquire().await.map_err(failed)?;
-    let inherited = crate::routes::invoices::payer::inherited_cost_bearer(
-        &mut conn,
-        Some(order_id),
-        patient_id,
-    )
-    .await
-    .map_err(failed)?;
-    let (recipient, phone) = if matches!(inherited.source, "head_order" | "order") {
-        let record = &inherited.record;
-        let value = sqlx::query_scalar::<_, Option<Value>>(
+    let inherited =
+        crate::routes::invoices::payer::inherited_cost_bearer(&mut conn, order_id, patient_id)
+            .await
+            .map_err(failed)?;
+    let record = &inherited.record;
+    let resolved_record = if matches!(inherited.source, "head_order" | "order")
+        || (with_default_payer && inherited.source == "default_payer")
+    {
+        sqlx::query_scalar::<_, Option<Value>>(
             "SELECT invoice_recipient_resolve($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(patient_id)
@@ -27064,9 +27140,13 @@ async fn load_invoice_payer(
         .bind(&record.address_country)
         .fetch_one(&mut *conn)
         .await
-        .map_err(failed)?;
-        (value, record.contact_phone.clone())
+        .map_err(failed)?
     } else {
+        None
+    };
+    let (recipient, phone) = if matches!(inherited.source, "head_order" | "order") {
+        (resolved_record, record.contact_phone.clone())
+    } else if let Some(order_id) = order_id {
         let row = sqlx::query(
             r#"SELECT COALESCE(invoice.recipient_snapshot, invoice_recipient_resolve(
                        invoice.patient_id, invoice.payer_patient_id,
@@ -27098,8 +27178,14 @@ async fn load_invoice_payer(
                 row.try_get::<Option<String>, _>("payer_contact_phone")
                     .unwrap_or_default(),
             ),
-            None => (None, None),
+            // No invoice names a payer yet: the patient's default payer
+            // (QA 2026-10-12 B3-09).
+            None => (resolved_record, record.contact_phone.clone()),
         }
+    } else {
+        // Without an order the patient's default payer is the Kostenübernehmer
+        // the declaration starts from (QA 2026-10-12 B3-09).
+        (resolved_record, record.contact_phone.clone())
     };
     let Some(recipient) = recipient else {
         return Ok(None);
@@ -34606,6 +34692,7 @@ mod tests {
         single_order_scope_points, tesseract_input_extension, trusted_contact_recipients_binding,
         valid_tesseract_language_spec,
     };
+    use super::{GeneratedAppointmentConfirmationContext, build_appointment_confirmation_pdf};
     use crate::routes::patients::{PATIENT_LABEL_FORMATS, PatientLabelAgencySettings};
     use chrono::{NaiveDate, TimeZone, Utc};
     use printpdf::{Op, PdfFontHandle};
@@ -34880,6 +34967,76 @@ mod tests {
         assert!(!text.to_ascii_lowercase().contains("c/o"));
         assert!(!text.contains("UTC"));
         text
+    }
+
+    /// QA 2026-10-12 B3-08: without an appointment the first examinations
+    /// take place "in Kürze" (not "am in Kürze"), a woman is "die Patientin",
+    /// and the header carries no technical label or duplicate document ID.
+    #[test]
+    fn appointment_confirmation_reads_correctly_without_a_date_and_for_a_woman() {
+        let reference = "DOC-20261012-000100";
+        let context = |first_examination: Option<NaiveDate>, salutation: Option<&str>| {
+            GeneratedAppointmentConfirmationContext {
+                language: "de".to_string(),
+                title_override: None,
+                doc_id: Some(reference.to_string()),
+                patient: DocPartyBlock {
+                    salutation: salutation.map(ToOwned::to_owned),
+                    ..legal_test_party("DE")
+                },
+                passport_number: None,
+                passport_valid_until: None,
+                recipient_block: None,
+                clinics: Vec::new(),
+                first_examination,
+                examination_weeks: None,
+                continuation_statement: None,
+                contact_phones: None,
+                agency: legal_test_agency(),
+                sign_place: None,
+                sign_date: NaiveDate::from_ymd_opt(2026, 10, 12),
+                generated_at: Utc.with_ymd_and_hms(2026, 10, 12, 9, 0, 0).unwrap(),
+            }
+        };
+
+        let text = normalized_pdf_text(
+            &build_appointment_confirmation_pdf(&context(None, Some("Frau")), reference).unwrap(),
+        );
+        assert!(
+            text.contains("Die ersten Untersuchungen finden in Kürze statt."),
+            "{text}"
+        );
+        assert!(!text.contains("am in Kürze"), "{text}");
+        assert!(
+            text.contains("In München wird die Patientin von unserer Agentur"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Die Kostenfrage wurde mit der Patientin geklärt."),
+            "{text}"
+        );
+        assert!(!text.contains("der Patient "), "{text}");
+        assert!(!text.contains("Project"), "{text}");
+        assert!(!text.contains("TB-V2"), "{text}");
+        assert!(!text.contains("Doc.-ID"), "{text}");
+        assert!(text.contains(reference), "{text}");
+
+        let text = normalized_pdf_text(
+            &build_appointment_confirmation_pdf(
+                &context(NaiveDate::from_ymd_opt(2026, 11, 17), Some("Herr")),
+                reference,
+            )
+            .unwrap(),
+        );
+        assert!(
+            text.contains("Die ersten Untersuchungen finden am 17.11.2026 statt."),
+            "{text}"
+        );
+        assert!(
+            text.contains("In München wird der Patient von unserer Agentur"),
+            "{text}"
+        );
+        assert!(text.contains("mit dem Patienten geklärt"), "{text}");
     }
 
     #[test]
@@ -35312,13 +35469,19 @@ mod tests {
         let mut layout =
             super::legal_document_pdf_layout("DOC-UNITTEST", &legal_test_agency(), regular, bold);
         let room = super::ADMIN_SIGNATURE_ROW_HEIGHT_MM + 12.0 + 20.0;
+        // A page with content (an empty page never breaks).
+        layout.notice_box(&[("Test", "Inhalt")], 0.0);
         layout.y_mm = layout.content_bottom_mm() + room + 5.0;
         super::keep_closing_with_signature_rows(&mut layout, 20.0, 2);
         assert_eq!(layout.page_number, 1, "it fits");
+        // A page with content (an empty page never breaks).
+        layout.notice_box(&[("Test", "Inhalt")], 0.0);
         layout.y_mm = layout.content_bottom_mm() + room - 5.0;
         super::keep_closing_with_signature_rows(&mut layout, 20.0, 1);
         assert_eq!(layout.page_number, 2, "a new page");
         // Three parties need two rows.
+        // A page with content (an empty page never breaks).
+        layout.notice_box(&[("Test", "Inhalt")], 0.0);
         layout.y_mm = layout.content_bottom_mm() + room + 5.0;
         super::keep_closing_with_signature_rows(&mut layout, 20.0, 3);
         assert_eq!(layout.page_number, 3);
@@ -35792,17 +35955,17 @@ mod tests {
         );
 
         // The GwG sheet of a person who acts for the lead is named like every
-        // lead document: title, name, date.
+        // lead document: title, name, date — DD.MM.YYYY (QA 2026-10-12 B3-10).
         let template = document_template_by_id("gwg_identification").unwrap();
         let at = Utc.with_ymd_and_hms(2026, 10, 11, 9, 30, 0).unwrap();
         let name = super::default_generated_document_name(template, "Maria MusterA", at, "de");
         assert_eq!(
             name,
-            "Dokumentationsbogen natürliche Personen · Maria MusterA · 2026-10-11"
+            "Dokumentationsbogen natürliche Personen · Maria MusterA · 11.10.2026"
         );
         assert_eq!(
             super::generated_document_file_name(&name, "pdf"),
-            "Dokumentationsbogen_natürliche_Personen_Maria_MusterA_2026-10-11.pdf"
+            "Dokumentationsbogen_natürliche_Personen_Maria_MusterA_11.10.2026.pdf"
         );
 
         // Brackets, slashes, underscores and a lone dash leave one "_".
@@ -38521,6 +38684,21 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(roles, ["payer", "agency"]);
         assert_signature_frames_detected(&coverage_pdf);
+
+        // Without a known payer the party block offers lines to write the
+        // name and address by hand (QA 2026-10-12 B3-09); the frames stay.
+        let blank = super::GeneratedCostCoverageContext {
+            payer: DocPartyBlock::default(),
+            ..coverage
+        };
+        let blank_pdf = super::build_cost_coverage_pdf(&blank, "DOC-VAT-COVERAGE").unwrap();
+        let blank_text = normalized_pdf_text(&blank_pdf.bytes);
+        assert!(
+            blank_text.contains("zwischen Name / Firma: ____"),
+            "{blank_text}"
+        );
+        assert!(blank_text.contains("Anschrift: ____"), "{blank_text}");
+        assert_signature_frames_detected(&blank_pdf);
     }
 
     #[test]

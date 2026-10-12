@@ -21,6 +21,7 @@ import type {
   TranslationRequest,
   UploadDocumentResponse,
 } from "../model/types";
+import type { DocumentRelationSource } from "../model/document-bindings";
 
 type JsonPayload = Record<string, unknown>;
 
@@ -43,11 +44,15 @@ export type PatientDocumentContext = {
   appointments: AppointmentOption[];
   frameworkContracts: FrameworkContractOption[] | null;
   profile: PatientDocumentProfile | null;
+  /** The default payer and the parents prefill their templates (QA B3-06, B3-09). */
+  relations: DocumentRelationSource[];
 };
 
 export type PatientDocumentProfile = {
   /** The child consent forms are offered only for a minor. */
   birth_date?: string | null;
+  /** "female" / "male" / …: gendered wording of the letters (QA B3-08). */
+  gender?: string | null;
   address_city?: string | null;
   address_country?: string | null;
   address_street?: string | null;
@@ -286,7 +291,7 @@ export async function fetchDocumentDetailBundle(
 export async function fetchPatientDocumentContext(
   patientId: string,
 ): Promise<PatientDocumentContext> {
-  const [orders, appointments, frameworkContracts, profile] = await Promise.all(
+  const [orders, appointments, frameworkContracts, profile, relations] = await Promise.all(
     [
       apiFetch<OrderOption[]>(`/orders?patient_id=${patientId}`).catch(
         () => [],
@@ -300,9 +305,18 @@ export async function fetchPatientDocumentContext(
       apiFetch<PatientDocumentProfile>(`/patients/${patientId}`).catch(
         () => null,
       ),
+      apiFetch<DocumentRelationSource[]>(`/patients/${patientId}/relations`).catch(
+        () => [] as DocumentRelationSource[],
+      ),
     ],
   );
-  return { orders, appointments, frameworkContracts, profile };
+  return {
+    orders,
+    appointments,
+    frameworkContracts,
+    profile,
+    relations: Array.isArray(relations) ? relations : [],
+  };
 }
 
 export function uploadDocument(formData: FormData) {

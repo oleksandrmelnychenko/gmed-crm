@@ -2858,3 +2858,134 @@ async fn erasure_waits_for_open_orders_and_invoices() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "retention_hold");
 }
+
+/// QA 2026-10-12 B3-11: the CEO Assistant reads everything and writes
+/// nothing — the DSGVO register (requests and their history, consents and
+/// revocations, Art. 19 recipients, the incident register, the patient
+/// lookup) answers its reads; every change stays refused.
+#[tokio::test]
+async fn ceo_assistant_reads_the_dsgvo_register_and_changes_nothing() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("b311");
+    let assistant_id = seed_user(&pool, &tag, "ceo_assistant").await;
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo = auth_header_for(admin_id, "ceo");
+    let assistant = auth_header_for(assistant_id, "ceo_assistant");
+
+    let (status, request) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &ceo,
+        Some(json!({ "request_type": "access", "source": "patient_request" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{request}");
+    let request_id = request["id"].as_str().unwrap().to_string();
+    let (status, consent) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/consents"),
+        &ceo,
+        Some(json!({ "consent_type": "dsgvo_data_transfer", "action": "grant" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{consent}");
+
+    for path in [
+        "/api/v1/admin/compliance/privacy-requests".to_string(),
+        format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        format!("/api/v1/admin/compliance/patient/{patient_id}/consents"),
+        format!("/api/v1/admin/compliance/patient/{patient_id}/recipients"),
+        "/api/v1/admin/compliance/consents".to_string(),
+        "/api/v1/admin/compliance/consents/expired".to_string(),
+        "/api/v1/admin/compliance/incidents".to_string(),
+        format!("/api/v1/admin/compliance/patient-lookup?search=PT-{tag}"),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body}");
+    }
+    let (_, history) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(history[0]["id"], request_id, "{history}");
+    let (_, consents) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/consents"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(
+        consents[0]["consent_type"], "dsgvo_data_transfer",
+        "{consents}"
+    );
+    let (_, lookup) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient-lookup?search=PT-{tag}"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(lookup[0]["id"], patient_id.to_string(), "{lookup}");
+
+    // Every write stays with the handlers.
+    for (path, body) in [
+        (
+            format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+            json!({ "request_type": "erasure", "source": "patient_request" }),
+        ),
+        (
+            format!("/api/v1/admin/compliance/patient/{patient_id}/consents"),
+            json!({
+                "consent_type": "dsgvo_data_transfer",
+                "action": "revoke",
+                "note": "E-Mail: Widerruf vom 12.10.2026",
+            }),
+        ),
+        (
+            format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review"),
+            json!({ "action": "approve" }),
+        ),
+        (
+            format!("/api/v1/admin/compliance/privacy-requests/{request_id}/step"),
+            json!({ "step": "verify_identity", "method": "id_document" }),
+        ),
+        (
+            format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+            json!({}),
+        ),
+        (
+            format!("/api/v1/admin/compliance/patient/{patient_id}/restriction/lift"),
+            json!({ "reason": "Synthetic lift of the restriction" }),
+        ),
+    ] {
+        let (status, response) = json_request(&app, "POST", &path, &assistant, Some(body)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
+    }
+    let (status, _) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/export"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    let open_requests: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM patient_privacy_requests WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(open_requests, 1);
+}

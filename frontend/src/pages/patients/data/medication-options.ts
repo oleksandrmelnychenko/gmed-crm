@@ -167,6 +167,173 @@ export const DARREICHUNGSFORM_OPTIONS: readonly MedicationOption[] = prioritizeO
   DARREICHUNGSFORM_PRIORITY_VALUES,
 );
 
-export function darreichungsformLabel(value: string | null | undefined) {
+/**
+ * Russian names of the dosage forms, as the server prints them in the Russian
+ * PDFs (`services/medication_labels.rs`). The pickers and lines of the Russian
+ * UI show them; the stored value stays the official code (QA 2026-10-12 B3-03).
+ */
+const DARREICHUNGSFORM_RU: Readonly<Record<string, string>> = {
+  AMP: "Ампулы",
+  AMPD: "Депо-ампулы",
+  AMPT: "Ампулы для приёма внутрь",
+  ANSLB: "Глазная и назальная мазь",
+  AUGG: "Глазной гель",
+  AUGS: "Глазная мазь",
+  AUGT: "Глазные капли",
+  BTL: "Пакетики",
+  CREM: "Крем",
+  DA: "Дозированный аэрозоль для ингаляций",
+  DRAG: "Драже",
+  DSTF: "Флакон",
+  EDAT: "Глазные капли (однодозовые)",
+  EDGL: "Глазной гель (однодозовый)",
+  EMUL: "Эмульсия для наружного применения",
+  EMULE: "Эмульсия для приёма внутрь",
+  EXPT: "Лиофилизированные таблетки",
+  FTBL: "Таблетки, покрытые плёночной оболочкой",
+  FTBM: "Кишечнорастворимые таблетки, покрытые плёночной оболочкой",
+  GEL: "Гель",
+  GELE: "Гель для приёма внутрь",
+  GRAM: "Кишечнорастворимые гранулы",
+  GRAN: "Гранулы",
+  IFIJ: "Раствор для инъекций / инфузий",
+  IFLG: "Раствор для инфузий",
+  IJLG: "Раствор для инъекций",
+  IJSU: "Суспензия для инъекций",
+  INHK: "Капсулы с порошком для ингаляций",
+  INHL: "Раствор для ингаляций",
+  INHP: "Порошок для ингаляций",
+  KAPM: "Кишечнорастворимые капсулы",
+  KAPR: "Капсулы пролонгированного действия",
+  KAPS: "Капсулы",
+  KGUM: "Жевательная резинка",
+  KOMB: "Комбинированная упаковка",
+  KTAB: "Жевательные таблетки",
+  LOTI: "Лосьон для наружного применения",
+  LSG: "Раствор",
+  NCREM: "Назальный крем",
+  NGEL: "Назальный гель",
+  NSPR: "Назальный спрей",
+  PAST: "Паста для наружного применения",
+  PFLA: "Пластырь",
+  PLVD: "Дозированный порошок для ингаляций",
+  PSTI: "Пастилки",
+  PULV: "Порошок",
+  PULVE: "Порошок для приёма внутрь",
+  RGRAM: "Кишечнорастворимые гранулы пролонгированного действия",
+  RGRAN: "Гранулы пролонгированного действия",
+  RSCHA: "Ректальная пена",
+  RSUSP: "Ректальная суспензия",
+  SALB: "Мазь",
+  SCHAU: "Пена для наружного применения",
+  SIRP: "Сироп",
+  SPRY: "Спрей для полости рта",
+  STABL: "Таблетки, диспергируемые в полости рта",
+  STIF: "Карандаш для наружного применения",
+  SUPP: "Суппозитории",
+  SUSP: "Суспензия для приёма внутрь",
+  SUTA: "Подъязычные таблетки",
+  TABB: "Шипучие таблетки",
+  TABL: "Таблетки",
+  TABMD: "Таблетки с модифицированным высвобождением",
+  TABR: "Таблетки пролонгированного действия",
+  TABRM: "Кишечнорастворимые таблетки пролонгированного действия",
+  TBLL: "Таблетки для рассасывания",
+  TBLM: "Кишечнорастворимые таблетки",
+  TROP: "Капли для приёма внутрь",
+  TRSB: "Сухое вещество (лиофилизат)",
+  TTAB: "Таблетки для приготовления раствора / суспензии",
+  UTBL: "Таблетки, покрытые оболочкой",
+  VACR: "Вагинальный крем",
+  VAGT: "Вагинальные таблетки",
+  VASP: "Вагинальные суппозитории",
+};
+
+/** Russian names of the routes (the stored value is the German name). */
+const EINNAHMEFORM_RU: Readonly<Record<string, string>> = {
+  Aural: "В ухо",
+  Bukkal: "Буккально",
+  Endobronchial: "Эндобронхиально",
+  Enteral: "Энтерально",
+  Inhalativ: "Ингаляционно",
+  Intraarteriell: "Внутриартериально",
+  Intraartikulär: "Внутрисуставно",
+  Intraduktal: "Внутрипротоково",
+  Intragluteal: "Внутриягодично",
+  Intrakutan: "Внутрикожно",
+  Intramuskulär: "Внутримышечно",
+  Intranasal: "Интраназально",
+  Intraneural: "Интраневрально",
+  Intraokulär: "Внутриглазно",
+  Intraossär: "Внутрикостно",
+  Intraperitoneal: "Внутрибрюшинно",
+  Intrapleural: "Внутриплеврально",
+  Intrathekal: "Интратекально",
+  Intratumoral: "Внутриопухолево",
+  Intravasal: "Внутрисосудисто",
+  Intravenös: "Внутривенно",
+  Intravesikal: "Внутрипузырно",
+  Konjunktival: "Конъюнктивально",
+  Kutan: "Накожно",
+  Oral: "Перорально",
+  Parenteral: "Парентерально",
+  Peridural: "Эпидурально",
+  Perineural: "Периневрально",
+  Perkutan: "Чрескожно",
+  Rektal: "Ректально",
+  Subkutan: "Подкожно",
+  Sublingual: "Сублингвально",
+  Topisch: "Местно",
+  Transdermal: "Трансдермально",
+  Vaginal: "Вагинально",
+};
+
+export type MedicationOptionLang = "ru" | "de";
+
+/** The dosage form picker in the UI language; the value stays the code. */
+export function darreichungsformOptions(lang: MedicationOptionLang): readonly MedicationOption[] {
+  if (lang !== "ru") return DARREICHUNGSFORM_OPTIONS;
+  return DARREICHUNGSFORM_OPTIONS.map((option) => ({
+    value: option.value,
+    label: DARREICHUNGSFORM_RU[option.value] ?? option.label,
+  }));
+}
+
+/**
+ * The route picker in the UI language; the value stays the German name. The
+ * Russian label keeps the abbreviation of the German one ("Перорально (p.o.)").
+ */
+export function einnahmeformOptions(lang: MedicationOptionLang): readonly MedicationOption[] {
+  if (lang !== "ru") return EINNAHMEFORM_OPTIONS;
+  return EINNAHMEFORM_OPTIONS.map((option) => {
+    const russian = EINNAHMEFORM_RU[option.value];
+    if (!russian) return option;
+    const abbreviation = /\(([^()]+)\)\s*$/.exec(option.label)?.[1];
+    return { value: option.value, label: abbreviation ? `${russian} (${abbreviation})` : russian };
+  });
+}
+
+/** The dosage form's name ("Tabletten" / "Таблетки") for a stored code; free text as entered. */
+export function darreichungsformLabel(
+  value: string | null | undefined,
+  lang: MedicationOptionLang = "de",
+) {
+  const normalized = value?.trim();
+  if (lang === "ru" && normalized) {
+    const russian = DARREICHUNGSFORM_RU[normalized.toUpperCase()];
+    if (russian) return russian;
+  }
   return optionLabel(DARREICHUNGSFORM_OPTIONS, value);
+}
+
+/** The route in the UI language ("Oral" / "Перорально"); null when it is no known route. */
+export function einnahmeformLabel(
+  value: string | null | undefined,
+  lang: MedicationOptionLang = "de",
+): string | null {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) return null;
+  const known = EINNAHMEFORM_OPTIONS.find((option) => option.value.toLowerCase() === normalized);
+  if (!known) return null;
+  return lang === "ru" ? (EINNAHMEFORM_RU[known.value] ?? known.value) : known.value;
 }

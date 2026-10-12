@@ -45,6 +45,45 @@ function kindLabel(kind: DocumentComplianceKind, tx: Bilingual): string {
   }
 }
 
+/** Template / document type codes → the compliance item they fulfil. */
+const KIND_BY_DOCUMENT_CODE: Record<string, DocumentComplianceKind> = {
+  privacy_consents: "dsgvo",
+  consent_data_release: "dsgvo",
+  consent_data_release_child: "dsgvo",
+  consent_data_release_single: "dsgvo",
+  dsgvo: "dsgvo",
+  confidentiality_release: "confidentiality_release",
+  schweigepflicht_release: "confidentiality_release",
+  framework_contract: "framework_contract",
+  enhanced_due_diligence: "enhanced_due_diligence",
+  cost_coverage_declaration: "cost_coverage_declaration",
+  passport_scan: "identity",
+  identity_document: "identity",
+  id_card: "identity",
+};
+
+/**
+ * The compliance item the picker starts with: the document's own (a document
+ * already recorded), else the one its template or type fulfils, else DSGVO —
+ * a Schweigepflichtentbindung starts with "Schweigepflichtentbindung", not
+ * with DSGVO (QA 2026-10-12 B3-10).
+ */
+export function defaultComplianceKind(
+  document?: Partial<Pick<DocumentItem, "compliance_kind" | "generated_template_id" | "art">> | null,
+): DocumentComplianceKind {
+  const candidates = [document?.compliance_kind, document?.generated_template_id, document?.art];
+  for (const candidate of candidates) {
+    const code = candidate?.trim().toLowerCase();
+    if (!code) continue;
+    if ((KINDS as readonly string[]).includes(code) && code !== "other") {
+      return code as DocumentComplianceKind;
+    }
+    const kind = KIND_BY_DOCUMENT_CODE[code];
+    if (kind) return kind;
+  }
+  return "dsgvo";
+}
+
 /**
  * Record a document as signed compliance evidence and, atomically on the
  * backend, flip the matching flag on the linked patient's legal_status (#13).
@@ -65,13 +104,14 @@ export function MarkComplianceSignedControl({
   documentId: string;
   patientId: string | null;
   /** The document's template, signature and name: decides whether proof is needed. */
-  document?: Pick<DocumentItem, "generated_template_id" | "signed_at" | "auto_name" | "original_filename">;
+  document?: Pick<DocumentItem, "generated_template_id" | "signed_at" | "auto_name" | "original_filename">
+    & Partial<Pick<DocumentItem, "art" | "compliance_kind">>;
   onDone?: () => void;
 }) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
 
-  const [kind, setKind] = useState<DocumentComplianceKind>("dsgvo");
+  const [kind, setKind] = useState<DocumentComplianceKind>(() => defaultComplianceKind(document));
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");

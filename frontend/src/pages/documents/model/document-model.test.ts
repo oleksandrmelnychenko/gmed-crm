@@ -616,6 +616,45 @@ describe("buildGeneratedDocumentManualTextDraft", () => {
     expect(draft).toContain("Terminbestätigung für Anna Müller");
     expect(draft).not.toContain("GM-001 · Anna Müller");
   });
+
+  it("words the Terminbestätigung correctly without a date and for a woman (QA B3-08)", () => {
+    const labels = {
+      appointmentsTitle: "Termin",
+      documentDate: "Dokumentdatum",
+      sourceInstitution: "Quelle",
+      addresseePerson: "Adressat",
+      ordersPatient: "Patient",
+      ordersTitle: "Auftrag",
+      sectionBindings: "Vorlagenfelder",
+      textBlocks: "Textbausteine",
+    };
+    const draft = buildGeneratedDocumentManualTextDraft({
+      template: template(),
+      form: generateForm(),
+      patientAddressee: "Anna Müller",
+      patientGender: "female",
+      lang: "de",
+      labels,
+    });
+    expect(draft).toContain("Die ersten Untersuchungen finden in Kürze statt.");
+    expect(draft).not.toContain("am in Kürze");
+    expect(draft).toContain("wird die Patientin von unserer Agentur betreut");
+    expect(draft).toContain("mit der Patientin geklärt");
+    expect(draft).not.toContain("Project");
+    expect(draft).not.toContain("TB-V2");
+
+    const dated = buildGeneratedDocumentManualTextDraft({
+      template: template(),
+      form: generateForm({ bindings: { period_from: "2026-11-17" } }),
+      patientAddressee: "Ben Muster",
+      patientGender: "male",
+      lang: "de",
+      labels,
+      formatDisplayDate: (value) => value.split("-").reverse().join("."),
+    });
+    expect(dated).toContain("Die ersten Untersuchungen finden am 17.11.2026 statt.");
+    expect(dated).toContain("mit dem Patienten geklärt");
+  });
 });
 
 describe("buildDocumentsPath", () => {

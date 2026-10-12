@@ -202,6 +202,8 @@ describe("staff route access by capability", () => {
       "/chat",
       "/task-manager",
       "/sops",
+      // The DSGVO register, read-only (QA 2026-10-12 B3-11).
+      "/admin/compliance",
     ]) {
       expect(canAccessStaffRoute("ceo_assistant", path), path).toBe(true);
     }

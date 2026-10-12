@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   DOCUMENT_BINDING_FIELDS,
   buildBindingsPayload,
+  childConsentBindingDefaults,
+  defaultPayerBindings,
+  payerBindingsForOrder,
   documentTemplateUsesOrderServices,
   enhancedDueDiligenceBindingDefaults,
   enhancedDueDiligenceTierRequiresCheck,
@@ -21,6 +24,81 @@ import {
   validateEnhancedDueDiligenceBindings,
 } from "./document-bindings";
 
+describe("template defaults from the patient's relations (QA 2026-10-12 B3-06, B3-09)", () => {
+  const relations = [
+    {
+      related_name: "Beispiel GmbH",
+      relation_type: "other",
+      is_default_payer: true,
+      email: "rechnung@example.com",
+      address_street: "Hauptstr. 5",
+      address_zip: "10115",
+      address_city: "Berlin",
+      address_country: "RU",
+      created_at: "2026-10-12T09:00:00Z",
+    },
+    {
+      related_name: "Ben Muster",
+      relation_type: "parent",
+      created_at: "2026-10-12T10:00:00Z",
+    },
+    {
+      related_name: "Anna Muster",
+      relation_type: "parent",
+      address_street: "Musterweg 1",
+      address_zip: "10115",
+      address_city: "Berlin",
+      created_at: "2026-10-12T08:00:00Z",
+    },
+  ];
+
+  it("starts the Kostenübernehmer with the default payer", () => {
+    expect(defaultPayerBindings(relations)).toEqual({
+      payer_name: "Beispiel GmbH",
+      payer_street: "Hauptstr. 5",
+      payer_zip: "10115",
+      payer_city: "Berlin",
+      payer_country: "RU",
+      payer_email: "rechnung@example.com",
+    });
+    expect(defaultPayerBindings([])).toEqual({});
+  });
+
+  it("lets an order's payer replace an untouched default payer", () => {
+    const prefilled = { ...defaultPayerBindings(relations), order_sequence: "1" };
+    expect(payerBindingsForOrder(prefilled, "order-1", relations)).toEqual({ order_sequence: "1" });
+    // A name the user typed stays.
+    const typed = { ...prefilled, payer_name: "Viktor Zahler" };
+    expect(payerBindingsForOrder(typed, "order-1", relations)).toMatchObject({ payer_name: "Viktor Zahler" });
+    // Without an order the default payer is back.
+    expect(payerBindingsForOrder({ order_sequence: "1" }, "", relations)).toMatchObject({
+      payer_name: "Beispiel GmbH",
+    });
+  });
+
+  it("names the child and the parents with the first parent's address", () => {
+    const child = {
+      name: "Lia Muster",
+      birth_date: "2016-05-01",
+      address_street: "Musterweg 1",
+      address_zip: "10115",
+      address_city: "Berlin",
+    };
+    expect(childConsentBindingDefaults("consent_data_release_single", child, relations)).toEqual({
+      child_name: "Lia Muster",
+      child_birth_date: "2016-05-01",
+      child_address: "Musterweg 1, 10115 Berlin",
+      guardian_name: "Anna Muster",
+      guardian_address: "Musterweg 1, 10115 Berlin",
+    });
+    expect(childConsentBindingDefaults("consent_data_release_child", child, relations)).toMatchObject({
+      guardian_name: "Anna Muster",
+      guardian2_name: "Ben Muster",
+    });
+    expect(childConsentBindingDefaults("privacy_consents", child, relations)).toEqual({});
+  });
+});
+
 describe("child consent forms only for a minor (QA 2026-10-12 B2-05)", () => {
   it("tells an adult from a minor on the Berlin date", () => {
     expect(isAdultOn("1988-05-12", "2026-10-12")).toBe(true);
@@ -38,6 +116,15 @@ describe("child consent forms only for a minor (QA 2026-10-12 B2-05)", () => {
       expect(isTemplateForPatientAge(template, null, "2026-10-12")).toBe(true);
     }
     expect(isTemplateForPatientAge("privacy_consents", "1988-05-12", "2026-10-12")).toBe(true);
+  });
+
+  it("hides the adult consent forms for a minor, which the server refuses (QA B3-06)", () => {
+    for (const template of ["privacy_consents", "confidentiality_release"]) {
+      expect(isTemplateForPatientAge(template, "2016-05-01", "2026-10-12")).toBe(false);
+      expect(isTemplateForPatientAge(template, "1988-05-12", "2026-10-12")).toBe(true);
+      expect(isTemplateForPatientAge(template, null, "2026-10-12")).toBe(true);
+    }
+    expect(isTemplateForPatientAge("medication_summary", "2016-05-01", "2026-10-12")).toBe(true);
   });
 
   it("explains the refusal in RU and DE, and says 'приём', not 'термин'", () => {

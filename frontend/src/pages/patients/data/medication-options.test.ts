@@ -4,6 +4,9 @@ import {
   DARREICHUNGSFORM_OPTIONS,
   EINNAHMEFORM_OPTIONS,
   darreichungsformLabel,
+  darreichungsformOptions,
+  einnahmeformLabel,
+  einnahmeformOptions,
 } from "./medication-options";
 
 function optionLabel(options: readonly { value: string; label: string }[], value: string) {
@@ -71,5 +74,30 @@ describe("medication option reference lists", () => {
     );
     expect(darreichungsformLabel("AMP")).toBe("Ampullen");
     expect(darreichungsformLabel("Filmtabl.")).toBe("Filmtabl.");
+  });
+
+  it("names forms and routes in Russian in the Russian UI, keeping the stored values (QA B3-03)", () => {
+    const forms = darreichungsformOptions("ru");
+    expect(forms.map((option) => option.value)).toEqual(DARREICHUNGSFORM_OPTIONS.map((option) => option.value));
+    // Every code has its Russian name: no German name is left in the Russian picker.
+    for (const option of forms) {
+      expect(option.label, option.value).toMatch(/[А-Яа-яЁё]/);
+    }
+    expect(optionLabel(forms, "TABL")).toBe("Таблетки");
+    expect(darreichungsformOptions("de")).toBe(DARREICHUNGSFORM_OPTIONS);
+
+    const routes = einnahmeformOptions("ru");
+    expect(routes.map((option) => option.value)).toEqual(EINNAHMEFORM_OPTIONS.map((option) => option.value));
+    for (const option of routes) {
+      expect(option.label, option.value).toMatch(/[А-Яа-яЁё]/);
+    }
+    expect(optionLabel(routes, "Oral")).toBe("Перорально (p.o.)");
+    expect(optionLabel(routes, "Aural")).toBe("В ухо");
+
+    expect(darreichungsformLabel("TABL", "ru")).toBe("Таблетки");
+    expect(darreichungsformLabel("TABL", "de")).toBe("Tabletten");
+    expect(einnahmeformLabel("Oral", "ru")).toBe("Перорально");
+    expect(einnahmeformLabel("oral", "de")).toBe("Oral");
+    expect(einnahmeformLabel("per Sonde", "ru")).toBeNull();
   });
 });

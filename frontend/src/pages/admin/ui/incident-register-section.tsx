@@ -31,7 +31,15 @@ function hoursLeft(deadline: string) {
  * Art. 33 DSGVO register. Staff report here; CEO and IT admin assess the risk
  * and record either the report to the authority or why none was needed.
  */
-export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
+export function IncidentRegisterSection({
+  canManage,
+  canView = false,
+}: {
+  canManage: boolean;
+  /** Reads the register without deciding (CEO Assistant, QA 2026-10-12 B3-11). */
+  canView?: boolean;
+}) {
+  const showsRegister = canManage || canView;
   const { t } = useLang();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
 
@@ -59,13 +67,13 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
   });
 
   const load = useCallback(async () => {
-    if (!canManage) return;
+    if (!showsRegister) return;
     try {
       setIncidents(await fetchSecurityIncidents());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, [canManage]);
+  }, [showsRegister]);
 
   useEffect(() => {
     void load();
@@ -223,7 +231,7 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
         </div>
       </form>
 
-      {canManage ? (
+      {showsRegister ? (
         <div className="space-y-2" data-testid="incident-register">
           {incidents.length === 0 ? (
             <p className="text-sm text-muted-foreground">{l("incidents_empty")}</p>
@@ -271,6 +279,22 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                         ? ` · ${l("incidents_subjects_notified")}: ${dateTime(incident.subjects_notified_at)}`
                         : ""}
                     </p>
+                    {!canManage ? (
+                      // Read-only: the recorded decision, no form (QA B3-11).
+                      <p className="text-xs text-muted-foreground" data-testid="incident-read-only-decision">
+                        {l("incidents_field_risk")}: {l(`incidents_risk_${incident.risk_assessment}`)}
+                        {incident.authority_reference
+                          ? ` · ${l("incidents_field_authority_reference")}: ${incident.authority_reference}`
+                          : ""}
+                        {incident.no_notification_reason
+                          ? ` · ${l("incidents_field_no_notification_reason")}: ${incident.no_notification_reason}`
+                          : ""}
+                        {incident.measures_taken
+                          ? ` · ${l("incidents_field_measures")}: ${incident.measures_taken}`
+                          : ""}
+                      </p>
+                    ) : null}
+                    {canManage ? (<>
                     <div className="grid gap-3 md:grid-cols-2">
                       <Field label={l("incidents_field_status")} htmlFor={`incident-status-${incident.id}`}>
                         <select
@@ -402,6 +426,7 @@ export function IncidentRegisterSection({ canManage }: { canManage: boolean }) {
                         </Button>
                       ) : null}
                     </div>
+                    </>) : null}
                   </div>
                 ) : null}
               </div>

@@ -50,6 +50,7 @@ import {
   textareaClass,
   tokens,
 } from "@/components/ui-shell";
+import { ReadOnlyBanner } from "@/components/read-only-scope";
 import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import {
@@ -77,9 +78,12 @@ import {
 } from "@/pages/admin/ui/privacy-request-steps";
 import {
   canExportPatientData,
+  canWritePrivacyRegister,
+  offersOpenBusinessHold,
   privacyRequestErrorMessage,
   patientLabel as composePatientLabel,
   privacySourceUiKey,
+  registerPatientReady,
   resolveActivePatientLabel,
 } from "@/pages/admin-compliance.helpers";
 
@@ -127,6 +131,11 @@ interface PrivacyRequestRecord {
   subject_notification?: PrivacyRequestStepFacts["subject_notification"];
   /** Why a held request waits: the retention, open business or a date. */
   hold_reason?: "retention" | "open_business" | "date" | null;
+  /**
+   * The patient still has running orders or invoices with an open amount:
+   * only then does a hold wait for them (QA 2026-10-12 B3-05).
+   */
+  patient_open_business?: boolean;
   /** The languages the patient speaks: the reason is written in the first known one. */
   patient_languages?: string[] | null;
 }
@@ -366,6 +375,8 @@ function useAdminCompliancePageContent() {
   const { privacySourceLabel } = useLanguageHelpers();
   const { lang, t } = useLang();
   const { user } = useAuth();
+  // CEO Assistant: the register is shown, nothing is offered to change it.
+  const readOnly = !canWritePrivacyRegister(user);
   const [searchParams, setSearchParams] = useSearchParams();
   const patientParam = searchParams.get("patient") ?? "";
 
@@ -516,16 +527,21 @@ function useAdminCompliancePageContent() {
     requestedPatientRef.current = patientId;
     setPatientLoading(true);
     setPatientError("");
+    // A slower answer for the patient picked before never lands on the
+    // patient picked now (QA 2026-10-12 B3-02).
+    const stillRequested = () => requestedPatientRef.current === patientId;
 
     try {
       const privacyRequests =
         await fetchPatientCompliancePrivacyRequests<PrivacyRequestRecord>(patientId);
-      setPatientPrivacyRequests(privacyRequests);
+      if (stillRequested()) setPatientPrivacyRequests(privacyRequests);
     } catch (error) {
-      setPatientPrivacyRequests([]);
-      setPatientError(privacyRequestErrorMessage(error, t));
+      if (stillRequested()) {
+        setPatientPrivacyRequests([]);
+        setPatientError(privacyRequestErrorMessage(error, t));
+      }
     } finally {
-      setPatientLoading(false);
+      if (stillRequested()) setPatientLoading(false);
     }
   }, [t]);
 
@@ -640,11 +656,15 @@ function useAdminCompliancePageContent() {
     void refreshWorkspace();
   });
 
-  const handleLoadPatientRegister = async (
-    event: FormEvent<HTMLFormElement>,
-  ) => {
-    event.preventDefault();
-    const targetPatientId = patientInput.trim();
+  /**
+   * One source of truth for the patient of the page: choosing a patient (in
+   * the picker, or by loading a typed id) makes it the active patient and
+   * loads its register at once; the previous patient's history is dropped
+   * immediately (QA 2026-10-12 B3-02).
+   */
+  const selectPatient = (value: string) => {
+    const targetPatientId = value.trim();
+    setPatientInput(targetPatientId);
     setActionError("");
 
     if (!targetPatientId) {
@@ -652,18 +672,39 @@ function useAdminCompliancePageContent() {
       setActivePatientId("");
       setPatientPrivacyRequests([]);
       setPatientError("");
+      setPatientLoading(false);
       syncPatientQuery("");
       return;
     }
 
-    syncPatientQuery(targetPatientId);
     setActivePatientId(targetPatientId);
-    await loadPatientWorkspace(targetPatientId);
+    setPatientPrivacyRequests([]);
+    syncPatientQuery(targetPatientId);
+    void loadPatientWorkspace(targetPatientId);
   };
 
+  const handleLoadPatientRegister = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    selectPatient(patientInput);
+  };
+
+  // The register acts only on the loaded patient the picker shows; while it
+  // loads (or the typed id is not loaded yet) every action waits.
+  const patientReady = registerPatientReady({
+    activePatientId,
+    pickedPatientId: patientInput,
+    loading: patientLoading,
+    error: patientError,
+  });
+  // The patient the open "new request" dialog names and files the request for.
+  const [privacySheetPatient, setPrivacySheetPatient] = useState<{
+    id: string;
+    label: string;
+  } | null>(null);
+
   const handleCreatePrivacyRequest = async () => {
-    const targetPatientId = (activePatientId || patientInput).trim();
-    if (!targetPatientId) {
+    const target = privacySheetPatient;
+    if (!target?.id) {
       setActionError(t.compliance_uuid_required);
       return;
     }
@@ -677,21 +718,24 @@ function useAdminCompliancePageContent() {
     setActionError("");
 
     try {
-      await createPatientPrivacyRequest(targetPatientId, {
+      // The request goes to the patient the dialog names, never to another
+      // one picked or loaded meanwhile.
+      await createPatientPrivacyRequest(target.id, {
         request_type: privacyRequestType,
         source: privacyRequestSource,
         reason: privacyReason.trim() || undefined,
       });
 
-      setActivePatientId(targetPatientId);
       setPrivacyReason("");
       setPrivacyRequestType("");
       setPrivacyRequestSource("");
       setPrivacySheetOpen(false);
-      syncPatientQuery(targetPatientId);
+      setPrivacySheetPatient(null);
       await Promise.all([
         loadPrivacyQueue(),
-        loadPatientWorkspace(targetPatientId),
+        requestedPatientRef.current === target.id
+          ? loadPatientWorkspace(target.id)
+          : Promise.resolve(),
       ]);
     } catch (error) {
       setActionError(privacyRequestErrorMessage(error, t));
@@ -774,11 +818,13 @@ function useAdminCompliancePageContent() {
 
   // Open requests are decided by the register roles; an approved one is
   // revised (hold / reject with a reason) only by CEO and IT admin.
+  // The read-only register (CEO Assistant) decides nothing (QA B3-11).
   const canDecide = (record: PrivacyRequestRecord) =>
-    record.status === "requested" ||
-    record.status === "retention_hold" ||
-    (record.status === "approved" &&
-      (user?.role === "ceo" || user?.role === "it_admin"));
+    !readOnly &&
+    (record.status === "requested" ||
+      record.status === "retention_hold" ||
+      (record.status === "approved" &&
+        (user?.role === "ceo" || user?.role === "it_admin")));
   const reasonGiven = decisionReason.trim().length >= 10;
   // The steps panel reloads the queue after recording the identity check.
   const latestReviewRecord = reviewSheetRecord
@@ -827,7 +873,8 @@ function useAdminCompliancePageContent() {
   }, [latestReviewRecord, t]);
 
   const doExport = async () => {
-    const targetPatientId = (activePatientId || patientInput).trim();
+    // The export is of the loaded patient the page names (QA B3-02).
+    const targetPatientId = patientReady ? activePatientId.trim() : "";
     if (!targetPatientId) {
       setActionError(t.compliance_uuid_required);
       return;
@@ -1101,75 +1148,90 @@ function useAdminCompliancePageContent() {
         )}
       />
 
+      {readOnly ? <ReadOnlyBanner /> : null}
+
       {actionError ? <Banner tone="error">{actionError}</Banner> : null}
 
       <Section
             title={t.compliance_privacy_requests_title}
             accessory={(
-              <div className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground">
+              <div
+                className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground"
+                data-testid="compliance-active-patient"
+              >
                 {activePatientLabel}
               </div>
             )}
           >
-            <form
-              className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
-              onSubmit={handleLoadPatientRegister}
-            >
+            {patientOptions.length > 0 ? (
+              // Choosing a patient loads it at once: the picker never shows a
+              // patient other than the one the page acts on (QA B3-02).
               <Field label={t.orders_patient} htmlFor="compliance-patient-id">
-                {patientOptions.length > 0 ? (
-                  <NativeComboboxSelect
-                    id="compliance-patient-id"
-                    value={patientInput}
-                    onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 w-full rounded-lg bg-field text-[13px]"
-                  >
-                    <option value="">{t.orders_patient}</option>
-                    {patientOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                ) : (
+                <NativeComboboxSelect
+                  id="compliance-patient-id"
+                  data-readonly="exempt"
+                  value={patientInput}
+                  onChange={(event) => selectPatient(event.target.value)}
+                  className="h-9 w-full rounded-lg bg-field text-[13px]"
+                >
+                  <option value="">{t.orders_patient}</option>
+                  {patientOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeComboboxSelect>
+              </Field>
+            ) : (
+              <form
+                className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]"
+                onSubmit={handleLoadPatientRegister}
+              >
+                <Field label={t.orders_patient} htmlFor="compliance-patient-id">
                   <Input
                     id="compliance-patient-id"
+                    data-readonly="exempt"
                     placeholder={t.compliance_patient_uuid_placeholder}
                     value={patientInput}
                     onChange={(event) => setPatientInput(event.target.value)}
                     className="h-9 rounded-lg bg-field"
                   />
-                )}
-              </Field>
-              <div className="flex items-end">
-                <Button type="submit" className="h-9 rounded-lg px-3.5">
-                  {t.common_search}
-                </Button>
-              </div>
-            </form>
+                </Field>
+                <div className="flex items-end">
+                  <Button type="submit" className="h-9 rounded-lg px-3.5">
+                    {uiText("compliance_load_patient", lang)}
+                  </Button>
+                </div>
+              </form>
+            )}
 
             {patientError ? <Banner tone="error">{patientError}</Banner> : null}
 
-            <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
-              <div className="space-y-1.5">
-                {privacyRequestType ? (
-                  <>
-                    <div className="text-xs text-muted-foreground">{t.compliance_request_type_label}</div>
-                    <Badge className="bg-amber-500/15 text-amber-700">
-                      {privacyRequestTypeLabel(privacyRequestType, t)}
-                    </Badge>
-                  </>
-                ) : null}
-                <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
+            {readOnly ? null : (
+              <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">{t.compliance_new_request_hint}</p>
+                  {activePatientId && !patientReady ? (
+                    <p className="text-xs text-muted-foreground" data-testid="compliance-patient-not-ready">
+                      {uiText("compliance_patient_not_loaded", lang)}
+                    </p>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg px-3.5"
+                  data-testid="compliance-create-request"
+                  disabled={privacyCreateBusy || !patientReady}
+                  onClick={() => {
+                    setActionError("");
+                    setPrivacySheetPatient({ id: activePatientId, label: activePatientLabel });
+                    setPrivacySheetOpen(true);
+                  }}
+                >
+                  {t.compliance_create_request}
+                </Button>
               </div>
-              <Button
-                type="button"
-                className="h-9 rounded-lg px-3.5"
-                disabled={privacyCreateBusy || (!activePatientId && !patientInput.trim())}
-                onClick={() => setPrivacySheetOpen(true)}
-              >
-                {t.compliance_create_request}
-              </Button>
-            </div>
+            )}
 
             <AdminTableCard
               title={
@@ -1206,36 +1268,24 @@ function useAdminCompliancePageContent() {
 
           <Section title={t.compliance_export}>
             {canExportPatientData(user?.role) ? (
-              <div className={cn("grid gap-4 rounded-xl p-3.5 md:grid-cols-[minmax(0,1fr)_auto]", tokens.surface.card)}>
-                <Field label={t.orders_patient}>
-                  {patientOptions.length > 0 ? (
-                    <NativeComboboxSelect
-                      value={patientInput}
-                      onChange={(event) => setPatientInput(event.target.value)}
-                      className="h-9 w-full rounded-lg bg-field text-[13px]"
-                    >
-                      <option value="">{t.orders_patient}</option>
-                      {patientOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </NativeComboboxSelect>
-                  ) : (
-                    <Input
-                      placeholder={t.compliance_uses_loaded_uuid}
-                      value={patientInput}
-                      onChange={(event) => setPatientInput(event.target.value)}
-                      className="h-9 rounded-lg bg-field"
-                    />
-                  )}
-                </Field>
-                <div className="flex items-end">
-                  <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => void doExport()}>
-                    <Download className="mr-1 size-4" />
-                    {t.compliance_export}
-                  </Button>
+              // The export is of the patient loaded above, never of a second
+              // picker that could name someone else (QA B3-02).
+              <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl p-3.5", tokens.surface.card)}>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="text-xs text-muted-foreground">{t.orders_patient}</div>
+                  <div className="text-sm font-medium text-foreground" data-testid="compliance-export-patient">
+                    {activePatientLabel}
+                  </div>
                 </div>
+                <Button
+                  type="button"
+                  className="h-9 rounded-lg px-3.5"
+                  disabled={!patientReady}
+                  onClick={() => void doExport()}
+                >
+                  <Download className="mr-1 size-4" />
+                  {t.compliance_export}
+                </Button>
               </div>
             ) : (
               // QA E2-08: no button that only answers 403.
@@ -1284,17 +1334,32 @@ function useAdminCompliancePageContent() {
             </AdminTableCard>
           </Section>
 
-          <Sheet open={privacySheetOpen} onOpenChange={setPrivacySheetOpen}>
+          <Sheet
+            open={privacySheetOpen && privacySheetPatient !== null}
+            onOpenChange={(open) => {
+              setPrivacySheetOpen(open);
+              if (!open) setPrivacySheetPatient(null);
+            }}
+          >
             <SheetContent side="right" className="w-full border-l border-border p-0 sm:max-w-[720px]">
               <AdminSheetScaffold
-                title={t.compliance_privacy_requests_title}
-                description={activePatientLabel}
+                title={t.compliance_create_request}
+                description={privacySheetPatient?.label ?? ""}
               >
                 <section className={cn("space-y-4 rounded-xl p-3.5", tokens.surface.softCard)}>
                   <AdminSectionTitle>{t.compliance_privacy_requests_title}</AdminSectionTitle>
+                  {/* The dialog names the patient the request is filed for (QA B3-02). */}
+                  <div
+                    className="rounded-lg border border-border/60 bg-card px-3 py-2"
+                    data-testid="privacy-request-dialog-patient"
+                  >
+                    <div className="text-xs text-muted-foreground">{t.orders_patient}</div>
+                    <div className="text-sm font-semibold text-foreground">{privacySheetPatient?.label}</div>
+                  </div>
                   {actionError ? <Banner tone="error">{actionError}</Banner> : null}
                   <Field label={t.compliance_request_type_label} required>
                     <NativeComboboxSelect
+                      aria-label={t.compliance_request_type_label}
                       value={privacyRequestType}
                       onChange={(event) =>
                         setPrivacyRequestType((event.target.value ?? "") as PrivacyRequestType | "")
@@ -1311,6 +1376,7 @@ function useAdminCompliancePageContent() {
                   </Field>
                   <Field label={uiText("privacy_source_label", lang)} required>
                     <NativeComboboxSelect
+                      aria-label={uiText("privacy_source_label", lang)}
                       value={privacyRequestSource}
                       onChange={(event) =>
                         setPrivacyRequestSource((event.target.value ?? "") as PrivacyRequestSource | "")
@@ -1389,6 +1455,7 @@ function useAdminCompliancePageContent() {
                       status={reviewSheetRecord.status}
                       facts={reviewSheetRecord}
                       t={t}
+                      readOnly={readOnly}
                       onRecorded={loadPrivacyQueue}
                     />
 
@@ -1451,7 +1518,8 @@ function useAdminCompliancePageContent() {
                               })}
                             </span>
                           </div>
-                        ) : reviewSheetRecord.request_type === "erasure" ? (
+                        ) : offersOpenBusinessHold(latestReviewRecord ?? reviewSheetRecord) ? (
+                          // Only while orders or invoices are open (QA B3-05).
                           <div className="space-y-2" data-testid="privacy-open-business-hold">
                             <div className="flex flex-wrap items-center gap-2">
                               <Button
@@ -1530,8 +1598,9 @@ function useAdminCompliancePageContent() {
                       </div>
                     ) : null}
 
-                    {reviewSheetRecord.status === "requested" ||
-                    reviewSheetRecord.status === "retention_hold" ? (
+                    {!readOnly &&
+                    (reviewSheetRecord.status === "requested" ||
+                      reviewSheetRecord.status === "retention_hold") ? (
                       <div className="flex flex-wrap gap-2">
                         <Button
                           type="button"
@@ -1640,13 +1709,23 @@ function useAdminCompliancePageContent() {
             </SheetContent>
           </Sheet>
 
+      {/* Consents and recipients of the loaded patient; the revoke dialog
+          names that patient (QA B3-02). The CEO Assistant reads them (B3-11). */}
       <PatientPrivacySections
         patientId={activePatientId}
+        patientLabel={activePatientLabel}
         canManageConsents={user?.role === "ceo" || user?.role === "patient_manager"}
+        canViewConsents={
+          user?.role === "ceo" ||
+          user?.role === "patient_manager" ||
+          hasCapability(user, "compliance.view")
+        }
+        actionsDisabled={!patientReady}
       />
 
       <IncidentRegisterSection
         canManage={user?.role === "ceo" || user?.role === "it_admin"}
+        canView={hasCapability(user, "compliance.view")}
       />
     </div>
   );

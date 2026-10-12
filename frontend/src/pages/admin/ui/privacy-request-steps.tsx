@@ -18,6 +18,8 @@ type Props = {
   status: string;
   facts: PrivacyRequestStepFacts;
   t: Translations;
+  /** Shows the recorded steps only, no form to record one (CEO Assistant, QA B3-11). */
+  readOnly?: boolean;
   onRecorded: () => void | Promise<void>;
 };
 
@@ -33,7 +35,7 @@ function day(value?: string) {
  * Art. 12 DSGVO bookkeeping around a request: identity check, the single
  * two-month extension, and telling the data subject the outcome.
  */
-export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }: Props) {
+export function PrivacyRequestSteps({ requestId, status, facts, t, readOnly = false, onRecorded }: Props) {
   const { lang } = useLang();
   const [local, setLocal] = useState<PrivacyRequestStepFacts>({});
   // Recorded steps are evidence: the method and the channel are chosen, never
@@ -90,7 +92,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
             ? `${t.compliance_steps_done} · ${methodLabel(merged.identity_verification.method)} · ${day(merged.identity_verification.at)}`
             : t.compliance_steps_open}
         </p>
-        {!merged.identity_verification ? (
+        {!merged.identity_verification && !readOnly ? (
           <div className="flex flex-wrap gap-2">
             <select
               aria-label={t.compliance_steps_identity}
@@ -125,7 +127,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
             ? `${t.compliance_steps_done} · +${merged.deadline_extension.days ?? 60} · ${merged.deadline_extension.reason ?? ""}`
             : t.compliance_steps_extension_hint}
         </p>
-        {!merged.deadline_extension && isOpen ? (
+        {!merged.deadline_extension && isOpen && !readOnly ? (
           <div className="flex flex-wrap gap-2">
             <input
               aria-label={t.compliance_steps_extension_reason}
@@ -155,7 +157,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
             ? `${t.compliance_steps_done} · ${channelLabel(merged.subject_notification.channel)} · ${day(merged.subject_notification.at)}`
             : t.compliance_steps_open}
         </p>
-        {!merged.subject_notification ? (
+        {!merged.subject_notification && !readOnly ? (
           <div className="flex flex-wrap gap-2">
             <select
               aria-label={t.compliance_steps_notified}
@@ -190,7 +192,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
             ? `${t.compliance_steps_done} · ${channelLabel(merged.recipients_notification.channel)} · ${day(merged.recipients_notification.at)}`
             : t.compliance_steps_recipients_hint}
         </p>
-        {!merged.recipients_notification ? (
+        {!merged.recipients_notification && !readOnly ? (
           <div className="flex flex-wrap gap-2">
             <select
               aria-label={t.compliance_steps_recipients}

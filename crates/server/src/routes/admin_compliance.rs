@@ -122,6 +122,26 @@ const HOLD_REASON_RETENTION: &str = "retention";
 const HOLD_REASON_OPEN_BUSINESS: &str = "open_business";
 const HOLD_REASON_DATE: &str = "date";
 
+/// Who reads the privacy request register and the Art. 19 recipients: the
+/// handlers (compliance, patient manager) and the read-only DSGVO view of the
+/// CEO Assistant, who reads everything and writes nothing (QA 2026-10-12
+/// B3-11). Every write of this module keeps its own, stricter check.
+const PRIVACY_REGISTER_READERS: &[Capability] = &[
+    Capability::AdminCompliance,
+    Capability::PatientsMedicalEdit,
+    Capability::ComplianceView,
+];
+
+/// Who reads the consent records: CEO and patient manager (who also grant and
+/// revoke them) and the read-only DSGVO view (CEO Assistant, QA B3-11).
+#[allow(clippy::result_large_err)]
+fn require_consent_reader(auth: &AuthUser) -> Result<(), axum::response::Response> {
+    if auth.can(Capability::ComplianceView) {
+        return Ok(());
+    }
+    auth.require_any_role(&[Role::Ceo, Role::PatientManager])
+}
+
 struct PrivacyRequestMeta {
     id: Uuid,
     patient_id: Uuid,
@@ -156,7 +176,28 @@ const PRIVACY_REQUEST_COLUMNS: &str = r#"pr.id, pr.patient_id, p.patient_id AS p
                   pr.reviewed_at, pr.executed_at, pr.context,
                   CASE WHEN p.clinical_retention_until > now()
                        THEN p.clinical_retention_until END AS patient_retention_until,
-                  p.languages AS patient_languages"#;
+                  p.languages AS patient_languages,
+                  (EXISTS (SELECT 1 FROM orders open_order
+                           WHERE open_order.patient_id = pr.patient_id
+                             AND open_order.status IN ('active', 'paused'))
+                   OR EXISTS (SELECT 1 FROM invoices invoice
+                              WHERE invoice.patient_id = pr.patient_id
+                                AND invoice.status <> 'cancelled'
+                                AND (COALESCE(invoice.total_gross, 0)
+                                         - COALESCE(invoice.credited_amount, 0)
+                                         - COALESCE(invoice.paid_amount, 0)
+                                         - COALESCE(invoice.prepayment_applied_amount, 0) > 0
+                                     OR (invoice.invoice_type = 'advance'
+                                         AND invoice.status <> 'draft'
+                                         AND LEAST(COALESCE(invoice.paid_amount, 0),
+                                                   COALESCE(invoice.total_gross, 0)
+                                                       - COALESCE(invoice.credited_amount, 0))
+                                             - COALESCE((
+                                                 SELECT SUM(allocation.amount_gross)
+                                                 FROM invoice_prepayment_allocations allocation
+                                                 WHERE allocation.advance_invoice_id = invoice.id
+                                             ), 0) > 0))))
+                      AS patient_open_business"#;
 
 /// The snapshot a new request takes of the patient's retention (`$1` is the
 /// patient): the end of the medical documentation's retention while it runs.
@@ -1341,9 +1382,7 @@ async fn list_patient_recipients(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
-    {
+    if let Err(e) = auth.require_any_capability(PRIVACY_REGISTER_READERS) {
         return e;
     }
     if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
@@ -1426,7 +1465,7 @@ async fn list_patient_consents(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = require_consent_reader(&auth) {
         return e;
     }
 
@@ -1920,9 +1959,7 @@ async fn list_patient_privacy_requests(
     Extension(auth): Extension<AuthUser>,
     Path(patient_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
-    {
+    if let Err(e) = auth.require_any_capability(PRIVACY_REGISTER_READERS) {
         return e;
     }
 
@@ -1974,7 +2011,9 @@ async fn patient_lookup(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<PatientLookupQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::AdminCompliance) {
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::AdminCompliance, Capability::ComplianceView])
+    {
         return e;
     }
     let search = query
@@ -2020,9 +2059,7 @@ async fn list_privacy_requests(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) =
-        auth.require_any_capability(&[Capability::AdminCompliance, Capability::PatientsMedicalEdit])
-    {
+    if let Err(e) = auth.require_any_capability(PRIVACY_REGISTER_READERS) {
         return e;
     }
 
@@ -2636,7 +2673,7 @@ async fn consent_dashboard(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = require_consent_reader(&auth) {
         return e;
     }
 
@@ -2844,7 +2881,7 @@ async fn expired_consents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::Ceo, Role::PatientManager]) {
+    if let Err(e) = require_consent_reader(&auth) {
         return e;
     }
 
@@ -4868,6 +4905,12 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "hold_open_business": (status == "retention_hold")
             .then(|| context.get("hold_open_business").cloned())
             .flatten(),
+        // Running orders or invoices with an open amount right now: the
+        // review offers the open-business hold only then (QA 2026-10-12 B3-05).
+        "patient_open_business": row
+            .try_get::<Option<bool>, _>("patient_open_business")
+            .unwrap_or_default()
+            .unwrap_or(false),
         // The languages the patient speaks: the reason told to the patient is
         // written in the first one the templates know (QA 2026-10-12 B2-08).
         "patient_languages": row

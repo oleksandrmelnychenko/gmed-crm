@@ -69,6 +69,7 @@ import type {
 } from "@/pages/patients/model/portal-shared";
 import { cn } from "@/lib/utils";
 import { PatientPortalMobileAccess } from "@/pages/patients/ui/patient-portal-mobile-access";
+import { missingDocumentHints } from "@/pages/patients/model/portal-required-documents";
 
 const PATIENT_DASHBOARD_REALTIME_EVENTS = [
   "appointment.created",
@@ -482,9 +483,30 @@ function usePatientDashboardPageContent() {
                     many: t.portal_dashboard_missing_required_document_many,
                   })}
                 </p>
-                <p className={cn("mt-1", tokens.text.muted)}>
-                  {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
-                </p>
+                {(() => {
+                  // A missing consent is signed, not uploaded: the card says
+                  // so, as the documents page does (QA 2026-10-12 B2-13).
+                  const hints = missingDocumentHints(
+                    documentAlerts.missing_documents.map((item) => item.key),
+                  );
+                  return (
+                    <>
+                      {hints.upload || !hints.consent ? (
+                        <p className={cn("mt-1", tokens.text.muted)}>
+                          {t.portal_dashboard_upload_the_missing_items_in_the_portal_so_your_care_team_can_con}
+                        </p>
+                      ) : null}
+                      {hints.consent ? (
+                        <p
+                          className={cn("mt-1", tokens.text.muted)}
+                          data-testid="portal-dashboard-consent-hint"
+                        >
+                          {l("portal_documents_consent_sent_by_gmed")}
+                        </p>
+                      ) : null}
+                    </>
+                  );
+                })()}
                 {documentAlerts.missing_count > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2">
                     {documentAlerts.missing_documents.map((item) => (

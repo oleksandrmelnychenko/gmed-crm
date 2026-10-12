@@ -60,6 +60,7 @@ import {
   isDesignedAgencyDocumentTemplate,
   isFixedLegalDocumentTemplate,
   isLeadOnlyDocumentTemplate,
+  isTemplateForPatientAge,
   keepPatientPartyBindings,
   patientPartyBindingDefaults,
   validateEnhancedDueDiligenceBindings,
@@ -1145,6 +1146,9 @@ function StaffDocumentsPage({
   const [generateFrameworkContracts, setGenerateFrameworkContracts] = useState<
     FrameworkContractOption[] | null
   >(null);
+  // The adult forms are not offered for a minor, the child forms not for an
+  // adult (QA 2026-10-12 B2-05, B3-06).
+  const [generatePatientBirthDate, setGeneratePatientBirthDate] = useState<string | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   const [generateError, setGenerateError] = useState("");
 
@@ -1924,6 +1928,7 @@ function StaffDocumentsPage({
       setGenerateOrders([]);
       setGenerateAppointments([]);
       setGenerateFrameworkContracts(null);
+      setGeneratePatientBirthDate(null);
       return;
     }
     let active = true;
@@ -1938,6 +1943,7 @@ function StaffDocumentsPage({
       setGenerateOrders(orderRows);
       setGenerateAppointments(appointmentRows);
       setGenerateFrameworkContracts(frameworkContracts);
+      setGeneratePatientBirthDate(profile?.birth_date ?? null);
       setGenerateForm((current) =>
         current.patientId === generateForm.patientId
           ? {
@@ -3965,8 +3971,13 @@ function StaffDocumentsPage({
                     // templates are not offered (QA 2026-10-11 B-19).
                     templates.filter(
                       (template) =>
-                        !isLeadOnlyDocumentTemplate(template) ||
-                        template.id === generateForm.templateId,
+                        template.id === generateForm.templateId ||
+                        (!isLeadOnlyDocumentTemplate(template) &&
+                          isTemplateForPatientAge(
+                            template.id,
+                            generatePatientBirthDate,
+                            appDateKey(),
+                          )),
                     ),
                   ).map(([groupKey, items]) => (
                     <optgroup key={groupKey} label={templateGroupLabel(groupKey, lang)}>
@@ -5686,6 +5697,7 @@ function StaffDocumentsPage({
 
                   {detail && canManage ? (
                     <MarkComplianceSignedControl
+                      key={detail.id}
                       documentId={detail.id}
                       patientId={detail.patient_id}
                       document={detail}

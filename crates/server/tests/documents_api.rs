@@ -8144,16 +8144,12 @@ async fn generated_document_replacement_requires_exact_template_id() {
         "/api/v1/documents/generate",
         &admin_bearer,
         Some(json!({
-            "template_id": "consent_data_release_child",
+            // The consent-form variants may replace each other (custody change,
+            // QA 2026-10-12); another template never can.
+            "template_id": "patient_sticker_compact",
             "patient_id": patient_id,
             "language": "de",
-            "replace_document_id": first_document_id,
-            "bindings": {
-                "child_name": "Max Mustermann",
-                "child_birth_date": "2015-01-01",
-                "guardian_name": "Erika Mustermann",
-                "guardian2_name": "Hans Mustermann"
-            }
+            "replace_document_id": first_document_id
         })),
     )
     .await;
@@ -8249,6 +8245,14 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
         None,
     )
     .await;
+    // The form is stored as its short code (the medication form's picker).
+    sqlx::query(
+        "UPDATE patient_medications SET form = 'TABL' WHERE patient_id = $1 AND wirkstoff = 'Metformin'",
+    )
+    .bind(patient_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, catalog_body) = json_request(
         &app,
@@ -8290,6 +8294,18 @@ async fn document_templates_can_generate_medication_summary_pdf_document() {
     assert!(preview_html.contains(&format!("Doctor {tag}-active")));
     assert!(preview_html.contains("Quelle: Medikationsplan der Patientenakte."));
     assert!(!preview_html.contains("Legacy Closed Med"));
+    // The form's name instead of its code (QA 2026-10-12 B3-07) and the
+    // owner's term ACT-Bedeutung (commit 0809211e, QA B3-04).
+    assert!(
+        preview_html.contains("Darreichungsform: Tabletten"),
+        "{preview_html}"
+    );
+    assert!(!preview_html.contains("TABL"), "{preview_html}");
+    assert!(
+        preview_html.contains("ACT-Bedeutung: Metformin"),
+        "{preview_html}"
+    );
+    assert!(!preview_html.contains("Wirkstoff"), "{preview_html}");
 
     let (status, detail_body) = json_request(
         &app,

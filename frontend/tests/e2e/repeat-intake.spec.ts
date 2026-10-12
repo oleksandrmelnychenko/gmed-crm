@@ -506,6 +506,12 @@ test("document review shows that consents of this request are still missing", as
   await expect(wizard.getByTestId("repeat-consent-note")).toBeVisible();
   await wizard.getByRole("button", {name: "Отметить согласия", exact: true}).first().click();
   await expect(page.locator("#lead-wizard-privacy-consent")).toBeFocused();
+  // With the privacy notice ticked the note names only the missing consent
+  // (QA 2026-10-12 B3-01), never "not ticked" for both.
+  await page.locator("#lead-wizard-privacy-consent").check();
+  await expect(wizard.getByTestId("repeat-consent-note")).toContainText(
+    "ещё не отмечено: согласие на обработку медицинских данных",
+  );
 });
 
 test("a lead without consent shows when it will be deleted automatically", async ({page}) => {

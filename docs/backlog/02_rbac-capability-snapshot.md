@@ -75,6 +75,7 @@
 | `admin.announcements` | x |   |   |   |   |   |   |   | x |
 | `admin.custom_fields` | x |   |   |   |   |   |   |   | x |
 | `admin.compliance` | x |   |   |   |   |   |   |   | x |
+| `compliance.view` | x | x |   |   |   |   |   |   |   |
 | `admin.health` | x |   |   |   |   |   |   |   | x |
 | `admin.activity` | x |   |   |   |   |   |   |   | x |
 | `datev.admin` | x |   |   |   |   |   |   |   | x |

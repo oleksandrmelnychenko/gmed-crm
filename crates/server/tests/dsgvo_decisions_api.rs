@@ -1143,6 +1143,8 @@ async fn an_erasure_held_for_open_business_waits_for_the_orders_not_ten_years() 
     let (request_id, body) = hold(patient_id, None).await;
     assert_eq!(body["status"], "retention_hold", "{body}");
     assert_eq!(body["hold_reason"], "open_business", "{body}");
+    // The register says the patient has open business (QA 2026-10-12 B3-05).
+    assert_eq!(body["patient_open_business"], true, "{body}");
     assert_eq!(body["retention_until"], Value::Null, "{body}");
     assert_eq!(
         body["hold_open_business"]["orders"],
@@ -1213,4 +1215,67 @@ async fn an_erasure_held_for_open_business_waits_for_the_orders_not_ten_years() 
         audit_count(&pool, "privacy_request_requeued", patient_id, 1).await,
         1
     );
+    // Nothing is open any more: the review no longer offers to wait for it.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == request_id.to_string())
+        .cloned()
+        .unwrap();
+    assert_eq!(row["patient_open_business"], false, "{row}");
+}
+
+/// QA 2026-10-12 B3-05: a patient without orders or invoices is not offered
+/// the "waits for open orders" hold — the register says nothing is open.
+#[tokio::test]
+async fn an_erasure_without_orders_or_invoices_reports_no_open_business() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool, admin_id) = (ctx.app.clone(), ctx.pool.clone(), ctx.admin_id);
+    let t = tag("no-open-business");
+    let ceo = bearer(admin_id, "ceo");
+    let patient_id = seed_patient(&pool, admin_id, &t).await;
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &ceo,
+        Some(json!({
+            "request_type": "erasure",
+            "source": "admin_intake",
+            "reason": "Synthetic erasure request",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["patient_open_business"], false, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/compliance/privacy-requests",
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let row = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["patient_id"] == patient_id.to_string())
+        .cloned()
+        .unwrap();
+    assert_eq!(row["patient_open_business"], false, "{row}");
 }

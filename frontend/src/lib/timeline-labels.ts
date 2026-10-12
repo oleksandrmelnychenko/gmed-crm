@@ -105,6 +105,13 @@ const CATEGORY_MAP: Record<string, string> = {
   medication_review: "timeline_category_recommendation_medication_review",
   patient_intake: "timeline_source_patient_intake",
   patient_custom: "timeline_source_patient_custom",
+  // The checklist (workflow stage) of a process task, never the humanized
+  // code "Order Discovery" (QA 2026-10-12 round 3, B-26b).
+  order_discovery: "timeline_source_order_discovery",
+  order_intake: "workflow_group_order_intake",
+  order_execution: "workflow_group_order_execution",
+  order_closure: "workflow_group_order_closure",
+  order_followup: "workflow_group_order_followup",
   other: "timeline_category_other",
 };
 

@@ -216,6 +216,27 @@ fn code(context: &ClinicalReportContext, raw: &str) -> String {
     };
     context.tx(ru, de).to_owned()
 }
+/// The severity of an allergy in the document language: the fixed choices of
+/// the form (`mild`, `moderate`, `severe`, `life_threatening`) and the free
+/// texts older entries carry in German or Russian ("leicht", "средняя" …), so
+/// a German PDF never prints "Schweregrad: средняя" (QA 2026-10-12 B3-03).
+/// Any other text is printed as entered.
+fn allergy_severity(context: &ClinicalReportContext, raw: &str) -> String {
+    let (ru, de) = match raw.trim().to_lowercase().as_str() {
+        "mild" | "leicht" | "лёгкая" | "легкая" | "слабая" => {
+            ("Лёгкая", "Leicht")
+        }
+        "moderate" | "mittel" | "mittelschwer" | "средняя" | "умеренная" => {
+            ("Средняя", "Mittel")
+        }
+        "severe" | "schwer" | "тяжёлая" | "тяжелая" => ("Тяжёлая", "Schwer"),
+        "life_threatening" | "lebensbedrohlich" | "жизнеугрожающая" | "угрожающая жизни" => {
+            ("Жизнеугрожающая", "Lebensbedrohlich")
+        }
+        _ => return raw.trim().to_owned(),
+    };
+    context.tx(ru, de).to_owned()
+}
 fn field(lines: &mut Vec<String>, label: &str, raw: impl AsRef<str>) {
     let text = clean_note(raw.as_ref());
     if !text.is_empty() {
@@ -320,7 +341,7 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 field(
                     &mut lines,
                     context.tx("Тяжесть", "Schweregrad"),
-                    code(context, &value(row, "severity")),
+                    allergy_severity(context, &value(row, "severity")),
                 );
                 lines
             },
@@ -708,9 +729,10 @@ fn report_sections(context: &ClinicalReportContext) -> Vec<Section> {
                 context,
                 row,
                 &[
-                    // The active ingredient, as the pharmacist says it
-                    // (QA 2026-10-12 B2-03), not the BMP attribute name.
-                    ("wirkstoff", "Действующее вещество", "Wirkstoff"),
+                    // The owner renamed the field "ACT-Bedeutung" /
+                    // "ACT-значение" everywhere (commit 0809211e,
+                    // 2026-09-17); QA 2026-10-12 B3-04 restores it here.
+                    ("wirkstoff", "ACT-значение", "ACT-Bedeutung"),
                     ("staerke", "Дозировка", "Stärke"),
                 ],
             );
@@ -1223,7 +1245,8 @@ mod tests {
 
     /// QA 2026-10-12 B2-03: a heading near the page bottom moves to the next
     /// page with its first entry instead of ending the page alone while the
-    /// entry starts there as "(Fortsetzung)"; the ingredient reads "Wirkstoff".
+    /// entry starts there as "(Fortsetzung)"; the ingredient reads
+    /// "ACT-Bedeutung" / "ACT-значение", the owner's term (QA B3-04).
     #[test]
     fn a_section_heading_stays_with_its_first_entry() {
         let context = example(false);
@@ -1266,12 +1289,41 @@ mod tests {
             &build_clinical_report_pdf(&example(false)).unwrap(),
         )
         .unwrap();
-        assert!(report.contains("Wirkstoff:"), "{report}");
-        assert!(!report.contains("ACT-Bedeutung"));
+        assert!(report.contains("ACT-Bedeutung:"), "{report}");
+        assert!(!report.contains("Wirkstoff:"), "{report}");
         let russian =
             pdf_extract::extract_text_from_mem(&build_clinical_report_pdf(&example(true)).unwrap())
                 .unwrap();
-        assert!(russian.contains("Действующее вещество"), "{russian}");
+        assert!(russian.contains("ACT-значение"), "{russian}");
+        assert!(!russian.contains("Действующее вещество"), "{russian}");
+    }
+
+    /// QA 2026-10-12 B3-03: the allergy severity is a fixed choice printed in
+    /// the document language; old free texts are translated when known.
+    #[test]
+    fn allergy_severity_prints_in_the_document_language() {
+        let german = example(false);
+        let russian = example(true);
+        assert_eq!(allergy_severity(&german, "средняя"), "Mittel");
+        assert_eq!(allergy_severity(&german, "moderate"), "Mittel");
+        assert_eq!(
+            allergy_severity(&german, "life_threatening"),
+            "Lebensbedrohlich"
+        );
+        assert_eq!(allergy_severity(&russian, "schwer"), "Тяжёлая");
+        assert_eq!(allergy_severity(&russian, "mild"), "Лёгкая");
+        assert_eq!(
+            allergy_severity(&german, " nur bei Kontakt "),
+            "nur bei Kontakt"
+        );
+        let report = pdf_extract::extract_text_from_mem(
+            &build_clinical_report_pdf(&example(false)).unwrap(),
+        )
+        .unwrap()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+        assert!(report.contains("Schweregrad: Mittel"), "{report}");
     }
 
     fn example(russian: bool) -> ClinicalReportContext {

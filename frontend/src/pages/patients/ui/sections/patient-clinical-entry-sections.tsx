@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import {
   darreichungsformLabel,
 } from "@/pages/patients/data/medication-options";
+import { allergySeverityLabel } from "@/pages/patients/model/allergy-severity";
+import { AllergySeveritySelect } from "./allergy-severity-select";
 import {
   updateClinicalMedicationLifecycle,
   type AllDoctorOption,
@@ -514,7 +516,7 @@ export function PatientClinicalWarningSection({
             </span>
             {isAllergy && warning.severity ? (
               <span className="min-w-0 max-w-full break-words text-[11px] text-orange-800">
-                {warning.severity}
+                {allergySeverityLabel(warning.severity, lang === "de" ? "de" : "ru")}
               </span>
             ) : null}
           </div>
@@ -555,11 +557,12 @@ export function PatientClinicalWarningSection({
                 />
               </Field>
               <Field label={tx("Тяжесть", "Schweregrad")}>
-                <Input
-                  value={draft.severity ?? ""}
-                  onChange={(event) => set({ severity: blankToNull(event.target.value) })}
+                {/* A fixed choice, printed in each document's language (QA B3-03). */}
+                <AllergySeveritySelect
+                  value={draft.severity}
+                  lang={lang === "de" ? "de" : "ru"}
                   className={inputClass}
-                  placeholder={tx("лёгкая / средняя / тяжёлая", "leicht / mittel / schwer")}
+                  onChange={(severity) => set({ severity })}
                 />
               </Field>
             </>
@@ -624,6 +627,8 @@ export function PatientMedicationTable({
   tx: Bilingual;
 }) {
   const sections = groupedMedicationItems(indexed, groups, groupOf, tx("Другое", "Weitere"));
+  // The form's name in the UI language (QA 2026-10-12 B3-03).
+  const formLang = tx("ru", "de") === "de" ? "de" : "ru";
   const dose = (value: string | null) => value?.trim() ?? "";
   const rows = sections.flatMap((section) => section.rows.map((row, sectionIndex) => ({
     ...row,
@@ -687,11 +692,11 @@ export function PatientMedicationTable({
     {
       id: "form",
       label: tx("Форма", "Form"),
-      accessor: (row) => darreichungsformLabel(row.item.form),
+      accessor: (row) => darreichungsformLabel(row.item.form, formLang),
       width: 140,
       cellClassName: "whitespace-normal",
       render: (row) => {
-        const label = darreichungsformLabel(row.item.form);
+        const label = darreichungsformLabel(row.item.form, formLang);
         return <span className="line-clamp-2" title={label}>{label || "—"}</span>;
       },
     },

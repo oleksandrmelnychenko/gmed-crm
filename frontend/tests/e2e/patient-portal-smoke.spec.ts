@@ -955,6 +955,13 @@ test.describe("patient portal smoke flows", () => {
       page.getByText("Nutzen Sie das Formular unten, um die fehlenden Unterlagen an Ihr Betreuungsteam zu senden."),
     ).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Ausweis hochladen", exact: true })).toHaveCount(0);
+
+    // The home card says the same (QA 2026-10-12 round 3, B2-13).
+    await page.goto("/");
+    await expect(page.getByTestId("portal-dashboard-consent-hint")).toContainText(
+      "schickt Ihnen GMED zur Unterschrift",
+    );
+    await expect(page.getByText("Laden Sie die fehlenden Unterlagen im Portal hoch", { exact: false })).toHaveCount(0);
   });
 
   test("a list read that answers after the upload does not hide the sent file (QA B-10 d)", async ({ page }) => {

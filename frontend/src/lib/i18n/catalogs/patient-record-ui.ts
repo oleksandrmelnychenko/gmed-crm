@@ -160,6 +160,13 @@ export const patientRecordUiDe = {
   "patient_legal_compliance_item_dsgvo": "DSGVO-Einwilligung",
   "patient_legal_compliance_item_confidentiality": "Schweigepflichtentbindung",
   "api_compliance_requires_active_consents": "„Compliance abgeschlossen“ lässt sich erst setzen, wenn die widerrufene Einwilligung neu unterschrieben vorliegt.",
+  // DSGVO page: the patient is loaded before anything acts on it (QA 2026-10-12 B3-02).
+  "compliance_load_patient": "Patient laden",
+  "compliance_patient_not_loaded": "Der Patient wird geladen – Anträge und Widerrufe sind erst danach möglich.",
+  // Lifting a country block names the patient or lead and who triggers it (B3-13).
+  "sanctions_country_lift_patient_label": "Patient",
+  "sanctions_country_lift_lead_label": "Lead",
+  "sanctions_country_lift_subjects_label": "Die Sperre geht aus von",
 };
 
 export const patientRecordUiRu = {
@@ -306,4 +313,9 @@ export const patientRecordUiRu = {
   "patient_legal_compliance_item_dsgvo": "согласие DSGVO",
   "patient_legal_compliance_item_confidentiality": "освобождение от врачебной тайны",
   "api_compliance_requires_active_consents": "«Комплаенс завершён» можно отметить только после того, как отозванное согласие будет подписано заново.",
+  "compliance_load_patient": "Загрузить пациента",
+  "compliance_patient_not_loaded": "Пациент загружается — запросы и отзывы станут доступны после загрузки.",
+  "sanctions_country_lift_patient_label": "Пациент",
+  "sanctions_country_lift_lead_label": "Лид",
+  "sanctions_country_lift_subjects_label": "Блокировку вызывает",
 } satisfies Record<keyof typeof patientRecordUiDe, string>;

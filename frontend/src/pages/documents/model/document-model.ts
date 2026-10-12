@@ -583,12 +583,29 @@ function joinDraftLines(lines: Array<string | false | null | undefined>) {
     .trim();
 }
 
+/**
+ * "die Patientin" / "der Patient" and the dative, from the patient's sex;
+ * both forms when it is not known (as the server's Terminbestätigung).
+ */
+export function appointmentPatientNoun(gender?: string | null): [string, string] {
+  switch (gender?.trim().toLowerCase()) {
+    case "female":
+      return ["die Patientin", "der Patientin"];
+    case "male":
+      return ["der Patient", "dem Patienten"];
+    default:
+      return ["die Patientin bzw. der Patient", "der Patientin bzw. dem Patienten"];
+  }
+}
+
 function buildKnownGeneratedDocumentDraft(
   input: {
     template: DocumentTemplate;
     form: GenerateFormState;
     patientLabel: string;
     patientAddressee?: string;
+    /** The patient's sex (`female`, `male`, …) for gendered wording. */
+    patientGender?: string | null;
     orderNumber?: string | null;
     appointment?: AppointmentOption | null;
   },
@@ -616,7 +633,13 @@ function buildKnownGeneratedDocumentDraft(
 
   switch (template.id) {
     case "appointment_confirmation": {
-      const firstExamination = draftDate(form.bindings.period_from, formatDisplayDate, "in Kürze");
+      // "finden am 17.11.2026 statt" / "finden in Kürze statt", never "am in
+      // Kürze"; "die Patientin" / "der Patient" from the patient's sex; no
+      // technical header label (QA 2026-10-12 B3-08, as the server PDF).
+      const firstExamination = draftValue(form.bindings.period_from)
+        ? `am ${draftDate(form.bindings.period_from, formatDisplayDate)}`
+        : "in Kürze";
+      const [patientNominative, patientDative] = appointmentPatientNoun(input.patientGender);
       const passportLine = passportNumber
         ? `Reisepass-Nr.: ${passportNumber}${
             passportValidUntil
@@ -627,10 +650,8 @@ function buildKnownGeneratedDocumentDraft(
       return joinDraftLines([
         `Datum: ${signDate}`,
         "Seiten: 1",
-        "Doc.-ID: automatisch",
         "Ersteller: GMED",
         `Für: ${patient}`,
-        "Project: TB-V2",
         "",
         recipient,
         "",
@@ -641,9 +662,9 @@ function buildKnownGeneratedDocumentDraft(
         "",
         "Sehr geehrte Damen und Herren,",
         `hiermit bestätigen wir, dass ${patient} sämtliche Termine für Diagnostik und Behandlung in ${clinicText} wahrnehmen wird.`,
-        `Die ersten Untersuchungen finden am ${firstExamination} statt.`,
-        "Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. Dolmetscher und Transfer sind organisiert.",
-        "Die Kostenfrage wurde mit dem Patienten geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.",
+        `Die ersten Untersuchungen finden ${firstExamination} statt.`,
+        `Die Behandlung wurde in Deutschland begonnen und soll nun fortgesetzt werden. In München wird ${patientNominative} von unserer Agentur betreut und begleitet. Dolmetscher und Transfer sind organisiert.`,
+        `Die Kostenfrage wurde mit ${patientDative} geklärt. Es fallen keine Kosten für die Bundesrepublik Deutschland an.`,
         contactPhones
           ? `Für Rückfragen stehen wir Ihnen gerne unter ${contactPhones} zur Verfügung.`
           : "Für Rückfragen stehen wir Ihnen gerne zur Verfügung.",
@@ -791,6 +812,7 @@ export function buildGeneratedDocumentManualTextDraft(input: {
   form: GenerateFormState;
   patientLabel?: string;
   patientAddressee?: string;
+  patientGender?: string | null;
   orderNumber?: string | null;
   appointment?: AppointmentOption | null;
   availableTemplateBlocks?: TemplateTextBlock[];
@@ -810,6 +832,7 @@ export function buildGeneratedDocumentManualTextDraft(input: {
       form: input.form,
       patientLabel,
       patientAddressee: input.patientAddressee,
+      patientGender: input.patientGender,
       orderNumber: input.orderNumber,
       appointment: input.appointment,
     },

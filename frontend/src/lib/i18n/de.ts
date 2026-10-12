@@ -1029,7 +1029,8 @@ export const de = {
   compliance_col_patient: "Patient",
   compliance_col_actions: "Aktionen",
   compliance_approve: "Genehmigen",
-  compliance_hold: "Sperren",
+  // The same word as the hold hint („Zurückstellen“ ohne Datum …), QA B3-12.
+  compliance_hold: "Zurückstellen",
   compliance_reject: "Ablehnen",
   compliance_execute: "Ausführen",
   compliance_executing: "Ausführen...",

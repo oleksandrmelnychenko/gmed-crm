@@ -4,6 +4,7 @@ import { useRepeatPatientReview } from "../model/use-repeat-patient-review";
 import { usePreviousRequests } from "../model/use-previous-requests";
 import { PreviousRequestsPanel } from "./previous-requests-panel";
 import { orderPeriodWarnings } from "../model/order-period-warnings";
+import { repeatConsentNote, requestConsentStatus } from "../model/request-consents";
 import { OrderCatalogServicesTable } from "@/pages/orders/ui/order-catalog-services-table";
 import type { ServiceLine } from "@/pages/orders/model/order-service-line";
 import { servicePriceOptionValue, parseServicePriceOptionValue, money, germanDateLabel, serviceBillingUnitLabel, serviceBillingUnitBadgeClass, formatMoneyValue, priceVersionDisplayName, resolveServiceDescriptionItems } from "@/pages/orders/model/order-service-presentation";
@@ -6756,9 +6757,9 @@ ${serviceCommentLines.join("\n")}`
       key: "request:consents",
       label: tx("Согласия в этом обращении", "Einwilligungen in dieser Anfrage"),
       ready: !missingConsentField,
-      status: missingConsentField
-        ? tx("Не отмечены: согласия из карточки не переносятся", "Nicht bestätigt: Einwilligungen werden nicht aus der Akte übernommen")
-        : tx("Отмечены в этом обращении", "In dieser Anfrage bestätigt"),
+      // The status names exactly what is still unticked: "not ticked" only
+      // when neither consent is (QA 2026-10-12 B3-01).
+      status: requestConsentStatus(draft?.privacyConsent ?? false, draft?.healthcareConsent ?? false, tx),
       detail: [
         `${tx("Политика конфиденциальности", "Datenschutzhinweise")}: ${draft.privacyConsent ? tx("да", "ja") : tx("нет", "nein")}`,
         `${tx("Медицинские данные", "Gesundheitsdaten")}: ${draft.healthcareConsent ? tx("да", "ja") : tx("нет", "nein")}`,
@@ -8400,7 +8401,7 @@ ${serviceCommentLines.join("\n")}`
                 <div className="space-y-1 rounded-lg border border-border/70 bg-muted/10 px-3 py-2">
                   {isRepeatIntake && (!draft.privacyConsent || !draft.healthcareConsent) ? (
                     <p data-testid="repeat-consent-note" className="pb-1 text-xs leading-5 text-amber-800">
-                      {tx("Согласия из карточки пациента не переносятся: подтвердите их с клиентом для этого обращения.", "Einwilligungen werden nicht aus der Patientenakte übernommen: bitte für diese Anfrage mit dem Kunden bestätigen.")}
+                      {repeatConsentNote(draft.privacyConsent, draft.healthcareConsent, tx)}
                     </p>
                   ) : null}
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />

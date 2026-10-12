@@ -142,6 +142,11 @@ capabilities! {
     AdminAnnouncements => "admin.announcements",
     AdminCustomFields => "admin.custom_fields",
     AdminCompliance => "admin.compliance",
+    // Reading the DSGVO register: privacy requests and their history,
+    // consents and revocations, Art. 19 recipients, the security incident
+    // register and the patient lookup of the page. The CEO Assistant reads
+    // everything and writes nothing (owner rule; QA 2026-10-12 B3-11).
+    ComplianceView => "compliance.view",
     AdminHealth => "admin.health",
     AdminActivity => "admin.activity",
     // DATEV
@@ -253,6 +258,7 @@ const CEO_ASSISTANT: &[Capability] = &[
     C::SopsView,
     C::FeedbackView,
     C::ReportsView,
+    C::ComplianceView,
     C::TasksUse,
     C::ChatUse,
 ];
@@ -711,6 +717,7 @@ mod tests {
                     "sops.view",
                     "feedback.view",
                     "reports.view",
+                    "compliance.view",
                     "tasks.use",
                     "chat.use",
                 ],

@@ -1762,7 +1762,8 @@ test.describe("staff smoke flows", () => {
         name: /Ins Patientenportal freigeben/i,
       })
       .click();
-    await expect(page.getByText(/aktive Portalfreigaben/i)).toBeVisible();
+    // "1 aktive Portalfreigabe" — counted in the right form since QA 2026-10-12 B2-02.
+    await expect(page.getByText(/aktive Portalfreigabe/i)).toBeVisible();
 
     await expect(
       page.getByRole("button", {
@@ -2272,9 +2273,11 @@ test.describe("patient-profile RBAC shell", () => {
     await expect(
       workspaceNav.getByRole("link", { name: /Relations/i }),
     ).toHaveCount(0);
+    // The assistant reads every tab, the workflow too (owner rule "reads
+    // everything", QA 2026-10-12 B2-06).
     await expect(
       workspaceNav.getByRole("link", { name: /Arbeitsablauf|Workflow/i }),
-    ).toHaveCount(0);
+    ).toBeVisible();
     await expect(
       workspaceNav.getByRole("link", { name: /Timeline/i }),
     ).toHaveCount(0);

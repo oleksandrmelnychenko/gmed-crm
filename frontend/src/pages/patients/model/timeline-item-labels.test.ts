@@ -20,9 +20,63 @@ describe("patientTimelineItemLabels (QA 2026-10-12 B-26b)", () => {
       },
       l,
       statusLabel,
+      "ru",
     );
-    expect(labels.title).toBe("Ramipril · 5 mg · Tabletten");
+    // One language: the Russian UI names the form in Russian (QA B3-03).
+    expect(labels.title).toBe("Ramipril · 5 mg · Таблетки");
     expect(labels.status).toBe("Активно");
+  });
+
+  it("shows an allergy's severity, translated or as entered (QA round 3 B-26b)", () => {
+    const allergy = (status: string) =>
+      patientTimelineItemLabels(
+        {
+          entity_type: "clinical",
+          category: "allergy",
+          title: "Penicillin · Exanthem",
+          status,
+          source_label: "allergie",
+        },
+        l,
+        statusLabel,
+        "ru",
+      ).status;
+    expect(allergy("средняя")).toBe("Средняя");
+    expect(allergy("severe")).toBe("Тяжёлая");
+    expect(allergy("nur bei Hautkontakt")).toBe("nur bei Hautkontakt");
+    expect(allergy("active")).toBe("Активно");
+    expect(allergy("средняя")).not.toBe("Неизвестное значение");
+  });
+
+  it("names the workflow stage of a process task (QA round 3 B-26b)", () => {
+    const task = patientTimelineItemLabels(
+      {
+        entity_type: "workflow_task",
+        category: "order_discovery",
+        title: "Подготовить шорт-лист клиник",
+        status: "open",
+        source_label: "PM Muster · patient_manager",
+      },
+      l,
+      statusLabel,
+      "ru",
+    );
+    expect(task.category).toBe(ru.timeline_source_order_discovery);
+    expect(task.category).not.toMatch(/Order Discovery/);
+    const de = translateCatalog("de").uiText;
+    const german = patientTimelineItemLabels(
+      {
+        entity_type: "workflow_task",
+        category: "order_discovery",
+        title: "Shortlist",
+        status: "open",
+        source_label: null,
+      },
+      (key) => de[key] ?? key,
+      statusLabel,
+      "de",
+    );
+    expect(german.category).toBe(de.timeline_source_order_discovery);
   });
 
   it("reads a clinical summary row without an unknown status or a German title", () => {

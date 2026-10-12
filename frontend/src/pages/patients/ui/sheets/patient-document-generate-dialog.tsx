@@ -19,14 +19,18 @@ import {
   type PatientDocumentProfile,
 } from "@/pages/documents/data/document-api";
 import {
+  childConsentBindingDefaults,
+  defaultPayerBindings,
   DOCUMENT_BINDING_FIELDS,
   documentTemplateUsesOrderServices,
+  type DocumentRelationSource,
   enhancedDueDiligenceBindingDefaults,
   formatDocumentGenerationError,
   isDesignedAgencyDocumentTemplate,
   isLeadOnlyDocumentTemplate,
   isTemplateForPatientAge,
   patientPartyBindingDefaults,
+  payerBindingsForOrder,
   validateEnhancedDueDiligenceBindings,
 } from "@/pages/documents/model/document-bindings";
 import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
@@ -95,6 +99,7 @@ export function PatientDocumentGenerateDialog({
   >(null);
   const [patientProfile, setPatientProfile] =
     useState<PatientDocumentProfile | null>(null);
+  const [relations, setRelations] = useState<DocumentRelationSource[]>([]);
   const [busy, setBusy] = useState(false);
   const [validationError, setValidationError] = useState("");
   const patientOptions = useMemo(
@@ -147,6 +152,7 @@ export function PatientDocumentGenerateDialog({
       setAppointments([]);
       setFrameworkContracts(null);
       setPatientProfile(null);
+      setRelations([]);
       return;
     }
     let active = true;
@@ -156,10 +162,18 @@ export function PatientDocumentGenerateDialog({
       setAppointments(context.appointments);
       setFrameworkContracts(context.frameworkContracts);
       setPatientProfile(context.profile);
+      setRelations(context.relations);
       setForm((current) => ({
         ...current,
         bindings: {
           ...patientPartyBindingDefaults(context.profile),
+          // A template chosen before the context arrived gets its defaults too.
+          ...templateBindingDefaults(
+            current.templateId,
+            current.orderId,
+            context.profile,
+            context.relations,
+          ),
           ...current.bindings,
         },
       }));
@@ -168,6 +182,33 @@ export function PatientDocumentGenerateDialog({
       active = false;
     };
   }, [open, patientId]);
+
+  /**
+   * Template-specific starting values: the Kostenübernehmer is the default
+   * payer while no order is chosen (QA 2026-10-12 B3-09), the child's form
+   * names the child and its parents with their address (B3-06).
+   */
+  function templateBindingDefaults(
+    templateId: string,
+    orderId: string,
+    profile: PatientDocumentProfile | null,
+    patientRelations: DocumentRelationSource[],
+  ) {
+    const option = patientOptions[0];
+    const childName = option
+      ? [option.first_name, option.last_name].filter(Boolean).join(" ")
+      : "";
+    return {
+      ...(templateId === "cost_coverage_declaration" && !orderId
+        ? defaultPayerBindings(patientRelations)
+        : {}),
+      ...childConsentBindingDefaults(
+        templateId,
+        profile ? { ...profile, name: childName } : { name: childName },
+        patientRelations,
+      ),
+    };
+  }
 
   const buildFormForTemplate = useCallback(
     (template: DocumentTemplate) => {
@@ -199,6 +240,7 @@ export function PatientDocumentGenerateDialog({
           ...(template.id === "enhanced_due_diligence"
             ? enhancedDueDiligenceBindingDefaults()
             : {}),
+          ...templateBindingDefaults(template.id, "", patientProfile, relations),
         },
       };
       return {
@@ -211,7 +253,7 @@ export function PatientDocumentGenerateDialog({
           }) || template.default_auto_name,
       };
     },
-    [patientId, patientOptions, patientProfile],
+    [patientId, patientOptions, patientProfile, relations],
   );
 
   useEffect(() => {
@@ -264,6 +306,7 @@ export function PatientDocumentGenerateDialog({
         form,
         patientLabel,
         patientAddressee,
+        patientGender: patientProfile?.gender,
         availableTemplateBlocks: [],
         lang,
         labels: {
@@ -517,17 +560,24 @@ export function PatientDocumentGenerateDialog({
                   onChange={(event) => {
                     const orderId = event.target.value;
                     setValidationError("");
-                    setForm((current) => ({
-                      ...current,
-                      orderId,
-                      bindings: orderId
+                    setForm((current) => {
+                      const bindings = orderId
                         ? {
                             ...current.bindings,
                             service_lines_text: "",
                             estimate_total: "",
                           }
-                        : current.bindings,
-                    }));
+                        : current.bindings;
+                      return {
+                        ...current,
+                        orderId,
+                        // The order's payer replaces an untouched default payer (B3-09).
+                        bindings:
+                          current.templateId === "cost_coverage_declaration"
+                            ? payerBindingsForOrder(bindings, orderId, relations)
+                            : bindings,
+                      };
+                    });
                   }}
                 >
                   <option value="" disabled={selectedTemplateRequiresOrder}>

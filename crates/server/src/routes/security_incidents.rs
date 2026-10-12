@@ -283,7 +283,11 @@ async fn list_incidents(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthUser>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::IncidentsManage) {
+    // The register is read by its managers and by the read-only DSGVO view
+    // (CEO Assistant, QA 2026-10-12 B3-11); decisions stay with the managers.
+    if let Err(e) =
+        auth.require_any_capability(&[Capability::IncidentsManage, Capability::ComplianceView])
+    {
         return e;
     }
 

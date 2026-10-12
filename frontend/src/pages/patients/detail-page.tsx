@@ -1179,7 +1179,9 @@ function usePatientDetailPageContent() {
   const canManageInvoices = hasCapability(user, "invoices.finance");
   const canEditPatientProfile = canManagePatientProfile(user);
   const canExportPatientCompliance = canManagePatientProfile(user);
-  const canOpenComplianceWorkspace = canManagePatientProfile(user);
+  // The CEO Assistant reads the DSGVO register too (read-only, QA B3-11).
+  const canOpenComplianceWorkspace =
+    canManagePatientProfile(user) || hasCapability(user, "compliance.view");
   const canPrintPatientLabel = canPrintPatientLabelFor(user);
   const canManageWorkflowChecklist =
     hasCapability(user, "patients.edit") || hasCapability(user, "services.edit");

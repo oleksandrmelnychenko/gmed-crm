@@ -4,7 +4,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Input } from "@/components/ui/input";
 import { checkboxClass, inputClass } from "@/components/ui-shell";
 import { cn } from "@/lib/utils";
-import { DARREICHUNGSFORM_OPTIONS, EINNAHMEFORM_OPTIONS } from "../../data/medication-options";
+import { darreichungsformOptions, einnahmeformOptions } from "../../data/medication-options";
 import { updateClinicalMedicationLifecycle, type ClinicalMedication } from "../../data/patient-clinical";
 import { Field, PatientFormSection } from "../shared/patient-form-primitives";
 import { MedicationNameFields } from "./medication-name-fields";
@@ -23,6 +23,8 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
   attribution: ReactNode;
 }) {
   const tx = (ru: string, de: string) => lang === "de" ? de : ru;
+  const formOptions = darreichungsformOptions(lang === "de" ? "de" : "ru");
+  const routeOptions = einnahmeformOptions(lang === "de" ? "de" : "ru");
   const doses = [
     ["dose_morgens", tx("Утро", "Morgens"), tx("Доза утром", "Dosis morgens")],
     ["dose_mittags", tx("День", "Mittags"), tx("Доза в обед", "Dosis mittags")],
@@ -57,16 +59,17 @@ export function MedicationEditorFields({ draft, onChange, lang, dateRangeValid, 
           </NativeComboboxSelect>
         </Field>
         <Field required label={tx("Форма выпуска", "Darreichungsform")}>
+          {/* Labels in the UI language, the stored value stays the code (QA B3-03). */}
           <NativeComboboxSelect value={draft.form ?? ""} required aria-label={tx("Форма выпуска", "Darreichungsform")} className={controlClass} onChange={event => onChange({form:nullable(event.target.value)})}>
             <option value="">—</option>
-            {DARREICHUNGSFORM_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-            {draft.form && !DARREICHUNGSFORM_OPTIONS.some(option => option.value === draft.form) ? <option value={draft.form}>{draft.form}</option> : null}
+            {formOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {draft.form && !formOptions.some(option => option.value === draft.form) ? <option value={draft.form}>{draft.form}</option> : null}
           </NativeComboboxSelect>
         </Field>
         <Field required label={tx("Способ применения", "Einnahmeform")}>
           <NativeComboboxSelect value={draft.einnahmeform ?? ""} required aria-label={tx("Способ применения", "Einnahmeform")} className={controlClass} onChange={event => onChange({einnahmeform:nullable(event.target.value)})}>
             <option value="">—</option>
-            {EINNAHMEFORM_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            {routeOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </NativeComboboxSelect>
         </Field>
       </div>

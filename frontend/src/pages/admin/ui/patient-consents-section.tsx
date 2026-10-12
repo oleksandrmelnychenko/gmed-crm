@@ -95,12 +95,17 @@ export function revocationNote(channelLabel: string, reason: string): string {
  */
 function ConsentRevokeDialog({
   consentType,
+  patientLabel,
+  patientFieldLabel,
   typeLabel,
   l,
   onClose,
   onConfirm,
 }: {
   consentType: string | null;
+  /** The patient whose consent is revoked: named in the dialog (QA B3-02). */
+  patientLabel: string;
+  patientFieldLabel: string;
   typeLabel: (value: string) => string;
   l: (key: string) => string;
   onClose: () => void;
@@ -129,6 +134,15 @@ function ConsentRevokeDialog({
               : l("consents_revoke_hint")}
           </DialogDescription>
         </DialogHeader>
+        {patientLabel ? (
+          <div
+            className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2"
+            data-testid="consent-revoke-patient"
+          >
+            <div className="text-xs text-muted-foreground">{patientFieldLabel}</div>
+            <div className="text-sm font-semibold text-foreground">{patientLabel}</div>
+          </div>
+        ) : null}
         <form
           className="grid gap-3"
           onSubmit={(event) => {
@@ -186,7 +200,20 @@ function ConsentRevokeDialog({
  * easy to withdraw as to give (Art. 7 Abs. 3 DSGVO); until now that was only
  * possible through the API.
  */
-export function PatientConsentsSection({ patientId }: { patientId: string }) {
+export function PatientConsentsSection({
+  patientId,
+  patientLabel = "",
+  canManage = true,
+  actionsDisabled = false,
+}: {
+  patientId: string;
+  /** "P-… · Name" of the patient: shown with the section and in the revoke dialog. */
+  patientLabel?: string;
+  /** Grant and revoke; without it the history is read-only (CEO Assistant, QA B3-11). */
+  canManage?: boolean;
+  /** Holds grant and revoke while the page has not loaded this patient (QA B3-02). */
+  actionsDisabled?: boolean;
+}) {
   const { t } = useLang();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
   const typeLabel = useCallback(
@@ -243,9 +270,20 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
   }
 
   return (
-    <Section title={l("consents_title")}>
+    <Section
+      title={l("consents_title")}
+      accessory={patientLabel ? (
+        <div
+          className="rounded-full border border-border/60 bg-muted/25 px-3 py-1 text-xs font-medium text-foreground"
+          data-testid="consents-patient"
+        >
+          {patientLabel}
+        </div>
+      ) : null}
+    >
       {error ? <Banner tone="error">{error}</Banner> : null}
 
+      {canManage ? (
       <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto]">
         <Field label={l("consents_field_type")} htmlFor="consent-type">
           <select
@@ -274,13 +312,14 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
           <Button
             type="button"
             className="h-9 rounded-lg px-3.5"
-            disabled={busy}
+            disabled={busy || actionsDisabled}
             onClick={() => void save(consentType, "grant", note.trim())}
           >
             {l("consents_grant")}
           </Button>
         </div>
       </div>
+      ) : null}
 
       <div className="space-y-2" data-testid="patient-consents">
         {consents.length === 0 ? (
@@ -301,12 +340,12 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
                 {consent.expires_at ? ` → ${day(consent.expires_at)}` : ""} · {consent.managed_by_name}
                 {consent.note ? ` · ${consent.note}` : ""}
               </span>
-              {active ? (
+              {active && canManage ? (
                 <Button
                   type="button"
                   variant="outline"
                   className="ml-auto h-8 rounded-lg"
-                  disabled={busy}
+                  disabled={busy || actionsDisabled}
                   onClick={() => setRevoking(consent.consent_type)}
                 >
                   {l("consents_revoke")}
@@ -318,6 +357,8 @@ export function PatientConsentsSection({ patientId }: { patientId: string }) {
       </div>
       <ConsentRevokeDialog
         consentType={revoking}
+        patientLabel={patientLabel}
+        patientFieldLabel={t.orders_patient}
         typeLabel={typeLabel}
         l={l}
         onClose={() => setRevoking(null)}
