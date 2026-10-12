@@ -969,6 +969,7 @@ test.describe("lead cabinet", () => {
       {
         version: "2026-10-12",
         language: "de",
+        recipients: [],
         choices: {
           agency_processing: true,
           doctors_to_agency: true,
