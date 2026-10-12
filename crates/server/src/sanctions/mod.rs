@@ -7,9 +7,12 @@
 //!   the file by hand.
 //! * [`normalize`] and [`matching`] are the matching engine.
 //! * [`screening`] loads the people we screen (lead patient, guardians of a
-//!   minor, third-party payer, patients) and the bank of the payment route,
-//!   stores possible matches as hits and tells the CEO.
-//! * [`policy`] is the blocked-country rule with its per-lead CEO override.
+//!   minor, third-party payer, invoice recipient, patients with the
+//!   relations that pay or receive their invoices, free-text payer contacts
+//!   of orders and invoices) and the bank of the payment route, stores
+//!   possible matches as hits and tells the CEO.
+//! * [`policy`] is the blocked-country rule with its per-lead or per-patient
+//!   CEO override.
 //! * [`gate`] blocks qualification, conversion, the agency countersignature
 //!   and order/contract work server-side.
 //!

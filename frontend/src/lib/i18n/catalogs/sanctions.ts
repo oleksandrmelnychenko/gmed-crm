@@ -26,6 +26,7 @@ export interface SanctionsTranslations {
   sanctions_kind_relation_default_payer: string;
   sanctions_kind_relation_invoice_payer: string;
   sanctions_kind_relation_legal_representative: string;
+  sanctions_kind_payer_contact: string;
   sanctions_our_person: string;
   sanctions_list_entry: string;
   sanctions_field_names: string;
@@ -73,6 +74,12 @@ export interface SanctionsTranslations {
   sanctions_country_lift: string;
   sanctions_country_lift_title: string;
   sanctions_country_lift_hint: string;
+  sanctions_country_leads: string;
+  sanctions_country_patients: string;
+  sanctions_country_patients_hint: string;
+  sanctions_country_lift_patient: string;
+  sanctions_country_lift_patient_title: string;
+  sanctions_country_lift_patient_hint: string;
   sanctions_country_revoke: string;
   sanctions_country_revoke_title: string;
   sanctions_list_title: string;
@@ -183,6 +190,7 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_kind_relation_default_payer: "Плательщик пациента по умолчанию",
   sanctions_kind_relation_invoice_payer: "Плательщик в заказе или счёте пациента",
   sanctions_kind_relation_legal_representative: "Родитель / опекун пациента",
+  sanctions_kind_payer_contact: "Плательщик (контакт в заказе или счёте)",
   sanctions_our_person: "Наши данные",
   sanctions_list_entry: "Запись в списке ЕС",
   sanctions_field_names: "Имена",
@@ -228,12 +236,20 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_open_lead: "Открыть лид",
   sanctions_open_patient: "Открыть пациента",
   sanctions_country_hint:
-    "Лиды, у которых гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список заблокированных стран.",
-  sanctions_country_none: "Нет лидов с заблокированной страной",
+    "Лиды и пациенты, у которых гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список заблокированных стран.",
+  sanctions_country_none: "Нет лидов и пациентов с заблокированной страной",
   sanctions_country_lift: "Снять блокировку для лида",
   sanctions_country_lift_title: "Снять блокировку по стране для этого лида",
   sanctions_country_lift_hint:
     "Снятие действует только для этого лида и для стран, заблокированных сейчас. Решение и причина сохраняются в журнале аудита.",
+  sanctions_country_leads: "Лиды",
+  sanctions_country_patients: "Пациенты",
+  sanctions_country_patients_hint:
+    "Страна самого пациента, его связей, которые оплачивают или получают счета, и плательщиков, указанных в заказах и счетах. Блокировка удерживает подпись агентства.",
+  sanctions_country_lift_patient: "Снять блокировку для пациента",
+  sanctions_country_lift_patient_title: "Снять блокировку по стране для этого пациента",
+  sanctions_country_lift_patient_hint:
+    "Снятие действует только для этого пациента и для стран, заблокированных сейчас. Решение и причина сохраняются в журнале аудита.",
   sanctions_country_revoke: "Вернуть блокировку",
   sanctions_country_revoke_title: "Вернуть блокировку по стране",
   sanctions_list_title: "Санкционный список ЕС",
@@ -347,6 +363,7 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_kind_relation_default_payer: "Standardzahler des Patienten",
   sanctions_kind_relation_invoice_payer: "Zahler in Auftrag oder Rechnung des Patienten",
   sanctions_kind_relation_legal_representative: "Elternteil / Vormund des Patienten",
+  sanctions_kind_payer_contact: "Zahler (Kontakt in Auftrag oder Rechnung)",
   sanctions_our_person: "Unsere Daten",
   sanctions_list_entry: "Eintrag der EU-Liste",
   sanctions_field_names: "Namen",
@@ -392,12 +409,20 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_open_lead: "Lead öffnen",
   sanctions_open_patient: "Patient öffnen",
   sanctions_country_hint:
-    "Leads, bei denen Staatsangehörigkeit oder Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste der gesperrten Länder stehen.",
-  sanctions_country_none: "Keine Leads mit gesperrtem Land",
+    "Leads und Patienten, bei denen Staatsangehörigkeit oder Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste der gesperrten Länder stehen.",
+  sanctions_country_none: "Keine Leads oder Patienten mit gesperrtem Land",
   sanctions_country_lift: "Sperre für diesen Lead aufheben",
   sanctions_country_lift_title: "Länder-Sperre für diesen Lead aufheben",
   sanctions_country_lift_hint:
     "Die Aufhebung gilt nur für diesen Lead und die jetzt gesperrten Länder. Entscheidung und Begründung werden im Audit-Protokoll gespeichert.",
+  sanctions_country_leads: "Leads",
+  sanctions_country_patients: "Patienten",
+  sanctions_country_patients_hint:
+    "Land des Patienten selbst, seiner Bezugspersonen, die Rechnungen zahlen oder erhalten, und der in Aufträgen und Rechnungen genannten Zahler. Die Sperre hält die Unterschrift der Agentur an.",
+  sanctions_country_lift_patient: "Sperre für diesen Patienten aufheben",
+  sanctions_country_lift_patient_title: "Länder-Sperre für diesen Patienten aufheben",
+  sanctions_country_lift_patient_hint:
+    "Die Aufhebung gilt nur für diesen Patienten und die jetzt gesperrten Länder. Entscheidung und Begründung werden im Audit-Protokoll gespeichert.",
   sanctions_country_revoke: "Sperre wiederherstellen",
   sanctions_country_revoke_title: "Länder-Sperre wiederherstellen",
   sanctions_list_title: "EU-Sanktionsliste",

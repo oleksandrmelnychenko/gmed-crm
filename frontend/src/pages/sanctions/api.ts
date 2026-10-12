@@ -68,7 +68,9 @@ export type HitStatus = "open" | "false_positive" | "confirmed";
 /**
  * `lead_bank`: the bank of the lead's payment route; `lead_recipient`: a third-party invoice
  * recipient who does not pay (owner decisions 2026-10-11); `patient_relation`: a relation of a
- * patient who pays or receives the invoices (QA 2026-10-11 B-25), its role in `relation`.
+ * patient who pays or receives the invoices (QA 2026-10-11 B-25), its role in `relation`;
+ * `payer_contact`: a free-text payer contact of an order or invoice, of a patient or a lead
+ * (2026-10-12).
  */
 export type SubjectKind =
   | "lead_patient"
@@ -77,7 +79,8 @@ export type SubjectKind =
   | "lead_bank"
   | "lead_recipient"
   | "patient"
-  | "patient_relation";
+  | "patient_relation"
+  | "payer_contact";
 
 export type SubjectData = {
   first_name: string;
@@ -133,7 +136,7 @@ export type SanctionsHit = {
   subject_kind: SubjectKind;
   /**
    * Which subject of the kind: for a bank `patient-bank` or `payer-bank`, `invoice-recipient` for the
-   * recipient, the relation id for a patient's relation.
+   * recipient, the relation id for a patient's relation, `contact-…` for a payer contact.
    */
   subject_ref?: string;
   lead_id: string | null;
@@ -208,16 +211,32 @@ export type UploadResponse = {
   rescreen: { leads: number; patients: number; new_hits: number; errors: number } | null;
 };
 
-export type CountryBlocksResponse = {
-  leads: {
-    lead_id: string;
-    name: string | null;
-    flag: "blocked_country" | "country_lifted";
-    found: string[];
-    blocking: string[];
-    lift: CountryLift | null;
-  }[];
+type CountryBlockEntry = {
+  name: string | null;
+  flag: "blocked_country" | "country_lifted";
+  found: string[];
+  blocking: string[];
+  lift: CountryLift | null;
 };
+
+/**
+ * The CEO's «Страны» tab: open leads and (since 2026-10-12) active or inactive patients a blocked
+ * country concerns — a patient's own countries, those of the relations that pay or receive its
+ * invoices and of the payer contacts of its orders and invoices.
+ */
+export type CountryBlocksResponse = {
+  leads: (CountryBlockEntry & { lead_id: string })[];
+  patients: (CountryBlockEntry & { patient_id: string; patient_number: string | null })[];
+};
+
+/** An older server answers without `patients`. */
+export function normalizeCountryBlocks(raw: unknown): CountryBlocksResponse {
+  const value = raw && typeof raw === "object" ? (raw as Partial<CountryBlocksResponse>) : {};
+  return {
+    leads: Array.isArray(value.leads) ? value.leads : [],
+    patients: Array.isArray(value.patients) ? value.patients : [],
+  };
+}
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
@@ -276,12 +295,18 @@ export const sanctionsApi = {
       `/sanctions/leads/${encodeURIComponent(leadId)}/country-override`,
       json({ reason }),
     ),
+  liftPatientCountryBlock: (patientId: string, reason: string) =>
+    apiFetch<CountryLift>(
+      `/sanctions/patients/${encodeURIComponent(patientId)}/country-override`,
+      json({ reason }),
+    ),
   revokeCountryLift: (overrideId: string, reason: string) =>
     apiFetch<{ ok: boolean }>(
       `/sanctions/country-overrides/${encodeURIComponent(overrideId)}/revoke`,
       json({ reason }),
     ),
-  countryBlocks: () => apiFetch<CountryBlocksResponse>("/sanctions/country-blocks", { forceFresh: true }),
+  countryBlocks: () =>
+    apiFetch<unknown>("/sanctions/country-blocks", { forceFresh: true }).then(normalizeCountryBlocks),
   hits: (status: HitStatus | "all") =>
     apiFetch<HitsResponse>(`/sanctions/hits?status=${encodeURIComponent(status)}`, { forceFresh: true }),
   hit: (hitId: string) =>

@@ -26,6 +26,11 @@ export type RelationFormState = {
   addressCountry: string;
   /** Receives the patient's invoices unless an order names another payer. */
   isDefaultPayer: boolean;
+  /**
+   * A separate contact is an organisation (company, foundation, insurer): the sanctions screening
+   * compares it with the listed entities by its whole name. A linked patient record is a person.
+   */
+  isOrganisation: boolean;
 };
 
 export type DocumentUploadFormState = {
@@ -88,7 +93,26 @@ export function blankRelationForm(): RelationFormState {
     addressCity: "",
     addressCountry: "",
     isDefaultPayer: false,
+    isOrganisation: false,
   };
+}
+
+/**
+ * Legal forms that mark a name as an organisation's, as the server's guess for relations without an
+ * answer (`ORGANISATION_LEGAL_FORMS` in crates/server/src/sanctions/screening.rs). Only a hint for a
+ * new relation's box; the box staff tick or untick is what the server stores.
+ */
+const ORGANISATION_LEGAL_FORMS = new Set([
+  "gmbh", "mbh", "ag", "kg", "kgaa", "ohg", "ug", "llc", "ltd", "limited", "inc", "corp", "plc",
+  "llp", "jsc", "pjsc", "ojsc", "cjsc", "ooo", "oao", "zao", "pao", "sarl", "srl", "spa", "bv",
+  "nv", "fze", "ооо", "оао", "зао", "пао", "тов", "пат",
+]);
+
+/** Whether a typed name carries a legal form ("Beispiel GmbH", "ООО Полартек"). */
+export function relationNameSuggestsOrganisation(name: string): boolean {
+  return name
+    .split(/[^\p{L}\p{N}]+/u)
+    .some((word) => word !== "" && ORGANISATION_LEGAL_FORMS.has(word.toLocaleLowerCase()));
 }
 
 export function relationToForm(relation: RelationItem): RelationFormState {
@@ -108,6 +132,9 @@ export function relationToForm(relation: RelationItem): RelationFormState {
     // its code with the next save; anything else is kept as written.
     addressCountry: countryCodeFromStoredValue(relation.address_country),
     isDefaultPayer: relation.is_default_payer ?? false,
+    // The server answers how the contact is screened: the stored box, or for an older row the
+    // legal form in its name; saving stores it.
+    isOrganisation: !relation.related_patient_id && relation.is_organisation === true,
   };
 }
 
@@ -133,6 +160,8 @@ export function relationFormToPayload(
     address_city: form.addressCity.trim(),
     address_country: form.addressCountry.trim(),
     is_default_payer: form.isDefaultPayer,
+    // A linked patient record is a person; the server stores no answer for it.
+    is_organisation: form.relatedPatientId ? null : form.isOrganisation,
   };
 }
 

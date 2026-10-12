@@ -348,3 +348,93 @@ test("confirming warns that the stop is final (German, phone width)", async ({ p
   await expect(page.getByTestId("sanctions-hit")).toContainText("Bestätigt");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
+
+/**
+ * The «Страны» tab lists patients as well (2026-10-12): a patient whose default payer lives in a
+ * blocked country, lifted by the CEO for the patient.
+ */
+test("the CEO lifts a patient's country block from the countries tab", async ({ page }) => {
+  const PATIENT_ID = "00000000-0000-0000-0000-00000000c001";
+  let lifted = false;
+  const calls: { method: string; path: string; payload: unknown }[] = [];
+  await page.addInitScript(() => {
+    localStorage.setItem("gmed_access_token", "sanctions-ui-test");
+    localStorage.setItem("gmed_refresh_token", "sanctions-ui-refresh");
+    localStorage.setItem("gmed_lang", "ru");
+  });
+  await page.route("**/api/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const path = url.pathname.replace("/api/v1", "");
+    const method = route.request().method();
+    if (method !== "GET") {
+      calls.push({ method, path, payload: route.request().postData() ? route.request().postDataJSON() : null });
+    }
+    let body: unknown = [];
+    if (path === "/me") {
+      body = { id: "00000000-0000-0000-0000-000000000001", name: "Test CEO", role: "ceo", email: "ceo@example.invalid" };
+    }
+    if (path === "/sanctions/hits") {
+      body = { hits: [], counts: { open: 0, false_positive: 0, confirmed: 0 } };
+    }
+    if (path === `/sanctions/patients/${PATIENT_ID}/country-override`) {
+      lifted = true;
+      body = { id: "lift-1", lead_id: null, patient_id: PATIENT_ID, countries: ["RU"] };
+    }
+    if (path === "/sanctions/country-blocks") {
+      body = {
+        leads: [],
+        patients: [
+          {
+            patient_id: PATIENT_ID,
+            patient_number: "P-0042",
+            name: "Anna Muster",
+            flag: lifted ? "country_lifted" : "blocked_country",
+            found: ["RU"],
+            blocking: lifted ? [] : ["RU"],
+            lift: lifted
+              ? {
+                  id: "lift-1",
+                  lead_id: null,
+                  patient_id: PATIENT_ID,
+                  countries: ["RU"],
+                  reason: "Payer lives in Germany since 2001, checked",
+                  lifted_by: "00000000-0000-0000-0000-000000000001",
+                  lifted_by_name: "Test CEO",
+                  lifted_at: "2026-10-12T08:00:00Z",
+                }
+              : null,
+          },
+        ],
+      };
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+  });
+  await page.goto("/sanctions?tab=countries");
+  const item = page.getByTestId("sanctions-country-patient");
+  await expect(item).toBeVisible(lazyPageLoad);
+  await expect(page.getByRole("heading", { name: "Пациенты" })).toBeVisible();
+  await expect(item).toContainText("Anna Muster");
+  await expect(item).toContainText("P-0042");
+  await expect(item).toContainText("Страна");
+  await expect(item.getByRole("link", { name: "Anna Muster" })).toHaveAttribute(
+    "href",
+    `/patients?patient=${PATIENT_ID}`,
+  );
+
+  await item.getByRole("button", { name: "Снять блокировку для пациента" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("Снять блокировку по стране для этого пациента");
+  await dialog.getByLabel("Причина").fill("Payer lives in Germany since 2001, checked");
+  await dialog.getByRole("button", { name: "Снять блокировку для пациента" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(item).toContainText("Страна: снято");
+  await expect(item).toContainText("Payer lives in Germany since 2001, checked");
+  await expect(item.getByRole("button", { name: "Вернуть блокировку" })).toBeVisible();
+  expect(calls).toEqual([
+    {
+      method: "POST",
+      path: `/sanctions/patients/${PATIENT_ID}/country-override`,
+      payload: { reason: "Payer lives in Germany since 2001, checked" },
+    },
+  ]);
+});

@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 import {
   sanctionsApi,
   type CountryBlocksResponse,
+  type CountryLift,
   type HitStatus,
   type HitsResponse,
   type SanctionsHit,
@@ -29,6 +30,7 @@ import { RiskSettingsTab } from "./risk-settings";
 import {
   FISALIS_URL,
   PATIENT_RELATION_ROLES,
+  PAYER_CONTACT_RELATION,
   countryList,
   dobMatchLabel,
   fisalisSearchText,
@@ -44,8 +46,16 @@ import {
 } from "./model";
 
 type Tab = "open" | "decided" | "countries" | "list" | "risk";
-/** Relations the kind label already names (`lead_payer`, `lead_recipient`, `patient_relation`). */
-const HIDDEN_RELATIONS = new Set<string>(["payer", "invoice_recipient", ...PATIENT_RELATION_ROLES]);
+/**
+ * Relations the kind label already names (`lead_payer`, `lead_recipient`, `patient_relation`,
+ * `payer_contact`).
+ */
+const HIDDEN_RELATIONS = new Set<string>([
+  "payer",
+  "invoice_recipient",
+  ...PATIENT_RELATION_ROLES,
+  PAYER_CONTACT_RELATION,
+]);
 const TABS: Tab[] = ["open", "decided", "countries", "list", "risk"];
 
 function errorText(error: unknown, fallback: string): string {
@@ -366,12 +376,49 @@ function HitsTab({
   );
 }
 
+/** One lead or patient of the «Страны» tab. */
+type CountryBlockItem = {
+  kind: "lead" | "patient";
+  id: string;
+  to: string;
+  name: string;
+  number: string | null;
+  flag: "blocked_country" | "country_lifted";
+  found: string[];
+  lift: CountryLift | null;
+};
+
+function countryBlockItems(data: CountryBlocksResponse): { leads: CountryBlockItem[]; patients: CountryBlockItem[] } {
+  return {
+    leads: data.leads.map((item) => ({
+      kind: "lead",
+      id: item.lead_id,
+      to: `/leads?lead=${item.lead_id}`,
+      name: item.name ?? item.lead_id,
+      number: null,
+      flag: item.flag,
+      found: item.found,
+      lift: item.lift,
+    })),
+    patients: data.patients.map((item) => ({
+      kind: "patient",
+      id: item.patient_id,
+      to: `/patients?patient=${item.patient_id}`,
+      name: item.name || item.patient_number || item.patient_id,
+      number: item.patient_number,
+      flag: item.flag,
+      found: item.found,
+      lift: item.lift,
+    })),
+  };
+}
+
 function CountriesTab() {
   const { t, lang } = useLang();
   const [data, setData] = useState<CountryBlocksResponse | null>(null);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
-  const [lifting, setLifting] = useState<{ leadId: string } | null>(null);
+  const [lifting, setLifting] = useState<{ kind: "lead" | "patient"; id: string } | null>(null);
   const [revoking, setRevoking] = useState<{ overrideId: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -379,7 +426,7 @@ function CountriesTab() {
       setData(await sanctionsApi.countryBlocks());
     } catch (loadError) {
       setError(errorText(loadError, t.common_error));
-      setData({ leads: [] });
+      setData({ leads: [], patients: [] });
     }
   }, [t.common_error]);
 
@@ -388,59 +435,82 @@ function CountriesTab() {
   }, [load]);
 
   if (!data) return <TabLoader />;
+  const { leads, patients } = countryBlockItems(data);
+  const renderItem = (item: CountryBlockItem) => (
+    <li
+      key={`${item.kind}-${item.id}`}
+      className={cn("flex flex-wrap items-center justify-between gap-3 rounded-lg p-3", tokens.surface.card)}
+      data-testid={`sanctions-country-${item.kind}`}
+    >
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge tone={item.flag === "blocked_country" ? "warning" : "neutral"}>
+            {item.flag === "blocked_country" ? t.sanctions_badge_blocked_country : t.sanctions_badge_country_lifted}
+          </StatusBadge>
+          <StaffLink to={item.to} className="text-sm font-semibold hover:underline">
+            {item.name}
+          </StaffLink>
+          {item.number && item.number !== item.name ? (
+            <span className="font-mono text-xs text-muted-foreground">{item.number}</span>
+          ) : null}
+          <span className="text-sm text-muted-foreground">{countryList(item.found, lang)}</span>
+        </div>
+        {item.lift ? (
+          <p className="text-xs text-muted-foreground">
+            {formatUiText(t.sanctions_banner_country_lifted, {
+              countries: countryList(item.lift.countries, lang),
+              name: item.lift.lifted_by_name ?? "—",
+              date: formatAppDate(item.lift.lifted_at),
+              reason: item.lift.reason,
+            })}
+          </p>
+        ) : null}
+      </div>
+      {item.flag === "blocked_country" ? (
+        <Button type="button" size="sm" variant="outline" onClick={() => setLifting({ kind: item.kind, id: item.id })}>
+          {item.kind === "patient" ? t.sanctions_country_lift_patient : t.sanctions_country_lift}
+        </Button>
+      ) : item.lift ? (
+        <Button type="button" size="sm" variant="ghost" onClick={() => setRevoking({ overrideId: item.lift!.id })}>
+          {t.sanctions_country_revoke}
+        </Button>
+      ) : null}
+    </li>
+  );
+  const liftingPatient = lifting?.kind === "patient";
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">{t.sanctions_country_hint}</p>
       {error ? <Banner tone="error">{error}</Banner> : null}
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
-      {data.leads.length === 0 ? (
+      {leads.length === 0 && patients.length === 0 ? (
         <p className="py-8 text-center text-sm text-muted-foreground">{t.sanctions_country_none}</p>
-      ) : (
-        <ul className="space-y-2">
-          {data.leads.map((item) => (
-            <li key={item.lead_id} className={cn("flex flex-wrap items-center justify-between gap-3 rounded-lg p-3", tokens.surface.card)}>
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge tone={item.flag === "blocked_country" ? "warning" : "neutral"}>
-                    {item.flag === "blocked_country" ? t.sanctions_badge_blocked_country : t.sanctions_badge_country_lifted}
-                  </StatusBadge>
-                  <StaffLink to={`/leads?lead=${item.lead_id}`} className="text-sm font-semibold hover:underline">
-                    {item.name ?? item.lead_id}
-                  </StaffLink>
-                  <span className="text-sm text-muted-foreground">{countryList(item.found, lang)}</span>
-                </div>
-                {item.lift ? (
-                  <p className="text-xs text-muted-foreground">
-                    {formatUiText(t.sanctions_banner_country_lifted, {
-                      countries: countryList(item.lift.countries, lang),
-                      name: item.lift.lifted_by_name ?? "—",
-                      date: formatAppDate(item.lift.lifted_at),
-                      reason: item.lift.reason,
-                    })}
-                  </p>
-                ) : null}
-              </div>
-              {item.flag === "blocked_country" ? (
-                <Button type="button" size="sm" variant="outline" onClick={() => setLifting({ leadId: item.lead_id })}>
-                  {t.sanctions_country_lift}
-                </Button>
-              ) : item.lift ? (
-                <Button type="button" size="sm" variant="ghost" onClick={() => setRevoking({ overrideId: item.lift!.id })}>
-                  {t.sanctions_country_revoke}
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+      ) : null}
+      {leads.length > 0 ? (
+        <section className="space-y-2" aria-label={t.sanctions_country_leads}>
+          <h3 className="text-sm font-semibold">{t.sanctions_country_leads}</h3>
+          <ul className="space-y-2">{leads.map(renderItem)}</ul>
+        </section>
+      ) : null}
+      {patients.length > 0 ? (
+        <section className="space-y-2" aria-label={t.sanctions_country_patients}>
+          <h3 className="text-sm font-semibold">{t.sanctions_country_patients}</h3>
+          <p className="text-xs text-muted-foreground">{t.sanctions_country_patients_hint}</p>
+          <ul className="space-y-2">{patients.map(renderItem)}</ul>
+        </section>
+      ) : null}
       <SanctionsReasonDialog
         open={lifting !== null}
-        title={t.sanctions_country_lift_title}
-        description={t.sanctions_country_lift_hint}
-        confirmLabel={t.sanctions_country_lift}
+        title={liftingPatient ? t.sanctions_country_lift_patient_title : t.sanctions_country_lift_title}
+        description={liftingPatient ? t.sanctions_country_lift_patient_hint : t.sanctions_country_lift_hint}
+        confirmLabel={liftingPatient ? t.sanctions_country_lift_patient : t.sanctions_country_lift}
         onConfirm={async (reason) => {
           if (!lifting) return;
-          await sanctionsApi.liftLeadCountryBlock(lifting.leadId, reason);
+          if (lifting.kind === "patient") {
+            await sanctionsApi.liftPatientCountryBlock(lifting.id, reason);
+          } else {
+            await sanctionsApi.liftLeadCountryBlock(lifting.id, reason);
+          }
           setFlash(t.settings_updated);
           await load();
         }}

@@ -1324,6 +1324,11 @@ struct UpsertRelationRequest {
     address_country: Option<String>,
     /// Receives the patient's invoices unless an order names another payer.
     is_default_payer: Option<bool>,
+    /// A separate contact is an organisation (box "Организация"): screened
+    /// against the listed entities by its whole name. `None` keeps the stored
+    /// answer on an update (older clients); a relation linked to a patient
+    /// record is a person and stores none.
+    is_organisation: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -8980,7 +8985,7 @@ async fn list_relations(
         r#"SELECT pr.id, pr.patient_id, pr.related_patient_id, pr.related_name, pr.relation_type,
                   pr.is_emergency_contact, pr.phone, pr.notes, pr.created_at,
                   pr.email, pr.address_street, pr.address_zip, pr.address_city,
-                  pr.address_country, pr.is_default_payer,
+                  pr.address_country, pr.is_default_payer, pr.is_organisation,
                   rp.patient_id AS related_patient_pid,
                   rp.first_name AS related_first_name,
                   rp.last_name AS related_last_name
@@ -9058,12 +9063,12 @@ impl RelationBillingFields {
 const RELATION_RETURNING: &str = r#"id, patient_id, related_patient_id, related_name, relation_type,
                           is_emergency_contact, phone, notes, created_at, email,
                           address_street, address_zip, address_city, address_country,
-                          is_default_payer"#;
+                          is_default_payer, is_organisation"#;
 
 const RELATION_SELECT_FROM_UPSERTED: &str = r#"SELECT u.id, u.patient_id, u.related_patient_id, u.related_name, u.relation_type,
                   u.is_emergency_contact, u.phone, u.notes, u.created_at,
                   u.email, u.address_street, u.address_zip, u.address_city,
-                  u.address_country, u.is_default_payer,
+                  u.address_country, u.is_default_payer, u.is_organisation,
                   rp.patient_id AS related_patient_pid,
                   rp.first_name AS related_first_name,
                   rp.last_name AS related_last_name
@@ -9140,6 +9145,10 @@ async fn create_relation(
     let notes = relation_opt_text(body.notes.as_deref());
     let billing = RelationBillingFields::from_request(&body);
     let is_default_payer = body.is_default_payer.unwrap_or(false);
+    // A patient record is a person; a separate contact keeps the answer.
+    let is_organisation = body
+        .is_organisation
+        .filter(|_| body.related_patient_id.is_none());
 
     let mut transaction = state
         .db
@@ -9156,8 +9165,9 @@ async fn create_relation(
                 INSERT INTO patient_relations (
                     patient_id, related_patient_id, related_name, relation_type,
                     is_emergency_contact, phone, notes, email, address_street,
-                    address_zip, address_city, address_country, is_default_payer
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                    address_zip, address_city, address_country, is_default_payer,
+                    is_organisation
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 RETURNING {RELATION_RETURNING}
            )
            {RELATION_SELECT_FROM_UPSERTED}"#
@@ -9175,6 +9185,7 @@ async fn create_relation(
     .bind(billing.city.1)
     .bind(billing.country.1)
     .bind(is_default_payer)
+    .bind(is_organisation)
     .fetch_one(&mut *transaction)
     .await
     .map_err(|error| relation_write_failed(error, FAILED))?;
@@ -9193,6 +9204,7 @@ async fn create_relation(
             "relation_type": body.relation_type,
             "related_patient_id": body.related_patient_id,
             "is_default_payer": is_default_payer,
+            "is_organisation": is_organisation,
         }),
     ));
 
@@ -9225,7 +9237,7 @@ async fn update_relation(
         .map_err(|error| relation_write_failed(error, FAILED))?;
     let current = sqlx::query(
         r#"SELECT related_patient_id, email, address_street, address_zip, address_city,
-                  address_country, is_default_payer
+                  address_country, is_default_payer, is_organisation
            FROM patient_relations WHERE patient_id = $1 AND id = $2 FOR UPDATE"#,
     )
     .bind(patient_uuid)
@@ -9269,6 +9281,16 @@ async fn update_relation(
     let zip = keep(billing.zip, "address_zip");
     let city = keep(billing.city, "address_city");
     let country = keep(billing.country, "address_country");
+    // A patient record is a person; an older client keeps the stored answer.
+    let is_organisation = if body.related_patient_id.is_some() {
+        None
+    } else {
+        body.is_organisation.or_else(|| {
+            current
+                .try_get::<Option<bool>, _>("is_organisation")
+                .unwrap_or_default()
+        })
+    };
 
     let row = sqlx::query(&format!(
         r#"WITH upserted AS (
@@ -9284,7 +9306,8 @@ async fn update_relation(
                     address_zip = $11,
                     address_city = $12,
                     address_country = $13,
-                    is_default_payer = $14
+                    is_default_payer = $14,
+                    is_organisation = $15
                 WHERE patient_id = $1
                   AND id = $2
                 RETURNING {RELATION_RETURNING}
@@ -9305,6 +9328,7 @@ async fn update_relation(
     .bind(city)
     .bind(country)
     .bind(is_default_payer)
+    .bind(is_organisation)
     .fetch_one(&mut *transaction)
     .await
     .map_err(|error| relation_write_failed(error, FAILED))?;
@@ -9323,6 +9347,7 @@ async fn update_relation(
             "relation_type": body.relation_type,
             "related_patient_id": body.related_patient_id,
             "is_default_payer": is_default_payer,
+            "is_organisation": is_organisation,
         }),
     ));
 
@@ -10878,6 +10903,21 @@ fn build_relation_json(row: sqlx::postgres::PgRow, linked_patient_visible: bool)
         (None, Some(last)) if !last.is_empty() => last,
         _ => related_name.clone(),
     };
+    // The organisation box: a patient record is a person; a separate contact
+    // without an answer (a row from before the box, a relation of the
+    // patient creation or the lead conversion) shows how it is screened —
+    // by the legal form in its name — until staff save it.
+    let linked = row
+        .try_get::<Option<Uuid>, _>("related_patient_id")
+        .unwrap_or_default()
+        .is_some();
+    let is_organisation = !linked
+        && row
+            .try_get::<Option<bool>, _>("is_organisation")
+            .unwrap_or_default()
+            .unwrap_or_else(|| {
+                crate::sanctions::screening::contact_name_is_organisation(&related_name)
+            });
 
     serde_json::json!({
         "id": row.try_get::<Uuid, _>("id").unwrap_or_else(|_| Uuid::nil()),
@@ -10896,6 +10936,7 @@ fn build_relation_json(row: sqlx::postgres::PgRow, linked_patient_visible: bool)
         "address_city": row.try_get::<Option<String>, _>("address_city").unwrap_or_default(),
         "address_country": row.try_get::<Option<String>, _>("address_country").unwrap_or_default(),
         "is_default_payer": row.try_get::<bool, _>("is_default_payer").unwrap_or(false),
+        "is_organisation": is_organisation,
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
     })
 }

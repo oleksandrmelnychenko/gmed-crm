@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { RelationItem } from "./detail-tab-types";
-import { blankRelationForm, relationFormToPayload, relationToForm } from "./sheet-forms";
+import {
+  blankRelationForm,
+  relationFormToPayload,
+  relationNameSuggestsOrganisation,
+  relationToForm,
+} from "./sheet-forms";
 
 function relation(overrides: Partial<RelationItem> = {}): RelationItem {
   return {
@@ -46,5 +51,39 @@ describe("relation form country (QA 2026-10-11 B-25)", () => {
     expect(relationToForm(relation({ address_country: "Bavaria" })).addressCountry).toBe("Bavaria");
     expect(relationToForm(relation({ address_country: null })).addressCountry).toBe("");
     expect(blankRelationForm().addressCountry).toBe("");
+  });
+});
+
+describe("relation organisation box (sanctions screening, 2026-10-12)", () => {
+  it("shows and sends the answer of a separate contact", () => {
+    const company = relationToForm(relation({ related_name: "Polartek Shipping", is_organisation: true }));
+    expect(company.isOrganisation).toBe(true);
+    expect(relationFormToPayload(company, company.relatedName)).toMatchObject({ is_organisation: true });
+    const person = relationToForm(relation({ is_organisation: false }));
+    expect(person.isOrganisation).toBe(false);
+    expect(relationFormToPayload(person, person.relatedName)).toMatchObject({ is_organisation: false });
+    // An older server says nothing: a person until staff tick the box.
+    expect(relationToForm(relation()).isOrganisation).toBe(false);
+    expect(blankRelationForm().isOrganisation).toBe(false);
+  });
+
+  it("never marks a linked patient record as an organisation", () => {
+    const linked = relationToForm(
+      relation({ related_patient_id: "patient-2", related_name: "Beispiel GmbH", is_organisation: true }),
+    );
+    expect(linked.isOrganisation).toBe(false);
+    expect(relationFormToPayload({ ...linked, isOrganisation: true }, "Ben Muster")).toMatchObject({
+      related_patient_id: "patient-2",
+      is_organisation: null,
+    });
+  });
+
+  it("suggests the box for a name with a legal form only", () => {
+    for (const name of ["Beispiel GmbH", "Polartek Shipping LLC", "ООО Полартек", "Beispiel GmbH & Co. KG", "Muster AG"]) {
+      expect(relationNameSuggestsOrganisation(name), name).toBe(true);
+    }
+    for (const name of ["Viktor Zahler", "Polartek", "Anna Agnes Muster", "Sa Ko", ""]) {
+      expect(relationNameSuggestsOrganisation(name), name).toBe(false);
+    }
   });
 });

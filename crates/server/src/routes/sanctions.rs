@@ -276,17 +276,9 @@ async fn lift_country_block(
     let found = async {
         let scope = scope.expand(&state.db).await?;
         let blocked = policy::blocked_countries(&state.db).await?;
-        let mut countries: Vec<String> = Vec::new();
-        for lead in screening::load_leads_subjects(&state.db, &scope.lead_ids).await? {
-            for subject in lead.subjects {
-                countries.extend(subject.countries());
-            }
-        }
-        for patient in &scope.patient_ids {
-            if let Some(subject) = screening::load_patient_subject(&state.db, *patient).await? {
-                countries.extend(subject.countries());
-            }
-        }
+        // The countries the gate checks: the leads' subjects and the
+        // patients' with their paying relations and payer contacts.
+        let countries = gate::scope_countries(&state.db, &scope).await?;
         Ok::<_, sqlx::Error>(policy::evaluate_countries(&countries, &blocked, &[]).found)
     }
     .await;
@@ -340,7 +332,7 @@ async fn country_blocks(
         // Every lead a blocked country concerns, also one with a sanctions
         // hit (QA 2026-10-11 A-38a: it was missing while the hit was open).
         let flags = gate::country_flags(&state).await?;
-        let mut items = Vec::new();
+        let mut leads = Vec::new();
         for flag in &flags {
             let status = gate::lead_status(&state, flag.lead_id).await?;
             let name: Option<(String, String)> =
@@ -348,7 +340,7 @@ async fn country_blocks(
                     .bind(flag.lead_id)
                     .fetch_optional(&state.db)
                     .await?;
-            items.push(json!({
+            leads.push(json!({
                 "lead_id": flag.lead_id,
                 "name": name.map(|(first, last)| format!("{first} {last}")),
                 "flag": flag.flag,
@@ -357,11 +349,41 @@ async fn country_blocks(
                 "lift": status.country.lift,
             }));
         }
-        Ok::<_, sqlx::Error>(items)
+        // Every patient (2026-10-12): its own countries, those of the
+        // relations that pay or receive its invoices and of the payer
+        // contacts of its orders and invoices. The lift is the CEO's per
+        // patient, as for a lead.
+        let patient_flags = gate::patient_country_flags(&state).await?;
+        let patient_ids: Vec<Uuid> = patient_flags.iter().map(|flag| flag.patient_id).collect();
+        let names: Vec<(Uuid, Option<String>, Option<String>)> = sqlx::query_as(
+            r#"SELECT id,
+                      NULLIF(btrim(concat_ws(' ', first_name, last_name)), ''),
+                      patient_id
+               FROM patients WHERE id = ANY($1)"#,
+        )
+        .bind(&patient_ids)
+        .fetch_all(&state.db)
+        .await?;
+        let mut patients = Vec::with_capacity(patient_flags.len());
+        for flag in patient_flags {
+            let record = names.iter().find(|(id, ..)| *id == flag.patient_id);
+            patients.push(json!({
+                "patient_id": flag.patient_id,
+                "patient_number": record.and_then(|(_, _, number)| number.clone()),
+                "name": record.and_then(|(_, name, _)| name.clone()),
+                "flag": flag.flag,
+                "found": flag.found,
+                "blocking": flag.blocking,
+                "lift": flag.lift,
+            }));
+        }
+        Ok::<_, sqlx::Error>((leads, patients))
     }
     .await;
     match result {
-        Ok(items) => Json(json!({ "leads": items })).into_response(),
+        Ok((leads, patients)) => {
+            Json(json!({ "leads": leads, "patients": patients })).into_response()
+        }
         Err(error) => db_err(error, "country blocks"),
     }
 }
@@ -403,7 +425,8 @@ async fn hit_json(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<Value
                     subject.kind.as_str() == subject_kind && subject.subject_ref == subject_ref
                 })
             }),
-        // The patient or one of its relations that pay or receive invoices.
+        // The patient, one of its relations that pay or receive invoices or
+        // a payer contact of its orders and invoices.
         (None, Some(patient_id)) => screening::load_patient_subjects(&state.db, patient_id)
             .await?
             .into_iter()
@@ -418,7 +441,8 @@ async fn hit_json(state: &AppState, row: &sqlx::postgres::PgRow) -> Result<Value
         // Whose subject among several of a kind: a guardian's contact id, a
         // payer reference, `patient-bank` / `payer-bank` for a bank,
         // `invoice-recipient` for the invoice recipient, the relation id for
-        // a patient's relation.
+        // a patient's relation, `contact-…` (a hash of the name) for a payer
+        // contact.
         "subject_ref": subject_ref,
         "lead_id": lead_id,
         "patient_id": patient_id,

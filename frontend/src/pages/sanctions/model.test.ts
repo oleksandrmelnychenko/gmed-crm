@@ -200,6 +200,16 @@ describe("hit subject labels", () => {
     expect(subjectKindLabel("lead_guardian", ru, "contact-1")).toBe(ru.sanctions_kind_lead_guardian);
     expect(subjectKindLabel("patient", de)).toBe(de.sanctions_kind_patient);
   });
+
+  it("names a free-text payer contact of an order or invoice (2026-10-12)", () => {
+    const ref = "contact-0123456789abcdef";
+    expect(subjectKindLabel("payer_contact", ru, ref, "payer_contact")).toBe(
+      "Плательщик (контакт в заказе или счёте)",
+    );
+    expect(subjectKindLabel("payer_contact", de, ref, "payer_contact")).toBe(
+      "Zahler (Kontakt in Auftrag oder Rechnung)",
+    );
+  });
 });
 
 describe("list entry display", () => {

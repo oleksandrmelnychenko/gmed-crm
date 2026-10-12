@@ -1,11 +1,14 @@
 //! Blocked-country policy (owner decision 2026-10-03).
 //!
 //! When any citizenship or the residence country of the patient, of a
-//! guardian of a minor patient or of the third-party payer is in the system
-//! setting [`BLOCKED_COUNTRIES_SETTING`] (default `["RU"]`), the lead cannot be
-//! qualified or converted and the agency cannot countersign its order. The CEO
-//! can lift the block for one lead (or patient) with a mandatory reason; the
-//! lift covers the countries blocked at that moment.
+//! guardian of a minor patient, of the third-party payer or invoice recipient
+//! — on the patient side: of a relation that pays or receives the invoices or
+//! of a free-text payer contact of an order or invoice (2026-10-12) — is in
+//! the system setting [`BLOCKED_COUNTRIES_SETTING`] (default `["RU"]`), the
+//! lead cannot be qualified or converted and the agency cannot countersign
+//! its order. The CEO can lift the block for one lead or patient with a
+//! mandatory reason (the «Страны» tab lists both); the lift covers the
+//! countries blocked at that moment.
 //!
 //! Legal caveat: EU sanctions list persons and sectors; they do not forbid
 //! medical services to Russian citizens as such. Refusing by nationality is a

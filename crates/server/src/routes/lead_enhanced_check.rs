@@ -267,12 +267,12 @@ pub(crate) async fn load_subjects(
                             AND h.status = 'open'
                       ) AS patient_open,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind = 'lead_payer'
+                          WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'confirmed'
                       ) AS payer_confirmed,
                       COUNT(*) FILTER (
-                          WHERE (h.subject_kind = 'lead_payer'
+                          WHERE (h.subject_kind IN ('lead_payer', 'payer_contact')
                                  OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))
                             AND h.status = 'open'
                       ) AS payer_open,
@@ -285,10 +285,12 @@ pub(crate) async fn load_subjects(
                FROM sanctions_hits h
                -- A hit on the bank counts for whoever pays through it; a hit
                -- on the third-party invoice recipient who does not pay counts
-               -- for the payer's side (owner decisions 2026-10-11).
+               -- for the payer's side (owner decisions 2026-10-11), a payer
+               -- contact staff named on the lead's order is a payer
+               -- (2026-10-12).
                WHERE (h.lead_id = l.id
                       AND h.subject_kind IN ('lead_patient', 'lead_payer', 'lead_bank',
-                                             'lead_recipient'))
+                                             'lead_recipient', 'payer_contact'))
                   -- The patient record of a repeat intake or of the converted lead.
                   OR (h.subject_kind = 'patient'
                       AND h.patient_id IN (l.prospect_patient_id, l.converted_patient_id))

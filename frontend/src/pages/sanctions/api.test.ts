@@ -1,6 +1,32 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLeadSanctionsStatus } from "./api";
+import { normalizeCountryBlocks, normalizeLeadSanctionsStatus } from "./api";
+
+describe("normalizeCountryBlocks", () => {
+  it("keeps leads and patients as the server sent them", () => {
+    const lead = { lead_id: "lead-1", name: "Anna Muster", flag: "blocked_country", found: ["RU"], blocking: ["RU"], lift: null };
+    const patient = {
+      patient_id: "patient-1",
+      patient_number: "P-0001",
+      name: "Ben Muster",
+      flag: "country_lifted",
+      found: ["RU"],
+      blocking: [],
+      lift: null,
+    };
+    expect(normalizeCountryBlocks({ leads: [lead], patients: [patient] })).toEqual({
+      leads: [lead],
+      patients: [patient],
+    });
+  });
+
+  it("reads an older server's answer without patients and a broken one as empty", () => {
+    expect(normalizeCountryBlocks({ leads: [] })).toEqual({ leads: [], patients: [] });
+    for (const raw of [null, "<html>", { leads: "x", patients: 3 }]) {
+      expect(normalizeCountryBlocks(raw)).toEqual({ leads: [], patients: [] });
+    }
+  });
+});
 
 describe("normalizeLeadSanctionsStatus", () => {
   it("keeps a complete status as the server sent it", () => {

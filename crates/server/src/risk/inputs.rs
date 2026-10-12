@@ -20,11 +20,12 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 )"#;
 
 /// A sanctions hit (`h`) on the payer's side: the third-party payer and the
-/// people behind it, the bank the payer pays through and the third-party
+/// people behind it, the bank the payer pays through, the third-party
 /// invoice recipient who does not pay (owner decisions 2026-10-11: the
-/// recipient is a third party on the money side). Every other hit of the
-/// lead — the patient, a guardian, the bank the patient pays through — is the
-/// patient's side (T16).
+/// recipient is a third party on the money side) and a free-text payer
+/// contact staff named on one of the lead's orders (`payer_contact`,
+/// 2026-10-12). Every other hit of the lead — the patient, a guardian, the
+/// bank the patient pays through — is the patient's side (T16).
 ///
 /// Only a CONFIRMED hit counts (owner decision 2026-10-07, QA 2026-10-11
 /// A-15/A-21/A-33): "under sanctions" means a match the CEO confirmed. An
@@ -32,7 +33,7 @@ const ORDER_PAYER_SQL: &str = r#"COALESCE(
 /// [`crate::sanctions::gate`] only — it never raises the risk level, so it
 /// never opens a follow-up block, the enhanced check or the payer's proof of
 /// funds, and nothing the lead, the payer or the recipient sees changes.
-pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient') \
+pub(crate) const PAYER_SIDE_HIT_SQL: &str = "(h.subject_kind IN ('lead_payer', 'lead_recipient', 'payer_contact') \
      OR (h.subject_kind = 'lead_bank' AND h.subject_ref = 'payer-bank'))";
 
 /// The inputs of a lead; `None` when the lead does not exist.

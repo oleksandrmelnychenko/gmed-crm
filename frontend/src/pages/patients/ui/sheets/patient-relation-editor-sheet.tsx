@@ -33,6 +33,7 @@ import type { RelationItem } from "../../model/detail-tab-types";
 import {
   blankRelationForm,
   relationFormToPayload,
+  relationNameSuggestsOrganisation,
   relationToForm,
   type RelationFormState,
 } from "../../model/sheet-forms";
@@ -70,6 +71,8 @@ type RelationEditorState = {
   busy: boolean;
   patientSearch: string;
   error: string;
+  /** Staff set the organisation box themselves; the name no longer suggests it. */
+  organisationTouched: boolean;
 };
 
 type RelationEditorPatch =
@@ -82,6 +85,7 @@ function createRelationEditorState(): RelationEditorState {
     busy: false,
     patientSearch: "",
     error: "",
+    organisationTouched: false,
   };
 }
 
@@ -163,6 +167,7 @@ function PatientRelationEditorSheet({
         busy: false,
         patientSearch: "",
         error: "",
+        organisationTouched: false,
       });
       return;
     }
@@ -171,6 +176,8 @@ function PatientRelationEditorSheet({
       form: editingRelation ? relationToForm(editingRelation) : blankRelationForm(),
       patientSearch: "",
       error: "",
+      // A saved relation keeps its answer; only a new one follows the typed name.
+      organisationTouched: Boolean(editingRelation),
     });
   }, [editingRelation, open]);
 
@@ -339,11 +346,19 @@ function PatientRelationEditorSheet({
             <Input
               id="relation-name"
               value={form.relatedName}
-              onChange={(event) =>
+              onChange={(event) => {
+                const relatedName = event.target.value;
                 dispatchRelationState((current) => ({
-                  form: { ...current.form, relatedName: event.target.value },
-                }))
-              }
+                  form: {
+                    ...current.form,
+                    relatedName,
+                    // A legal form in a new contact's name ticks the box until staff decide.
+                    isOrganisation: current.organisationTouched
+                      ? current.form.isOrganisation
+                      : relationNameSuggestsOrganisation(relatedName),
+                  },
+                }));
+              }}
               className={inputClass}
               placeholder={t.patient_relation_name_placeholder}
               disabled={Boolean(form.relatedPatientId)}
@@ -399,6 +414,28 @@ function PatientRelationEditorSheet({
             />
             {t.patient_relation_emergency_contact}
           </label>
+
+          {/* A linked patient record is a person; only a separate contact can be an organisation. */}
+          {form.relatedPatientId ? null : (
+            <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground md:col-span-2">
+              <input
+                type="checkbox"
+                className={checkboxClass}
+                checked={form.isOrganisation}
+                onChange={(event) => {
+                  const isOrganisation = event.target.checked;
+                  dispatchRelationState((current) => ({
+                    form: { ...current.form, isOrganisation },
+                    organisationTouched: true,
+                  }));
+                }}
+              />
+              {tx(
+                "Организация (компания, фонд, страховая), а не частное лицо",
+                "Organisation (Firma, Stiftung, Versicherung), keine Privatperson",
+              )}
+            </label>
+          )}
         </div>
       </FormSection>
 

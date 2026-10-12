@@ -60,6 +60,11 @@ export type RelationItem = {
   address_country?: string | null;
   /** Receives the patient's invoices unless an order names another payer. */
   is_default_payer?: boolean;
+  /**
+   * A separate contact is an organisation (box in the relation dialog); for a row without an
+   * answer the server says how it is screened (legal form in the name). False for a linked record.
+   */
+  is_organisation?: boolean;
   created_at: string;
 };
 

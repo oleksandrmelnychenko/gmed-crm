@@ -79,6 +79,9 @@ export const PAYER_BANK_REF = "payer-bank";
  */
 export const PATIENT_RELATION_ROLES = ["default_payer", "invoice_payer", "legal_representative"] as const;
 
+/** `relation` of a free-text payer contact of an order or invoice (`payer_contact`). */
+export const PAYER_CONTACT_RELATION = "payer_contact";
+
 /**
  * What the hit is about. A bank says whose payment route it is: the payer's
  * bank (`subject_ref` "payer-bank") or the patient's. A patient's relation
@@ -111,6 +114,7 @@ export function subjectKindLabel(
     lead_payer: t.sanctions_kind_lead_payer,
     lead_recipient: t.sanctions_kind_lead_recipient,
     patient: t.sanctions_kind_patient,
+    payer_contact: t.sanctions_kind_payer_contact,
   }[kind];
 }
 

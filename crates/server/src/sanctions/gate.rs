@@ -4,7 +4,7 @@
 //! |---|---|---|---|
 //! | confirmed hit (permanent, nobody can lift it) | blocked | blocked | blocked |
 //! | open hit (until the CEO decides) | blocked | blocked | blocked |
-//! | blocked country (CEO can lift per lead) | blocked | blocked | allowed |
+//! | blocked country (CEO can lift per lead or patient) | blocked | blocked | allowed |
 //!
 //! The countersignature is `signed_agency` on the order, a framework contract
 //! set to `signed`, an e-signature package with an agency signer and a paper
@@ -17,9 +17,14 @@
 //! or deleting a quote, supplier invoices and dunning are never blocked.
 //!
 //! A hit of a patient's relation that pays or receives the invoices
-//! (`patient_relation`) belongs to the patient and holds like the patient's
-//! own. Invoices are not guarded for anybody (bookkeeping of services already
-//! rendered, GoBD); the hold is on new orders, contracts and signatures.
+//! (`patient_relation`) or of a free-text payer contact of the patient's
+//! orders and invoices (`payer_contact`) belongs to the patient and holds
+//! like the patient's own. Their countries are the patient's for the
+//! blocked-country row (2026-10-12, like the lead's payer and invoice
+//! recipient): the agency countersignature waits until the CEO lifts the
+//! block for the patient. Invoices are not guarded for anybody (bookkeeping
+//! of services already rendered, GoBD); the hold is on new orders, contracts
+//! and signatures.
 //!
 //! The gate is one middleware on the protected router ([`middleware`]) so the
 //! rule lives in one place instead of in every handler. [`classify`] maps the
@@ -187,7 +192,7 @@ impl Block {
             kind: BlockKind::BlockedCountry,
             code: BlockKind::BlockedCountry.code(),
             message: format!(
-                "Blocked country ({}): qualification, conversion and the agency countersignature need the CEO to lift the block for this lead",
+                "Blocked country ({}): qualification, conversion and the agency countersignature need the CEO to lift the block for this lead or patient",
                 countries.join(", ")
             ),
             permanent: false,
@@ -225,8 +230,13 @@ async fn hit_counts(db: &gmed_db::DbPool, scope: &Scope) -> Result<(i64, i64), s
     Ok((row.try_get("open_hits")?, row.try_get("confirmed_hits")?))
 }
 
-/// Citizenship and residence codes of every subject in the scope.
-async fn scope_countries(db: &gmed_db::DbPool, scope: &Scope) -> Result<Vec<String>, sqlx::Error> {
+/// Citizenship and residence codes of every subject in the scope: the
+/// leads' subjects and the patients' (the patient, the relations that pay or
+/// receive the invoices, the payer contacts of its orders and invoices).
+pub async fn scope_countries(
+    db: &gmed_db::DbPool,
+    scope: &Scope,
+) -> Result<Vec<String>, sqlx::Error> {
     let mut countries: Vec<String> = Vec::new();
     let mut push = |codes: Vec<String>| {
         for code in codes {
@@ -240,8 +250,9 @@ async fn scope_countries(db: &gmed_db::DbPool, scope: &Scope) -> Result<Vec<Stri
             push(subject.countries());
         }
     }
+    let mut patients = screening::load_patients_subjects(db, &scope.patient_ids).await?;
     for patient_id in &scope.patient_ids {
-        if let Some(subject) = screening::load_patient_subject(db, *patient_id).await? {
+        for subject in patients.remove(patient_id).unwrap_or_default() {
             push(subject.countries());
         }
     }
@@ -899,6 +910,120 @@ pub async fn country_flags(state: &AppState) -> Result<Vec<LeadFlag>, sqlx::Erro
                 flag: "country_lifted",
             });
         }
+    }
+    Ok(flags)
+}
+
+/// A patient a blocked country concerns, for the CEO's «Страны» tab.
+#[derive(Debug, Clone, Serialize)]
+pub struct PatientCountryFlag {
+    pub patient_id: Uuid,
+    /// `blocked_country` or `country_lifted`.
+    pub flag: &'static str,
+    pub found: Vec<String>,
+    pub blocking: Vec<String>,
+    pub lift: Option<CountryOverride>,
+}
+
+/// Every active or inactive patient a blocked country concerns (2026-10-12):
+/// the patient's own citizenships and residence, those of the relations that
+/// pay or receive the invoices and of the payer contacts of its orders and
+/// invoices, and — as the gate expands a patient's scope ([`Scope::expand`])
+/// — those of the leads the patient came from. A lift for the patient or for
+/// one of those leads counts. Open leads are listed by [`country_flags`]; a
+/// prospective patient is covered by its lead.
+pub async fn patient_country_flags(
+    state: &AppState,
+) -> Result<Vec<PatientCountryFlag>, sqlx::Error> {
+    let blocked = policy::blocked_countries(&state.db).await?;
+    if blocked.is_empty() {
+        return Ok(Vec::new());
+    }
+    let patient_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM patients
+           WHERE lifecycle_status IN ('active', 'inactive')
+             AND NOT COALESCE(legal_status ? 'anonymized_at', false)
+           ORDER BY last_name, first_name, id"#,
+    )
+    .fetch_all(&state.db)
+    .await?;
+    if patient_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut subjects = screening::load_patients_subjects(&state.db, &patient_ids).await?;
+    let lead_rows: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        r#"SELECT id, converted_patient_id, prospect_patient_id
+           FROM leads
+           WHERE converted_patient_id = ANY($1) OR prospect_patient_id = ANY($1)"#,
+    )
+    .bind(&patient_ids)
+    .fetch_all(&state.db)
+    .await?;
+    let lead_ids: Vec<Uuid> = lead_rows.iter().map(|(id, _, _)| *id).collect();
+    let lead_countries: Vec<(Uuid, Vec<String>)> =
+        screening::load_leads_subjects(&state.db, &lead_ids)
+            .await?
+            .into_iter()
+            .map(|lead| {
+                let countries = lead
+                    .subjects
+                    .iter()
+                    .flat_map(|subject| subject.countries())
+                    .collect();
+                (lead.lead_id, countries)
+            })
+            .collect();
+    let overrides = policy::active_overrides(&state.db, &lead_ids, &patient_ids).await?;
+    let mut flags = Vec::new();
+    for patient_id in patient_ids {
+        let own_leads: Vec<Uuid> = lead_rows
+            .iter()
+            .filter(|(_, converted, prospect)| {
+                *converted == Some(patient_id) || *prospect == Some(patient_id)
+            })
+            .map(|(lead_id, _, _)| *lead_id)
+            .collect();
+        let mut countries: Vec<String> = Vec::new();
+        let patient_codes = subjects
+            .remove(&patient_id)
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|subject| subject.countries())
+            .collect::<Vec<_>>();
+        let lead_codes = lead_countries
+            .iter()
+            .filter(|(lead_id, _)| own_leads.contains(lead_id))
+            .flat_map(|(_, codes)| codes.iter().cloned());
+        for code in patient_codes.into_iter().chain(lead_codes) {
+            if !countries.contains(&code) {
+                countries.push(code);
+            }
+        }
+        let patient_overrides: Vec<CountryOverride> = overrides
+            .iter()
+            .filter(|lift| {
+                lift.patient_id == Some(patient_id)
+                    || lift
+                        .lead_id
+                        .is_some_and(|lead_id| own_leads.contains(&lead_id))
+            })
+            .cloned()
+            .collect();
+        let evaluation = policy::evaluate_countries(&countries, &blocked, &patient_overrides);
+        if evaluation.found.is_empty() {
+            continue;
+        }
+        flags.push(PatientCountryFlag {
+            patient_id,
+            flag: if evaluation.blocking.is_empty() {
+                "country_lifted"
+            } else {
+                "blocked_country"
+            },
+            found: evaluation.found,
+            blocking: evaluation.blocking,
+            lift: patient_overrides.into_iter().next(),
+        });
     }
     Ok(flags)
 }

@@ -35,13 +35,22 @@
 //!   an order or an invoice names as payer, and the parents and guardians of
 //!   a minor patient (the contracting party and default invoice recipient) —
 //!   see [`relation_subjects`]. The hit belongs to the patient.
+//! * a free-text payer contact of an order or an invoice (`payer_contact`,
+//!   `payer_contact_name`, not a relation, 2026-10-12): owned by the patient
+//!   of an active or inactive patient's order or invoice, by the lead for an
+//!   order of a lead whose patient is still prospective — see
+//!   [`payer_contact_subjects`].
+//!
+//! Every subject but a bank counts for the blocked-country policy
+//! ([`SubjectRecord::countries`]).
 //!
 //! Triggers: database triggers queue a lead or patient whenever a screened
 //! field changes (any writer: wizard, public intake, patient portal, the
-//! patient card's relations); the worker in [`spawn_screening_worker`]
-//! screens the queue. A new list version re-screens every open subject
-//! ([`rescreen_all`]). The gate screens the lead once more right before
-//! qualification, conversion and the agency countersignature.
+//! patient card's relations, the payer of an order or an invoice); the worker
+//! in [`spawn_screening_worker`] screens the queue. A new list version
+//! re-screens every open subject ([`rescreen_all`]). The gate screens the
+//! lead once more right before qualification, conversion and the agency
+//! countersignature.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -77,6 +86,9 @@ pub enum SubjectKind {
     Patient,
     /// A relation of a patient who pays or receives the patient's invoices.
     PatientRelation,
+    /// A free-text payer contact of an order or an invoice (not a relation),
+    /// of a patient or of a lead.
+    PayerContact,
 }
 
 impl SubjectKind {
@@ -89,9 +101,16 @@ impl SubjectKind {
             Self::LeadRecipient => "lead_recipient",
             Self::Patient => "patient",
             Self::PatientRelation => "patient_relation",
+            Self::PayerContact => "payer_contact",
         }
     }
 }
+
+/// `relation` of a payer contact subject.
+pub const PAYER_CONTACT_RELATION: &str = "payer_contact";
+/// `subject_ref` of a payer contact: this prefix and 16 hex characters of the
+/// hash of the name ([`payer_contact_ref`]); one subject per name and owner.
+pub const PAYER_CONTACT_REF_PREFIX: &str = "contact-";
 
 /// `relation` of a relation subject: the patient's default payer
 /// (`patient_relations.is_default_payer`).
@@ -122,7 +141,8 @@ pub struct SubjectRecord {
     pub lead_id: Option<Uuid>,
     pub patient_id: Option<Uuid>,
     /// Guardian contact id or payer declaration id, the relation id of a
-    /// patient's relation; empty for the patient.
+    /// patient's relation, [`payer_contact_ref`] of a payer contact; empty
+    /// for the patient.
     pub subject_ref: String,
     pub subject: Subject,
     /// ISO codes of the residence country (country policy only).
@@ -134,14 +154,13 @@ pub struct SubjectRecord {
 impl SubjectRecord {
     /// Citizenships and residence, the countries the country policy checks.
     /// A bank has none: the policy is about people, the account country is
-    /// only a hint for the CEO's review. A patient's relation has none either:
-    /// the policy stays with the patient and the lead (whose block the CEO
-    /// lifts per lead); the relation's countries are shown in the review.
+    /// only a hint for the CEO's review. A patient's relation that pays or
+    /// receives the invoices and a payer contact count like the lead's payer
+    /// and invoice recipient (owner rule 2026-10-11, applied to the patient
+    /// side 2026-10-12): their country holds what the patient's own blocked
+    /// country holds until the CEO lifts it for the patient.
     pub fn countries(&self) -> Vec<String> {
-        if matches!(
-            self.kind,
-            SubjectKind::LeadBank | SubjectKind::PatientRelation
-        ) {
+        if self.kind == SubjectKind::LeadBank {
             return Vec::new();
         }
         let mut countries = self.subject.citizenships.clone();
@@ -308,6 +327,7 @@ pub async fn load_leads_subjects(
     let mut payers = load_payer_rows(db, lead_ids).await;
     let mut representatives = load_representative_rows(db, lead_ids).await?;
     let mut recipients = load_recipient_rows(db, lead_ids).await?;
+    let mut contacts = load_lead_contact_rows(db, lead_ids).await?;
     let today = crate::app_time::today();
     let mut leads = Vec::with_capacity(rows.len());
     for row in rows {
@@ -315,15 +335,49 @@ pub async fn load_leads_subjects(
         let payer_rows = payers.remove(&lead_id).unwrap_or_default();
         let representative_rows = representatives.remove(&lead_id).unwrap_or_default();
         let recipient = recipients.remove(&lead_id);
+        let contact_rows = contacts.remove(&lead_id).unwrap_or_default();
         if let Some(mut lead) =
             lead_subjects_from_row(&row, &payer_rows, &representative_rows, today)
         {
             lead.subjects
                 .extend(recipient_subjects(lead_id, recipient.as_ref(), &payer_rows));
+            let contacts =
+                payer_contact_subjects(Owner::Lead(lead_id), &contact_rows, &lead.subjects, &[]);
+            lead.subjects.extend(contacts);
             leads.push(lead);
         }
     }
     Ok(leads)
+}
+
+/// The free-text payer contacts (`payer_contact_name`, with the
+/// `payer_address_country`) of the leads' orders whose patient is not
+/// screened yet — none, or the prospective patient of an open lead — as JSON
+/// rows `{name, country}` by lead. Once the patient is active the patient
+/// owns them ([`load_patient_contact_rows`]).
+async fn load_lead_contact_rows(
+    db: &gmed_db::DbPool,
+    lead_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        r#"SELECT o.source_lead_id,
+                  jsonb_build_object('name', o.payer_contact_name,
+                                     'country', o.payer_address_country)
+           FROM orders o
+           LEFT JOIN patients p ON p.id = o.patient_id
+           WHERE o.source_lead_id = ANY($1)
+             AND NULLIF(btrim(o.payer_contact_name), '') IS NOT NULL
+             AND (p.id IS NULL OR p.lifecycle_status = 'prospective')
+           ORDER BY o.created_at, o.id"#,
+    )
+    .bind(lead_ids)
+    .fetch_all(db)
+    .await?;
+    let mut by_lead: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    for (lead_id, row) in rows {
+        by_lead.entry(lead_id).or_default().push(row);
+    }
+    Ok(by_lead)
 }
 
 /// The invoice recipients of the leads (`lead_invoice_recipients`, step 3 of
@@ -852,104 +906,154 @@ pub fn screen_subject(
     }
 }
 
-/// A patient as a subject; `None` for missing, prospective, deleted or
-/// anonymised records.
-pub async fn load_patient_subject(
-    db: &gmed_db::DbPool,
-    patient_id: Uuid,
-) -> Result<Option<SubjectRecord>, sqlx::Error> {
-    let Some(row) = sqlx::query(
-        r#"SELECT id, first_name, last_name, birth_date, citizenships, nationality,
-                  residence_country, address_country, lifecycle_status,
-                  legal_status ? 'anonymized_at' AS anonymized
-           FROM patients
-           WHERE id = $1"#,
-    )
-    .bind(patient_id)
-    .fetch_optional(db)
-    .await?
-    else {
-        return Ok(None);
-    };
-    let lifecycle = text(&row, "lifecycle_status");
+/// A patient row as a subject; `None` for prospective, deleted or anonymised
+/// records.
+fn patient_subject_from_row(row: &sqlx::postgres::PgRow) -> Option<SubjectRecord> {
+    let patient_id: Uuid = row.try_get("id").ok()?;
+    let lifecycle = text(row, "lifecycle_status");
     let anonymized: bool = row
         .try_get::<Option<bool>, _>("anonymized")
         .unwrap_or(None)
         .unwrap_or(false);
     if anonymized || matches!(lifecycle.as_str(), "prospective" | "deleted") {
-        return Ok(None);
+        return None;
     }
     let mut citizenships = iso_codes(
         &row.try_get::<Vec<String>, _>("citizenships")
             .unwrap_or_default(),
     );
-    if let Some(code) = country_code(&text(&row, "nationality"))
+    if let Some(code) = country_code(&text(row, "nationality"))
         && !citizenships.contains(&code)
     {
         citizenships.push(code);
     }
-    let residence = iso_codes(&[
-        text(&row, "residence_country"),
-        text(&row, "address_country"),
-    ]);
-    Ok(Some(SubjectRecord {
+    let residence = iso_codes(&[text(row, "residence_country"), text(row, "address_country")]);
+    Some(SubjectRecord {
         kind: SubjectKind::Patient,
         lead_id: None,
         patient_id: Some(patient_id),
         subject_ref: String::new(),
         subject: Subject {
-            first_name: text(&row, "first_name"),
+            first_name: text(row, "first_name"),
             middle_name: None,
-            last_name: text(&row, "last_name"),
+            last_name: text(row, "last_name"),
             date_of_birth: row.try_get("birth_date").unwrap_or(None),
             citizenships,
             organisation: false,
         },
         residence,
         relation: None,
-    }))
+    })
 }
 
-/// The subjects of a patient: the patient ([`load_patient_subject`]) and the
-/// relations that pay or receive the invoices ([`relation_subjects`]). Empty
-/// for missing, prospective, deleted or anonymised records — the relations of
-/// a patient that is not screened are not screened either.
+/// A patient as a subject; `None` for missing, prospective, deleted or
+/// anonymised records.
+pub async fn load_patient_subject(
+    db: &gmed_db::DbPool,
+    patient_id: Uuid,
+) -> Result<Option<SubjectRecord>, sqlx::Error> {
+    let row = sqlx::query(PATIENT_SUBJECT_SELECT)
+        .bind(vec![patient_id])
+        .fetch_optional(db)
+        .await?;
+    Ok(row.as_ref().and_then(patient_subject_from_row))
+}
+
+const PATIENT_SUBJECT_SELECT: &str = r#"
+    SELECT id, first_name, last_name, birth_date, citizenships, nationality,
+           residence_country, address_country, lifecycle_status,
+           legal_status ? 'anonymized_at' AS anonymized
+    FROM patients
+    WHERE id = ANY($1)"#;
+
+/// The subjects of a patient ([`load_patients_subjects`]).
 pub async fn load_patient_subjects(
     db: &gmed_db::DbPool,
     patient_id: Uuid,
 ) -> Result<Vec<SubjectRecord>, sqlx::Error> {
-    let Some(patient) = load_patient_subject(db, patient_id).await? else {
-        return Ok(Vec::new());
-    };
-    let rows = load_relation_rows(db, patient_id).await?;
-    let relations = relation_subjects(
-        patient_id,
-        patient.subject.date_of_birth,
-        &rows,
-        crate::app_time::today(),
-    );
-    let mut subjects = Vec::with_capacity(1 + relations.len());
-    subjects.push(patient);
-    subjects.extend(relations);
-    Ok(subjects)
+    Ok(load_patients_subjects(db, &[patient_id])
+        .await?
+        .remove(&patient_id)
+        .unwrap_or_default())
 }
 
-/// The relations of a patient as JSON rows for [`relation_subjects`]: the
-/// relation's own columns, whether an order or an invoice names it as payer
-/// (`names_payer`) and the patient record it is linked to (`linked`, `null`
-/// for a separate contact).
+/// The subjects of several patients by patient: the patient
+/// ([`patient_subject_from_row`]), the relations that pay or receive the
+/// invoices ([`relation_subjects`]) and the free-text payer contacts of its
+/// orders and invoices ([`payer_contact_subjects`]). Missing, prospective,
+/// deleted or anonymised records are left out — the relations and contacts
+/// of a patient that is not screened are not screened either.
+pub async fn load_patients_subjects(
+    db: &gmed_db::DbPool,
+    patient_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<SubjectRecord>>, sqlx::Error> {
+    let mut by_patient: HashMap<Uuid, Vec<SubjectRecord>> = HashMap::new();
+    if patient_ids.is_empty() {
+        return Ok(by_patient);
+    }
+    let patients: Vec<SubjectRecord> = sqlx::query(PATIENT_SUBJECT_SELECT)
+        .bind(patient_ids)
+        .fetch_all(db)
+        .await?
+        .iter()
+        .filter_map(patient_subject_from_row)
+        .collect();
+    let screened: Vec<Uuid> = patients
+        .iter()
+        .filter_map(|patient| patient.patient_id)
+        .collect();
+    if screened.is_empty() {
+        return Ok(by_patient);
+    }
+    let mut relations = load_relation_rows(db, &screened).await?;
+    let mut contacts = load_patient_contact_rows(db, &screened).await?;
+    let with_contacts: Vec<Uuid> = contacts.keys().copied().collect();
+    let declared = load_declared_payers(db, &with_contacts).await?;
+    let today = crate::app_time::today();
+    for patient in patients {
+        let Some(patient_id) = patient.patient_id else {
+            continue;
+        };
+        let relation_rows = relations.remove(&patient_id).unwrap_or_default();
+        let birth_date = patient.subject.date_of_birth;
+        let mut subjects = vec![patient];
+        subjects.extend(relation_subjects(
+            patient_id,
+            birth_date,
+            &relation_rows,
+            today,
+        ));
+        let contact_rows = contacts.remove(&patient_id).unwrap_or_default();
+        let contact_records = payer_contact_subjects(
+            Owner::Patient(patient_id),
+            &contact_rows,
+            &subjects,
+            declared.get(&patient_id).map(Vec::as_slice).unwrap_or(&[]),
+        );
+        subjects.extend(contact_records);
+        by_patient.insert(patient_id, subjects);
+    }
+    Ok(by_patient)
+}
+
+/// The relations of the patients as JSON rows for [`relation_subjects`], by
+/// patient: the relation's own columns, whether an order or an invoice names
+/// it as payer (`names_payer`) and the patient record it is linked to
+/// (`linked`, `null` for a separate contact).
 async fn load_relation_rows(
     db: &gmed_db::DbPool,
-    patient_id: Uuid,
-) -> Result<Vec<Value>, sqlx::Error> {
-    sqlx::query_scalar::<_, Value>(
-        r#"SELECT jsonb_build_object(
+    patient_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        r#"SELECT r.patient_id,
+                  jsonb_build_object(
                       'id', r.id,
                       'related_name', r.related_name,
                       'notes', r.notes,
                       'relation_type', r.relation_type,
                       'address_country', r.address_country,
                       'is_default_payer', r.is_default_payer,
+                      'is_organisation', r.is_organisation,
                       'names_payer',
                           EXISTS (SELECT 1 FROM orders o
                                   WHERE o.payer_patient_relation_id = r.id)
@@ -967,12 +1071,110 @@ async fn load_relation_rows(
                   )
            FROM patient_relations r
            LEFT JOIN patients p ON p.id = r.related_patient_id
-           WHERE r.patient_id = $1
+           WHERE r.patient_id = ANY($1)
            ORDER BY r.created_at, r.id"#,
     )
-    .bind(patient_id)
+    .bind(patient_ids)
     .fetch_all(db)
-    .await
+    .await?;
+    let mut by_patient: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    for (patient_id, row) in rows {
+        by_patient.entry(patient_id).or_default().push(row);
+    }
+    Ok(by_patient)
+}
+
+/// The free-text payer contacts of the patients' orders and invoices
+/// (`payer_contact_name` with the `payer_address_country`) as JSON rows
+/// `{name, country}` by patient, orders first, oldest first. Every order and
+/// invoice counts, whatever its status, like a relation an order names as
+/// payer.
+async fn load_patient_contact_rows(
+    db: &gmed_db::DbPool,
+    patient_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let rows: Vec<(Uuid, Value)> = sqlx::query_as(
+        r#"SELECT patient_id, contact FROM (
+               SELECT o.patient_id, 0 AS source, o.created_at, o.id,
+                      jsonb_build_object('name', o.payer_contact_name,
+                                         'country', o.payer_address_country) AS contact
+               FROM orders o
+               WHERE o.patient_id = ANY($1)
+                 AND NULLIF(btrim(o.payer_contact_name), '') IS NOT NULL
+               UNION ALL
+               SELECT i.patient_id, 1 AS source, i.created_at, i.id,
+                      jsonb_build_object('name', i.payer_contact_name,
+                                         'country', i.payer_address_country)
+               FROM invoices i
+               WHERE i.patient_id = ANY($1)
+                 AND NULLIF(btrim(i.payer_contact_name), '') IS NOT NULL
+           ) contacts
+           ORDER BY source, created_at, id"#,
+    )
+    .bind(patient_ids)
+    .fetch_all(db)
+    .await?;
+    let mut by_patient: HashMap<Uuid, Vec<Value>> = HashMap::new();
+    for (patient_id, row) in rows {
+        by_patient.entry(patient_id).or_default().push(row);
+    }
+    Ok(by_patient)
+}
+
+/// The third-party payers and invoice recipients the patients' leads declared
+/// (`lead_payer`, `lead_recipient` of a lead converted into the patient or
+/// whose prospective patient it is), by patient. The lead's payer declaration
+/// writes its payer onto the lead's orders as a free-text contact
+/// (`routes::lead_payer::sync_order_payers`); such a contact is screened with
+/// what the lead declared about it ([`payer_contact_subjects`]).
+async fn load_declared_payers(
+    db: &gmed_db::DbPool,
+    patient_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<SubjectRecord>>, sqlx::Error> {
+    let mut by_patient: HashMap<Uuid, Vec<SubjectRecord>> = HashMap::new();
+    if patient_ids.is_empty() {
+        return Ok(by_patient);
+    }
+    let leads: Vec<(Uuid, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        r#"SELECT id, converted_patient_id, prospect_patient_id
+           FROM leads
+           WHERE converted_patient_id = ANY($1) OR prospect_patient_id = ANY($1)"#,
+    )
+    .bind(patient_ids)
+    .fetch_all(db)
+    .await?;
+    if leads.is_empty() {
+        return Ok(by_patient);
+    }
+    let lead_ids: Vec<Uuid> = leads.iter().map(|(id, _, _)| *id).collect();
+    for lead in load_leads_subjects(db, &lead_ids).await? {
+        let declared: Vec<SubjectRecord> = lead
+            .subjects
+            .into_iter()
+            .filter(|record| {
+                matches!(
+                    record.kind,
+                    SubjectKind::LeadPayer | SubjectKind::LeadRecipient
+                )
+            })
+            .collect();
+        let mut owners: Vec<Uuid> = Vec::new();
+        for patient_id in [lead.converted_patient_id, lead.prospect_patient_id]
+            .into_iter()
+            .flatten()
+        {
+            if patient_ids.contains(&patient_id) && !owners.contains(&patient_id) {
+                owners.push(patient_id);
+            }
+        }
+        for patient_id in owners {
+            by_patient
+                .entry(patient_id)
+                .or_default()
+                .extend(declared.iter().cloned());
+        }
+    }
+    Ok(by_patient)
 }
 
 /// Legal forms that make a separate contact's name an organisation's. Only
@@ -1012,13 +1214,31 @@ fn notes_birth_date(notes: &str) -> Option<NaiveDate> {
 
 /// A separate contact by its name as staff entered it (the relation has no
 /// citizenship; a birth date only in its notes, [`notes_birth_date`]): a
-/// person by given names and the last word, an organisation by the whole name
-/// when it carries a legal form or is a single word (a person needs a first
-/// name to be screened; like a payer without a first name).
-fn contact_subject(name: &str, date_of_birth: Option<NaiveDate>) -> Subject {
+/// person by given names and the last word, an organisation by the whole
+/// name.
+///
+/// `organisation` is the box "Организация" of the relation dialog
+/// (`patient_relations.is_organisation`, 2026-10-12): ticked, an
+/// organisation; not ticked, a person. A single word is screened as an
+/// organisation all the same, since a person needs a given name to be
+/// screened (like a payer without a first name). Without an answer (`None`:
+/// rows from before the box, relations written by the patient creation or
+/// the lead conversion, a payer contact of an order or invoice) the name
+/// decides: a legal form ([`ORGANISATION_LEGAL_FORMS`]) or a single word make
+/// it an organisation.
+fn contact_subject(
+    name: &str,
+    date_of_birth: Option<NaiveDate>,
+    organisation: Option<bool>,
+) -> Subject {
     let whole = name.split_whitespace().collect::<Vec<_>>().join(" ");
     let (first_name, last_name) = split_full_name(&whole);
-    if first_name.is_empty() || names_an_organisation(&whole) {
+    let organisation = match organisation {
+        Some(true) => true,
+        Some(false) => first_name.is_empty(),
+        None => first_name.is_empty() || names_an_organisation(&whole),
+    };
+    if organisation {
         Subject {
             first_name: String::new(),
             middle_name: None,
@@ -1039,6 +1259,13 @@ fn contact_subject(name: &str, date_of_birth: Option<NaiveDate>) -> Subject {
     }
 }
 
+/// Whether a separate contact without an answer to the organisation box is
+/// screened as an organisation ([`contact_subject`]): what the relation
+/// dialog shows for such a row until staff save it.
+pub fn contact_name_is_organisation(name: &str) -> bool {
+    contact_subject(name, None, None).organisation
+}
+
 /// The relations of a patient that are screened (QA 2026-10-11 B-25: a
 /// relation marked "Оплачивает счета пациента по умолчанию" became the invoice
 /// recipient without screening), in this order of precedence for the role in
@@ -1056,12 +1283,13 @@ fn contact_subject(name: &str, date_of_birth: Option<NaiveDate>) -> Subject {
 /// Other relations (an adult's spouse, a friend, an emergency contact) are no
 /// subjects. A relation linked to a patient record (`linked`) is screened with
 /// that record's name, birth date and citizenships — the name an invoice
-/// carries — a separate contact by its name and the birth date in its notes
-/// (`contact_subject`). The residence is the relation's address country
-/// (where its invoices go), then the linked record's countries: shown to the
-/// CEO, not part of the country policy ([`SubjectRecord::countries`]). One
-/// subject per relation, the relation id as `subject_ref`; the hit belongs to
-/// the patient.
+/// carries — a separate contact by its name, the birth date in its notes and
+/// the organisation box (`is_organisation`, [`contact_subject`]). The
+/// residence is the relation's address country (where its invoices go), then
+/// the linked record's countries; with the citizenships they count for the
+/// blocked-country policy ([`SubjectRecord::countries`]). One subject per
+/// relation, the relation id as `subject_ref`; the hit belongs to the
+/// patient.
 pub fn relation_subjects(
     patient_id: Uuid,
     patient_birth_date: Option<NaiveDate>,
@@ -1119,6 +1347,7 @@ pub fn relation_subjects(
             None => contact_subject(
                 &json_text(row, "related_name"),
                 notes_birth_date(&json_text(row, "notes")),
+                row.get("is_organisation").and_then(Value::as_bool),
             ),
         };
         subjects.push(SubjectRecord {
@@ -1132,6 +1361,110 @@ pub fn relation_subjects(
         });
     }
     subjects
+}
+
+/// The canonical name tokens of a subject, sorted: two subjects with the same
+/// key are the same name, whatever the spelling noise, the word order or the
+/// split into first and last name.
+fn name_key(subject: &Subject) -> Vec<String> {
+    let mut tokens: Vec<String> = name_tokens(&format!(
+        "{} {} {}",
+        subject.first_name,
+        subject.middle_name.as_deref().unwrap_or_default(),
+        subject.last_name
+    ))
+    .into_iter()
+    .map(|token| token.canon)
+    .collect();
+    tokens.sort();
+    tokens
+}
+
+/// `subject_ref` of a payer contact with the name key `key`
+/// ([`PAYER_CONTACT_REF_PREFIX`] and 16 hex characters of its hash).
+pub fn payer_contact_ref(key: &[String]) -> String {
+    let digest = hex::encode(Sha256::digest(key.join(" ").as_bytes()));
+    format!("{PAYER_CONTACT_REF_PREFIX}{}", &digest[..16])
+}
+
+/// The free-text payer contacts of an owner's orders and invoices
+/// (`payer_contact_name`, a payer who is no relation; rows `{name, country}`)
+/// as subjects of the owner, 2026-10-12.
+///
+/// * One subject per name ([`name_key`], [`payer_contact_ref`]): the same
+///   contact on an order and its invoices is reviewed once; the countries of
+///   all of them (`payer_address_country`) are its residence and count for
+///   the blocked-country policy.
+/// * A contact with the name of another subject of the owner (`known`: the
+///   patient or the lead's patient, a relation, the lead's payer or invoice
+///   recipient) is that subject and not screened twice — the lead's payer
+///   declaration writes its payer onto the lead's orders as such a contact.
+/// * A patient's contact with the name of a payer or invoice recipient one of
+///   the patient's leads declared (`declared`) is screened with what the lead
+///   declared (birth date, citizenships, organisation or person, residence):
+///   the same data as the lead's subject, so the CEO's decision on the lead's
+///   hit carries over ([`covered_by_lead_hit`]).
+/// * Otherwise the contact is screened by its name like a separate relation
+///   without an answer to the organisation box ([`contact_subject`]).
+pub fn payer_contact_subjects(
+    owner: Owner,
+    rows: &[Value],
+    known: &[SubjectRecord],
+    declared: &[SubjectRecord],
+) -> Vec<SubjectRecord> {
+    let (lead_id, patient_id) = match owner {
+        Owner::Lead(id) => (Some(id), None),
+        Owner::Patient(id) => (None, Some(id)),
+    };
+    let known_keys: Vec<Vec<String>> = known
+        .iter()
+        .filter(|record| record.kind != SubjectKind::LeadBank)
+        .map(|record| name_key(&record.subject))
+        .filter(|key| !key.is_empty())
+        .collect();
+    let mut subjects: Vec<(Vec<String>, SubjectRecord)> = Vec::new();
+    for row in rows {
+        let plain = contact_subject(&json_text(row, "name"), None, None);
+        let key = name_key(&plain);
+        if key.is_empty() || known_keys.contains(&key) {
+            continue;
+        }
+        let countries = json_codes(row, "country");
+        if let Some((_, record)) = subjects.iter_mut().find(|(existing, _)| *existing == key) {
+            for code in countries {
+                if !record.residence.contains(&code) {
+                    record.residence.push(code);
+                }
+            }
+            continue;
+        }
+        let (subject, mut residence) = match declared
+            .iter()
+            .find(|record| name_key(&record.subject) == key)
+        {
+            Some(record) => (record.subject.clone(), record.residence.clone()),
+            None => (plain, Vec::new()),
+        };
+        for code in countries {
+            if !residence.contains(&code) {
+                residence.push(code);
+            }
+        }
+        let subject_ref = payer_contact_ref(&key);
+        subjects.push((
+            key,
+            SubjectRecord {
+                kind: SubjectKind::PayerContact,
+                lead_id,
+                patient_id,
+                subject_ref,
+                subject,
+                residence,
+                relation: Some(PAYER_CONTACT_RELATION.to_string()),
+            },
+        ));
+    }
+    subjects.into_iter().map(|(_, record)| record).collect()
 }
 
 /// Normalised fingerprint of what we know about a subject: a false-positive
@@ -1204,8 +1537,9 @@ pub async fn screen_lead(state: &AppState, lead_id: Uuid) -> Result<ScreenReport
     Ok(report)
 }
 
-/// Screens a patient and the relations that pay or receive its invoices
-/// ([`load_patient_subjects`]) and stores their possible matches.
+/// Screens a patient, the relations that pay or receive its invoices and the
+/// payer contacts of its orders and invoices ([`load_patient_subjects`]) and
+/// stores their possible matches.
 pub async fn screen_patient(
     state: &AppState,
     patient_id: Uuid,
@@ -1248,6 +1582,54 @@ struct ExistingHit {
     entry_fingerprint: String,
 }
 
+/// A hit of one of a patient's leads (converted into the patient or with the
+/// patient as prospect).
+#[derive(Debug, Clone)]
+pub struct LeadHit {
+    pub kind: String,
+    pub logical_id: String,
+    pub subject_fingerprint: String,
+    pub entry_fingerprint: String,
+    pub status: String,
+}
+
+/// Whether a match of a patient's subject is already a hit of one of the
+/// patient's leads, so no hit of the patient is created:
+///
+/// * the patient keeps the CEO's false-positive decisions about the lead's
+///   patient (`lead_patient`) as long as the data are the same;
+/// * a payer contact ([`payer_contact_subjects`]) that is the lead's payer,
+///   invoice recipient or payer contact with the same data is covered by the
+///   lead's hit: a false positive as long as the data are the same, an open
+///   or confirmed hit because it holds the patient through the gate already
+///   (`gate::Scope::expand`) — the CEO reviews one person once.
+///
+/// The lead's decisions are never about a relation that happens to carry the
+/// same data.
+pub fn covered_by_lead_hit(
+    kind: SubjectKind,
+    logical_id: &str,
+    subject_fingerprint: &str,
+    entry_fingerprint: &str,
+    lead_hits: &[LeadHit],
+) -> bool {
+    let kinds: &[&str] = match kind {
+        SubjectKind::Patient => &["lead_patient"],
+        SubjectKind::PayerContact => &["lead_payer", "lead_recipient", "payer_contact"],
+        _ => return false,
+    };
+    lead_hits.iter().any(|hit| {
+        kinds.contains(&hit.kind.as_str())
+            && hit.logical_id == logical_id
+            && hit.subject_fingerprint == subject_fingerprint
+            && match hit.status.as_str() {
+                "false_positive" => hit.entry_fingerprint == entry_fingerprint,
+                "open" | "confirmed" => kind == SubjectKind::PayerContact,
+                _ => false,
+            }
+    })
+}
+
 async fn screen_owner(
     state: &AppState,
     index: &ActiveIndex,
@@ -1286,23 +1668,33 @@ async fn screen_owner(
         });
     }
 
-    // A patient converted from a lead keeps the CEO's false-positive
-    // decisions about the lead's patient as long as the data are the same.
-    let inherited: HashSet<(String, String, String)> = match owner {
-        Owner::Patient(patient_id) => sqlx::query_as::<_, (String, String, String)>(
-            r#"SELECT h.list_logical_id, h.subject_fingerprint, h.entry_fingerprint
-               FROM sanctions_hits h
-               JOIN leads l ON l.id = h.lead_id
-               WHERE l.converted_patient_id = $1
-                 AND h.subject_kind = 'lead_patient'
-                 AND h.status = 'false_positive'"#,
-        )
-        .bind(patient_id)
-        .fetch_all(&mut *tx)
-        .await?
-        .into_iter()
-        .collect(),
-        Owner::Lead(_) => HashSet::new(),
+    // The hits of the patient's leads: what the CEO decided (or still
+    // reviews) about the lead's subjects carries over (`covered_by_lead_hit`).
+    let lead_hits: Vec<LeadHit> = match owner {
+        Owner::Patient(patient_id) => {
+            sqlx::query_as::<_, (String, String, String, String, String)>(
+                r#"SELECT h.subject_kind, h.list_logical_id, h.subject_fingerprint,
+                          h.entry_fingerprint, h.status
+                   FROM sanctions_hits h
+                   JOIN leads l ON l.id = h.lead_id
+                   WHERE l.converted_patient_id = $1 OR l.prospect_patient_id = $1"#,
+            )
+            .bind(patient_id)
+            .fetch_all(&mut *tx)
+            .await?
+            .into_iter()
+            .map(
+                |(kind, logical_id, subject_fingerprint, entry_fingerprint, status)| LeadHit {
+                    kind,
+                    logical_id,
+                    subject_fingerprint,
+                    entry_fingerprint,
+                    status,
+                },
+            )
+            .collect()
+        }
+        Owner::Lead(_) => Vec::new(),
     };
 
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
@@ -1367,15 +1759,13 @@ async fn screen_owner(
                 .await?;
                 continue;
             }
-            // The lead's decisions are about the patient only, never about a
-            // relation that happens to carry the same data.
-            if record.kind == SubjectKind::Patient
-                && inherited.contains(&(
-                    entry.logical_id.clone(),
-                    subject_fp.clone(),
-                    entry_fp.clone(),
-                ))
-            {
+            if covered_by_lead_hit(
+                record.kind,
+                &entry.logical_id,
+                &subject_fp,
+                &entry_fp,
+                &lead_hits,
+            ) {
                 continue;
             }
 
@@ -1608,8 +1998,8 @@ pub struct RescreenReport {
 }
 
 /// Screens every open lead and every active or inactive patient (with the
-/// relations that pay or receive its invoices) again, after a new list
-/// version.
+/// relations that pay or receive its invoices and the payer contacts of its
+/// orders and invoices) again, after a new list version.
 pub async fn rescreen_all(state: &AppState) -> Result<RescreenReport, sqlx::Error> {
     let lead_ids: Vec<Uuid> = sqlx::query_scalar(
         r#"SELECT id FROM leads
@@ -2284,6 +2674,7 @@ mod tests {
             "relation_type": relation_type,
             "address_country": null,
             "is_default_payer": false,
+            "is_organisation": null,
             "names_payer": false,
             "linked": null,
         });
@@ -2342,10 +2733,10 @@ mod tests {
             ),
             ("Testomir", "Korneev")
         );
-        // The address country (a legacy name) is shown, not part of the
-        // country policy.
+        // The address country (a legacy name) is read as its code and counts
+        // for the country policy like the lead's payer's (2026-10-12).
         assert_eq!(payer.residence, ["DE"]);
-        assert!(payer.countries().is_empty());
+        assert_eq!(payer.countries(), ["DE"]);
         assert_eq!(payer.snapshot()["relation"], "default_payer");
         assert_eq!(subjects[1].subject_ref, order_payer.to_string());
         assert_eq!(subjects[1].relation.as_deref(), Some("invoice_payer"));
@@ -2417,11 +2808,14 @@ mod tests {
         );
         assert_eq!(record.subject.citizenships, ["RU", "UA"]);
         assert_eq!(record.residence, ["AT", "CY"]);
+        // Citizenships and countries of the linked record count for the
+        // country policy.
+        assert_eq!(record.countries(), ["RU", "UA", "AT", "CY"]);
 
-        // A separate contact: a person by given names and the last word; a
-        // legal form or a single word make it an organisation by the whole
-        // name.
-        let subject = |name: &str| contact_subject(name, None);
+        // A separate contact without an answer to the organisation box: a
+        // person by given names and the last word; a legal form or a single
+        // word make it an organisation by the whole name.
+        let subject = |name: &str| contact_subject(name, None, None);
         let person = subject("Anna Maria Beispiel");
         assert!(!person.organisation);
         assert_eq!(
@@ -2458,8 +2852,12 @@ mod tests {
             assert_eq!(notes_birth_date(notes), None, "{notes}");
         }
         assert_eq!(
-            contact_subject("Polartek Shipping LLC", NaiveDate::from_ymd_opt(1985, 3, 2))
-                .date_of_birth,
+            contact_subject(
+                "Polartek Shipping LLC",
+                NaiveDate::from_ymd_opt(1985, 3, 2),
+                None
+            )
+            .date_of_birth,
             None
         );
         for name in [
@@ -2507,5 +2905,251 @@ mod tests {
             1
         );
         assert!(screen_subject(&index, &record("Mia Beispiel")).is_empty());
+    }
+
+    #[test]
+    fn the_organisation_box_decides_how_a_separate_contact_is_screened() {
+        let index = crate::sanctions::matching::SanctionsIndex::build(
+            crate::sanctions::fsf::parse_fsf_xml(include_bytes!("testdata/synthetic_fsf_1_1.xml"))
+                .unwrap()
+                .entries,
+        );
+        let today = NaiveDate::from_ymd_opt(2026, 10, 11).unwrap();
+        let record = |name: &str, organisation: Value| {
+            relation_subjects(
+                Uuid::new_v4(),
+                None,
+                &[relation_row(
+                    Uuid::new_v4(),
+                    name,
+                    "other",
+                    json!({ "is_default_payer": true, "is_organisation": organisation }),
+                )],
+                today,
+            )
+            .remove(0)
+        };
+        // A company name without a legal form: the guess takes it for a
+        // person, the ticked box screens it against the listed entities.
+        let guessed = record("Polartek Shipping", Value::Null);
+        assert!(!guessed.subject.organisation);
+        assert!(screen_subject(&index, &guessed).is_empty());
+        let ticked = record("Polartek Shipping", json!(true));
+        assert!(ticked.subject.organisation);
+        assert_eq!(ticked.subject.first_name, "");
+        assert_eq!(ticked.subject.last_name, "Polartek Shipping");
+        assert_eq!(screen_subject(&index, &ticked).len(), 1);
+        // Not ticked: a person, also with a word that looks like a legal
+        // form; a single word still goes as an organisation (a person needs
+        // a given name).
+        let person = record("Anna Ag", json!(false));
+        assert!(!person.subject.organisation);
+        assert_eq!(person.subject.first_name, "Anna");
+        assert!(record("Anna Ag", Value::Null).subject.organisation);
+        assert!(record("Polartek", json!(false)).subject.organisation);
+        // The answer is part of the fingerprint: a changed box is reviewed
+        // again.
+        assert_ne!(
+            subject_fingerprint(&guessed.subject),
+            subject_fingerprint(&ticked.subject)
+        );
+        // What the dialog shows for a row without an answer.
+        assert!(contact_name_is_organisation("Beispiel GmbH"));
+        assert!(contact_name_is_organisation("Polartek"));
+        assert!(!contact_name_is_organisation("Viktor Zahler"));
+    }
+
+    fn contact(name: &str, country: Option<&str>) -> Value {
+        json!({ "name": name, "country": country })
+    }
+
+    #[test]
+    fn a_payer_contact_is_one_subject_per_name_with_the_countries_of_all_its_records() {
+        let patient_id = Uuid::new_v4();
+        let patient = SubjectRecord {
+            kind: SubjectKind::Patient,
+            lead_id: None,
+            patient_id: Some(patient_id),
+            subject_ref: String::new(),
+            subject: Subject {
+                first_name: "Anna".into(),
+                last_name: "Muster".into(),
+                ..Subject::default()
+            },
+            residence: vec!["DE".into()],
+            relation: None,
+        };
+        let relation = relation_subjects(
+            patient_id,
+            None,
+            &[relation_row(
+                Uuid::new_v4(),
+                "Ben Muster",
+                "spouse",
+                json!({ "is_default_payer": true }),
+            )],
+            NaiveDate::from_ymd_opt(2026, 10, 12).unwrap(),
+        );
+        let mut known = vec![patient];
+        known.extend(relation);
+        let subjects = payer_contact_subjects(
+            Owner::Patient(patient_id),
+            &[
+                contact("Viktor Zahler", Some("AT")),
+                // The same name on an invoice, spelled differently: one
+                // subject, both countries.
+                contact("  ZAHLER   Viktor ", Some("Russland")),
+                contact("Viktor Zahler", None),
+                // The relation and the patient are screened as such.
+                contact("Ben Muster", Some("RU")),
+                contact("Anna Muster", None),
+                contact("Beispiel GmbH", Some("CY")),
+                contact("   ", Some("RU")),
+            ],
+            &known,
+            &[],
+        );
+        assert_eq!(subjects.len(), 2, "{subjects:?}");
+        let person = &subjects[0];
+        assert_eq!(person.kind, SubjectKind::PayerContact);
+        assert_eq!(person.kind.as_str(), "payer_contact");
+        assert_eq!(person.patient_id, Some(patient_id));
+        assert_eq!(person.lead_id, None);
+        assert_eq!(person.relation.as_deref(), Some(PAYER_CONTACT_RELATION));
+        assert!(person.subject_ref.starts_with(PAYER_CONTACT_REF_PREFIX));
+        assert_eq!(
+            person.subject_ref.len(),
+            PAYER_CONTACT_REF_PREFIX.len() + 16
+        );
+        assert!(!person.subject.organisation);
+        assert_eq!(person.residence, ["AT", "RU"]);
+        // The countries count for the blocked-country policy.
+        assert_eq!(person.countries(), ["AT", "RU"]);
+        let company = &subjects[1];
+        assert!(company.subject.organisation);
+        assert_eq!(company.subject.last_name, "Beispiel GmbH");
+        assert_eq!(company.countries(), ["CY"]);
+        // The reference follows the name, not the record or the spelling.
+        let again = payer_contact_subjects(
+            Owner::Lead(Uuid::new_v4()),
+            &[contact("Viktor  Zahler", None)],
+            &[],
+            &[],
+        );
+        assert_eq!(again[0].subject_ref, person.subject_ref);
+        assert!(again[0].lead_id.is_some());
+        assert_eq!(again[0].patient_id, None);
+    }
+
+    #[test]
+    fn a_payer_contact_the_lead_declared_is_screened_with_the_leads_data() {
+        let lead_id = Uuid::new_v4();
+        let declared = payer_subjects(
+            lead_id,
+            &[json!({
+                "payer_kind": "third_party",
+                "payer_type": "person",
+                "first_name": "Testomir",
+                "last_name": "Korneev",
+                "date_of_birth": "1961-03-14",
+                "citizenships": ["RU"],
+                "country": "CY",
+            })],
+        );
+        // On the lead's own orders the declaration's payer is the lead's
+        // payer subject, not a contact of its own.
+        assert!(
+            payer_contact_subjects(
+                Owner::Lead(lead_id),
+                &[contact("Testomir Korneev", Some("CY"))],
+                &declared,
+                &[],
+            )
+            .is_empty()
+        );
+        // On the converted patient's orders it is the patient's contact,
+        // screened with what the lead declared: the same fingerprint as the
+        // lead's subject, so the CEO's decision on the lead's hit carries
+        // over.
+        let patient_id = Uuid::new_v4();
+        let subjects = payer_contact_subjects(
+            Owner::Patient(patient_id),
+            &[contact("Testomir Korneev", Some("AT"))],
+            &[],
+            &declared,
+        );
+        assert_eq!(subjects.len(), 1);
+        let record = &subjects[0];
+        assert_eq!(
+            record.subject.date_of_birth,
+            NaiveDate::from_ymd_opt(1961, 3, 14)
+        );
+        assert_eq!(record.subject.citizenships, ["RU"]);
+        assert_eq!(record.residence, ["CY", "AT"]);
+        assert_eq!(record.countries(), ["RU", "CY", "AT"]);
+        let fingerprint = subject_fingerprint(&record.subject);
+        assert_eq!(fingerprint, subject_fingerprint(&declared[0].subject));
+
+        let hit = |kind: &str, status: &str, subject: &str| LeadHit {
+            kind: kind.into(),
+            logical_id: "900101".into(),
+            subject_fingerprint: subject.into(),
+            entry_fingerprint: "entry".into(),
+            status: status.into(),
+        };
+        let covered = |hits: &[LeadHit]| {
+            covered_by_lead_hit(
+                SubjectKind::PayerContact,
+                "900101",
+                &fingerprint,
+                "entry",
+                hits,
+            )
+        };
+        assert!(covered(&[hit(
+            "lead_payer",
+            "false_positive",
+            &fingerprint
+        )]));
+        assert!(covered(&[hit("lead_payer", "open", &fingerprint)]));
+        assert!(covered(&[hit("lead_recipient", "confirmed", &fingerprint)]));
+        assert!(covered(&[hit("payer_contact", "open", &fingerprint)]));
+        // Other data, another list entry or another kind: a hit of its own.
+        assert!(!covered(&[hit("lead_payer", "false_positive", "other")]));
+        assert!(!covered(&[hit(
+            "lead_patient",
+            "false_positive",
+            &fingerprint
+        )]));
+        assert!(!covered_by_lead_hit(
+            SubjectKind::PayerContact,
+            "900101",
+            &fingerprint,
+            "amended",
+            &[hit("lead_payer", "false_positive", &fingerprint)],
+        ));
+        // The patient keeps only false positives about the lead's patient;
+        // a relation never inherits.
+        assert!(covered_by_lead_hit(
+            SubjectKind::Patient,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("lead_patient", "false_positive", "fp")],
+        ));
+        assert!(!covered_by_lead_hit(
+            SubjectKind::Patient,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("lead_patient", "open", "fp")],
+        ));
+        assert!(!covered_by_lead_hit(
+            SubjectKind::PatientRelation,
+            "900101",
+            "fp",
+            "entry",
+            &[hit("lead_patient", "false_positive", "fp")],
+        ));
     }
 }

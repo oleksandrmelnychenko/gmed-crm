@@ -2420,3 +2420,534 @@ async fn a_patients_relation_who_pays_is_screened_and_held_like_the_patient() {
     .await;
     assert!(not_a_gate_block(&body), "{body}");
 }
+
+/// An order of a patient, as the order intake creates one.
+async fn insert_patient_order(app: &TestApp, patient_id: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(format!(
+        "ORD-RC-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ))
+    .bind(patient_id)
+    .bind(app.pm_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap()
+}
+
+/// The agency's countersignature of an order.
+async fn countersign(app: &TestApp, order_id: Uuid) -> (StatusCode, Value) {
+    request(
+        app,
+        "POST",
+        &format!("/orders/{order_id}/commercial-basis"),
+        &app.pm(),
+        Some(json!({ "signed_agency": true })),
+    )
+    .await
+}
+
+/// The patient's entry in the CEO's «Страны» tab.
+async fn patient_country_block(app: &TestApp, patient_id: Uuid) -> Option<Value> {
+    let (code, blocks) = request(app, "GET", "/sanctions/country-blocks", &app.ceo(), None).await;
+    assert_eq!(code, StatusCode::OK, "{blocks}");
+    blocks["patients"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no patients: {blocks}"))
+        .iter()
+        .find(|item| item["patient_id"] == json!(patient_id))
+        .cloned()
+}
+
+/// Owner rule 2026-10-11 on the patient side (2026-10-12): the country of a
+/// relation that pays or receives the invoices holds what the patient's own
+/// blocked country holds — the agency countersignature, not other order
+/// work — until the CEO lifts it for the patient in the «Страны» tab. The
+/// relation and the patient learn nothing.
+#[tokio::test]
+async fn a_paying_relations_blocked_country_holds_until_the_ceo_lifts_it_for_the_patient() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    // The country policy works without a list (default: RU).
+    let patient = insert_patient(&app, "Anna", "Muster", "1990-02-02").await;
+    let order_id = insert_patient_order(&app, patient).await;
+
+    // A friend who pays nothing: the country does not count.
+    save_relation(
+        &app,
+        patient,
+        None,
+        json!({ "related_name": "Mia Beispiel", "relation_type": "friend", "address_country": "RU" }),
+    )
+    .await;
+    let (_, body) = countersign(&app, order_id).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    assert!(patient_country_block(&app, patient).await.is_none());
+
+    // The default payer lives in a blocked country.
+    let payer = save_relation(
+        &app,
+        patient,
+        None,
+        json!({
+            "related_name": "Viktor Zahler",
+            "relation_type": "other",
+            "address_street": "Musterweg 1",
+            "address_zip": "10115",
+            "address_city": "Moskau",
+            "address_country": "RU",
+            "is_default_payer": true
+        }),
+    )
+    .await;
+    let payer_id = payer["id"].as_str().unwrap().to_string();
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+    assert_eq!(body["countries"], json!(["RU"]));
+    // Other order work goes on, as for the patient's own country.
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/orders/{order_id}/commercial-basis"),
+        &app.pm(),
+        Some(json!({ "needs_description": "Check-up" })),
+    )
+    .await;
+    assert!(not_a_gate_block(&body), "{body}");
+    let (_, body) = request(
+        &app,
+        "POST",
+        &format!("/patients/{patient}/order-intakes"),
+        &app.pm(),
+        Some(json!({})),
+    )
+    .await;
+    assert!(not_a_gate_block(&body), "{body}");
+    // Nothing about the block in the relations list.
+    let (code, relations) = request(
+        &app,
+        "GET",
+        &format!("/patients/{patient}/relations"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{relations}");
+    let text = relations.to_string();
+    assert!(
+        !text.contains("blocked") && !text.contains("sanction"),
+        "{relations}"
+    );
+
+    // The CEO sees the patient in the «Страны» tab; nobody else reads it.
+    let item = patient_country_block(&app, patient)
+        .await
+        .expect("the patient is listed");
+    assert_eq!(item["flag"], "blocked_country", "{item}");
+    assert_eq!(item["blocking"], json!(["RU"]), "{item}");
+    assert_eq!(item["name"], "Anna Muster", "{item}");
+    assert!(item["patient_number"].is_string(), "{item}");
+    let (code, _) = request(&app, "GET", "/sanctions/country-blocks", &app.pm(), None).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+
+    // Lifting needs the CEO and a reason.
+    let lift_path = format!("/sanctions/patients/{patient}/country-override");
+    let reason = json!({ "reason": "Payer lives in Germany since 2001, checked" });
+    let (code, _) = request(&app, "POST", &lift_path, &app.pm(), Some(reason.clone())).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    let (code, lift) = request(&app, "POST", &lift_path, &app.ceo(), Some(reason)).await;
+    assert_eq!(code, StatusCode::CREATED, "{lift}");
+    assert_eq!(lift["countries"], json!(["RU"]), "{lift}");
+    assert_eq!(lift["patient_id"], json!(patient), "{lift}");
+    let item = patient_country_block(&app, patient).await.unwrap();
+    assert_eq!(item["flag"], "country_lifted", "{item}");
+    assert_eq!(item["lift"]["lifted_by_name"], "Clara Chefin", "{item}");
+    let (_, body) = countersign(&app, order_id).await;
+    assert!(not_a_gate_block(&body), "{body}");
+
+    // A country the lift did not cover blocks again.
+    let (code, body) = request(
+        &app,
+        "PUT",
+        "/sanctions/settings/blocked-countries",
+        &app.ceo(),
+        Some(json!({ "countries": ["RU", "BY"] })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    save_relation(
+        &app,
+        patient,
+        Some(&payer_id),
+        json!({
+            "related_name": "Viktor Zahler",
+            "relation_type": "other",
+            "address_country": "BY",
+            "is_default_payer": true
+        }),
+    )
+    .await;
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["countries"], json!(["BY"]));
+    assert_eq!(
+        patient_country_block(&app, patient).await.unwrap()["flag"],
+        "blocked_country"
+    );
+
+    // A minor's parent is the contracting party: its country counts too.
+    let child = insert_patient(&app, "Mia", "Muster", "2015-06-01").await;
+    let child_order = insert_patient_order(&app, child).await;
+    save_relation(
+        &app,
+        child,
+        None,
+        json!({ "related_name": "Ben Muster", "relation_type": "parent", "address_country": "RU" }),
+    )
+    .await;
+    let (code, body) = countersign(&app, child_order).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'sanctions_country_block_lifted' AND entity_type = 'patient' AND entity_id = $1",
+    )
+    .bind(patient)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+/// The box "Организация" of the relation dialog (2026-10-12) decides how a
+/// separate contact is screened; the legal-form guess stays for rows without
+/// an answer.
+#[tokio::test]
+async fn the_organisation_box_screens_a_relation_as_an_organisation() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let patient = insert_patient(&app, "Anna", "Muster", "1990-02-02").await;
+    screen_queue(&app).await;
+
+    // A company name without a legal form, the box not ticked: a person.
+    let relation = save_relation(
+        &app,
+        patient,
+        None,
+        json!({
+            "related_name": "Polartek Shipping",
+            "relation_type": "other",
+            "is_default_payer": true,
+            "is_organisation": false
+        }),
+    )
+    .await;
+    assert_eq!(relation["is_organisation"], false, "{relation}");
+    let relation_id = relation["id"].as_str().unwrap().to_string();
+    screen_queue(&app).await;
+    assert!(patient_hits(&app, patient).await.is_empty());
+
+    // Ticked: an organisation, screened against the listed entities.
+    let saved = save_relation(
+        &app,
+        patient,
+        Some(&relation_id),
+        json!({
+            "related_name": "Polartek Shipping",
+            "relation_type": "other",
+            "is_default_payer": true,
+            "is_organisation": true
+        }),
+    )
+    .await;
+    assert_eq!(saved["is_organisation"], true, "{saved}");
+    assert!(
+        patient_is_queued(&app, patient).await,
+        "the box queues the patient"
+    );
+    screen_queue(&app).await;
+    let hits = patient_hits(&app, patient).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "patient_relation");
+    assert_eq!(hits[0]["list_entry"]["subject_type"], "entity");
+    assert_eq!(hits[0]["current_subject"]["organisation"], true);
+    assert_eq!(hits[0]["current_subject"]["last_name"], "Polartek Shipping");
+
+    // An older client that does not send the box keeps the answer.
+    let kept = save_relation(
+        &app,
+        patient,
+        Some(&relation_id),
+        json!({
+            "related_name": "Polartek Shipping",
+            "relation_type": "other",
+            "is_default_payer": true
+        }),
+    )
+    .await;
+    assert_eq!(kept["is_organisation"], true, "{kept}");
+    let stored: Option<bool> =
+        sqlx::query_scalar("SELECT is_organisation FROM patient_relations WHERE id = $1")
+            .bind(Uuid::parse_str(&relation_id).unwrap())
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored, Some(true));
+
+    // Rows without an answer (the lead conversion, before the box) show how
+    // they are screened: by the legal form in the name.
+    let other = insert_patient(&app, "Ben", "Muster", "1985-03-03").await;
+    for name in ["Beispiel GmbH", "Viktor Zahler"] {
+        sqlx::query(
+            "INSERT INTO patient_relations (patient_id, related_name, relation_type) VALUES ($1, $2, 'other')",
+        )
+        .bind(other)
+        .bind(name)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    }
+    // A linked patient record is a person and stores no answer.
+    let linked = save_relation(
+        &app,
+        other,
+        None,
+        json!({
+            "related_patient_id": patient,
+            "related_name": "Anna Muster",
+            "relation_type": "sibling",
+            "is_organisation": true
+        }),
+    )
+    .await;
+    assert_eq!(linked["is_organisation"], false, "{linked}");
+    let (code, relations) = request(
+        &app,
+        "GET",
+        &format!("/patients/{other}/relations"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{relations}");
+    let shown = |name: &str| {
+        relations
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|relation| relation["related_name"] == name)
+            .unwrap_or_else(|| panic!("{name}: {relations}"))["is_organisation"]
+            .clone()
+    };
+    assert_eq!(shown("Beispiel GmbH"), true);
+    assert_eq!(shown("Viktor Zahler"), false);
+    assert_eq!(shown("Anna Muster"), false);
+    let linked_answer: Option<bool> = sqlx::query_scalar(
+        "SELECT is_organisation FROM patient_relations WHERE patient_id = $1 AND related_patient_id IS NOT NULL",
+    )
+    .bind(other)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(linked_answer, None);
+}
+
+/// A free-text payer contact of an order or an invoice (`payer_contact_name`,
+/// not a relation, 2026-10-12) is screened like the other payers: one subject
+/// per name, owned by the patient — or by the lead while its patient is
+/// prospective — held until the CEO decides; its country counts for the
+/// blocked-country policy. The payer a lead declared, which the declaration
+/// writes onto the lead's orders as such a contact, is screened once.
+#[tokio::test]
+async fn a_free_text_payer_contact_of_an_order_or_invoice_is_screened() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+
+    // The patient's order names a contact as payer.
+    let patient = insert_patient(&app, "Anna", "Muster", "1990-02-02").await;
+    let order_id = insert_patient_order(&app, patient).await;
+    screen_queue(&app).await;
+    assert!(patient_hits(&app, patient).await.is_empty());
+    sqlx::query(
+        "UPDATE orders SET payer_contact_name = 'Testomir Korneev', payer_address_country = 'AT' WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert!(
+        patient_is_queued(&app, patient).await,
+        "the order's payer contact queues the patient"
+    );
+    screen_queue(&app).await;
+    let hits = patient_hits(&app, patient).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    let hit = hits[0].clone();
+    assert_eq!(hit["subject_kind"], "payer_contact", "{hit}");
+    assert!(
+        hit["subject_ref"]
+            .as_str()
+            .is_some_and(|reference| reference.starts_with("contact-")),
+        "{hit}"
+    );
+    assert_eq!(hit["lead_id"], Value::Null);
+    assert_eq!(hit["owner_name"], "Anna Muster");
+    assert_eq!(hit["list_logical_id"], "900101");
+    assert_eq!(hit["current_subject"]["first_name"], "Testomir", "{hit}");
+    assert_eq!(hit["current_subject"]["last_name"], "Korneev", "{hit}");
+    assert_eq!(hit["current_subject"]["relation"], "payer_contact", "{hit}");
+    assert_eq!(hit["current_subject"]["residence"], json!(["AT"]), "{hit}");
+    // Held like the patient's own hit.
+    let (code, body) = request(
+        &app,
+        "POST",
+        &format!("/patients/{patient}/order-intakes"),
+        &app.pm(),
+        Some(json!({})),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+
+    // The same contact on an invoice: one subject, both countries.
+    sqlx::query(
+        r#"INSERT INTO invoices (order_id, patient_id, invoice_type, status, total_net,
+                                 total_vat, total_gross, line_items, portal_visible,
+                                 created_by, payer_contact_name, payer_address_country)
+           VALUES ($1, $2, 'final', 'draft', 30, 0, 30, '[]', true, $3,
+                   'Korneev  Testomir', 'CY')"#,
+    )
+    .bind(order_id)
+    .bind(patient)
+    .bind(app.pm_id)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert!(
+        patient_is_queued(&app, patient).await,
+        "the invoice's payer contact queues the patient"
+    );
+    screen_queue(&app).await;
+    let hits = patient_hits(&app, patient).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["id"], hit["id"]);
+    assert_eq!(
+        hits[0]["current_subject"]["residence"],
+        json!(["AT", "CY"]),
+        "{hits:?}"
+    );
+
+    // The CEO's false positive releases the hold.
+    decide(
+        &app,
+        hit["id"].as_str().unwrap(),
+        "false_positive",
+        "Another person: payer's passport and birth date checked",
+    )
+    .await;
+    let (_, body) = countersign(&app, order_id).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    // The payer's country in the blocked list holds the countersignature
+    // until the CEO lifts it for the patient.
+    sqlx::query("UPDATE orders SET payer_address_country = 'RU' WHERE id = $1")
+        .bind(order_id)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+    assert_eq!(body["countries"], json!(["RU"]));
+    let item = patient_country_block(&app, patient)
+        .await
+        .expect("the patient is listed");
+    assert_eq!(item["blocking"], json!(["RU"]), "{item}");
+
+    // A contact staff named on an open lead's order: the lead's subject.
+    let lead = insert_lead(&app, "Mia", "Beispiel", Some("1992-04-04"), &[], json!([])).await;
+    assert_eq!(lead_status(&app, lead).await["screening"], "clear");
+    let (code, order) = request(
+        &app,
+        "POST",
+        "/orders",
+        &app.pm(),
+        Some(json!({ "source_lead_id": lead })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED, "{order}");
+    let lead_order = Uuid::parse_str(order["id"].as_str().unwrap()).unwrap();
+    sqlx::query(
+        "UPDATE orders SET payer_contact_name = 'OOO Polartek Shipping', payer_address_country = 'CY' WHERE id = $1",
+    )
+    .bind(lead_order)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    assert!(
+        lead_is_queued(&app, lead).await,
+        "the order's payer contact queues the lead"
+    );
+    let status = lead_status(&app, lead).await;
+    assert_eq!(status["screening"], "review_pending", "{status}");
+    let hits = lead_hits(&app, lead).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "payer_contact");
+    assert_eq!(hits[0]["patient_id"], Value::Null);
+    assert_eq!(hits[0]["current_subject"]["organisation"], true);
+    let (code, body) = qualify(&app, lead).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+
+    // The payer a lead declared is written onto its orders as a contact: it
+    // is screened once, as the lead's payer.
+    let paying = insert_lead(&app, "Ben", "Beispiel", Some("1988-08-08"), &[], json!([])).await;
+    let (code, order) = request(
+        &app,
+        "POST",
+        "/orders",
+        &app.pm(),
+        Some(json!({ "source_lead_id": paying })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED, "{order}");
+    let paying_order = Uuid::parse_str(order["id"].as_str().unwrap()).unwrap();
+    declare_payer(
+        &app,
+        paying,
+        json!({
+            "payer_kind": "third_party",
+            "payer_type": "person",
+            "first_name": "Testomir",
+            "last_name": "Korneev",
+            "source_of_funds": "savings"
+        }),
+    )
+    .await;
+    let contact: Option<String> =
+        sqlx::query_scalar("SELECT payer_contact_name FROM orders WHERE id = $1")
+            .bind(paying_order)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(contact.as_deref(), Some("Testomir Korneev"));
+    assert_eq!(
+        lead_status(&app, paying).await["screening"],
+        "review_pending"
+    );
+    let kinds: Vec<String> = lead_hits(&app, paying)
+        .await
+        .iter()
+        .map(|hit| hit["subject_kind"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(kinds, ["lead_payer"]);
+}
