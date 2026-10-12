@@ -51,7 +51,8 @@ export function OrderResignAction({
         template_id: "single_order",
         order_id: orderId,
         ...(patientId ? { patient_id: patientId } : { lead_id: leadId }),
-        language: de ? "de" : "ru",
+        // Einzelauftrag supports German only; the button follows the UI language.
+        language: "de",
         replace_document_id: previous?.id,
       });
       staffGo(`/documents?order_id=${encodeURIComponent(orderId)}&document=${encodeURIComponent(created.id)}`);
