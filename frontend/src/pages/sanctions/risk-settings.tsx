@@ -233,7 +233,7 @@ export function RiskSettingsTab() {
       {error ? <Banner tone="error">{error}</Banner> : null}
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
       {config ? (
-        <section className={cn("space-y-4 rounded-xl p-4", tokens.surface.card)} data-testid="risk-config">
+        <section className="space-y-4" data-testid="risk-config">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <AdminSectionTitle>{t.risk_config_title}</AdminSectionTitle>
@@ -245,8 +245,8 @@ export function RiskSettingsTab() {
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="min-w-0 space-y-1" data-testid="risk-list-1">
-              <span className={cn(tokens.text.label, "block")}>{t.risk_list_1}</span>
+            <div className="min-w-0 space-y-2" data-testid="risk-list-1">
+              <AdminSectionTitle>{t.risk_list_1}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_1}
                 onChange={(next) => setConfig((current) => (current ? withListMove(current, "list_1", next) : current))}
@@ -254,8 +254,8 @@ export function RiskSettingsTab() {
                 disabled={busy}
               />
             </div>
-            <div className="min-w-0 space-y-1" data-testid="risk-list-2">
-              <span className={cn(tokens.text.label, "block")}>{t.risk_list_2}</span>
+            <div className="min-w-0 space-y-2" data-testid="risk-list-2">
+              <AdminSectionTitle>{t.risk_list_2}</AdminSectionTitle>
               <CitizenshipMultiSelect
                 value={config.list_2}
                 onChange={(next) => setConfig((current) => (current ? withListMove(current, "list_2", next) : current))}

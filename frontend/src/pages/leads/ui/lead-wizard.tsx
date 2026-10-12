@@ -2868,7 +2868,7 @@ function WizardDocumentRows({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [protectedDocumentIds, setProtectedDocumentIds] = useState<Set<string>>(() => new Set());
   if (documents.length === 0) {
-    return <p className="text-xs text-muted-foreground">{emptyLabel}</p>;
+    return emptyLabel ? <p className="text-xs text-muted-foreground">{emptyLabel}</p> : null;
   }
   const sortedDocuments = sortWizardDocumentsNewestFirst(documents);
   const latestDocuments = sortedDocuments.filter((document) => document.is_latest_version);
@@ -8200,16 +8200,10 @@ ${serviceCommentLines.join("\n")}`
                     tx={tx}
                     lang={lang}
                   />
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {tx(
-                      "Заполняется из заявки: личные данные, гражданство, адрес, документ, представители, плательщик и ответы AML. На каждого человека свой лист; подписывает сотрудник GMED.",
-                      "Wird aus der Anfrage ausgefüllt: Personalien, Staatsangehörigkeit, Anschrift, Ausweis, Vertreter, Kostenträger und AML-Angaben. Je Person ein eigener Bogen; es unterschreibt die Bearbeiterin / der Bearbeiter von GMED.",
-                    )}
-                  </p>
                   <WizardDocumentRows
                     documents={wizardDocuments.gwg_identification}
                     complianceKind="other"
-                    emptyLabel={tx("Лист ещё не создан", "Bogen wurde noch nicht erstellt")}
+                    emptyLabel=""
                     lang={lang}
                     busy={busy}
                     disabled={isBusy}

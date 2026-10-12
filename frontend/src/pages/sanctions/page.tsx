@@ -8,7 +8,9 @@ import { useSearchParams } from "react-router-dom";
 import { ExternalLink, Gauge, Globe2, ListChecks, Search, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { StaffLink } from "@/components/staff-link";
-import { Banner, PageHeader, StatusBadge, SuccessBanner, TabLoader, tokens } from "@/components/ui-shell";
+import { AdminGuideButton } from "@/components/admin-guide";
+import { AdminSectionTitle } from "@/components/admin-page-patterns";
+import { Banner, PageHeader, StatusBadge, SuccessBanner, TabLoader, TabShell, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { copyText, selectElementText } from "@/lib/copy-text";
@@ -68,7 +70,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid gap-0.5 sm:grid-cols-[140px_minmax(0,1fr)] sm:gap-3">
       <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-words text-sm">{children || "—"}</dd>
+      <dd className="min-w-0 break-words text-[13px]">{children || "—"}</dd>
     </div>
   );
 }
@@ -162,7 +164,7 @@ export function HitCard({
   return (
     <article
       ref={cardRef}
-      className={cn("space-y-4 rounded-xl p-4", tokens.surface.card)}
+      className={cn("space-y-3.5 rounded-xl p-3.5 sm:p-4", tokens.surface.card)}
       data-testid="sanctions-hit"
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -191,9 +193,9 @@ export function HitCard({
 
       {!hit.still_matches ? <Banner tone="warning">{t.sanctions_no_longer_matches}</Banner> : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <section className={cn("space-y-3 rounded-lg p-3", tokens.surface.mutedCard)}>
-          <h3 className="text-sm font-semibold">{t.sanctions_our_person}</h3>
+      <div className="grid gap-4 border-y border-border/60 py-3.5 lg:grid-cols-2 lg:gap-6">
+        <section className="min-w-0 space-y-3">
+          <AdminSectionTitle>{t.sanctions_our_person}</AdminSectionTitle>
           <SubjectDetails subject={subject} bank={bank} t={t} lang={lang} />
           {changed ? (
             <div className="space-y-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
@@ -202,11 +204,11 @@ export function HitCard({
             </div>
           ) : null}
         </section>
-        <section className={cn("space-y-3 rounded-lg p-3", tokens.surface.mutedCard)}>
-          <h3 className="text-sm font-semibold">
+        <section className="min-w-0 space-y-3 lg:border-l lg:border-border/60 lg:pl-6">
+          <AdminSectionTitle>
             {t.sanctions_list_entry}
             {entry.subject_type === "entity" ? ` · ${t.sanctions_field_entity}` : ""}
-          </h3>
+          </AdminSectionTitle>
           <dl className="space-y-2">
             <Row label={t.sanctions_field_names}>
               <ul className="space-y-0.5">
@@ -271,15 +273,15 @@ export function HitCard({
       {hit.status === "open" ? (
         <div className="space-y-2">
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => setDecision("false_positive")}>
+            <Button type="button" size="sm" variant="outline" className="h-9 rounded-lg bg-field sm:h-8" onClick={() => setDecision("false_positive")}>
               <ShieldCheck className="size-4" aria-hidden />
               {t.sanctions_button_false_positive}
             </Button>
-            <Button type="button" variant="destructive" onClick={() => setDecision("confirmed")}>
+            <Button type="button" size="sm" variant="destructive" className="h-9 rounded-lg sm:h-8" onClick={() => setDecision("confirmed")}>
               <ShieldAlert className="size-4" aria-hidden />
               {t.sanctions_button_confirm}
             </Button>
-            <Button type="button" variant="ghost" onClick={openFisalis}>
+            <Button type="button" size="sm" variant="ghost" className="h-9 rounded-lg sm:h-8" onClick={openFisalis}>
               <Search className="size-4" aria-hidden />
               {t.sanctions_button_fisalis}
               <ExternalLink className="size-3.5" aria-hidden />
@@ -606,8 +608,30 @@ export function SanctionsPage() {
   const requested = params.get("tab") as Tab | null;
   const tab: Tab = requested && TABS.includes(requested) ? requested : "open";
   const [openCount, setOpenCount] = useState<number | null>(null);
+  const navigationRef = useRef<HTMLElement>(null);
   const showsHits = tab === "open" || tab === "decided";
   const updateCounts = useCallback((counts: HitsResponse["counts"]) => setOpenCount(counts.open), []);
+
+  useEffect(() => {
+    const navigation = navigationRef.current;
+    const viewport = navigation?.parentElement;
+    if (!navigation || !viewport) return;
+    const revealActive = () => {
+      const active = navigation.querySelector<HTMLElement>('[aria-current="page"]');
+      if (!active || viewport.scrollWidth <= viewport.clientWidth) return;
+      const item = active.getBoundingClientRect();
+      const frame = viewport.getBoundingClientRect();
+      if (item.left < frame.left || item.right > frame.right) {
+        viewport.scrollLeft += item.left - frame.left - (viewport.clientWidth - item.width) / 2;
+      }
+    };
+    revealActive();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(revealActive);
+    observer.observe(viewport);
+    observer.observe(navigation);
+    return () => observer.disconnect();
+  }, [tab]);
 
   useEffect(() => {
     // The hit tabs report the counts with every load of their list.
@@ -643,11 +667,13 @@ export function SanctionsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={t.nav_sanctions} description={t.sanctions_page_intro} />
-      <Banner tone="warning" withIcon>
-        {t.sanctions_disclaimer}
-      </Banner>
-      <nav aria-label={t.nav_sanctions} className="flex flex-wrap gap-1">
+      <PageHeader title={t.nav_sanctions} actions={(
+        <AdminGuideButton title={t.nav_sanctions} description={t.sanctions_page_intro} showTableToolbarGuide={false}>
+          <p className="text-muted-foreground">{t.sanctions_disclaimer}</p>
+        </AdminGuideButton>
+      )} />
+      <div className="-mx-2.5 overflow-x-auto overflow-y-hidden px-2.5 pb-1 sm:mx-0 sm:px-0">
+      <nav ref={navigationRef} aria-label={t.nav_sanctions} className="flex w-max min-w-full justify-center gap-1">
         {TABS.map((entry) => (
           <Button
             key={entry}
@@ -655,7 +681,7 @@ export function SanctionsPage() {
             size="sm"
             variant={entry === tab ? "default" : "ghost"}
             aria-current={entry === tab ? "page" : undefined}
-            className="h-9 rounded-md px-3 text-xs sm:h-8"
+            className="h-9 min-w-0 rounded-md px-3 text-xs sm:h-8"
             onClick={() => setParams(entry === "open" ? {} : { tab: entry }, { replace: true })}
           >
             {icons[entry]}
@@ -663,11 +689,14 @@ export function SanctionsPage() {
           </Button>
         ))}
       </nav>
+      </div>
+      <TabShell className="mt-0">
       {tab === "open" ? <HitsTab status="open" onCounts={updateCounts} /> : null}
       {tab === "decided" ? <HitsTab status="decided" onCounts={updateCounts} /> : null}
       {tab === "countries" ? <CountriesTab /> : null}
       {tab === "list" ? <SanctionsListSettings /> : null}
       {tab === "risk" ? <RiskSettingsTab /> : null}
+      </TabShell>
     </div>
   );
 }

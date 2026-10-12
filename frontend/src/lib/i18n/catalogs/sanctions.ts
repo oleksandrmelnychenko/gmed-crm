@@ -93,16 +93,16 @@ export interface SanctionsTranslations {
   sanctions_list_refresh: string;
   sanctions_list_refresh_started: string;
   sanctions_list_upload: string;
-  sanctions_list_upload_hint: string;
   sanctions_list_uploaded: string;
   sanctions_list_unchanged: string;
   sanctions_list_versions: string;
   sanctions_list_source_download: string;
   sanctions_list_source_upload: string;
   sanctions_blocked_countries: string;
-  sanctions_blocked_countries_hint: string;
   sanctions_blocked_countries_placeholder: string;
   sanctions_blocked_countries_saved: string;
+  sanctions_countries_synced: string;
+  sanctions_countries_sync_failed: string;
   sanctions_settings_title: string;
   sanctions_settings_hint: string;
   sanctions_live_checking: string;
@@ -263,18 +263,16 @@ export const sanctionsRu: SanctionsTranslations = {
   sanctions_list_refresh: "Загрузить сейчас",
   sanctions_list_refresh_started: "Загрузка запущена. Обновите страницу через минуту.",
   sanctions_list_upload: "Загрузить файл",
-  sanctions_list_upload_hint:
-    "Резервный путь, например без интернета: файл «Full sanctions list» в формате XML 1.1 с портала FSF (или ZIP с этим файлом).",
   sanctions_list_uploaded: "Список от {date} загружен — записей: {entries}. Повторная проверка — новых совпадений: {new_hits}.",
   sanctions_list_unchanged: "Файл совпадает с действующей версией.",
   sanctions_list_versions: "Версии",
   sanctions_list_source_download: "загрузка",
   sanctions_list_source_upload: "вручную",
   sanctions_blocked_countries: "Заблокированные страны",
-  sanctions_blocked_countries_hint:
-    "Если гражданство или страна проживания пациента, родителя/опекуна несовершеннолетнего, плательщика или получателя счёта входит в список, лид нельзя квалифицировать и конвертировать, а агентство не подписывает заказ, пока CEO не снимет блокировку для лида. Санкции ЕС касаются конкретных лиц и секторов и не запрещают лечение граждан страны как таковых: отказ по гражданству — деловое решение с рисками AGG § 19 и DSGVO ст. 22 (нужна проверка юриста).",
   sanctions_blocked_countries_placeholder: "Страны",
   sanctions_blocked_countries_saved: "Список заблокированных стран сохранён",
+  sanctions_countries_synced: "Учтены страны из EU Sanctions Map: {count}.",
+  sanctions_countries_sync_failed: "Не удалось обновить страны из EU Sanctions Map. Повторите загрузку, чтобы обновить страны.",
   sanctions_settings_title: "Санкции и заблокированные страны",
   sanctions_settings_hint: "Санкционный список ЕС и политика по странам. Изменяет только CEO.",
   sanctions_live_checking: "Проверка по санкционному списку ЕС…",
@@ -436,18 +434,16 @@ export const sanctionsDe: SanctionsTranslations = {
   sanctions_list_refresh: "Jetzt herunterladen",
   sanctions_list_refresh_started: "Download gestartet. Bitte die Seite in einer Minute neu laden.",
   sanctions_list_upload: "Datei hochladen",
-  sanctions_list_upload_hint:
-    "Ausweichweg, z. B. ohne Internet: die Datei „Full sanctions list“ im Format XML 1.1 aus dem FSF-Portal (oder ein ZIP mit dieser Datei).",
   sanctions_list_uploaded: "Liste vom {date} geladen – Einträge: {entries}. Neuprüfung – neue Treffer: {new_hits}.",
   sanctions_list_unchanged: "Die Datei entspricht dem aktuellen Stand.",
   sanctions_list_versions: "Versionen",
   sanctions_list_source_download: "Download",
   sanctions_list_source_upload: "manuell",
   sanctions_blocked_countries: "Gesperrte Länder",
-  sanctions_blocked_countries_hint:
-    "Steht die Staatsangehörigkeit oder das Wohnsitzland des Patienten, eines Elternteils/Vormunds eines Minderjährigen, des Zahlers oder des Rechnungsempfängers auf der Liste, kann der Lead weder qualifiziert noch konvertiert werden und die Agentur unterzeichnet keinen Auftrag, bis der CEO die Sperre für den Lead aufhebt. EU-Sanktionen betreffen bestimmte Personen und Sektoren und verbieten keine Behandlung von Staatsangehörigen als solchen: Eine Ablehnung wegen der Staatsangehörigkeit ist eine geschäftliche Entscheidung mit Risiken nach AGG § 19 und DSGVO Art. 22 (anwaltliche Prüfung erforderlich).",
   sanctions_blocked_countries_placeholder: "Länder",
   sanctions_blocked_countries_saved: "Gesperrte Länder gespeichert",
+  sanctions_countries_synced: "Berücksichtigte Länder aus der EU Sanctions Map: {count}.",
+  sanctions_countries_sync_failed: "Die Länder aus der EU Sanctions Map konnten nicht aktualisiert werden. Bitte den Download erneut starten, um die Länder zu aktualisieren.",
   sanctions_settings_title: "Sanktionen und gesperrte Länder",
   sanctions_settings_hint: "EU-Sanktionsliste und Länderregel. Änderungen nur durch den CEO.",
   sanctions_live_checking: "Prüfung gegen die EU-Sanktionsliste…",

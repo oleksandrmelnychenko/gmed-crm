@@ -3,11 +3,11 @@
  * countries. Shown in the admin settings and on the sanctions page.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, RefreshCcw, ShieldCheck, Upload } from "lucide-react";
+import { ExternalLink, LoaderCircle, RefreshCcw, ShieldCheck, Upload } from "lucide-react";
 
 import { CitizenshipMultiSelect, normalizeCitizenships } from "@/components/ui/citizenship-multi-select";
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
-import { Banner, SuccessBanner, tokens } from "@/components/ui-shell";
+import { Banner, SuccessBanner, TabLoader, tokens } from "@/components/ui-shell";
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { formatUiText, useLang } from "@/lib/i18n";
@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 
 import { sanctionsApi, type ListStatusResponse } from "./api";
 import { countryList } from "./model";
+import { EU_COUNTRIES_SOURCE_URL, syncEuBlockedCountries } from "./country-sync";
 
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -57,15 +58,26 @@ export function SanctionsListSettings({ className }: { className?: string }) {
     }
   };
 
+  const syncCountries = async (): Promise<string> => {
+    try {
+      const result = await syncEuBlockedCountries(sanctionsApi);
+      setBlocked(result.countries);
+      return formatUiText(t.sanctions_countries_synced, { count: result.sourceCount });
+    } catch {
+      setError(t.sanctions_countries_sync_failed);
+      return "";
+    }
+  };
+
   const upload = (file: File) =>
     run("upload", async () => {
       const result = await sanctionsApi.uploadList(file);
-      if (result.outcome.result === "unchanged") return t.sanctions_list_unchanged;
-      return formatUiText(t.sanctions_list_uploaded, {
+      const message = result.outcome.result === "unchanged" ? t.sanctions_list_unchanged : formatUiText(t.sanctions_list_uploaded, {
         date: formatAppDate(result.outcome.list_date),
         entries: result.outcome.entries,
         new_hits: result.rescreen?.new_hits ?? 0,
       });
+      return [message, await syncCountries()].filter(Boolean).join(" ");
     });
 
   const list = status?.list;
@@ -74,8 +86,10 @@ export function SanctionsListSettings({ className }: { className?: string }) {
   const blockedChanged =
     [...normalizeCitizenships(blocked)].sort().join(",") !== [...savedBlocked].sort().join(",");
 
+  if (!status && !error) return <TabLoader />;
+
   return (
-    <section className={cn("space-y-4 rounded-xl p-4", tokens.surface.card, className)} data-testid="sanctions-list-settings">
+    <section className={cn("space-y-4", className)} data-testid="sanctions-list-settings">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <AdminSectionTitle>
@@ -96,7 +110,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
               onClick={() =>
                 run("refresh", async () => {
                   await sanctionsApi.refreshList();
-                  return t.sanctions_list_refresh_started;
+                  return [t.sanctions_list_refresh_started, await syncCountries()].filter(Boolean).join(" ");
                 })
               }
             >
@@ -127,7 +141,7 @@ export function SanctionsListSettings({ className }: { className?: string }) {
       {flash ? <SuccessBanner>{flash}</SuccessBanner> : null}
 
       {list ? (
-        <div className="space-y-1.5 text-sm">
+        <div className={cn("space-y-1.5 rounded-lg p-3.5 text-[13px]", tokens.surface.card)}>
           <p className={cn(!active && "text-amber-700")}>
             {active
               ? formatUiText(t.sanctions_list_active, {
@@ -152,7 +166,6 @@ export function SanctionsListSettings({ className }: { className?: string }) {
               })}
             </p>
           ) : null}
-          <p className="text-xs text-muted-foreground">{t.sanctions_list_upload_hint}</p>
           {list.versions.length > 0 ? (
             <details className="text-xs">
               <summary className="cursor-pointer text-muted-foreground">{t.sanctions_list_versions}</summary>
@@ -178,15 +191,22 @@ export function SanctionsListSettings({ className }: { className?: string }) {
       ) : null}
 
       <div className="space-y-2 border-t border-border/60 pt-3">
-        <AdminSectionTitle>{t.sanctions_blocked_countries}</AdminSectionTitle>
-        <p className="text-xs leading-5 text-muted-foreground">{t.sanctions_blocked_countries_hint}</p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <AdminSectionTitle>
+            {t.sanctions_blocked_countries}
+            <span className="ml-2 text-xs font-normal text-muted-foreground">{" "}{savedBlocked.length}</span>
+          </AdminSectionTitle>
+          <a href={EU_COUNTRIES_SOURCE_URL} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+            EU Sanctions Map <ExternalLink className="size-3" aria-hidden />
+          </a>
+        </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
           <div className="min-w-0 flex-1">
             <CitizenshipMultiSelect
               value={blocked}
               onChange={setBlocked}
               placeholder={t.sanctions_blocked_countries_placeholder}
-              disabled={busy === "countries"}
+              disabled={Boolean(busy) || !status}
             />
           </div>
           <Button

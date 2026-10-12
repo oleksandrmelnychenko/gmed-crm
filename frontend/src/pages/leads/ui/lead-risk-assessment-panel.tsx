@@ -66,14 +66,14 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[34rem] text-left text-xs" data-testid="lead-risk-triggers">
+      <table className="w-full min-w-[34rem] text-left text-xs leading-4" data-testid="lead-risk-triggers">
         <thead className="text-[11px] uppercase tracking-[0.04em] text-muted-foreground">
           <tr className="border-b border-border/70">
             <th className="py-1.5 pr-3 font-medium">{tx("Триггер", "Auslöser")}</th>
             <th className="py-1.5 pr-3 font-medium">{tx("Кого касается", "Betrifft")}</th>
             <th className="py-1.5 pr-3 text-right font-medium">{tx("Баллы", "Punkte")}</th>
             <th className="py-1.5 pr-3 font-medium">{tx("Состояние", "Zustand")}</th>
-            <th className="py-1.5 font-medium">{tx("Впервые", "Erstmals")}</th>
+            <th className="whitespace-nowrap py-1.5 pl-3 font-medium">{tx("Впервые", "Erstmals")}</th>
           </tr>
         </thead>
         <tbody>
@@ -99,7 +99,7 @@ function TriggerTable({ assessment, tx }: { assessment: LeadRiskAssessment; tx: 
                 <td className="py-1.5 pr-3 align-top" data-testid={`lead-risk-trigger-${trigger.key}-state`}>
                   {riskTriggerStateLabel(trigger, tx, (value) => formatAppDate(value))}
                 </td>
-                <td className="py-1.5 align-top tabular-nums">{formatAppDate(trigger.first_fired_at) || "—"}</td>
+                <td className="whitespace-nowrap py-1.5 pl-3 align-middle tabular-nums">{formatAppDate(trigger.first_fired_at) || "—"}</td>
               </tr>
             );
           })}
