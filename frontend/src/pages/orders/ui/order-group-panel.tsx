@@ -232,7 +232,7 @@ export function OrderGroupPanel({
         </Badge>
       </div>
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         <SummaryTile
           label={tx("Итог по группе", "Gruppensumme")}
           value={money(group.rollup_total_estimated, group.head.currency)}
@@ -325,7 +325,7 @@ export function OrderGroupPanel({
                   }
                 }}
                 placeholder={tx("Поиск по номеру или пациенту…", "Nach Nummer oder Patient suchen…")}
-                className="h-9 flex-1 min-w-[14rem]"
+                className="h-9 min-w-0 flex-1 basis-full sm:basis-auto sm:min-w-[14rem]"
               />
               <Button
                 type="button"
@@ -402,11 +402,11 @@ export function OrderGroupPanel({
                 "Rechnungen des Auftrags und der Familien-Unteraufträge gehen an diesen Zahler – mit Name, E-Mail und Rechnungsanschrift.",
               )}
             </p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <select
                 value={payer.relationId}
                 onChange={(event) => updatePayer({ relationId: event.target.value })}
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-2 text-sm"
                 aria-label={tx("Родственник-плательщик", "Angehöriger als Zahler")}
               >
                 <option value="">{tx("Родственник не выбран", "Kein Angehöriger gewählt")}</option>
@@ -505,7 +505,7 @@ export function OrderGroupPanel({
                 onChange={(event) =>
                   updatePayer({ role: event.target.value as OrderPayerForm["role"] })
                 }
-                className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                className="h-9 w-full min-w-0 max-w-full truncate rounded-md border border-input bg-background px-2 text-sm"
                 aria-label={tx("Получатель счёта", "Rechnungsempfänger")}
               >
                 <option value="">{tx("Проверить при выпуске счёта", "Bei Ausstellung prüfen")}</option>

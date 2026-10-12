@@ -727,7 +727,7 @@ export const operationsRu: OperationsTranslations = {
   staff_services_kind_transfer: "Трансфер",
   staff_services_kind_vip_terminal: "VIP-терминал",
   staff_services_kind_flight: "Перелёт",
-  staff_services_kind_chauffeur: "Шофёр",
+  staff_services_kind_chauffeur: "Водитель",
   staff_services_kind_translation_support: "Поддержка перевода",
   staff_services_kind_other: "Другое",
   staff_services_source_patient_portal: "Портал пациента",

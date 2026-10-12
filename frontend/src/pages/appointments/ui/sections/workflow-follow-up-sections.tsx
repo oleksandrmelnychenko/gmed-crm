@@ -321,14 +321,14 @@ function DoctorFollowUpCreateForm({
   setForm: DoctorFollowUpFormSetter;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const { roleLabel, taskPriorityLabel } = useAppointmentLabels();
+  const { appointmentText, roleLabel, taskPriorityLabel } = useAppointmentLabels();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
 
   return (
     <form
       onSubmit={onSubmit}
-      className={`space-y-4 ${appointmentSoftPanelClassName}`}
+      className={`min-w-0 space-y-4 ${appointmentSoftPanelClassName}`}
     >
       <Field label={tr.appointments_title_col}>
         <Input
@@ -383,7 +383,7 @@ function DoctorFollowUpCreateForm({
           placeholder={withEllipsis(tr.patients_notes)}
         />
       </Field>
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
         <label className={appointmentToggleCardClassName}>
           <input
             type="checkbox"
@@ -398,7 +398,7 @@ function DoctorFollowUpCreateForm({
           />
           <span>{t.appointments_doctor_follow_up_mirror_task}</span>
         </label>
-        <Field label={tr.appointments_title_col}>
+        <Field label={appointmentText("appointments_task_priority")}>
           <NativeComboboxSelect
             value={form.taskPriority}
             onChange={(event) =>
@@ -456,7 +456,7 @@ function AppointmentPackageEndSectionContent({
   onRefresh,
   onError,
 }: AppointmentPackageEndSectionProps) {
-  const { appointmentText, roleLabel, taskPriorityLabel, taskStatusLabel } = useAppointmentLabels();
+  const { appointmentPluralText, appointmentText, roleLabel, taskPriorityLabel, taskStatusLabel } = useAppointmentLabels();
   const {
     formatAppointmentDateLabel: formatDateLabel,
     formatAppointmentDateTimeLabel: formatDateTimeLabel,
@@ -568,14 +568,13 @@ function AppointmentPackageEndSectionContent({
           description={t.appointments_package_follow_up_description}
         />
         <span className={appointmentMetaPillClassName}>
-          {reminders.length + tasks.length}{" "}
-          {reminders.length + tasks.length === 1
-            ? t.appointments_common_package_item
-            : t.appointments_common_package_items}
+          {/* "0 пунктов пакета", "2 пункта пакета" (QA C3-08). */}
+          {appointmentPluralText("appointments_package_items_count", reminders.length + tasks.length)}
         </span>
       </div>
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
-        <div className="space-y-3">
+      {/* One column below xl that never grows past the sheet (QA C2-10). */}
+      <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <div className="min-w-0 space-y-3">
           {reminders.length === 0 && tasks.length === 0 ? (
             <EmptyState text={tr.common_not_set} />
           ) : (
@@ -628,7 +627,7 @@ function AppointmentPackageEndSectionContent({
         {canManageReminders ? (
           <form
             onSubmit={handleSubmit}
-            className={`space-y-4 ${appointmentSoftPanelClassName}`}
+            className={`min-w-0 space-y-4 ${appointmentSoftPanelClassName}`}
           >
             <Field label={t.appointments_date}>
               <Input
@@ -691,7 +690,7 @@ function AppointmentPackageEndSectionContent({
                 placeholder={withEllipsis(tr.patients_notes)}
               />
             </Field>
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
               <label className={appointmentToggleCardClassName}>
                 <input
                   type="checkbox"
@@ -706,7 +705,7 @@ function AppointmentPackageEndSectionContent({
                 />
                 <span>{t.appointments_package_follow_up_create_task}</span>
               </label>
-              <Field label={tr.appointments_title_col}>
+              <Field label={appointmentText("appointments_task_priority")}>
                 <NativeComboboxSelect
                   value={form.taskPriority}
                   onChange={(event) =>

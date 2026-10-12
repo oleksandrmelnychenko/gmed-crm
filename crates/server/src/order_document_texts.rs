@@ -36,6 +36,12 @@ pub(crate) fn format_money_de(value: Decimal, currency: &str) -> String {
     format!("{sign}{grouped},{:02} {symbol}", cents % 100)
 }
 
+/// A quantity in German notation, without trailing zeros: `1.5` -> `"1,5"`,
+/// `3.0000` -> `"3"` (QA C3-10: "Stunden: 1.5" in a German order-line note).
+pub(crate) fn format_quantity_de(value: Decimal) -> String {
+    value.normalize().to_string().replace('.', ",")
+}
+
 /// The German unit of a catalogue price. The catalogue stores technical or
 /// UI-language units ("item", "hour", "шт.", "час"); a German document
 /// prints "Stück", "Std." and so on. Unknown units stay as entered.
@@ -269,6 +275,13 @@ mod tests {
         assert_eq!(format_money_de(dec("95"), "eur"), "95,00 €");
         assert_eq!(format_money_de(dec("-12.345"), ""), "-12,35 €");
         assert_eq!(format_money_de(dec("1000000"), "CHF"), "1.000.000,00 CHF");
+    }
+
+    #[test]
+    fn quantities_use_the_german_decimal_comma() {
+        assert_eq!(format_quantity_de(dec("1.5")), "1,5");
+        assert_eq!(format_quantity_de(dec("3.0000")), "3");
+        assert_eq!(format_quantity_de(dec("2.25")), "2,25");
     }
 
     #[test]

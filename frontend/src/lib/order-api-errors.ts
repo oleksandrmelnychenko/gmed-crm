@@ -15,6 +15,10 @@ export const ORDER_API_ERROR_KEYS: Record<string, string> = {
   agency_service_currency_mismatch: "api_orders_agency_service_currency_mismatch",
   agency_service_price_version_mismatch: "api_orders_agency_service_price_version_mismatch",
   agency_service_no_active_price: "api_orders_agency_service_no_active_price",
+  // The client signed other terms: confirm the reset (QA C3-01, catalogs/orders-round3-ui.ts).
+  order_signed_terms_change: "api_orders_signed_terms_change",
+  // An order document older than the last change of the order (paper signature).
+  order_document_outdated: "api_orders_document_outdated",
   // Framework contracts, quotes and the agency catalogue (contracts.rs)
   quote_valid_until_past: "api_quotes_valid_until_past",
   prepayment_exceeds_quote_total: "api_quotes_prepayment_exceeds_total",

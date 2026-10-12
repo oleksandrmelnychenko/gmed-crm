@@ -62,11 +62,60 @@ struct ServiceGroupParticipant {
     description_override: Option<String>,
 }
 
+/// German note of a line generated from a multi-doctor service group; the
+/// notes travel to the order documents (UI: `service-line-notes.ts`).
+pub const SERVICE_GROUP_LINE_NOTE: &str = "Aus der Leistungsgruppe mit mehreren Ärzten erstellt";
+
+/// Why generating the lines of a service group stopped.
+#[derive(Debug)]
+pub enum ServiceGroupLinesError {
+    Database(sqlx::Error),
+    /// The lines would change the terms of an order the client signed and
+    /// the reset of the signature was not confirmed (409, QA C3-01).
+    SignedTermsChange(axum::response::Response),
+}
+
+impl From<sqlx::Error> for ServiceGroupLinesError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Database(error)
+    }
+}
+
 pub async fn generate_order_service_group_lines(
     pool: &gmed_db::DbPool,
     group_id: Uuid,
     override_duplicates: bool,
 ) -> Result<GeneratedServiceGroupLines, sqlx::Error> {
+    match generate_order_service_group_lines_checked(
+        pool,
+        group_id,
+        override_duplicates,
+        false,
+        None,
+    )
+    .await
+    {
+        Ok(summary) => Ok(summary),
+        Err(ServiceGroupLinesError::Database(error)) => Err(error),
+        Err(ServiceGroupLinesError::SignedTermsChange(_)) => Err(sqlx::Error::Protocol(
+            crate::routes::orders::client_terms::SIGNED_TERMS_CHANGE.to_string(),
+        )),
+    }
+}
+
+/// Generates the lines of a service group. New or rewritten lines change the
+/// terms of the order: on an order the client signed they need
+/// `confirm_signature_reset`, which resets the order signatures
+/// (`routes/orders/client_terms.rs`).
+pub async fn generate_order_service_group_lines_checked(
+    pool: &gmed_db::DbPool,
+    group_id: Uuid,
+    override_duplicates: bool,
+    confirm_signature_reset: bool,
+    actor: Option<Uuid>,
+) -> Result<GeneratedServiceGroupLines, ServiceGroupLinesError> {
+    use crate::routes::orders::client_terms;
+
     let mut tx = pool.begin().await?;
 
     let group = sqlx::query(
@@ -99,6 +148,9 @@ pub async fn generate_order_service_group_lines(
             .try_get("vat_source")
             .unwrap_or_else(|_| "manual".to_string()),
     })?;
+    let terms_before = client_terms::lock_before(&mut tx, group.order_id)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
 
     let participants = sqlx::query(
         r#"SELECT participant.id,
@@ -220,7 +272,7 @@ pub async fn generate_order_service_group_lines(
             .bind(group.tax_profile_id)
             .bind(&group.vat_source)
             .bind(group_id)
-            .bind("Generated from multi-doctor service group")
+            .bind(SERVICE_GROUP_LINE_NOTE)
             .execute(&mut *tx)
             .await?
             .rows_affected();
@@ -262,7 +314,7 @@ pub async fn generate_order_service_group_lines(
         .bind(&group.vat_source)
         .bind(group_id)
         .bind(participant.id)
-        .bind("Generated from multi-doctor service group")
+        .bind(SERVICE_GROUP_LINE_NOTE)
         .fetch_one(&mut *tx)
         .await?;
 
@@ -290,6 +342,23 @@ pub async fn generate_order_service_group_lines(
         .bind(group_id)
         .execute(&mut *tx)
         .await?;
+    }
+
+    match client_terms::settle(
+        &mut tx,
+        group.order_id,
+        &terms_before,
+        confirm_signature_reset,
+        actor,
+        "service_group_lines",
+    )
+    .await
+    {
+        Ok(_) => {}
+        Err(client_terms::TermsError::Refused(response)) => {
+            return Err(ServiceGroupLinesError::SignedTermsChange(response));
+        }
+        Err(client_terms::TermsError::Database(error)) => return Err(error.into()),
     }
 
     tx.commit().await?;

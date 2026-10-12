@@ -40,8 +40,9 @@ const copy = {
     delivered: "Erbracht",
     markDelivered: "Als erbracht markieren",
     empty: "In diesem Auftrag gibt es keine Leistungen aus Ihrem Bereich.",
+    // QA C3-09: the concierge records these lines as delivered, so not "read only".
     concierge_services:
-      "Nur Ansicht: Sie sehen den Zeitraum, den Status und die Service- und Logistikleistungen dieses Auftrags. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
+      "Sie sehen den Zeitraum, den Status und die Service- und Logistikleistungen dieses Auftrags und können sie als erbracht markieren; sonst ändern Sie hier nichts. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
     interpreter_team:
       "Nur Ansicht: Sie sehen den Zeitraum, den Status und die Dolmetscherleistungen dieses Auftrags. Medizinische Leistungen, Preise, Notizen und Finanzdaten sind ausgeblendet.",
   },
@@ -57,7 +58,7 @@ const copy = {
     markDelivered: "Отметить как оказанную",
     empty: "В этом заказе нет услуг из вашей зоны ответственности.",
     concierge_services:
-      "Только просмотр: вы видите период, статус и сервисные и логистические услуги заказа. Медицинские услуги, цены, заметки и финансы скрыты.",
+      "Вы видите период, статус и сервисные и логистические услуги заказа и можете отмечать их оказанными; другие изменения здесь недоступны. Медицинские услуги, цены, заметки и финансы скрыты.",
     interpreter_team:
       "Только просмотр: вы видите период, статус и услуги переводчиков по заказу. Медицинские услуги, цены, заметки и финансы скрыты.",
   },

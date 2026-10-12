@@ -3,6 +3,7 @@ import { FileUp, LoaderCircle, Stamp } from "lucide-react";
 
 import { AdminSectionTitle } from "@/components/admin-page-patterns";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { appDateKey } from "@/lib/app-time-zone";
 import { cn } from "@/lib/utils";
 
@@ -100,11 +101,13 @@ export function PaperSignatureSection({ lang, electronicFormExcluded, disabled =
             {tx("Скан больше 25 МБ.", "Der Scan ist größer als 25 MB.")}
           </p>
         ) : null}
+        {/* The app's DD.MM.YYYY date field, not the browser's own (QA C3-02). */}
         <label className="grid max-w-56 gap-1.5 text-xs font-medium text-muted-foreground">
           {tx("Дата подписи", "Unterschrieben am")}
-          <input
+          <Input
             type="date"
-            className="h-9 rounded-md border border-input bg-field px-2 text-sm font-normal text-foreground"
+            data-testid="paper-signature-date"
+            className="h-9 text-sm font-normal"
             max={today}
             value={signedOn}
             disabled={blocked}

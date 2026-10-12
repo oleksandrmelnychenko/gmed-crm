@@ -219,6 +219,13 @@ import {
   syncLeadWizardOrderLeistungen,
   updateOrderCommercialBasis,
 } from "@/pages/orders/data/order-api";
+import {
+  clientSignatureNote,
+  documentMatchesOrderTerms,
+  signedTermsChangeConfirmText,
+  SignedTermsChangeCancelled,
+  withSignedTermsConfirmation,
+} from "@/pages/orders/model/client-signature";
 import type { Leistung, OrderSummary } from "@/pages/orders/model/types";
 import {
   fetchAllDoctors,
@@ -5887,84 +5894,103 @@ ${serviceCommentLines.join("\n")}`
       prepaymentDeadline,
       order?.prepayment_due_at,
     );
-    await updateOrderCommercialBasis(orderId, {
-      contract_id: contractId,
-      prepayment_required: flags.prepayment_required ?? prepayment,
-      ...(prepaymentDueAt !== undefined ? { prepayment_due_at: prepaymentDueAt } : {}),
-      ...(!syncOrderServiceLines
-        && normalizedPrepaymentAmount
-        && validMoneyInput(normalizedPrepaymentAmount)
-        ? { prepayment_amount: normalizedPrepaymentAmount }
-        : {}),
-      // Existing repeat signatures are changed only by the explicit signature action.
-      // Sending cached checkboxes here would restore signatures invalidated by a service edit.
-      // The client's signature follows the signed order document only (owner
-      // decision 2026-10-12): never sent from the cached state, which would
-      // undo a scan or QES recorded meanwhile.
-      signed_patient: flags.signed_patient,
-      signed_agency: flags.signed_agency ?? (prospectMergeOnlyRef.current ? undefined : signedAgency),
-      needs_description: needsDescription,
-      date_from: draft.programDateFrom,
-      date_to: draft.programDateTo,
-    });
-
-    let persistedServiceLines = withEstimatedOutlaysLast(lines.filter(validLine));
-    if (syncOrderServiceLines) {
-      const currentServiceLines = withEstimatedOutlaysLast(
-        lines.filter((line) => validLine(line) && line.managedByWizard !== false),
-      ).map((line) => ({
-        line,
-        clientReference:
-          line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
-      }));
-      await Promise.all(
-        currentServiceLines.map(({ line, clientReference }) =>
-          createOrderLeistung(orderId, {
-            agency_service_id: line.agencyServiceId,
-            agency_service_price_version_id: requestedAgencyServicePriceId(line),
-            description: line.description.trim(),
-            quantity: money(line.quantity),
-            unit_price: money(line.price),
-            vat_rate: money(line.vat),
-            is_cost_passthrough: line.isCostPassthrough === true,
-            client_reference: clientReference,
-          }),
-        ),
-      );
-      await syncLeadWizardOrderLeistungen(
-        orderId,
-        leadId,
-        currentServiceLines.map((item) => item.clientReference),
-      );
-      const persistedOrder = await fetchOrder(orderId);
-      persistedServiceLines = withEstimatedOutlaysLast(
-        persistedOrder.leistungen.map(lineFromOrderLeistung).filter(validLine),
-      );
-      if (persistedServiceLines.length === 0) {
-        throw new Error(tx(
-          "Заказ не сохранил ни одной корректной услуги",
-          "Der Auftrag enthält nach dem Speichern keine gültige Leistung",
-        ));
-      }
-      const persistedEstimate = calculateServiceLineEstimate(persistedServiceLines);
-      if (
-        normalizedPrepaymentAmount
-        && validMoneyInput(normalizedPrepaymentAmount)
-        && toCents(money(normalizedPrepaymentAmount)) > toCents(persistedEstimate.gross)
-      ) {
-        throw new Error(tx(
-          "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
-          "Die erforderliche Vorauszahlung übersteigt den neu berechneten Auftragsbetrag. Passen Sie die Vorauszahlung an.",
-        ));
-      }
-      await updateOrderCommercialBasis(orderId, {
-        total_estimated: persistedEstimate.gross.toFixed(2),
-        ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
+    const targetOrderId = orderId;
+    // QA C3-01: the client's signature covers the services and the period it
+    // was given for. A change of a signed order is refused until the user
+    // confirms the reset; the dialog names the signed and the new total.
+    const persistCommercialTerms = async (confirmSignatureReset: boolean) => {
+      await updateOrderCommercialBasis(targetOrderId, {
+        ...(confirmSignatureReset ? { confirm_signature_reset: true } : {}),
+        contract_id: contractId,
+        prepayment_required: flags.prepayment_required ?? prepayment,
+        ...(prepaymentDueAt !== undefined ? { prepayment_due_at: prepaymentDueAt } : {}),
+        ...(!syncOrderServiceLines
+          && normalizedPrepaymentAmount
+          && validMoneyInput(normalizedPrepaymentAmount)
           ? { prepayment_amount: normalizedPrepaymentAmount }
           : {}),
+        // Existing repeat signatures are changed only by the explicit signature action.
+        // Sending cached checkboxes here would restore signatures invalidated by a service edit.
+        // The client's signature follows the signed order document only (owner
+        // decision 2026-10-12): never sent from the cached state, which would
+        // undo a scan or QES recorded meanwhile.
+        signed_patient: flags.signed_patient,
+        signed_agency: flags.signed_agency ?? (prospectMergeOnlyRef.current ? undefined : signedAgency),
+        needs_description: needsDescription,
+        date_from: draft.programDateFrom,
+        date_to: draft.programDateTo,
       });
-      setLines(persistedServiceLines);
-    }
+
+      let persistedServiceLines = withEstimatedOutlaysLast(lines.filter(validLine));
+      if (syncOrderServiceLines) {
+        const currentServiceLines = withEstimatedOutlaysLast(
+          lines.filter((line) => validLine(line) && line.managedByWizard !== false),
+        ).map((line) => ({
+          line,
+          clientReference:
+            line.clientReference ?? `lead-wizard:${leadId}:${line.id}`,
+        }));
+        await Promise.all(
+          currentServiceLines.map(({ line, clientReference }) =>
+            createOrderLeistung(targetOrderId, {
+              agency_service_id: line.agencyServiceId,
+              agency_service_price_version_id: requestedAgencyServicePriceId(line),
+              description: line.description.trim(),
+              quantity: money(line.quantity),
+              unit_price: money(line.price),
+              vat_rate: money(line.vat),
+              is_cost_passthrough: line.isCostPassthrough === true,
+              client_reference: clientReference,
+              confirm_signature_reset: confirmSignatureReset,
+            }),
+          ),
+        );
+        await syncLeadWizardOrderLeistungen(
+          targetOrderId,
+          leadId,
+          currentServiceLines.map((item) => item.clientReference),
+          confirmSignatureReset,
+        );
+        const persistedOrder = await fetchOrder(targetOrderId);
+        persistedServiceLines = withEstimatedOutlaysLast(
+          persistedOrder.leistungen.map(lineFromOrderLeistung).filter(validLine),
+        );
+        if (persistedServiceLines.length === 0) {
+          throw new Error(tx(
+            "Заказ не сохранил ни одной корректной услуги",
+            "Der Auftrag enthält nach dem Speichern keine gültige Leistung",
+          ));
+        }
+        const persistedEstimate = calculateServiceLineEstimate(persistedServiceLines);
+        if (
+          normalizedPrepaymentAmount
+          && validMoneyInput(normalizedPrepaymentAmount)
+          && toCents(money(normalizedPrepaymentAmount)) > toCents(persistedEstimate.gross)
+        ) {
+          throw new Error(tx(
+            "Необходимая предоплата превышает пересчитанную сумму заказа. Обновите сумму предоплаты.",
+            "Die erforderliche Vorauszahlung übersteigt den neu berechneten Auftragsbetrag. Passen Sie die Vorauszahlung an.",
+          ));
+        }
+        await updateOrderCommercialBasis(targetOrderId, {
+          total_estimated: persistedEstimate.gross.toFixed(2),
+          ...(normalizedPrepaymentAmount && validMoneyInput(normalizedPrepaymentAmount)
+            ? { prepayment_amount: normalizedPrepaymentAmount }
+            : {}),
+        });
+        setLines(persistedServiceLines);
+      }
+      return persistedServiceLines;
+    };
+    const persistedServiceLines = await withSignedTermsConfirmation(
+      persistCommercialTerms,
+      (refusal) => window.confirm(signedTermsChangeConfirmText(
+        refusal,
+        syncOrderServiceLines
+          ? calculateServiceLineEstimate(withEstimatedOutlaysLast(lines.filter(validLine))).gross
+          : null,
+      )),
+    );
     return { contractId, orderId, serviceLines: persistedServiceLines };
   }
 
@@ -5991,7 +6017,10 @@ ${serviceCommentLines.join("\n")}`
         feedback.tone === "warning" ? { ...feedback, followsReadiness: true } : feedback,
       );
     } catch (nextError) {
-      setCommercialSaveFeedback({ tone: "error", message: errorText(nextError, tx) });
+      // Keeping the client's signature is a choice, not a failure (QA C3-01).
+      setCommercialSaveFeedback(nextError instanceof SignedTermsChangeCancelled
+        ? { tone: "warning", message: nextError.message }
+        : { tone: "error", message: errorText(nextError, tx) });
       setValidationContext(null);
       setError("");
     } finally {
@@ -9194,9 +9223,20 @@ ${serviceCommentLines.join("\n")}`
                     order counts only with proof — the scan of the signed copy or a QES
                     (inside the contract package during intake) — never one click. */}
                 {(() => {
+                  // QA C3-01: a version made before the last change of the
+                  // services or the period no longer records the signature.
+                  const termsChangedAt = order?.client_signature?.terms_changed_at;
                   const { needsDocument, documentToSign, manualOnly } = orderClientSignatureState(
-                    commercialDocuments.single_order,
+                    commercialDocuments.single_order.filter((document) => (
+                      Boolean(document.signed_at)
+                      || documentMatchesOrderTerms(document.created_at, termsChangedAt)
+                    )),
                     signedPatient,
+                  );
+                  const signedVersionNote = clientSignatureNote(
+                    order?.client_signature,
+                    signedPatient,
+                    order?.total_estimated,
                   );
                   return (
                     <div
@@ -9228,6 +9268,19 @@ ${serviceCommentLines.join("\n")}`
                                     "Die Unterschrift des Kunden zählt nur mit unterschriebenem Dokument: elektronisch im Vertragspaket oder als Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“).",
                                   )}
                         </p>
+                        {signedVersionNote ? (
+                          <p
+                            data-testid="lead-order-signed-version"
+                            className={cn(
+                              "text-xs",
+                              signedVersionNote.tone === "warning"
+                                ? "text-amber-800 dark:text-amber-300"
+                                : "text-muted-foreground",
+                            )}
+                          >
+                            {signedVersionNote.text}
+                          </p>
+                        ) : null}
                       </div>
                       {documentToSign ? (
                         <PaperSignatureConfirmButton
@@ -9768,7 +9821,16 @@ ${serviceCommentLines.join("\n")}`
                     <>
                       <p className="font-medium">{tx("Изменения не сохранены", "Änderungen nicht gespeichert")}</p>
                       {autosaveError || error ? <p className="mt-0.5">{autosaveError || error}</p> : null}
-                      {autosaveErrorDetail ? <p className="mt-0.5 font-mono text-[10px] opacity-70">{autosaveErrorDetail}</p> : null}
+                      {/* QA C3-03: the user reads the translated text; the request and
+                          the server's own words stay folded for support. */}
+                      {autosaveErrorDetail ? (
+                        <details data-testid="lead-autosave-error-detail" className="mt-1 text-[10px] opacity-70">
+                          <summary className="cursor-pointer select-none">
+                            {tx("Подробности для поддержки", "Details für den Support")}
+                          </summary>
+                          <p className="mt-0.5 break-all font-mono">{autosaveErrorDetail}</p>
+                        </details>
+                      ) : null}
                     </>
                   ) : error}
                 </div>

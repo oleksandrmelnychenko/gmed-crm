@@ -156,6 +156,9 @@ import {
 } from "./model/partner-cost-amounts";
 import { parseOrderStatusBlocker, resolveOrderNextStep } from "./model/order-next-step";
 import { orderLoadErrorKey } from "./model/order-load-error";
+import { clientSignatureNote, withSignedTermsConfirmation } from "./model/client-signature";
+import { skipPassiveOrderRefresh } from "./model/order-realtime";
+import { billingSourceLabel } from "./model/billing-source";
 import { priceVersionDisplayName } from "./model/order-service-presentation";
 import {
   canCancelLeistung,
@@ -1134,6 +1137,9 @@ function useOrdersPageContent() {
     followupForm, orderFollowupToForm(orderDetail?.followup_flow),
   );
   const phaseAdvancePending = useRef(false);
+  // When the workspace last loaded (mount, a reload): a passive realtime
+  // frame shortly after it does not load everything again (QA C-33).
+  const workspaceLoadedAtRef = useRef(Date.now());
   const [statusSaving, setStatusSaving] = useState<OrderStatus | null>(null);
   // The provider, category and doctor filters of the list sit in a second row
   // that opens on demand (or whenever one of them is set).
@@ -1750,6 +1756,7 @@ function useOrdersPageContent() {
   }
 
   function triggerReload() {
+    workspaceLoadedAtRef.current = Date.now();
     startTransition(() => {
       setReloadNonce((current) => current + 1);
     });
@@ -1813,6 +1820,10 @@ function useOrdersPageContent() {
 
   useDebouncedRealtimeSubscription(ORDER_REALTIME_EVENTS, (_event, events) => {
     if (!permissions.canViewPage) return;
+    // QA C-33: the socket's own "connected" frame right after an order
+    // workspace loaded is no change; reloading then requested every endpoint
+    // of the workspace twice. The list keeps reloading on every connect.
+    if (selectedOrderId && skipPassiveOrderRefresh(events, workspaceLoadedAtRef.current)) return;
     clearApiCache("/orders");
     clearApiCache("/orders/debt-management");
 
@@ -1838,6 +1849,11 @@ function useOrdersPageContent() {
     }
     triggerReload();
   }, 250);
+
+  // Opening an order loads its workspace (QA C-33, see above).
+  useEffect(() => {
+    if (selectedOrderId) workspaceLoadedAtRef.current = Date.now();
+  }, [selectedOrderId]);
 
   const ensureProviderDoctors = useCallback(
     async (providerId: string) => {
@@ -2969,7 +2985,10 @@ function useOrdersPageContent() {
     setLeistungSaving(true);
     setLeistungError(null);
     try {
-      await createOrderLeistung(selectedOrderId, {
+      // A signed order: the user confirms the reset of the client's signature
+      // (the dialog names the signed and the new total, QA C3-01).
+      await withSignedTermsConfirmation((confirmSignatureReset) => createOrderLeistung(selectedOrderId, {
+        confirm_signature_reset: confirmSignatureReset,
         agency_service_id: optString(leistungForm.agencyServiceId),
         agency_service_price_version_id: optString(
           leistungForm.agencyServicePriceVersionId,
@@ -2986,7 +3005,7 @@ function useOrdersPageContent() {
         doctor_id: optString(leistungForm.doctorId),
         external_document_id: optString(leistungForm.externalDocumentId),
         notes: optString(leistungForm.notes),
-      });
+      }));
       resetLeistungDialog(false);
       triggerReload();
     } catch (error) {
@@ -3091,7 +3110,9 @@ function useOrdersPageContent() {
     setGeneratingServiceGroupId(serviceGroupId);
     setServiceGroupsError(null);
     try {
-      await generateServiceGroupLines(serviceGroupId, overrideDuplicates);
+      await withSignedTermsConfirmation((confirmSignatureReset) => (
+        generateServiceGroupLines(serviceGroupId, overrideDuplicates, confirmSignatureReset)
+      ));
       triggerReload();
     } catch (error) {
       setServiceGroupsError(
@@ -4273,6 +4294,7 @@ function useOrdersPageContent() {
                           </div>
                         </div>
 
+                        <div className="min-w-0 space-y-2">
                         <dl className="min-w-0 divide-y divide-border/60 overflow-hidden rounded-xl border border-border/70">
                           {[
                             [
@@ -4313,6 +4335,26 @@ function useOrdersPageContent() {
                             </div>
                           ))}
                         </dl>
+                        {(() => {
+                          // The version the client signed (QA C3-01).
+                          const note = clientSignatureNote(
+                            orderDetail.client_signature,
+                            Boolean(orderDetail.signed_patient),
+                            orderDetail.total_estimated,
+                            orderDetail.currency,
+                          );
+                          return note ? (
+                            <p
+                              data-testid="order-client-signed-version"
+                              className={note.tone === "warning"
+                                ? "rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-xs leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                                : "px-1 text-xs leading-5 text-muted-foreground"}
+                            >
+                              {note.text}
+                            </p>
+                          ) : null;
+                        })()}
+                        </div>
                       </div>
 
                       <div className="mt-4 border-t border-border/60 pt-4">
@@ -7157,13 +7199,7 @@ function useOrdersPageContent() {
                                   />
                                   <MiniMetric
                                     label={t.orders_billing_source}
-                                    value={
-                                      leistung.source_interpreter_report_id
-                                        ? `${t.orders_billing_source_interpreter_report} ${leistung.source_interpreter_report_id}`
-                                        : leistung.source_medical_appointment_id
-                                          ? `${t.orders_billing_source_completed_appointment} ${leistung.source_medical_appointment_id}`
-                                          : t.orders_billing_source_manual
-                                    }
+                                    value={billingSourceLabel(leistung, lang)}
                                     className="min-[760px]:col-span-2"
                                   />
                                   <MiniMetric
@@ -7199,9 +7235,9 @@ function useOrdersPageContent() {
                                   />
                                 </div>
 
-                                {readableServiceLineNotes(leistung.notes) ? (
+                                {readableServiceLineNotes(leistung.notes, lang) ? (
                                   <div className="whitespace-pre-line border-t border-border px-4 py-3 text-sm leading-snug text-muted-foreground">
-                                    {readableServiceLineNotes(leistung.notes)}
+                                    {readableServiceLineNotes(leistung.notes, lang)}
                                   </div>
                                 ) : null}
                               </article>
@@ -9334,5 +9370,11 @@ export function OrdersPage(...args: Parameters<typeof useOrdersPageContent>) {
   const content = useOrdersPageContent(...args);
   // Billing keeps its provider-invoice and economics controls; pure viewers get read-only.
   const readOnly = !hasCapability(user, "orders.edit") && !hasCapability(user, "orders.economics");
-  return <ReadOnlyScope active={readOnly}>{content}</ReadOnlyScope>;
+  // A concierge records its service lines as delivered (RBAC matrix): its
+  // order view says what it may do instead of "read only" (QA C3-09).
+  return (
+    <ReadOnlyScope active={readOnly} banner={user?.role !== "concierge"}>
+      {content}
+    </ReadOnlyScope>
+  );
 }

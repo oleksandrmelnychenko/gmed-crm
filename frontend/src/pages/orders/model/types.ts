@@ -54,6 +54,21 @@ export type OrderPaymentTracking = {
   due_at: string | null;
 };
 
+/**
+ * The version of the order the client signed (QA C3-01): its total, period
+ * and signing time, and whether a later change of the services or the period
+ * waits for a new signature.
+ */
+export type OrderClientSignature = {
+  signed_total: string | null;
+  signed_date_from: string | null;
+  signed_date_to: string | null;
+  signed_at: string | null;
+  signed_document_id: string | null;
+  terms_changed_at: string | null;
+  changes_await_signature: boolean;
+};
+
 export type OrderSummary = {
   id: string;
   order_number: string;
@@ -68,6 +83,7 @@ export type OrderSummary = {
   total_estimated?: unknown;
   signed_patient?: boolean;
   signed_agency?: boolean;
+  client_signature?: OrderClientSignature | null;
   prepayment_required?: boolean;
   prepayment_due_at?: string | null;
   prepayment_amount?: unknown;
@@ -104,6 +120,11 @@ export type Leistung = {
   source_interpreter_report_id?: string | null;
   source_medical_appointment_id?: string | null;
   source_order_amendment_id?: string | null;
+  /** The visit the line was charged from (title only for medical readers, QA C3-11). */
+  source_appointment_title?: string | null;
+  source_appointment_date?: string | null;
+  /** Hours of the approved interpreter report the line bills. */
+  source_report_hours?: string | null;
   agency_service_id?: string | null;
   agency_service_price_version_id?: string | null;
   agency_service_key?: string | null;
@@ -228,6 +249,7 @@ export type OrderDetail = {
   date_to?: string | null;
   signed_patient?: boolean | null;
   signed_agency?: boolean | null;
+  client_signature?: OrderClientSignature | null;
   total_estimated: unknown;
   total_actual: unknown;
   currency: string;

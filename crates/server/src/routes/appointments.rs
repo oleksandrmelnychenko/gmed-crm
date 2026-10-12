@@ -9681,7 +9681,10 @@ fn interpreter_report_billing_notes(
     [
         headline,
         format!("Dolmetscher: {}", candidate.interpreter_name),
-        format!("Stunden: {}", candidate.hours.normalize()),
+        format!(
+            "Stunden: {}",
+            crate::order_document_texts::format_quantity_de(candidate.hours)
+        ),
         format!(
             "Termin: {} am {}",
             candidate.appointment_title,
@@ -9752,7 +9755,7 @@ async fn sync_interpreter_report_billing_candidate(
             candidate,
             format!(
                 "Geplante Leistung ({} Std.) durch den freigegebenen Dolmetscherbericht mit den tatsächlichen Stunden ersetzt",
-                planned_quantity.normalize()
+                crate::order_document_texts::format_quantity_de(planned_quantity)
             ),
         );
         sqlx::query(

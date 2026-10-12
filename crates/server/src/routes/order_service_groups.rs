@@ -18,7 +18,8 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::money::CommercialRounding;
 use crate::services::order_service_groups::{
-    generate_order_service_group_lines, preview_order_service_group_lines,
+    ServiceGroupLinesError, generate_order_service_group_lines_checked,
+    preview_order_service_group_lines,
 };
 use crate::state::AppState;
 use gmed_domain::role::Role;
@@ -100,6 +101,10 @@ struct AppointmentDoctorParticipantInput {
 #[derive(Deserialize)]
 struct GenerateLinesRequest {
     override_duplicates: Option<bool>,
+    /// Confirms that new lines on an order the client signed reset the order
+    /// signatures (QA C3-01).
+    #[serde(default)]
+    confirm_signature_reset: bool,
 }
 
 #[derive(Deserialize)]
@@ -524,10 +529,12 @@ async fn generate_service_group_lines(
         return resp;
     }
 
-    match generate_order_service_group_lines(
+    match generate_order_service_group_lines_checked(
         &state.db,
         service_group_id,
         body.override_duplicates.unwrap_or(false),
+        body.confirm_signature_reset,
+        Some(auth.user_id),
     )
     .await
     {
@@ -546,7 +553,8 @@ async fn generate_service_group_lines(
             ));
             Json(summary).into_response()
         }
-        Err(error) => {
+        Err(ServiceGroupLinesError::SignedTermsChange(response)) => response,
+        Err(ServiceGroupLinesError::Database(error)) => {
             tracing::error!(error = %error, service_group_id = %service_group_id, "generate service group lines");
             err(
                 StatusCode::INTERNAL_SERVER_ERROR,

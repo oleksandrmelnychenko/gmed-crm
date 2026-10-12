@@ -20,6 +20,7 @@ use gmed_domain::access::capabilities::Capability;
 use gmed_domain::role::Role;
 use sqlx::Row;
 
+pub(crate) mod client_terms;
 mod incoming_invoices;
 mod pipeline;
 mod unassigned_invoices;
@@ -230,6 +231,10 @@ struct UpdateOrderCommercialBasisRequest {
     needs_description: Option<String>,
     date_from: Option<String>,
     date_to: Option<String>,
+    /// Confirms that moving the programme period of an order the client
+    /// signed resets the order signatures (QA C3-01, `client_terms.rs`).
+    #[serde(default)]
+    confirm_signature_reset: bool,
 }
 
 #[derive(Deserialize)]
@@ -343,6 +348,10 @@ struct AddLeistungRequest {
     planned_partner_cost_net: Option<f64>,
     planned_partner_cost_vat: Option<f64>,
     planned_partner_cost_gross: Option<f64>,
+    /// Confirms that a change of the services of an order the client signed
+    /// resets the order signatures (QA C3-01, `client_terms.rs`).
+    #[serde(default)]
+    confirm_signature_reset: bool,
 }
 
 #[derive(Deserialize)]
@@ -366,6 +375,9 @@ struct CancelLeistungRequest {
 struct SyncLeadWizardLeistungenRequest {
     lead_id: Uuid,
     client_references: Vec<String>,
+    /// See `AddLeistungRequest::confirm_signature_reset`.
+    #[serde(default)]
+    confirm_signature_reset: bool,
 }
 
 #[derive(Deserialize)]
@@ -671,7 +683,7 @@ async fn list_orders(
     match sqlx::query(
         r#"SELECT o.id, o.order_number, o.patient_id, o.source_lead_id, o.phase, o.status,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
-                  o.signed_patient, o.signed_agency,
+                  o.signed_patient, o.signed_agency, o.client_signed_terms, o.client_terms_changed_at,
                   o.prepayment_required, o.prepayment_amount, o.prepayment_due_at, o.date_from, o.date_to, o.created_at,
                   (SELECT jsonb_build_object('status',payment_status,'required_amount',required_amount::text,'received_amount',received_amount::text,'remaining_amount',remaining_amount::text,'currency',currency,'due_at',prepayment_due_at)
                    FROM order_payment_tracking WHERE order_id=o.id) AS payment_tracking,
@@ -833,6 +845,14 @@ async fn list_orders(
                     "total_estimated": r.try_get::<Option<rust_decimal::Decimal>, _>("total_estimated").unwrap_or_default(),
                     "signed_patient": r.try_get::<bool, _>("signed_patient").unwrap_or(false),
                     "signed_agency": r.try_get::<bool, _>("signed_agency").unwrap_or(false),
+                    "client_signature": client_terms::signature_payload(
+                        r.try_get::<bool, _>("signed_patient").unwrap_or(false),
+                        r.try_get::<Option<serde_json::Value>, _>("client_signed_terms")
+                            .unwrap_or_default()
+                            .as_ref(),
+                        r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("client_terms_changed_at")
+                            .unwrap_or_default(),
+                    ),
                     "prepayment_required": r.try_get::<bool, _>("prepayment_required").unwrap_or(false),
                     "prepayment_amount": r.try_get::<Option<rust_decimal::Decimal>, _>("prepayment_amount").unwrap_or_default(),
                     "prepayment_due_at": r.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default(),
@@ -3720,7 +3740,7 @@ async fn get_order(
                   o.source_lead_id, o.contract_id,
                   o.case_id, cs.case_id AS case_code,
                   o.phase, o.status, o.needs_description, o.signed_patient,
-                  o.signed_agency,
+                  o.signed_agency, o.client_signed_terms, o.client_terms_changed_at,
                   COALESCE(order_service_total_gross(o.id), o.total_estimated) AS total_estimated,
                   o.total_actual, UPPER(o.currency) AS currency,
                   o.created_at, o.updated_at, o.cancellation_reason, o.cancelled_at,
@@ -3776,6 +3796,18 @@ async fn get_order(
         .unwrap_or_default();
     let signed_patient = order.try_get::<bool, _>("signed_patient").unwrap_or(false);
     let signed_agency = order.try_get::<bool, _>("signed_agency").unwrap_or(false);
+    // Which version the client signed, and whether changes wait for a new
+    // signature (QA C3-01).
+    let client_signature = client_terms::signature_payload(
+        signed_patient,
+        order
+            .try_get::<Option<serde_json::Value>, _>("client_signed_terms")
+            .unwrap_or_default()
+            .as_ref(),
+        order
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("client_terms_changed_at")
+            .unwrap_or_default(),
+    );
     let total_estimated = order
         .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
         .unwrap_or_default();
@@ -3872,10 +3904,19 @@ async fn get_order(
                   billing.invoice_references,
                   doc.auto_name AS external_document_auto_name,
                   doc.original_filename AS external_document_filename,
-                  source_report.report_text AS source_report_text
+                  source_report.report_text AS source_report_text,
+                  source_report.hours AS source_report_hours,
+                  COALESCE(source_appointment.title, report_appointment.title) AS source_appointment_title,
+                  COALESCE(source_appointment.date, report_appointment.date) AS source_appointment_date
            FROM order_leistungen ol
            LEFT JOIN interpreter_reports source_report
              ON source_report.id = ol.source_interpreter_report_id
+           -- A readable charge source instead of raw ids (QA C3-11): the
+           -- completed visit, or the visit of the interpreter report.
+           LEFT JOIN appointments source_appointment
+             ON source_appointment.id = ol.source_medical_appointment_id
+           LEFT JOIN appointments report_appointment
+             ON report_appointment.id = source_report.appointment_id
            LEFT JOIN providers pr ON pr.id = ol.provider_id
            LEFT JOIN provider_doctors d ON d.id = ol.doctor_id
            LEFT JOIN LATERAL (
@@ -4013,6 +4054,15 @@ async fn get_order(
             "source_interpreter_report_id": l.try_get::<Option<Uuid>, _>("source_interpreter_report_id").unwrap_or_default(),
             "source_medical_appointment_id": l.try_get::<Option<Uuid>, _>("source_medical_appointment_id").unwrap_or_default(),
             "source_order_amendment_id": l.try_get::<Option<Uuid>, _>("source_order_amendment_id").unwrap_or_default(),
+            // Readable charge source (QA C3-11): the visit's date always, its
+            // title only for readers of medical data (it can name the
+            // treatment), the reported hours of an interpreter report.
+            "source_appointment_title": auth
+                .can(Capability::PatientsMedicalView)
+                .then(|| l.try_get::<Option<String>, _>("source_appointment_title").unwrap_or_default())
+                .flatten(),
+            "source_appointment_date": l.try_get::<Option<chrono::NaiveDate>, _>("source_appointment_date").unwrap_or_default().map(|value| value.to_string()),
+            "source_report_hours": l.try_get::<Option<rust_decimal::Decimal>, _>("source_report_hours").unwrap_or_default().map(|value| value.normalize().to_string()),
             "agency_service_id": l.try_get::<Option<Uuid>, _>("agency_service_id").unwrap_or_default(),
             "agency_service_price_version_id": l.try_get::<Option<Uuid>, _>("agency_service_price_version_id").unwrap_or_default(),
             "agency_service_key": l.try_get::<Option<String>, _>("agency_service_key").unwrap_or_default(),
@@ -4062,6 +4112,7 @@ async fn get_order(
             "case_id":case_id,"case_code":case_code,"patient_name":patient_name,"patient_pid":patient_pid,
             "phase":phase,"status":status,"intake_state":"draft","needs_description":needs_description,
             "date_from":order_date_from,"date_to":order_date_to,"signed_patient":signed_patient,"signed_agency":signed_agency,
+            "client_signature":client_signature,
             "total_estimated":total_estimated,"total_actual":total_actual,"currency":order_currency,
             "leistungen":leist_json,"external_invoices":[],"created_at":created_at,"updated_at":updated_at
         })).into_response();
@@ -4248,6 +4299,7 @@ async fn get_order(
         "date_from": order_date_from.map(|value| value.to_string()),
         "date_to": order_date_to.map(|value| value.to_string()),
         "signed_patient": signed_patient, "signed_agency": signed_agency,
+        "client_signature": client_signature,
         "total_estimated": total_estimated, "total_actual": total_actual,
         "currency": order_currency,
         "leistungen": leist_json,
@@ -5421,7 +5473,31 @@ async fn update_order_commercial_basis(
         }
     }
 
-    match sqlx::query(
+    // A moved programme period changes the terms the client signed (QA C3-01):
+    // the order row is locked and its terms compared around the update.
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "begin order commercial basis update");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order commercial basis",
+            );
+        }
+    };
+    let terms_before = match client_terms::lock_before(&mut transaction, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "lock order terms for commercial basis");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to update order commercial basis",
+            );
+        }
+    };
+
+    let updated = sqlx::query(
         r#"UPDATE orders
          SET total_estimated = COALESCE($2, total_estimated),
              contract_id = COALESCE($3, contract_id),
@@ -5483,24 +5559,53 @@ async fn update_order_commercial_basis(
     .bind(date_to_patch.flatten())
     .bind(prepayment_due_patch.is_some())
     .bind(prepayment_due_patch.flatten())
-    .fetch_optional(&state.db)
-    .await
-    {
+    .fetch_optional(&mut *transaction)
+    .await;
+    let updated = match updated {
         Ok(Some(row)) => {
+            match client_terms::settle(
+                &mut transaction,
+                order_id,
+                &terms_before,
+                body.confirm_signature_reset,
+                Some(auth.user_id),
+                "order_period",
+            )
+            .await
+            {
+                Ok(change) => match transaction.commit().await {
+                    Ok(()) => Ok(Some((row, change))),
+                    Err(error) => Err(error),
+                },
+                Err(client_terms::TermsError::Refused(response)) => return response,
+                Err(client_terms::TermsError::Database(error)) => Err(error),
+            }
+        }
+        Ok(None) => Ok(None),
+        Err(error) => Err(error),
+    };
+    match updated {
+        Ok(Some((row, terms_change))) => {
+            // A reset by the changed terms leaves the order unsigned.
+            let signature_reset = terms_change.signature_reset();
             let contract_id = row
                 .try_get::<Option<Uuid>, _>("contract_id")
                 .unwrap_or_default();
             let total_estimated = row
                 .try_get::<Option<rust_decimal::Decimal>, _>("total_estimated")
                 .unwrap_or_default();
-            let signed_patient = row.try_get::<bool, _>("signed_patient").unwrap_or(false);
-            let signed_agency = row.try_get::<bool, _>("signed_agency").unwrap_or(false);
+            let signed_patient =
+                !signature_reset && row.try_get::<bool, _>("signed_patient").unwrap_or(false);
+            let signed_agency =
+                !signature_reset && row.try_get::<bool, _>("signed_agency").unwrap_or(false);
             let signed_patient_at = row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_patient_at")
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .filter(|_| !signature_reset);
             let signed_agency_at = row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_agency_at")
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .filter(|_| !signature_reset);
             let prepayment_required = row
                 .try_get::<bool, _>("prepayment_required")
                 .unwrap_or(false);
@@ -5509,7 +5614,8 @@ async fn update_order_commercial_basis(
                 .unwrap_or_default();
             let signed_at = row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signed_at")
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .filter(|_| !signature_reset);
             let date_from = row
                 .try_get::<Option<chrono::NaiveDate>, _>("date_from")
                 .unwrap_or_default();
@@ -5533,7 +5639,10 @@ async fn update_order_commercial_basis(
                     "date_to": date_to.map(|value| value.to_string()),
                 }),
             ));
-            if let Err(error) = crate::services::order_payment_tracking::sync_notifications(&state, Some(order_id)).await {
+            if let Err(error) =
+                crate::services::order_payment_tracking::sync_notifications(&state, Some(order_id))
+                    .await
+            {
                 tracing::error!(%error, %order_id, "notify commercial payment deadline change");
             }
             Json(serde_json::json!({
@@ -5553,6 +5662,7 @@ async fn update_order_commercial_basis(
                     "prepayment_due_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("prepayment_due_at").unwrap_or_default(),
                 "date_from": date_from.map(|value| value.to_string()),
                 "date_to": date_to.map(|value| value.to_string()),
+                "signature_reset": signature_reset,
             }))
             .into_response()
         }
@@ -9976,7 +10086,25 @@ async fn add_leistung(
         Err(resp) => return resp,
     };
 
-    match sqlx::query(
+    // The order row is locked for the whole edit: the terms the client signed
+    // are compared before and after it (QA C3-01, `client_terms.rs`).
+    let mut transaction = match state.db.begin().await {
+        Ok(transaction) => transaction,
+        Err(error) => {
+            tracing::error!(%error, %order_id, "begin add leistung");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+    let terms_before = match client_terms::lock_before(&mut transaction, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(%error, %order_id, "lock order terms for a new service");
+            return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+        }
+    };
+
+    let upserted = sqlx::query(
         "INSERT INTO order_leistungen (
              order_id, patient_id, agency_service_id, agency_service_price_version_id,
              description, quantity, unit_price, currency, vat_rate,
@@ -10034,12 +10162,34 @@ async fn add_leistung(
     .bind(planned_cost_gross)
     .bind(tax_profile_id)
     .bind(vat_source)
-    .fetch_optional(&state.db)
-    .await
-    {
+    .fetch_optional(&mut *transaction)
+    .await;
+    match upserted {
         Ok(Some(r)) => {
             let id: Uuid = r.try_get("id").unwrap_or_default();
             let inserted: bool = r.try_get("inserted").unwrap_or(false);
+            let terms_change = match client_terms::settle(
+                &mut transaction,
+                order_id,
+                &terms_before,
+                body.confirm_signature_reset,
+                Some(auth.user_id),
+                "order_service",
+            )
+            .await
+            {
+                Ok(change) => change,
+                Err(client_terms::TermsError::Refused(response)) => return response,
+                Err(client_terms::TermsError::Database(error)) => {
+                    tracing::error!(%error, %order_id, "check signed order terms for a service");
+                    return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+                }
+            };
+            if let Err(error) = transaction.commit().await {
+                tracing::error!(%error, %order_id, "commit add leistung");
+                return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
+            }
+            let signature_reset = terms_change.signature_reset();
             if inserted {
                 crate::realtime::publish_order_event(
                     &state,
@@ -10053,19 +10203,25 @@ async fn add_leistung(
                     }),
                 )
                 .await;
-                (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
+                (
+                    StatusCode::CREATED,
+                    Json(serde_json::json!({"id": id, "signature_reset": signature_reset})),
+                )
+                    .into_response()
             } else {
                 (
                     StatusCode::OK,
                     Json(serde_json::json!({
                         "id": id,
                         "idempotent_replay": true,
+                        "signature_reset": signature_reset,
                     })),
                 )
                     .into_response()
             }
         }
         Ok(None) => {
+            drop(transaction);
             let Some(client_reference) = client_reference else {
                 tracing::error!(order_id = %order_id, "leistung insert returned no row without a client reference");
                 return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed");
@@ -10197,6 +10353,17 @@ async fn sync_lead_wizard_leistungen(
             );
         }
     };
+    let terms_before = match client_terms::lock_before(&mut transaction, order_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Order not found"),
+        Err(error) => {
+            tracing::error!(error = %error, order_id = %order_id, "lock order terms for service sync");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
+        }
+    };
     let removable_ids = match sqlx::query_scalar::<_, Uuid>(
         r#"SELECT id
            FROM order_leistungen
@@ -10277,6 +10444,26 @@ async fn sync_lead_wizard_leistungen(
             );
         }
     };
+    let terms_change = match client_terms::settle(
+        &mut transaction,
+        order_id,
+        &terms_before,
+        body.confirm_signature_reset,
+        Some(auth.user_id),
+        "lead_wizard_service_sync",
+    )
+    .await
+    {
+        Ok(change) => change,
+        Err(client_terms::TermsError::Refused(response)) => return response,
+        Err(client_terms::TermsError::Database(error)) => {
+            tracing::error!(error = %error, order_id = %order_id, "check signed order terms for service sync");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to sync order services",
+            );
+        }
+    };
     if let Err(error) = transaction.commit().await {
         tracing::error!(error = %error, order_id = %order_id, lead_id = %body.lead_id, "commit lead wizard service sync");
         return err(
@@ -10296,7 +10483,12 @@ async fn sync_lead_wizard_leistungen(
             }),
         ));
     }
-    Json(serde_json::json!({ "ok": true, "removed_count": deleted })).into_response()
+    Json(serde_json::json!({
+        "ok": true,
+        "removed_count": deleted,
+        "signature_reset": terms_change.signature_reset(),
+    }))
+    .into_response()
 }
 
 async fn update_leistung_planned_cost(

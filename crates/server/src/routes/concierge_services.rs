@@ -5549,6 +5549,34 @@ pub(crate) async fn ensure_task_for_service(
             "Failed to resolve service task",
         )
     })?;
+    // A service without a concierge takes the concierge its new task went to
+    // (the patient's coordinating concierge), as the work center does when a
+    // task is linked to a service: the service and its task share one
+    // assignee, and the task detail then shows the booking ("Подтвердить
+    // бронь") and the expenses of the service (QA C3-07).
+    sqlx::query(
+        r#"UPDATE concierge_services service
+           SET assigned_concierge_id = task.assigned_to,
+               updated_at = now()
+           FROM tasks task
+           JOIN users assignee ON assignee.id = task.assigned_to
+           WHERE service.id = $1
+             AND task.id = $2
+             AND service.assigned_concierge_id IS NULL
+             AND assignee.role = 'concierge'
+             AND assignee.is_active"#,
+    )
+    .bind(service_id)
+    .bind(task_id)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "assign service to its task's concierge");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to resolve service task",
+        )
+    })?;
     transaction.commit().await.map_err(|error| {
         tracing::error!(error = %error, service_id = %service_id, task_id = %task_id, "commit canonical service task");
         err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to resolve service task")

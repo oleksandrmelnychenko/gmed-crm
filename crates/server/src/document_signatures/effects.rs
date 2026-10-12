@@ -389,22 +389,56 @@ pub(super) async fn apply_business_effects(
         && let Some(order_id) = order_id
         && (client_signed || agency_signed)
     {
+        // QA C3-01: a signature counts for the order only on a document made
+        // after the last staff change of its terms (services, period); an
+        // older version shows terms the order no longer has. The signed
+        // version keeps the terms the client signed (`order_client_terms`).
+        // A paper scan or a single QES result is a new version of the
+        // generated document it was made from: that one's age counts.
         let order = sqlx::query(
-            r#"UPDATE orders
-               SET signed_patient = signed_patient OR $2,
-                   signed_agency = signed_agency OR $3,
-                   signed_patient_at = CASE WHEN $2 AND NOT signed_patient THEN $4 ELSE signed_patient_at END,
-                   signed_agency_at = CASE WHEN $3 AND NOT signed_agency THEN $4 ELSE signed_agency_at END,
-                   signed_at = CASE WHEN (signed_patient OR $2) AND (signed_agency OR $3)
+            r#"WITH source AS (
+                   SELECT COALESCE(original.created_at, signed.created_at) AS generated_at
+                   FROM documents signed
+                   LEFT JOIN documents original
+                     ON original.id = signed.replaces_document_id
+                    AND signed.ursprung IN ('paper_signature', 'electronic_signature')
+                   WHERE signed.id = $5
+               ),
+               current_order AS (
+                   SELECT o.id,
+                          (o.client_terms_changed_at IS NULL
+                           OR COALESCE((SELECT generated_at FROM source), now())
+                              > o.client_terms_changed_at) AS document_current
+                   FROM orders o
+                   WHERE o.id = $1
+               )
+               UPDATE orders
+               SET signed_patient = signed_patient OR ($2 AND current_order.document_current),
+                   signed_agency = signed_agency OR ($3 AND current_order.document_current),
+                   signed_patient_at = CASE WHEN $2 AND current_order.document_current AND NOT signed_patient
+                                            THEN $4 ELSE signed_patient_at END,
+                   signed_agency_at = CASE WHEN $3 AND current_order.document_current AND NOT signed_agency
+                                           THEN $4 ELSE signed_agency_at END,
+                   signed_at = CASE WHEN current_order.document_current
+                                         AND (signed_patient OR $2) AND (signed_agency OR $3)
                                     THEN COALESCE(signed_at, $4) ELSE signed_at END,
+                   client_signed_terms = CASE
+                       WHEN $2 AND current_order.document_current
+                           THEN order_client_terms(orders.id)
+                                || jsonb_build_object('signed_at', $4, 'document_id', $5)
+                       ELSE client_signed_terms
+                   END,
                    updated_at = now()
-               WHERE id = $1
-               RETURNING signed_patient, signed_agency"#,
+               FROM current_order
+               WHERE orders.id = current_order.id
+               RETURNING orders.signed_patient, orders.signed_agency,
+                         current_order.document_current"#,
         )
         .bind(order_id)
         .bind(client_signed)
         .bind(agency_signed)
         .bind(signed_at)
+        .bind(document_id)
         .fetch_optional(&mut **tx)
         .await
         .map_err(database)?;
@@ -412,6 +446,9 @@ pub(super) async fn apply_business_effects(
             effects["order_id"] = json!(order_id);
             effects["order_signed_patient"] = json!(order.get::<bool, _>("signed_patient"));
             effects["order_signed_agency"] = json!(order.get::<bool, _>("signed_agency"));
+            if !order.get::<bool, _>("document_current") {
+                effects["order_document_outdated"] = json!(true);
+            }
         }
     }
     Ok(())

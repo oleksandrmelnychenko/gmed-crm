@@ -326,8 +326,8 @@ async fn a_service_without_concierge_gets_the_patients_concierge_as_executor() {
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{booked}");
-    let (assigned_to, assigned_by): (Uuid, Uuid) = sqlx::query_as(
-        "SELECT assigned_to, assigned_by FROM tasks WHERE id = concierge_service_canonical_task_id($1)",
+    let (task_id, assigned_to, assigned_by): (Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT id, assigned_to, assigned_by FROM tasks WHERE id = concierge_service_canonical_task_id($1)",
     )
     .bind(service_id)
     .fetch_one(&ctx.pool)
@@ -338,6 +338,29 @@ async fn a_service_without_concierge_gets_the_patients_concierge_as_executor() {
         "the patient's concierge works it"
     );
     assert_eq!(assigned_by, ceo_id, "the booking CEO stays the author");
+
+    // QA C3-07: the service takes its task's concierge, so the task detail
+    // names the service and offers its booking ("Подтвердить бронь").
+    let service_concierge: Option<Uuid> =
+        sqlx::query_scalar("SELECT assigned_concierge_id FROM concierge_services WHERE id = $1")
+            .bind(service_id)
+            .fetch_one(&ctx.pool)
+            .await
+            .unwrap();
+    assert_eq!(service_concierge, Some(concierge_id));
+    let (status, detail) = json_request(
+        &ctx.app,
+        "GET",
+        &format!("/api/v1/concierge-operational-items/{task_id}"),
+        &auth_header_for(ceo_id, "ceo"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail}");
+    assert_eq!(
+        detail["item"]["concierge_service_id"],
+        service_id.to_string()
+    );
 }
 
 #[tokio::test]

@@ -252,6 +252,8 @@ export function fetchOrderServiceGroupLinePreview(
 export function generateServiceGroupLines(
   serviceGroupId: string,
   overrideDuplicates = false,
+  /** Confirms that new lines on a signed order reset its signatures (QA C3-01). */
+  confirmSignatureReset = false,
 ): Promise<{
   generated_count: number;
   updated_count: number;
@@ -260,6 +262,7 @@ export function generateServiceGroupLines(
 }> {
   return post(`/order-service-groups/${serviceGroupId}/generate-lines`, {
     override_duplicates: overrideDuplicates,
+    confirm_signature_reset: confirmSignatureReset,
   });
 }
 

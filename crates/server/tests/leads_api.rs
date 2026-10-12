@@ -2796,9 +2796,14 @@ async fn returning_patient_attach_reuses_identity_without_overwriting_master_dat
     sqlx::query("UPDATE framework_contracts SET patient_id = $2, lead_id = NULL, valid_from = DATE '2030-01-01', valid_to = DATE '2030-12-31' WHERE id = $1")
         .bind(artifacts.contract_id).bind(patient_id).execute(pool).await.unwrap();
     let contract_path = format!("/api/v1/orders/{}/commercial-basis", artifacts.order_id);
+    // Moving the period of the signed order resets its signatures (QA C3-01);
+    // the client signs the new version again (what its scan leaves behind).
     let (status, response) = json_request(&app, "POST", &contract_path, &pm,
-        Some(json!({"contract_id": artifacts.contract_id, "date_from": "2030-09-01", "date_to": "2030-09-15"}))).await;
+        Some(json!({"contract_id": artifacts.contract_id, "date_from": "2030-09-01", "date_to": "2030-09-15", "confirm_signature_reset": true}))).await;
     assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["signature_reset"], true, "{response}");
+    sqlx::query("UPDATE orders SET signed_patient=true,signed_agency=true,signed_at=now(),signed_patient_at=now(),signed_agency_at=now() WHERE id=$1")
+        .bind(artifacts.order_id).execute(pool).await.unwrap();
     sqlx::query("UPDATE documents SET order_intake_context=repeat_order_document_context(order_id) WHERE order_id=$1")
         .bind(artifacts.order_id).execute(pool).await.unwrap();
     let other_patient: Uuid = sqlx::query_scalar("INSERT INTO patients (patient_id, first_name, last_name, birth_date, gender, lifecycle_status, created_by) VALUES ($1, 'Other', 'Patient', DATE '1985-01-01', 'female', 'active', $2) RETURNING id")
@@ -5496,7 +5501,11 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     let seeded = seed_complete_lead_onboarding(&app, lead).await;
     let order = seeded.order_id;
     let path = format!("/api/v1/orders/{order}/commercial-basis");
+    // QA C3-01: moving the period of the signed draft needs the confirmed reset.
     let (s,b)=json_request(&app,"POST",&path,&pm,Some(json!({"contract_id":seeded.contract_id,"date_from":"2030-09-01","date_to":"2030-09-15"}))).await;
+    assert_eq!(s, StatusCode::CONFLICT, "{b}");
+    assert_eq!(b["error"], "order_signed_terms_change");
+    let (s,b)=json_request(&app,"POST",&path,&pm,Some(json!({"contract_id":seeded.contract_id,"date_from":"2030-09-01","date_to":"2030-09-15","confirm_signature_reset":true}))).await;
     assert_eq!(
         s,
         StatusCode::OK,

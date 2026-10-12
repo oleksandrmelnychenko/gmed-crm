@@ -302,6 +302,8 @@ export function updateOrderFollowupFlow(orderId: string, payload: JsonPayload) {
 export type CreatedOrderLeistung = {
   id: string;
   idempotent_replay?: boolean;
+  /** The change reset the client's signature of the order (QA C3-01). */
+  signature_reset?: boolean;
 };
 
 export function createOrderLeistung(orderId: string, payload: JsonPayload) {
@@ -336,12 +338,14 @@ export function syncLeadWizardOrderLeistungen(
   orderId: string,
   leadId: string,
   clientReferences: string[],
+  confirmSignatureReset = false,
 ) {
-  return postJson<{ ok: boolean; removed_count: number }>(
+  return postJson<{ ok: boolean; removed_count: number; signature_reset?: boolean }>(
     `/orders/${orderId}/leistungen/sync-lead-wizard`,
     {
       lead_id: leadId,
       client_references: clientReferences,
+      confirm_signature_reset: confirmSignatureReset,
     },
   );
 }
@@ -359,6 +363,8 @@ export function updateOrderCommercialBasis(
     needs_description?: string;
     date_from?: string;
     date_to?: string;
+    /** Confirms that moving the period of a signed order resets its signatures (QA C3-01). */
+    confirm_signature_reset?: boolean;
   },
 ) {
   return postJson<{
@@ -378,6 +384,7 @@ export function updateOrderCommercialBasis(
     prepayment_due_at: string | null;
     date_from: string | null;
     date_to: string | null;
+    signature_reset?: boolean;
   }>(`/orders/${orderId}/commercial-basis`, payload);
 }
 

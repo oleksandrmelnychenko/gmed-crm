@@ -14,13 +14,13 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
   [["anesthesiology", "anaesthesiology", "anästhesiologie", "anaesthesiologie", "анестезиология"], { de: "Anästhesiologie", ru: "Анестезиология" }],
   [["cardiology", "kardiologie", "кардиология"], { de: "Kardiologie", ru: "Кардиология" }],
   [["dermatology", "dermatologie", "дерматология"], { de: "Dermatologie", ru: "Дерматология" }],
-  [["dermatology_and_venereology", "dermatologie_und_venerologie", "дерматология_и_венерология"], { de: "Dermatologie und Venerologie", ru: "Дерматология и венерология" }],
+  [["dermatology_and_venereology", "dermatologie_und_venerologie", "дерматология_и_венерология", "дерматовенерология"], { de: "Dermatologie und Venerologie", ru: "Дерматовенерология" }],
   [["endocrinology", "endokrinologie", "эндокринология"], { de: "Endokrinologie", ru: "Эндокринология" }],
   [["endocrinology_and_diabetology", "endokrinologie_und_diabetologie", "эндокринология_и_диабетология"], { de: "Endokrinologie und Diabetologie", ru: "Эндокринология и диабетология" }],
   [["gastroenterology", "gastroenterologie", "гастроэнтерология"], { de: "Gastroenterologie", ru: "Гастроэнтерология" }],
   [["gynecology", "gynaecology", "gynäkologie", "gynaekologie", "гинекология"], { de: "Gynäkologie", ru: "Гинекология" }],
   [["hematology", "haematology", "hämatologie", "haematologie", "гематология"], { de: "Hämatologie", ru: "Гематология" }],
-  [["internal_medicine", "internal medicine", "innere medizin", "внутренняя медицина"], { de: "Innere Medizin", ru: "Внутренняя медицина" }],
+  [["internal_medicine", "internal medicine", "innere medizin", "innere_medizin", "внутренняя медицина", "внутренние болезни"], { de: "Innere Medizin", ru: "Внутренние болезни" }],
   [["neurology", "neurologie", "неврология"], { de: "Neurologie", ru: "Неврология" }],
   [["oncology", "onkologie", "онкология"], { de: "Onkologie", ru: "Онкология" }],
   [
@@ -33,6 +33,7 @@ const KNOWN_SPECIALIZATIONS: [string[], KnownSpecializationLabels][] = [
     { de: "Orthopädie und Unfallchirurgie", ru: "Ортопедия и травматология" },
   ],
   [["orthopedics", "orthopaedics", "orthopädie", "orthopaedie", "ортопедия"], { de: "Orthopädie", ru: "Ортопедия" }],
+  [["kinder_und_jugendmedizin", "kinder- und jugendmedizin"], { de: "Kinder- und Jugendmedizin", ru: "Педиатрия" }],
   [["pediatrics", "paediatrics", "pädiatrie", "paediatrie", "педиатрия"], { de: "Pädiatrie", ru: "Педиатрия" }],
   [["psychiatry", "psychiatrie", "психиатрия"], { de: "Psychiatrie", ru: "Психиатрия" }],
   [["radiology", "radiologie", "радиология"], { de: "Radiologie", ru: "Радиология" }],
@@ -70,10 +71,19 @@ function knownSpecializationLabelsForItem(item: SpecializationLabelItem) {
   );
 }
 
+/**
+ * The name of a catalogue specialisation in the UI language. The catalogue
+ * (/specializations, `medical_specializations`) is the one source of names
+ * (QA C3-05: pickers showed "Дерматология и венерология" while the catalogue
+ * says "Дерматовенерология"); the built-in list only fills in an item without
+ * a name in that language and bare legacy values.
+ */
 export function specializationLabelForItem(
   item: SpecializationLabelItem,
   lang: SpecializationLabelLang,
 ) {
+  const ownName = (lang === "de" ? item.name_de : item.name_ru)?.trim();
+  if (ownName) return ownName;
   const knownLabels = knownSpecializationLabelsForItem(item);
   if (knownLabels) return knownLabels[lang];
 

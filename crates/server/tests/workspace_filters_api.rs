@@ -3276,7 +3276,7 @@ async fn approved_interpreter_report_auto_creates_order_leistung_from_agency_cat
     let report_text = format!("Interpreter completed support for {tag}");
     let notes = leistungen[0]["notes"].as_str().unwrap_or_default();
     assert!(notes.contains(&format!("Bericht: {report_id}")), "{notes}");
-    assert!(notes.contains("Stunden: 2.5"), "{notes}");
+    assert!(notes.contains("Stunden: 2,5"), "{notes}");
     assert!(!notes.contains(&report_text), "{notes}");
 
     // A line written before the change still stores the copied text. Billing

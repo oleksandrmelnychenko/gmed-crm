@@ -264,6 +264,24 @@ async fn store_signed_version(
     {
         return Err(error(StatusCode::CONFLICT, "signature_already_pending"));
     }
+    // QA C3-01: an order document made before the last change of the order's
+    // services or period shows terms the order no longer has; the client
+    // signs a new version instead.
+    if template_of(&source).as_deref() == Some("single_order")
+        && let Some(order_id) = source.get::<Option<Uuid>, _>("order_id")
+    {
+        let outdated: Option<bool> = sqlx::query_scalar(
+            "SELECT COALESCE(client_terms_changed_at > $2, false) FROM orders WHERE id = $1 FOR UPDATE",
+        )
+        .bind(order_id)
+        .bind(source.get::<DateTime<Utc>, _>("created_at"))
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_error)?;
+        if outdated == Some(true) {
+            return Err(error(StatusCode::CONFLICT, "order_document_outdated"));
+        }
+    }
 
     let signed_id = Uuid::new_v4();
     // The signed scan is the same document: it keeps the document's unified
