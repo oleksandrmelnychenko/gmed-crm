@@ -12,4 +12,10 @@ export const BILLING_API_ERROR_KEYS: Record<string, string> = {
   rebilling_waiver_nothing_to_waive: "api_billing_rebilling_waiver_nothing_to_waive",
   rebilling_waiver_not_possible: "api_billing_rebilling_waiver_not_possible",
   rebilling_waiver_already_reversed: "api_billing_rebilling_waiver_already_reversed",
+  // Every issued document names GMED's tax registration (release.rs, QA
+  // D2-09): also a service cancelled from the order that issues a credit note.
+  issuer_tax_registration_missing: "api_billing_issuer_tax_registration_missing",
+  // advance_settlement.rs
+  advance_rest_already_closed: "api_billing_advance_rest_already_closed",
+  advance_not_settled_by_final_invoice: "api_billing_advance_not_settled_by_final_invoice",
 };

@@ -8,7 +8,7 @@ import type { InvoiceCreditableLine } from "./types";
  * lines, so a 0 % pass-through line credits no VAT. Mirrors the server plan in
  * `crates/server/src/routes/invoices/credit_notes.rs`.
  */
-export type CreditNoteMode = "lines" | "vat_rate";
+export type CreditNoteMode = "lines" | "vat_rate" | "amount";
 
 export type CreditNoteLineDraft = {
   selected: boolean;
@@ -28,7 +28,51 @@ export type CreditNoteSelectionError =
   | "invalid_amount"
   | "line_exceeded"
   | "vat_rate_missing"
-  | "vat_rate_exceeded";
+  | "vat_rate_exceeded"
+  | "limit_exceeded";
+
+/**
+ * The server's limit of a new credit note (`credit_note_limit_gross`, QA
+ * D2-01): an advance cannot be credited below what a final invoice already
+ * deducted. `null` when the server sent none (older responses).
+ */
+export function creditNoteLimit(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === "") return null;
+  const numeric = amount(value);
+  return Number.isFinite(numeric) ? Math.max(roundCents(numeric), 0) : null;
+}
+
+/**
+ * An invoice whose line snapshot carries no amounts (old format) has no
+ * creditable lines but can still take a credit by amount (QA D-55/D-56).
+ */
+export function creditsByAmount(
+  lines: readonly InvoiceCreditableLine[] | undefined,
+  limit: number | null,
+) {
+  return (lines ?? []).length === 0 && limit !== null && toCents(limit) > 0;
+}
+
+/**
+ * The selection as the server reads it: an invoice without creditable lines
+ * takes an amount, an invoice with lines never the plain amount.
+ */
+export function effectiveCreditNoteSelection(
+  lines: readonly InvoiceCreditableLine[] | undefined,
+  limit: number | null,
+  selection: CreditNoteSelectionDraft,
+): CreditNoteSelectionDraft {
+  if (creditsByAmount(lines, limit)) {
+    return selection.mode === "amount" ? selection : { ...selection, mode: "amount" };
+  }
+  return selection.mode === "amount" ? { ...selection, mode: "lines" } : selection;
+}
+
+/** What is left of a line, never more than the invoice's limit. */
+export function lineCreditable(line: InvoiceCreditableLine, limit: number | null) {
+  const open = remaining(line);
+  return limit === null ? open : Math.min(open, limit);
+}
 
 function amount(value: unknown): number {
   const numeric = Number(String(value ?? "").trim().replace(",", "."));
@@ -64,10 +108,11 @@ export function creditableVatRates(lines: readonly InvoiceCreditableLine[] | und
 
 export function emptyCreditNoteSelection(
   lines: readonly InvoiceCreditableLine[] | undefined,
+  limit: number | null = null,
 ): CreditNoteSelectionDraft {
   const rates = creditableVatRates(lines);
   return {
-    mode: "lines",
+    mode: creditsByAmount(lines, limit) ? "amount" : "lines",
     lines: {},
     vatRate: rates.length === 1 ? rates[0].rate : "",
     amountGross: "",
@@ -99,11 +144,41 @@ export type CreditNotePreview = {
  * VAT-rate credits are previewed with the rate's gross-to-VAT ratio; the
  * server spreads them over the rate's lines and may differ by a cent.
  */
+export type CreditNotePreviewOptions = {
+  /** `credit_note_limit_gross` of the invoice. */
+  limit?: number | null;
+  /** The invoice's VAT share of its gross (credits by amount). */
+  vatRatio?: number;
+};
+
 export function previewCreditNote(
   lines: readonly InvoiceCreditableLine[] | undefined,
   draft: CreditNoteSelectionDraft,
+  options: CreditNotePreviewOptions = {},
+): CreditNotePreview {
+  const preview = previewSelection(lines, draft, options.vatRatio ?? 0);
+  const limit = options.limit ?? null;
+  if (!preview.error && limit !== null && toCents(preview.gross) > toCents(limit)) {
+    return { ...preview, error: "limit_exceeded" };
+  }
+  return preview;
+}
+
+function previewSelection(
+  lines: readonly InvoiceCreditableLine[] | undefined,
+  draft: CreditNoteSelectionDraft,
+  vatRatio: number,
 ): CreditNotePreview {
   const all = lines ?? [];
+  if (draft.mode === "amount") {
+    // The server keeps the invoice's own VAT split (`without_lines`).
+    const gross = amount(draft.amountGross);
+    if (!Number.isFinite(gross) || toCents(gross) <= 0) {
+      return { gross: 0, vat: 0, net: 0, error: "invalid_amount" };
+    }
+    const vat = Math.min(roundCents(gross * (Number.isFinite(vatRatio) ? vatRatio : 0)), roundCents(gross));
+    return { gross: roundCents(gross), vat, net: roundCents(gross - vat), error: null };
+  }
   if (draft.mode === "vat_rate") {
     const rate = creditableVatRates(all).find((entry) => entry.rate === draft.vatRate);
     const gross = amount(draft.amountGross);
@@ -158,6 +233,9 @@ export function creditNoteSelectionPayload(
   lines: readonly InvoiceCreditableLine[] | undefined,
   draft: CreditNoteSelectionDraft,
 ): Record<string, unknown> {
+  if (draft.mode === "amount") {
+    return { amount_gross: roundCents(amount(draft.amountGross)).toFixed(2) };
+  }
   if (draft.mode === "vat_rate") {
     return {
       vat_rate: draft.vatRate,

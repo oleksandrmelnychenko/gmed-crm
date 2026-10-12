@@ -37,6 +37,7 @@ use axum::{
     response::IntoResponse,
 };
 use chrono::{NaiveDate, Utc};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use sqlx::{PgConnection, Row, postgres::PgRow};
@@ -974,8 +975,42 @@ struct RecipientEvaluation {
     minor_recipient: bool,
     /// The recipient is the contracting party.
     is_party: bool,
-    /// Released advances of the order billed to another recipient.
-    mismatched_advances: Vec<Option<String>>,
+    /// Released advances of another recipient that this final invoice bills
+    /// (same quote, still open).
+    mismatched_advances: Vec<MismatchedAdvance>,
+}
+
+/// An advance of another recipient that a final invoice would settle: named
+/// to billing before it confirms (QA D2-03).
+struct MismatchedAdvance {
+    invoice_number: Option<String>,
+    recipient_name: Option<String>,
+    total_gross: Decimal,
+    paid_gross: Decimal,
+    open_gross: Decimal,
+}
+
+impl MismatchedAdvance {
+    fn to_json(&self) -> Value {
+        json!({
+            "invoice_number": self.invoice_number,
+            "recipient_name": self.recipient_name,
+            "total_gross": crate::money::money_string(self.total_gross),
+            "paid_gross": crate::money::money_string(self.paid_gross),
+            "open_gross": crate::money::money_string(self.open_gross),
+        })
+    }
+}
+
+fn mismatched_numbers(advances: &[MismatchedAdvance]) -> Vec<Option<String>> {
+    advances
+        .iter()
+        .map(|advance| advance.invoice_number.clone())
+        .collect()
+}
+
+fn mismatched_json(advances: &[MismatchedAdvance]) -> Vec<Value> {
+    advances.iter().map(MismatchedAdvance::to_json).collect()
 }
 
 impl RecipientEvaluation {
@@ -1031,25 +1066,62 @@ async fn evaluate_recipient(
     let party = contracting_party::resolve(conn, patient_id, order_id, None, today).await?;
     let minor_recipient = recipient.kind == "patient" && is_minor_on(birth_date, today);
     let is_party = party.is_recipient(&live);
+    // Only advances this final invoice bills (same quote, unless it settles
+    // the whole order) and that still ask for something: an advance of
+    // another quote or one already credited into another invoice is not
+    // settled by it, so billing neither confirms nor stores it (QA D2-03).
     let mismatched_advances = match (invoice_type.as_str(), order_id) {
         ("final", Some(order_id)) => {
-            sqlx::query_scalar::<_, Option<String>>(
-                r#"SELECT advance.invoice_number
-                   FROM invoices advance
-                   WHERE advance.order_id = $1
+            let sql = format!(
+                r#"SELECT advance.invoice_number,
+                          advance.recipient_snapshot ->> 'name' AS recipient_name,
+                          advance.total_gross, advance.paid_amount,
+                          advance.total_gross - advance.credited_amount
+                              - COALESCE((
+                                  SELECT SUM(allocation.amount_gross)
+                                  FROM invoice_prepayment_allocations allocation
+                                  WHERE allocation.advance_invoice_id = advance.id
+                              ), 0) AS open_gross
+                   FROM invoices final_invoice
+                   JOIN invoices advance
+                     ON advance.order_id = final_invoice.order_id
+                    AND advance.patient_id = final_invoice.patient_id
+                   WHERE final_invoice.id = $4
+                     AND advance.order_id = $1
                      AND advance.patient_id = $2
                      AND advance.invoice_type = 'advance'
                      AND advance.released_at IS NOT NULL
                      AND advance.status <> 'cancelled'
                      AND invoice_recipient_identity(advance.recipient_snapshot)
                          IS DISTINCT FROM invoice_recipient_identity($3::jsonb)
-                   ORDER BY advance.issued_at, advance.id"#,
-            )
-            .bind(order_id)
-            .bind(patient_id)
-            .bind(&live)
-            .fetch_all(&mut *conn)
-            .await?
+                     AND advance.total_gross - advance.credited_amount
+                         - COALESCE((
+                             SELECT SUM(allocation.amount_gross)
+                             FROM invoice_prepayment_allocations allocation
+                             WHERE allocation.advance_invoice_id = advance.id
+                         ), 0) > 0
+                     AND {covers}
+                   ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#,
+                covers = super::advance_settlement::FINAL_QUOTE_COVERS_ADVANCE,
+            );
+            sqlx::query(&sql)
+                .bind(order_id)
+                .bind(patient_id)
+                .bind(&live)
+                .bind(invoice_id)
+                .fetch_all(&mut *conn)
+                .await?
+                .into_iter()
+                .map(|row| {
+                    Ok(MismatchedAdvance {
+                        invoice_number: row.try_get("invoice_number")?,
+                        recipient_name: row.try_get("recipient_name")?,
+                        total_gross: row.try_get("total_gross")?,
+                        paid_gross: row.try_get("paid_amount")?,
+                        open_gross: row.try_get("open_gross")?,
+                    })
+                })
+                .collect::<Result<Vec<_>, sqlx::Error>>()?
         }
         _ => Vec::new(),
     };
@@ -1094,7 +1166,8 @@ pub(crate) async fn draft_release_checks(
     if !evaluation.mismatched_advances.is_empty() {
         warnings.push(json!({
             "code": "advance_recipient_mismatch",
-            "advance_invoice_numbers": evaluation.mismatched_advances,
+            "advance_invoice_numbers": mismatched_numbers(&evaluation.mismatched_advances),
+            "advances": mismatched_json(&evaluation.mismatched_advances),
         }));
     }
     // A settlement invoice for services not rendered yet: allowed, printed as
@@ -1173,7 +1246,10 @@ pub(crate) async fn release_recipient_snapshot(
                 code: "advance_recipient_mismatch",
                 message: "Advance invoices of this order went to another recipient; the final invoice deducts advances of the same recipient only",
                 field: "confirm_advance_recipient_mismatch",
-                details: json!({ "advance_invoice_numbers": evaluation.mismatched_advances }),
+                details: json!({
+                    "advance_invoice_numbers": mismatched_numbers(&evaluation.mismatched_advances),
+                    "advances": mismatched_json(&evaluation.mismatched_advances),
+                }),
             });
         }
         confirmed.insert(
@@ -1181,7 +1257,8 @@ pub(crate) async fn release_recipient_snapshot(
             json!({
                 "by": actor_id,
                 "at": now,
-                "advance_invoice_numbers": evaluation.mismatched_advances,
+                "advance_invoice_numbers": mismatched_numbers(&evaluation.mismatched_advances),
+                "advances": mismatched_json(&evaluation.mismatched_advances),
             }),
         );
     }

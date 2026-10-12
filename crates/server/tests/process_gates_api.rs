@@ -2777,7 +2777,9 @@ async fn ceo_assistant_reads_the_orders_it_lists_but_cannot_change_them() {
         None,
     )
     .await;
-    assert_eq!(economics["margin_visible"], false);
+    // The assistant reads the order's money in full, margin included (owner
+    // decision 2026-10-12, QA D2-07).
+    assert_eq!(economics["margin_visible"], true);
 
     // Writes stay closed for the read-only role.
     let (status, _) = json_request(
@@ -2799,13 +2801,23 @@ async fn ceo_assistant_reads_the_orders_it_lists_but_cannot_change_them() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
-    // An assistant without access to the patient still gets nothing.
-    let (status, _) = json_request(
+    // Every assistant reads every order, also without an assignment to the
+    // patient (QA D2-07), and still changes nothing.
+    let (status, body) = json_request(
         &app,
         "GET",
         &format!("/api/v1/orders/{order_id}"),
         &other_assistant,
         None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/status"),
+        &other_assistant,
+        Some(json!({ "status": "paused" })),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN);

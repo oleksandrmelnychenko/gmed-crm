@@ -277,6 +277,42 @@ pub(crate) fn creditable_lines(
     lines
 }
 
+/// Whether an invoice's line snapshot carries the amounts its totals were
+/// built from: every line names its gross amount and together they make the
+/// invoice total (a cent of rounding per line). Old snapshots (seeded or
+/// early advance invoices, QA D-55/D-56) keep only a `total_gross` per line
+/// or no amounts at all: their lines cannot take a credit, so credits on
+/// them go by amount with the invoice's own VAT split
+/// ([`CreditNotePlan::without_lines`]).
+pub(crate) fn line_snapshot_carries_total(line_items: &Value, total_gross: Decimal) -> bool {
+    let Some(items) = line_items.as_array().filter(|items| !items.is_empty()) else {
+        return false;
+    };
+    let mut sum = Decimal::ZERO;
+    for item in items {
+        match json_decimal(item, "line_gross") {
+            Some(gross) => sum += gross,
+            None => return false,
+        }
+    }
+    let tolerance = Decimal::new(1, 2) * Decimal::from(items.len());
+    (sum - total_gross).abs() <= tolerance
+}
+
+/// [`creditable_lines`] of an invoice whose snapshot can carry a credit;
+/// empty otherwise (credits by amount, see [`line_snapshot_carries_total`]).
+pub(crate) fn creditable_lines_for_invoice(
+    line_items: &Value,
+    credits: &[ExistingCredit],
+    total_gross: Decimal,
+) -> Vec<CreditableLine> {
+    if line_snapshot_carries_total(line_items, total_gross) {
+        creditable_lines(line_items, credits)
+    } else {
+        Vec::new()
+    }
+}
+
 /// What staff asked to credit.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum CreditSelection {
@@ -913,6 +949,34 @@ mod tests {
         assert_eq!(
             proportional_selection(&[], dec("12.5")),
             Some(CreditSelection::Amount(dec("12.50")))
+        );
+    }
+
+    #[test]
+    fn old_line_snapshots_without_amounts_take_credits_by_amount() {
+        // The seeded advance of QA D-55: one line with only `total_gross`.
+        let legacy = json!([
+            {"description": "Treatment package", "quantity": 1, "unit_price": "1000.00", "total_gross": "1000.00"}
+        ]);
+        assert!(!line_snapshot_carries_total(&legacy, dec("1000")));
+        assert!(creditable_lines_for_invoice(&legacy, &[], dec("1000")).is_empty());
+        assert!(!line_snapshot_carries_total(&json!([]), dec("1000")));
+        assert!(!line_snapshot_carries_total(&json!(null), dec("1000")));
+        // The rest of 400 is then closed by amount, VAT as on the invoice.
+        assert_eq!(
+            proportional_selection(&[], dec("400")),
+            Some(CreditSelection::Amount(dec("400")))
+        );
+        let plan = CreditNotePlan::without_lines(dec("400"), Decimal::ZERO, dec("1000"));
+        assert_eq!((plan.gross, plan.vat), (dec("400"), Decimal::ZERO));
+
+        // Lines whose amounts do not make the invoice total cannot carry it.
+        assert!(!line_snapshot_carries_total(&mixed_invoice(), dec("1500")));
+        // Current snapshots keep their line credits.
+        assert!(line_snapshot_carries_total(&mixed_invoice(), dec("999.99")));
+        assert_eq!(
+            creditable_lines_for_invoice(&mixed_invoice(), &[], dec("999.99")).len(),
+            2
         );
     }
 

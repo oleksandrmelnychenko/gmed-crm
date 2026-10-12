@@ -41,6 +41,29 @@ use crate::audit;
 use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 
+/// Same quote, unless the final invoice settles the whole order (no quote,
+/// cancelled order) or the advance's quote was replaced or closed (SQL over
+/// `final_invoice` and `advance`).
+macro_rules! final_quote_covers_advance {
+    () => {
+        r#"(
+        final_invoice.quote_id IS NULL
+        OR advance.quote_id IS NULL
+        OR advance.quote_id = final_invoice.quote_id
+        OR EXISTS (
+            SELECT 1 FROM orders settled_order
+            WHERE settled_order.id = final_invoice.order_id
+              AND settled_order.status = 'cancelled'
+        )
+        OR EXISTS (
+            SELECT 1 FROM quotes advance_quote
+            WHERE advance_quote.id = advance.quote_id
+              AND advance_quote.status IN ('superseded', 'rejected', 'expired')
+        )
+    )"#
+    };
+}
+
 /// `final_invoice` settles `advance`: same order and patient, both issued
 /// and active, the advance released first, billed to the same recipient (or
 /// an advance billing confirmed by number at the final's release), and of the
@@ -52,7 +75,8 @@ use crate::state::AppState;
 /// `now()` of two transactions and a clock that steps back between them left
 /// the advance unsettled (flaky `invoice_payer_api` test, 2026-10-12).
 /// Invoices released before the sequence existed fall back to `issued_at`.
-pub(crate) const FINAL_SETTLES_ADVANCE: &str = r#"
+pub(crate) const FINAL_SETTLES_ADVANCE: &str = concat!(
+    r#"
     final_invoice.order_id = advance.order_id
     AND final_invoice.patient_id = advance.patient_id
     AND final_invoice.invoice_type = 'final'
@@ -74,21 +98,13 @@ pub(crate) const FINAL_SETTLES_ADVANCE: &str = r#"
                '[]'::jsonb
            ) ? advance.invoice_number
     )
-    AND (
-        final_invoice.quote_id IS NULL
-        OR advance.quote_id IS NULL
-        OR advance.quote_id = final_invoice.quote_id
-        OR EXISTS (
-            SELECT 1 FROM orders settled_order
-            WHERE settled_order.id = final_invoice.order_id
-              AND settled_order.status = 'cancelled'
-        )
-        OR EXISTS (
-            SELECT 1 FROM quotes advance_quote
-            WHERE advance_quote.id = advance.quote_id
-              AND advance_quote.status IN ('superseded', 'rejected', 'expired')
-        )
-    )"#;
+    AND "#,
+    final_quote_covers_advance!()
+);
+
+/// The quote part of [`FINAL_SETTLES_ADVANCE`]: which advances a final
+/// invoice (also a draft about to be released) bills, whoever received them.
+pub(crate) const FINAL_QUOTE_COVERS_ADVANCE: &str = final_quote_covers_advance!();
 
 /// What an advance still asks for beyond the money credited from it into
 /// settlement invoices: its corrected total minus its allocations.
@@ -252,8 +268,21 @@ pub(super) async fn close_advance_rest_tx(
     let existing = credit_notes::load_active_credits(transaction, advance_invoice_id)
         .await
         .map_err(|error| failed_response(error, advance_invoice_id, "advance credits"))?;
-    let creditable = credit_notes::creditable_lines(&context.line_items, &existing);
+    // The rest comes from the invoice balance above. An advance whose line
+    // snapshot carries no amounts (seeded or early advances, QA D-55/D-56)
+    // has no creditable lines: its rest is credited by amount with the
+    // advance's own VAT split instead of being skipped.
+    let creditable = credit_notes::creditable_lines_for_invoice(
+        &context.line_items,
+        &existing,
+        context.total_gross,
+    );
     let Some(selection) = credit_notes::proportional_selection(&creditable, rest) else {
+        tracing::warn!(
+            invoice_id = %advance_invoice_id,
+            rest = %rest,
+            "advance rest left open: no line of the advance can take the credit"
+        );
         return Ok(None);
     };
     let request_selection = selection.to_json();

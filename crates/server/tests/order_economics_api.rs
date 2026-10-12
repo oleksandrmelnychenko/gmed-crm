@@ -1913,3 +1913,93 @@ async fn economics_assigns_line_credits_and_keeps_pass_through_out_of_the_margin
     assert!(manager_view["actual"]["passthrough_cost_net"].is_null());
     assert!(manager_view["actual"]["margin_net"].is_null());
 }
+
+/// QA D2-07 (owner decision 2026-10-12): the CEO Assistant reads every
+/// order's money, debt management, supplier payouts and concierge expenses,
+/// also of patients nobody assigned to it, and changes none of them.
+#[tokio::test]
+async fn the_ceo_assistant_reads_order_money_and_changes_nothing() {
+    let Some(context) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let app = context.app;
+    let pool = context.pool;
+    let admin_id = context.admin_id;
+    let tag = Uuid::new_v4().simple().to_string();
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let assistant = auth_header(
+        seed_user(&pool, &tag, "ceo_assistant").await,
+        "ceo_assistant",
+    );
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, currency, created_by)
+           VALUES ($1, $2, 'execution', 'active', 'EUR', $3)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    for path in [
+        format!("/api/v1/orders/{order_id}"),
+        format!("/api/v1/orders/{order_id}/economics"),
+        format!("/api/v1/orders/{order_id}/external-invoices"),
+        format!("/api/v1/orders/{order_id}/leistungen"),
+        "/api/v1/orders/debt-management".to_string(),
+        "/api/v1/concierge-expenses".to_string(),
+    ] {
+        let (status, body) = json_request(&app, "GET", &path, &assistant, None).await;
+        assert_eq!(status, StatusCode::OK, "{path}: {body:?}");
+    }
+    let (status, orders) = json_request(&app, "GET", "/api/v1/orders", &assistant, None).await;
+    assert_eq!(status, StatusCode::OK, "{orders:?}");
+    assert!(
+        orders
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|order| order["id"] == order_id.to_string()),
+        "the order of an unassigned patient is listed"
+    );
+    // The payout history is open to the assistant (unknown document: 404,
+    // not 403).
+    let unknown = Uuid::new_v4();
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/company-provider-liabilities/{unknown}/settlements"),
+        &assistant,
+        None,
+    )
+    .await;
+    assert_ne!(status, StatusCode::FORBIDDEN, "{body:?}");
+
+    // Writes stay closed.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/debt-management"),
+        &assistant,
+        Some(json!({ "status": "review_required" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/company-provider-liabilities/{unknown}/settlements"),
+        &assistant,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "financial_account_id": Uuid::new_v4(),
+            "amount_gross": "10",
+            "paid_on": "2026-10-12",
+            "payment_method": "bank_transfer",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body:?}");
+}

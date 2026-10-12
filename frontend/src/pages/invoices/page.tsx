@@ -76,14 +76,27 @@ import { IncomingInvoices } from "./ui/incoming-invoices";
 import { TerminationSettlementQueue } from "./termination-settlement/queue";
 import { PaymentEditForm } from "./ui/payment-edit-form";
 import { CreditNoteForm, CreditNoteLinesSummary } from "./ui/credit-note-form";
-import { creditNoteSelectionPayload, previewCreditNote } from "./model/credit-note";
+import {
+  creditNoteLimit,
+  creditNoteSelectionPayload,
+  effectiveCreditNoteSelection,
+  previewCreditNote,
+} from "./model/credit-note";
 import { CREDIT_TRANSFER_METHOD, paymentOverpayment } from "./model/overpayment";
 import { CreditBalancePanel } from "./ui/credit-balance-panel";
 import { CreateInvoiceDialog } from "./ui/create-invoice-dialog";
 import { InvoiceLineComment } from "./ui/invoice-line-comment";
 import { DatevWorkspace } from "./datev/workspace";
 import { invoiceCreationErrorMessage } from "./model/billing-release";
-import { dunningBlockReason, dunningErrorKey } from "./model/invoice-dunning";
+import {
+  automaticDunningNote,
+  dunningBlockReason,
+  dunningDeadlineHint,
+  dunningDeadlineRunning,
+  dunningErrorKey,
+  dunningOverrideCopy,
+  isDunningDeadlineError,
+} from "./model/invoice-dunning";
 import { buildPaymentCorrectionPayload, canCorrectPayment } from "./model/payment-correction";
 import {
   creditNoteReleases,
@@ -1023,9 +1036,22 @@ function useStaffInvoicesPageContent() {
     newCreditNoteDraft(),
   );
   const creditNoteForm = creditNoteDraft.draft;
+  // The server's limit (QA D2-01) and, for invoices without creditable
+  // lines, credits by amount with the invoice's VAT share (QA D-55).
+  const creditNoteLimitGross = creditNoteLimit(detail?.credit_note_limit_gross);
+  const creditNoteSelection = useMemo(
+    () => effectiveCreditNoteSelection(detail?.creditable_lines, creditNoteLimitGross, creditNoteForm.selection),
+    [detail?.creditable_lines, creditNoteLimitGross, creditNoteForm.selection],
+  );
+  const creditNoteVatRatio = Number(detail?.total_gross) > 0
+    ? Number(detail?.total_vat ?? 0) / Number(detail?.total_gross)
+    : 0;
   const creditNotePreview = useMemo(
-    () => previewCreditNote(detail?.creditable_lines, creditNoteForm.selection),
-    [detail?.creditable_lines, creditNoteForm.selection],
+    () => previewCreditNote(detail?.creditable_lines, creditNoteSelection, {
+      limit: creditNoteLimitGross,
+      vatRatio: creditNoteVatRatio,
+    }),
+    [detail?.creditable_lines, creditNoteSelection, creditNoteLimitGross, creditNoteVatRatio],
   );
   const [creditNoteBusy, setCreditNoteBusy] = useState(false);
   const [creditNoteError, setCreditNoteError] = useState<string | null>(null);
@@ -1660,7 +1686,15 @@ function useStaffInvoicesPageContent() {
   const dunningBlockKey = dunningBlockReason(
     detailBusy || detailError || detail?.id !== selectedInvoiceId ? null : detail,
   );
-  const canCreateDunning = access.canManage && !dunningBusy && !dunningBlockKey && !dunningError && Boolean(nextDunning);
+  // The next level waits for the deadline of the previous letter; the CEO
+  // may send it earlier with a reason (QA D2-06).
+  const dunningDeadline = dunningDeadlineRunning(dunningEvents, nextDunning);
+  const canOverrideDunningDeadline = user?.role === "ceo";
+  const [dunningOverrideReason, setDunningOverrideReason] = useState("");
+  const dunningOverrideReady = !dunningDeadline
+    || (canOverrideDunningDeadline && dunningOverrideReason.trim().length >= 3);
+  const canCreateDunning = access.canManage && !dunningBusy && !dunningBlockKey && !dunningError && Boolean(nextDunning)
+    && (!dunningDeadline || canOverrideDunningDeadline);
   const dunningActionLabel = nextDunning === "collections"
     ? t.invoices_workspace_record_collections
     : nextDunning ? text.createDunning : text.noFurtherEscalation;
@@ -2019,7 +2053,7 @@ function useStaffInvoicesPageContent() {
     try {
       const created = (await createInvoiceCreditNote(detail.id, {
         request_id: creditNoteForm.requestId,
-        ...creditNoteSelectionPayload(detail.creditable_lines, creditNoteForm.selection),
+        ...creditNoteSelectionPayload(detail.creditable_lines, creditNoteSelection),
         reason: creditNoteForm.reason.trim(),
         issued_on: creditNoteForm.issuedOn,
         portal_visible: creditNoteForm.portalVisible,
@@ -2237,20 +2271,27 @@ function useStaffInvoicesPageContent() {
 
   async function handleCreateDunning() {
     if (!selectedInvoiceId || !nextDunning || !canCreateDunning || dunningRequestPending.current) return;
+    if (!dunningOverrideReady) return;
     dunningRequestPending.current = true;
     setDunningBusy(true);
     try {
       const created = await createDunningEvent(selectedInvoiceId, {
         level: nextDunning,
         note: dunningForm.note.trim() || null,
+        ...(dunningDeadline ? { deadline_override_reason: dunningOverrideReason.trim() } : {}),
       });
       setDunningEvents((current) => [...current, created]);
       setDunningForm({ note: "" });
+      setDunningOverrideReason("");
       setDunningDialogOpen(false);
       setDunningError(null);
       setReloadToken((current) => current + 1);
     } catch (error) {
-      setDunningError(t[dunningErrorKey(error)]);
+      setDunningError(
+        isDunningDeadlineError(error)
+          ? localizeInvoiceError(error, lang, t.common_error)
+          : t[dunningErrorKey(error)],
+      );
     } finally {
       dunningRequestPending.current = false;
       setDunningBusy(false);
@@ -3384,6 +3425,8 @@ function useStaffInvoicesPageContent() {
                     {access.canManage && !["draft", "cancelled"].includes(detail.status) && Number(detail.adjusted_total_gross ?? detail.total_gross) > 0 ? (
                       <CreditNoteForm
                         lines={detail.creditable_lines}
+                        limit={creditNoteLimitGross}
+                        isAdvance={detail.invoice_type === "advance"}
                         draft={creditNoteForm}
                         onChange={(update) => setCreditNoteForm(update)}
                         preview={creditNotePreview}
@@ -4165,6 +4208,11 @@ function useStaffInvoicesPageContent() {
                   </p>
                 ) : null}
                 {dunningError && !dunningDialogOpen ? <ShellBanner tone="error">{dunningError}</ShellBanner> : null}
+                {access.canManage && dunningDeadline && !dunningBlockKey ? (
+                  <p id="invoice-dunning-deadline" className="text-sm text-muted-foreground">
+                    {dunningDeadlineHint(dunningDeadline, lang, canOverrideDunningDeadline)}
+                  </p>
+                ) : null}
                 <DataTableSurface
                   rows={dunningEvents}
                   columns={
@@ -4253,29 +4301,30 @@ function useStaffInvoicesPageContent() {
                       {
                         id: "responsible",
                         label: text.dunningResponsible,
-                        accessor: (event) => event.created_by_name ?? text.system,
+                        // The automatic run is the system, not a person (QA D2-12).
+                        accessor: (event) => (event.automatic ? text.system : event.created_by_name ?? text.system),
                         sortable: true,
                         width: 200,
                         render: (event) => (
                           <span className="block truncate font-mono text-xs text-foreground">
-                            {event.created_by_name ?? text.system}
+                            {event.automatic ? text.system : event.created_by_name ?? text.system}
                           </span>
                         ),
                       },
                       {
                         id: "note",
                         label: text.dunningNote,
-                        accessor: (event) => event.note ?? "",
+                        accessor: (event) => (event.automatic ? automaticDunningNote(event.level, lang) : event.note ?? ""),
                         searchable: true,
                         width: 320,
-                        render: (event) => (
-                          <span
-                            className="block truncate text-xs text-foreground"
-                            title={event.note ?? undefined}
-                          >
-                            {event.note?.trim() || t.common_not_set}
-                          </span>
-                        ),
+                        render: (event) => {
+                          const note = event.automatic ? automaticDunningNote(event.level, lang) : event.note?.trim();
+                          return (
+                            <span className="block truncate text-xs text-foreground" title={note || undefined}>
+                              {note || t.common_not_set}
+                            </span>
+                          );
+                        },
                       },
                     ] satisfies ColumnDef<(typeof dunningEvents)[number]>[]
                   }
@@ -4301,7 +4350,13 @@ function useStaffInvoicesPageContent() {
                           setDunningDialogOpen(true);
                         }}
                         disabled={!canCreateDunning}
-                        aria-describedby={dunningBlockKey ? "invoice-dunning-block-reason" : undefined}
+                        aria-describedby={
+                          dunningBlockKey
+                            ? "invoice-dunning-block-reason"
+                            : dunningDeadline
+                              ? "invoice-dunning-deadline"
+                              : undefined
+                        }
                       >
                         {dunningActionLabel}
                       </Button>
@@ -4675,6 +4730,23 @@ function useStaffInvoicesPageContent() {
                   </div>
                 </div>
               </div>
+              {dunningDeadline ? (
+                <ShellBanner tone="warning">
+                  {dunningDeadlineHint(dunningDeadline, lang, canOverrideDunningDeadline)}
+                </ShellBanner>
+              ) : null}
+              {dunningDeadline && canOverrideDunningDeadline ? (
+                <Field label={dunningOverrideCopy(lang).label}>
+                  <textarea
+                    className={textareaClassName}
+                    value={dunningOverrideReason}
+                    maxLength={1000}
+                    onChange={(event) => setDunningOverrideReason(event.target.value)}
+                    disabled={!canCreateDunning}
+                    placeholder={dunningOverrideCopy(lang).placeholder}
+                  />
+                </Field>
+              ) : null}
               <Field label={text.dunningNote}>
                 <textarea
                   className={textareaClassName}
@@ -4691,7 +4763,7 @@ function useStaffInvoicesPageContent() {
               </Button>
               <Button
                 type="button"
-                disabled={!canCreateDunning}
+                disabled={!canCreateDunning || !dunningOverrideReady}
                 onClick={() => void handleCreateDunning()}
               >
                 {dunningBusy ? <LoaderCircle className="mr-2 size-4 animate-spin" /> : null}

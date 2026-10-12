@@ -856,7 +856,14 @@ async fn list_debt_management_queue(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ListDebtManagementQuery>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::Ceo]) {
+    // Read-only for the CEO Assistant (QA D2-07); changes stay with PM,
+    // Billing and the CEO (`update_debt_management`).
+    if let Err(e) = auth.require_any_role(&[
+        Role::PatientManager,
+        Role::Billing,
+        Role::Ceo,
+        Role::CeoAssistant,
+    ]) {
         return e;
     }
 
@@ -3952,7 +3959,7 @@ async fn get_order(
         auth.role,
         Role::Ceo | Role::CeoAssistant | Role::PatientManager | Role::Billing
     );
-    let can_view_order_costs = matches!(auth.role, Role::Ceo | Role::Billing);
+    let can_view_order_costs = matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant);
     let mut leist_json = Vec::new();
     for l in leistungen {
         let quantity = l
@@ -4868,7 +4875,7 @@ async fn get_order_economics(
         );
     }
 
-    let margin_visible = matches!(auth.role, Role::Ceo | Role::Billing);
+    let margin_visible = matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant);
     let currency_mismatch_count = external
         .try_get::<i64, _>("currency_mismatch_count")
         .unwrap_or_default();
@@ -7825,7 +7832,10 @@ async fn get_external_invoice_allocations(
     Extension(auth): Extension<AuthUser>,
     Path((order_id, external_invoice_id)): Path<(Uuid, Uuid)>,
 ) -> axum::response::Response {
-    if let Err(response) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    // Read: also the CEO Assistant (QA D2-07); allocating stays PM/Billing.
+    if let Err(response) =
+        auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::CeoAssistant])
+    {
         return response;
     }
     match can_access_order(&state, &auth, order_id, None).await {
@@ -8235,7 +8245,10 @@ async fn list_external_invoices(
     Extension(auth): Extension<AuthUser>,
     Path(order_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if let Err(e) = auth.require_any_role(&[Role::PatientManager, Role::Billing]) {
+    // Read: also the CEO Assistant (QA D2-07); recording stays PM/Billing.
+    if let Err(e) =
+        auth.require_any_role(&[Role::PatientManager, Role::Billing, Role::CeoAssistant])
+    {
         return e;
     }
     match can_access_order(&state, &auth, order_id, None).await {
@@ -9440,7 +9453,7 @@ async fn list_leistungen(
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
     }
-    let can_view_order_costs = matches!(auth.role, Role::Ceo | Role::Billing);
+    let can_view_order_costs = matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant);
 
     match sqlx::query(
         r#"SELECT ol.id, ol.patient_id, ol.description, ol.quantity, ol.unit_price, ol.currency, ol.vat_rate,
@@ -13363,7 +13376,10 @@ async fn can_access_order(
     if preparing {
         return Ok(false);
     }
-    if matches!(auth.role, Role::Ceo | Role::Billing) {
+    // The CEO Assistant reads every order (owner decision 2026-10-12, QA
+    // D2-07) and writes none: every write of an order checks a role or
+    // capability the assistant does not hold before it gets here.
+    if matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant) {
         return Ok(true);
     }
 

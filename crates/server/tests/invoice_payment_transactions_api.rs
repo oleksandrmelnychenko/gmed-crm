@@ -1416,3 +1416,215 @@ async fn refunds_and_payment_reversals_from_a_cash_default_account_need_the_cash
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused:?}");
     assert_eq!(money(&refused["available_balance"]), Decimal::ZERO);
 }
+
+/// An advance whose line snapshot carries no amounts (old format: only
+/// `total_gross` per line, like the seeded `INV-…` of the QA stack).
+async fn seed_legacy_advance(
+    pool: &PgPool,
+    order_id: Uuid,
+    patient_id: Uuid,
+    created_by: Uuid,
+    tag: &str,
+) -> Uuid {
+    sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status, issued_at,
+                due_date, total_net, total_vat, total_gross, paid_amount, line_items,
+                notes, created_by
+           ) VALUES (
+                $1, $2, $3, 'advance', 'sent', now() - interval '1 day', CURRENT_DATE + 14,
+                1000, 0, 1000, 0, $4, 'Legacy advance', $5
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}"))
+    .bind(json!([{
+        "description": "Treatment package",
+        "quantity": 1,
+        "unit_price": "1000.00",
+        "total_gross": "1000.00"
+    }]))
+    .bind(created_by)
+    .fetch_one(pool)
+    .await
+    .unwrap()
+}
+
+async fn invoice_detail(app: &axum::Router, bearer: &str, invoice_id: Uuid) -> Value {
+    let (status, detail) = json_request(
+        app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_id}"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{detail:?}");
+    detail
+}
+
+/// QA D-55/D-56 (round 2): the rest of an advance whose lines are an old
+/// snapshot is closed from the invoice balance, by amount, both when the
+/// final invoice is released and with the manual button; the patient is
+/// asked for 400, not 800. The credit-note form offers what the server
+/// accepts (D2-01).
+#[tokio::test]
+async fn the_rest_of_an_advance_with_an_old_line_snapshot_is_closed_by_amount() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("legacy-advance-rest");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing = auth_header_for(seed_user(&pool, &tag, "billing").await, "billing");
+
+    // At the release of the final invoice.
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let advance = seed_legacy_advance(&pool, order_id, patient_id, admin_id, &tag).await;
+    record_payment(&app, &billing, advance, Uuid::new_v4(), 600, "LEGACY-ADV").await;
+    let detail = invoice_detail(&app, &billing, advance).await;
+    assert_eq!(detail["creditable_lines"], json!([]), "{detail}");
+    assert_eq!(detail["credit_note_limit_gross"], "1000");
+    let final_invoice = seed_invoice_in_status(
+        &pool,
+        order_id,
+        patient_id,
+        admin_id,
+        &format!("{tag}-final"),
+        "final",
+        1000,
+        false,
+        "draft",
+    )
+    .await;
+    let (status, released) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{final_invoice}/status"),
+        &billing,
+        Some(json!({ "status": "sent" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released:?}");
+    assert_eq!(released["prepayment_applied_amount"], "600");
+    assert_eq!(released["balance_due"], "400");
+    let detail = invoice_detail(&app, &billing, advance).await;
+    assert_eq!(detail["credited_amount"], "400", "{detail}");
+    assert_eq!(detail["balance_due"], "0", "{detail}");
+    assert_eq!(detail["advance_settlement"]["open_rest"], "0", "{detail}");
+    assert_eq!(detail["credit_note_limit_gross"], "0", "QA D2-01: {detail}");
+    let (mode, vat, line_items): (String, Decimal, Option<Value>) = sqlx::query_as(
+        r#"SELECT credit_mode, amount_vat, line_items
+           FROM invoice_credit_note_transactions WHERE invoice_id = $1"#,
+    )
+    .bind(advance)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(mode, "legacy_pro_rata");
+    assert_eq!(vat, Decimal::ZERO, "the advance's own VAT split (0 %)");
+    assert!(line_items.is_none());
+
+    // With the manual button, for an advance whose final invoice was
+    // released before the rule existed.
+    let second_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-2")).await;
+    let second_advance = seed_legacy_advance(
+        &pool,
+        second_order,
+        patient_id,
+        admin_id,
+        &format!("{tag}-2"),
+    )
+    .await;
+    record_payment(
+        &app,
+        &billing,
+        second_advance,
+        Uuid::new_v4(),
+        600,
+        "LEGACY-2",
+    )
+    .await;
+    let second_final = seed_invoice(
+        &pool,
+        second_order,
+        patient_id,
+        admin_id,
+        &format!("{tag}-2-final"),
+        "final",
+        1000,
+        false,
+    )
+    .await;
+    let (status, applied) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{second_final}/prepayment-allocations"),
+        &billing,
+        Some(json!({
+            "request_id": Uuid::new_v4(),
+            "advance_invoice_id": second_advance,
+            "amount_gross": "600",
+        })),
+    )
+    .await;
+    assert!(status.is_success(), "{applied:?}");
+    let detail = invoice_detail(&app, &billing, second_advance).await;
+    assert_eq!(detail["advance_settlement"]["open_rest"], "400", "{detail}");
+    let (status, closed) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{second_advance}/advance-rest"),
+        &billing,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{closed:?}");
+    assert_eq!(closed["amount_gross"], "400");
+    assert_eq!(closed["invoice"]["balance_due"], "0", "{closed}");
+    assert_eq!(closed["invoice"]["credited_amount"], "400");
+}
+
+/// QA D2-11: an order without a required prepayment gets no "prepayment
+/// status" notice for its payments.
+#[tokio::test]
+async fn payments_of_an_order_without_required_prepayment_send_no_prepayment_notice() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("no-prepayment-notice");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let billing_id = seed_user(&pool, &tag, "billing").await;
+    let billing = auth_header_for(billing_id, "billing");
+    let order_id = seed_order(&pool, patient_id, admin_id, &tag).await;
+    let invoice = seed_invoice(
+        &pool, order_id, patient_id, admin_id, &tag, "final", 1000, false,
+    )
+    .await;
+    record_payment(
+        &app,
+        &billing,
+        invoice,
+        Uuid::new_v4(),
+        600,
+        "NO-PREPAYMENT",
+    )
+    .await;
+    let notices: i64 = sqlx::query_scalar(
+        r#"SELECT count(*) FROM user_notifications
+           WHERE entity_id = $1 AND kind = 'order_payment_status'"#,
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notices, 0);
+    let tracked: String = sqlx::query_scalar(
+        "SELECT payment_status FROM order_payment_notification_state WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(tracked, "not_required", "the state is still tracked");
+}

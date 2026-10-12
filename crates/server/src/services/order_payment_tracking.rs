@@ -44,9 +44,14 @@ pub async fn sync_notifications(
         changed_orders.push((order, row.try_get::<Option<Uuid>, _>("source_lead_id")?));
         // On first rollout, seed settled/unrequired orders silently. Pending
         // signed orders and subsequent changes are actionable for finance.
-        if previous.is_some()
-            || !matches!(status.as_str(), "paid" | "not_required")
-            || (order_id.is_some() && received > Decimal::ZERO)
+        // An order without a required prepayment has nothing to track: its
+        // payments are followed on the invoices, so no "prepayment status"
+        // notice is sent for them (QA D2-11: "Предоплата не требуется ·
+        // Остаток 0,00 €" on every payment while 400 € were still owed).
+        if status != "not_required"
+            && (previous.is_some()
+                || status != "paid"
+                || (order_id.is_some() && received > Decimal::ZERO))
         {
             let body = serde_json::json!({
                 "order_number": row.try_get::<String,_>("order_number")?,

@@ -26,6 +26,12 @@ export interface FinanceBalancesTranslations {
   finance_credit_note_error_line_exceeded: string;
   finance_credit_note_error_vat_rate_missing: string;
   finance_credit_note_error_vat_rate_exceeded: string;
+  /** The server's limit of a new credit note (QA D2-01). */
+  finance_credit_note_limit: string;
+  finance_credit_note_limit_applied_advance: string;
+  finance_credit_note_error_limit_exceeded: string;
+  /** Invoices whose line snapshot carries no amounts take credits by amount (QA D-55). */
+  finance_credit_note_by_amount_hint: string;
   finance_credit_note_empty: string;
   finance_credit_note_visible_in_portal: string;
   finance_credit_note_staff_only: string;
@@ -117,6 +123,12 @@ export const financeBalancesRu: FinanceBalancesTranslations = {
   finance_credit_note_error_line_exceeded: "Сумма превышает остаток позиции.",
   finance_credit_note_error_vat_rate_missing: "Выберите ставку НДС.",
   finance_credit_note_error_vat_rate_exceeded: "Сумма превышает остаток по этой ставке НДС.",
+  finance_credit_note_limit: "Можно скорректировать по счёту: {amount}",
+  finance_credit_note_limit_applied_advance:
+    "Можно скорректировать: {amount}. Этот аванс зачтён в финальный счёт: сначала снимите зачёт в финальном счёте или скорректируйте финальный счёт кредит-нотой.",
+  finance_credit_note_error_limit_exceeded: "Сумма больше, чем можно скорректировать по счёту ({amount}).",
+  finance_credit_note_by_amount_hint:
+    "Позиции этого счёта сохранены в старом формате без сумм: кредит-нота выставляется на сумму, НДС — в пропорции самого счёта.",
   finance_credit_note_empty: "Кредит-нот пока нет.",
   finance_credit_note_visible_in_portal: "Видно в портале",
   finance_credit_note_staff_only: "Только для сотрудников",
@@ -214,6 +226,13 @@ export const financeBalancesDe: FinanceBalancesTranslations = {
   finance_credit_note_error_vat_rate_missing: "Wählen Sie einen Steuersatz.",
   finance_credit_note_error_vat_rate_exceeded:
     "Der Betrag übersteigt den offenen Betrag dieses Steuersatzes.",
+  finance_credit_note_limit: "Insgesamt korrigierbar: {amount}",
+  finance_credit_note_limit_applied_advance:
+    "Korrigierbar: {amount}. Diese Anzahlung ist in die Schlussrechnung angerechnet: Heben Sie zuerst die Anrechnung in der Schlussrechnung auf oder korrigieren Sie die Schlussrechnung per Gutschrift.",
+  finance_credit_note_error_limit_exceeded:
+    "Der Betrag übersteigt den korrigierbaren Betrag der Rechnung ({amount}).",
+  finance_credit_note_by_amount_hint:
+    "Die Positionen dieser Rechnung sind im alten Format ohne Beträge gespeichert: Die Korrektur erfolgt über einen Betrag, die Umsatzsteuer im Verhältnis der Rechnung.",
   finance_credit_note_empty: "Keine Rechnungskorrekturen.",
   finance_credit_note_visible_in_portal: "Im Portal sichtbar",
   finance_credit_note_staff_only: "Nur intern",

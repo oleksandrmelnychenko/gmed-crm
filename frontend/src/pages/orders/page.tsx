@@ -279,6 +279,7 @@ import {
   OrderCancellationDialog,
 } from "./ui/order-cancellation";
 import { normalizeOrderCancellationSettlement } from "./model/order-cancellation";
+import { debtRecheckCopy } from "./model/debt-recheck";
 import { OrderFollowupMilestones } from "./ui/order-followup-milestones";
 import { readableServiceLineNotes } from "./model/service-line-notes";
 import {
@@ -1671,6 +1672,15 @@ function useOrdersPageContent() {
     orderDetail?.process_gates?.debt_management?.owner_user_id,
   ]);
   const canManageDebt = hasCapability(user, "orders.economics");
+  // The CEO Assistant reads the debt queue (QA D2-07); editing stays with
+  // `orders.economics`.
+  const canViewDebt = canManageDebt || user?.role === "ceo_assistant";
+  // One source for the debt line of the re-check (QA D2-08).
+  const createDebtCopy = debtRecheckCopy(
+    createRecheck?.overdue_invoice_count ?? 0,
+    createRecheck?.debt_management?.overdue_invoices,
+    lang,
+  );
   const orderSectionAnchorRef = useRef<HTMLDivElement>(null);
   const orderWorkspaceTopRef = useRef<HTMLDivElement>(null);
   // Set while a blocker opens a section and scrolls to one of its controls,
@@ -2442,7 +2452,7 @@ function useOrdersPageContent() {
   ]);
 
   useEffect(() => {
-    if (!permissions.canViewPage || !canManageDebt) {
+    if (!permissions.canViewPage || !canViewDebt) {
       resetDebtQueue();
       return;
     }
@@ -2471,7 +2481,7 @@ function useOrdersPageContent() {
     };
   }, [
     applyDebtQueue,
-    canManageDebt,
+    canViewDebt,
     failDebtQueueLoad,
     filters.providerTaxonomyNodeId,
     finishDebtQueueLoad,
@@ -3443,7 +3453,7 @@ function useOrdersPageContent() {
         }
       />
 
-      {canManageDebt && (Boolean(debtQueueError) || debtQueue.length > 0) ? (
+      {canViewDebt && (Boolean(debtQueueError) || debtQueue.length > 0) ? (
         <section className="rounded-lg border border-border/70 bg-card p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
@@ -8578,7 +8588,7 @@ function useOrdersPageContent() {
                                         : check.key === "contract"
                                           ? l("orders_vertragsunterlagen_gultig")
                                           : check.key === "debt_clear"
-                                            ? l("orders_debt_hold_aufgehoben")
+                                            ? createDebtCopy.label
                                             : check.key === "passport_valid"
                                               ? l("orders_recheck_passport_valid")
                                               : check.label}
@@ -8607,6 +8617,15 @@ function useOrdersPageContent() {
                                     ? l("orders_recheck_passport_expired")
                                     : l("orders_recheck_passport_expiring")}
                                 </Badge>
+                              ) : check.key === "debt_clear" && createDebtCopy.overdue ? (
+                                // Overdue debt is shown for attention; it never
+                                // blocks a new order (QA D2-08).
+                                <Badge
+                                  variant="outline"
+                                  className="rounded-full border-amber-200 bg-amber-50 text-amber-700"
+                                >
+                                  {createDebtCopy.badge}
+                                </Badge>
                               ) : (
                                 <Badge
                                   variant="outline"
@@ -8621,6 +8640,13 @@ function useOrdersPageContent() {
                                 </Badge>
                               )}
                             </div>
+                            {check.key === "debt_clear" && createDebtCopy.invoices.length ? (
+                              <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                                {createDebtCopy.invoices.map((line) => (
+                                  <li key={line}>{line}</li>
+                                ))}
+                              </ul>
+                            ) : null}
                             {check.key === "passport_valid" &&
                             check.expiry &&
                             (check.status === "expired" ||
@@ -8700,7 +8726,7 @@ function useOrdersPageContent() {
                                 count: createRecheck.overdue_invoice_count,
                               })
                             : createRecheck.requires_recheck
-                              ? l("orders_keine_uberfalligen_forderungen_erkannt")
+                              ? createDebtCopy.summary
                               : l("orders_debt_hold_wird_gepruft_sobald_eine_fruhere_kundenhistori")}
                         </div>
                         {createRecheck.requires_recheck &&

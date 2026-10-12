@@ -753,14 +753,20 @@ async fn lock_financial_context(
     }
 }
 
+/// Finance readers of every expense: CEO and Billing, and the CEO Assistant
+/// read-only (QA D2-07; reviewing, posting and reversing stay with
+/// [`require_finance`]).
+fn reads_all_expenses(auth: &AuthUser) -> bool {
+    matches!(auth.role, Role::Ceo | Role::Billing | Role::CeoAssistant)
+}
+
 fn can_read_expenses(auth: &AuthUser, context: &ServiceContext) -> bool {
-    auth.role == Role::Ceo
-        || auth.role == Role::Billing
+    reads_all_expenses(auth)
         || (auth.role == Role::Concierge && context.assigned_concierge_id == Some(auth.user_id))
 }
 
 fn can_read_task_expenses(auth: &AuthUser, context: &TaskContext) -> bool {
-    matches!(auth.role, Role::Ceo | Role::Billing)
+    reads_all_expenses(auth)
         || context.assigned_to == auth.user_id
         || context.assigned_by == auth.user_id
 }
@@ -768,11 +774,11 @@ fn can_read_task_expenses(auth: &AuthUser, context: &TaskContext) -> bool {
 fn can_read_scope(auth: &AuthUser, scope: ExpenseScope, context: &FinancialContext) -> bool {
     match scope {
         ExpenseScope::Service(_) => {
-            matches!(auth.role, Role::Ceo | Role::Billing)
+            reads_all_expenses(auth)
                 || (auth.role == Role::Concierge && context.assigned_to == Some(auth.user_id))
         }
         ExpenseScope::Task(_) => {
-            matches!(auth.role, Role::Ceo | Role::Billing)
+            reads_all_expenses(auth)
                 || context.assigned_to == Some(auth.user_id)
                 || context.assigned_by == Some(auth.user_id)
         }
@@ -785,12 +791,27 @@ fn can_submit_scope(auth: &AuthUser, scope: ExpenseScope, context: &FinancialCon
             auth.role == Role::Ceo
                 || (auth.role == Role::Concierge && context.assigned_to == Some(auth.user_id))
         }
-        ExpenseScope::Task(_) => can_read_scope(auth, scope, context),
+        // As before the assistant's read access (QA D2-07): finance or the
+        // people of the task.
+        ExpenseScope::Task(_) => {
+            matches!(auth.role, Role::Ceo | Role::Billing)
+                || context.assigned_to == Some(auth.user_id)
+                || context.assigned_by == Some(auth.user_id)
+        }
     }
 }
 
 fn require_finance(auth: &AuthUser) -> Result<(), Response> {
     if matches!(auth.role, Role::Ceo | Role::Billing) {
+        Ok(())
+    } else {
+        Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
+    }
+}
+
+/// The review queue: finance and, read-only, the CEO Assistant.
+fn require_finance_read(auth: &AuthUser) -> Result<(), Response> {
+    if reads_all_expenses(auth) {
         Ok(())
     } else {
         Err(err(StatusCode::FORBIDDEN, "Insufficient permissions"))
@@ -2053,7 +2074,7 @@ async fn list_expense_review_queue(
     Extension(auth): Extension<AuthUser>,
     Query(query): Query<ExpenseReviewQueueQuery>,
 ) -> Response {
-    if let Err(response) = require_finance(&auth) {
+    if let Err(response) = require_finance_read(&auth) {
         return response;
     }
 

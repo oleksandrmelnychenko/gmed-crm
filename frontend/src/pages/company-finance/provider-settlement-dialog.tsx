@@ -259,7 +259,7 @@ export function ProviderSettlementDialog({
       })
       .catch((error: unknown) => {
         if (!active) return;
-        setLoadError(error instanceof Error ? error.message : text.loadFailed);
+        setLoadError(localizeCompanyFinanceError(error, lang, text.loadFailed));
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -267,7 +267,7 @@ export function ProviderSettlementDialog({
     return () => {
       active = false;
     };
-  }, [liabilityId, reloadToken, text.loadFailed]);
+  }, [lang, liabilityId, reloadToken, text.loadFailed]);
 
   const reversedPaymentIds = useMemo(
     () => new Set(
@@ -326,7 +326,7 @@ export function ProviderSettlementDialog({
       await reload(liability.id, true);
       onChanged();
     } catch (error) {
-      setApprovalError(error instanceof Error ? error.message : text.approvalFailed);
+      setApprovalError(localizeCompanyFinanceError(error, lang, text.approvalFailed));
     } finally {
       setApprovalBusy(false);
     }
@@ -353,7 +353,7 @@ export function ProviderSettlementDialog({
       setReversalForm({ requestId: crypto.randomUUID(), paidOn: todayIso(), note: "" });
       onChanged();
     } catch (error) {
-      setReversalError(error instanceof Error ? error.message : text.reversalFailed);
+      setReversalError(localizeCompanyFinanceError(error, lang, text.reversalFailed, settlement?.currency ?? "EUR"));
     } finally {
       setReversalBusy(false);
     }

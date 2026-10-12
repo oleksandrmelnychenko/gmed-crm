@@ -101,6 +101,13 @@ fn can_manage_provider_settlements(role: Role) -> bool {
     role.can(Capability::CompanyFinanceEdit)
 }
 
+/// Payout history and provider statements are read by every company-finance
+/// reader, the CEO Assistant included (QA D2-07); payments and reversals keep
+/// `company_finance.edit`.
+fn can_view_provider_settlements(role: Role) -> bool {
+    role.can(Capability::CompanyFinanceEdit) || role.can(Capability::CompanyFinanceView)
+}
+
 fn decimal_to_string(value: Decimal) -> String {
     crate::money::money_string(value)
 }
@@ -249,7 +256,7 @@ async fn get_provider_settlement(
     Extension(auth): Extension<AuthUser>,
     Path(external_invoice_id): Path<Uuid>,
 ) -> axum::response::Response {
-    if !can_manage_provider_settlements(auth.role) {
+    if !can_view_provider_settlements(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -322,7 +329,7 @@ async fn get_provider_statement(
     Path(provider_id): Path<Uuid>,
     Query(query): Query<ProviderStatementQuery>,
 ) -> axum::response::Response {
-    if !can_manage_provider_settlements(auth.role) {
+    if !can_view_provider_settlements(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 
@@ -570,7 +577,7 @@ async fn get_provider_financial_summary(
     Path(provider_id): Path<Uuid>,
     Query(query): Query<ProviderFinancialSummaryQuery>,
 ) -> axum::response::Response {
-    if !can_manage_provider_settlements(auth.role) {
+    if !can_view_provider_settlements(auth.role) {
         return err(StatusCode::FORBIDDEN, "Insufficient permissions");
     }
 

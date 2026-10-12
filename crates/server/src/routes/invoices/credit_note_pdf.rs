@@ -123,7 +123,8 @@ pub(crate) async fn load_credit_note_pdf_context(
     invoice_id: Uuid,
     credit_note_id: Uuid,
 ) -> Result<Option<CreditNotePdfContext>, sqlx::Error> {
-    let Some(row) = sqlx::query(
+    // GMED's tax registration as of the issue of this credit note (QA D2-09).
+    let sql = format!(
         r#"SELECT credit.id, credit.invoice_id, credit.transaction_type, credit.document_number,
                   credit.reason, credit.issued_on, credit.currency, credit.amount_net,
                   credit.amount_vat, credit.amount_gross, credit.line_items,
@@ -136,14 +137,14 @@ pub(crate) async fn load_credit_note_pdf_context(
                   orders.order_number,
                   patient.patient_id AS patient_pid, patient.title, patient.first_name,
                   patient.last_name, patient.languages,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  {vat_id} AS agency_vat_id,
+                  {tax_number} AS agency_tax_number
            FROM invoice_credit_note_transactions credit
            JOIN invoices invoice ON invoice.id = credit.invoice_id
            JOIN patients patient ON patient.id = invoice.patient_id
@@ -151,11 +152,14 @@ pub(crate) async fn load_credit_note_pdf_context(
            LEFT JOIN invoice_credit_note_transactions original
              ON original.id = credit.reverses_transaction_id
            WHERE credit.id = $1 AND credit.invoice_id = $2"#,
-    )
-    .bind(credit_note_id)
-    .bind(invoice_id)
-    .fetch_optional(&mut *conn)
-    .await?
+        vat_id = super::release::issued_tax_registration_sql("credit", "vat_id"),
+        tax_number = super::release::issued_tax_registration_sql("credit", "tax_number"),
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(credit_note_id)
+        .bind(invoice_id)
+        .fetch_optional(&mut *conn)
+        .await?
     else {
         return Ok(None);
     };
@@ -229,7 +233,8 @@ pub(crate) async fn load_storno_pdf_context(
     conn: &mut PgConnection,
     invoice_id: Uuid,
 ) -> Result<Option<CreditNotePdfContext>, sqlx::Error> {
-    let Some(row) = sqlx::query(
+    // GMED's tax registration as of the cancellation (QA D2-09).
+    let sql = format!(
         r#"SELECT storno.id, storno.document_number, storno.reason, storno.issued_on,
                   storno.currency, storno.amount_net, storno.amount_vat, storno.amount_gross,
                   storno.line_items, storno.original_invoice_number,
@@ -240,23 +245,26 @@ pub(crate) async fn load_storno_pdf_context(
                   orders.order_number,
                   patient.patient_id AS patient_pid, patient.title, patient.first_name,
                   patient.last_name, patient.languages,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
-                  (SELECT value #>> '{}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_name') AS agency_name,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_care_of') AS agency_care_of,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_address') AS agency_address,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_phone') AS agency_phone,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_email') AS agency_email,
+                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_website') AS agency_website,
+                  {vat_id} AS agency_vat_id,
+                  {tax_number} AS agency_tax_number
            FROM invoice_storno_documents storno
            JOIN invoices invoice ON invoice.id = storno.invoice_id
            JOIN patients patient ON patient.id = invoice.patient_id
            LEFT JOIN orders ON orders.id = invoice.order_id
            WHERE storno.invoice_id = $1"#,
-    )
-    .bind(invoice_id)
-    .fetch_optional(&mut *conn)
-    .await?
+        vat_id = super::release::issued_tax_registration_sql("storno", "vat_id"),
+        tax_number = super::release::issued_tax_registration_sql("storno", "tax_number"),
+    );
+    let Some(row) = sqlx::query(&sql)
+        .bind(invoice_id)
+        .fetch_optional(&mut *conn)
+        .await?
     else {
         return Ok(None);
     };

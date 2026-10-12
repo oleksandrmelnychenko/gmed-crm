@@ -13,6 +13,7 @@ import { useLang } from "@/lib/i18n";
 import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { useFinanceAutoRefresh } from "@/pages/company-finance/use-finance-auto-refresh";
+import { localizeFinancialDescription } from "../../model/account-statement-labels";
 import type { PatientAccountMovement, PatientAccountStatement } from "../../model/detail-tab-types";
 import { buildPatientFinancePeriods, financeAmount, financeCents, isFinanceDate, patientFinanceDateRange, type FinancePeriodPreset, type PatientFinancePeriod } from "../../model/finance-periods";
 
@@ -22,26 +23,26 @@ const copy = {
     month: "Этот месяц", previous_month: "Прошлый месяц", quarter: "Этот квартал", year: "Этот год", all: "За всё время", custom: "Свои даты",
     opening: "На начало периода", invoices: "Счета и кредит-ноты", payments: "Получено оплат", refunds: "Возвращено пациенту", adjustments: "Прочие начисления / корректировки", closing: "На конец периода",
     monthly: "По месяцам", monthColumn: "Месяц", openingColumn: "Входящий остаток", closingColumn: "Расчётный остаток", status: "Состояние", debt: "Долг", credit: "Переплата", settled: "Без долга",
-    movements: "Операции за период", date: "Дата", document: "Документ", kind: "Операция", debit: "Начислено", creditAmount: "Уменьшено", balance: "Остаток", order: "Заказ", count: "Операций",
+    movements: "Операции за период", date: "Дата", document: "Документ", kind: "Операция", description: "Описание / причина", debit: "Начислено", creditAmount: "Уменьшено", balance: "Остаток", order: "Заказ", count: "Операций",
     empty: "За выбранный период операций нет. Остаток перенесён с начала периода.", noMovements: "За выбранный месяц операций нет.", back: "Все месяцы", invoicesLink: "Открыть счета",
     loading: "Загрузка финансов", updating: "Обновление…", failed: "Не удалось загрузить финансы пациента.", retry: "Повторить",
     datesError: "Укажите корректные даты: начало периода не должно быть позже окончания.", dataError: "Не удалось сверить движения с остатком. Суммы не показаны — повторите загрузку.",
     reconciliation: "Остаток расчётный: есть суммы, требующие сверки. Они учитываются в таблице, но пока не подтверждены.",
     explanation: "Счета показаны с учётом кредит-нот, оплаты и возвраты — с учётом сторно. Прочие движения включают внешние требования и ручные корректировки. Нажмите на месяц, чтобы увидеть операции.",
-    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", termination_uninvoiced: "Расторжение: набежало, ещё не выставлено", imported: "Перенесённая оплата", unknown: "Прочая операция",
+    invoice: "Выставлен счёт", credit_note: "Кредит-нота", credit_note_reversal: "Сторно кредит-ноты", storno: "Документ сторно (отмена счёта)", payment: "Оплата", payment_reversal: "Сторно оплаты", refund: "Возврат", refund_reversal: "Сторно возврата", balance_adjustment: "Корректировка", balance_adjustment_reversal: "Сторно корректировки", external_receivable: "Внешнее требование", external_allocation: "Распределение внешнего требования", external_allocation_reversal: "Сторно распределения", external_rebilling_waived: "Расход за счёт GMED", termination_uninvoiced: "Расторжение: набежало, ещё не выставлено", termination_to_credit: "Расторжение: выставлено авансом, не оказано", imported: "Перенесённая оплата", unknown: "Прочая операция",
   },
   de: {
     title: "Finanzen nach Zeitraum", from: "Zeitraum von", to: "Bis", currency: "Währung",
     month: "Dieser Monat", previous_month: "Letzter Monat", quarter: "Dieses Quartal", year: "Dieses Jahr", all: "Gesamter Zeitraum", custom: "Eigene Daten",
     opening: "Saldo zu Beginn", invoices: "Rechnungen und Gutschriften", payments: "Zahlungseingänge", refunds: "An Patienten erstattet", adjustments: "Sonstige Belastungen / Korrekturen", closing: "Saldo am Ende",
     monthly: "Nach Monaten", monthColumn: "Monat", openingColumn: "Anfangssaldo", closingColumn: "Berechneter Saldo", status: "Kontostand", debt: "Offener Betrag", credit: "Guthaben", settled: "Ausgeglichen",
-    movements: "Buchungen im Zeitraum", date: "Datum", document: "Beleg", kind: "Buchung", debit: "Belastung", creditAmount: "Minderung", balance: "Saldo", order: "Auftrag", count: "Buchungen",
+    movements: "Buchungen im Zeitraum", date: "Datum", document: "Beleg", kind: "Buchung", description: "Beschreibung / Grund", debit: "Belastung", creditAmount: "Minderung", balance: "Saldo", order: "Auftrag", count: "Buchungen",
     empty: "Keine Buchungen im gewählten Zeitraum. Der Anfangssaldo wird fortgeführt.", noMovements: "Keine Buchungen in diesem Monat.", back: "Alle Monate", invoicesLink: "Rechnungen öffnen",
     loading: "Finanzen werden geladen", updating: "Aktualisierung…", failed: "Die Patientenfinanzen konnten nicht geladen werden.", retry: "Erneut versuchen",
     datesError: "Gültige Daten eingeben: Der Beginn darf nicht nach dem Ende liegen.", dataError: "Buchungen und Saldo konnten nicht abgestimmt werden. Beträge werden nicht angezeigt. Bitte erneut laden.",
     reconciliation: "Der Saldo ist vorläufig: Einige Beträge müssen noch abgestimmt werden. Sie sind in der Tabelle berücksichtigt, aber noch nicht bestätigt.",
     explanation: "Rechnungen enthalten Gutschriften, Zahlungen und Erstattungen berücksichtigen Stornierungen. Sonstige Buchungen umfassen externe Forderungen und manuelle Korrekturen. Ein Klick auf einen Monat zeigt die Buchungen.",
-    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", termination_uninvoiced: "Kündigung: angefallen, noch nicht berechnet", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
+    invoice: "Rechnung", credit_note: "Gutschrift", credit_note_reversal: "Gutschriftstorno", storno: "Stornorechnung", payment: "Zahlung", payment_reversal: "Zahlungsstorno", refund: "Erstattung", refund_reversal: "Erstattungsstorno", balance_adjustment: "Kontokorrektur", balance_adjustment_reversal: "Korrekturstorno", external_receivable: "Externe Forderung", external_allocation: "Forderungszuordnung", external_allocation_reversal: "Zuordnungsstorno", external_rebilling_waived: "Kosten trägt GMED", termination_uninvoiced: "Kündigung: angefallen, noch nicht berechnet", termination_to_credit: "Kündigung: vorab berechnet, nicht erbracht", imported: "Übernommene Zahlung", unknown: "Sonstige Buchung",
   },
 } as const;
 
@@ -118,6 +119,9 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
     { id: "date", label: l.date, accessor: row => row.entry_date, filterType: "date", width: 130, sortable: true, render: row => <span className="whitespace-nowrap">{formatAppDate(row.entry_date)}</span> },
     { id: "kind", label: l.kind, accessor: row => row.id.startsWith("payment-balance:") ? l.imported : (l[row.kind as keyof typeof l] ?? l.unknown), width: 235 },
     { id: "document", label: l.document, accessor: row => row.document_number ?? "", width: 190, render: row => <span className="font-mono text-xs">{row.document_number || "—"}</span> },
+    // Why the amount moved: the waiver's reason, a credit note's reason, the
+    // cancelled invoice — in the UI language (QA D2-04, D2-05).
+    { id: "description", label: l.description, accessor: row => localizeFinancialDescription(row.description ?? "", lang), width: 280, searchable: true, render: row => { const value = localizeFinancialDescription(row.description ?? "", lang); return <span className="block truncate text-xs" title={value || undefined}>{value || "—"}</span>; } },
     { id: "order", label: l.order, accessor: row => row.order_number ?? "", width: 180, render: row => <span className="font-mono text-xs">{row.order_number || "—"}</span> },
     ...(["debit", "credit", "balance_after"] as const).map(id => ({
       id, label: id === "debit" ? l.debit : id === "credit" ? l.creditAmount : l.balance, accessor: (row: PatientAccountMovement) => Number(row[id]), width: 170, filterType: "number" as const,

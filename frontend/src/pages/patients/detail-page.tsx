@@ -1871,7 +1871,8 @@ function usePatientDetailPageContent() {
       toast.success(t.common_active);
       reload();
     } catch (error) {
-      setTabActionError(error instanceof Error ? error.message : t.common_failed_create);
+      // E.g. the deadline of the previous letter still runs (QA D2-06).
+      setTabActionError(localizeInvoiceError(error, lang, t.common_failed_create));
     } finally {
       setDunningBusy(false);
     }

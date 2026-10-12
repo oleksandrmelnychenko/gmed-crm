@@ -418,11 +418,12 @@ export function ConciergeExpenseReviewPanel({
       ));
     } catch (error) {
       if (queueRequestRef.current !== request) return;
-      setLoadError(error instanceof Error ? error.message : text.loadFailed);
+      // No raw English server text (e.g. "Insufficient permissions", QA D2-07).
+      setLoadError(localizeCompanyFinanceError(error, lang, text.loadFailed));
     } finally {
       if (queueRequestRef.current === request) setLoading(false);
     }
-  }, [text.loadFailed]);
+  }, [lang, text.loadFailed]);
 
   useEffect(() => {
     void loadQueue(true);

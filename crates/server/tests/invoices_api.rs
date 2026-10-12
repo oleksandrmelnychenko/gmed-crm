@@ -2693,8 +2693,60 @@ async fn invoice_release_requires_the_issuer_tax_registration() {
     let quote = create_quote(&app, &pm_bearer, order_id).await;
     let quote_id = quote["id"].as_str().unwrap();
 
+    // An invoice issued while the Steuernummer is set keeps it (QA D2-09).
+    let issued_order = seed_order(&pool, patient_id, admin_id, &format!("{tag}-issued")).await;
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Organisation', 1, 100, 19, 'approved')"#,
+    )
+    .bind(issued_order)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let issued_quote = create_quote(&app, &pm_bearer, issued_order).await;
+    let issued_draft =
+        create_draft_invoice(&app, &billing_bearer, issued_quote["id"].as_str().unwrap()).await;
+    let issued_id = issued_draft["id"].as_str().unwrap().to_string();
+    release_invoice(&app, &billing_bearer, &issued_id).await;
+    let issued_snapshot: Value =
+        sqlx::query_scalar("SELECT issuer_tax_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&issued_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let issued_tax_number = issued_snapshot["tax_number"].as_str().map(str::to_string);
+    assert!(issued_tax_number.is_some(), "{issued_snapshot}");
+    let credit_note = |reason: &str| {
+        json!({
+            "request_id": Uuid::new_v4(),
+            "amount_gross": "10",
+            "reason": reason,
+            "issued_on": gmed_server::app_time::today().to_string(),
+        })
+    };
+
     set_system_setting(&pool, "agency_tax_number", "").await;
     set_system_setting(&pool, "agency_vat_id", "  ").await;
+
+    // A credit note names the issuer as well: not issued without it.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{issued_id}/credit-notes"),
+        &billing_bearer,
+        Some(credit_note("Kulanz ohne Steuernummer")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "issuer_tax_registration_missing", "{body}");
+    let credits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invoice_credit_note_transactions WHERE invoice_id = $1::uuid",
+    )
+    .bind(&issued_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(credits, 0);
 
     let (status, body) = json_request(
         &app,
@@ -2782,6 +2834,53 @@ async fn invoice_release_requires_the_issuer_tax_registration() {
             .is_some_and(|number| number.starts_with("INV-")),
         "{released}"
     );
+
+    // The credit note keeps the registration of its own issue; the invoice
+    // issued earlier keeps the Steuernummer it was released with.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{issued_id}/credit-notes"),
+        &billing_bearer,
+        Some(credit_note("Kulanz mit USt-IdNr.")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let credit_snapshot: Value = sqlx::query_scalar(
+        "SELECT issuer_tax_snapshot FROM invoice_credit_note_transactions WHERE invoice_id = $1::uuid",
+    )
+    .bind(&issued_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        credit_snapshot["vat_id"], "DE123456789",
+        "{credit_snapshot}"
+    );
+    let still: Value =
+        sqlx::query_scalar("SELECT issuer_tax_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&issued_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        still["tax_number"].as_str().map(str::to_string),
+        issued_tax_number
+    );
+    // Issued registrations never change.
+    let changed =
+        sqlx::query("UPDATE invoices SET issuer_tax_snapshot = '{}'::jsonb WHERE id = $1::uuid")
+            .bind(&issued_id)
+            .execute(&pool)
+            .await;
+    assert!(changed.is_err(), "the release snapshot is frozen");
+    let snapshot_of_new: Value =
+        sqlx::query_scalar("SELECT issuer_tax_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&draft_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(snapshot_of_new["vat_id"], "DE123456789");
 }
 
 /// A tax profile's VAT rate lies between 0 and 100 %; the VAT mapping of the
@@ -4096,6 +4195,43 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["level"], "first");
+    assert_eq!(body["automatic"], false);
+    assert!(body["created_by_name"].is_string(), "{body}");
+    let first_deadline = body["payment_due_date"].as_str().unwrap().to_string();
+
+    // QA D2-06: the next level waits for the deadline of the reminder
+    // ("trotz unserer Zahlungserinnerung" is true only then).
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &billing_bearer,
+        Some(json!({ "level": "second", "note": "Second notice" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "dunning_previous_deadline_running");
+    assert_eq!(body["previous_level"], "first");
+    assert_eq!(body["payment_due_date"], first_deadline.as_str());
+    assert_eq!(body["override_allowed"], false);
+    // Only the CEO may send it earlier, with a reason.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &billing_bearer,
+        Some(json!({ "level": "second", "deadline_override_reason": "Schuldner verweigert" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    sqlx::query(
+        "UPDATE invoice_dunning_events SET payment_due_date = CURRENT_DATE - 1
+         WHERE invoice_id = $1 AND level = 'first'",
+    )
+    .bind(Uuid::parse_str(invoice_id).unwrap())
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, body) = json_request(
         &app,
@@ -4105,7 +4241,7 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
         Some(json!({ "level": "second", "note": "Second notice" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["level"], "second");
 
     let (status, body) = json_request(
@@ -4116,8 +4252,50 @@ async fn billing_can_run_first_and_second_dunning_then_collections() {
         Some(json!({ "level": "collections", "note": "Collections approved" })),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["previous_level"], "second");
+    let ceo_bearer = auth_header_for(seed_user(&pool, &tag, "ceo").await, "ceo");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &ceo_bearer,
+        Some(json!({ "level": "collections", "deadline_override_reason": "x" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/invoices/{invoice_id}/dunning"),
+        &ceo_bearer,
+        Some(json!({
+            "level": "collections",
+            "note": "Collections approved",
+            "deadline_override_reason": "Schuldner verweigert die Zahlung schriftlich"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["level"], "collections");
+    support::wait_until("dunning override audit", || {
+        let pool = pool.clone();
+        let invoice_id = invoice_id.to_string();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                r#"SELECT count(*) FROM audit_log
+                   WHERE entity_id = $1::uuid AND action = 'create_invoice_dunning_event'
+                     AND context -> 'deadline_override' ->> 'reason'
+                         = 'Schuldner verweigert die Zahlung schriftlich'"#,
+            )
+            .bind(invoice_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+                == 1
+        }
+    })
+    .await;
 
     let (status, body) = json_request(
         &app,
@@ -4441,10 +4619,12 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
         ]
     );
 
-    let auto_notes: Vec<String> = sqlx::query_scalar(
-        "SELECT note FROM invoice_dunning_events
+    // QA D2-12: the system sends them, no employee is named and no English
+    // note is stored (the UI words the step by level).
+    let auto_steps: Vec<(Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT created_by, note FROM invoice_dunning_events
          WHERE invoice_id IN ($1, $2, $3)
-           AND note LIKE '[system auto-dunning]%'",
+           AND automatic",
     )
     .bind(invoice_first_id)
     .bind(invoice_second_id)
@@ -4452,7 +4632,38 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(auto_notes.len(), 3);
+    assert_eq!(auto_steps.len(), 3);
+    assert!(
+        auto_steps
+            .iter()
+            .all(|(author, note)| author.is_none() && note.is_none()),
+        "{auto_steps:?}"
+    );
+    let (status, events) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_first_id}/dunning"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events}");
+    assert_eq!(events[0]["automatic"], true, "{events}");
+    assert!(events[0]["created_by_name"].is_null(), "{events}");
+    let (status, events) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/invoices/{invoice_second_id}/dunning"),
+        &billing_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{events}");
+    assert_eq!(
+        events[0]["automatic"], false,
+        "the seeded manual step keeps its author"
+    );
+    assert!(events[0]["created_by_name"].is_string(), "{events}");
 
     support::wait_until("auto dunning audit rows", || async {
         let count: i64 = sqlx::query_scalar(
@@ -4492,7 +4703,8 @@ async fn auto_dunning_scheduler_marks_overdue_and_advances_reminder_levels() {
            FROM invoice_documents letter
            JOIN invoice_dunning_events event ON event.id = letter.dunning_event_id
            WHERE letter.document_kind = 'dunning_letter'
-             AND event.note LIKE '[system auto-dunning]%'
+             AND event.automatic
+             AND letter.generated_by IS NULL
              AND event.payment_due_date IS NOT NULL
              AND event.invoice_id IN ($1, $2, $3)"#,
     )
@@ -4596,8 +4808,10 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     assert!(text.contains("Hauptstraße 1"), "{text}");
     // The database clock steps back before the next letters (seen under CI
     // load, 2026-10-12): the list still follows the levels, not the clock.
+    // The reminder's deadline has passed (the 1. Mahnung waits for it, QA
+    // D2-06).
     sqlx::query(
-        "UPDATE invoice_dunning_events SET sent_at = sent_at + interval '30 seconds', created_at = created_at + interval '30 seconds' WHERE id = $1::uuid",
+        "UPDATE invoice_dunning_events SET sent_at = sent_at + interval '30 seconds', created_at = created_at + interval '30 seconds', payment_due_date = CURRENT_DATE - 1 WHERE id = $1::uuid",
     )
     .bind(&reminder_id)
     .execute(&pool)

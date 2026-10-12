@@ -28,6 +28,19 @@ it("renders payment deadlines as localized follow-up notices with the correct cu
   expect(localizedNotificationCopy(due, "de").body).toContain("Frist: 28.09.2026 00:30");
 });
 
+it("names the open prepayment, never an open rest of an order without a required prepayment (QA D2-11)", () => {
+  const required = { kind: "order_payment_status", body: JSON.stringify({ order_number: "A-2", payment_status: "partially_paid", required_amount: "300", received_amount: "100", remaining_amount: "200", currency: "EUR" }) } as Notification;
+  const ru = localizedNotificationCopy(required, "ru").body ?? "";
+  expect(ru).toMatch(/Предоплата: 300,00\s€/);
+  expect(ru).toMatch(/Остаток предоплаты: 200,00\s€/);
+  expect(localizedNotificationCopy(required, "de").body).toMatch(/Offene Vorauszahlung: 200,00\s€/);
+  // Older notices of orders without a required prepayment.
+  const legacy = { kind: "order_payment_status", body: JSON.stringify({ order_number: "A-3", payment_status: "not_required", required_amount: "0", received_amount: "600", remaining_amount: "0", currency: "EUR" }) } as Notification;
+  const copy = localizedNotificationCopy(legacy, "ru");
+  expect(copy.body).toMatch(/^Получено: 600,00\s€$/);
+  expect(copy.body).not.toContain("Остаток");
+});
+
 it("words the daily compliance deadline digest in German and Russian", () => {
   const digest = {
     kind: "compliance_deadline_digest",

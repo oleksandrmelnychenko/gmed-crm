@@ -69,10 +69,12 @@ export function newPaymentDraft(balanceDue: unknown, today = isoToday()): Invoic
 export function newCreditNoteDraft(
   today = isoToday(),
   creditableLines?: readonly InvoiceCreditableLine[],
+  /** `credit_note_limit_gross`: credits by amount when no line can take one. */
+  limit: number | null = null,
 ): InvoiceCreditNoteDraft {
   return {
     requestId: crypto.randomUUID(),
-    selection: emptyCreditNoteSelection(creditableLines),
+    selection: emptyCreditNoteSelection(creditableLines, limit),
     reason: "",
     issuedOn: today,
     portalVisible: true,

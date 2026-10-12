@@ -79,4 +79,31 @@ describe("credit transfers in the statement", () => {
       "Erstattung zu Rechnung INV-20260928-0009",
     );
   });
+
+  it("shows allocations, reversals and German correction texts in the UI language (QA D2-05)", () => {
+    expect(localizeFinancialDescription("External provider -> INV-20261012-0010", "ru")).toBe(
+      "Внешний поставщик → INV-20261012-0010",
+    );
+    expect(localizeFinancialDescription("Muster Labor GmbH -> INV-20261012-0010", "de")).toBe(
+      "Muster Labor GmbH → INV-20261012-0010",
+    );
+    expect(
+      localizeFinancialDescription("Rechnungskorrektur (Gutschrift) zu INV-20261012-0010", "ru"),
+    ).toBe("Кредит-нота к счёту INV-20261012-0010");
+    expect(
+      localizeFinancialDescription("Rechnungskorrektur (Gutschrift) zu INV-20261012-0010", "de"),
+    ).toBe("Rechnungskorrektur (Gutschrift) zu INV-20261012-0010");
+    expect(localizeFinancialDescription("Cancellation of invoice INV-1", "ru")).toBe("Отмена счёта INV-1");
+    expect(
+      localizeFinancialDescription(
+        "Restbetrag der Anzahlungsrechnung INV-3 – abgerechnet mit der Schlussrechnung INV-4",
+        "ru",
+      ),
+    ).toBe("Остаток авансового счёта INV-3 — закрыт финальным счётом INV-4");
+    expect(localizeFinancialDescription("External receivable allocation reversed", "ru")).toBe(
+      "Распределение внешнего долга сторнировано",
+    );
+    // A waiver's reason is staff text: shown as written.
+    expect(localizeFinancialDescription("Kulanz, Labor trägt GMED", "ru")).toBe("Kulanz, Labor trägt GMED");
+  });
 });

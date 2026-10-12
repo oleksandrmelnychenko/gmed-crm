@@ -150,6 +150,8 @@
 ### 2.6 Відстеження передоплати (обчислюється, сповіщення «Статус оплаты»)
 `not_required` Предоплата не требуется · `not_configured` Не указана сумма предоплаты · `awaiting_invoice` Ожидается выставление счёта · `awaiting_payment` Ожидается оплата · `partially_paid` Частично оплачено · `paid` Оплачено · `due_soon` Срок оплаты в ближайшие 24 часа · `overdue` Срок оплаты истёк.
 
+Сповіщення `order_payment_status` (CEO, Billing, PM пацієнта) надсилається лише для замовлень із вимогою передоплати: для `not_required` стан і далі записується (`order_payment_notification_state`), але сповіщення немає (QA D2-11, 2026-10-12 — раніше кожна оплата такого замовлення давала «Предоплата не требуется · Остаток 0,00 €», хоча за рахунками ще був борг). «Остаток» у сповіщенні — залишок **передоплати** (`required − received`), тому текст «Остаток предоплаты / Offene Vorauszahlung» і поруч потрібна сума; старі сповіщення `not_required` показуються без залишку.
+
 ---
 
 ## 3. Позиція замовлення (`order_leistungen`)
@@ -360,7 +362,9 @@
 
 - **Порядок листів** у картці рахунку й у порталі — за рівнем (`first` → `second` → `collections`; кожен рівень раз на рахунок, унікальний індекс), а не за `sent_at`: час двох різних транзакцій ламав порядок, коли годинник БД відступав назад (2026-10-12).
 - **Вручну** (`invoices.finance`): не для `draft`/`paid`/`cancelled`, лише з простроченим строком і залишком > 0, рівні по черзі й по одному разу, не під блокуванням (409). Подія, статус `overdue`, PDF-лист і аудит пишуться в одній транзакції; строк листа — 14 днів.
+- **Наступний рівень вручну — лише після строку попереднього листа (QA D2-06, 2026-10-12).** `second` можна надіслати, коли минув «Neue Zahlungsfrist» листа `first` (строк < сьогодні за календарем Берліна, як в автоматичному запуску), `collections` — коли минув строк листа `second`; інакше 409 `dunning_previous_deadline_running` (`previous_level`, `payment_due_date`, `next_level_from`, `override_allowed`). Лише CEO може надіслати раніше з причиною (`deadline_override_reason`, 3–1000 символів; аудит `create_invoice_dunning_event` → `deadline_override`). Так текст «trotz unserer Zahlungserinnerung …» відповідає дійсності. Картка рахунку показує, з якої дати доступний наступний рівень; кнопка до того неактивна (для CEO — діалог з причиною).
 - **Авто**, щогодини: `first` — коли минув пільговий період після строку (`auto_dunning_grace_days`, типово 7 днів за календарем Берліна, 0–90, адмін-налаштування «Напоминания об оплате / Mahnwesen»); `second` — через 14 днів після `first` і після строку оплати з листа `first`; `collections` — через 28 днів після `second` і після строку з його листа (`auto_dunning_*_delay_days`). Пропускаються рахунки замовлень зі станом боргу `payment_plan` чи `escalated` (статус `overdue` ставиться) і рахунки з блокуванням (ні нагадувань, ні `overdue`). Аудит у транзакції з подією й листом.
+- **Автор автоматичного кроку — система (QA D2-12, міграція `20261012191200`).** Подія має `automatic = true`, без `created_by` і без примітки; аудит (`auto_create_invoice_dunning_event`, `auto_mark_invoice_overdue`) — без користувача; збережений лист — без `generated_by`. Картка показує «Система / System» і перекладений текст за рівнем («Напоминание создано автоматически: срок оплаты истёк» тощо). До цього автором ставав найстаріший активний користувач Billing (з будь-якого набору), примітка була англійською; такі старі події міграція позначила `automatic` за приміткою `[system auto-dunning]…`, збереженого автора не змінено (історія), картка й для них показує «Система».
 
 **Блокування нагадувань (Mahnsperre, Q3/Q4, рішення 2026-09-28).** `POST /invoices/{id}/dunning-block` і `…/dunning-block/clear` — `invoices.finance` (CEO, Billing), причина 3–1000 символів обов'язкова для обох; лише для випущеного нескасованого рахунку. Таблиця `invoice_dunning_blocks` — історія (блок знімається один раз, не редагується), аудит `set_/clear_invoice_dunning_block` у транзакції. Діє, поки не знято: немає автоматичних і ручних нагадувань, автоматичного `overdue` (планувальник і перерахунок після сторно оплати). Показується в списку й картці рахунку (RU «Блокировка напоминаний», DE «Mahnsperre»), порталу не віддається.
 
@@ -403,10 +407,13 @@
 Модуль `crates/server/src/routes/invoices/advance_settlement.rs`.
 
 - **Який фінальний рахунок розраховує аванс.** Той самий заказ і пацієнт, обидва випущені й не скасовані, аванс випущено раніше (за порядком випуску `invoices.release_sequence` — значення послідовності БД, яке рахунок отримує один раз при випуску, а не за годинником: `issued_at` двох різних транзакцій ламався, коли годинник БД відступав назад, 2026-10-12; рахунки, випущені до цього, порівнюються за `issued_at`); отримувач той самий **або** аванс названо номером у підтвердженні `advance_recipient_mismatch` цього фінального рахунку; і той самий кошторис — крім фінального рахунку без кошторису чи скасованого замовлення (розрахунок при розірванні) і авансу без кошторису або із заміненим/відхиленим/простроченим кошторисом.
-- **Випуск фінального рахунку (D-56).** Спершу автоматично зараховуються оплачені аванси (як і раніше), потім на кожен аванс, який він розраховує, видається звичайна кредит-нота (`CN-…`, архівний PDF, аудит) на **неоплачену** частину: «Restbetrag der Anzahlungsrechnung … – abgerechnet mit der Schlussrechnung …», рядки й ПДВ пропорційно до власних рядків авансу. Фінальний рахунок виставляє всю послугу й віднімає лише отримані гроші (§ 14 Abs. 5 Satz 2 UStG), тож залишок авансу більше не вимагається: пацієнт не бачить суму двічі (портал, список, дашборди, нагадування). Оплачені, але ще не зараховані гроші авансу лишаються доступними для інших рахунків замовлення. Виданий рахунок не змінюється (GoBD); помилкову кредит-ноту сторнують (CNR).
+- **Випуск фінального рахунку (D-56).** Спершу автоматично зараховуються оплачені аванси, які він розраховує (правило вище, `FINAL_SETTLES_ADVANCE`; з 2026-10-12 також при випуску — раніше бралися всі аванси замовлення того самого отримувача, зокрема іншого кошторису), потім на кожен такий аванс видається звичайна кредит-нота (`CN-…`, архівний PDF, аудит) на **неоплачену** частину: «Restbetrag der Anzahlungsrechnung … – abgerechnet mit der Schlussrechnung …», рядки й ПДВ пропорційно до власних рядків авансу. Фінальний рахунок виставляє всю послугу й віднімає лише отримані гроші (§ 14 Abs. 5 Satz 2 UStG), тож залишок авансу більше не вимагається: пацієнт не бачить суму двічі (портал, список, дашборди, нагадування). Оплачені, але ще не зараховані гроші авансу лишаються доступними для інших рахунків замовлення (вручну). Виданий рахунок не змінюється (GoBD); помилкову кредит-ноту сторнують (CNR).
+- **Аванс зі старим знімком рядків (D-55/D-56, раунд 2, 2026-10-12).** Залишок завжди рахується з балансу рахунку (`total_gross − credited_amount − max(оплачено, зараховано)`), не з рядків. Якщо рядки авансу не несуть сум (старий формат: лише `total_gross` у рядку, без `line_gross`, як засіяний `INV-…`; або суми рядків не дають суму рахунку — `credit_notes::line_snapshot_carries_total`), кредит-нота видається **на суму** з ПДВ у власній пропорції авансу (`total_vat / total_gross`, режим `legacy_pro_rata`, рядок PDF «Rechnungskorrektur (anteilig)») — при випуску фінального рахунку й кнопкою нижче. Раніше такий залишок мовчки не закривався: портал показував 800 € замість 400 €, а кнопка відповідала «больше нет открытого остатка». Форма кредит-ноти для такого рахунку пропонує суму замість рядків; вирахування авансу у фінальному рахунку (PDF, ZUGFeRD) бере одну групу ПДВ із сум рахунку.
 - **Оплата після цього.** Картка авансу показує, який фінальний рахунок його розраховує («Расчёт через финальный счёт»), і просить записувати нові оплати на фінальний рахунок; записана на аванс оплата стає переплатою пацієнта (її переносять або повертають).
-- **Ручне закриття.** `POST /invoices/{id}/advance-rest` (CEO, Billing; кнопка «Закрыть остаток кредит-нотой») закриває весь незарахований залишок авансу, який уже розраховує випущений фінальний рахунок: неоплачене більше не вимагається, оплачене, але не зараховане стає переплатою (до повернення). Для авансів, випущених до цього правила, і після ручного зняття зарахування.
-- **Підтвердження іншого отримувача (D-57).** Підтвердження `advance_recipient_mismatch` діє лише для авансових рахунків, названих у ньому номером (`advance_invoice_numbers` у знімку); аванси, виставлені пізніше, воно не охоплює. Автоматичне зарахування бере аванс іншого отримувача лише в такому разі. Ручне зарахування авансу іншого отримувача потребує `confirm_recipient_mismatch` (409 `prepayment_recipient_mismatch`; у картці — галочка підтвердження, аванс підписано ім'ям отримувача). Показ «до сплати з урахуванням авансу» (список, виписка, портал) теж зараховує лише аванси того самого отримувача.
+- **Оплата авансу, коли фінальний рахунок уже випущено (D2-02).** Отримані гроші зараховуються лише у випущений фінальний рахунок, який розраховує цей аванс (те саме правило: той самий кошторис, випущений **після** авансу, той самий отримувач або аванс названо в його підтвердженні), у порядку випуску (`release_sequence`). Раніше бралися всі відкриті фінальні рахунки замовлення, найстаріший першим: оплата авансу нового кошторису потрапляла в раніше випущений фінальний рахунок іншого кошторису, а фінальний рахунок «свого» кошторису нічого не віднімав.
+- **Ручне закриття.** `POST /invoices/{id}/advance-rest` (CEO, Billing; кнопка «Закрыть остаток кредит-нотой») закриває весь незарахований залишок авансу, який уже розраховує випущений фінальний рахунок: неоплачене більше не вимагається, оплачене, але не зараховане стає переплатою (до повернення). Для авансів, випущених до цього правила, після ручного зняття зарахування і для авансів зі старим знімком рядків (запит нижче).
+- **Межа кредит-ноти (D2-01).** Деталь рахунку віддає `credit_note_limit_gross` — скільки ще може взяти кредит-нота: для авансу `total_gross − credited_amount − зараховано у фінальні рахунки` (нижче сервер відповідає 409 `credit_note_below_applied_advance`), для інших рахунків `total_gross − credited_amount`. Форма показує «Можно скорректировать» не більше цієї межі і пояснює, чому 0.
+- **Підтвердження іншого отримувача (D-57, D2-03).** Попередження й 409 `advance_recipient_mismatch` при випуску фінального рахунку називають лише ті аванси іншого отримувача, які цей фінальний рахунок справді розраховує (той самий кошторис за правилом вище) і які ще мають відкритий залишок (`total_gross − credited_amount − зараховано > 0`): `details.advances` — номер, отримувач, сума, оплачено, відкрито (у діалозі — список); аванси іншого кошторису чи вже повністю зараховані не називаються й не зберігаються. Підтвердження діє лише для авансових рахунків, названих у ньому номером (`advance_invoice_numbers` і `advances` у знімку); аванси, виставлені пізніше, воно не охоплює. Автоматичне зарахування бере аванс іншого отримувача лише в такому разі. Ручне зарахування авансу іншого отримувача потребує `confirm_recipient_mismatch` (409 `prepayment_recipient_mismatch`; у картці — галочка підтвердження, аванс підписано ім'ям отримувача). Показ «до сплати з урахуванням авансу» (список, виписка, портал) теж зараховує лише аванси того самого отримувача.
 - **Кредит-нота нижче зарахованого авансу (D-63).** Кредит-нота на фінальний рахунок, після якої його сума менша за зарахований аванс, у тій самій транзакції знімає надлишок зарахування (найновіше першим; частину знову зараховує; історія зняття зберігається) і закриває невикористаний залишок авансу власною кредит-нотою — гроші стають переплатою пацієнта, яку можна повернути. Попередній перегляд скасування послуги й форма кредит-ноти показують цю суму заздалегідь (`prepayment_released_gross`).
 - **Кредит-нота на перевиставлені витрати (D-64).** Якщо рахунок перевиставляє витрату постачальника (алокація `external_invoice_patient_invoice_allocations`), кредит-нота нижче цієї суми сторнує алокацію на зайву частину (решту знову алокує), як і сторно рахунку: витрата знову «не виставлена» і з'являється в «Расходы для перевыставления». Форма кредит-ноти попереджає про це. Якщо цей залишок пацієнту більше не виставлятимуть, Billing знімає його кнопкою «Не перевыставлять» — витрату несе GMED (10.3).
 - **Дані до цього правила.** Міграції немає (видані рахунки не змінюються). Відкриті залишки авансів закриває кнопка вище. Зарахування між різними отримувачами без підтвердження саме цього авансу (на перевірку `Billing`; помилкові знімає «Отменить зачёт» у картці цільового рахунку, після чого аванс зараховується у власний фінальний рахунок вручну):
@@ -426,6 +433,95 @@
             -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers', '[]'::jsonb)
         ? COALESCE(advance.invoice_number, '')
   ORDER BY allocation.created_at;
+  ```
+
+- **Автоматичні зарахування авансу в чужий фінальний рахунок до виправлення D2-02 (лише читання).** Зарахування, де фінальний рахунок випущено раніше за аванс або він виставляє інший (чинний) кошторис. Billing перевіряє кожне: помилкове знімає «Отменить зачёт» у картці цільового рахунку, після чого аванс зараховується у свій фінальний рахунок (кнопкою в його картці або вже автоматично, якщо той випущено пізніше):
+
+  ```sql
+  SELECT allocation.id, advance.invoice_number AS advance_invoice,
+         target.invoice_number AS target_invoice, allocation.amount_gross,
+         allocation.created_at
+  FROM invoice_prepayment_allocations allocation
+  JOIN invoices advance ON advance.id = allocation.advance_invoice_id
+  JOIN invoices target ON target.id = allocation.target_invoice_id
+  WHERE target.invoice_type = 'final'
+    AND (
+        CASE
+            WHEN advance.release_sequence IS NOT NULL AND target.release_sequence IS NOT NULL
+                THEN advance.release_sequence > target.release_sequence
+            ELSE advance.issued_at > target.issued_at
+        END
+        OR (target.quote_id IS NOT NULL AND advance.quote_id IS NOT NULL
+            AND advance.quote_id <> target.quote_id
+            AND NOT EXISTS (SELECT 1 FROM orders o
+                            WHERE o.id = target.order_id AND o.status = 'cancelled')
+            AND NOT EXISTS (SELECT 1 FROM quotes q
+                            WHERE q.id = advance.quote_id
+                              AND q.status IN ('superseded', 'rejected', 'expired')))
+    )
+  ORDER BY allocation.created_at;
+  ```
+
+- **Аванси зі старим знімком рядків після розгортання (D-55/D-56, лише читання).** Аванси, рядки яких не несуть сум, із відкритим залишком і випущеним фінальним рахунком, що їх розраховує (до виправлення залишок при випуску не закривався). Billing відкриває кожен аванс і натискає «Закрыть остаток кредит-нотой» (`open_rest` — сума кредит-ноти; у портала пацієнта ця сума досі показувалась удруге). Запит нічого не змінює:
+
+  ```sql
+  SELECT advance.id, advance.invoice_number AS advance_invoice,
+         patient.patient_id AS patient, settling.invoice_number AS final_invoice,
+         advance.total_gross, advance.credited_amount, advance.paid_amount,
+         COALESCE(allocated.amount, 0) AS applied_to_finals,
+         advance.total_gross - advance.credited_amount
+             - COALESCE(allocated.amount, 0) AS open_rest
+  FROM invoices advance
+  JOIN patients patient ON patient.id = advance.patient_id
+  LEFT JOIN LATERAL (
+      SELECT SUM(allocation.amount_gross) AS amount
+      FROM invoice_prepayment_allocations allocation
+      WHERE allocation.advance_invoice_id = advance.id
+  ) allocated ON true
+  JOIN LATERAL (
+      SELECT final_invoice.invoice_number
+      FROM invoices final_invoice
+      WHERE final_invoice.order_id = advance.order_id
+        AND final_invoice.patient_id = advance.patient_id
+        AND final_invoice.invoice_type = 'final'
+        AND final_invoice.status NOT IN ('draft', 'cancelled')
+        AND CASE
+                WHEN advance.release_sequence IS NOT NULL
+                     AND final_invoice.release_sequence IS NOT NULL
+                    THEN advance.release_sequence < final_invoice.release_sequence
+                ELSE advance.issued_at <= final_invoice.issued_at
+            END
+        AND (invoice_recipient_identity(advance.recipient_snapshot)
+                 IS NOT DISTINCT FROM invoice_recipient_identity(final_invoice.recipient_snapshot)
+             OR COALESCE(final_invoice.recipient_snapshot -> 'confirmations'
+                    -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers', '[]'::jsonb)
+                ? advance.invoice_number)
+        AND (final_invoice.quote_id IS NULL OR advance.quote_id IS NULL
+             OR advance.quote_id = final_invoice.quote_id
+             OR EXISTS (SELECT 1 FROM orders o
+                        WHERE o.id = final_invoice.order_id AND o.status = 'cancelled')
+             OR EXISTS (SELECT 1 FROM quotes q
+                        WHERE q.id = advance.quote_id
+                          AND q.status IN ('superseded', 'rejected', 'expired')))
+      ORDER BY final_invoice.release_sequence NULLS FIRST, final_invoice.issued_at
+      LIMIT 1
+  ) settling ON true
+  WHERE advance.invoice_type = 'advance'
+    AND advance.status NOT IN ('draft', 'cancelled')
+    AND advance.total_gross - advance.credited_amount - COALESCE(allocated.amount, 0) > 0
+    AND NOT (
+        jsonb_typeof(advance.line_items) = 'array'
+        AND jsonb_array_length(advance.line_items) > 0
+        AND NOT EXISTS (
+            SELECT 1 FROM jsonb_array_elements(advance.line_items) item
+            WHERE NULLIF(BTRIM(item ->> 'line_gross'), '') IS NULL
+        )
+        AND ABS((SELECT SUM((item ->> 'line_gross')::numeric)
+                 FROM jsonb_array_elements(advance.line_items) item)
+                - advance.total_gross)
+            <= 0.01 * jsonb_array_length(advance.line_items)
+    )
+  ORDER BY advance.issued_at;
   ```
 
 ---

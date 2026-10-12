@@ -92,3 +92,19 @@ test("server rejection is translated, and refreshing rechecks the invoice", asyn
   expect(state.writes).toHaveLength(1);
   expect(state.errors).toEqual([]);
 });
+
+test("the next level waits for the reminder's deadline; automatic reminders are the system's (QA D2-06, D2-12)", async ({ page }) => {
+  const state = await prepare(page);
+  state.events.push({
+    id: "event-auto", invoice_id: invoiceId, level: "first", note: null, automatic: true,
+    created_by_name: null, balance_due: "2963.10", payment_due_date: "2026-09-21",
+    sent_at: "2026-09-07T09:00:00Z", created_at: "2026-09-07T09:00:00Z",
+  });
+  await page.goto(`/invoices?invoice=${invoiceId}`);
+  await expect(page.getByRole("button", { name: "Добавить напоминание", exact: true })).toBeDisabled();
+  await expect(page.locator("#invoice-dunning-deadline")).toContainText("с 22.09.2026");
+  await expect(page.getByText("Создано автоматически: срок оплаты истёк.")).toBeVisible();
+  await expect(page.getByText("Система", { exact: true }).first()).toBeVisible();
+  expect(state.writes).toEqual([]);
+  expect(state.errors).toEqual([]);
+});

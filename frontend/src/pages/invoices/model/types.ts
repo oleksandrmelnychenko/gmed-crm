@@ -328,6 +328,17 @@ export type InvoiceReleaseWarning = {
     | string;
   missing?: string[];
   advance_invoice_numbers?: (string | null)[];
+  /** The advances of another recipient this final invoice settles (QA D2-03). */
+  advances?: InvoiceMismatchedAdvance[];
+};
+
+/** An open advance of another recipient that a final invoice will settle. */
+export type InvoiceMismatchedAdvance = {
+  invoice_number: string | null;
+  recipient_name: string | null;
+  total_gross: string;
+  paid_gross: string;
+  open_gross: string;
 };
 
 export type InvoiceReleaseChecks = {
@@ -424,6 +435,13 @@ export type InvoiceItem = {
   available_prepayments?: InvoicePrepaymentOption[];
   prepayment_allocations?: InvoicePrepaymentAllocation[];
   creditable_lines?: InvoiceCreditableLine[];
+  /**
+   * The most a credit note may still take (QA D2-01): an advance not below
+   * what was credited from it into a final invoice. Empty `creditable_lines`
+   * with a positive limit: the invoice takes credits by amount (old line
+   * snapshots without amounts).
+   */
+  credit_note_limit_gross?: unknown;
   /** Advance invoices: the released final invoice that settles it. */
   advance_settlement?: InvoiceAdvanceSettlement | null;
   payment_proofs?: InvoicePaymentProof[];
@@ -452,8 +470,10 @@ export type DunningEvent = {
   balance_due: unknown;
   sent_at: string;
   created_at: string;
-  created_by_name?: string;
-  created_by_role?: string;
+  /** Sent by the automatic run: no author, the UI words the note (QA D2-12). */
+  automatic?: boolean;
+  created_by_name?: string | null;
+  created_by_role?: string | null;
 };
 
 export type AccountingEntry = {

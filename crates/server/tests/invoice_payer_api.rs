@@ -1736,6 +1736,148 @@ async fn confirmed_advance_mismatch_covers_only_the_named_advances() {
     );
 }
 
+/// QA D2-02 / D2-03: the payment of an advance is credited only into a final
+/// invoice that settles it (same quote, released after it, same recipient or
+/// confirmed by number), never into an earlier final invoice of another
+/// quote. The confirmation of another recipient names exactly the open
+/// advances of its own quote, with recipient and amounts.
+#[tokio::test]
+async fn a_paid_advance_reaches_only_the_final_invoice_of_its_own_quote() {
+    let Some(fx) = fixture("payer-advance-quote").await else {
+        return;
+    };
+    let patient = seed_patient(&fx.pool, fx.admin_id, &fx.tag, "1980-05-05", true).await;
+    let order = seed_order(&fx.pool, patient, fx.admin_id, &fx.tag).await;
+    let first_quote = create_quote(&fx.app, &fx.manager, order).await;
+
+    // Quote 1: advance (paid 50 of 119), then its final invoice (69 open).
+    let first_advance = create_draft(&fx.app, &fx.billing, &first_quote, "advance").await;
+    let first_advance_id = first_advance["id"].as_str().unwrap().to_string();
+    let (status, body) = release(&fx.app, &fx.billing, &first_advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    pay(&fx.app, &fx.billing, &first_advance_id, "50").await;
+    let first_final = create_draft(&fx.app, &fx.billing, &first_quote, "final").await;
+    let first_final_id = first_final["id"].as_str().unwrap().to_string();
+    let (status, body) = release(&fx.app, &fx.billing, &first_final_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["prepayment_applied_amount"], "50", "{body}");
+    assert_eq!(body["balance_due"], "69", "{body}");
+
+    // Quote 2 for a new service: an advance released and paid after the
+    // first final invoice.
+    sqlx::query(
+        r#"INSERT INTO order_leistungen (order_id, description, quantity, unit_price, vat_rate, status)
+           VALUES ($1, 'Flughafentransfer', 1, 180, 19, 'approved')"#,
+    )
+    .bind(order)
+    .execute(&fx.pool)
+    .await
+    .unwrap();
+    let second_quote = create_quote(&fx.app, &fx.manager, order).await;
+    let second_advance = create_draft(&fx.app, &fx.billing, &second_quote, "advance").await;
+    let second_advance_id = second_advance["id"].as_str().unwrap().to_string();
+    let (status, body) = release(&fx.app, &fx.billing, &second_advance_id, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["total_gross"], "214.2", "{body}");
+    let second_number = advance_number(&fx.pool, &second_advance_id).await;
+    pay(&fx.app, &fx.billing, &second_advance_id, "214.20").await;
+
+    // The earlier final invoice of quote 1 does not take that money.
+    let (_, first_final_detail) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{first_final_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        first_final_detail["prepayment_applied_amount"], "50",
+        "{first_final_detail}"
+    );
+    assert_eq!(first_final_detail["balance_due"], "69");
+    let applied_elsewhere: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM invoice_prepayment_allocations WHERE advance_invoice_id = $1::uuid",
+    )
+    .bind(&second_advance_id)
+    .fetch_one(&fx.pool)
+    .await
+    .unwrap();
+    assert_eq!(applied_elsewhere, 0, "QA D2-02");
+
+    // The final invoice of quote 2 goes to a company: the confirmation names
+    // only the open advance of quote 2, with recipient and amounts.
+    let second_final = create_draft(&fx.app, &fx.billing, &second_quote, "final").await;
+    let second_final_id = second_final["id"].as_str().unwrap().to_string();
+    let (status, _) = set_invoice_payer(
+        &fx.app,
+        &fx.billing,
+        &second_final_id,
+        json!({
+            "payer_contact_name": "Beispiel GmbH",
+            "payer_address_street": "Musterweg 1",
+            "payer_address_zip": "10115",
+            "payer_address_city": "Berlin",
+            "payer_address_country": "DE",
+            "payer_role": "cost_bearer"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, refused) = release(&fx.app, &fx.billing, &second_final_id, json!({})).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "advance_recipient_mismatch");
+    assert_eq!(
+        refused["details"]["advance_invoice_numbers"],
+        json!([second_number]),
+        "QA D2-03: only the open advance of this quote"
+    );
+    let named = &refused["details"]["advances"][0];
+    assert_eq!(named["invoice_number"], second_number.as_str(), "{refused}");
+    assert_eq!(named["paid_gross"], "214.2", "{refused}");
+    assert_eq!(named["open_gross"], "214.2", "{refused}");
+    assert!(named["recipient_name"].is_string(), "{refused}");
+    let (status, released) = release(
+        &fx.app,
+        &fx.billing,
+        &second_final_id,
+        json!({ "confirm_advance_recipient_mismatch": true }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{released}");
+    assert_eq!(
+        released["prepayment_applied_amount"], "214.2",
+        "the confirmed final deducts the advance of its own quote"
+    );
+    assert_eq!(released["balance_due"], "0", "{released}");
+    let snapshot: Value =
+        sqlx::query_scalar("SELECT recipient_snapshot FROM invoices WHERE id = $1::uuid")
+            .bind(&second_final_id)
+            .fetch_one(&fx.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        snapshot["confirmations"]["advance_recipient_mismatch"]["advance_invoice_numbers"],
+        json!([second_number])
+    );
+    let (_, second_advance_detail) = json_request(
+        &fx.app,
+        "GET",
+        &format!("/api/v1/invoices/{second_advance_id}"),
+        &fx.billing,
+        None,
+    )
+    .await;
+    assert_eq!(
+        second_advance_detail["advance_settlement"]["final_invoice_id"], second_final_id,
+        "{second_advance_detail}"
+    );
+    assert_eq!(
+        second_advance_detail["advance_settlement"]["applied_amount"],
+        "214.2"
+    );
+}
+
 #[tokio::test]
 async fn payer_changes_are_audited_with_old_and_new_values_in_the_transaction() {
     let Some(fx) = fixture("payer-audit").await else {

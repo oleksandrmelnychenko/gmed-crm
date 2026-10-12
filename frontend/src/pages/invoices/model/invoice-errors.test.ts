@@ -6,6 +6,60 @@ import {
   localizeInvoiceError,
 } from "./invoice-errors";
 
+describe("money-relevant confirmations and refusals name their facts", () => {
+  it("names the advances of another recipient a final invoice settles (QA D2-03)", () => {
+    const advances = [
+      {
+        invoice_number: "INV-20261012-0005",
+        recipient_name: "Ben Muster",
+        total_gross: "214.2",
+        paid_gross: "214.2",
+        open_gross: "214.2",
+      },
+    ];
+    const refused = {
+      code: "advance_recipient_mismatch",
+      body: {
+        error: "advance_recipient_mismatch",
+        confirm_field: "confirm_advance_recipient_mismatch",
+        details: { advance_invoice_numbers: ["INV-20261012-0005"], advances },
+      },
+    };
+    const ru = localizeInvoiceError(refused, "ru", "x");
+    expect(ru).toContain("INV-20261012-0005");
+    expect(ru).toContain("Ben Muster");
+    expect(ru).toMatch(/оплачено 214,20\s€/);
+    expect(localizeInvoiceError(refused, "de", "x")).toContain("Empfänger: Ben Muster");
+    expect(
+      invoiceReleaseWarningText({ code: "advance_recipient_mismatch", advances }, "ru"),
+    ).toContain("Затронутые авансы: INV-20261012-0005");
+  });
+
+  it("says until when the previous dunning letter runs (QA D2-06)", () => {
+    const refused = {
+      code: "dunning_previous_deadline_running",
+      body: {
+        error: "dunning_previous_deadline_running",
+        previous_level: "first",
+        payment_due_date: "2026-10-26",
+        override_allowed: false,
+      },
+    };
+    const ru = localizeInvoiceError(refused, "ru", "x");
+    expect(ru).toContain("26.10.2026");
+    expect(ru).not.toContain("CEO");
+    expect(
+      localizeInvoiceError({ ...refused, body: { ...refused.body, override_allowed: true } }, "de", "x"),
+    ).toContain("Als CEO");
+  });
+
+  it("refuses correction documents without GMED's tax registration in the UI language (QA D2-09)", () => {
+    const refused = { code: "issuer_tax_registration_missing", body: { error: "issuer_tax_registration_missing" } };
+    expect(localizeInvoiceError(refused, "ru", "x")).toContain("документ корректировки");
+    expect(localizeInvoiceError(refused, "de", "x")).toContain("Rechnungskorrektur");
+  });
+});
+
 describe("localizeInvoiceError", () => {
   it("points to the system settings when GMED's tax number is missing", () => {
     const error = Object.assign(

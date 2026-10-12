@@ -31,9 +31,16 @@ export function localizedNotificationCopy(
       const data = JSON.parse(item.body ?? "{}");
       const due = data.due_at ? formatAppDateTime(data.due_at) : "";
       const deadline = due ? ` · ${lang === "de" ? "Frist" : "Срок"}: ${due}` : "";
+      const title = `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`;
+      const received = `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)}`;
+      // "Offen" is what is left of the required prepayment, not of the
+      // invoices; without a required prepayment there is none (QA D2-11).
+      if (data.payment_status === "not_required") {
+        return { title, body: received };
+      }
       return {
-        title: `${data.order_number ?? ""} · ${paymentStatusLabel(data.payment_status ?? "awaiting_payment", lang)}`,
-        body: `${lang === "de" ? "Erhalten" : "Получено"}: ${formatMoneyAmount(data.received_amount, data.currency)} · ${lang === "de" ? "Offen" : "Остаток"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
+        title,
+        body: `${lang === "de" ? "Vorauszahlung" : "Предоплата"}: ${formatMoneyAmount(data.required_amount, data.currency)} · ${received} · ${lang === "de" ? "Offene Vorauszahlung" : "Остаток предоплаты"}: ${formatMoneyAmount(data.remaining_amount, data.currency)}${deadline}`,
       };
     } catch {
       return { title: lang === "de" ? "Zahlungsstatus aktualisiert" : "Статус оплаты обновлён", body: null };

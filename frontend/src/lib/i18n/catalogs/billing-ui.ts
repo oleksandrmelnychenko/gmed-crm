@@ -11,6 +11,12 @@ export const billingUiDe = {
   "api_billing_rebilling_waiver_not_possible":
     "Nur eine aktive Lieferantenrechnung eines Patienten kann von der Weiterberechnung ausgenommen werden.",
   "api_billing_rebilling_waiver_already_reversed": "Diese Ausnahme wurde bereits zurückgenommen.",
+  // Invoices and correction documents name GMED's tax registration (QA D2-09).
+  "api_billing_issuer_tax_registration_missing":
+    "Ausstellung nicht möglich: Steuernummer und USt-IdNr. der GMED fehlen. Bitte in den Systemeinstellungen eintragen lassen; es wurde nichts gebucht.",
+  "api_billing_advance_rest_already_closed": "Die Anzahlungsrechnung hat keinen offenen Rest mehr.",
+  "api_billing_advance_not_settled_by_final_invoice":
+    "Noch keine ausgestellte Schlussrechnung rechnet diese Anzahlung ab.",
 } as const satisfies Record<string, string>;
 
 export const billingUiRu = {
@@ -21,4 +27,8 @@ export const billingUiRu = {
   "api_billing_rebilling_waiver_not_possible":
     "Не перевыставлять можно только действующий счёт поставщика пациента.",
   "api_billing_rebilling_waiver_already_reversed": "Это решение уже отменено.",
+  "api_billing_issuer_tax_registration_missing":
+    "Выпуск невозможен: не указаны Steuernummer и USt-IdNr. GMED. Их нужно заполнить в «Системных настройках»; ничего не проведено.",
+  "api_billing_advance_rest_already_closed": "У авансового счёта больше нет открытого остатка.",
+  "api_billing_advance_not_settled_by_final_invoice": "Этот аванс ещё не закрыт выпущенным финальным счётом.",
 } as const satisfies Record<keyof typeof billingUiDe, string>;

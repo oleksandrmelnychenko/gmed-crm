@@ -724,6 +724,15 @@ type PatientRecheckContract = {
   valid_to: string | null;
 };
 
+/** An overdue invoice named in the re-check (QA D2-08). */
+export type OverdueInvoiceSummary = {
+  invoice_number: string | null;
+  due_date: string | null;
+  recipient_name: string | null;
+  billed_to_patient: boolean;
+  balance_due: string;
+};
+
 export type PatientOrderRecheck = {
   requires_recheck: boolean;
   can_create_order: boolean;
@@ -746,6 +755,8 @@ export type PatientOrderRecheck = {
     blocking: boolean;
     blocking_reason: string | null;
     overdue_invoice_count: number;
+    /** The overdue invoices and their recipients (a third-party payer too). */
+    overdue_invoices?: OverdueInvoiceSummary[];
     outstanding_balance: string;
     latest_workflow?: {
       order_id: string;

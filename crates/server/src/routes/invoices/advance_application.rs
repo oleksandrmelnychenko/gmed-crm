@@ -92,7 +92,13 @@ pub(crate) async fn apply_available_advances_tx(
         return Ok(Vec::new());
     }
 
-    let advances = sqlx::query(
+    // Only the advances this final invoice settles (the rule of the advance
+    // settlement, `FINAL_SETTLES_ADVANCE`): same order and patient, released
+    // before it, billed to the same recipient or confirmed by number at its
+    // release (§ 14 Abs. 5 Satz 2 UStG, QA D-57), and of the same quote
+    // unless the final settles the whole order. The payment of an advance
+    // never lands on an earlier final invoice of another quote (QA D2-02).
+    let advances_sql = format!(
         r#"SELECT advance.id, advance.invoice_number,
                   GREATEST(
                       LEAST(advance.paid_amount, advance.total_gross - advance.credited_amount)
@@ -103,39 +109,22 @@ pub(crate) async fn apply_available_advances_tx(
                       ), 0),
                       0
                   ) AS available_amount
-           FROM invoices advance
-           WHERE advance.order_id = $1
+           FROM invoices final_invoice
+           JOIN invoices advance ON {settles}
+           WHERE final_invoice.id = $3
+             AND advance.order_id = $1
              AND advance.patient_id = $2
-             AND advance.invoice_type = 'advance'
-             AND advance.status NOT IN ('draft', 'cancelled')
              AND advance.paid_amount > 0
-             -- § 14 Abs. 5 Satz 2 UStG: only advances billed to the same
-             -- recipient. An advance of another recipient only when billing
-             -- confirmed exactly that advance invoice at release: the
-             -- confirmation lists the advance numbers it covers and never
-             -- extends to advances issued later (QA D-57: the payment of one
-             -- debtor settled the invoice of another).
-             AND EXISTS (
-                 SELECT 1 FROM invoices target
-                 WHERE target.id = $3
-                   AND (
-                       invoice_recipient_identity(advance.recipient_snapshot)
-                          IS NOT DISTINCT FROM invoice_recipient_identity(target.recipient_snapshot)
-                       OR COALESCE(
-                              target.recipient_snapshot -> 'confirmations'
-                                  -> 'advance_recipient_mismatch' -> 'advance_invoice_numbers',
-                              '[]'::jsonb
-                          ) ? advance.invoice_number
-                   )
-             )
-           ORDER BY advance.issued_at, advance.id
+           ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id
            FOR UPDATE OF advance"#,
-    )
-    .bind(order_id)
-    .bind(patient_id)
-    .bind(target_invoice_id)
-    .fetch_all(&mut **transaction)
-    .await?;
+        settles = super::advance_settlement::FINAL_SETTLES_ADVANCE,
+    );
+    let advances = sqlx::query(&advances_sql)
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(target_invoice_id)
+        .fetch_all(&mut **transaction)
+        .await?;
     let available = advances
         .iter()
         .map(|row| row.try_get::<Decimal, _>("available_amount"))
@@ -186,29 +175,31 @@ pub(crate) async fn apply_available_advances_tx(
     Ok(applied)
 }
 
-/// Released final invoices of an advance invoice's order that still ask for
-/// money, oldest first: where a newly paid advance is credited.
+/// Released final invoices that settle an advance invoice and still ask for
+/// money, in release order: where a newly paid advance is credited. The rule
+/// is the one of the release (`FINAL_SETTLES_ADVANCE`): a final invoice
+/// released before the advance, of another quote or of another recipient
+/// (unless it confirmed this advance by number) never takes its money
+/// (QA D2-02).
 pub(crate) async fn open_final_invoices_for_advance_tx(
     transaction: &mut Transaction<'_, Postgres>,
     advance_invoice_id: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    sqlx::query_scalar::<_, Uuid>(
+    let sql = format!(
         r#"SELECT final_invoice.id
            FROM invoices advance
-           JOIN invoices final_invoice
-             ON final_invoice.order_id = advance.order_id
-            AND final_invoice.patient_id = advance.patient_id
+           JOIN invoices final_invoice ON {settles}
            WHERE advance.id = $1
-             AND advance.invoice_type = 'advance'
-             AND final_invoice.invoice_type = 'final'
-             AND final_invoice.status NOT IN ('draft', 'cancelled')
              AND final_invoice.total_gross - final_invoice.credited_amount
                  - final_invoice.paid_amount - final_invoice.prepayment_applied_amount > 0
-           ORDER BY final_invoice.issued_at, final_invoice.id"#,
-    )
-    .bind(advance_invoice_id)
-    .fetch_all(&mut **transaction)
-    .await
+           ORDER BY final_invoice.release_sequence NULLS FIRST, final_invoice.issued_at,
+                    final_invoice.id"#,
+        settles = super::advance_settlement::FINAL_SETTLES_ADVANCE,
+    );
+    sqlx::query_scalar::<_, Uuid>(&sql)
+        .bind(advance_invoice_id)
+        .fetch_all(&mut **transaction)
+        .await
 }
 
 /// Unapplied paid advance cash each of `invoice_ids` would receive, allocated

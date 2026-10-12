@@ -68,6 +68,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
+import { IssuerTaxRegistrationBanner } from "@/components/issuer-tax-registration-banner";
 import {
   formatEnumLabelFromKeys,
   formatUnknownValue,
@@ -2601,6 +2602,10 @@ function useFinanceCatalogPageContent() {
       <PageHeader
         title={t.finance_catalog_title}
       />
+
+      {/* GMED's tax registration is missing: no invoice or correction document
+          can be issued (QA D2-10). */}
+      <IssuerTaxRegistrationBanner />
 
       {error ? (
         <Banner tone="error" withIcon>

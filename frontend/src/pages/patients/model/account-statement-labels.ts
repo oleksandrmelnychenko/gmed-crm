@@ -126,9 +126,38 @@ const FINANCIAL_DESCRIPTIONS: Record<string, Pair> = {
     "Счёт пациента отменён; внешний долг снова открыт",
   ],
   "External provider": ["Externer Anbieter", "Внешний поставщик"],
+  "External receivable allocation reversed": [
+    "Forderungszuordnung storniert",
+    "Распределение внешнего долга сторнировано",
+  ],
+  "Termination settlement: accrued, not yet invoiced": [
+    "Kündigung: angefallen, noch nicht berechnet",
+    "Расторжение: набежало, ещё не выставлено",
+  ],
+  "Termination settlement: invoiced in advance, not delivered": [
+    "Kündigung: vorab berechnet, nicht erbracht",
+    "Расторжение: выставлено авансом, не оказано",
+  ],
 };
 
+/**
+ * German document texts the server stores as descriptions (credit-note and
+ * reversal reasons it writes itself), worded in the RU UI (QA D2-05).
+ */
+const GERMAN_DESCRIPTION_PATTERNS: Array<[RegExp, (match: RegExpExecArray) => Pair]> = [
+  [
+    /^Restbetrag der Anzahlungsrechnung (.+?) – abgerechnet mit der Schlussrechnung (.+)$/,
+    (match) => [match[0], `Остаток авансового счёта ${match[1]} — закрыт финальным счётом ${match[2]}`],
+  ],
+  [
+    /^Rechnungskorrektur \(Gutschrift\) zu (.+)$/,
+    (match) => [match[0], `Кредит-нота к счёту ${match[1]}`],
+  ],
+  [/^Stornierung der Rechnung (.+)$/, (match) => [match[0], `Отмена счёта ${match[1]}`]],
+];
+
 const FINANCIAL_DESCRIPTION_PREFIXES: Array<[string, Pair]> = [
+  ["Cancellation of invoice ", ["Stornierung der Rechnung ", "Отмена счёта "]],
   ["Concierge partner payment reversal", ["Storno der Zahlung an Concierge-Partner", "Сторно оплаты партнёру консьержа"]],
   ["Concierge partner payment", ["Zahlung an Concierge-Partner", "Оплата партнёру консьержа"]],
   [CREDIT_TRANSFER_OUT, ["Guthaben verrechnet mit Rechnung ", "Переплата зачтена в счёт "]],
@@ -141,9 +170,18 @@ const FINANCIAL_DESCRIPTION_PREFIXES: Array<[string, Pair]> = [
 ];
 
 /** Server descriptions of statement rows are English; show them in the UI language. */
-export function localizeFinancialDescription(value: string, lang: string) {
+export function localizeFinancialDescription(value: string, lang: string): string {
   const direct = FINANCIAL_DESCRIPTIONS[value];
   if (direct) return pick(direct, lang, value);
+  // "<provider> -> <invoice>": a supplier cost allocated to a patient invoice.
+  const arrow = value.indexOf(" -> ");
+  if (arrow > 0) {
+    return `${localizeFinancialDescription(value.slice(0, arrow), lang)} → ${value.slice(arrow + 4)}`;
+  }
+  for (const [pattern, words] of GERMAN_DESCRIPTION_PATTERNS) {
+    const match = pattern.exec(value);
+    if (match) return pick(words(match), lang, value);
+  }
   for (const [prefix, labels] of FINANCIAL_DESCRIPTION_PREFIXES) {
     if (value.startsWith(prefix)) {
       return `${pick(labels, lang, prefix)}${value.slice(prefix.length)}`;

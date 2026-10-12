@@ -7,11 +7,14 @@ import { Input } from "@/components/ui/input";
 import { inputClass, selectClass, tokens } from "@/components/ui-shell";
 import { appDateKey } from "@/lib/app-time-zone";
 import { useLang } from "@/lib/i18n";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, toCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
   creditableVatRates,
+  creditsByAmount,
+  effectiveCreditNoteSelection,
+  lineCreditable,
   normalizeVatRate,
   type CreditNoteMode,
   type CreditNotePreview,
@@ -31,6 +34,10 @@ function Field({ label, className, children }: { label: string; className?: stri
 
 type CreditNoteFormProps = {
   lines: InvoiceCreditableLine[] | undefined;
+  /** `credit_note_limit_gross`: the most the server accepts (QA D2-01). */
+  limit?: number | null;
+  /** An advance invoice: a limit of 0 means its money is in a final invoice. */
+  isAdvance?: boolean;
   draft: InvoiceCreditNoteDraft;
   onChange: (update: (current: InvoiceCreditNoteDraft) => InvoiceCreditNoteDraft) => void;
   preview: CreditNotePreview;
@@ -47,11 +54,18 @@ const ERROR_KEYS = {
   line_exceeded: "finance_credit_note_error_line_exceeded",
   vat_rate_missing: "finance_credit_note_error_vat_rate_missing",
   vat_rate_exceeded: "finance_credit_note_error_vat_rate_exceeded",
+  limit_exceeded: "finance_credit_note_error_limit_exceeded",
 } as const satisfies Record<CreditNoteSelectionError, string>;
 
-/** Credit-note form: credited invoice lines or an amount within one VAT rate. */
+/**
+ * Credit-note form: credited invoice lines or an amount within one VAT rate;
+ * an invoice whose lines carry no amounts takes an amount. Never offers more
+ * than the server accepts (`limit`).
+ */
 export function CreditNoteForm({
   lines,
+  limit = null,
+  isAdvance = false,
   draft,
   onChange,
   preview,
@@ -64,6 +78,9 @@ export function CreditNoteForm({
   const money = (value: unknown) => formatMoneyAmount(value, currency);
   const rates = creditableVatRates(lines);
   const openLines = (lines ?? []).filter((line) => Number(line.remaining_gross) > 0);
+  const selection = effectiveCreditNoteSelection(lines, limit, draft.selection);
+  const byAmount = creditsByAmount(lines, limit);
+  const openTotal = openLines.reduce((sum, line) => sum + Number(line.remaining_gross), 0);
   const setMode = (mode: CreditNoteMode) =>
     onChange((current) => ({
       ...current,
@@ -74,8 +91,22 @@ export function CreditNoteForm({
       },
     }));
   const showError = preview.error && preview.error !== "nothing_selected";
+  const errorText = showError
+    ? t[ERROR_KEYS[preview.error!]].replace("{amount}", money(limit ?? 0))
+    : "";
 
-  if (openLines.length === 0) {
+  // Nothing the server would accept (QA D2-01): say why instead of offering
+  // the lines' remaining amounts.
+  if (limit !== null && toCents(limit) <= 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+        {isAdvance && openLines.length > 0
+          ? t.finance_credit_note_limit_applied_advance.replace("{amount}", money(0))
+          : t.finance_credit_note_no_open_lines}
+      </div>
+    );
+  }
+  if (openLines.length === 0 && !byAmount) {
     return (
       <div className="rounded-lg border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
         {t.finance_credit_note_no_open_lines}
@@ -85,27 +116,54 @@ export function CreditNoteForm({
 
   return (
     <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
-      <div className="flex flex-wrap gap-2" role="radiogroup">
-        {(["lines", "vat_rate"] as const).map((mode) => (
-          <Button
-            key={mode}
-            type="button"
-            size="sm"
-            variant={draft.selection.mode === mode ? "default" : "outline"}
-            role="radio"
-            aria-checked={draft.selection.mode === mode}
-            onClick={() => setMode(mode)}
-          >
-            {mode === "lines" ? t.finance_credit_note_mode_lines : t.finance_credit_note_mode_vat_rate}
-          </Button>
-        ))}
-      </div>
+      {byAmount ? (
+        <p className="text-sm text-muted-foreground">{t.finance_credit_note_by_amount_hint}</p>
+      ) : (
+        <div className="flex flex-wrap gap-2" role="radiogroup">
+          {(["lines", "vat_rate"] as const).map((mode) => (
+            <Button
+              key={mode}
+              type="button"
+              size="sm"
+              variant={selection.mode === mode ? "default" : "outline"}
+              role="radio"
+              aria-checked={selection.mode === mode}
+              onClick={() => setMode(mode)}
+            >
+              {mode === "lines" ? t.finance_credit_note_mode_lines : t.finance_credit_note_mode_vat_rate}
+            </Button>
+          ))}
+        </div>
+      )}
+      {limit !== null && (byAmount || toCents(limit) < toCents(openTotal)) ? (
+        <p className="text-sm font-medium text-foreground">
+          {t.finance_credit_note_limit.replace("{amount}", money(limit))}
+        </p>
+      ) : null}
 
-      {draft.selection.mode === "lines" ? (
+      {selection.mode === "amount" ? (
+        <Field label={t.finance_credit_note_amount}>
+          <Input
+            type="number"
+            min="0.01"
+            step="0.01"
+            max={limit ?? undefined}
+            value={draft.selection.amountGross}
+            onChange={(event) =>
+              onChange((current) => ({
+                ...current,
+                selection: { ...current.selection, amountGross: event.target.value },
+              }))
+            }
+            className={inputClass}
+          />
+        </Field>
+      ) : selection.mode === "lines" ? (
         <div className="space-y-2">
           {(lines ?? []).map((line) => {
             const lineDraft = draft.selection.lines[line.line_index] ?? { selected: false, amount: "" };
             const open = Number(line.remaining_gross) > 0;
+            const creditable = lineCreditable(line, limit);
             return (
               <div
                 key={line.line_index}
@@ -140,7 +198,7 @@ export function CreditNoteForm({
                       {line.is_cost_passthrough ? ` · ${t.finance_credit_note_passthrough}` : ""}
                       {" · "}
                       {open
-                        ? t.finance_credit_note_line_remaining.replace("{amount}", money(line.remaining_gross))
+                        ? t.finance_credit_note_line_remaining.replace("{amount}", money(creditable))
                         : t.finance_credit_note_line_fully_credited}
                     </span>
                   </span>
@@ -150,9 +208,9 @@ export function CreditNoteForm({
                     type="number"
                     min="0.01"
                     step="0.01"
-                    max={line.remaining_gross}
+                    max={creditable}
                     aria-label={t.finance_credit_note_line_amount}
-                    placeholder={Number(line.remaining_gross).toFixed(2)}
+                    placeholder={creditable.toFixed(2)}
                     title={t.finance_credit_note_line_amount_hint}
                     value={lineDraft.amount}
                     onChange={(event) =>
@@ -244,7 +302,7 @@ export function CreditNoteForm({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm tabular-nums text-muted-foreground" aria-live="polite">
           {showError ? (
-            <span className="text-rose-700">{t[ERROR_KEYS[preview.error!]]}</span>
+            <span className="text-rose-700">{errorText}</span>
           ) : preview.gross > 0 ? (
             t.finance_credit_note_preview
               .replace("{net}", money(preview.net))

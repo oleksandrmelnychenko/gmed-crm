@@ -445,11 +445,15 @@ export type DunningEvent = {
   level: "first" | "second" | "collections";
   note?: string | null;
   due_date_snapshot?: string | null;
+  /** New payment deadline the letter set (`YYYY-MM-DD`). */
+  payment_due_date?: string | null;
   balance_due: string;
   sent_at: string;
   created_at: string;
-  created_by_name: string;
-  created_by_role: string;
+  /** Sent by the automatic run: no author, the UI words the note (QA D2-12). */
+  automatic?: boolean;
+  created_by_name: string | null;
+  created_by_role: string | null;
 };
 
 export type WorkflowChecklistItem = {

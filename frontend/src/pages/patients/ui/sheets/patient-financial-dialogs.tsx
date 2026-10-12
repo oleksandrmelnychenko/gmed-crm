@@ -14,6 +14,12 @@ import {
 
 import { t as translateCatalog, useLang, type Lang } from "@/lib/i18n";
 
+import {
+  automaticDunningNote,
+  dunningDeadlineHint,
+  dunningDeadlineRunning,
+} from "@/pages/invoices/model/invoice-dunning";
+
 import type { DunningEvent } from "../../model/detail-tab-types";
 import { FormSection } from "../shared/patient-form-primitives";
 import { PatientSheetScaffold } from "../shared/patient-sheet-scaffold";
@@ -152,8 +158,16 @@ function DunningEventsList({
             </div>
             <div className="mt-2 space-y-1 text-sm text-slate-600">
               <p>{l("patients_balance_due")}: {formatMoney(event.balance_due)}</p>
-              <p>{l("patients_created_by")}: {event.created_by_name}</p>
-              {event.note ? <p>{event.note}</p> : null}
+              {/* The automatic run is the system, not a person (QA D2-12). */}
+              <p>
+                {l("patients_created_by")}:{" "}
+                {event.automatic ? (lang === "de" ? "System" : "Система") : event.created_by_name}
+              </p>
+              {event.automatic ? (
+                <p>{automaticDunningNote(event.level, lang)}</p>
+              ) : event.note ? (
+                <p>{event.note}</p>
+              ) : null}
             </div>
           </div>
         ))
@@ -381,6 +395,7 @@ function InvoiceManagerDialog({
   textareaClassName,
 }: InvoiceManagerDialogProps) {
   const { lang } = useLang();
+  const dunningDeadline = dunningDeadlineRunning(dunningEvents, nextDunningLevel(dunningEvents));
   return (
     <PatientSheetScaffold
       requireChanges
@@ -470,7 +485,8 @@ function InvoiceManagerDialog({
               size="sm"
               className="h-8 rounded-lg gap-1.5"
               onClick={() => void onCreateDunning()}
-              disabled={dunningBusy}
+              disabled={dunningBusy || Boolean(dunningDeadline)}
+              aria-describedby={dunningDeadline ? "patient-dunning-deadline" : undefined}
             >
               {dunningBusy ? <LoaderCircle className="size-3.5 animate-spin" /> : null}
               {l("patients_send")}: {dunningLevelLabel(nextDunningLevel(dunningEvents) ?? "", lang)}
@@ -481,6 +497,13 @@ function InvoiceManagerDialog({
         <p className="text-xs leading-5 text-muted-foreground">
           {l("patients_track_sent_reminders_and_escalate_overdue_invoices")}
         </p>
+        {canManageInvoices && dunningDeadline ? (
+          // The next level waits for the previous letter's deadline (QA D2-06);
+          // the CEO sends it earlier from the invoice card, with a reason.
+          <p id="patient-dunning-deadline" className="mt-2 text-xs leading-5 text-amber-800 dark:text-amber-200">
+            {dunningDeadlineHint(dunningDeadline, lang, false)}
+          </p>
+        ) : null}
         <div className="mt-3">
           <FormField label={l("patients_reminder_note")} htmlFor="dunning-note">
             <textarea

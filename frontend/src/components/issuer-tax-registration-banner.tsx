@@ -20,14 +20,14 @@ export const SYSTEM_SETTINGS_PATH = "/admin/settings";
 const copy = {
   ru: {
     title: "Не указаны налоговые данные GMED.",
-    body: "Пока в системных настройках не заполнены Steuernummer или USt-IdNr. компании, счета нельзя выпустить (§ 14 UStG); черновики создавать можно.",
+    body: "Пока в системных настройках не заполнены Steuernummer или USt-IdNr. компании, счета, кредит-ноты и документы сторно нельзя выпустить (§ 14 UStG); черновики создавать можно.",
     link: "Открыть системные настройки",
     ask: "Заполнить их может CEO или IT-администратор.",
     onSettings: "Заполните поле «Налоговый номер / Steuernummer» или «ИНН по НДС / USt-IdNr.» ниже.",
   },
   de: {
     title: "Steuerdaten der GMED fehlen.",
-    body: "Solange in den Systemeinstellungen weder Steuernummer noch USt-IdNr. des Unternehmens hinterlegt sind, können keine Rechnungen ausgestellt werden (§ 14 UStG); Entwürfe sind möglich.",
+    body: "Solange in den Systemeinstellungen weder Steuernummer noch USt-IdNr. des Unternehmens hinterlegt sind, können keine Rechnungen, Gutschriften oder Stornorechnungen ausgestellt werden (§ 14 UStG); Entwürfe sind möglich.",
     link: "Systemeinstellungen öffnen",
     ask: "Eintragen können CEO oder IT-Administration.",
     onSettings: "Bitte unten „Steuernummer“ oder „USt-IdNr.“ ausfüllen.",

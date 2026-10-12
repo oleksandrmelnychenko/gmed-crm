@@ -588,9 +588,13 @@ pub(super) async fn load_deducted_advances(
     let mut advances = Vec::with_capacity(rows.len());
     for row in rows {
         let mut line_items = row.try_get::<Value, _>("line_items")?;
-        if line_items.as_array().is_none_or(Vec::is_empty) {
-            // Early advance invoices carry no lines: their totals are one
-            // group, the rate implied by their VAT and net.
+        if !credit_notes::line_snapshot_carries_total(
+            &line_items,
+            row.try_get::<Decimal, _>("total_gross")?,
+        ) {
+            // Early advance invoices carry no lines, seeded ones lines
+            // without amounts: their totals are one group, the rate implied
+            // by their VAT and net.
             line_items = json!([{
                 "line_net": row.try_get::<Decimal, _>("total_net")?.to_string(),
                 "line_vat": row.try_get::<Decimal, _>("total_vat")?.to_string(),

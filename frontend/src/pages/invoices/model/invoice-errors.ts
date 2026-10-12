@@ -342,9 +342,10 @@ const EXACT: Record<string, Pair> = {
 /** Machine-readable error codes of the payer and release checks. */
 const CODES: Record<string, Pair> = {
   // § 14 Abs. 4 Nr. 2 UStG: GMED's Steuernummer or USt-IdNr. must be on the invoice.
+  // Also for credit notes, their reversals and cancellation documents (QA D2-09).
   issuer_tax_registration_missing: [
-    "Die Rechnung kann nicht ausgestellt werden: Steuernummer und USt-IdNr. der GMED fehlen. Bitte in den Systemeinstellungen (Administration → Systemeinstellungen) eintragen lassen; der Entwurf bleibt erhalten.",
-    "Счёт нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Их нужно заполнить в «Системных настройках» (Администрирование → Системные настройки); черновик сохранён.",
+    "Die Rechnung oder Rechnungskorrektur kann nicht ausgestellt werden: Steuernummer und USt-IdNr. der GMED fehlen. Bitte in den Systemeinstellungen (Administration → Systemeinstellungen) eintragen lassen; Entwürfe bleiben erhalten, es wurde nichts gebucht.",
+    "Счёт или документ корректировки нельзя выпустить: не указаны Steuernummer и USt-IdNr. GMED. Их нужно заполнить в «Системных настройках» (Администрирование → Системные настройки); черновики сохранены, ничего не проведено.",
   ],
   recipient_address_incomplete: [
     "Für die Ausstellung fehlen Name oder vollständige Anschrift des Rechnungsempfängers (Straße, PLZ, Ort, Land).",
@@ -451,14 +452,68 @@ function errorCode(error: unknown) {
 
 /** Text of a release check shown on a draft (`release_checks.warnings`). */
 export function invoiceReleaseWarningText(
-  warning: { code: string; missing?: string[] },
+  warning: { code: string; missing?: string[]; advances?: unknown },
   lang: string,
 ) {
   return localizeInvoiceError(
-    { code: warning.code, body: { error: warning.code, missing: warning.missing } },
+    {
+      code: warning.code,
+      body: { error: warning.code, missing: warning.missing, advances: warning.advances },
+    },
     lang,
     warning.code,
   );
+}
+
+/** `DD.MM.YYYY` of an ISO date (`YYYY-MM-DD`), else the value. */
+function germanDate(value: unknown) {
+  if (typeof value !== "string") return "–";
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
+}
+
+/**
+ * The next dunning level waits for the deadline of the previous letter
+ * (QA D2-06): when it ends and who may send it earlier.
+ */
+function dunningDeadlineText(body: Record<string, unknown> | null, lang: string) {
+  const deadline = germanDate(body?.payment_due_date);
+  const level = body?.previous_level === "second"
+    ? lang === "de" ? "der 1. Mahnung" : "первого требования"
+    : lang === "de" ? "der Zahlungserinnerung" : "напоминания об оплате";
+  const override = body?.override_allowed === true;
+  if (lang === "de") {
+    return `Die Zahlungsfrist ${level} läuft bis ${deadline}; die nächste Stufe ist erst danach möglich.${override ? " Als CEO können Sie sie mit Begründung vorher senden." : ""}`;
+  }
+  return `Срок оплаты из ${level} действует до ${deadline}; следующий уровень можно отправить только после него.${override ? " CEO может отправить раньше, указав причину." : ""}`;
+}
+
+/**
+ * The advances of another recipient a final invoice will settle, named with
+ * recipient and amounts so billing sees what it confirms (QA D2-03). From
+ * the release warning (`advances`) or the 409 (`details.advances`).
+ */
+function mismatchedAdvancesText(body: Record<string, unknown> | null, lang: string) {
+  const details = body?.details;
+  const raw =
+    body?.advances ??
+    (details && typeof details === "object" ? (details as Record<string, unknown>).advances : null);
+  if (!Array.isArray(raw) || raw.length === 0) return "";
+  const listed = raw
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => {
+      const number = typeof item.invoice_number === "string" ? item.invoice_number : "—";
+      const recipient = typeof item.recipient_name === "string" ? item.recipient_name : "—";
+      const money = (value: unknown) =>
+        typeof value === "string" || typeof value === "number" ? formatMoneyAmount(value) : "–";
+      return lang === "de"
+        ? `${number} (Empfänger: ${recipient}, bezahlt ${money(item.paid_gross)}, offen ${money(item.open_gross)})`
+        : `${number} (получатель: ${recipient}, оплачено ${money(item.paid_gross)}, открыто ${money(item.open_gross)})`;
+    });
+  if (listed.length === 0) return "";
+  return lang === "de"
+    ? ` Betroffene Anzahlungen: ${listed.join("; ")}.`
+    : ` Затронутые авансы: ${listed.join("; ")}.`;
 }
 
 /**
@@ -490,9 +545,15 @@ export function localizeInvoiceError(error: unknown, lang: string, fallback: str
       ? `Die Kasse (Standardkonto für Zahlungen) kann nicht ins Minus gehen. Verfügbar: ${available}.`
       : `Касса (счёт по умолчанию для оплат) не может уйти в минус. Доступно: ${available}.`;
   }
+  if (errorCode(error) === "dunning_previous_deadline_running") {
+    return dunningDeadlineText(errorBody(error), lang);
+  }
   const coded = CODES[errorCode(error)];
   if (coded) {
     const text = lang === "de" ? coded[0] : coded[1];
+    if (errorCode(error) === "advance_recipient_mismatch") {
+      return `${text}${mismatchedAdvancesText(errorBody(error), lang)}`;
+    }
     const missing = errorBody(error)?.missing;
     if (Array.isArray(missing) && missing.length > 0) {
       const parts = missing

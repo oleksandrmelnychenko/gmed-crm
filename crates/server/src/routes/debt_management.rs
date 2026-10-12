@@ -195,6 +195,44 @@ pub(crate) async fn load_patient_debt_management_state(
     let outstanding_balance = finance
         .try_get::<Decimal, _>("outstanding_balance")
         .unwrap_or(Decimal::ZERO);
+    // Which invoices are overdue and to whom they went (a third-party payer's
+    // invoice counts too): the re-check panel names them instead of saying
+    // "no overdue debt" next to a count (QA D2-08). Debt never blocks.
+    let overdue_invoices = sqlx::query(
+        r#"SELECT invoice_number, due_date,
+                  recipient_snapshot ->> 'name' AS recipient_name,
+                  COALESCE((recipient_snapshot ->> 'kind') = 'patient', true) AS billed_to_patient,
+                  GREATEST(total_gross - COALESCE(credited_amount, 0) - COALESCE(paid_amount, 0)
+                           - COALESCE(prepayment_applied_amount, 0), 0) AS balance_due
+           FROM invoices
+           WHERE patient_id = $1
+             AND status = 'overdue'
+             AND total_gross - COALESCE(credited_amount, 0) > COALESCE(paid_amount, 0)
+                                + COALESCE(prepayment_applied_amount, 0)
+           ORDER BY due_date NULLS LAST, invoice_number
+           LIMIT 10"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, patient_id = %patient_id, "load overdue invoices for debt-management");
+        err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to load debt-management state",
+        )
+    })?
+    .into_iter()
+    .map(|row| {
+        json!({
+            "invoice_number": row.try_get::<Option<String>, _>("invoice_number").unwrap_or_default(),
+            "due_date": row.try_get::<Option<chrono::NaiveDate>, _>("due_date").unwrap_or_default().map(|value| value.to_string()),
+            "recipient_name": row.try_get::<Option<String>, _>("recipient_name").unwrap_or_default(),
+            "billed_to_patient": row.try_get::<bool, _>("billed_to_patient").unwrap_or(true),
+            "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
+        })
+    })
+    .collect::<Vec<_>>();
 
     let latest = sqlx::query(
         r#"SELECT dm.order_id,
@@ -338,6 +376,7 @@ pub(crate) async fn load_patient_debt_management_state(
             "blocking_reason": null,
             "attention_reason": blocking_reason,
             "overdue_invoice_count": overdue_invoice_count,
+            "overdue_invoices": overdue_invoices,
             "outstanding_balance": decimal_to_string(outstanding_balance),
             "latest_workflow": latest_payload,
         }),

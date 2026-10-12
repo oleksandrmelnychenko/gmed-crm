@@ -529,6 +529,10 @@ struct UpdateInvoiceVisibilityRequest {
 struct CreateDunningEventRequest {
     level: String,
     note: Option<String>,
+    /// CEO only: send the next level although the deadline of the previous
+    /// letter is still running (3 to 1000 characters, audited).
+    #[serde(default)]
+    deadline_override_reason: Option<String>,
 }
 
 struct QuoteInvoiceContext {
@@ -629,7 +633,6 @@ struct AccountingEntryInsert<'a> {
 
 struct AutoDunningCandidate {
     invoice_id: Uuid,
-    created_by: Uuid,
     status: String,
     due_date: NaiveDate,
     total_gross: Decimal,
@@ -944,7 +947,7 @@ fn row_invoice_portal_visibility(row: &sqlx::postgres::PgRow) -> Value {
 /// advances available for crediting, the supporting documents list, the
 /// contract link, the credit-note form data, credit transfers (internal
 /// notes, other invoices) and the patient's relatives offered as payers.
-const STAFF_ONLY_INVOICE_KEYS: [&str; 13] = [
+const STAFF_ONLY_INVOICE_KEYS: [&str; 14] = [
     "dunning_block",
     "visibility_note",
     "internal_note",
@@ -952,6 +955,7 @@ const STAFF_ONLY_INVOICE_KEYS: [&str; 13] = [
     "supporting_documents",
     "contract_id",
     "creditable_lines",
+    "credit_note_limit_gross",
     "credit_transfers",
     "credit_transfer_targets",
     "payer_relation_options",
@@ -1795,23 +1799,62 @@ async fn load_existing_dunning_levels(
     .await
 }
 
-async fn resolve_auto_dunning_actor_user_id(state: &AppState) -> Result<Option<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
-        r#"SELECT id
-           FROM users
-           WHERE is_active = true
-             AND role IN ('billing', 'ceo', 'ceo_assistant')
-           ORDER BY CASE role
-               WHEN 'billing' THEN 0
-               WHEN 'ceo' THEN 1
-               ELSE 2
-           END,
-           created_at
-           LIMIT 1"#,
-    )
-    .fetch_optional(&state.db)
-    .await
+/// The level whose letter must have expired before `level` is sent.
+fn previous_dunning_level(level: &str) -> Option<&'static str> {
+    match level {
+        "second" => Some("first"),
+        "collections" => Some("second"),
+        _ => None,
+    }
 }
+
+/// A letter's deadline has passed once the day after it has begun (Berlin
+/// calendar), as for the automatic run.
+fn dunning_deadline_passed(deadline: NaiveDate, today: NaiveDate) -> bool {
+    deadline < today
+}
+
+/// The previous level of `level` and the payment deadline its letter set,
+/// when that letter was sent. Events recorded before letters existed count
+/// from the day they were sent.
+async fn previous_dunning_deadline(
+    state: &AppState,
+    invoice_id: Uuid,
+    level: &str,
+) -> Result<Option<(&'static str, NaiveDate)>, sqlx::Error> {
+    let Some(previous) = previous_dunning_level(level) else {
+        return Ok(None);
+    };
+    let Some(row) = sqlx::query(
+        r#"SELECT payment_due_date, sent_at
+           FROM invoice_dunning_events
+           WHERE invoice_id = $1 AND level = $2"#,
+    )
+    .bind(invoice_id)
+    .bind(previous)
+    .fetch_optional(&state.db)
+    .await?
+    else {
+        return Ok(None);
+    };
+    let deadline = match row.try_get::<Option<NaiveDate>, _>("payment_due_date")? {
+        Some(date) => date,
+        None => {
+            let mut conn = state.db.acquire().await?;
+            dunning_letters::dunning_payment_due_date(
+                invoice_document_date(row.try_get::<DateTime<Utc>, _>("sent_at")?),
+                dunning_letters::load_dunning_payment_term_days(&mut conn).await?,
+            )
+        }
+    };
+    Ok(Some((previous, deadline)))
+}
+
+/// Automatic reminders are sent by the system, not by a person: the event
+/// keeps no author (`automatic`), the audit row no actor, and the UI shows
+/// "System" with a translated note (QA D2-12). Before 2026-10-12 the oldest
+/// active Billing user was named instead.
+const AUTO_DUNNING_TRIGGER: &str = "invoice_scheduler";
 
 /// Released, unpaid invoices with a due date. Invoices with an active
 /// dunning block (Mahnsperre) are left out entirely: neither reminders nor the
@@ -1820,7 +1863,7 @@ async fn load_auto_dunning_candidates(
     state: &AppState,
 ) -> Result<Vec<AutoDunningCandidate>, sqlx::Error> {
     let rows = sqlx::query(
-        r#"SELECT i.id, i.created_by, i.status, i.due_date, i.total_gross, i.credited_amount, i.paid_amount,
+        r#"SELECT i.id, i.status, i.due_date, i.total_gross, i.credited_amount, i.paid_amount,
                   i.prepayment_applied_amount,
                   COALESCE(debt.status, 'not_required') AS debt_status,
                   max(ide.sent_at) FILTER (WHERE ide.level = 'first') AS first_sent_at,
@@ -1837,7 +1880,7 @@ async fn load_auto_dunning_candidates(
                  SELECT 1 FROM invoice_dunning_blocks block
                  WHERE block.invoice_id = i.id AND block.cleared_at IS NULL
              )
-           GROUP BY i.id, i.created_by, i.status, i.due_date, i.total_gross,
+           GROUP BY i.id, i.status, i.due_date, i.total_gross,
                     i.credited_amount, i.paid_amount, i.prepayment_applied_amount, debt.status"#,
     )
     .fetch_all(&state.db)
@@ -1847,7 +1890,6 @@ async fn load_auto_dunning_candidates(
         .into_iter()
         .map(|row| AutoDunningCandidate {
             invoice_id: row.try_get::<Uuid, _>("id").unwrap_or_default(),
-            created_by: row.try_get::<Uuid, _>("created_by").unwrap_or_default(),
             status: row.try_get::<String, _>("status").unwrap_or_default(),
             due_date: row
                 .try_get::<NaiveDate, _>("due_date")
@@ -1886,16 +1928,25 @@ async fn load_auto_dunning_candidates(
         .collect())
 }
 
-fn auto_dunning_note(level: &str) -> String {
-    match level {
-        "first" => "[system auto-dunning] First reminder created automatically after due date passed."
-            .to_string(),
-        "second" => "[system auto-dunning] Second reminder created automatically after first reminder remained unpaid."
-            .to_string(),
-        "collections" => "[system auto-dunning] Collections escalation created automatically after second reminder remained unpaid."
-            .to_string(),
-        _ => "[system auto-dunning] Reminder created automatically.".to_string(),
-    }
+/// Audit row of an automatic step, without a human actor, in the step's
+/// transaction.
+async fn write_system_invoice_audit_tx(
+    conn: &mut sqlx::PgConnection,
+    action: &str,
+    invoice_id: Uuid,
+    context: Value,
+) -> Result<(), sqlx::Error> {
+    audit::write_in_transaction(
+        conn,
+        &audit::domain_event(
+            action.to_string(),
+            None,
+            "invoice",
+            Some(invoice_id),
+            context,
+        ),
+    )
+    .await
 }
 
 /// Order debt states in which billing handles the debt by hand: a payment
@@ -1984,7 +2035,6 @@ pub async fn run_auto_dunning_scheduler_once(
     state: &AppState,
 ) -> Result<AutoDunningRunSummary, sqlx::Error> {
     let today = crate::app_time::today();
-    let automation_actor_user_id = resolve_auto_dunning_actor_user_id(state).await?;
     let (second_delay_days, collections_delay_days) = load_auto_dunning_delay_days(state).await?;
     let rules = AutoDunningRules {
         grace_days: load_auto_dunning_grace_days(state).await?,
@@ -2007,7 +2057,6 @@ pub async fn run_auto_dunning_scheduler_once(
             continue;
         }
 
-        let actor_user_id = automation_actor_user_id.unwrap_or(candidate.created_by);
         if candidate.status != "overdue" {
             // The status change and its audit row are one transaction; a block
             // set meanwhile keeps the invoice as it is.
@@ -2027,13 +2076,12 @@ pub async fn run_auto_dunning_scheduler_once(
             .await?;
             let marked = result.rows_affected() > 0;
             if marked {
-                write_invoice_audit_tx(
+                write_system_invoice_audit_tx(
                     &mut transaction,
-                    actor_user_id,
                     "auto_mark_invoice_overdue",
                     candidate.invoice_id,
                     serde_json::json!({
-                        "trigger": "invoice_scheduler",
+                        "trigger": AUTO_DUNNING_TRIGGER,
                         "due_date": candidate.due_date.to_string(),
                         "balance_due": decimal_to_string(balance_due),
                     }),
@@ -2046,11 +2094,11 @@ pub async fn run_auto_dunning_scheduler_once(
                 summary.overdue_marked += result.rows_affected();
                 crate::realtime::publish_invoice_event(
                     state,
-                    Some(actor_user_id),
+                    None,
                     "invoice.overdue_marked",
                     candidate.invoice_id,
                     serde_json::json!({
-                        "trigger": "invoice_scheduler",
+                        "trigger": AUTO_DUNNING_TRIGGER,
                         "status": "overdue",
                         "due_date": candidate.due_date.to_string(),
                         "balance_due": decimal_to_string(balance_due),
@@ -2073,9 +2121,9 @@ pub async fn run_auto_dunning_scheduler_once(
             continue;
         }
 
-        let note = auto_dunning_note(level);
         // The event, its letter and its audit row are written together: a
-        // dunning step without the letter it sends is not recorded.
+        // dunning step without the letter it sends is not recorded. The
+        // system sends it: no author, no note (the UI words it by level).
         let mut transaction = state.db.begin().await?;
         if dunning_blocks::is_blocked(&mut transaction, candidate.invoice_id).await? {
             continue;
@@ -2087,17 +2135,15 @@ pub async fn run_auto_dunning_scheduler_once(
         let inserted = sqlx::query_scalar::<_, Uuid>(
             r#"INSERT INTO invoice_dunning_events (
                     invoice_id, level, note, due_date_snapshot, balance_due, created_by,
-                    payment_due_date
-               ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    payment_due_date, automatic
+               ) VALUES ($1, $2, NULL, $3, $4, NULL, $5, true)
                ON CONFLICT (invoice_id, level) DO NOTHING
                RETURNING id"#,
         )
         .bind(candidate.invoice_id)
         .bind(level)
-        .bind(note.clone())
         .bind(Some(candidate.due_date))
         .bind(balance_due)
-        .bind(actor_user_id)
         .bind(payment_due_date)
         .fetch_optional(&mut *transaction)
         .await?;
@@ -2107,7 +2153,7 @@ pub async fn run_auto_dunning_scheduler_once(
                 &mut transaction,
                 candidate.invoice_id,
                 dunning_event_id,
-                Some(actor_user_id),
+                None,
             )
             .await
             {
@@ -2117,13 +2163,12 @@ pub async fn run_auto_dunning_scheduler_once(
                     continue;
                 }
             }
-            let audited = write_invoice_audit_tx(
+            let audited = write_system_invoice_audit_tx(
                 &mut transaction,
-                actor_user_id,
                 "auto_create_invoice_dunning_event",
                 candidate.invoice_id,
                 serde_json::json!({
-                    "trigger": "invoice_scheduler",
+                    "trigger": AUTO_DUNNING_TRIGGER,
                     "level": level,
                     "balance_due": decimal_to_string(balance_due),
                     "due_date_snapshot": candidate.due_date.to_string(),
@@ -2151,11 +2196,11 @@ pub async fn run_auto_dunning_scheduler_once(
             summary.dunning_events_created += 1;
             crate::realtime::publish_invoice_event(
                 state,
-                Some(actor_user_id),
+                None,
                 "invoice.dunning_created",
                 candidate.invoice_id,
                 serde_json::json!({
-                    "trigger": "invoice_scheduler",
+                    "trigger": AUTO_DUNNING_TRIGGER,
                     "level": level,
                     "balance_due": decimal_to_string(balance_due),
                     "due_date_snapshot": candidate.due_date.to_string(),
@@ -4550,10 +4595,35 @@ async fn load_invoice_detail(
                 tracing::error!(error = %e, invoice_id = %invoice_id, "load invoice credit notes");
                 err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
             })?;
-        credit_notes::creditable_lines(&raw_line_items, &credits)
+        credit_notes::creditable_lines_for_invoice(&raw_line_items, &credits, total_gross)
             .iter()
             .map(credit_notes::CreditableLine::to_json)
             .collect::<Vec<_>>()
+    };
+    // The most a credit note may still take (QA D2-01): an advance cannot be
+    // credited below the money already credited from it into a settlement
+    // invoice (`credit_note_below_applied_advance`), any other invoice down
+    // to zero.
+    let credit_note_limit_gross = {
+        let applied_from_advance = if row.try_get::<String, _>("invoice_type").unwrap_or_default()
+            == "advance"
+        {
+            sqlx::query_scalar::<_, Decimal>(
+                    r#"SELECT COALESCE(SUM(amount_gross), 0)
+                       FROM invoice_prepayment_allocations
+                       WHERE advance_invoice_id = $1"#,
+                )
+                .bind(invoice_id)
+                .fetch_one(&state.db)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, invoice_id = %invoice_id, "load advance allocations for credit limit");
+                    err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load invoice")
+                })?
+        } else {
+            Decimal::ZERO
+        };
+        (total_gross - credited_amount - applied_from_advance).max(Decimal::ZERO)
     };
     let direct_document_ids = extract_external_document_ids(&raw_line_items);
     let source_line_ids = extract_source_line_ids(&raw_line_items);
@@ -5012,6 +5082,7 @@ async fn load_invoice_detail(
         "paid_at": row.try_get::<Option<DateTime<Utc>>, _>("paid_at").unwrap_or_default().map(|v| v.to_rfc3339()),
         "line_items": line_items,
         "creditable_lines": creditable_lines,
+        "credit_note_limit_gross": decimal_to_string(credit_note_limit_gross),
         "supporting_documents": supporting_documents,
         "portal_visible": row.try_get::<bool, _>("portal_visible").unwrap_or(true),
         "hide_amounts_from_patient": row.try_get::<bool, _>("hide_amounts_from_patient").unwrap_or(false),
@@ -5097,14 +5168,17 @@ async fn load_invoice_pdf_context_on(
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_name') AS agency_bank_name,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_swift') AS agency_bank_swift,
                   (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_bank_iban') AS agency_bank_iban,
-                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_vat_id') AS agency_vat_id,
-                  (SELECT value #>> '{{}}' FROM system_settings WHERE key = 'agency_tax_number') AS agency_tax_number
+                  {vat_id} AS agency_vat_id,
+                  {tax_number} AS agency_tax_number
            FROM invoices i
            LEFT JOIN orders o ON o.id = i.order_id
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN quotes q ON q.id = i.quote_id
            WHERE i.id = $1"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
+        // The registration of the release, not of today (QA D2-09).
+        vat_id = release::issued_tax_registration_sql("i", "vat_id"),
+        tax_number = release::issued_tax_registration_sql("i", "tax_number"),
     );
     let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
@@ -10573,7 +10647,13 @@ async fn plan_credit_note_tx(
             tracing::error!(error = %e, invoice_id = %invoice_id, "load active credit notes");
             failed()
         })?;
-    let creditable = credit_notes::creditable_lines(&context.line_items, &existing_credits);
+    // An invoice whose line snapshot carries no amounts takes credits by
+    // amount, VAT as on the invoice (QA D-55/D-56).
+    let creditable = credit_notes::creditable_lines_for_invoice(
+        &context.line_items,
+        &existing_credits,
+        context.total_gross,
+    );
     let planned = match (selection, creditable.is_empty()) {
         (credit_notes::CreditSelection::Amount(amount), true) => {
             Ok(credit_notes::CreditNotePlan::without_lines(
@@ -10619,6 +10699,11 @@ async fn store_credit_note_tx(
             "Failed to create credit note",
         )
     };
+    // A credit note names the issuer like the invoice (§ 14 Abs. 4 Nr. 2
+    // UStG): not issued while GMED's tax registration is missing (QA D2-09).
+    // The document keeps the registration of this moment
+    // (`issuer_tax_snapshot`, set by the database).
+    release::ensure_issuer_tax_registration(transaction).await?;
     // Gapless: the counter row is locked until this transaction ends.
     let sequence = release::next_correction_number(transaction, release::SERIES_CREDIT_NOTE)
         .await
@@ -10855,6 +10940,10 @@ async fn reverse_invoice_credit_note(
             );
         }
     };
+    // The reversal is a numbered correction document as well (QA D2-09).
+    if let Err(response) = release::ensure_issuer_tax_registration(&mut transaction).await {
+        return response;
+    }
     let row = match sqlx::query(
         r#"SELECT credit.amount_net, credit.amount_vat, credit.amount_gross,
                   credit.issued_on AS credit_issued_on,
@@ -12056,12 +12145,17 @@ async fn load_einvoice(
                   i.patient_id, o.order_number,
                   {recipient_columns},
                   (SELECT jsonb_object_agg(key, value #>> '{{}}') FROM system_settings
-                    WHERE key LIKE 'agency\_%') AS agency
+                    WHERE key LIKE 'agency\_%') AS agency,
+                  {vat_id} AS issued_vat_id,
+                  {tax_number} AS issued_tax_number
            FROM invoices i
            JOIN patients p ON p.id = i.patient_id
            LEFT JOIN orders o ON o.id = i.order_id
            WHERE i.id = $1"#,
         recipient_columns = document::RECIPIENT_COLUMNS,
+        // The registration of the release, not of today (QA D2-09).
+        vat_id = release::issued_tax_registration_sql("i", "vat_id"),
+        tax_number = release::issued_tax_registration_sql("i", "tax_number"),
     );
     let Some(row) = sqlx::query(&sql)
         .bind(invoice_id)
@@ -12175,8 +12269,8 @@ async fn load_einvoice(
             city: seller_city,
             country_code: setting("agency_country_code").map(|code| code.to_uppercase()),
             email: setting("agency_email"),
-            vat_id: setting("agency_vat_id"),
-            tax_number: setting("agency_tax_number"),
+            vat_id: optional("issued_vat_id"),
+            tax_number: optional("issued_tax_number"),
         },
         buyer: zugferd::EInvoiceParty {
             name: recipient.name,
@@ -12464,12 +12558,12 @@ async fn load_dunning_event_rows(
     let order = dunning_level_order("ide");
     let rows = sqlx::query(&format!(
         r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
-                  ide.sent_at, ide.created_at, ide.payment_due_date,
+                  ide.sent_at, ide.created_at, ide.payment_due_date, ide.automatic,
                   u.name AS created_by_name, u.role AS created_by_role,
                   letter.file_name AS letter_file_name,
                   letter.generated_at AS letter_generated_at
            FROM invoice_dunning_events ide
-           JOIN users u ON u.id = ide.created_by
+           LEFT JOIN users u ON u.id = ide.created_by
            LEFT JOIN invoice_documents letter ON letter.dunning_event_id = ide.id
            WHERE ide.invoice_id = $1
            ORDER BY {order}"#
@@ -12504,18 +12598,35 @@ async fn load_dunning_event_rows(
                             .map(|value| value.to_rfc3339()),
                     })
                 });
+            // A step of the automatic run is the system's: no author, and
+            // its note is worded by the UI (older rows kept an English text
+            // and the oldest Billing user, QA D2-12).
+            let automatic = row.try_get::<bool, _>("automatic").unwrap_or(false);
             json!({
                 "id": row.try_get::<Uuid, _>("id").unwrap_or_default(),
                 "invoice_id": invoice_id,
                 "level": row.try_get::<String, _>("level").unwrap_or_default(),
-                "note": row.try_get::<Option<String>, _>("note").unwrap_or_default(),
+                "automatic": automatic,
+                "note": if automatic {
+                    None
+                } else {
+                    row.try_get::<Option<String>, _>("note").unwrap_or_default()
+                },
                 "due_date_snapshot": row.try_get::<Option<NaiveDate>, _>("due_date_snapshot").unwrap_or_default().map(|value| value.to_string()),
                 "payment_due_date": payment_due_date.to_string(),
                 "balance_due": decimal_to_string(row.try_get::<Decimal, _>("balance_due").unwrap_or(Decimal::ZERO)),
                 "sent_at": sent_at.to_rfc3339(),
                 "created_at": row.try_get::<DateTime<Utc>, _>("created_at").map(|value| value.to_rfc3339()).unwrap_or_default(),
-                "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
-                "created_by_role": row.try_get::<String, _>("created_by_role").unwrap_or_default(),
+                "created_by_name": if automatic {
+                    None
+                } else {
+                    row.try_get::<Option<String>, _>("created_by_name").unwrap_or_default()
+                },
+                "created_by_role": if automatic {
+                    None
+                } else {
+                    row.try_get::<Option<String>, _>("created_by_role").unwrap_or_default()
+                },
                 "letter": letter,
             })
         })
@@ -12628,6 +12739,55 @@ async fn create_dunning_event(
         return err(status, message);
     }
 
+    // The next letter only after the deadline of the previous one has passed
+    // (as the automatic run, QA D2-06): "trotz unserer Zahlungserinnerung"
+    // is true only then. The CEO may send it earlier with a reason.
+    let deadline_override = match previous_dunning_deadline(&state, invoice_id, &body.level).await {
+        Ok(Some((previous_level, deadline))) if !dunning_deadline_passed(deadline, today) => {
+            let reason = body
+                .deadline_override_reason
+                .as_deref()
+                .map(str::trim)
+                .filter(|reason| !reason.is_empty());
+            match reason {
+                Some(reason) if auth.role == Role::Ceo => {
+                    if !(3..=1000).contains(&reason.chars().count()) {
+                        return err(
+                            StatusCode::UNPROCESSABLE_ENTITY,
+                            "The reason for sending the next dunning level early needs 3 to 1000 characters",
+                        );
+                    }
+                    Some(json!({
+                        "reason": reason,
+                        "previous_level": previous_level,
+                        "previous_payment_due_date": deadline.to_string(),
+                    }))
+                }
+                _ => {
+                    return coded_err(
+                        StatusCode::CONFLICT,
+                        "dunning_previous_deadline_running",
+                        "The payment deadline of the previous dunning letter has not passed yet",
+                        json!({
+                            "previous_level": previous_level,
+                            "payment_due_date": deadline.to_string(),
+                            "next_level_from": (deadline + chrono::Duration::days(1)).to_string(),
+                            "override_allowed": auth.role == Role::Ceo,
+                        }),
+                    );
+                }
+            }
+        }
+        Ok(_) => None,
+        Err(error) => {
+            tracing::error!(%error, %invoice_id, "load previous dunning deadline");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate dunning sequence",
+            );
+        }
+    };
+
     let failed = |error: sqlx::Error| {
         tracing::error!(error = %error, invoice_id = %invoice_id, "create invoice dunning");
         match &error {
@@ -12726,6 +12886,7 @@ async fn create_dunning_event(
             "payment_due_date": payment_due_date.to_string(),
             "letter_file_name": letter.file_name,
             "letter_sha256": letter_sha256,
+            "deadline_override": deadline_override,
         }),
     )
     .await;
@@ -13467,6 +13628,12 @@ async fn update_invoice_status(
                 )
             })
     });
+    // The cancellation document names the issuer like the invoice (QA D2-09).
+    if cancelling_released
+        && let Err(response) = release::ensure_issuer_tax_registration(&mut transaction).await
+    {
+        return response;
+    }
     let invoice_date = invoice_document_date(Utc::now());
     let release_due_date = if releasing {
         let payment_term_days =

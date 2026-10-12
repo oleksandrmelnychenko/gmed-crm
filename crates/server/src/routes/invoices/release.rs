@@ -37,6 +37,47 @@ pub(crate) async fn issuer_tax_registration_configured(
     .await
 }
 
+/// Refuses to issue a document while GMED's tax registration is missing:
+/// the release check of invoices, also for credit notes, their reversals and
+/// cancellation documents (QA D2-09), which print the issuer the same way.
+pub(super) async fn ensure_issuer_tax_registration(
+    conn: &mut PgConnection,
+) -> Result<(), axum::response::Response> {
+    match issuer_tax_registration_configured(conn).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(super::coded_err(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            ISSUER_TAX_REGISTRATION_MISSING,
+            "GMED's tax number or VAT ID is missing; set it in the system settings before issuing invoices or correction documents",
+            serde_json::json!({}),
+        )),
+        Err(error) => {
+            tracing::error!(%error, "load issuer tax registration");
+            Err(super::err(
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to issue the document",
+            ))
+        }
+    }
+}
+
+/// SQL for GMED's USt-IdNr. (`key` `vat_id`) or Steuernummer (`tax_number`)
+/// as an issued document prints it: the snapshot taken when the document
+/// (alias `document`, column `issuer_tax_snapshot`) was issued, whatever the
+/// settings say later (QA D2-09); documents issued before snapshots existed
+/// (2026-10-12) read the current setting.
+pub(crate) fn issued_tax_registration_sql(document: &str, key: &str) -> String {
+    let setting = match key {
+        "vat_id" => "agency_vat_id",
+        _ => "agency_tax_number",
+    };
+    format!(
+        "CASE WHEN {document}.issuer_tax_snapshot IS NOT NULL \
+              THEN NULLIF(BTRIM({document}.issuer_tax_snapshot ->> '{key}'), '') \
+              ELSE (SELECT value #>> '{{}}' FROM system_settings WHERE key = '{setting}') END"
+    )
+}
+
 /// A draft prepared from order or quote lines that still carry the former
 /// English demo texts of the seeded catalogue ("Interpreter support") is
 /// refreshed to the German catalogue texts right before it is released, so
@@ -195,6 +236,20 @@ mod tests {
             "CNR-2026-000007"
         );
         assert_eq!(storno_number(day("2026-09-28"), 1), "STORNO-20260928-0001");
+    }
+
+    #[test]
+    fn issued_documents_read_the_tax_registration_of_their_issue() {
+        let sql = issued_tax_registration_sql("credit", "tax_number");
+        assert!(
+            sql.contains("credit.issuer_tax_snapshot ->> 'tax_number'"),
+            "{sql}"
+        );
+        assert!(sql.contains("key = 'agency_tax_number'"), "{sql}");
+        assert!(sql.contains("value #>> '{}'"), "{sql}");
+        let sql = issued_tax_registration_sql("i", "vat_id");
+        assert!(sql.contains("i.issuer_tax_snapshot ->> 'vat_id'"), "{sql}");
+        assert!(sql.contains("key = 'agency_vat_id'"), "{sql}");
     }
 
     #[test]

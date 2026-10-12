@@ -593,9 +593,9 @@ async fn credit_note_below_the_applied_advance_releases_it_and_makes_it_refundab
         return;
     };
     let tag = format!("credit-prepay-{}", Uuid::new_v4().simple());
-    let (patient_id, target_invoice_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
+    let (patient_id, earlier_final_id) = seed_finance_case(&ctx.pool, ctx.admin_id, &tag).await;
     let order_id: Uuid = sqlx::query_scalar("SELECT order_id FROM invoices WHERE id = $1")
-        .bind(target_invoice_id)
+        .bind(earlier_final_id)
         .fetch_one(&ctx.pool)
         .await
         .unwrap();
@@ -613,6 +613,28 @@ async fn credit_note_below_the_applied_advance_releases_it_and_makes_it_refundab
     .bind(order_id)
     .bind(patient_id)
     .bind(format!("ADV-{tag}"))
+    .bind(ctx.admin_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    // The final invoice that settles the advance is released after it; the
+    // one released before the advance never takes its money (QA D2-02).
+    let target_invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (
+                order_id, patient_id, invoice_number, invoice_type, status,
+                issued_at, due_date, total_net, total_vat, total_gross,
+                paid_amount, line_items, portal_visible,
+                hide_amounts_from_patient, created_by
+           ) VALUES (
+                $1, $2, $3, 'final', 'sent', now() - interval '5 days',
+                CURRENT_DATE - 1, 84.03, 15.97, 100, 0,
+                '[{"description":"Care","quantity":"1","line_net":"84.03","line_vat":"15.97","line_gross":"100"}]',
+                true, false, $4
+           ) RETURNING id"#,
+    )
+    .bind(order_id)
+    .bind(patient_id)
+    .bind(format!("INV-{tag}-settling"))
     .bind(ctx.admin_id)
     .fetch_one(&ctx.pool)
     .await
