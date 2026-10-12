@@ -427,6 +427,11 @@ fn lead_portal_account_summary(row: &sqlx::postgres::PgRow) -> Value {
                 .ok()
                 .flatten()
                 .map(|value| value.to_rfc3339()),
+            // Delivery status of that last e-mail, once Mittaro reported one.
+            "login_email_delivery": row
+                .try_get::<Option<String>, _>("portal_login_email_delivery")
+                .ok()
+                .flatten(),
         }),
         None => Value::Null,
     }
@@ -478,6 +483,12 @@ async fn list_leads(
                     WHERE e.lead_id = leads.id AND e.user_id = leads.portal_user_id
                       AND e.status = 'sent')
                       AS portal_login_emailed_at,
+                  (SELECT e.delivery_status FROM portal_login_emails e
+                    WHERE e.lead_id = leads.id AND e.user_id = leads.portal_user_id
+                      AND e.status = 'sent'
+                    ORDER BY e.created_at DESC
+                    LIMIT 1)
+                      AS portal_login_email_delivery,
                   (SELECT COUNT(*) FROM lead_attachments a WHERE a.lead_id = leads.id) AS attachment_count
            FROM leads
            WHERE ($1::bool = true OR $2::text IS NOT NULL

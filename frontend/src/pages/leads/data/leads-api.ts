@@ -7,6 +7,7 @@ import type {
   CreateLeadBody,
   LeadDetail,
   LeadsStats,
+  LoginEmailDeliveryStatus,
 } from "@/lib/api/types";
 
 import type { LeadListItem } from "../model/types";
@@ -114,6 +115,9 @@ export type LeadLoginEmailRecord = {
   error_code: string | null;
   sent_at: string;
   sent_by_name: string | null;
+  /** What Mittaro reported later; null until the first check. */
+  delivery_status?: LoginEmailDeliveryStatus | null;
+  delivery_updated_at?: string | null;
 };
 
 /** Whether sign-in data can be e-mailed (Mittaro), and what was sent so far. */

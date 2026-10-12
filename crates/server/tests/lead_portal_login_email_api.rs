@@ -9,9 +9,10 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::extract::{ConnectInfo, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, Request, StatusCode};
-use axum::routing::post;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
 use axum::{Extension, Router};
 use secrecy::SecretString;
 use serde_json::{Value, json};
@@ -72,11 +73,25 @@ async fn json_request(
     )
 }
 
-/// What the stand-in Mittaro API received, and the idempotency keys it knows.
+/// What the stand-in Mittaro API received, the idempotency keys it knows and
+/// the delivery status it reports per message id.
 #[derive(Clone, Default)]
 struct FakeMittaro {
     received: Arc<Mutex<Vec<(HeaderMap, Value)>>>,
     accepted: Arc<Mutex<HashMap<String, String>>>,
+    statuses: Arc<Mutex<HashMap<String, Value>>>,
+    status_requests: Arc<Mutex<Vec<String>>>,
+}
+
+async fn fake_status(
+    State(fake): State<FakeMittaro>,
+    Path(id): Path<String>,
+) -> axum::response::Response {
+    fake.status_requests.lock().unwrap().push(id.clone());
+    match fake.statuses.lock().unwrap().get(&id) {
+        Some(status) => axum::Json(status.clone()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 async fn fake_send(
@@ -112,6 +127,7 @@ async fn start_fake_mittaro() -> (String, FakeMittaro) {
     let fake = FakeMittaro::default();
     let router = Router::new()
         .route("/v1/emails", post(fake_send))
+        .route("/v1/emails/{id}", get(fake_status))
         .with_state(fake.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -350,6 +366,164 @@ async fn managers_email_the_current_sign_in_data_once_and_the_log_goes_with_the_
             .await
             .unwrap();
     assert_eq!(remaining, 0);
+}
+
+#[tokio::test]
+async fn the_delivery_status_is_read_back_from_mittaro_and_shown_with_the_login() {
+    let Some(suite) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let pool = &suite.pool;
+    let manager_id = seed_user(pool, "login-delivery", "patient_manager").await;
+    let manager = bearer(manager_id, "patient_manager");
+
+    let (api_url, fake) = start_fake_mittaro().await;
+    let state = suite.state.clone().with_mailer(MailConfig {
+        mittaro_api_key: Some(SecretString::from("tx_live_test")),
+        mittaro_api_url: Some(api_url),
+        from: Some("zugang@gmed-health.test".into()),
+        reply_to: None,
+        console_url: Some("https://console.gmed-health.test".into()),
+    });
+    let app = gmed_server::build_app_for_role_contract_tests(state.clone()).layer(Extension(
+        ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 41002))),
+    ));
+
+    let (status, created) = json_request(
+        &app,
+        "POST",
+        "/api/v1/leads",
+        &manager,
+        Some(json!({
+            "first_name": "Petro",
+            "last_name": "Deliverytest",
+            "email": "petro.deliverytest@example.com",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let lead_id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    let path = format!("/api/v1/leads/{lead_id}/portal-login-email");
+    let (status, sent) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({
+            "user_id": created["portal_account"]["user_id"],
+            "password": created["portal_account"]["one_time_password"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sent}");
+    let message_id = sent["message_id"].as_str().unwrap().to_string();
+    let lead_row = |list: &Value| {
+        list.as_array()
+            .or_else(|| list["items"].as_array())
+            .or_else(|| list["data"].as_array())
+            .unwrap()
+            .iter()
+            .find(|lead| lead["id"] == lead_id.to_string())
+            .unwrap()
+            .clone()
+    };
+
+    // Not checked yet: no status.
+    let (_, list) = json_request(&app, "GET", "/api/v1/leads", &manager, None).await;
+    assert!(lead_row(&list)["portal_account"]["login_email_delivery"].is_null());
+
+    // The receiving server asks to try later: shown, checked again later.
+    fake.statuses.lock().unwrap().insert(
+        message_id.clone(),
+        json!({ "id": message_id, "status": "deferred", "smtp_code": "451" }),
+    );
+    let outcome = gmed_server::mail::delivery::sync_due(&state).await;
+    assert_eq!(outcome.changed, 1, "{outcome:?}");
+    let (_, info) = json_request(&app, "GET", &path, &manager, None).await;
+    assert_eq!(info["sent"][0]["delivery_status"], "deferred", "{info}");
+    assert!(info["sent"][0]["delivery_updated_at"].is_string());
+    // Checked a moment ago: not asked again in the same minute.
+    assert_eq!(
+        gmed_server::mail::delivery::sync_due(&state).await.checked,
+        0
+    );
+
+    // Then the address bounces for good.
+    fake.statuses.lock().unwrap().insert(
+        message_id.clone(),
+        json!({ "id": message_id, "status": "bounced", "smtp_code": "550" }),
+    );
+    sqlx::query("UPDATE portal_login_emails SET delivery_checked_at = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        gmed_server::mail::delivery::sync_due(&state).await.changed,
+        1
+    );
+    let (_, list) = json_request(&app, "GET", "/api/v1/leads", &manager, None).await;
+    assert_eq!(
+        lead_row(&list)["portal_account"]["login_email_delivery"],
+        "bounced"
+    );
+    let (final_, smtp_code): (bool, Option<String>) = sqlx::query_as(
+        "SELECT delivery_final, smtp_code FROM portal_login_emails WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(final_);
+    assert_eq!(smtp_code.as_deref(), Some("550"));
+
+    // A settled message is never asked about again.
+    sqlx::query("UPDATE portal_login_emails SET delivery_checked_at = NULL WHERE lead_id = $1")
+        .bind(lead_id)
+        .execute(pool)
+        .await
+        .unwrap();
+    let asked = fake.status_requests.lock().unwrap().len();
+    assert_eq!(
+        gmed_server::mail::delivery::sync_due(&state).await.checked,
+        0
+    );
+    assert_eq!(fake.status_requests.lock().unwrap().len(), asked);
+
+    // The bounce is audited (without the address).
+    support::wait_until("undelivered audit row", || {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM audit_log WHERE action = 'portal_login_email_undelivered' AND entity_id = $1",
+            )
+            .bind(lead_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+                == 1
+        }
+    })
+    .await;
+
+    // A message the provider does not know is settled as unknown.
+    let (status, again) = json_request(
+        &app,
+        "POST",
+        &path,
+        &manager,
+        Some(json!({
+            "user_id": created["portal_account"]["user_id"],
+            "password": created["portal_account"]["one_time_password"],
+            "language": "en",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    gmed_server::mail::delivery::sync_due(&state).await;
+    let (_, info) = json_request(&app, "GET", &path, &manager, None).await;
+    assert_eq!(info["sent"][0]["delivery_status"], "unknown", "{info}");
+    assert_eq!(info["sent"][1]["delivery_status"], "bounced", "{info}");
 }
 
 #[tokio::test]

@@ -96,7 +96,7 @@ async fn login_email_history(
 ) -> Result<Vec<Value>, sqlx::Error> {
     let rows = sqlx::query(
         r#"SELECT e.user_id, e.recipient, e.language, e.status, e.error_code, e.created_at,
-                  u.name AS sent_by_name
+                  e.delivery_status, e.delivery_updated_at, u.name AS sent_by_name
            FROM portal_login_emails e
            LEFT JOIN users u ON u.id = e.sent_by
            WHERE ($1::uuid IS NOT NULL AND e.lead_id = $1)
@@ -119,6 +119,12 @@ async fn login_email_history(
                 "error_code": row.try_get::<Option<String>, _>("error_code").ok().flatten(),
                 "sent_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok(),
                 "sent_by_name": row.try_get::<Option<String>, _>("sent_by_name").ok().flatten(),
+                // What Mittaro reported later (`crate::mail::delivery`).
+                "delivery_status": row.try_get::<Option<String>, _>("delivery_status").ok().flatten(),
+                "delivery_updated_at": row
+                    .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("delivery_updated_at")
+                    .ok()
+                    .flatten(),
             })
         })
         .collect())

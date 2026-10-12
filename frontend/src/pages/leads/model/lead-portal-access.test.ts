@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canIssueLeadPortalPassword,
   leadPortalStatus,
+  loginEmailDelivery,
   loginEmailErrorMessage,
   patientMessageLanguage,
   portalCredentialsMessage,
@@ -14,6 +15,20 @@ const account = {
   password_change_pending: true,
   last_login_at: null,
 };
+
+describe("loginEmailDelivery", () => {
+  it("says what to do when the access e-mail did not arrive", () => {
+    expect(loginEmailDelivery("delivered", "ru")).toEqual({ label: "Доставлено", tone: "success", hint: null });
+    expect(loginEmailDelivery("deferred", "de").tone).toBe("warning");
+    for (const status of ["bounced", "failed", "suppressed", "complained"] as const) {
+      const delivery = loginEmailDelivery(status, "ru");
+      expect(delivery.tone).toBe("error");
+      expect(delivery.hint).toBeTruthy();
+    }
+    expect(loginEmailDelivery("suppressed", "de").label).toBe("Adresse gesperrt");
+    expect(loginEmailDelivery("unknown", "ru").tone).toBe("neutral");
+  });
+});
 
 describe("leadPortalStatus", () => {
   it("follows the login from creation to an own password", () => {

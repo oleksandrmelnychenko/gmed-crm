@@ -55,7 +55,12 @@ pub(crate) const PATIENT_PORTAL_LOGIN_SQL: &str = r#"
                AS last_login_at,
            (SELECT max(e.created_at) FROM portal_login_emails e
              WHERE e.patient_id = p.id AND e.user_id = u.id AND e.status = 'sent')
-               AS login_emailed_at
+               AS login_emailed_at,
+           (SELECT e.delivery_status FROM portal_login_emails e
+             WHERE e.patient_id = p.id AND e.user_id = u.id AND e.status = 'sent'
+             ORDER BY e.created_at DESC
+             LIMIT 1)
+               AS login_email_delivery
     FROM patient_assignments pa
     JOIN users u ON u.id = pa.user_id AND u.role = 'patient'
     WHERE pa.patient_id = p.id AND pa.revoked_at IS NULL

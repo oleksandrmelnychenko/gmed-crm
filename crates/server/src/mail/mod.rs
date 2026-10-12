@@ -8,10 +8,14 @@
 //! (one URL for everyone, no tracking); no fonts or styles load from anywhere.
 //! Messages never carry health data.
 //!
+//! The delivery status of accepted messages is read back from Mittaro
+//! (`GET /v1/emails/{id}`, [`delivery`]).
+//!
 //! Without `GMED_MITTARO_API_KEY`, `GMED_MAIL_FROM` and a console URL the
 //! mailer reports `not_configured` and nothing is sent.
 
 pub mod connection;
+pub mod delivery;
 pub mod templates;
 
 use std::time::Duration;
@@ -51,6 +55,14 @@ pub struct OutgoingEmail {
     pub idempotency_key: String,
 }
 
+/// What the provider reports about an accepted message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderStatus {
+    /// The provider's status word, lower case (`queued`, `sent`, …).
+    pub status: String,
+    pub smtp_code: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SentEmail {
     pub message_id: String,
@@ -74,6 +86,8 @@ pub enum MailError {
     Request,
     #[error("the provider answered with an unreadable response")]
     InvalidResponse,
+    #[error("the provider does not know this message")]
+    NotFound,
 }
 
 impl MailError {
@@ -84,6 +98,7 @@ impl MailError {
             Self::InvalidMessage(_) => "mail_invalid_message",
             Self::QuotaReached => "mail_quota_reached",
             Self::Unavailable(_) | Self::Request | Self::InvalidResponse => "mail_unavailable",
+            Self::NotFound => "mail_message_not_found",
         }
     }
 }
@@ -131,7 +146,9 @@ pub fn error_response(error: &MailError) -> axum::response::Response {
         MailError::Unavailable(_) | MailError::Request | MailError::InvalidResponse => {
             StatusCode::SERVICE_UNAVAILABLE
         }
-        MailError::Rejected(_) | MailError::InvalidMessage(_) => StatusCode::BAD_GATEWAY,
+        MailError::Rejected(_) | MailError::InvalidMessage(_) | MailError::NotFound => {
+            StatusCode::BAD_GATEWAY
+        }
     };
     coded(status, error.code(), &error.to_string())
 }
@@ -188,6 +205,29 @@ enum MailerState {
 #[derive(Deserialize)]
 struct AcceptedResponse {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct StatusResponse {
+    status: String,
+    /// A string in the documentation; a number is accepted too.
+    #[serde(default)]
+    smtp_code: Option<serde_json::Value>,
+}
+
+/// Message ids as Mittaro issues them (`email_01…`); anything else is not
+/// put into a request path.
+fn is_message_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// At most `max` characters of a provider value.
+fn bounded(value: &str, max: usize) -> String {
+    value.trim().chars().take(max).collect()
 }
 
 impl Mailer {
@@ -320,6 +360,64 @@ impl Mailer {
     }
 }
 
+impl Mailer {
+    /// The provider's status of an accepted message (`GET /v1/emails/{id}`).
+    /// One attempt: the delivery sync asks again on its next run.
+    pub async fn status(&self, message_id: &str) -> Result<ProviderStatus, MailError> {
+        let MailerState::Ready {
+            client,
+            api_url,
+            api_key,
+            ..
+        } = &self.state
+        else {
+            return Err(MailError::NotConfigured);
+        };
+        if !is_message_id(message_id) {
+            return Err(MailError::NotFound);
+        }
+        let response = client
+            .get(format!("{}/{message_id}", api_url.trim_end_matches('/')))
+            .header(
+                reqwest::header::AUTHORIZATION,
+                format!("Bearer {}", api_key.expose_secret()),
+            )
+            .send()
+            .await
+            .map_err(|_| MailError::Request)?;
+        let status = response.status().as_u16();
+        match status {
+            200 => {
+                let bytes = response
+                    .bytes()
+                    .await
+                    .map_err(|_| MailError::InvalidResponse)?;
+                if bytes.len() > MAX_RESPONSE_BYTES {
+                    return Err(MailError::InvalidResponse);
+                }
+                let found: StatusResponse =
+                    serde_json::from_slice(&bytes).map_err(|_| MailError::InvalidResponse)?;
+                let smtp_code = match found.smtp_code {
+                    Some(serde_json::Value::String(code)) => Some(code),
+                    Some(serde_json::Value::Number(code)) => Some(code.to_string()),
+                    _ => None,
+                }
+                .map(|code| bounded(&code, 16))
+                .filter(|code| !code.is_empty());
+                Ok(ProviderStatus {
+                    status: bounded(&found.status, 64).to_ascii_lowercase(),
+                    smtp_code,
+                })
+            }
+            404 => Err(MailError::NotFound),
+            401 | 403 => Err(MailError::Rejected(status)),
+            429 => Err(MailError::QuotaReached),
+            500..=599 => Err(MailError::Unavailable(status)),
+            _ => Err(MailError::InvalidResponse),
+        }
+    }
+}
+
 enum Attempt {
     Retry {
         error: MailError,
@@ -396,7 +494,13 @@ async fn post_once(
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use axum::{Router, extract::State, http::HeaderMap, response::IntoResponse, routing::post};
+    use axum::{
+        Router,
+        extract::{Path, State},
+        http::HeaderMap,
+        response::IntoResponse,
+        routing::{get, post},
+    };
 
     use super::*;
 
@@ -433,11 +537,40 @@ mod tests {
         }
     }
 
+    async fn report(
+        State(captured): State<Captured>,
+        headers: HeaderMap,
+        Path(id): Path<String>,
+    ) -> axum::response::Response {
+        captured
+            .requests
+            .lock()
+            .unwrap()
+            .push((headers, json!({ "get": id })));
+        match id.as_str() {
+            "email_01SENT" => axum::Json(json!({
+                "id": id,
+                "status": "Sent",
+                "created_at": "2026-08-14T09:14:07Z",
+                "sent_at": "2026-08-14T09:14:09Z",
+                "smtp_code": "250",
+            }))
+            .into_response(),
+            "email_01NUMBER" => {
+                axum::Json(json!({ "id": id, "status": "bounced", "smtp_code": 550 }))
+                    .into_response()
+            }
+            "email_01DENIED" => axum::http::StatusCode::FORBIDDEN.into_response(),
+            _ => axum::http::StatusCode::NOT_FOUND.into_response(),
+        }
+    }
+
     async fn fake_mittaro(statuses: Vec<u16>) -> (String, Captured) {
         let captured = Captured::default();
         *captured.statuses.lock().unwrap() = statuses;
         let app = Router::new()
             .route("/v1/emails", post(receive))
+            .route("/v1/emails/{id}", get(report))
             .with_state(captured.clone());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -542,5 +675,49 @@ mod tests {
             Err(MailError::QuotaReached)
         );
         assert_eq!(captured.requests.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn reads_the_status_of_an_accepted_message() {
+        let (url, captured) = fake_mittaro(vec![]).await;
+        let mailer = mailer(url);
+        assert_eq!(
+            mailer.status("email_01SENT").await,
+            Ok(ProviderStatus {
+                status: "sent".into(),
+                smtp_code: Some("250".into()),
+            })
+        );
+        assert_eq!(
+            mailer.status("email_01NUMBER").await.unwrap().smtp_code,
+            Some("550".into())
+        );
+        assert_eq!(
+            mailer.status("email_01DENIED").await,
+            Err(MailError::Rejected(403))
+        );
+        assert_eq!(
+            mailer.status("email_01OTHER").await,
+            Err(MailError::NotFound)
+        );
+        let requests = captured.requests.lock().unwrap();
+        assert_eq!(requests[0].0["authorization"], "Bearer tx_live_test");
+        assert_eq!(requests[0].1["get"], "email_01SENT");
+    }
+
+    #[tokio::test]
+    async fn an_odd_message_id_never_reaches_the_request_path() {
+        let (url, captured) = fake_mittaro(vec![]).await;
+        let mailer = mailer(url);
+        for id in ["", "../keys", "email_01?x=1", "email 01"] {
+            assert_eq!(mailer.status(id).await, Err(MailError::NotFound), "{id}");
+        }
+        assert!(captured.requests.lock().unwrap().is_empty());
+        assert_eq!(
+            Mailer::new(MailConfig::default())
+                .status("email_01SENT")
+                .await,
+            Err(MailError::NotConfigured)
+        );
     }
 }

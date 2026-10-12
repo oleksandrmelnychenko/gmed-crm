@@ -2603,6 +2603,7 @@ async fn list_patients(
                    portal.password_reset_required AS portal_password_change_pending,
                    portal.last_login_at AS portal_last_login_at,
                    portal.login_emailed_at AS portal_login_emailed_at,
+                   portal.login_email_delivery AS portal_login_email_delivery,
                    subscription.package_key AS subscription_package_key,
                    subscription.name AS subscription_name,
                    subscription.status AS subscription_status,
@@ -12300,6 +12301,10 @@ fn patient_portal_account_summary(row: &PgRow) -> Value {
                 .flatten(),
             "login_emailed_at": row
                 .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("portal_login_emailed_at")
+                .ok()
+                .flatten(),
+            "login_email_delivery": row
+                .try_get::<Option<String>, _>("portal_login_email_delivery")
                 .ok()
                 .flatten(),
         }),

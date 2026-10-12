@@ -637,7 +637,8 @@ test.describe("patients data-table", () => {
         is_active: true,
         password_change_pending: false,
         last_login_at: "2026-10-04T08:30:00Z",
-        login_emailed_at: null,
+        login_emailed_at: "2026-10-04T09:00:00Z",
+        login_email_delivery: "bounced",
       },
       subscription: {
         kind: "gmed_reserve",
@@ -683,6 +684,9 @@ test.describe("patients data-table", () => {
     await expect(row).toContainText("anna@example.com");
     // Patients have no GwG sheet in this row.
     await expect(row.getByText("Doku-Bogen GwG")).toHaveCount(0);
+    // Mittaro reported the access e-mail as undeliverable.
+    await expect(row.getByTestId("portal-login-email-delivery")).toHaveAttribute("data-status", "bounced");
+    await expect(row.getByTestId("portal-login-email-fact")).toContainText(/Unzustellbar|Не доставлено/);
     // A row without login data from the server has no chevron.
     await expect(patientGrid(page).getByTestId(`patient-expand-${patients[1].id}`)).toHaveCount(0);
 

@@ -1,4 +1,4 @@
-import type { LeadPortalAccountSummary } from "@/lib/api/types";
+import type { LeadPortalAccountSummary, LoginEmailDeliveryStatus } from "@/lib/api/types";
 
 /**
  * State of the patient login created with a lead (owner decision 2026-10-03):
@@ -150,6 +150,68 @@ const LOGIN_EMAIL_ERRORS: Record<string, { ru: string; de: string }> = {
     de: "Der Zugang hat keine gültige E-Mail-Adresse",
   },
 };
+
+const DELIVERY_LABELS: Record<LoginEmailDeliveryStatus, { ru: string; de: string }> = {
+  queued: { ru: "В очереди", de: "In Warteschlange" },
+  sending: { ru: "Отправляется", de: "Wird übergeben" },
+  sent: { ru: "Принято сервером", de: "Übergeben" },
+  delivered: { ru: "Доставлено", de: "Zugestellt" },
+  deferred: { ru: "Доставка откладывается", de: "Zurückgestellt" },
+  bounced: { ru: "Не доставлено", de: "Unzustellbar" },
+  failed: { ru: "Ошибка доставки", de: "Fehlgeschlagen" },
+  suppressed: { ru: "Адрес заблокирован", de: "Adresse gesperrt" },
+  complained: { ru: "Отмечено как спам", de: "Als Spam gemeldet" },
+  unknown: { ru: "Статус неизвестен", de: "Status unbekannt" },
+};
+
+/**
+ * Delivery state of the last sign-in e-mail (Mittaro, checked by the server):
+ * label, badge tone and, when the person did not get it, what to do.
+ */
+export function loginEmailDelivery(status: LoginEmailDeliveryStatus, lang: Lang) {
+  const de = lang === "de";
+  const label = de ? DELIVERY_LABELS[status].de : DELIVERY_LABELS[status].ru;
+  switch (status) {
+    case "delivered":
+    case "sent":
+      return { label, tone: "success" as const, hint: null };
+    case "deferred":
+      return {
+        label,
+        tone: "warning" as const,
+        hint: de
+          ? "Der Empfangsserver nimmt die E-Mail noch nicht an; Mittaro versucht es weiter."
+          : "Сервер получателя пока не принимает письмо; Mittaro пробует ещё.",
+      };
+    case "bounced":
+    case "failed":
+      return {
+        label,
+        tone: "error" as const,
+        hint: de
+          ? "Die E-Mail ist nicht angekommen: Adresse prüfen oder Zugang per Nachricht weitergeben."
+          : "Письмо не дошло: проверьте адрес или передайте доступ сообщением.",
+      };
+    case "suppressed":
+      return {
+        label,
+        tone: "error" as const,
+        hint: de
+          ? "Mittaro sendet nach einer Rückweisung oder Spam-Meldung nicht mehr an diese Adresse: Zugang per Nachricht weitergeben."
+          : "Mittaro больше не отправляет на этот адрес после отказа или жалобы на спам: передайте доступ сообщением.",
+      };
+    case "complained":
+      return {
+        label,
+        tone: "error" as const,
+        hint: de
+          ? "Der Empfänger hat die E-Mail als Spam gemeldet; weitere E-Mails an diese Adresse werden gesperrt."
+          : "Получатель отметил письмо как спам; дальнейшие письма на этот адрес блокируются.",
+      };
+    default:
+      return { label, tone: "neutral" as const, hint: null };
+  }
+}
 
 /** Localized reason a sign-in e-mail was not sent, from the server's code. */
 export function loginEmailErrorMessage(error: unknown, lang: Lang): string | null {

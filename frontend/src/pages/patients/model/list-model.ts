@@ -1,3 +1,4 @@
+import type { LoginEmailDeliveryStatus } from "@/lib/api/types";
 import { appDateKeyOf, appWallClock, parseDateKey } from "@/lib/app-time-zone";
 import { actorRole, hasCapability, type Actor } from "@/lib/permissions";
 
@@ -39,6 +40,7 @@ export type PatientPortalAccountSummary = {
   password_change_pending: boolean;
   last_login_at: string | null;
   login_emailed_at: string | null;
+  login_email_delivery?: LoginEmailDeliveryStatus | null;
 };
 
 /** The three tariffs an order can carry (owner decision 2026-10-05). */

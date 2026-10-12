@@ -75,7 +75,22 @@ export interface LeadPortalAccountSummary {
   last_login_at: string | null;
   /** Last sign-in e-mail sent to the lead's own login. */
   login_emailed_at?: string | null;
+  /** What Mittaro reported for that e-mail; null until the first check. */
+  login_email_delivery?: LoginEmailDeliveryStatus | null;
 }
+
+/** Delivery state of a sign-in e-mail, read back from Mittaro. */
+export type LoginEmailDeliveryStatus =
+  | "queued"
+  | "sending"
+  | "sent"
+  | "delivered"
+  | "deferred"
+  | "bounced"
+  | "failed"
+  | "suppressed"
+  | "complained"
+  | "unknown";
 
 export interface ConvertLeadResponse {
   patient_id: string;

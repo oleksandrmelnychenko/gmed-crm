@@ -26,7 +26,7 @@ import {
   type PatientMessageLanguage,
 } from "@/pages/leads/model/lead-portal-access";
 import { leadErrorMessage } from "@/pages/leads/model/leads-model";
-import { PortalCredentialsDialog, PortalFact } from "@/pages/leads/ui/lead-portal-access";
+import { LoginEmailFact, PortalCredentialsDialog, PortalFact } from "@/pages/leads/ui/lead-portal-access";
 
 import {
   issuePatientPortalAccess,
@@ -238,9 +238,7 @@ export function PatientPortalAccessDetail({
               {account?.last_login_at ? formatAppDateTime(account.last_login_at) : de ? "noch nie" : "ещё не было"}
             </PortalFact>
             {account?.login_emailed_at ? (
-              <PortalFact label={de ? "Zugang per E-Mail" : "Доступ по e-mail"}>
-                {formatAppDateTime(account.login_emailed_at)}
-              </PortalFact>
+              <LoginEmailFact emailedAt={account.login_emailed_at} delivery={account.login_email_delivery} lang={lang} />
             ) : null}
           </>
         ) : null}

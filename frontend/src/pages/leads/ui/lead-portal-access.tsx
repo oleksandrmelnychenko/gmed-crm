@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/record-workspace/recipes/status-badge";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
-import type { Lead } from "@/lib/api/types";
+import type { Lead, LoginEmailDeliveryStatus } from "@/lib/api/types";
 import { copyText, selectElementText } from "@/lib/copy-text";
 import { cn } from "@/lib/utils";
 import { downloadDocumentFile, fetchDocuments, generateDocument } from "@/pages/documents/data/document-api";
@@ -32,6 +32,7 @@ import {
   leadPortalStatus,
   leadPortalStatusLabel,
   leadPortalStatusTone,
+  loginEmailDelivery,
   loginEmailErrorMessage,
   patientMessageLanguage,
   portalCredentialsMessage,
@@ -78,6 +79,36 @@ export function PortalFact({
       <dt className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 text-[13px] font-medium leading-snug text-foreground">{children}</dd>
     </div>
+  );
+}
+
+/** Date of the last sign-in e-mail and what Mittaro reported for it. */
+export function LoginEmailFact({
+  emailedAt,
+  delivery,
+  lang,
+}: {
+  emailedAt: string;
+  delivery?: LoginEmailDeliveryStatus | null;
+  lang: Lang;
+}) {
+  const state = delivery ? loginEmailDelivery(delivery, lang) : null;
+  return (
+    <PortalFact label={lang === "de" ? "Zugang per E-Mail" : "Доступ по e-mail"} testId="portal-login-email-fact">
+      {formatAppDateTime(emailedAt)}
+      {state ? (
+        <span className="mt-1 flex flex-col items-start gap-1">
+          <StatusBadge tone={state.tone}>
+            <span data-testid="portal-login-email-delivery" data-status={delivery}>{state.label}</span>
+          </StatusBadge>
+          {state.hint ? (
+            <span className={cn("text-[11px] font-normal", state.tone === "error" ? "text-rose-700" : "text-muted-foreground")}>
+              {state.hint}
+            </span>
+          ) : null}
+        </span>
+      ) : null}
+    </PortalFact>
   );
 }
 
@@ -322,9 +353,11 @@ export function LeadPortalAccessDetail({
             {lastLogin ? formatAppDateTime(lastLogin) : de ? "noch nie" : "ещё не было"}
           </PortalFact>
           {lead.portal_account?.login_emailed_at ? (
-            <PortalFact label={de ? "Zugang per E-Mail" : "Доступ по e-mail"}>
-              {formatAppDateTime(lead.portal_account.login_emailed_at)}
-            </PortalFact>
+            <LoginEmailFact
+              emailedAt={lead.portal_account.login_emailed_at}
+              delivery={lead.portal_account.login_email_delivery}
+              lang={lang}
+            />
           ) : null}
           {lead.retention_deadline_at && status !== "disabled" ? (
             <PortalFact label={de ? "Zugang bis" : "Доступ до"}>{formatAppDate(lead.retention_deadline_at)}</PortalFact>
