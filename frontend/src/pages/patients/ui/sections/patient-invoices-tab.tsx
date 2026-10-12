@@ -25,6 +25,7 @@ import {
 
 import { AdminToolbar } from "@/components/admin-page-patterns";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { WritableScope } from "@/components/read-only-scope";
 import type { ColumnDef } from "@/components/data-table/types";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
@@ -2111,6 +2112,8 @@ function usePatientInvoicesTabContent({
           {financeError}
         </Banner>
       ) : null}
+        {/* Period, order and package filters and the export are reading: usable read-only. */}
+        <WritableScope>
         <AdminToolbar className="items-start gap-2 rounded-xl border border-border/60 bg-card p-3 shadow-none">
           <Field
             label={t.patient_invoices_from}
@@ -2230,6 +2233,7 @@ function usePatientInvoicesTabContent({
             </Button>
           </div>
         </AdminToolbar>
+        </WritableScope>
 
       {accountStatement ? (
         <>

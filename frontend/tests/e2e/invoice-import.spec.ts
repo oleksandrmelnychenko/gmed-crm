@@ -510,7 +510,8 @@ test("XML original is escaped, buyer fills client and prepaid amount does not re
   await expect(dialog.getByLabel(/Содержимое XML|XML-Inhalt/)).toHaveText(xml);
   await expect(dialog.locator("iframe, img")).toHaveCount(0);
   await expect(dialog.getByRole("combobox", { name: /^(Клиент|Patient)$/ })).toContainText("Alpha");
-  await expect(dialog.getByText(/К оплате по XML|Zahlbetrag laut XML/)).toContainText("99.00");
+  // Owner money format: "99,00 €".
+  await expect(dialog.getByText(/К оплате по XML|Zahlbetrag laut XML/)).toContainText(/99,00\s€/);
   await expect(dialog.getByLabel(grossAmountLabel)).toHaveValue("119.00");
   await dialog.getByRole("combobox", { name: /Заказ клиента|Auftrag des Patienten/ }).click();
   await page.getByRole("option", { name: "O-101", exact: true }).click();
@@ -685,7 +686,7 @@ test("explicit invoiced VAT and calculated due date show their sources without a
   await expect(dialog.getByText(/в самом счёте НДС не начислен|Rechnung weist keine Umsatzsteuer aus/)).toBeVisible();
   await expect(dialog.getByText(/\+30 (дней|Tage)/)).toBeVisible();
   await expect(dialog.getByText("Software-Lizenz", { exact: true })).toBeVisible();
-  await expect(dialog.getByText(/5 · (Цена|Preis): 8.50 EUR/)).toBeVisible();
+  await expect(dialog.getByText(/5 · (Цена|Preis): 8,50\s€/)).toBeVisible();
   await expect(dialog.getByRole("button", { name: /Подтвердить и сохранить|Bestätigen und speichern/ })).toBeDisabled();
   await dialog.getByLabel(vatAmountLabel).fill("1.00");
   await expect(dialog.getByText(/По фразе в счёте|Laut Rechnung: ohne Umsatzsteuer/)).toHaveCount(1);

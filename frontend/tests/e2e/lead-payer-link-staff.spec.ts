@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // The payer's own link in the staff wizard (contract phase 3a, section 6):
 // the panel "Zahler-Link" in "Wer zahlt" and the payer's answers in "Angaben
@@ -223,6 +224,7 @@ async function mount(
   portal: Record<string, unknown> = {},
   options: MountOptions = {},
 ) {
+  await startClockAt(page);
   const state = { link: initial, declaration: { ...declaration } as Record<string, unknown> };
   const calls: Calls = { sends: [], revokes: 0, estimates: [] };
   await page.addInitScript((value) => {

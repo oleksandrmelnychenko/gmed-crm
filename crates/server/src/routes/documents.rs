@@ -22,7 +22,7 @@ use printpdf::{
     PdfWarnMsg, Point, Pt, Rect, Rgb, TextItem, WindingOrder,
 };
 use rust_decimal::Decimal;
-use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
+use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
@@ -19997,7 +19997,7 @@ fn cost_coverage_payer_lines(party: &DocPartyBlock) -> Vec<String> {
 }
 
 /// Format a raw line-item monetary cell. Numeric values ("999.00"/"999,00") are
-/// normalised to "999,00 EUR" via `fmt_money_de`; operator free-text such as
+/// normalised to "999,00 €" via `fmt_money_de`; operator free-text such as
 /// "100,00 EUR/1 Stunde" is preserved verbatim.
 fn cost_coverage_money_cell(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
@@ -25960,34 +25960,19 @@ fn doc_salutation(gender: &str) -> Option<String> {
     }
 }
 
-/// German currency formatting with thousands grouping: 1234.5 -> "1.234,50 EUR".
+/// German currency formatting with thousands grouping: 1234.5 -> "1.234,50 €"
+/// (owner rule: money on documents reads "1.234,56 €", never "EUR").
 fn format_eur(value: f64) -> String {
     format_eur_decimal(Decimal::from_f64(value).unwrap_or_default())
 }
 
 /// [`format_eur`] for an exact decimal; cents are rounded half away from zero.
 fn format_eur_decimal(value: Decimal) -> String {
-    let rounded = money::round_cents(value);
-    let cents = (rounded.abs() * Decimal::ONE_HUNDRED)
-        .to_u128()
-        .unwrap_or(0);
-    let euros = cents / 100;
-    let frac = cents % 100;
-    let mut grouped = String::new();
-    let digits = euros.to_string();
-    let len = digits.len();
-    for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (len - i).is_multiple_of(3) {
-            grouped.push('.');
-        }
-        grouped.push(ch);
-    }
-    let sign = if rounded < Decimal::ZERO { "-" } else { "" };
-    format!("{sign}{grouped},{frac:02} EUR")
+    crate::order_document_texts::format_money_de(value, "EUR")
 }
 
 /// Format a raw monetary string (e.g. a Postgres NUMERIC ::TEXT "2698.00" or a
-/// German "2.698,00") into "2.698,00 EUR". Returns the trimmed input unchanged
+/// German "2.698,00") into "2.698,00 €". Returns the trimmed input unchanged
 /// when it cannot be parsed (so already-formatted free text is preserved).
 fn fmt_money_de(raw: &str) -> String {
     match parse_eur_decimal(raw) {
@@ -26322,7 +26307,7 @@ fn localized_estimate_work_type_sections(
 
 fn format_eur_range(minimum: f64, maximum: f64) -> String {
     let minimum = format_eur(minimum);
-    let minimum = minimum.strip_suffix(" EUR").unwrap_or(&minimum);
+    let minimum = minimum.strip_suffix(" €").unwrap_or(&minimum);
     format!("{minimum} - {}", format_eur(maximum))
 }
 
@@ -35304,23 +35289,23 @@ mod tests {
                 ..line(
                     "Organisation der Kardiologie-Termine bei Dr. Beispiel",
                     Some("Begleitung zur Herzkatheteruntersuchung in der Beispielklinik"),
-                    "1.000,00 EUR",
+                    "1.000,00 €",
                     "19",
                 )
             },
             line(
                 "Zweitmeinung Onkologie Beispielklinikum",
                 None,
-                "500,00 EUR",
+                "500,00 €",
                 "19",
             ),
             line(
                 "Interpreter support",
                 Some("Dolmetscher im Herzzentrum"),
-                "300,00 EUR",
+                "300,00 €",
                 "19",
             ),
-            line(super::ESTIMATED_OUTLAYS_DESCRIPTION, None, "50,00 EUR", "0"),
+            line(super::ESTIMATED_OUTLAYS_DESCRIPTION, None, "50,00 €", "0"),
         ];
         items[3].is_cost_passthrough = true;
         let catalog = vec![(
@@ -35332,8 +35317,8 @@ mod tests {
             rows.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
             ["Leistungen", "Dolmetscher- und Übersetzungsleistungen"]
         );
-        assert_eq!(super::format_eur_decimal(rows[0].1), "1.500,00 EUR");
-        assert_eq!(super::format_eur_decimal(rows[1].1), "300,00 EUR");
+        assert_eq!(super::format_eur_decimal(rows[0].1), "1.500,00 €");
+        assert_eq!(super::format_eur_decimal(rows[1].1), "300,00 €");
 
         let context = GeneratedSingleOrderContext {
             language: "de".to_string(),
@@ -35368,9 +35353,9 @@ mod tests {
             }),
             quote_number: Some("KV-2026-0042".to_string()),
             line_items: items.clone(),
-            total_net: Some("1.850,00 EUR".to_string()),
-            total_vat: Some("342,00 EUR".to_string()),
-            total_gross: Some("2.192,00 EUR".to_string()),
+            total_net: Some("1.850,00 €".to_string()),
+            total_vat: Some("342,00 €".to_string()),
+            total_gross: Some("2.192,00 €".to_string()),
             party_sign_place: None,
             party_sign_date: None,
             agency_sign_place: Some("Köln".to_string()),
@@ -35391,13 +35376,13 @@ mod tests {
             "Kostenübernehmer/in: Viktor Zahler, Ringstraße 9, 1010 Wien, Österreich",
             "LEISTUNGSART",
             "Leistungen",
-            "1.500,00 EUR",
+            "1.500,00 €",
             "Dolmetscher- und Übersetzungsleistungen",
-            "300,00 EUR",
-            "Nettowert: 1.800,00 EUR",
-            "MWSt. 19%: 342,00 EUR",
-            "Voraussichtliche Auslagen: 50,00 EUR",
-            "Gesamtsumme: 2.192,00 EUR",
+            "300,00 €",
+            "Nettowert: 1.800,00 €",
+            "MWSt. 19%: 342,00 €",
+            "Voraussichtliche Auslagen: 50,00 €",
+            "Gesamtsumme: 2.192,00 €",
             super::PAYER_COST_ESTIMATE_PRIVACY_SENTENCE,
             "IBAN",
             "Unterschrift Kostenübernehmer/in",
@@ -35829,7 +35814,7 @@ mod tests {
             "Ich zahle selbst.",
             "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
             "Zahlung über Dritte / Zahlungsdienstleister nein",
-            "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
+            "Voraussichtlicher Gesamtbetrag 8.000,00 €",
         ] {
             assert!(text.contains(expected), "{expected} missing in {text}");
         }
@@ -36896,7 +36881,7 @@ mod tests {
         assert!(text.contains("Deutschland"));
         assert!(text.contains(LEGAL_ADDRESS_STREET));
         assert!(text.contains(LEGAL_ADDRESS_CITY));
-        assert!(text.contains("500,00 EUR der Gesamtsumme"));
+        assert!(text.contains("500,00 € der Gesamtsumme"));
         assert!(text.contains("Der Vertrag tritt zum 01.07.2026"));
         assert!(text.contains("Köln, den 16.07.2026"));
         assert!(text.contains("Potsdam, den 16.07.2026"));
@@ -37073,8 +37058,8 @@ mod tests {
             localized_sections: Vec::new(),
             description: "Concierge Service Essential (1 Tag)".to_string(),
             quantity: "1".to_string(),
-            unit_price: "150,00 EUR".to_string(),
-            line_gross: "150,00 EUR".to_string(),
+            unit_price: "150,00 €".to_string(),
+            line_gross: "150,00 €".to_string(),
             vat_rate: Some("19".to_string()),
             is_cost_passthrough: false,
             notes: Some(
@@ -37165,8 +37150,8 @@ mod tests {
                     localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte) (im Zeitraum 17.12.2025 bis 19.12.2025)".to_string(),
                     quantity: "5".to_string(),
-                    unit_price: "100,00 EUR".to_string(),
-                    line_gross: "500,00 EUR".to_string(),
+                    unit_price: "100,00 €".to_string(),
+                    line_gross: "500,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: Some(
@@ -37180,8 +37165,8 @@ mod tests {
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
-                    unit_price: "999,00 EUR".to_string(),
-                    line_gross: "999,00 EUR".to_string(),
+                    unit_price: "999,00 €".to_string(),
+                    line_gross: "999,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
@@ -37192,15 +37177,15 @@ mod tests {
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
-                    line_gross: "800,00 EUR".to_string(),
+                    line_gross: "800,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
                 },
             ],
-            total_net: Some("2.299,00 EUR".to_string()),
-            total_vat: Some("436,81 EUR".to_string()),
-            total_gross: Some("2.735,81 EUR".to_string()),
+            total_net: Some("2.299,00 €".to_string()),
+            total_vat: Some("436,81 €".to_string()),
+            total_gross: Some("2.735,81 €".to_string()),
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),
@@ -37250,7 +37235,7 @@ mod tests {
             text.contains("Einschließlich folgender Absätze aus dem (I) Leistungsumfang: 1, 2.")
         );
         assert!(!text.contains("Leistung — Einzelpreis — Menge — Summe"));
-        assert!(!text.contains("Gesamtsumme: 476,00 EUR"));
+        assert!(!text.contains("Gesamtsumme: 476,00 €"));
         // Every service is taxed at 19 %: the short VAT note stays.
         assert!(text.contains(
             "*Alle angegebenen Preise zzgl. MwSt. 19 %. Der konkrete Aufwand wird im Kostenvoranschlag"
@@ -37262,14 +37247,14 @@ mod tests {
             localized_sections: Vec::new(),
             description: super::ESTIMATED_OUTLAYS_DESCRIPTION.to_string(),
             quantity: "1".to_string(),
-            unit_price: "50,00 EUR".to_string(),
-            line_gross: "50,00 EUR".to_string(),
+            unit_price: "50,00 €".to_string(),
+            line_gross: "50,00 €".to_string(),
             vat_rate: Some("0".to_string()),
             is_cost_passthrough: false,
             notes: None,
         });
-        context.total_net = Some("2.349,00 EUR".to_string());
-        context.total_gross = Some("2.785,81 EUR".to_string());
+        context.total_net = Some("2.349,00 €".to_string());
+        context.total_gross = Some("2.785,81 €".to_string());
 
         let estimate_bytes = build_order_cost_estimate_pdf(&context, "DOC-QUOTE-FALLBACK").unwrap();
         assert_signature_frames_detected(&estimate_bytes);
@@ -37306,10 +37291,10 @@ mod tests {
         );
         assert!(estimate_text.contains("Dolmetscher-/Betreuungsleistung"));
         assert!(estimate_text.contains("100,00 EUR/1 Stunde"));
-        assert!(estimate_text.contains("2.299,00 EUR"));
-        assert!(estimate_text.contains("436,81 EUR"));
-        assert!(estimate_text.contains("50,00 EUR"));
-        assert!(estimate_text.contains("2.785,81 EUR"));
+        assert!(estimate_text.contains("2.299,00 €"));
+        assert!(estimate_text.contains("436,81 €"));
+        assert!(estimate_text.contains("50,00 €"));
+        assert!(estimate_text.contains("2.785,81 €"));
         assert_eq!(
             estimate_text
                 .matches(super::ESTIMATED_OUTLAYS_DESCRIPTION)
@@ -37407,17 +37392,17 @@ mod tests {
             priced_line(
                 "Organisation der Behandlung",
                 "1",
-                "550,00 EUR",
-                "550,00 EUR",
+                "550,00 €",
+                "550,00 €",
                 "0",
             ),
-            priced_line("Airport transfer", "2", "180,00 EUR", "360,00 EUR", "19"),
-            priced_line("Interpreter", "8", "95,00 EUR", "760,00 EUR", "19"),
+            priced_line("Airport transfer", "2", "180,00 €", "360,00 €", "19"),
+            priced_line("Interpreter", "8", "95,00 €", "760,00 €", "19"),
             priced_line(
                 super::ESTIMATED_OUTLAYS_DESCRIPTION,
                 "1",
-                "1.200,00 EUR",
-                "1.200,00 EUR",
+                "1.200,00 €",
+                "1.200,00 €",
                 "0",
             ),
         ]
@@ -37430,11 +37415,11 @@ mod tests {
         // Only 19 %: the short note is unchanged. Quotes store "19.00" and a
         // manual line without a rate has always been taxed at 19 %.
         let taxed = [
-            priced_line("Airport transfer", "2", "180,00 EUR", "360,00 EUR", "19"),
-            priced_line("Interpreter", "8", "95,00 EUR", "760,00 EUR", "19.00"),
+            priced_line("Airport transfer", "2", "180,00 €", "360,00 €", "19"),
+            priced_line("Interpreter", "8", "95,00 €", "760,00 €", "19.00"),
             GeneratedContractLineItem {
                 vat_rate: None,
-                ..priced_line("Beratung", "1", "100,00 EUR", "100,00 EUR", "19")
+                ..priced_line("Beratung", "1", "100,00 €", "100,00 €", "19")
             },
         ];
         let taxed = taxed.iter().collect::<Vec<_>>();
@@ -37465,7 +37450,7 @@ mod tests {
         // A flagged pass-through cost is never described as medical care.
         let clinic_invoice = GeneratedContractLineItem {
             is_cost_passthrough: true,
-            ..priced_line("Klinikrechnung", "1", "800,00 EUR", "800,00 EUR", "0")
+            ..priced_line("Klinikrechnung", "1", "800,00 €", "800,00 €", "0")
         };
         let note = super::contract_vat_note(&[&lines[1], &clinic_invoice]);
         assert_eq!(
@@ -37474,7 +37459,7 @@ mod tests {
         );
 
         // Two taxed rates: highest first; the VAT total names no single rate.
-        let reduced = priced_line("Fachliteratur", "1", "20,00 EUR", "20,00 EUR", "7");
+        let reduced = priced_line("Fachliteratur", "1", "20,00 €", "20,00 €", "7");
         let two_rates = [&reduced, &lines[1]];
         assert_eq!(
             super::contract_vat_note(&two_rates),
@@ -37540,9 +37525,9 @@ mod tests {
             quote_number: Some("KV-2026-0010".to_string()),
             // The lead wizard leaves the estimated outlays out of the order.
             line_items: lines[..3].to_vec(),
-            total_net: Some("1.670,00 EUR".to_string()),
-            total_vat: Some("212,80 EUR".to_string()),
-            total_gross: Some("1.882,80 EUR".to_string()),
+            total_net: Some("1.670,00 €".to_string()),
+            total_vat: Some("212,80 €".to_string()),
+            total_gross: Some("1.882,80 €".to_string()),
             party_sign_place: None,
             party_sign_date: None,
             agency_sign_place: None,
@@ -37561,16 +37546,16 @@ mod tests {
         assert!(!order_text.contains("zzgl. MwSt. 19 %"));
 
         context.line_items = lines.clone();
-        context.total_net = Some("2.870,00 EUR".to_string());
-        context.total_gross = Some("3.082,80 EUR".to_string());
+        context.total_net = Some("2.870,00 €".to_string());
+        context.total_gross = Some("3.082,80 €".to_string());
         let estimate_text = assert_legal_pdf_chrome(
             &build_order_cost_estimate_pdf(&context, "DOC-VAT-QUOTE").unwrap(),
             "KV-2026-0010",
         );
-        assert!(estimate_text.contains("Nettowert: 1.670,00 EUR"));
-        assert!(estimate_text.contains("MWSt. 19%: 212,80 EUR"));
-        assert!(estimate_text.contains("Voraussichtliche Auslagen: 1.200,00 EUR"));
-        assert!(estimate_text.contains("Gesamtsumme: 3.082,80 EUR"));
+        assert!(estimate_text.contains("Nettowert: 1.670,00 €"));
+        assert!(estimate_text.contains("MWSt. 19%: 212,80 €"));
+        assert!(estimate_text.contains("Voraussichtliche Auslagen: 1.200,00 €"));
+        assert!(estimate_text.contains("Gesamtsumme: 3.082,80 €"));
         // The outlays have their own row; the note covers the listed services.
         assert!(estimate_text.contains(&format!("{MIXED_VAT_NOTE}.")));
         assert_eq!(
@@ -37599,9 +37584,9 @@ mod tests {
             contract_date: NaiveDate::from_ymd_opt(2026, 9, 28),
             quote_number: Some("KV-2026-0010".to_string()),
             line_items: lines,
-            total_net: Some("2.870,00 EUR".to_string()),
-            total_vat: Some("212,80 EUR".to_string()),
-            total_gross: Some("3.082,80 EUR".to_string()),
+            total_net: Some("2.870,00 €".to_string()),
+            total_vat: Some("212,80 €".to_string()),
+            total_gross: Some("3.082,80 €".to_string()),
             payer_sign_place: None,
             payer_sign_date: None,
             agency_sign_place: None,
@@ -37614,7 +37599,7 @@ mod tests {
         );
         assert!(coverage_text.contains(&format!("*{MIXED_VAT_NOTE}.")));
         assert!(!coverage_text.contains("zzgl. MwSt. 19 %"));
-        assert!(coverage_text.contains("MWSt. 19%: 212,80 EUR"));
+        assert!(coverage_text.contains("MWSt. 19%: 212,80 €"));
         // The Kostenübernehmer signs in a frame of its own, which is also found
         // in a declaration generated before the frames were recorded.
         let coverage_pdf = super::build_cost_coverage_pdf(&coverage, "DOC-VAT-COVERAGE").unwrap();
@@ -37645,13 +37630,13 @@ mod tests {
                 )],
                 description: String::new(),
                 quantity: "1".to_string(),
-                unit_price: "100,00 - 1000,00 EUR".to_string(),
-                line_gross: "100,00 - 1000,00 EUR".to_string(),
+                unit_price: "100,00 - 1000,00 €".to_string(),
+                line_gross: "100,00 - 1000,00 €".to_string(),
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
             }],
-            total_range: Some("100,00 - 1000,00 EUR".to_string()),
+            total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
         };
@@ -37667,7 +37652,7 @@ mod tests {
         assert!(text.contains("Patienten und der jeweiligen Einrichtung."));
         assert!(!text.contains("GOÄ/DRG"));
         assert!(text.contains("Kardiologische Untersuchung"));
-        assert!(text.contains("100,00 - 1000,00 EUR"));
+        assert!(text.contains("100,00 - 1000,00 €"));
     }
 
     #[test]
@@ -37694,13 +37679,13 @@ mod tests {
                 ],
                 description: String::new(),
                 quantity: "1".to_string(),
-                unit_price: "100,00 - 1000,00 EUR".to_string(),
-                line_gross: "100,00 - 1000,00 EUR".to_string(),
+                unit_price: "100,00 - 1000,00 €".to_string(),
+                line_gross: "100,00 - 1000,00 €".to_string(),
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
             }],
-            total_range: Some("100,00 - 1000,00 EUR".to_string()),
+            total_range: Some("100,00 - 1000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
         };
@@ -37749,8 +37734,8 @@ mod tests {
             )],
             description: String::new(),
             quantity: "1".to_string(),
-            unit_price: "100,00 - 1000,00 EUR".to_string(),
-            line_gross: "100,00 - 1000,00 EUR".to_string(),
+            unit_price: "100,00 - 1000,00 €".to_string(),
+            line_gross: "100,00 - 1000,00 €".to_string(),
             vat_rate: None,
             is_cost_passthrough: false,
             notes: None,
@@ -37764,7 +37749,7 @@ mod tests {
             order_number: Some("A-2026-0101".to_string()),
             estimate_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             line_items: vec![long_item("EINS"), long_item("ZWEI")],
-            total_range: Some("200,00 - 2000,00 EUR".to_string()),
+            total_range: Some("200,00 - 2000,00 €".to_string()),
             agency: legal_test_agency(),
             generated_at: Utc.with_ymd_and_hms(2026, 7, 16, 10, 30, 0).unwrap(),
         };
@@ -37779,7 +37764,7 @@ mod tests {
         assert!(pages[0].contains("ZWEIANFANG"));
         assert!(!pages[0].contains("ZWEIENDE"));
         assert!(pages[1].contains("ZWEIENDE"));
-        assert_eq!(text.matches("100,00 - 1000,00 EUR").count(), 2);
+        assert_eq!(text.matches("100,00 - 1000,00 €").count(), 2);
 
         assert_eq!(text.matches("Rechtliche Hinweise").count(), 1);
         assert!(!text.contains("Rechtliche Hinweise:"));
@@ -37792,19 +37777,19 @@ mod tests {
             cost_estimate_price_text("100,00 - 1000,00 €"),
             "100,00 - 1000,00 €"
         );
-        assert_eq!(cost_estimate_price_text("1428.00"), "1.428,00 EUR");
+        assert_eq!(cost_estimate_price_text("1428.00"), "1.428,00 €");
     }
 
     /// The agency line the wizard used to send for a VKS without work types.
     fn agency_interpreter_bindings() -> DocumentBindingOverrides {
         DocumentBindingOverrides {
-            estimate_total: Some("339,15 EUR".to_string()),
+            estimate_total: Some("339,15 €".to_string()),
             service_lines: vec![ServiceLineInput {
                 description: "Interpreter support".to_string(),
                 description_items: None,
                 fee: Some("285,00 EUR / Std.".to_string()),
                 quantity: Some("1".to_string()),
-                line_total: Some("285,00 EUR".to_string()),
+                line_total: Some("285,00 €".to_string()),
                 vat_rate: Some("19".to_string()),
                 is_cost_passthrough: None,
                 note: None,
@@ -37820,7 +37805,7 @@ mod tests {
             Some(GeneratedCostEstimateCatalogSelection {
                 work_type_ids: Vec::new(),
                 line_items: Vec::new(),
-                total_range: "0,00 - 0,00 EUR".to_string(),
+                total_range: "0,00 - 0,00 €".to_string(),
             }),
         ] {
             let Err(message) =
@@ -37848,13 +37833,13 @@ mod tests {
                 localized_sections: vec![("Gastroskopie".to_string(), String::new())],
                 description: String::new(),
                 quantity: "2".to_string(),
-                unit_price: "800,00 - 1.200,00 EUR".to_string(),
-                line_gross: "800,00 - 1.200,00 EUR".to_string(),
+                unit_price: "800,00 - 1.200,00 €".to_string(),
+                line_gross: "800,00 - 1.200,00 €".to_string(),
                 vat_rate: None,
                 is_cost_passthrough: false,
                 notes: None,
             }],
-            total_range: "800,00 - 1.200,00 EUR".to_string(),
+            total_range: "800,00 - 1.200,00 €".to_string(),
         };
         let CostEstimateLines {
             line_items: items,
@@ -37869,21 +37854,21 @@ mod tests {
                 .iter()
                 .all(|item| item.description != "Interpreter support")
         );
-        assert_eq!(items[0].line_gross, "800,00 - 1.200,00 EUR");
-        assert_eq!(total.as_deref(), Some("800,00 - 1.200,00 EUR"));
+        assert_eq!(items[0].line_gross, "800,00 - 1.200,00 €");
+        assert_eq!(total.as_deref(), Some("800,00 - 1.200,00 €"));
         assert_eq!(ids, vec![work_type_id]);
     }
 
     #[test]
     fn cost_estimate_keeps_medical_lines_entered_in_the_document_generator() {
         let bindings = DocumentBindingOverrides {
-            estimate_total: Some("1.000,00 - 1.500,00 EUR".to_string()),
+            estimate_total: Some("1.000,00 - 1.500,00 €".to_string()),
             service_lines: vec![ServiceLineInput {
                 description: "Kardiologische Untersuchung".to_string(),
                 description_items: None,
                 fee: None,
                 quantity: None,
-                line_total: Some("1.000,00 - 1.500,00 EUR".to_string()),
+                line_total: Some("1.000,00 - 1.500,00 €".to_string()),
                 vat_rate: None,
                 is_cost_passthrough: None,
                 note: None,
@@ -37896,8 +37881,8 @@ mod tests {
             work_type_ids: ids,
         } = resolve_cost_estimate_lines(None, false, &bindings).unwrap();
         assert_eq!(items[0].description, "Kardiologische Untersuchung");
-        assert_eq!(items[0].line_gross, "1.000,00 - 1.500,00 EUR");
-        assert_eq!(total.as_deref(), Some("1.000,00 - 1.500,00 EUR"));
+        assert_eq!(items[0].line_gross, "1.000,00 - 1.500,00 €");
+        assert_eq!(total.as_deref(), Some("1.000,00 - 1.500,00 €"));
         assert!(ids.is_empty());
     }
 
@@ -37984,12 +37969,18 @@ mod tests {
         );
         assert_eq!(
             cost_coverage_money_cell("999.00").as_deref(),
-            Some("999,00 EUR")
+            Some("999,00 €")
         );
         assert_eq!(
             cost_coverage_money_cell("2735.81").as_deref(),
-            Some("2.735,81 EUR")
+            Some("2.735,81 €")
         );
+        // An amount stored the old way, "… EUR", prints with the euro sign.
+        assert_eq!(
+            cost_coverage_money_cell("2.735,81 EUR").as_deref(),
+            Some("2.735,81 €")
+        );
+        assert_eq!(super::fmt_money_de("1428.00"), "1.428,00 €");
     }
 
     #[test]
@@ -38007,9 +37998,9 @@ mod tests {
         }])
         .unwrap();
 
-        assert_eq!(totals.0, "400,00 EUR");
-        assert_eq!(totals.1, "76,00 EUR");
-        assert_eq!(totals.2, "476,00 EUR");
+        assert_eq!(totals.0, "400,00 €");
+        assert_eq!(totals.1, "76,00 €");
+        assert_eq!(totals.2, "476,00 €");
     }
 
     #[test]
@@ -38027,9 +38018,9 @@ mod tests {
         }])
         .unwrap();
 
-        assert_eq!(totals.0, "237,50 EUR");
-        assert_eq!(totals.1, "45,13 EUR");
-        assert_eq!(totals.2, "282,63 EUR");
+        assert_eq!(totals.0, "237,50 €");
+        assert_eq!(totals.1, "45,13 €");
+        assert_eq!(totals.2, "282,63 €");
     }
 
     #[test]
@@ -38099,8 +38090,8 @@ mod tests {
                     localized_sections: Vec::new(),
                     description: "Organisation der Behandlung (pro 1 Ärzte)".to_string(),
                     quantity: "5".to_string(),
-                    unit_price: "100,00 EUR".to_string(),
-                    line_gross: "500,00 EUR".to_string(),
+                    unit_price: "100,00 €".to_string(),
+                    line_gross: "500,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: Some("Leistungsumfang 10, 11".to_string()),
@@ -38111,8 +38102,8 @@ mod tests {
                     description: "Beratungsleistungen (auch telefonisch) und Datenmanagement"
                         .to_string(),
                     quantity: "1".to_string(),
-                    unit_price: "999,00 EUR".to_string(),
-                    line_gross: "999,00 EUR".to_string(),
+                    unit_price: "999,00 €".to_string(),
+                    line_gross: "999,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
@@ -38123,15 +38114,15 @@ mod tests {
                     description: "Dolmetscher-/Betreuungsleistung".to_string(),
                     quantity: "8".to_string(),
                     unit_price: "100,00 EUR/1 Stunde".to_string(),
-                    line_gross: "800,00 EUR".to_string(),
+                    line_gross: "800,00 €".to_string(),
                     vat_rate: Some("19".to_string()),
                     is_cost_passthrough: false,
                     notes: None,
                 },
             ],
-            total_net: Some("2.299,00 EUR".to_string()),
-            total_vat: Some("436,81 EUR".to_string()),
-            total_gross: Some("2.735,81 EUR".to_string()),
+            total_net: Some("2.299,00 €".to_string()),
+            total_vat: Some("436,81 €".to_string()),
+            total_gross: Some("2.735,81 €".to_string()),
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             agency_sign_place: Some("Köln".to_string()),

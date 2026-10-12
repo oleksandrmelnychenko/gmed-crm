@@ -1,4 +1,5 @@
 import { formatAppDate } from "@/lib/app-time-zone";
+import { formatMoneyAmount } from "@/lib/money";
 import type { OrderOption, PatientOption } from "../model/types";
 import { matchInvoicePatient } from "../model/patient-match";
 
@@ -83,8 +84,9 @@ export function filterDemoInvoices(search: string, filter: DatevBindingFilter, b
   });
 }
 
-export function datevMoney(cents: number, lang: string): string {
-  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { style: "currency", currency: "EUR" }).format(cents / 100);
+/** "1.234,56 €" in every UI language (owner money format). */
+export function datevMoney(cents: number): string {
+  return formatMoneyAmount(cents / 100);
 }
 
 export function datevDate(date: string): string {

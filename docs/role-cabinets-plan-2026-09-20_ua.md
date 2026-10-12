@@ -197,7 +197,12 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
   редагування; зовнішній активний scope показує один банер «Только просмотр /
   Nur Ansicht» (`read_only_scope_title/hint`). Фільтри лишаються робочими:
   `Input[type=search]`, контроли з `data-readonly="exempt"`, `ToolbarField` і
-  панель фільтрів `DataTableSurface` (`WritableScope`).
+  панель фільтрів `DataTableSurface` (`WritableScope`). З 2026-10-12 уся панель
+  інструментів таблиці (разом із `toolbarStart`) — у `WritableScope`; так само
+  панелі фільтрів поза таблицями (фінанси, хронологія й аналізи в картці
+  пацієнта, панель пошуку прийомів, пошук SOP і готелів, фільтри людей провайдерів).
+  Фільтр, сортування й пошук — це читання; вимикаються лише контроли запису
+  (QA: асистент CEO не міг фільтрувати документи пацієнта).
 - Моделі сторінок (`pages/*/model/*.ts`, `services.model.ts`,
   `reports/hotels/model.ts`, `concierge/model.ts`) відповідають через
   `hasCapability(user, …)` замість списків ролей; `hasCapability` приймає

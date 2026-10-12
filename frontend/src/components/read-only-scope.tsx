@@ -5,9 +5,11 @@
  * controls rendered inside it (`Input`, date pickers, `SelectField`,
  * `NativeComboboxSelect`, `Button[type=submit]`, `Button[data-action="write"]`)
  * and hides `InfoRow` edit pencils, so a page needs one wrapper instead of a
- * `disabled` prop on every field. Filters keep working: `Input[type=search]`
- * and controls marked `data-readonly="exempt"` stay enabled, and
- * `<WritableScope>` opens a writable pocket (the data-table toolbar uses it).
+ * `disabled` prop on every field. Filtering, sorting and searching are reading
+ * and keep working: `Input[type=search]` and controls marked
+ * `data-readonly="exempt"` stay enabled, and `<WritableScope>` opens a writable
+ * pocket (the whole data-table toolbar, `ToolbarField`, filter bars and the
+ * search sheets use it). Only write controls are disabled.
  *
  * The outermost active scope shows one banner; nested scopes do not repeat it.
  * See docs/role-cabinets-plan-2026-09-20_ua.md §3.3.

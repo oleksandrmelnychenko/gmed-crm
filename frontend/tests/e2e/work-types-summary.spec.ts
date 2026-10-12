@@ -25,7 +25,7 @@ for (const scenario of [
     await page.setViewportSize({ width: scenario.width, height: 800 });
     await page.goto(`/__work-types-qa?lang=${scenario.lang}&hours=${scenario.hours}&compact=${scenario.compact}`);
     const summary = page.getByTestId("work-types-summary");
-    await expect(summary).toContainText(/250,00\s+–\s+1[.\s]000,00 EUR/);
+    await expect(summary).toContainText(/250,00\s+–\s+1\.000,00\s€/);
     await expect(summary).not.toContainText(/EUR\/|2[.\s]000,00|3[.\s]750,00|15[.\s]000,00/);
     await expect(summary.locator('[data-column-id="rate"]')).toHaveCount(0);
     await expect(summary).not.toContainText(scenario.lang === "ru" ? "Итого:" : "Gesamt:");

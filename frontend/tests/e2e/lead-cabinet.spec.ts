@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { E2E_NOW, startClockAt } from "./helpers";
 
 // Lead cabinet (owner decision 2026-10-03): a patient login that reaches only
 // requests sees the request page, the account and the legal notice. Mocked
@@ -462,6 +463,7 @@ async function setup(
     prepare?: (request: ReturnType<typeof leadRequest>) => void;
   } = {},
 ) {
+  await startClockAt(page);
   const request = leadRequest();
   request.personal_data.primary_language = options.primaryLanguage ?? null;
   options.prepare?.(request);
@@ -1940,7 +1942,8 @@ test.describe("lead cabinet", () => {
     const languages = page.getByTestId("lead-cabinet-language");
     const openCalendar = page.getByTestId("lead-request-step-person").locator("[data-picker-anchor] button").first();
     const month = (locale: string) =>
-      new RegExp(new Intl.DateTimeFormat(locale, { month: "long", timeZone: "Europe/Berlin" }).format(new Date()), "i");
+      // The browser clock starts at E2E_NOW: the picker opens on its Berlin month.
+      new RegExp(new Intl.DateTimeFormat(locale, { month: "long", timeZone: "Europe/Berlin" }).format(E2E_NOW), "i");
 
     await languages.getByRole("radio", { name: "UA" }).click();
     await openCalendar.click();

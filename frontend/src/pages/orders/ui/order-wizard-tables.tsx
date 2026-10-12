@@ -1,8 +1,8 @@
 import { OrderCatalogServicesTable } from "./order-catalog-services-table";
 import type { ServiceLine } from "../model/order-service-line";
 import { serviceDescriptionItems, serviceDescriptionText } from "@/lib/service-description";
-import { moneyLineAmounts, roundCents } from "@/lib/money";
-import { money, formatMoneyValue, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
+import { formatMoneyLabel, moneyLineAmounts, roundCents } from "@/lib/money";
+import { money, germanDateLabel, servicePriceOptionValue, parseServicePriceOptionValue, serviceBillingUnitLabel, resolveServiceDescriptionItems } from "../model/order-service-presentation";
 import { useState, type ReactNode } from "react";
 import { ArrowRight, Check, Download } from "lucide-react";
 import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signature-confirm";
@@ -71,7 +71,7 @@ export function OrderWizardLinesTable({ lines, catalog, effectiveOn, dateTo, spe
         <option value="">{tx("Выберите услугу и цену", "Leistung und Preis auswählen")}</option>
         {catalog.map(service => <optgroup key={service.id} label={service.service_name}>
           {listAgencyServicePriceChoices(service, effectiveOn ?? undefined).map(price => <option key={price.id || 'catalog'} value={servicePriceOptionValue(service.id, price.id)} disabled={lines.some(line => line.agency_service_id === service.id) || price.currency.toUpperCase() !== "EUR"}>
-            {formatMoneyValue(money(price.unit_price), lang)} {price.currency} / {serviceBillingUnitLabel(service.unit_label, tx)} · {price.name || germanDateLabel(price.valid_from)}{price.is_effective ? ` · ${tx("Рекомендуемая", "Empfohlen")}` : ""}
+            {formatMoneyLabel(money(price.unit_price), price.currency)} / {serviceBillingUnitLabel(service.unit_label, tx)} · {price.name || germanDateLabel(price.valid_from)}{price.is_effective ? ` · ${tx("Рекомендуемая", "Empfohlen")}` : ""}
           </option>)}
         </optgroup>)}
       </NativeComboboxSelect>

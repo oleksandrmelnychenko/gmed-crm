@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // Lead cabinet, step 3 "Versicherung & Rechnung" (owner spec 2026-10-11): the
 // invoice recipient comes first and absorbs "who pays". "Wer ist
@@ -304,6 +305,7 @@ const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 async function setup(page: Page, options: { minor?: boolean; prepare?: (request: Request) => void } = {}) {
+  await startClockAt(page);
   const request = leadRequest(options.minor ?? false);
   options.prepare?.(request);
   const calls = {

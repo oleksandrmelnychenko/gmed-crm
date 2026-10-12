@@ -19,6 +19,7 @@ import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
+import { WritableScope } from "@/components/read-only-scope";
 import { Input } from "@/components/ui/input";
 import { useLang, type Lang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -1143,7 +1144,9 @@ function FiltersBar({
   };
 
   const isToolbar = variant === "toolbar";
+  // Every control here is a filter, i.e. reading: usable on a read-only page.
   return (
+    <WritableScope>
     <div className={isToolbar ? "min-w-[1040px] flex-1" : undefined}>
       <div
         className={
@@ -1321,6 +1324,7 @@ function FiltersBar({
         </div>
       </div>
     </div>
+    </WritableScope>
   );
 }
 

@@ -127,6 +127,26 @@ describe("dismissal guard", () => {
     expect(isAuxiliaryOverlayEscape("escape-key", undefined)).toBe(false)
   })
 
+  it("closes the dialog on Escape in the search input of a list that is already closing", () => {
+    // Closest-match emulation: the list root carries data-closed during its exit animation.
+    class FakeElement {
+      closing: boolean
+      constructor(closing: boolean) {
+        this.closing = closing
+      }
+      closest(selector: string) {
+        const match = selector
+          .split(", ")
+          .some((part) => part.startsWith("[data-overlay-interaction-root]") && (!this.closing || !part.includes(":not([data-closed])")))
+        return match ? this : null
+      }
+    }
+    vi.stubGlobal("Element", FakeElement)
+
+    expect(isAuxiliaryOverlayEscape("escape-key", { target: new FakeElement(false) } as unknown as Event)).toBe(true)
+    expect(isAuxiliaryOverlayEscape("escape-key", { target: new FakeElement(true) } as unknown as Event)).toBe(false)
+  })
+
   it("keeps the dialog open on Escape in a combobox input whose list is open", () => {
     class FakeElement {
       expanded: boolean

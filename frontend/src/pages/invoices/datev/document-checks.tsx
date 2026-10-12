@@ -3,6 +3,7 @@ import { Download, LoaderCircle, RotateCcw, Square, Trash2, Upload } from "lucid
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ApiRequestError } from "@/lib/api";
+import { formatRecognizedMoney } from "@/lib/money";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { parseInvoiceFile } from "../data/invoice-import-api";
 import { checkableInvoiceFile, documentCheckReport, invoiceCheckSummary, matchingInvoice, MAX_CHECK_FILES, type DocumentCheck } from "./document-check-model";
@@ -113,7 +114,7 @@ export function DatevDocumentChecks() {
           {row.summary ? <>
             <p className="text-xs text-muted-foreground">{copy.sources[row.summary.source_format] ?? copy.sources.unknown}{row.summary.syntax ? ` · ${row.summary.syntax.toUpperCase()}` : ""}</p>
             <dl className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {[[copy.supplier, row.summary.fields.supplier_name], [copy.invoice, row.summary.fields.external_invoice_number], [copy.date, row.summary.fields.invoice_date], [copy.net, row.summary.fields.amount_net], [copy.vat, row.summary.fields.amount_vat], [copy.gross, row.summary.fields.amount_gross ? `${row.summary.fields.amount_gross} ${row.summary.fields.currency}` : ""]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-sm">{value || copy.absent}</dd></div>)}
+              {[[copy.supplier, row.summary.fields.supplier_name], [copy.invoice, row.summary.fields.external_invoice_number], [copy.date, row.summary.fields.invoice_date], [copy.net, formatRecognizedMoney(row.summary.fields.amount_net, row.summary.fields.currency)], [copy.vat, formatRecognizedMoney(row.summary.fields.amount_vat, row.summary.fields.currency)], [copy.gross, formatRecognizedMoney(row.summary.fields.amount_gross, row.summary.fields.currency)]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-words text-sm">{value || copy.absent}</dd></div>)}
             </dl>
             {row.summary.issues.length ? <ul className="list-disc space-y-1 pl-4 text-sm">
               {row.summary.issues.map((issue) => <li key={issue}>{copy[issue]}</li>)}

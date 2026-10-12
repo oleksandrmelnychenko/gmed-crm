@@ -289,8 +289,11 @@ export function DataTableSurface<T>({
           toolbarClassName,
         )}
       >
-        {toolbarStart}
+        {/* Filters, search, sorting and columns are reading: they stay usable on a
+            read-only page (CEO assistant: the status/type filters of the patient
+            documents were disabled). Pages show write buttons here by capability. */}
         <WritableScope>
+        {toolbarStart}
         <FilterBuilder
           columns={enhancedColumns}
           rows={rows}

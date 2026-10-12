@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Trash2 } from "lucide-react";
-import { roundCents } from "@/lib/money";
+import { formatMoneyLabel, roundCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { t as translationsFor, type Lang } from "@/lib/i18n";
 import { agencyServiceLineDisplayDescription, agencyServiceLineDisplayName } from "@/lib/agency-service-labels";
@@ -32,7 +32,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
   const displayDescription = (line: ServiceLine) =>
     agencyServiceLineDisplayDescription(describe(line), line.catalogDescription, lineService(line), translations, lang);
   const servicePriceChoiceLabel = (price: ReturnType<typeof listAgencyServicePriceChoices>[number]) => [
-    `${formatMoneyValue(money(price.unit_price), lang)} ${price.currency}`, priceVersionDisplayName(price),
+    formatMoneyLabel(money(price.unit_price), price.currency), priceVersionDisplayName(price),
     `${germanDateLabel(price.valid_from)} — ${price.valid_to ? germanDateLabel(price.valid_to) : tx("бессрочно", "unbefristet")}`,
     price.is_effective ? tx("рекомендуемая", "empfohlen") : "",
   ].filter(Boolean).join(" · ");
@@ -162,7 +162,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
               value={selectedPriceId}
               selectedLabel={selectedPrice ? (
                 <span className="inline-flex max-w-full items-baseline gap-1.5">
-                  <span className="font-medium">{formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}</span>
+                  <span className="font-medium">{formatMoneyLabel(money(line.price), line.currency)}</span>
                   <span className="text-muted-foreground">/ {unit}</span>
                 </span>
               ) : undefined}
@@ -191,7 +191,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                     <span className="block whitespace-normal py-0.5">
                       <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         <span className="font-mono text-xs font-medium tabular-nums">
-                          {formatMoneyValue(money(inputString(price.unit_price)), lang)} {price.currency}
+                          {formatMoneyLabel(money(inputString(price.unit_price)), price.currency)}
                           <span className="font-normal text-muted-foreground"> / {unit}</span>
                         </span>
                         {price.is_effective ? <span className="text-[10px] font-medium text-emerald-700">{tx("Рекомендуемая", "Empfohlen")}</span> : null}
@@ -210,7 +210,7 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
         }
         return (
           <span className="whitespace-nowrap">
-            {formatMoneyValue(money(line.price), lang)} {line.currency || "EUR"}/{unit}
+            {formatMoneyLabel(money(line.price), line.currency)} / {unit}
           </span>
         );
       },
@@ -243,9 +243,9 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
         return (
           <span
             className="whitespace-nowrap font-semibold"
-            title={`${line.quantity || "0"} ${unit} × ${formatMoneyValue(money(line.price), lang)} ${line.currency || "EUR"} = ${formatMoneyValue(total, lang)} ${line.currency || "EUR"}`}
+            title={`${line.quantity || "0"} ${unit} × ${formatMoneyLabel(money(line.price), line.currency)} = ${formatMoneyLabel(total, line.currency)}`}
           >
-            {formatMoneyValue(total, lang)} {line.currency || "EUR"}
+            {formatMoneyLabel(total, line.currency)}
           </span>
         );
       },
@@ -290,19 +290,19 @@ export function OrderCatalogServicesTable({ lines, catalogById, effectiveOn, lan
                         <div className="min-w-[7rem]">
                           <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("Нетто", "Netto")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                            {formatMoneyValue(totals.net, lang)} EUR
+                            {formatMoneyLabel(totals.net)}
                           </dd>
                         </div>
                         <div className="min-w-[7rem]">
                           <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{tx("НДС", "MwSt.")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-mono text-xs font-medium tabular-nums text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                            {formatMoneyValue(totals.vat, lang)} EUR
+                            {formatMoneyLabel(totals.vat)}
                           </dd>
                         </div>
                         <div className="min-w-[8rem] border-l border-border pl-6">
                           <dt className="text-[10px] font-semibold uppercase tracking-wide text-foreground">{tx("Итого", "Gesamt")}</dt>
                           <dd className="mt-1 inline-flex whitespace-nowrap rounded-full border border-emerald-300 bg-emerald-100 px-2.5 py-1 font-mono text-xs font-semibold tabular-nums text-emerald-900 dark:border-emerald-700 dark:bg-emerald-900/55 dark:text-emerald-100">
-                            {formatMoneyValue(totals.gross, lang)} EUR
+                            {formatMoneyLabel(totals.gross)}
                           </dd>
                         </div>
                       </dl>

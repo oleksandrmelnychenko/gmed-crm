@@ -15,6 +15,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { appDateKey, formatAppDateTime } from "@/lib/app-time-zone";
 import type { Lang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 import {
@@ -160,13 +161,11 @@ function todayInputValue() {
   return appDateKey();
 }
 
-function formatMoney(value: string, currency: string, lang: Lang) {
+/** "1.234,56 €" in every UI language (owner money format). */
+function formatMoney(value: string, currency: string) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return `${value} ${currency}`;
-  return new Intl.NumberFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    style: "currency",
-    currency: currency || "EUR",
-  }).format(amount);
+  return formatMoneyAmount(amount, currency || "EUR");
 }
 
 function formatDate(value: string) {
@@ -492,7 +491,7 @@ export function ConciergeExpenseReceiptDialog({
                           <li key={item.id} className="rounded-lg border border-border/70 bg-muted/15 p-3">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div className="flex items-center gap-2"><Badge variant="outline" className={cn("rounded-full text-[10px]", statusTone(item.status))}>{labels[item.status]}</Badge><span className="text-xs font-medium">{item.vendor}</span></div>
-                              <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency, lang)}</span>
+                              <span className="font-mono text-xs font-semibold">{formatMoney(item.amount_gross, item.currency)}</span>
                             </div>
                             <p className="mt-1 text-[11px] text-muted-foreground">{context?.patient?.display_name || service.patient_name || "—"} · {formatDate(item.submitted_at)}</p>
                             <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
@@ -600,7 +599,7 @@ export function ConciergeExpenseReceiptDialog({
                               ? <span className="block text-[11px]">{labels.afterDelivery}</span>
                               : null}
                           </dt>
-                          <dd className="font-mono text-xs font-semibold">{formatMoney(value, currency, lang)}</dd>
+                          <dd className="font-mono text-xs font-semibold">{formatMoney(value, currency)}</dd>
                         </div>
                       ))}
                     </dl>

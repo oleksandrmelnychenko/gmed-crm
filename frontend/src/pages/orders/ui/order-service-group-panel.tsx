@@ -4,6 +4,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useEffect } from "react";
 
 import { formatAppDate } from "@/lib/app-time-zone";
+import { formatMoneyAmount } from "@/lib/money";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -171,16 +172,14 @@ function formatCatalogDate(value: string) {
 
 export function serviceGroupPriceChoiceLabel(
   choice: AgencyServicePriceChoice,
-  locale: string,
+  _locale: string,
   openEndedLabel: string,
   recommendedLabel: string,
 ) {
   const numericPrice = Number(choice.unit_price);
+  // Owner money format in every UI language: "120,00 €".
   const price = Number.isFinite(numericPrice)
-    ? new Intl.NumberFormat(locale, {
-        style: "currency",
-        currency: choice.currency,
-      }).format(numericPrice)
+    ? formatMoneyAmount(numericPrice, choice.currency || "EUR")
     : `${String(choice.unit_price)} ${choice.currency}`;
   const period = `${formatCatalogDate(choice.valid_from)} — ${
     choice.valid_to

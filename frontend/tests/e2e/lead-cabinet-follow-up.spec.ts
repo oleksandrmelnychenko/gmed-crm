@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // Lead cabinet as a stepper with the follow-up blocks (trigger flow
 // 2026-10-07, contract sections 3, 6 and 13): short steps with badges from
@@ -209,6 +210,7 @@ function recompute(request: LeadRequestMock) {
 }
 
 async function setup(page: Page, prepare?: (request: LeadRequestMock) => void) {
+  await startClockAt(page);
   const request = leadRequest();
   prepare?.(request);
   recompute(request);

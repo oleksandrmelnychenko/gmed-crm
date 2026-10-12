@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 import { lazyPageLoad } from "./lazy-pages";
 
 /**
@@ -76,6 +77,7 @@ function employee(id: string, first: string, records: Json[], overrides: Json = 
 }
 
 async function setup(page: Page) {
+  await startClockAt(page);
   const anna = employee("emp-anna", "Anna", [record("rec-anna", "emp-anna")], { next_due_on: "2027-03-02" });
   let miaRecords: Json[] = [];
   const mia = () =>

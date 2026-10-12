@@ -284,6 +284,7 @@ export function InterpreterMobileAgenda({
         <div className="space-y-4">
           <Field label={searchLabel}>
             <Input
+              data-readonly="exempt"
               value={searchValue}
               onChange={(event) => onSearchChange(event.target.value)}
               placeholder={withEllipsis(searchPlaceholder)}

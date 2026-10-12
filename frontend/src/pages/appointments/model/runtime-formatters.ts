@@ -1,5 +1,6 @@
 import { appDateTimeFormat, dateOrInstant, formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { getLang, t as translateCatalog } from "@/lib/i18n";
+import { formatMoneyAmount, formatMoneyLabel } from "@/lib/money";
 
 function appointmentRuntimeTranslations() {
   return translateCatalog(getLang());
@@ -54,13 +55,10 @@ export function formatAppointmentMoneyLabel(
   if (!value) return appointmentRuntimeTranslations().common_not_set;
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return `${value} ${currency}`;
+  // Owner money format in every UI language: "1.234,56 €".
   try {
-    return numeric.toLocaleString(appointmentRuntimeLocale(), {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 2,
-    });
+    return formatMoneyAmount(numeric, currency || "EUR");
   } catch {
-    return `${numeric.toFixed(2)} ${currency}`;
+    return formatMoneyLabel(numeric, currency);
   }
 }

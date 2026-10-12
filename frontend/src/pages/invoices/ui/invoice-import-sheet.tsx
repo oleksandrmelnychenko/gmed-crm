@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Banner, Field } from "@/components/ui-shell";
 import { useLang } from "@/lib/i18n";
 import { ApiRequestError } from "@/lib/api";
+import { formatRecognizedMoney } from "@/lib/money";
 import type { OrderOption, PatientOption } from "../model/types";
 import { blankImportFields, importFieldsFromPreview, importTotalsMatch, invoiceSourceCanSave, isInvoiceXml, normalizeInvoiceFile, type InvoiceImportFields, type InvoiceImportPreview, type InvoiceImportScope } from "../model/import-model";
 import { confirmCompanyInvoiceImport, confirmInvoiceImport, discardInvoiceImportSource, parseInvoiceFile, uploadInvoiceSource } from "../data/invoice-import-api";
@@ -363,9 +364,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
               {preview?.payment && (preview.payment.terms?.length || preview.payment.method || preview.payment.amount_due != null) ? <div className="space-y-2 rounded-xl border border-border/70 bg-card p-4 text-xs shadow-sm">
                 <h3 className="flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="size-2 shrink-0 rounded-full bg-orange-500" />{tx("Условия оплаты из документа", "Zahlungsbedingungen laut Dokument")}</h3>
                 {preview.payment.terms?.map((term, index) => <p key={index}>{term}</p>)}
-                {preview.payment.amount_due != null ? <p className="font-medium">{tx("К оплате по XML", "Zahlbetrag laut XML")}: {preview.payment.amount_due} {preview.fields.currency}</p> : null}
-                {preview.payment.prepaid != null ? <p>{tx("Предоплата по XML", "Vorauszahlung laut XML")}: {preview.payment.prepaid} {preview.fields.currency}</p> : null}
-                {preview.payment.rounding != null ? <p>{tx("Округление", "Rundung")}: {preview.payment.rounding} {preview.fields.currency}</p> : null}
+                {preview.payment.amount_due != null ? <p className="font-medium">{tx("К оплате по XML", "Zahlbetrag laut XML")}: {formatRecognizedMoney(preview.payment.amount_due, preview.fields.currency)}</p> : null}
+                {preview.payment.prepaid != null ? <p>{tx("Предоплата по XML", "Vorauszahlung laut XML")}: {formatRecognizedMoney(preview.payment.prepaid, preview.fields.currency)}</p> : null}
+                {preview.payment.rounding != null ? <p>{tx("Округление", "Rundung")}: {formatRecognizedMoney(preview.payment.rounding, preview.fields.currency)}</p> : null}
                 {preview.warnings.includes("payable_differs_from_total") ? <p>{tx("К оплате и итог инвойса различаются. В инвойс переносится полная сумма; передоплата из XML не создаёт платёж автоматически.", "Zahlbetrag und Rechnungsbrutto unterscheiden sich. Übernommen wird der volle Rechnungsbetrag; eine XML-Vorauszahlung erzeugt nicht automatisch eine Zahlung.")}</p> : null}
                 {preview.payment.method === "direct_debit" ? <p>{tx("Автоматическое списание", "Lastschrift")}{preview.payment.collection_date ? ` · ${preview.payment.collection_date.split("-").reverse().join(".")}` : ""}. {tx("Дата списания показана отдельно от срока оплаты.", "Das Abbuchungsdatum wird getrennt von der Fälligkeit angezeigt.")}</p> : null}
               </div> : null}
@@ -373,9 +374,9 @@ export function InvoiceImportSheet({ patients, orders, initialPatientId = "", in
                 {preview.warnings.includes("line_items_total_mismatch") ? <Banner tone="warning" withIcon>{tx("Сумма распознанных позиций не совпадает с итогом. Проверьте, все ли позиции прочитаны.", "Die Summe der erkannten Positionen stimmt nicht mit dem Gesamtbetrag überein. Prüfen, ob alle Positionen erfasst wurden.")}</Banner> : null}
                 {preview.warnings.includes("line_item_amount_recovered_from_subtotal") ? <Banner tone="warning" withIcon>{tx("В одной позиции OCR потерял десятичный разделитель. Сумма восстановлена только по точному совпадению с напечатанным подытогом; сверьте позицию с оригиналом.", "Bei einer Position hat die OCR das Dezimaltrennzeichen verloren. Der Betrag wurde nur anhand der exakten Übereinstimmung mit der gedruckten Zwischensumme rekonstruiert; bitte mit dem Original abgleichen.")}</Banner> : null}
                 <div className="divide-y rounded-lg border text-xs">{preview.line_items.map((line, index) => <div key={index} className="space-y-1.5 p-3">
-                  <div className="flex justify-between gap-3"><span>{String(line.name ?? line.description ?? "")}</span><span className="shrink-0 font-mono">{String(line.price_subtotal ?? line.amount ?? "")} {preview.fields.currency}</span></div>
+                  <div className="flex justify-between gap-3"><span>{String(line.name ?? line.description ?? "")}</span><span className="shrink-0 font-mono">{formatRecognizedMoney(line.price_subtotal ?? line.amount, preview.fields.currency)}</span></div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
-                    {line.qty != null ? <span>{tx("Кол-во", "Menge")}: {String(line.qty)}{line.unit_price != null ? ` · ${tx("Цена", "Preis")}: ${String(line.unit_price)} ${preview.fields.currency ?? ""}` : ""}{line.price_base_quantity != null && Number(line.price_base_quantity) !== 1 ? ` ${tx("за", "je")} ${String(line.price_base_quantity)}` : ""}</span> : null}
+                    {line.qty != null ? <span>{tx("Кол-во", "Menge")}: {String(line.qty)}{line.unit_price != null ? ` · ${tx("Цена", "Preis")}: ${formatRecognizedMoney(line.unit_price, preview.fields.currency)}` : ""}{line.price_base_quantity != null && Number(line.price_base_quantity) !== 1 ? ` ${tx("за", "je")} ${String(line.price_base_quantity)}` : ""}</span> : null}
                     {line.vat_rate != null ? <span>{tx("НДС", "USt.")}: {String(line.vat_rate)} %</span> : null}
                     {line.service_period ? <span>{String(line.service_period)}</span> : null}
                     {file?.type === "application/pdf" && typeof line.page === "number" && Number.isInteger(line.page) && line.page > 0 ? <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => setOriginalPage(line.page as number)}>{tx("Стр.", "Seite")} {line.page}</button> : null}

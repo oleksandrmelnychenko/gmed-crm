@@ -73,13 +73,15 @@ export function leadWizardDocumentTotal(
 const GERMAN_AMOUNT = cachedNumberFormat("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /**
- * The stored total as shown: an older document stored "550.00 EUR" (a dot);
- * it is shown "550,00 EUR" like the documents written since (QA 2026-10-10).
+ * The stored total as shown: an older document stored "550.00 EUR" (a dot) or
+ * "550,00 EUR"; it is shown "550,00 €" like the documents written since
+ * (QA 2026-10-10; owner rule "1.234,56 €").
  */
 export function leadWizardDocumentTotalLabel(total: string | null): string | null {
   if (!total) return total;
   const plain = /^(\d+)\.(\d{2}) ([A-Z]{3})$/u.exec(total);
-  return plain ? `${GERMAN_AMOUNT.format(Number(`${plain[1]}.${plain[2]}`))} ${plain[3]}` : total;
+  const german = plain ? `${GERMAN_AMOUNT.format(Number(`${plain[1]}.${plain[2]}`))} ${plain[3]}` : total;
+  return german.replace(/(\d) EUR$/u, "$1 €");
 }
 
 export function LeadWizardDocumentMetadata({

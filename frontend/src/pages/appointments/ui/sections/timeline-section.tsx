@@ -115,6 +115,8 @@ function AppointmentTimelineSection({
       <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
         <NativeComboboxSelect
           key={`kind-${timelineEvents.length}`}
+          // A filter is reading: it stays usable on a read-only appointment.
+          data-readonly="exempt"
           value={timelineFilter}
           onChange={(event) =>
             setTimelineFilter(

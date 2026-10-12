@@ -2,10 +2,10 @@ import { DataTable } from "@/components/data-table/data-table";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Badge } from "@/components/ui/badge";
 import type { Lang } from "@/lib/i18n";
+import { formatMoneyRange } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { SpecializationWorkType } from "@/pages/specializations/data/specialization-work-types-api";
 type Tx = (ru: string, de: string) => string;
-const formatMoneyValue = (value: number, lang: Lang) => new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
 const SPECIALIZATION_COLUMN_WIDTH = 230;
 const WORK_TYPE_COLUMN_MIN_WIDTH = 280;
 const DURATION_COLUMN_WIDTH = 130;
@@ -146,7 +146,7 @@ export function SelectedWorkTypesSummary({
       width: PRICE_RANGE_COLUMN_WIDTH,
       render: (workType) => (
         <span className="whitespace-nowrap font-mono font-semibold tabular-nums text-foreground">
-          {formatMoneyValue(workType.min_price_eur, lang)} – {formatMoneyValue(workType.max_price_eur, lang)} EUR
+          {formatMoneyRange(workType.min_price_eur, workType.max_price_eur)}
         </span>
       ),
     },

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // Lead cabinet, invoice recipient and payment route (owner spec
 // "Patientenformular", sections 7 and 8; contract phase 2): where the invoice
@@ -279,6 +280,7 @@ const overflow = (page: Page) =>
 const answers = (billing: Locator) => billing.getByTestId("lead-request-invoice-to").locator("label");
 
 async function setup(page: Page, options: { minor?: boolean; prepare?: (request: Request) => void } = {}) {
+  await startClockAt(page);
   const request = leadRequest(options.minor ?? false);
   options.prepare?.(request);
   const calls = {

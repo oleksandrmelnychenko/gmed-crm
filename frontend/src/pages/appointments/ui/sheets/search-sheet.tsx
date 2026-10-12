@@ -5,6 +5,7 @@ import {
   type SetStateAction,
 } from "react";
 
+import { WritableScope } from "@/components/read-only-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { inputClass, selectClass } from "@/components/ui-shell";
@@ -81,7 +82,10 @@ function SearchSheet({
   const { t, lang } = useLang();
   const tr = t as unknown as Record<string, string>;
 
+  // Every field of the search sheet is a filter, i.e. reading: it stays usable
+  // for a role that sees the appointments read-only.
   return (
+    <WritableScope>
     <AppointmentEditorSheet
       open={open}
       onOpenChange={onOpenChange}
@@ -325,6 +329,7 @@ function SearchSheet({
         </Field>
       </div>
     </AppointmentEditorSheet>
+    </WritableScope>
   );
 }
 

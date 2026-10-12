@@ -6,7 +6,7 @@
  */
 import { countryNameForDisplay } from "@/components/ui/country-select";
 import { appDateKeyOf, formatAppDateTime } from "@/lib/app-time-zone";
-import { cachedNumberFormat } from "@/lib/intl-cache";
+import { formatMoneyLabel } from "@/lib/money";
 
 import type {
   LeadComplianceFlag,
@@ -696,7 +696,7 @@ export function billingStatements(
   }
   // Block C: the total the lead expects to pay, once given (QA 2026-10-10: it
   // was only printed in the patient form).
-  const expectedTotal = expectedTotalLabel(billing.expected_total_eur, lang);
+  const expectedTotal = expectedTotalLabel(billing.expected_total_eur);
   if (expectedTotal) {
     payment.push(statement("expected_total", tx("Ожидаемая общая сумма", "Voraussichtlicher Gesamtbetrag"), expectedTotal));
   }
@@ -704,12 +704,11 @@ export function billingStatements(
   return { invoice, payment, byPayer, complianceLine: complianceFlagsLine(billing.compliance_flags, tx) };
 }
 
-/** "6.000,00 EUR" (German) / "6 000,00 EUR" (Russian); "" without an amount. */
-export function expectedTotalLabel(value: string | null | undefined, lang: string): string {
+/** "6.000,00 €" in every UI language (owner money format); "" without an amount. */
+export function expectedTotalLabel(value: string | null | undefined): string {
   const amount = Number(value?.trim() || Number.NaN);
   if (!Number.isFinite(amount)) return "";
-  const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return `${formatter.format(amount)} EUR`;
+  return formatMoneyLabel(amount);
 }
 
 /** The note that stands in for section 8 while the third-party payer answers it himself. */

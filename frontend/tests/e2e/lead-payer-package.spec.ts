@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // The payer's signature package in the staff wizard (contract phase 3b,
 // section 6.1): four documents, prepared and sent for a qualified signature
@@ -187,6 +188,7 @@ function summary(state: Json): Json | null {
 type Calls = { prepares: number; sends: Json[] };
 
 async function mount(page: Page, lang: "ru" | "de", initial: Json, options: { declaration?: Json; status?: Json } = {}) {
+  await startClockAt(page);
   const state = {
     package: initial,
     documents: (initial.package ? packageDocuments() : []) as Json[],

@@ -37,6 +37,7 @@ import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import type { Lang } from "@/lib/i18n";
+import { formatMoneyAmount } from "@/lib/money";
 import { useTaskRealtimeRefresh } from "./use-task-realtime";
 import { cn } from "@/lib/utils";
 import { localizeTaskNote, localizeTaskTitle } from "@/lib/task-labels";
@@ -309,13 +310,11 @@ function dateOnly(value: string | null) {
   return formatAppDate(value) || value;
 }
 
-function expenseMoney(value: string, currency: string, lang: Lang) {
+/** "1.234,56 €" in every UI language (owner money format). */
+function expenseMoney(value: string, currency: string) {
   const amount = Number(value);
   if (!Number.isFinite(amount)) return `${value} ${currency}`;
-  return new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    style: "currency",
-    currency: currency || "EUR",
-  }).format(amount);
+  return formatMoneyAmount(amount, currency || "EUR");
 }
 
 function expenseStatusClassName(status: ConciergeExpenseItem["status"]) {
@@ -1205,7 +1204,7 @@ export function ConciergeTaskDetailDialog({
                               </Badge>
                             </div>
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {dateOnly(item.expense_date)} · {expenseMoney(item.amount_gross, item.currency, lang)}
+                              {dateOnly(item.expense_date)} · {expenseMoney(item.amount_gross, item.currency)}
                             </p>
                           </div>
                           {item.receipt ? (

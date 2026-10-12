@@ -58,10 +58,59 @@ export function moneyLineAmounts(
   return { net, vat, gross: roundCents(net + vat) };
 }
 
-export function formatMoneyAmount(value: unknown, currency = "EUR"): string {
+function moneyNumber(value: unknown): number {
   const numeric =
     typeof value === "number"
       ? value
       : Number(String(value ?? "").trim().replace(",", "."));
-  return moneyFormatter(currency).format(Number.isFinite(numeric) ? numeric : 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+export function formatMoneyAmount(value: unknown, currency = "EUR"): string {
+  return moneyFormatter(currency).format(moneyNumber(value));
+}
+
+const MONEY_NUMBER = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function isEuro(currency: string | null | undefined): boolean {
+  const code = (currency ?? "").trim().toUpperCase();
+  return code === "" || code === "EUR";
+}
+
+/**
+ * Money shown next to an ISO currency code ("… EUR" before): euros read
+ * "1.234,56 €" in every UI language (owner rule); another currency keeps its
+ * code, "1.234,56 USD".
+ */
+export function formatMoneyLabel(value: unknown, currency?: string | null): string {
+  if (isEuro(currency)) return formatMoneyAmount(value, "EUR");
+  return `${MONEY_NUMBER.format(moneyNumber(value))}\u00a0${(currency ?? "").trim().toUpperCase()}`;
+}
+
+const RECOGNIZED_MONEY_NUMBER = new Intl.NumberFormat("de-DE", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+
+/**
+ * An amount read from an imported document (XML/OCR preview): "8,50 €", a
+ * unit price keeps up to four decimals ("0,1234 €"); text that is no number
+ * stays as read.
+ */
+export function formatRecognizedMoney(value: unknown, currency?: string | null): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const numeric = Number(raw.replace(",", "."));
+  const code = (currency ?? "").trim().toUpperCase();
+  const unit = isEuro(currency) ? "€" : code;
+  if (!Number.isFinite(numeric)) return code ? `${raw} ${code}` : raw;
+  return `${RECOGNIZED_MONEY_NUMBER.format(numeric)}\u00a0${unit}`;
+}
+
+/** A price range, "250,00 – 1.000,00 €" (the currency once, after the upper bound). */
+export function formatMoneyRange(minimum: unknown, maximum: unknown, currency?: string | null): string {
+  return `${MONEY_NUMBER.format(moneyNumber(minimum))} – ${formatMoneyLabel(maximum, currency)}`;
 }

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
+import { E2E_NOW, startClockAt } from "./helpers";
 
 import { lazyPageLoad } from "./lazy-pages";
 
@@ -269,6 +270,11 @@ type Call = {
 };
 
 async function setup(page: Page, options: Options = {}) {
+  await startClockAt(page);
+  // The mock server keeps time with the browser clock (E2E_NOW, running on), so
+  // code timestamps and resend countdowns agree with the page whatever the real date.
+  const clockStartedAt = Date.now();
+  const now = () => E2E_NOW.getTime() + (Date.now() - clockStartedAt);
   const payerType = options.payerType ?? "person";
   const q: Questionnaire = {
     patient_name: "Mia Muster",
@@ -297,7 +303,7 @@ async function setup(page: Page, options: Options = {}) {
   const signature: { value: Record<string, unknown> | null | undefined } = { value: options.signaturePackage };
   const state = {
     status: options.linkStatus ?? "active",
-    codeSentAt: options.codeSentSecondsAgo !== undefined ? Date.now() - options.codeSentSecondsAgo * 1000 : (null as number | null),
+    codeSentAt: options.codeSentSecondsAgo !== undefined ? now() - options.codeSentSecondsAgo * 1000 : (null as number | null),
     attemptsLeft: 5,
     wrongTotal: 0,
     session: null as string | null,
@@ -448,11 +454,11 @@ async function setup(page: Page, options: Options = {}) {
       });
     }
     if (path === "/public/payer-link/code" && method === "POST") {
-      if (link.codeSentAt && Date.now() - link.codeSentAt < 60_000) {
-        return refuse(route, 429, "code_rate_limited", { retry_after_seconds: Math.ceil((60_000 - (Date.now() - link.codeSentAt)) / 1000) });
+      if (link.codeSentAt && now() - link.codeSentAt < 60_000) {
+        return refuse(route, 429, "code_rate_limited", { retry_after_seconds: Math.ceil((60_000 - (now() - link.codeSentAt)) / 1000) });
       }
       if (options.hourlyCodeLimitReached) return refuse(route, 429, "code_rate_limited", { retry_after_seconds: 42 });
-      link.codeSentAt = Date.now();
+      link.codeSentAt = now();
       link.attemptsLeft = 5;
       return route.fulfill({ status: 202, json: { sent_at: new Date(link.codeSentAt).toISOString(), resend_after_seconds: 60 } });
     }

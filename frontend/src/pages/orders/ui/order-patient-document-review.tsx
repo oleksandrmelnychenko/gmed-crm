@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/ui-shell";
 import type { Lang } from "@/lib/i18n";
+import { formatMoneyLabel } from "@/lib/money";
 import type { ContractItem } from "@/pages/contracts/model/types";
 import type { DocumentItem } from "@/pages/documents/model/types";
 import type { PatientOrderRecheck } from "../model/types";
@@ -64,7 +65,7 @@ export function OrderPatientDocumentReview({ readiness, documents, dateTo, lang,
       status: readiness.debt_hold ? tx("Сценарий работы с задолженностью — согласуйте с бухгалтерией", "Forderungsmanagement – mit der Buchhaltung abstimmen")
         : readiness.overdue_invoice_count > 0 ? tx("Есть просроченные счета", "Überfällige Rechnungen vorhanden") : tx("Задолженности нет", "Keine offenen Forderungen"),
       detail: readiness.overdue_invoice_count > 0 || readiness.debt_hold
-        ? `${tx("Просрочено счетов", "Überfällige Rechnungen")}: ${readiness.overdue_invoice_count}${outstanding ? ` · ${tx("Остаток", "Offen")}: ${outstanding} EUR` : ""}`
+        ? `${tx("Просрочено счетов", "Überfällige Rechnungen")}: ${readiness.overdue_invoice_count}${outstanding ? ` · ${tx("Остаток", "Offen")}: ${formatMoneyLabel(outstanding)}` : ""}`
         : "—" },
     { key: "passport", label: tx("Паспорт", "Reisepass"), ready: passportStatus === "valid", status: PASSPORT_REVIEW_LABELS[passportStatus][language],
       detail: readiness.passport_expiry ? `${tx("Действует до", "Gültig bis")}: ${formatIntakeDate(readiness.passport_expiry)}` : tx("Дата окончания действия отсутствует", "Ablaufdatum fehlt") },

@@ -881,6 +881,7 @@ function useSopsPageContent() {
             accessory={
               <div className="flex min-w-[220px] items-center gap-2">
                 <Input
+                  data-readonly="exempt"
                   value={queueSearch}
                   onChange={(event) => setQueueSearch(event.target.value)}
                   className={shellInputClassName}
@@ -925,6 +926,7 @@ function useSopsPageContent() {
             accessory={
               <div className="flex min-w-[240px] items-center gap-2">
                 <Input
+                  data-readonly="exempt"
                   value={librarySearch}
                   onChange={(event) => setLibrarySearch(event.target.value)}
                   className={shellInputClassName}

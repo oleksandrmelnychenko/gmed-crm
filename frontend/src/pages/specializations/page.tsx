@@ -38,7 +38,7 @@ import {
   isChecklistTemplate,
 } from "@/pages/patients/data/specialization-checklist";
 import { SpecializationChecklistForm } from "@/pages/patients/ui/sections/specialization-checklist-form";
-import { cachedNumberFormat } from "@/lib/intl-cache";
+import { formatMoneyRange } from "@/lib/money";
 import { formatAppDateTime } from "@/lib/app-time-zone";
 import {
   createSpecialization,
@@ -166,12 +166,9 @@ function compareCatalogItems<T extends { sort_order: number; code: string }>(
   return left.sort_order - right.sort_order || left.code.localeCompare(right.code);
 }
 
-function formatPriceRange(item: SpecializationWorkType, lang: Lang) {
-  const formatter = cachedNumberFormat(lang === "ru" ? "ru-RU" : "de-DE", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${formatter.format(item.min_price_eur)} - ${formatter.format(item.max_price_eur)} EUR`;
+/** "250,00 – 1.000,00 €" in every UI language (owner money format). */
+function formatPriceRange(item: SpecializationWorkType) {
+  return formatMoneyRange(item.min_price_eur, item.max_price_eur);
 }
 
 function WorkTypeUpdatedAt({ value, lang }: { value?: string | null; lang: Lang }) {
@@ -724,7 +721,7 @@ export function SpecializationsPage() {
                         </div>
                         <div className="space-y-1">
                           <p className="font-mono text-sm tabular-nums text-foreground">
-                            {formatPriceRange(item, lang)}
+                            {formatPriceRange(item)}
                           </p>
                           <WorkTypeUpdatedAt value={item.updated_at} lang={lang} />
                         </div>

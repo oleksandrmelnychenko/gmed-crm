@@ -291,7 +291,7 @@ mod tests {
         );
         assert_eq!(
             bindings.service_lines[0].line_total.as_deref(),
-            Some("1.140,00 EUR")
+            Some("1.140,00 €")
         );
         // German price per unit, never the raw catalogue unit (QA 2026-10-11).
         assert_eq!(
@@ -303,17 +303,17 @@ mod tests {
             Some("19 Std.")
         );
         assert_eq!(bindings.specialties.as_deref(), Some("Urologie"));
-        assert_eq!(bindings.estimate_total.as_deref(), Some("1.356,60 EUR"));
+        assert_eq!(bindings.estimate_total.as_deref(), Some("1.356,60 €"));
         let selection = estimate_selection(&json!({"data":data})).unwrap();
         assert_eq!(
             selection.line_items[0].unit_price,
-            "28.000,00 - 35.000,00 EUR"
+            "28.000,00 - 35.000,00 €"
         );
         assert_eq!(
             selection.line_items[0].line_gross,
-            "28.000,00 - 35.000,00 EUR"
+            "28.000,00 - 35.000,00 €"
         );
-        assert_eq!(selection.total_range, "28.000,00 - 35.000,00 EUR");
+        assert_eq!(selection.total_range, "28.000,00 - 35.000,00 €");
         assert_eq!(selection.line_items[0].quantity, "15");
         assert_eq!(selection.line_items[0].localized_sections.len(), 2);
         assert_eq!(
@@ -344,7 +344,7 @@ mod tests {
         let line = json!({"quantity":"1", "unit_price":"0.03", "vat_rate":"19"});
         assert_eq!(
             totals(&json!({"lines":[line,line]})),
-            Some(("0,06 EUR".into(), "0,02 EUR".into(), "0,08 EUR".into()))
+            Some(("0,06 €".into(), "0,02 €".into(), "0,08 €".into()))
         );
     }
 
@@ -364,12 +364,12 @@ mod tests {
             quote.service_lines[1].description,
             "Voraussichtliche Auslagen"
         );
-        assert_eq!(quote.estimate_total.as_deref(), Some("169,00 EUR"));
+        assert_eq!(quote.estimate_total.as_deref(), Some("169,00 €"));
 
         let order = repeat_bindings(&context, "single_order");
         assert_eq!(order.service_lines.len(), 1);
         assert_eq!(order.service_lines[0].description, "Coordination");
-        assert_eq!(order.estimate_total.as_deref(), Some("119,00 EUR"));
+        assert_eq!(order.estimate_total.as_deref(), Some("119,00 €"));
     }
 
     #[test]

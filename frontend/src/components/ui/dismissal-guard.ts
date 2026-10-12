@@ -24,6 +24,12 @@ const AUXILIARY_OVERLAY_SELECTOR = [
   ".MuiDialog-root",
   ".MuiModal-root",
 ].join(", ")
+// A list that already closed but is still on screen for its exit animation
+// (`data-closed`) does not count as open: a second Escape right after the one
+// that closed the list closes the dialog.
+const OPEN_AUXILIARY_OVERLAY_SELECTOR = AUXILIARY_OVERLAY_SELECTOR.split(", ")
+  .map((selector) => `${selector}:not([data-closed])`)
+  .join(", ")
 const EXPANDED_CONTROL_SELECTOR = "[aria-expanded='true'][role='combobox'], [aria-expanded='true'][aria-haspopup]"
 const OVERLAY_CONTENT_SELECTOR =
   "[data-slot='sheet-content'], [data-slot='dialog-content']"
@@ -81,7 +87,7 @@ if (typeof document !== "undefined") {
     "keydown",
     (event) => {
       if (event.key === "Escape") {
-        escapeWhileListOpen = document.querySelector(AUXILIARY_OVERLAY_SELECTOR) !== null
+        escapeWhileListOpen = document.querySelector(OPEN_AUXILIARY_OVERLAY_SELECTOR) !== null
       }
     },
     true,
@@ -100,9 +106,11 @@ export function isAuxiliaryOverlayEscape(reason: string, event: Event | undefine
   const activeElement =
     typeof document === "undefined" ? null : document.activeElement
 
+  // A closing list keeps the focus in its search input until its exit
+  // animation ends; that list is closed already.
   return (
-    isElementInside(event.target, AUXILIARY_OVERLAY_SELECTOR) ||
-    isElementInside(activeElement, AUXILIARY_OVERLAY_SELECTOR) ||
+    isElementInside(event.target, OPEN_AUXILIARY_OVERLAY_SELECTOR) ||
+    isElementInside(activeElement, OPEN_AUXILIARY_OVERLAY_SELECTOR) ||
     // The input of a combobox whose list is open: the list is portaled, the key
     // goes to the input inside the dialog (DEV check 2026-10-11: Escape closed
     // the whole lead wizard instead of the specialization list).

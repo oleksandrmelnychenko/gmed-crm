@@ -735,13 +735,14 @@ describe("sections 7–8 as the group shows them", () => {
     const cash = billing({ payment_method: "cash", expected_total_eur: "6000.00", compliance_flags: ["cash_payment"] });
     expect(rows(billingStatements(cash, ru, "ru").payment)).toContainEqual([
       "expected_total",
-      expect.stringMatching(/^6\s000,00 EUR$/u),
+      // The owner money format in both languages: "6.000,00 €".
+      "6.000,00\u00a0€",
       "",
       false,
     ]);
     const german = billingStatements(cash, de, "de").payment.find((row) => row.key === "expected_total");
     expect(german?.label).toBe("Voraussichtlicher Gesamtbetrag");
-    expect(german?.value).toBe("6.000,00 EUR");
+    expect(german?.value).toBe("6.000,00\u00a0€");
     // Not given, or an older server: no row.
     expect(billingStatements(billing({ payment_method: "cash", expected_total_eur: null }), ru, "ru").payment.map((row) => row.key))
       .not.toContain("expected_total");

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { chooseComboboxOption, pickerSection } from "./helpers";
+import { chooseComboboxOption, pickerSection, startClockAt } from "./helpers";
 
 // A real one-page PDF: the lead wizard renders previews with pdf.js.
 const previewPdf = readFileSync(new URL("./fixtures/signature-preview.pdf", import.meta.url));
@@ -22,12 +22,12 @@ type StaffMockOptions = {
 
 let generatedDocumentPayloads: Array<Record<string, unknown>> = [];
 
-function localIsoDate(date = new Date()) {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
+// Every staff test starts the browser clock at E2E_NOW (it runs on from there).
+// The app's "today" is the Europe/Berlin date of the browser clock, so the
+// mocked appointment of today never depends on the wall clock or on the time
+// zone of the machine (a run around midnight, or CI in UTC between 22:00 and
+// 24:00, showed the appointments page one day off the mock).
+const STAFF_TODAY = "2026-10-12";
 
 async function setDatePickerValue(input: Locator, value: string) {
   const displayValue = value.split("-").reverse().join(".");
@@ -111,7 +111,8 @@ async function installStaffApiMocks(page: Page, options: StaffMockOptions = {}) 
   const documentId = "00000000-0000-0000-0000-000000000501";
   const appointmentConfirmationId = "00000000-0000-0000-0000-000000000502";
   const patientId = "00000000-0000-0000-0000-000000000301";
-  const appointmentDate = localIsoDate();
+  await startClockAt(page);
+  const appointmentDate = STAFF_TODAY;
   let nextGeneratedDocumentIndex = 1;
   let nextProviderShareIndex = 1;
   let nextTranslationRequestIndex = 1;
@@ -2244,17 +2245,30 @@ test.describe("patient-profile RBAC shell", () => {
     await expect(page.getByText("CEO Assistant", { exact: true }).first()).toBeVisible();
   });
 
-  test("ceo assistant sees only read-only commercial tabs on patient profile", async ({
+  // Owner decision 2026-10-11: the CEO assistant reads everything, the patient's
+  // documents and medical record included, and writes nothing.
+  test("ceo assistant reads the patient's documents and commercial tabs read-only", async ({
     page,
   }) => {
     await page.goto("/patients/00000000-0000-0000-0000-000000000301?tab=documents");
-    await page.waitForURL(/\/patients\/00000000-0000-0000-0000-000000000301$/);
     const workspaceNav = page.getByRole("complementary");
 
     await expect(page.getByRole("heading", { name: "Anna Muster" })).toBeVisible();
+    await expect(page.getByRole("status").getByText("Nur Ansicht", { exact: true })).toBeVisible();
+    // The documents tab stays open; the assistant creates and uploads nothing.
+    await expect(page).toHaveURL(/\/patients\/00000000-0000-0000-0000-000000000301\?tab=documents$/);
+    await expect(workspaceNav.getByRole("link", { name: "Dokumente", exact: true })).toBeVisible();
+    const documentsTab = page.getByRole("tabpanel");
+    await expect(documentsTab.getByRole("button", { name: "Spalten", exact: false })).toBeVisible();
+    for (const action of ["Dokument erstellen", "Aus Vorlage generieren", "Dokument hochladen"]) {
+      await expect(documentsTab.getByRole("button", { name: action, exact: true })).toHaveCount(0);
+    }
+    // Filtering is reading: the filters stay usable in the read-only view.
+    await expect(documentsTab.getByRole("combobox", { name: "Status", exact: true })).toBeEnabled();
+    await expect(documentsTab.getByRole("combobox", { name: "Typ", exact: true })).toBeEnabled();
     await expect(
-      workspaceNav.getByRole("link", { name: /Dokumente|Documents/i }),
-    ).toHaveCount(0);
+      workspaceNav.getByRole("link", { name: "Diagnosen & Medikation", exact: true }),
+    ).toBeVisible();
     await expect(
       workspaceNav.getByRole("link", { name: /Relations/i }),
     ).toHaveCount(0);
@@ -2529,11 +2543,12 @@ test.describe("lead wizard UX", () => {
     expect(documentPayload.bindings.service_lines.at(-1)).toMatchObject({
       description: "Voraussichtliche Auslagen",
       quantity: "1",
-      fee: "50,00 EUR",
-      line_total: "50,00 EUR",
+      // German money with the euro sign, as on the document (owner rule "1.234,56 €").
+      fee: "50,00 €",
+      line_total: "50,00 €",
       vat_rate: "0",
     });
-    expect(documentPayload.bindings.estimate_total).toBe("169,00 EUR");
+    expect(documentPayload.bindings.estimate_total).toBe("169,00 €");
   });
 
   test("catalog placeholders follow lead selections through the generated order request", async ({ page }) => {
@@ -3670,12 +3685,18 @@ test.describe("lead onboarding wizard", () => {
     const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
     await expect(wizard.locator('input[name="first_name"]')).toBeVisible();
     const navigation = wizard.getByRole("navigation", { name: "Schritte der Lead-Aufnahme" });
-    // The medical step loads its specialty catalogue once, on first open; only later reads count as repeated.
+    // The medical step loads its specialty catalogue once, on first open, and refreshes the
+    // lead, its documents and orders and then, last, its framework contracts once
+    // (refreshDocumentsState); only later reads count as repeated. Which of the two ends
+    // first is a race, so the test waits for both.
     const specialtiesLoaded = page.waitForResponse((response) =>
       new URL(response.url()).pathname.endsWith("/providers/specializations"),
     );
+    const stepRefreshed = page.waitForRequest((request) =>
+      request.method() === "GET" && new URL(request.url()).pathname.endsWith("/framework-contracts"),
+    );
     await navigation.getByRole("tab", { name: /Medizinische Merkmale/i }).click();
-    await specialtiesLoaded;
+    await Promise.all([specialtiesLoaded, stepRefreshed]);
     const repeatedReads: string[] = [];
     const clinicalWrites: string[] = [];
     page.on("request", (request) => {
@@ -4279,11 +4300,11 @@ test.describe("responsive staff workspace", () => {
       return payload.wizard_state?.commercial_draft?.lines?.[0]?.description ===
         "Transport coordination";
     });
-    // Catalog options are grouped by service and list each price version ("12.500,00 EUR · … / unit").
+    // Catalog options are grouped by service and list each price version ("12.500,00 € · … / unit", owner money format).
     await chooseComboboxOption(
       page,
       wizard.getByRole("combobox", { name: "Leistung aus dem Katalog auswählen" }),
-      /^12\.500,00 EUR/,
+      /^12\.500,00\s€/,
     );
     const commercialRequest = await commercialAutosaveRequest;
     expect(commercialRequest.postDataJSON()).toMatchObject({
@@ -4312,7 +4333,7 @@ test.describe("responsive staff workspace", () => {
     await expect(wizard.locator('input[name="first_name"]')).toBeVisible();
     await navigation.getByRole("tab", { name: /Vertrag & Angebot/i }).click();
     await expect(wizard.getByText("Transport coordination", { exact: true })).toBeVisible();
-    await expect(wizard.getByText("12.500,00 EUR", { exact: false }).first()).toBeVisible();
+    await expect(wizard.getByText(/12\.500,00\s€/).first()).toBeVisible();
 
     const contractId = "00000000-0000-0000-0000-000000000961";
     const orderId = "00000000-0000-0000-0000-000000000962";

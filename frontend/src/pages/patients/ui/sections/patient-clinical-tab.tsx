@@ -3951,7 +3951,9 @@ export function PatientClinicalTab({
 
           <div className="grid items-end gap-2.5 border-b border-border/50 bg-white px-3 py-3 sm:grid-cols-[minmax(150px,220px)_minmax(150px,220px)_auto]">
             <Field label={tx("С", "Von")}>
+              {/* The lab period is a filter, i.e. reading: usable read-only. */}
               <Input
+                data-readonly="exempt"
                 type="date"
                 value={labPeriodDraft.dateFrom}
                 max={labPeriodDraft.dateTo || undefined}
@@ -3964,6 +3966,7 @@ export function PatientClinicalTab({
             </Field>
             <Field label={tx("По", "Bis")}>
               <Input
+                data-readonly="exempt"
                 type="date"
                 value={labPeriodDraft.dateTo}
                 min={labPeriodDraft.dateFrom || undefined}

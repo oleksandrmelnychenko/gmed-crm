@@ -12,7 +12,7 @@ import { useDatevText } from "./text";
 export function DatevInvoiceDialog({ invoice, binding, onClose, onSave }: {
   invoice: DatevDemoInvoice; binding?: DatevDemoBinding; onClose: () => void; onSave: (binding: DatevDemoBinding) => void;
 }) {
-  const { text, lang } = useDatevText();
+  const { text } = useDatevText();
   const suggestedId = suggestDemoPatient(invoice);
   const [patientId, setPatientId] = useState(binding?.patientId ?? suggestedId);
   const [orderId, setOrderId] = useState(binding?.orderId ?? "");
@@ -60,12 +60,12 @@ export function DatevInvoiceDialog({ invoice, binding, onClose, onSave }: {
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">{text.fields}</h3>
             <div className="grid gap-3 sm:grid-cols-2">
-              {[[text.number, invoice.number], [text.supplier, invoice.supplier], [text.recipient, invoice.recipient], [text.date, datevDate(invoice.date)], [text.due, datevDate(invoice.dueDate)], [text.currency, invoice.currency], [text.net, datevMoney(invoice.netCents, lang)], [text.vat, datevMoney(invoice.vatCents, lang)]].map(([label, value]) => <Field key={label} label={label}><Input aria-label={label} value={value} readOnly /></Field>)}
+              {[[text.number, invoice.number], [text.supplier, invoice.supplier], [text.recipient, invoice.recipient], [text.date, datevDate(invoice.date)], [text.due, datevDate(invoice.dueDate)], [text.currency, invoice.currency], [text.net, datevMoney(invoice.netCents)], [text.vat, datevMoney(invoice.vatCents)]].map(([label, value]) => <Field key={label} label={label}><Input aria-label={label} value={value} readOnly /></Field>)}
             </div>
-            <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3 font-semibold"><span className="text-sm">{text.total}</span><span className="text-lg tabular-nums">{datevMoney(invoice.grossCents, lang)}</span></div>
+            <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3 font-semibold"><span className="text-sm">{text.total}</span><span className="text-lg tabular-nums">{datevMoney(invoice.grossCents)}</span></div>
             <p className="flex justify-between text-xs text-muted-foreground"><span>{text.paymentStatus}</span><span>{text.unavailable}</span></p>
           </div>
-          <div className="space-y-2"><h3 className="text-sm font-semibold">{text.lines}</h3><div className="divide-y rounded-lg border">{invoice.lines.map((line) => <div key={line.description} className="flex justify-between gap-3 p-3 text-xs"><span>{line.description} × {line.quantity}</span><span className="whitespace-nowrap tabular-nums">{datevMoney(line.unitCents * line.quantity, lang)}</span></div>)}</div></div>
+          <div className="space-y-2"><h3 className="text-sm font-semibold">{text.lines}</h3><div className="divide-y rounded-lg border">{invoice.lines.map((line) => <div key={line.description} className="flex justify-between gap-3 p-3 text-xs"><span>{line.description} × {line.quantity}</span><span className="whitespace-nowrap tabular-nums">{datevMoney(line.unitCents * line.quantity)}</span></div>)}</div></div>
           <div><Button type="button" variant="ghost" size="sm" onClick={() => setShowText(!showText)}>{showText ? text.hideText : text.showText}</Button>{showText ? <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-muted/30 p-3 text-xs">{invoice.text}</pre> : null}</div>
           <dl className="space-y-1 border-t pt-3 text-xs text-muted-foreground"><div className="flex justify-between gap-3"><dt>{text.source}</dt><dd className="text-right">{text.sampleSource}</dd></div><div className="flex justify-between gap-3"><dt>{text.sourceId}</dt><dd>{invoice.id}</dd></div></dl>
           <label className="flex items-start gap-2 text-xs leading-5"><input type="checkbox" className="mt-1 size-4 shrink-0" checked={confirmed} disabled={!isValidDemoBinding(invoice.id, { patientId, orderId })} onChange={(event) => setConfirmed(event.target.checked)} />{text.confirm}</label>

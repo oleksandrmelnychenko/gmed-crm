@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // The expanded row of the leads list: the state of the lead's patient portal
 // at a glance (owner feedback 2026-10-05). Mocked API, synthetic data.
@@ -85,6 +86,7 @@ function minorPortalIntake(leadId: string) {
 }
 
 async function setup(page: Page, lang: "ru" | "de", mail: MailMock = {}, minorLeadId?: string) {
+  await startClockAt(page);
   const calls: Call[] = [];
   await page.addInitScript((language) => {
     localStorage.setItem("gmed_lang", language);

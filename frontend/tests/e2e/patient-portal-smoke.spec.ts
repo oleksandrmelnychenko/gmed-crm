@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
-import { chooseComboboxOption, pickerValueInput } from "./helpers";
+import { chooseComboboxOption, pickerValueInput, startClockAt } from "./helpers";
 
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
@@ -19,6 +19,7 @@ function multipartField(body: Buffer | null, name: string) {
 }
 
 async function installPatientPortalMocks(page: Page) {
+  await startClockAt(page);
   let paymentProofUploadedAt: string | null = null;
   const paymentProofTimestamp = "2026-04-10T09:15:00Z";
   let nextPrivacyRequestIndex = 1;

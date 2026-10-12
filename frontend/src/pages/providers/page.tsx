@@ -64,7 +64,7 @@ import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
-import { formatMoneyAmount } from "@/lib/money";
+import { formatMoneyAmount, formatMoneyRange } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import type { SortStack } from "@/components/data-table/types";
 import { readDataTableState, writeDataTableState } from "@/components/data-table/url-state";
@@ -204,7 +204,6 @@ import {
 import { clearApiCache } from "@/lib/api";
 import { useSecurePersistedState } from "@/lib/secure-persist";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
-import { cachedNumberFormat } from "@/lib/intl-cache";
 import { CountrySelect } from "@/pages/patients/ui/shared/patient-form-primitives";
 import {
   fetchSpecializationWorkTypes,
@@ -7699,15 +7698,9 @@ function providerWorkTypeName(
         workType.code;
 }
 
-function providerWorkTypePrice(
-  workType: SpecializationWorkType,
-  lang: "de" | "ru",
-) {
-  const formatter = cachedNumberFormat(lang === "de" ? "de-DE" : "ru-RU", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-  return `${formatter.format(workType.min_price_eur)} - ${formatter.format(workType.max_price_eur)} EUR`;
+/** "250,00 – 1.000,00 €" in every UI language (owner money format). */
+function providerWorkTypePrice(workType: SpecializationWorkType) {
+  return formatMoneyRange(workType.min_price_eur, workType.max_price_eur);
 }
 
 function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
@@ -7863,7 +7856,7 @@ function ProviderWorkTypesCatalog({ detail }: { detail: ProviderDetail }) {
         width: 200,
         render: (workType) => (
           <span className="block text-right font-mono text-xs tabular-nums text-foreground">
-            {providerWorkTypePrice(workType, lang)}
+            {providerWorkTypePrice(workType)}
           </span>
         ),
       },

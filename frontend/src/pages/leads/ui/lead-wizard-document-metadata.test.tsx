@@ -12,11 +12,13 @@ import {
 } from "./lead-wizard-document-metadata";
 
 describe("leadWizardDocumentTotalLabel", () => {
-  it("shows an older dotted total with a decimal comma", () => {
-    expect(leadWizardDocumentTotalLabel("550.00 EUR")).toBe("550,00 EUR");
-    expect(leadWizardDocumentTotalLabel("2735.81 EUR")).toBe("2.735,81 EUR");
-    expect(leadWizardDocumentTotalLabel("2.735,81 EUR")).toBe("2.735,81 EUR");
-    expect(leadWizardDocumentTotalLabel("1.000,00 - 1.500,00 EUR")).toBe("1.000,00 - 1.500,00 EUR");
+  it("shows an older dotted or EUR total with a decimal comma and the euro sign", () => {
+    expect(leadWizardDocumentTotalLabel("550.00 EUR")).toBe("550,00 €");
+    expect(leadWizardDocumentTotalLabel("2735.81 EUR")).toBe("2.735,81 €");
+    expect(leadWizardDocumentTotalLabel("2.735,81 EUR")).toBe("2.735,81 €");
+    expect(leadWizardDocumentTotalLabel("1.000,00 - 1.500,00 EUR")).toBe("1.000,00 - 1.500,00 €");
+    expect(leadWizardDocumentTotalLabel("2.735,81 €")).toBe("2.735,81 €");
+    expect(leadWizardDocumentTotalLabel("100,00 USD")).toBe("100,00 USD");
     expect(leadWizardDocumentTotalLabel(null)).toBeNull();
   });
 });
@@ -89,10 +91,10 @@ describe("LeadWizardDocumentMetadata", () => {
     );
 
     expect(html).toContain("data-generated-document-total");
-    expect(html).toContain("Итого: 2.735,81 EUR");
+    expect(html).toContain("Итого: 2.735,81 €");
     expect(html).toContain("border-amber-200");
-    expect(html.indexOf("KV-20260913-0033")).toBeLessThan(html.indexOf("Итого: 2.735,81 EUR"));
-    expect(html.indexOf("Итого: 2.735,81 EUR")).toBeLessThan(html.indexOf("1,9 МБ"));
+    expect(html.indexOf("KV-20260913-0033")).toBeLessThan(html.indexOf("Итого: 2.735,81 €"));
+    expect(html.indexOf("Итого: 2.735,81 €")).toBeLessThan(html.indexOf("1,9 МБ"));
   });
 
   it("distinguishes document versions while retaining the business number", () => {

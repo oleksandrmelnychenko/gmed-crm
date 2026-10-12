@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, LoaderCircle } from "lucide-react";
 import { DataTableSurface } from "@/components/data-table/data-table-surface";
+import { WritableScope } from "@/components/read-only-scope";
 import type { ColumnDef } from "@/components/data-table/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -131,6 +132,8 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
           <h2 className="flex items-center gap-2 text-sm font-semibold"><span role="status" className="flex size-3 shrink-0 items-center justify-center">{busy ? <><LoaderCircle className="size-3 animate-spin text-muted-foreground" /><span className="sr-only">{data ? l.updating : l.loading}</span></> : <span className="size-2 rounded-full bg-[var(--brand)]" />}</span>{l.title}</h2>
           <Button type="button" size="sm" variant="outline" onClick={onOpenInvoices}>{l.invoicesLink}<ArrowRight /></Button>
         </div>
+        {/* The period and the currency are reading: usable on a read-only patient. */}
+        <WritableScope>
         <div className="space-y-3 p-4">
           <div className="flex flex-wrap gap-1.5">
             {(["month", "previous_month", "quarter", "year", "all", "custom"] as const).map(value => <Button key={value} type="button" size="sm" variant={preset === value ? "default" : "ghost"} aria-pressed={preset === value} onClick={() => changePreset(value)}>{l[value]}</Button>)}
@@ -141,6 +144,7 @@ export function PatientFinanceTab({ patientId, onOpenInvoices }: { patientId: st
             <Field label={l.currency}><SelectField aria-label={l.currency} value={effectiveCurrency || "EUR"} options={[...new Set([...(data?.available_currencies ?? []), effectiveCurrency || "EUR"])].map(value => ({ value, label: value }))} onValueChange={value => { setCurrency(value); setSelectedMonth(""); }} /></Field>
           </div>
         </div>
+        </WritableScope>
       </section>
       {!validRange ? <Banner tone="error">{l.datesError}</Banner> : null}
       {(result.key === requestPath && result.error) || report.invalid ? <Banner tone="error"><div className="flex flex-wrap items-center justify-between gap-3"><span>{report.invalid ? l.dataError : l.failed}</span><Button type="button" size="sm" variant="outline" onClick={refresh} disabled={busy}>{l.retry}</Button></div></Banner> : null}

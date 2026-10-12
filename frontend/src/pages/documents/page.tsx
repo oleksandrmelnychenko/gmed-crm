@@ -3396,6 +3396,7 @@ function StaffDocumentsPage({
           <div className="mb-2 flex items-center justify-end">
             <NativeComboboxSelect
               aria-label={t.users_status}
+              data-readonly="exempt"
               value={translationQueueStatus}
               onChange={(event) =>
                 setTranslationQueueStatus(event.target.value as TranslationQueueStatusFilter)

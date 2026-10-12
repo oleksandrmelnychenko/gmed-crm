@@ -7,6 +7,7 @@ import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Badge } from "@/components/ui/badge";
 import { CountrySelect, countryNameForDisplay } from "@/components/ui/country-select";
 import { apiFetch } from "@/lib/api";
+import { formatMoneyAmount } from "@/lib/money";
 import { useLang } from "@/lib/i18n";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
 import { createContract, createQuote, fetchAgencyServices, fetchContracts } from "@/pages/contracts/data/contracts-api";
@@ -205,7 +206,7 @@ export function OrderWizard({ patient, orderId, onClose, onCreated, onSaved, cli
   }), tx, workTypesStepLabel);
   const orderCatalog = [...new Map([...(data?.catalog_snapshot?.services ?? []), ...catalog].map(item => [item.id, item])).values()];
   const amount = intakeTotal(data?.lines ?? []);
-  const amountLabel = new Intl.NumberFormat(lang === "de" ? "de-DE" : "ru-RU", { style: "currency", currency: "EUR" }).format(amount);
+  const amountLabel = formatMoneyAmount(amount);
   const periodLabel = data?.date_from || data?.date_to ? `${formatIntakeDate(data.date_from)} – ${formatIntakeDate(data.date_to)}` : tx("Период не указан", "Zeitraum nicht angegeben");
   const pep = data?.facts.pep_contract_partner === true || data?.facts.pep_beneficial_owner === true;
   const selectedDocumentKind = documentKind === "enhanced_due_diligence" && !pep ? "single_order" : documentKind;

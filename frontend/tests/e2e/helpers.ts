@@ -1,6 +1,20 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
+ * The instant the browser clock of a date-sensitive spec starts at; the clock
+ * runs on from there. The mocks date their deadlines, link expiries and slots
+ * around it (retention deadline 19.10.2026, payer link until 05.11.2026, …),
+ * so no spec breaks as real time passes, around midnight, or in another time
+ * zone. The app's "today" is the Europe/Berlin date of this clock: 12.10.2026.
+ */
+export const E2E_NOW = new Date("2026-10-12T10:00:00+02:00");
+
+/** Starts the browser clock at `now` (default {@link E2E_NOW}); call before `page.goto`. */
+export async function startClockAt(page: Page, now: Date = E2E_NOW) {
+  await page.clock.setSystemTime(now);
+}
+
+/**
  * Accessible names of the sections of an MUI date/time field. The pickers
  * speak the UI language (Russian or German), so these match both.
  */

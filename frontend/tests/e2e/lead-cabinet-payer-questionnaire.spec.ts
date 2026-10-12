@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // Lead cabinet, the paying parent's own questionnaire (contract phase 3a,
 // 5.2): the parent who pays for the child answers the payer-only questions
@@ -228,6 +229,7 @@ type SetupOptions = {
 };
 
 async function setup(page: Page, options: SetupOptions = {}) {
+  await startClockAt(page);
   const paying = options.paying ?? true;
   const request = childRequest({ paying }) as Record<string, unknown>;
   // A server that knows the consent to pass the cost estimate on (phase 3b, 11.2): never asked of the paying parent.

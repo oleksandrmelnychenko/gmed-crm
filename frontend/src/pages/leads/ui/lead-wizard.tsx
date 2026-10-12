@@ -132,7 +132,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import { paymentStatusLabel } from "@/lib/payment-status";
-import { moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
+import { formatMoneyLabel, formatMoneyRange, moneyLineAmounts, roundCents, sameCents, toCents } from "@/lib/money";
 import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKey, formatAppDate, isoToBerlinLocalInput, parseBerlinLocalInput } from "@/lib/app-time-zone";
 import { isValidEmailAddress, isValidPhoneNumber } from "@/lib/contact-validation";
@@ -2021,7 +2021,7 @@ function costEstimateWorkTypeDescription(
 // A catalog price is the price of the whole service. Its duration is
 // informational: an operation of 15 hours is not 15 times its price.
 function costEstimateWorkTypeRange(item: SpecializationWorkType) {
-  return `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} EUR`;
+  return `${formatMoneyValue(item.min_price_eur, "de")} - ${formatMoneyValue(item.max_price_eur, "de")} €`;
 }
 
 function costEstimateServiceLines(
@@ -2046,7 +2046,7 @@ function costEstimateTotalRange(
     }),
     { minimum: 0, maximum: 0 },
   );
-  return `${formatMoneyValue(total.minimum, "de")} - ${formatMoneyValue(total.maximum, "de")} EUR`;
+  return `${formatMoneyValue(total.minimum, "de")} - ${formatMoneyValue(total.maximum, "de")} €`;
 }
 
 
@@ -4456,14 +4456,14 @@ export function LeadWizard({
       : "";
     // The VKS total is the medical work-type range; the agency order total never applies.
     const totalLabel = templateId !== "cost_estimate"
-      ? `${formatMoneyValue(estimate.gross, lang)} EUR`
+      ? formatMoneyLabel(estimate.gross)
       : selectedCostEstimateWorkTypes.length > 0
         ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
         : null;
     const prepaymentLabel = !prepayment
       ? tx("не требуется", "nicht erforderlich")
       : prepaymentAmount.trim()
-        ? `${formatMoneyValue(money(prepaymentAmount), lang)} EUR`
+        ? formatMoneyLabel(money(prepaymentAmount))
         : tx("требуется, сумма не указана", "erforderlich, Betrag fehlt");
 
     return (
@@ -6305,10 +6305,11 @@ ${serviceCommentLines.join("\n")}`
           specialties: draft.specialties.map((value) => specialtyDocumentLabel(value)).join(", "),
           period_from: draft.programDateFrom || undefined,
           period_to: draft.programDateTo || undefined,
-          // German amounts, as the document is German (QA 2026-10-10: no "550.00 EUR").
+          // German amounts, "1.234,56 €", as the document is German (QA 2026-10-10: no
+          // "550.00 EUR"; owner rule: the euro sign, never "EUR").
           estimate_total: templateId === "cost_estimate"
             ? costEstimateTotalRange(selectedCostEstimateWorkTypes)
-            : `${formatMoneyValue(documentEstimate.gross, "de")} EUR`,
+            : `${formatMoneyValue(documentEstimate.gross, "de")} €`,
           service_lines: templateId === "cost_estimate"
             ? costEstimateServiceLines(
                 selectedCostEstimateWorkTypes,
@@ -6318,7 +6319,7 @@ ${serviceCommentLines.join("\n")}`
                 description: serviceDocumentDescription(line),
                 quantity: line.quantity,
                 fee: serviceDocumentFee(line),
-                line_total: `${formatMoneyValue(roundCents(money(line.quantity) * money(line.price)), "de")} EUR`,
+                line_total: `${formatMoneyValue(roundCents(money(line.quantity) * money(line.price)), "de")} €`,
                 vat_rate: line.vat,
                 // A 0 % pass-through cost is a durchlaufender Posten, not tax-exempt medical care.
                 is_cost_passthrough: line.isCostPassthrough === true,
@@ -6524,7 +6525,7 @@ ${serviceCommentLines.join("\n")}`
         : tx("бессрочно", "unbefristet")
     }`;
     return [
-      `${formatMoneyValue(money(inputString(price.unit_price)), lang)} ${price.currency}`,
+      formatMoneyLabel(money(inputString(price.unit_price)), price.currency),
       priceVersionDisplayName(price),
       period,
       price.is_effective ? tx("рекомендуемая", "empfohlen") : "",
@@ -8848,9 +8849,7 @@ ${serviceCommentLines.join("\n")}`
                                                   {workTypeDurationLabel(durationHours, tx)}
                                                 </span>
                                                 <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-mono font-medium tabular-nums text-emerald-800 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200">
-                                                  {formatMoneyValue(workType.min_price_eur, lang)}
-                                                  {" – "}
-                                                  {formatMoneyValue(workType.max_price_eur, lang)} EUR
+                                                  {formatMoneyRange(workType.min_price_eur, workType.max_price_eur)}
                                                 </span>
                                               </span>
                                             </span>
@@ -8934,7 +8933,7 @@ ${serviceCommentLines.join("\n")}`
                         onChange={(event) => patch("costThreshold", event.target.value)}
                       />
                       <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-muted-foreground">
-                        EUR
+                        €
                       </span>
                     </div>
                   </Field>
@@ -9221,7 +9220,7 @@ ${serviceCommentLines.join("\n")}`
                             placeholder="0.00"
                           />
                           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-muted-foreground">
-                            EUR
+                            €
                           </span>
                         </div>
                       </Field>
@@ -9284,7 +9283,7 @@ ${serviceCommentLines.join("\n")}`
                         {tx("Сумма", "Betrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-foreground">
-                        {formatMoneyValue(quoteTotal, lang)} EUR
+                        {formatMoneyLabel(quoteTotal)}
                       </dd>
                     </div>
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
@@ -9292,7 +9291,7 @@ ${serviceCommentLines.join("\n")}`
                         {tx("Предоплата", "Vorauszahlung")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
-                        {formatMoneyValue(persistedPrepayment, lang)} EUR
+                        {formatMoneyLabel(persistedPrepayment)}
                       </dd>
                     </div>
                     <div className={cn("min-w-0 rounded-lg px-3 py-2.5", tokens.surface.mutedCard)}>
@@ -9300,7 +9299,7 @@ ${serviceCommentLines.join("\n")}`
                         {tx("Остаток", "Restbetrag")}
                       </dt>
                       <dd className="mt-1 whitespace-nowrap font-mono text-xs tabular-nums text-foreground">
-                        {formatMoneyValue(Math.max(quoteTotal - persistedPrepayment, 0), lang)} EUR
+                        {formatMoneyLabel(Math.max(quoteTotal - persistedPrepayment, 0))}
                       </dd>
                     </div>
                   </dl>
@@ -9432,7 +9431,7 @@ ${serviceCommentLines.join("\n")}`
                   <div className="flex justify-end text-xs text-muted-foreground">
                     <span>{tx("Осталось получить", "Noch zu erhalten")}: </span>
                     <span className="ml-1 font-mono tabular-nums text-foreground">
-                      {formatMoneyValue(prepaymentRemaining, lang)} {quote.currency ?? "EUR"}
+                      {formatMoneyLabel(prepaymentRemaining, quote.currency)}
                     </span>
                   </div>
                 ) : null}
@@ -9464,14 +9463,14 @@ ${serviceCommentLines.join("\n")}`
                       </div>
                       <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5 font-mono tabular-nums">
                         <dt className="sr-only">{tx("Итого", "Gesamt")}</dt>
-                        <dd>{tx("Итого", "Gesamt")}: {formatMoneyValue(quote ? quoteTotal : estimate.gross, lang)} EUR</dd>
+                        <dd>{tx("Итого", "Gesamt")}: {formatMoneyLabel(quote ? quoteTotal : estimate.gross)}</dd>
                       </div>
                       <div className="rounded-full border border-border/70 bg-background/80 px-2 py-0.5">
                         <dt className="sr-only">{tx("Предоплата", "Vorauszahlung")}</dt>
                         <dd>
                           {tx("Предоплата", "Vorauszahlung")}: {prepayment
                             ? prepaymentAmount.trim()
-                              ? `${formatMoneyValue(money(prepaymentAmount), lang)} EUR`
+                              ? formatMoneyLabel(money(prepaymentAmount))
                               : tx("сумма не указана", "Betrag fehlt")
                             : tx("не требуется", "nicht erforderlich")}
                         </dd>
@@ -10344,10 +10343,10 @@ ${serviceCommentLines.join("\n")}`
                           <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
                             {[
                               { label: tx("Объём", "Umfang"), value: `${line.quantity || "0"} ${unit}`, isTotal: false },
-                              { label: tx("Ставка", "Satz"), value: `${formatMoneyValue(money(line.price), lang)} ${line.currency || "EUR"}/${unit}`, isTotal: false },
+                              { label: tx("Ставка", "Satz"), value: `${formatMoneyLabel(money(line.price), line.currency)} / ${unit}`, isTotal: false },
                               { label: tx("НДС", "MwSt."), value: `${formatMoneyValue(money(line.vat), lang)}%`, isTotal: false },
-                              { label: tx("Нетто", "Netto"), value: `${formatMoneyValue(net, lang)} ${line.currency || "EUR"}`, isTotal: false },
-                              { label: tx("Итого", "Gesamt"), value: `${formatMoneyValue(lineGross, lang)} ${line.currency || "EUR"}`, isTotal: true },
+                              { label: tx("Нетто", "Netto"), value: formatMoneyLabel(net, line.currency), isTotal: false },
+                              { label: tx("Итого", "Gesamt"), value: formatMoneyLabel(lineGross, line.currency), isTotal: true },
                             ].map((item) => (
                               <div key={item.label} className="rounded-md border border-border/70 bg-muted/25 px-3 py-2">
                                 <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</dt>
@@ -10389,9 +10388,9 @@ ${serviceCommentLines.join("\n")}`
                           variant="outline"
                           className="border-emerald-200 bg-emerald-50 px-3 py-1 font-mono text-[15px] font-semibold tabular-nums text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
                         >
-                          {formatMoneyValue(item.value, lang)} EUR
+                          {formatMoneyLabel(item.value)}
                         </Badge>
-                      ) : `${formatMoneyValue(item.value, lang)} EUR`}
+                      ) : formatMoneyLabel(item.value)}
                     </dd>
                   </div>
                 ))}

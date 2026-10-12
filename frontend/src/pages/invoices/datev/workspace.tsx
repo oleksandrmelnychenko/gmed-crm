@@ -26,7 +26,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
     { id: "supplier", label: text.supplier, accessor: (row) => row.supplier, width: 210, sortable: true },
     { id: "recipient", label: text.recipient, accessor: (row) => row.recipient, width: 170, sortable: true },
     { id: "date", label: text.date, accessor: (row) => row.date, width: 150, sortable: true, render: (row) => <span className="text-muted-foreground">{datevDate(row.date)}</span> },
-    { id: "total", label: text.total, accessor: (row) => row.grossCents, width: 145, sortable: true, render: (row) => <span className="font-medium tabular-nums">{datevMoney(row.grossCents, lang)}</span> },
+    { id: "total", label: text.total, accessor: (row) => row.grossCents, width: 145, sortable: true, render: (row) => <span className="font-medium tabular-nums">{datevMoney(row.grossCents)}</span> },
     { id: "binding", label: text.binding, width: 200, accessor: (row) => bindings[row.id] ? text.linked : suggestDemoPatient(row) ? text.suggested : text.needsClient, render: (row) => {
       const binding = bindings[row.id];
       const patient = binding ? DATEV_DEMO_PATIENTS.find((item) => item.id === binding.patientId) : undefined;
@@ -51,7 +51,7 @@ export function DatevWorkspace({ active, demo, onModeChange, onConnection }: {
     </section> : <>
       <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100"><Badge variant="outline" className="shrink-0">{text.demo}</Badge><span>{text.demoNotice}</span></div>
       <dl className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-        {[[text.count, DATEV_DEMO_INVOICES.length], [text.linkedCount, linkedCount], [text.needsReview, DATEV_DEMO_INVOICES.length - linkedCount], [text.totalAmount, datevMoney(DATEV_DEMO_INVOICES.reduce((sum, row) => sum + row.grossCents, 0), lang)]].map(([label, value]) => <div key={label} className="rounded-xl border bg-card px-4 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-2 text-xl font-semibold tabular-nums">{value}</dd></div>)}
+        {[[text.count, DATEV_DEMO_INVOICES.length], [text.linkedCount, linkedCount], [text.needsReview, DATEV_DEMO_INVOICES.length - linkedCount], [text.totalAmount, datevMoney(DATEV_DEMO_INVOICES.reduce((sum, row) => sum + row.grossCents, 0))]].map(([label, value]) => <div key={label} className="rounded-xl border bg-card px-4 py-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-2 text-xl font-semibold tabular-nums">{value}</dd></div>)}
       </dl>
       {notice ? <p role="status" className="rounded-lg bg-muted/30 px-3 py-2 text-xs">{notice === "saved" ? text.saved : text.demoRefreshed}</p> : null}
       <DataTableSurface

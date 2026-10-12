@@ -19,6 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { getLang, useLang, type Translations } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { cachedNumberFormat } from "@/lib/intl-cache";
+import { formatMoneyLabel, formatMoneyRange } from "@/lib/money";
 import {
   knownLeadProgramServiceLabel,
   leadInsuranceCoverageLabel,
@@ -204,11 +205,12 @@ function selectedWorkTypeNumber(value: number, lang: "de" | "ru") {
   }).format(value);
 }
 
-function selectedWorkTypePriceRange(item: LeadOriginSelectedWorkType, lang: "de" | "ru") {
+/** The price range of a work type, "250,00 – 1.000,00 €" (owner money format). */
+function selectedWorkTypePriceRange(item: LeadOriginSelectedWorkType) {
   if (item.minPriceEur == null && item.maxPriceEur == null) return null;
-  if (item.minPriceEur == null) return `${selectedWorkTypeNumber(item.maxPriceEur as number, lang)} EUR`;
-  if (item.maxPriceEur == null) return `${selectedWorkTypeNumber(item.minPriceEur, lang)} EUR`;
-  return `${selectedWorkTypeNumber(item.minPriceEur, lang)} - ${selectedWorkTypeNumber(item.maxPriceEur, lang)} EUR`;
+  if (item.minPriceEur == null) return formatMoneyLabel(item.maxPriceEur);
+  if (item.maxPriceEur == null) return formatMoneyLabel(item.minPriceEur);
+  return formatMoneyRange(item.minPriceEur, item.maxPriceEur);
 }
 
 function ProfileDetailTile({
@@ -1047,7 +1049,7 @@ function usePatientProfileTabContent({
                     </p>
                     <div className="overflow-hidden rounded-md border border-border/60 bg-white">
                       {selectedWorkTypes.map((workType) => {
-                        const priceRange = selectedWorkTypePriceRange(workType, profileLang);
+                        const priceRange = selectedWorkTypePriceRange(workType);
                         return (
                           <article
                             key={workType.id}

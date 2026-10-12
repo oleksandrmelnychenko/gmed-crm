@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import { startClockAt } from "./helpers";
 
 // Lead cabinet, who acts for the lead (owner spec "Patientenformular",
 // section 3; contract phase 1b-2): an adult's representative and legal
@@ -314,6 +315,7 @@ const scan = { name: "ausweis.jpg", mimeType: "image/jpeg", buffer: Buffer.from(
 const proof = { name: "nachweis.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") };
 
 async function setup(page: Page, options: { minor: boolean; prepare?: (request: Request) => void }) {
+  await startClockAt(page);
   const request = leadRequest(options.minor);
   options.prepare?.(request);
   const calls = {

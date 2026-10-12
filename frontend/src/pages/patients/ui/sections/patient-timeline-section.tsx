@@ -1,6 +1,7 @@
 import { Search } from "lucide-react";
 
 import { DataTablePager } from "@/components/data-table/data-table-pager";
+import { WritableScope } from "@/components/read-only-scope";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
@@ -149,6 +150,8 @@ export function PatientTimelineTab({
         </EmptyCell>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
+          {/* Filters and search are reading: usable on a read-only patient. */}
+          <WritableScope>
           <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
             <NativeComboboxSelect
               // Remount when counts arrive so the trigger label re-derives
@@ -225,6 +228,7 @@ export function PatientTimelineTab({
               </Button>
             ) : null}
           </div>
+          </WritableScope>
           <DataTablePager
             pageIndex={timelineLimit > 0 ? Math.floor(timelineOffset / timelineLimit) : 0}
             pageSize={timelineLimit}

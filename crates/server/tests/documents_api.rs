@@ -7074,7 +7074,7 @@ async fn lead_cost_estimate_lists_only_the_selected_medical_work_types() {
     let pdf_text = extract_pdf_text(&bytes);
     assert!(pdf_text.contains("Gastroskopie mit Biopsie"), "{pdf_text}");
     // The line and the total are the same catalog range.
-    assert!(pdf_text.contains("800,00 - 1.200,00 EUR"), "{pdf_text}");
+    assert!(pdf_text.contains("800,00 - 1.200,00 €"), "{pdf_text}");
     assert!(!pdf_text.contains("Interpreter support"), "{pdf_text}");
     assert!(!pdf_text.contains("285,00"), "{pdf_text}");
     assert!(!pdf_text.contains("339,15"), "{pdf_text}");
@@ -7817,7 +7817,7 @@ async fn document_templates_can_generate_framework_contract_pdf_document() {
     assert!(pdf_text.contains("override.patient@example.test"));
     assert!(pdf_text.contains("+49 89 123456"));
     assert!(!pdf_text.contains("4. EINZELAUFTRAG"));
-    assert!(pdf_text.contains("2.500,00 EUR"));
+    assert!(pdf_text.contains("2.500,00 €"));
     assert!(!pdf_text.contains("Klinik Datenschutzstelle"));
     assert!(!pdf_text.contains("Patientenbetreuung /"));
     assert!(!pdf_text.to_ascii_lowercase().contains("c/o"));
@@ -11363,7 +11363,7 @@ async fn the_leads_patient_form_is_generated_after_the_request_was_sent() {
         // The payment route of the base form and the expected total (QA
         // 2026-10-10 B5).
         "Bevorzugte Zahlungsart für Rechnungen Barzahlung",
-        "Voraussichtlicher Gesamtbetrag 8.000,00 EUR",
+        "Voraussichtlicher Gesamtbetrag 8.000,00 €",
         "Herkunft der Mittel Ersparnisse",
         "Ersparnisse aus dem Gehalt",
         "Beruf Lehrerin",

@@ -205,7 +205,7 @@ export function ProviderDocumentsSection({
         </span>
         {canManage ? <Button type="button" size="sm" className="h-8 shrink-0 self-center rounded-lg" onClick={openUpload}><Plus className="size-3.5" />{labels.upload}</Button> : null}
         <span aria-hidden className="mx-1 h-4 w-px shrink-0 self-center bg-border" />
-        <div className="relative min-w-[240px] flex-1"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input className="h-8 bg-field pl-8 text-xs" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} /></div>
+        <div className="relative min-w-[240px] flex-1"><Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input data-readonly="exempt" className="h-8 bg-field pl-8 text-xs" value={query} placeholder={labels.search} onChange={(event) => setQuery(event.target.value)} /></div>
         <select className="h-8 w-[220px] shrink-0 rounded-md border border-input bg-field px-3 text-xs" value={patientFilter} onChange={(event) => setPatientFilter(event.target.value)}>
           <option value="">{labels.allPatients}</option>
           {patientOptions.map((patient) => <option key={patient.id} value={patient.id}>{patient.name}</option>)}

@@ -1,6 +1,6 @@
 import { expect, test, type Route } from "@playwright/test";
 
-import { chooseComboboxOption } from "./helpers";
+import { chooseComboboxOption, startClockAt } from "./helpers";
 
 // QA 2026-10-11 C-12/C-20: a concierge service reaches "Забронировано" and
 // "Подтверждено" only through the partner booking, which had no reachable UI.
@@ -130,6 +130,8 @@ test("CEO books the partner of a planned service and confirms the booking (RU)",
     return json(route, { message: "Not mocked" }, 404);
   });
 
+  // The slot (20.10.2026) stays in the future whatever the real date.
+  await startClockAt(page);
   await page.goto("/login");
   await page.locator("#email").fill("ceo@example.com");
   await page.locator("#password").fill("synthetic-test");
