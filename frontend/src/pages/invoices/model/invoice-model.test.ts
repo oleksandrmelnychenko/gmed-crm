@@ -174,6 +174,8 @@ describe("invoice payer and recipient", () => {
         payerPatientPid: "",
         payerRole: "",
         contactName: "  Ivan Payer ",
+        isOrganisation: false,
+        organisationTouched: false,
         contactEmail: "",
         contactPhone: " ",
         contactRelationship: "father",
@@ -196,6 +198,30 @@ describe("invoice payer and recipient", () => {
       payer_address_city: "Kyiv",
       payer_address_country: null,
       payer_notes: null,
+      payer_contact_is_organisation: false,
+    });
+  });
+
+  it("shows and sends the organisation box of a contact payer", () => {
+    const invoice = {
+      payer: { contact_name: "Polartek Shipping", contact_is_organisation: true },
+    } as unknown as InvoiceItem;
+    const form = invoiceToPayerForm(invoice);
+    expect(form.isOrganisation).toBe(true);
+    expect(form.organisationTouched).toBe(true);
+    expect(payerFormToPayload(form)).toMatchObject({
+      payer_contact_name: "Polartek Shipping",
+      payer_contact_is_organisation: true,
+    });
+    expect(payerFormToPayload({ ...form, isOrganisation: false })).toMatchObject({
+      payer_contact_is_organisation: false,
+    });
+    // No contact: no answer.
+    const empty = invoiceToPayerForm({ payer: null } as unknown as InvoiceItem);
+    expect(empty.isOrganisation).toBe(false);
+    expect(empty.organisationTouched).toBe(false);
+    expect(payerFormToPayload({ ...empty, isOrganisation: true })).toMatchObject({
+      payer_contact_is_organisation: null,
     });
   });
 
@@ -205,6 +231,8 @@ describe("invoice payer and recipient", () => {
       payerPatientPid: "",
       payerRole: "" as const,
       contactName: "",
+      isOrganisation: false,
+      organisationTouched: false,
       contactEmail: "",
       contactPhone: "",
       contactRelationship: "",

@@ -106,20 +106,16 @@
       ],
       "manual_binding_keys": [
         "extra_release_recipients",
-        "consent_email",
-        "consent_threema",
-        "consent_whatsapp",
-        "consent_telegram",
         "party_sign_place",
         "party_sign_date"
       ],
       "frontend_form_tokens": [
         "documentBindingFieldLabel",
-        "field.kind === \"boolean\"",
         "isFixedLegalDocumentTemplate"
       ],
       "runtime_tokens": [
-        "build_adult_privacy_consents_pdf"
+        "build_adult_privacy_consents_pdf",
+        "consent_choices::OwnConsentChoice"
       ]
     },
     {

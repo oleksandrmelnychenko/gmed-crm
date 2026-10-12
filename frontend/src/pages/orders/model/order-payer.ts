@@ -5,6 +5,8 @@
  * inherit it as one whole record.
  */
 
+import { relationNameSuggestsOrganisation } from "@/pages/patients/model/sheet-forms";
+
 /**
  * How the payer relates to the contracting party: the party itself, a
  * Kostenübernehmer, or the party at another invoice address (no
@@ -31,6 +33,13 @@ export type OrderPayerForm = {
   city: string;
   country: string;
   notes: string;
+  /**
+   * The free-text contact is an organisation (company, foundation, insurer): the sanctions
+   * screening compares it with the listed entities by its whole name.
+   */
+  isOrganisation: boolean;
+  /** Staff set the box themselves (or it was stored); a typed name no longer changes it. */
+  organisationTouched: boolean;
 };
 
 export type OrderPayerSource = {
@@ -46,6 +55,11 @@ export type OrderPayerSource = {
   payer_address_city?: string | null;
   payer_address_country?: string | null;
   payer_notes: string | null;
+  /**
+   * The organisation box of the contact: the stored answer, or for an older row how the server
+   * screens the name (legal form); null without a contact name.
+   */
+  payer_contact_is_organisation?: boolean | null;
 };
 
 export const EMPTY_ORDER_PAYER: OrderPayerForm = {
@@ -61,16 +75,19 @@ export const EMPTY_ORDER_PAYER: OrderPayerForm = {
   city: "",
   country: "",
   notes: "",
+  isOrganisation: false,
+  organisationTouched: false,
 };
 
 /** The stored payer as form values (the relation and the role are kept, not dropped). */
 export function orderPayerToForm(source: OrderPayerSource): OrderPayerForm {
   const role = ORDER_PAYER_ROLES.find((known) => known === source.payer_role) ?? "";
+  const name = source.payer_contact_name ?? "";
   return {
     relationId: source.payer_patient_relation_id ?? "",
     patientPid: source.payer_patient_pid ?? "",
     role,
-    name: source.payer_contact_name ?? "",
+    name,
     relationship: source.payer_contact_relationship ?? "",
     email: source.payer_contact_email ?? "",
     phone: source.payer_contact_phone ?? "",
@@ -79,7 +96,21 @@ export function orderPayerToForm(source: OrderPayerSource): OrderPayerForm {
     city: source.payer_address_city ?? "",
     country: source.payer_address_country ?? "",
     notes: source.payer_notes ?? "",
+    isOrganisation: Boolean(name.trim()) && source.payer_contact_is_organisation === true,
+    // A saved contact keeps its answer; an empty one follows the name staff type.
+    organisationTouched: Boolean(name.trim()),
   };
+}
+
+/**
+ * The organisation box after staff typed a contact name: until they tick or untick the box
+ * themselves, a legal form in the name ("Beispiel GmbH", "ООО Полартек") ticks it.
+ */
+export function organisationAfterTypedName(
+  form: { isOrganisation: boolean; organisationTouched: boolean },
+  name: string,
+): boolean {
+  return form.organisationTouched ? form.isOrganisation : relationNameSuggestsOrganisation(name);
 }
 
 /**
@@ -105,6 +136,8 @@ export function orderPayerPayload(form: OrderPayerForm) {
     payer_address_city: text(form.city),
     payer_address_country: text(form.country),
     payer_notes: text(form.notes),
+    // Only a contact name carries the answer; the server stores none without one.
+    payer_contact_is_organisation: text(form.name) ? form.isOrganisation : null,
   };
 }
 

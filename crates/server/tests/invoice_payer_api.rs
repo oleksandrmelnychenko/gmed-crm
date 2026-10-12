@@ -1445,6 +1445,16 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    // The database clock steps back before the final invoice is released
+    // (seen once under CI load: the advance stayed unsettled). The release
+    // order, not `issued_at`, decides that the advance came first.
+    sqlx::query(
+        "UPDATE invoices SET issued_at = issued_at + interval '30 seconds' WHERE id = $1::uuid",
+    )
+    .bind(advance["id"].as_str().unwrap())
+    .execute(&fx.pool)
+    .await
+    .unwrap();
 
     // The final invoice goes to a contact who is not the contracting party.
     let final_invoice = create_draft(&fx.app, &fx.billing, &quote, "final").await;
@@ -1486,9 +1496,24 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
             .unwrap();
     assert_eq!(snapshot["name"], "Firma Zahlt GmbH");
     assert!(snapshot["service_recipient_name"].is_string());
+    assert_eq!(
+        snapshot["confirmations"]["advance_recipient_mismatch"]["advance_invoice_numbers"],
+        json!([advance_number(&fx.pool, advance["id"].as_str().unwrap()).await])
+    );
+    // Each release takes the next value of the release order.
+    let sequences: Vec<Option<i64>> = sqlx::query_scalar(
+        "SELECT release_sequence FROM invoices WHERE id = ANY($1::uuid[]) ORDER BY invoice_type",
+    )
+    .bind(vec![
+        advance["id"].as_str().unwrap().to_string(),
+        invoice_id.clone(),
+    ])
+    .fetch_all(&fx.pool)
+    .await
+    .unwrap();
     assert!(
-        snapshot["confirmations"]["advance_recipient_mismatch"]["advance_invoice_numbers"]
-            .is_array()
+        matches!(sequences.as_slice(), [Some(advance), Some(last)] if advance < last),
+        "{sequences:?}"
     );
 
     // The statement can be narrowed to the paying company.
@@ -1542,6 +1567,15 @@ async fn recipient_other_than_the_party_and_advance_mismatch_need_confirmation()
     .await;
     assert_eq!(patient_advance["balance_due"], "0", "{patient_advance}");
     assert_eq!(patient_advance["display_status"], "credited");
+}
+
+/// The number an invoice got at its release.
+async fn advance_number(pool: &PgPool, invoice_id: &str) -> String {
+    sqlx::query_scalar("SELECT invoice_number FROM invoices WHERE id = $1::uuid")
+        .bind(invoice_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 async fn pay(app: &axum::Router, auth: &str, invoice_id: &str, amount: &str) -> Value {

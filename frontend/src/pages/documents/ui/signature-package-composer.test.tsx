@@ -95,6 +95,23 @@ describe("signature package composer rules", () => {
     expect(packageWarnings([candidate("x", { signer_policy: "agency_only" }), candidate("y")], limits)).toContainEqual({ kind: "policy_conflict" });
   });
 
+  it("keeps a consent form without the patient's own choice out of the package and says to sign on paper", () => {
+    const missing = candidate("consent", { ineligible_reason: "consent_choice_missing" });
+    expect(packageWarnings([missing], limits)).toContainEqual({ document_id: "consent", kind: "ineligible", reason: "consent_choice_missing" });
+    const resolved = resolvePackage(candidates([missing]), emptyPackageSelection("consent"));
+    expect(resolved.blocked).toBe(true);
+    const tx = (_ru: string, de: string) => de;
+    const txRu = (ru: string) => ru;
+    expect(signatureErrorText("consent_choice_missing", tx)).toContain("Unterschrift auf Papier");
+    expect(signatureErrorText("consent_choice_missing", txRu)).toBe(
+      "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
+    );
+    expect(signatureErrorText("consent_choice_changed", txRu)).toContain("изменил выбор");
+    const markup = renderToStaticMarkup(<SignaturePackageComposer documentId="consent" candidates={candidates([missing])} previewedDocumentIds={[]}
+      selection={emptyPackageSelection("consent")} onChange={() => undefined} />);
+    expect(markup).toContain("Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett");
+  });
+
   it("requires every companion attachment and picks a single option automatically", () => {
     expect(requiredAttachmentTemplates([candidate("a", { companion: "privacy_information" }), candidate("b", { companion: "privacy_information" }), candidate("c")])).toEqual(["privacy_information"]);
     const pool = candidates(

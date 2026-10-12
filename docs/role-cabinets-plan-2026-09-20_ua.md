@@ -138,7 +138,13 @@ EPIC 14 «Безпека» (`docs/requirements/03_product-backlog_ua.md`), ау�
 3. **Режим перегляду форм.** Спільна обгортка `ReadOnlyScope` (React context):
    усередині всі `Input/Select/Textarea/Button[type=submit]` стають disabled, а
    кнопки дій ховаються. Кожна сторінка вмикає її однією умовою
-   `!can("<module>.edit")`. Це і є «рід онлі для інших».
+   `!can("<module>.edit")`. Це і є «рід онлі для інших». Те саме діє для
+   спільного вибору файлу `FilePicker` (`components/ui/file-picker.tsx`,
+   2026-10-12): замість голого `<input type="file">`, який показує кнопку й
+   статус мовою браузера («Вибрати файл»), — кнопка й назва вибраного файлу
+   мовою застосунку (`file_picker_*` у `catalogs/shared.ts`); справжнє поле
+   файлу лишається в DOM (приховане, але доступне з клавіатури й для
+   `setInputFiles` у тестах, з тим самим `id` і підписом поля).
 4. **Row-level scope** лишається як є (`policy::check_access`, assignment,
    `ShareStatus`, маскування полів) — capabilities відповідають на «чи є
    екран/кнопка», policy — на «чи цей запис».

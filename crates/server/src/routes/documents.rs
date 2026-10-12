@@ -2990,11 +2990,10 @@ struct DocumentBindingOverrides {
     guardian2_label: Option<String>,
     guardian2_birth_date: Option<NaiveDate>,
     extra_release_recipients: Option<String>,
-    consent_email: Option<bool>,
-    consent_messenger: Option<bool>,
-    consent_threema: Option<bool>,
-    consent_whatsapp: Option<bool>,
-    consent_telegram: Option<bool>,
+    // No consent options (`consent_email`, `consent_whatsapp` …): staff never
+    // tick a box of the consent form; only the person's own choice does
+    // (`crate::consent_choices`, 2026-10-12). Older clients still sending
+    // them are ignored like any unknown key.
     #[serde(default)]
     aml_enhanced_due_diligence: Option<AmlEnhancedDueDiligenceBindings>,
     #[serde(default)]
@@ -16133,6 +16132,27 @@ async fn generate_document(
         generated_bindings_snapshot.get_or_insert_with(|| json!({}))["_order_intake_context"] =
             context.clone();
     }
+    // The person's own choice of the consent form options (lead cabinet,
+    // 2026-10-12): the form ticks only those and records the choice, which
+    // an electronic signature needs (`crate::consent_choices`).
+    let own_consent_choice = if crate::consent_choices::needs_own_choice(Some(template.id)) {
+        match crate::consent_choices::current_for(&state.db, lead_id, patient_id).await {
+            Ok(choice) => choice,
+            Err(error) => {
+                tracing::error!(error = %error, ?patient_id, ?lead_id, "load the own consent choice");
+                return err(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to load the consent choice",
+                );
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(choice) = own_consent_choice.as_ref() {
+        generated_bindings_snapshot.get_or_insert_with(|| json!({}))
+            [crate::consent_choices::BINDING_KEY] = choice.binding();
+    }
     let manual_text = match normalize_generated_manual_text(body.manual_text.as_deref()) {
         Ok(value) => value,
         Err(resp) => return resp,
@@ -17493,6 +17513,7 @@ async fn generate_document(
                 &agency,
                 &bindings,
                 &generated_doc_id,
+                own_consent_choice.as_ref(),
             ) {
                 Ok(generated) => {
                     record_signature_anchors(&mut generated_bindings_snapshot, generated)
@@ -21560,12 +21581,18 @@ fn agency_data_controller_statement(agency: &AgencyContractSettings) -> &str {
     agency.data_controller_statement.trim()
 }
 
-/// A box of a consent form, always printed empty: the person ticks it by hand
-/// (owner decision 2026-10-11; Art. 7 DSGVO — an active, unambiguous
-/// consent, never a pre-ticked one).
-fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
+/// The box of a consent form option: «[x]» only for what the person chose
+/// themselves (lead cabinet, `crate::consent_choices`), else empty for the
+/// person to tick by hand (owner decision 2026-10-11; Art. 7 DSGVO — an
+/// active, unambiguous consent, never one pre-ticked by staff).
+fn consent_box(chosen: bool) -> &'static str {
+    if chosen { "[x]" } else { "[ ]" }
+}
+
+/// A box of a consent form ([`consent_box`]).
+fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, chosen: bool, text: &str) {
     layout.text_block_justified(
-        &format!("[ ]  {text}"),
+        &format!("{}  {text}", consent_box(chosen)),
         10.5,
         false,
         4.0,
@@ -21575,11 +21602,11 @@ fn adult_legal_checkbox(layout: &mut TreatmentPlanPdfLayout, text: &str) {
     );
 }
 
-/// A communication channel of the consent form, an empty box like
+/// A communication channel of the consent form, a box like
 /// [`adult_legal_checkbox`].
-fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, label: &str) {
+fn adult_legal_channel(layout: &mut TreatmentPlanPdfLayout, chosen: bool, label: &str) {
     layout.text_block(
-        &format!("[ ]  {label}"),
+        &format!("{}  {label}", consent_box(chosen)),
         10.5,
         false,
         12.0,
@@ -25440,6 +25467,7 @@ fn build_adult_privacy_consents_pdf(
     agency: &AgencyContractSettings,
     bindings: &DocumentBindingOverrides,
     document_reference: &str,
+    own_choice: Option<&crate::consent_choices::OwnConsentChoice>,
 ) -> Result<GeneratedPdf, &'static str> {
     let (document, regular, bold) = new_admin_pdf()?;
     let mut layout = legal_document_pdf_layout(document_reference, agency, regular, bold);
@@ -25450,6 +25478,11 @@ fn build_adult_privacy_consents_pdf(
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty());
+    // «[x]» only for what the person chose themselves in the lead cabinet
+    // (2026-10-12); without such a choice every box is printed empty and
+    // ticked by the person on the printed copy (owner decision 2026-10-11).
+    // Staff bindings never tick a box; staff fill in only the recipients.
+    let chosen = own_choice.map(|choice| choice.choices).unwrap_or_default();
 
     adult_legal_document_header(
         &mut layout,
@@ -25457,30 +25490,38 @@ fn build_adult_privacy_consents_pdf(
         "Einverständniserklärung zur Datenübermittlung",
     );
     adult_legal_identity_block(&mut layout, party, true);
-    fc_body(&mut layout, "bin damit einverstanden (bitte ankreuzen):");
-    // Every box is printed empty and ticked by the person on the printed
-    // copy, also the three consents the service runs on (owner decision
-    // 2026-10-11). Staff fill in only the recipients' names.
+    fc_body(
+        &mut layout,
+        if own_choice.is_some() {
+            "bin damit einverstanden (angekreuzt ist meine eigene Auswahl):"
+        } else {
+            "bin damit einverstanden (bitte ankreuzen):"
+        },
+    );
     adult_legal_checkbox(
         &mut layout,
+        chosen.agency_processing,
         &format!(
             "dass {agency_identity} und von der verantwortlichen Person beauftragte Mitarbeitende meine personenbezogenen und medizinischen Daten, Personalausweis- und Reisepasskopien, Vorbefunde, Laborbefunde, Bilddaten, ärztliche und medizinische Dokumentation, Rezepte, Kostenvoranschläge, Rechnungen, Quittungen, Behandlungs- und Leistungsverträge sowie Arzt- und Krankenhausberichte einholen, bearbeiten, speichern und erforderlichenfalls an behandelnde Ärzte, Krankenhäuser, Labore, andere medizinische Einrichtungen, Dolmetscher, Übersetzer, Gutachter oder Kostenträger übermitteln;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        chosen.doctors_to_agency,
         &format!(
             "dass alle meine behandelnden Ärzte und medizinischen Einrichtungen meine Behandlungsunterlagen und medizinischen Informationen an {agency_identity} übermitteln dürfen;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        chosen.data_system,
         &format!(
             "dass meine erforderlichen personenbezogenen und medizinischen Unterlagen im {data_system_name} gespeichert und verarbeitet werden;"
         ),
     );
     adult_legal_checkbox(
         &mut layout,
+        chosen.named_recipients,
         "dass meine personenbezogenen und medizinischen Daten an folgende Personen oder Institutionen übermittelt werden:",
     );
     if let Some(recipients) = recipients {
@@ -25498,15 +25539,19 @@ fn build_adult_privacy_consents_pdf(
     }
     adult_legal_checkbox(
         &mut layout,
+        chosen.any_channel(),
         "dass meine personenbezogenen und medizinischen Daten sowie erforderliche Unterlagen über folgende Kommunikationsmedien eingeholt und/oder übermittelt werden:",
     );
-    for channel in [
-        "E-mail",
-        "Threema-Messenger",
-        "WhatsApp-Messenger",
-        "Telegram-Messenger",
+    for (channel, picked) in [
+        ("E-mail", chosen.channel_email),
+        ("Threema-Messenger", chosen.channel_threema),
+        ("WhatsApp-Messenger", chosen.channel_whatsapp),
+        ("Telegram-Messenger", chosen.channel_telegram),
     ] {
-        adult_legal_channel(&mut layout, channel);
+        adult_legal_channel(&mut layout, picked, channel);
+    }
+    if let Some(choice) = own_choice {
+        fc_body(&mut layout, &choice.printed_note());
     }
     fc_body(
         &mut layout,
@@ -34833,12 +34878,20 @@ mod tests {
             party_sign_place: Some("Berlin".to_string()),
             party_sign_date: NaiveDate::from_ymd_opt(2026, 7, 16),
             extra_release_recipients: Some("Maria Beispiel, Vertrauenskontakt".to_string()),
-            consent_email: Some(true),
-            consent_threema: Some(true),
-            consent_whatsapp: Some(false),
-            consent_telegram: Some(true),
             ..Default::default()
         };
+        // Staff bindings that used to preselect channels are no fields any
+        // more: deserialised, they are ignored like any unknown key.
+        let legacy: DocumentBindingOverrides = serde_json::from_value(json!({
+            "party_sign_place": "Berlin",
+            "consent_email": true,
+            "consent_whatsapp": true
+        }))
+        .unwrap();
+        let legacy_snapshot = generated_binding_snapshot(&legacy).unwrap();
+        assert_eq!(legacy_snapshot["party_sign_place"], "Berlin");
+        assert!(legacy_snapshot.get("consent_email").is_none());
+        assert!(legacy_snapshot.get("consent_whatsapp").is_none());
 
         let release = build_adult_confidentiality_release_pdf(
             &party,
@@ -34865,6 +34918,7 @@ mod tests {
             &agency,
             &bindings,
             "EW-20260716-UNITTEST0001",
+            None,
         )
         .unwrap();
         assert_signature_frames_detected(&consent);
@@ -34886,7 +34940,51 @@ mod tests {
         assert!(consent_text.contains("[ ] Threema-Messenger"));
         assert!(consent_text.contains("[ ] WhatsApp-Messenger"));
         assert!(consent_text.contains("[ ] Telegram-Messenger"));
+        assert!(consent_text.contains("bitte ankreuzen"));
+        assert!(!consent_text.contains("GMED-Kundenkabinett"));
         assert!(!consent_text.contains('?'));
+
+        // The person's own choice from the lead cabinet: «[x]» only for what
+        // they chose, with the date of the choice (2026-10-12).
+        let own = crate::consent_choices::OwnConsentChoice {
+            id: Uuid::nil(),
+            choices: crate::consent_choices::ConsentChoices {
+                agency_processing: true,
+                doctors_to_agency: true,
+                channel_whatsapp: true,
+                ..Default::default()
+            },
+            chosen_at: chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 10, 12, 8, 5, 0)
+                .unwrap(),
+            source: "lead_portal".into(),
+        };
+        let chosen = build_adult_privacy_consents_pdf(
+            &party,
+            &agency,
+            &bindings,
+            "EW-20261012-UNITTEST0002",
+            Some(&own),
+        )
+        .unwrap();
+        assert_signature_frames_detected(&chosen);
+        let chosen_text = assert_legal_pdf_chrome(&chosen, "EW-20261012-UNITTEST0002");
+        assert!(chosen_text.contains("[x] dass alle meine behandelnden"));
+        assert!(chosen_text.contains("[ ] dass meine erforderlichen"));
+        assert!(
+            chosen_text
+                .contains("[ ] dass meine personenbezogenen und medizinischen Daten an folgende")
+        );
+        assert!(
+            chosen_text.contains("[x] dass meine personenbezogenen und medizinischen Daten sowie")
+        );
+        assert!(chosen_text.contains("[ ] E-mail"));
+        assert!(chosen_text.contains("[ ] Threema-Messenger"));
+        assert!(chosen_text.contains("[x] WhatsApp-Messenger"));
+        assert!(chosen_text.contains("[ ] Telegram-Messenger"));
+        assert!(chosen_text.contains("angekreuzt ist meine eigene Auswahl"));
+        assert!(chosen_text.contains("12.10.2026 um 10:05 Uhr"));
+        assert!(chosen_text.contains("GMED-Kundenkabinett"));
+        assert!(!chosen_text.contains('?'));
 
         let privacy_information =
             build_adult_privacy_information_pdf(&agency, "DS-20260716-UNITTEST0001").unwrap();
@@ -34923,6 +35021,7 @@ mod tests {
             &agency,
             &bindings,
             "EW-20260904-NO-RECIPIENTS",
+            None,
         )
         .unwrap();
         let text = normalized_pdf_text(&bytes);

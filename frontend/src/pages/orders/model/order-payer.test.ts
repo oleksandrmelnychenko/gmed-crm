@@ -5,6 +5,7 @@ import {
   isPlausiblePayerEmail,
   orderPayerPayload,
   orderPayerToForm,
+  organisationAfterTypedName,
 } from "./order-payer";
 
 describe("order payer", () => {
@@ -59,6 +60,38 @@ describe("order payer", () => {
       payer_notes: "Rechnung per Post",
     });
     expect(orderPayerToForm({ ...stored, payer_role: "guarantor" }).role).toBe("");
+  });
+
+  it("sends the organisation box of a contact and lets a legal form tick it until staff decide", () => {
+    const stored = {
+      payer_patient_relation_id: null,
+      payer_contact_name: "Polartek Shipping",
+      payer_contact_relationship: null,
+      payer_contact_email: null,
+      payer_contact_phone: null,
+      payer_notes: null,
+      payer_contact_is_organisation: true,
+    };
+    const form = orderPayerToForm(stored);
+    expect(form.isOrganisation).toBe(true);
+    expect(form.organisationTouched).toBe(true);
+    expect(orderPayerPayload(form)).toMatchObject({
+      payer_contact_name: "Polartek Shipping",
+      payer_contact_is_organisation: true,
+    });
+    // A saved answer stays when the name is corrected.
+    expect(organisationAfterTypedName(form, "Polartek Shipping Ltd")).toBe(true);
+    expect(
+      organisationAfterTypedName({ ...form, isOrganisation: false }, "Beispiel GmbH"),
+    ).toBe(false);
+    // A new contact: the legal form ticks the box, a person's name does not.
+    expect(organisationAfterTypedName(EMPTY_ORDER_PAYER, "Beispiel GmbH")).toBe(true);
+    expect(organisationAfterTypedName(EMPTY_ORDER_PAYER, "Viktor Zahler")).toBe(false);
+    // Without a contact name no answer is sent.
+    expect(
+      orderPayerPayload({ ...EMPTY_ORDER_PAYER, patientPid: "P-1", isOrganisation: true }),
+    ).toMatchObject({ payer_contact_is_organisation: null });
+    expect(orderPayerToForm({ ...stored, payer_contact_name: null }).isOrganisation).toBe(false);
   });
 
   it("checks e-mail addresses like the server", () => {

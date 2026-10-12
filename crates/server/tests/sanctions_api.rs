@@ -2951,3 +2951,318 @@ async fn a_free_text_payer_contact_of_an_order_or_invoice_is_screened() {
         .collect();
     assert_eq!(kinds, ["lead_payer"]);
 }
+
+/// The order payer dialog ("Плательщик"), as the order group panel sends it.
+async fn set_order_payer(app: &TestApp, order_id: Uuid, payer: Value) -> Value {
+    let (code, body) = request(
+        app,
+        "POST",
+        &format!("/orders/{order_id}/payer"),
+        &app.ceo(),
+        Some(payer),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert!(!body.to_string().contains("sanction"), "{body}");
+    body
+}
+
+async fn stored_order_answer(app: &TestApp, order_id: Uuid) -> Option<bool> {
+    sqlx::query_scalar("SELECT payer_contact_is_organisation FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(app.pool())
+        .await
+        .unwrap()
+}
+
+/// The box "Организация" of the order and invoice payer dialogs
+/// (2026-10-12): a free-text payer contact is screened as an organisation or
+/// a person as staff say; the legal-form guess stays for rows without an
+/// answer and is what the dialogs show for them.
+#[tokio::test]
+async fn the_payer_dialogs_organisation_box_screens_a_payer_contact() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let patient = insert_patient(&app, "Anna", "Muster", "1990-02-02").await;
+    let order_id = insert_patient_order(&app, patient).await;
+    screen_queue(&app).await;
+
+    // A company name without a legal form, the box not ticked: a person.
+    let contact = |organisation: Option<bool>| {
+        let mut payer = json!({
+            "payer_contact_name": "Polartek Shipping",
+            "payer_address_street": "Hafenweg 1",
+            "payer_address_zip": "20457",
+            "payer_address_city": "Hamburg",
+            "payer_address_country": "DE",
+            "payer_role": "cost_bearer"
+        });
+        if let Some(organisation) = organisation {
+            payer["payer_contact_is_organisation"] = json!(organisation);
+        }
+        payer
+    };
+    let saved = set_order_payer(&app, order_id, contact(Some(false))).await;
+    assert_eq!(saved["payer_contact_is_organisation"], false, "{saved}");
+    assert_eq!(stored_order_answer(&app, order_id).await, Some(false));
+    screen_queue(&app).await;
+    assert!(patient_hits(&app, patient).await.is_empty());
+    // An older client that does not send the box keeps the answer.
+    set_order_payer(&app, order_id, contact(None)).await;
+    assert_eq!(stored_order_answer(&app, order_id).await, Some(false));
+    let (code, group) = request(
+        &app,
+        "GET",
+        &format!("/orders/{order_id}/group"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{group}");
+    assert_eq!(group["head"]["payer_contact_is_organisation"], false);
+
+    // Ticked: an organisation, screened against the listed entities.
+    let saved = set_order_payer(&app, order_id, contact(Some(true))).await;
+    assert_eq!(saved["payer_contact_is_organisation"], true, "{saved}");
+    assert!(
+        patient_is_queued(&app, patient).await,
+        "the box queues the patient"
+    );
+    screen_queue(&app).await;
+    let hits = patient_hits(&app, patient).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "payer_contact");
+    assert_eq!(hits[0]["list_entry"]["subject_type"], "entity");
+    assert_eq!(hits[0]["current_subject"]["organisation"], true);
+    assert_eq!(hits[0]["current_subject"]["last_name"], "Polartek Shipping");
+
+    // The invoice payer dialog: a row from before the box shows the guess
+    // by the legal form; the answer staff give is stored and screened.
+    let other = insert_patient(&app, "Ben", "Muster", "1985-03-03").await;
+    let other_order = insert_patient_order(&app, other).await;
+    let invoice_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO invoices (order_id, patient_id, invoice_type, status, total_net,
+                                 total_vat, total_gross, line_items, portal_visible,
+                                 created_by, payer_contact_name, payer_address_country)
+           VALUES ($1, $2, 'final', 'draft', 30, 0, 30, '[]', true, $3,
+                   'Beispiel GmbH', 'DE')
+           RETURNING id"#,
+    )
+    .bind(other_order)
+    .bind(other)
+    .bind(app.pm_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    let (code, invoice) = request(
+        &app,
+        "GET",
+        &format!("/invoices/{invoice_id}"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{invoice}");
+    assert_eq!(
+        invoice["payer"]["contact_is_organisation"], true,
+        "{invoice}"
+    );
+    screen_queue(&app).await;
+    assert!(patient_hits(&app, other).await.is_empty());
+    let (code, invoice) = request(
+        &app,
+        "POST",
+        &format!("/invoices/{invoice_id}/payer"),
+        &app.ceo(),
+        Some(contact(Some(true))),
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{invoice}");
+    assert_eq!(
+        invoice["payer"]["contact_is_organisation"], true,
+        "{invoice}"
+    );
+    let stored: Option<bool> =
+        sqlx::query_scalar("SELECT payer_contact_is_organisation FROM invoices WHERE id = $1")
+            .bind(invoice_id)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored, Some(true));
+    screen_queue(&app).await;
+    let hits = patient_hits(&app, other).await;
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0]["subject_kind"], "payer_contact");
+    assert_eq!(hits[0]["current_subject"]["organisation"], true);
+    // The answer is audited with the payer.
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'payer_assigned' AND entity_id = $1 AND (new_value ->> 'payer_contact_is_organisation') = 'true'",
+    )
+    .bind(invoice_id)
+    .fetch_one(app.pool())
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+/// Another patient record named as payer of an order or invoice
+/// (`payer_patient_id`, 2026-10-12) is screened as its own patient; its own
+/// open or confirmed hit and its countries hold the patient it pays for like
+/// a paying relation's. The hit stays the payer record's; the paid-for
+/// patient's data say nothing about it.
+#[tokio::test]
+async fn a_paying_patient_records_hit_holds_the_patient_it_pays_for() {
+    let Some(app) = test_app().await else {
+        return;
+    };
+    load_synthetic_list(&app).await;
+    let patient = insert_patient(&app, "Anna", "Muster", "1990-02-02").await;
+    let payer = insert_patient(&app, "Testomir", "Korneev", "1961-03-14").await;
+    screen_queue(&app).await;
+    let payer_hits = patient_hits(&app, payer).await;
+    assert_eq!(payer_hits.len(), 1, "{payer_hits:?}");
+    assert_eq!(payer_hits[0]["subject_kind"], "patient");
+    assert!(patient_hits(&app, patient).await.is_empty());
+    let intake = |patient_id: Uuid| {
+        let app = &app;
+        async move {
+            request(
+                app,
+                "POST",
+                &format!("/patients/{patient_id}/order-intakes"),
+                &app.pm(),
+                Some(json!({})),
+            )
+            .await
+        }
+    };
+    let (_, body) = intake(patient).await;
+    assert!(not_a_gate_block(&body), "{body}");
+
+    // The order names the payer's patient record.
+    let order_id = insert_patient_order(&app, patient).await;
+    set_order_payer(
+        &app,
+        order_id,
+        json!({ "payer_patient_id": payer, "payer_role": "cost_bearer" }),
+    )
+    .await;
+    let (code, body) = intake(patient).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+    // The hit stays the payer record's; nothing new for the patient, nothing
+    // about it in the patient's order group.
+    assert!(patient_hits(&app, patient).await.is_empty());
+    let (code, group) = request(
+        &app,
+        "GET",
+        &format!("/orders/{order_id}/group"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{group}");
+    assert!(!group.to_string().contains("sanction"), "{group}");
+
+    // Only the payer record's own hit counts, not the hits of its own
+    // relations.
+    save_relation(
+        &app,
+        payer,
+        None,
+        json!({
+            "related_name": "OOO Polartek Shipping",
+            "relation_type": "other",
+            "is_default_payer": true
+        }),
+    )
+    .await;
+    screen_queue(&app).await;
+    assert_eq!(patient_hits(&app, payer).await.len(), 2);
+    decide(
+        &app,
+        payer_hits[0]["id"].as_str().unwrap(),
+        "false_positive",
+        "Another person: payer's passport and birth place checked",
+    )
+    .await;
+    let (_, body) = intake(patient).await;
+    assert!(not_a_gate_block(&body), "{body}");
+    let (code, body) = intake(payer).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_review_pending");
+
+    // The payer record's residence in a blocked country holds the agency
+    // countersignature until the CEO lifts it for the patient.
+    sqlx::query("UPDATE patients SET address_country = 'RU' WHERE id = $1")
+        .bind(payer)
+        .execute(app.pool())
+        .await
+        .unwrap();
+    let (code, body) = countersign(&app, order_id).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "blocked_country");
+    assert_eq!(body["countries"], json!(["RU"]));
+    let item = patient_country_block(&app, patient)
+        .await
+        .expect("the patient is listed");
+    assert_eq!(item["blocking"], json!(["RU"]), "{item}");
+    let (code, lift) = request(
+        &app,
+        "POST",
+        &format!("/sanctions/patients/{patient}/country-override"),
+        &app.ceo(),
+        Some(json!({ "reason": "Payer lives in Germany since 2001, checked" })),
+    )
+    .await;
+    assert_eq!(code, StatusCode::CREATED, "{lift}");
+    assert_eq!(lift["countries"], json!(["RU"]), "{lift}");
+    let (_, body) = countersign(&app, order_id).await;
+    assert!(not_a_gate_block(&body), "{body}");
+
+    // A confirmed hit of a record an invoice names as payer is final for the
+    // patient it pays for too.
+    let child = insert_patient(&app, "Mia", "Muster", "2001-06-01").await;
+    let second_payer = insert_patient(&app, "Testomir", "Korneev", "1961-03-14").await;
+    let child_order = insert_patient_order(&app, child).await;
+    screen_queue(&app).await;
+    let second_hits = patient_hits(&app, second_payer).await;
+    assert_eq!(second_hits.len(), 1, "{second_hits:?}");
+    sqlx::query(
+        r#"INSERT INTO invoices (order_id, patient_id, invoice_type, status, total_net,
+                                 total_vat, total_gross, line_items, portal_visible,
+                                 created_by, payer_patient_id)
+           VALUES ($1, $2, 'final', 'draft', 30, 0, 30, '[]', true, $3, $4)"#,
+    )
+    .bind(child_order)
+    .bind(child)
+    .bind(app.pm_id)
+    .bind(second_payer)
+    .execute(app.pool())
+    .await
+    .unwrap();
+    decide(
+        &app,
+        second_hits[0]["id"].as_str().unwrap(),
+        "confirmed",
+        "Name, birth date and citizenship match",
+    )
+    .await;
+    let (code, body) = intake(child).await;
+    assert_eq!(code, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "sanctions_confirmed");
+    assert_eq!(body["permanent"], true);
+    // The child's own hit list stays empty.
+    let child_hits: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM sanctions_hits WHERE patient_id = $1")
+            .bind(child)
+            .fetch_one(app.pool())
+            .await
+            .unwrap();
+    assert_eq!(child_hits, 0);
+}

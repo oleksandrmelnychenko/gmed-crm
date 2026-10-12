@@ -5313,3 +5313,168 @@ async fn sending_the_request_also_sends_follow_up_blocks_that_are_complete() {
     .unwrap();
     assert_eq!(events, 1);
 }
+
+/// The consent form «Einverständniserklärung zur Datenübermittlung» prints its
+/// boxes empty (owner 2026-10-11); with an electronic signature nobody could
+/// tick them. The lead chooses the options in the cabinet (2026-10-12): only
+/// the person, every save kept; the generated form records the newest choice,
+/// which an electronic signature then needs.
+#[tokio::test]
+async fn the_lead_chooses_the_consent_form_options_and_the_form_records_the_choice() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead_id, user_id, patient) =
+        lead_with_login(&app, "Clara", "clara.consent@example.com").await;
+    sqlx::query(
+        r#"UPDATE leads SET date_of_birth = DATE '1984-02-02', legal_sex = 'female',
+                            street_address = 'Musterweg 1', zip_code = '10115', city = 'Berlin',
+                            country = 'DE', phone = '+49 30 1234567', primary_language = 'de'
+           WHERE id = $1"#,
+    )
+    .bind(lead_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let path = format!("/api/v1/me/lead-requests/{lead_id}/consent-choices");
+    let choices = json!({
+        "agency_processing": true,
+        "doctors_to_agency": true,
+        "data_system": false,
+        "named_recipients": false,
+        "channel_email": false,
+        "channel_threema": false,
+        "channel_whatsapp": true,
+        "channel_telegram": false
+    });
+
+    // Nothing is chosen in advance.
+    let (status, list) =
+        json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let form = &list["requests"][0]["consent_form"];
+    assert_eq!(form["version"], "2026-10-12", "{form}");
+    assert_eq!(form["choices"], Value::Null, "{form}");
+
+    // Staff never choose for the person.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &app.staff("patient_manager"),
+        Some(json!({ "choices": choices, "version": "2026-10-12", "language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    // Outdated texts and unknown options are refused.
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "choices": choices, "version": "2026-01-01", "language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "consent_version_outdated", "{body}");
+    let (status, _) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "choices": { "staff_ticked": true }, "version": "2026-10-12", "language": "de" })),
+    )
+    .await;
+    assert!(status.is_client_error(), "{status}");
+
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "choices": choices, "version": "2026-10-12", "language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    assert_eq!(saved["choices"], choices);
+    assert!(saved["chosen_at"].is_string(), "{saved}");
+    let (chosen_by, access_kind, source): (Option<Uuid>, String, String) = sqlx::query_as(
+        "SELECT chosen_by, access_kind, source FROM consent_form_choices WHERE lead_id = $1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(chosen_by, Some(user_id));
+    assert_eq!(access_kind, "self");
+    assert_eq!(source, "lead_portal");
+    assert_eq!(
+        audit_count(pool, "lead_portal_consent_choices_saved", lead_id).await,
+        1
+    );
+    let (_, list) = json_request(router, "GET", "/api/v1/me/lead-requests", &patient, None).await;
+    assert_eq!(list["requests"][0]["consent_form"]["choices"], choices);
+
+    // The generated form records the newest choice.
+    let (status, generated) = json_request(
+        router,
+        "POST",
+        "/api/v1/documents/generate",
+        &app.staff("patient_manager"),
+        Some(json!({ "template_id": "privacy_consents", "lead_id": lead_id, "language": "de" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{generated}");
+    let document_id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+    let recorded: Value = sqlx::query_scalar(
+        "SELECT generated_bindings -> '_own_consent_choice' FROM documents WHERE id = $1",
+    )
+    .bind(document_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let choice_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM consent_form_choices WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(recorded["id"], json!(choice_id), "{recorded}");
+    assert_eq!(recorded["choices"], choices, "{recorded}");
+    assert_eq!(recorded["source"], "lead_portal");
+
+    // A new choice is a new record; the older one stays.
+    let mut changed = choices.clone();
+    changed["channel_email"] = json!(true);
+    let (status, saved) = json_request(
+        router,
+        "POST",
+        &path,
+        &patient,
+        Some(json!({ "choices": changed, "version": "2026-10-12", "language": "ru" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{saved}");
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM consent_form_choices WHERE lead_id = $1")
+            .bind(lead_id)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, 2);
+    // The form generated before shows the older choice: no electronic
+    // signature for it any more.
+    let (status, state) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/documents/{document_id}/signature-requests"),
+        &app.staff("patient_manager"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(
+        state["ineligible_reason"], "consent_choice_changed",
+        "{state}"
+    );
+}

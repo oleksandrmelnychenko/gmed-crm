@@ -4594,6 +4594,15 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
         "{text}"
     );
     assert!(text.contains("Hauptstraße 1"), "{text}");
+    // The database clock steps back before the next letters (seen under CI
+    // load, 2026-10-12): the list still follows the levels, not the clock.
+    sqlx::query(
+        "UPDATE invoice_dunning_events SET sent_at = sent_at + interval '30 seconds', created_at = created_at + interval '30 seconds' WHERE id = $1::uuid",
+    )
+    .bind(&reminder_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let (status, first_notice) = json_request(
         &app,
@@ -4650,6 +4659,13 @@ async fn dunning_letters_are_stored_and_reach_staff_and_patient() {
     assert_eq!(status, StatusCode::OK);
     let events = events.as_array().unwrap();
     assert_eq!(events.len(), 3);
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| event["level"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>(),
+        ["first", "second", "collections"]
+    );
     assert!(
         events
             .iter()

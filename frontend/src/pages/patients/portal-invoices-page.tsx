@@ -3,6 +3,7 @@ import { Download, LoaderCircle, RefreshCw, Upload } from "lucide-react";
 
 import { AdminSheetScaffold } from "@/components/admin-page-patterns";
 import { Button } from "@/components/ui/button";
+import { FilePicker } from "@/components/ui/file-picker";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
@@ -1197,13 +1198,9 @@ function usePatientInvoicesPageContent() {
           </DialogHeader>
           <form className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={(event) => void handlePaymentProofUpload(event)}>
             <Field label={t.portal_invoices_file} htmlFor="invoice-payment-proof">
-              <input
+              <FilePicker
                 id="invoice-payment-proof"
-                type="file"
-                className={cn(
-                  inputClass,
-                  "block w-full py-1.5 file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
-                )}
+                selected={uploadFile}
                 onChange={(event) => dispatchInvoicesState({ uploadFile: event.target.files?.[0] ?? null })}
               />
             </Field>

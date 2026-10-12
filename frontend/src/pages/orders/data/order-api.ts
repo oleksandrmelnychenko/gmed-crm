@@ -516,6 +516,8 @@ export type OrderGroupHead = {
   payer_address_city: string | null;
   payer_address_country: string | null;
   payer_role: string | null;
+  /** Organisation box of the contact (stored, else the server's legal-form guess). */
+  payer_contact_is_organisation: boolean | null;
 };
 
 /** A relative of the head patient that can pay for the order. */
@@ -581,6 +583,10 @@ export function normalizeOrderGroup(value: unknown): OrderGroup {
       payer_address_city: nullableStringValue(head.payer_address_city),
       payer_address_country: nullableStringValue(head.payer_address_country),
       payer_role: nullableStringValue(head.payer_role),
+      payer_contact_is_organisation:
+        typeof head.payer_contact_is_organisation === "boolean"
+          ? head.payer_contact_is_organisation
+          : null,
     },
     subs: subs.map((entry) => {
       const sub = asRecord(entry);

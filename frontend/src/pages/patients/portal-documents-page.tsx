@@ -3,6 +3,7 @@ import { startTransition, useCallback, useEffect, useMemo, useReducer, useRef, t
 import { Download, IdCard, LoaderCircle, RefreshCw, ShieldCheck, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { FilePicker } from "@/components/ui/file-picker";
 import {
   Dialog,
   DialogContent,
@@ -741,15 +742,11 @@ function usePatientDocumentsPageContent() {
                 />
               </Field>
               <Field label={t.portal_documents_file} htmlFor="portal-document-upload-file">
-                <input
+                <FilePicker
                   ref={uploadFileInputRef}
                   id="portal-document-upload-file"
-                  type="file"
+                  selected={uploadFile}
                   onChange={(event) => dispatchDocumentsState({ uploadFile: event.target.files?.[0] ?? null })}
-                  className={cn(
-                    inputClass,
-                    "block h-auto w-full border border-input px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-foreground",
-                  )}
                 />
               </Field>
               <Field label={t.portal_documents_note} htmlFor="portal-document-upload-note">

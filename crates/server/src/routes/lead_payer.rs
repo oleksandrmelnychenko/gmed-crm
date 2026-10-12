@@ -505,6 +505,8 @@ impl Declaration {
             address_city: self.city.clone(),
             address_country: self.country.clone(),
             payer_role: Some(PAYER_ROLE_COST_BEARER.to_string()),
+            // The declared payer type answers the organisation box.
+            contact_is_organisation: Some(self.is_organisation()),
         })
     }
 
@@ -2726,7 +2728,9 @@ async fn sync_order_payers(
         } else {
             continue;
         };
-        if next == previous {
+        // An order written before the organisation box (2026-10-12) is not
+        // rewritten for the box alone.
+        if next.same_apart_from_organisation_box(&previous) {
             continue;
         }
         write_order_payer(
@@ -2771,7 +2775,8 @@ async fn write_order_payer(
             payer_role = $13,
             payer_updated_by = $14,
             payer_updated_at = now(),
-            updated_at = now()
+            updated_at = now(),
+            payer_contact_is_organisation = $15
          WHERE id = $1",
     )
     .bind(order_id)
@@ -2788,6 +2793,7 @@ async fn write_order_payer(
     .bind(&next.address_country)
     .bind(&next.payer_role)
     .bind(actor)
+    .bind(next.contact_is_organisation)
     .execute(&mut *tx)
     .await?;
     let mut event = audit::domain_diff_event(

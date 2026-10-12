@@ -79,6 +79,13 @@ pub struct PayerRecord {
     pub address_city: Option<String>,
     pub address_country: Option<String>,
     pub payer_role: Option<String>,
+    /// The box "Организация" of the payer dialogs for the free-text contact
+    /// (`payer_contact_is_organisation`, 2026-10-12): the sanctions screening
+    /// takes the contact for an organisation (`Some(true)`) or a person
+    /// (`Some(false)`); `None` without a contact name and for rows from
+    /// before the box — the legal form in the name decides then
+    /// ([`crate::sanctions::screening::contact_name_is_organisation`]).
+    pub contact_is_organisation: Option<bool>,
 }
 
 /// Select list of the payer columns of `alias`, prefixed with `prefix`.
@@ -96,6 +103,7 @@ pub(crate) fn payer_columns(alias: &str, prefix: &str) -> String {
         "payer_address_city",
         "payer_address_country",
         "payer_role",
+        "payer_contact_is_organisation",
     ]
     .iter()
     .map(|column| format!("{alias}.{column} AS {prefix}{column}"))
@@ -144,6 +152,11 @@ impl PayerRecord {
             address_city: text("payer_address_city"),
             address_country: text("payer_address_country"),
             payer_role: text("payer_role"),
+            contact_is_organisation: row
+                .try_get::<Option<bool>, _>(
+                    format!("{prefix}payer_contact_is_organisation").as_str(),
+                )
+                .unwrap_or_default(),
         }
     }
 
@@ -161,8 +174,49 @@ impl PayerRecord {
             "payer_address_city": self.address_city,
             "payer_address_country": self.address_country,
             "payer_role": self.payer_role,
+            "payer_contact_is_organisation": self.contact_is_organisation,
         })
     }
+
+    /// The same payer apart from the organisation box: an order the payer
+    /// declaration wrote before the box existed keeps counting as written by
+    /// the declaration.
+    pub fn same_apart_from_organisation_box(&self, other: &Self) -> bool {
+        Self {
+            contact_is_organisation: other.contact_is_organisation,
+            ..self.clone()
+        } == *other
+    }
+
+    /// The organisation box as the payer dialogs show it: the stored answer,
+    /// else how the screening takes the contact name (legal form); `None`
+    /// without a contact name.
+    pub fn contact_is_organisation_shown(&self) -> Option<bool> {
+        contact_organisation_shown(self.contact_name.clone(), self.contact_is_organisation)
+    }
+
+    /// An older client sends no answer: a contact under the same name keeps
+    /// the stored one.
+    pub fn keep_organisation_answer_of(&mut self, previous: &Self) {
+        if self.contact_is_organisation.is_none()
+            && self.contact_name.is_some()
+            && self.contact_name == previous.contact_name
+        {
+            self.contact_is_organisation = previous.contact_is_organisation;
+        }
+    }
+}
+
+/// The organisation box of a free-text payer contact as the order and
+/// invoice payer dialogs show it: the stored `answer`, else how the sanctions
+/// screening takes the name (legal form, a single word); `None` without a
+/// contact name.
+pub(crate) fn contact_organisation_shown(
+    contact_name: Option<String>,
+    answer: Option<bool>,
+) -> Option<bool> {
+    let name = contact_name.filter(|name| !name.trim().is_empty())?;
+    Some(answer.unwrap_or_else(|| crate::sanctions::screening::contact_name_is_organisation(&name)))
 }
 
 /// A plausible e-mail address: one `@`, a local part and a dotted domain,
@@ -197,6 +251,9 @@ pub(crate) struct PayerInput {
     pub payer_address_city: Option<String>,
     pub payer_address_country: Option<String>,
     pub payer_role: Option<String>,
+    /// The free-text contact is an organisation (box "Организация"); kept
+    /// only with a contact name.
+    pub payer_contact_is_organisation: Option<bool>,
     /// Patient number (`P-…`) of a payer patient record, for dialogs without
     /// a patient picker; used when `payer_patient_id` is not given.
     pub payer_patient_pid: Option<String>,
@@ -252,10 +309,14 @@ pub(crate) fn payer_from_input(
     patient_id: Option<Uuid>,
 ) -> Result<PayerRecord, (&'static str, &'static str)> {
     let text = |value: &Option<String>| normalize_optional(value.as_deref());
+    let contact_name = text(&input.payer_contact_name);
     let mut record = PayerRecord {
         payer_patient_id: input.payer_patient_id,
         payer_patient_relation_id: input.payer_patient_relation_id,
-        contact_name: text(&input.payer_contact_name),
+        contact_is_organisation: input
+            .payer_contact_is_organisation
+            .filter(|_| contact_name.is_some()),
+        contact_name,
         contact_email: text(&input.payer_contact_email),
         contact_phone: text(&input.payer_contact_phone),
         contact_relationship: text(&input.payer_contact_relationship),
@@ -365,7 +426,8 @@ pub(crate) async fn adapt_payer_to_patient(
     if let Some(relation_id) = record.payer_patient_relation_id {
         let relation = sqlx::query(
             r#"SELECT patient_id, related_patient_id, related_name, relation_type, email, phone,
-                      address_street, address_zip, address_city, address_country
+                      address_street, address_zip, address_city, address_country,
+                      is_organisation
                FROM patient_relations WHERE id = $1"#,
         )
         .bind(relation_id)
@@ -393,6 +455,13 @@ pub(crate) async fn adapt_payer_to_patient(
                     Some(person) if person != patient_id => record.payer_patient_id = Some(person),
                     Some(_) => return Ok(PayerRecord::default()),
                     None => {
+                        if record.contact_name.is_none() {
+                            // The relation's own answer to the organisation
+                            // box goes with its name.
+                            record.contact_is_organisation = row
+                                .try_get::<Option<bool>, _>("is_organisation")
+                                .unwrap_or_default();
+                        }
                         record.contact_name = record.contact_name.or_else(|| text("related_name"));
                         record.contact_phone = record.contact_phone.or_else(|| text("phone"));
                         record.contact_relationship = record
@@ -520,8 +589,7 @@ async fn inherit(
                 if declared.synced.as_ref().is_some_and(|declaration| {
                     declaration
                         .order_payer_record(record.notes.clone())
-                        .as_ref()
-                        == Some(&record)
+                        .is_some_and(|written| written.same_apart_from_organisation_box(&record))
                 }) {
                     continue;
                 }
@@ -771,7 +839,8 @@ pub(crate) async fn store_invoice_payer(
                payer_address_country = $12,
                payer_role = $13,
                payer_updated_by = COALESCE($14, payer_updated_by),
-               payer_updated_at = CASE WHEN $14::uuid IS NULL THEN payer_updated_at ELSE now() END
+               payer_updated_at = CASE WHEN $14::uuid IS NULL THEN payer_updated_at ELSE now() END,
+               payer_contact_is_organisation = $15
            WHERE id = $1"#,
     )
     .bind(invoice_id)
@@ -788,6 +857,7 @@ pub(crate) async fn store_invoice_payer(
     .bind(&record.address_country)
     .bind(&record.payer_role)
     .bind(actor_id)
+    .bind(record.contact_is_organisation)
     .execute(&mut *conn)
     .await?
     .rows_affected();
@@ -1240,6 +1310,8 @@ pub(crate) async fn update_invoice_payer(
         }
     }
     let previous = PayerRecord::from_row(&locked, "");
+    let mut record = record;
+    record.keep_organisation_answer_of(&previous);
     if let Err(error) =
         store_invoice_payer(&mut transaction, invoice_id, &record, Some(auth.user_id)).await
     {
@@ -1287,6 +1359,58 @@ pub(crate) async fn update_invoice_payer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_organisation_box_of_a_payer_contact_is_kept_with_its_name() {
+        let input = |name: Option<&str>, organisation: Option<bool>| PayerInput {
+            payer_contact_name: name.map(str::to_string),
+            payer_patient_pid: None,
+            payer_contact_is_organisation: organisation,
+            ..PayerInput::default()
+        };
+        let record =
+            payer_from_input(&input(Some(" Polartek Shipping "), Some(true)), None).unwrap();
+        assert_eq!(record.contact_is_organisation, Some(true));
+        assert_eq!(record.contact_is_organisation_shown(), Some(true));
+        assert_eq!(
+            record.to_audit_json()["payer_contact_is_organisation"],
+            true
+        );
+        // No contact name, no answer.
+        let without = payer_from_input(&input(None, Some(true)), None).unwrap();
+        assert_eq!(without.contact_is_organisation, None);
+        assert_eq!(without.contact_is_organisation_shown(), None);
+        // Without an answer the dialog shows the screening's guess.
+        assert_eq!(
+            contact_organisation_shown(Some("Beispiel GmbH".into()), None),
+            Some(true)
+        );
+        assert_eq!(
+            contact_organisation_shown(Some("Viktor Zahler".into()), None),
+            Some(false)
+        );
+        assert_eq!(
+            contact_organisation_shown(Some("Beispiel GmbH".into()), Some(false)),
+            Some(false)
+        );
+        assert_eq!(
+            contact_organisation_shown(Some("  ".into()), Some(true)),
+            None
+        );
+        // An older client keeps the stored answer for the same name only.
+        let mut older = payer_from_input(&input(Some("Polartek Shipping"), None), None).unwrap();
+        older.keep_organisation_answer_of(&record);
+        assert_eq!(older.contact_is_organisation, Some(true));
+        let mut renamed = payer_from_input(&input(Some("Beispiel AG"), None), None).unwrap();
+        renamed.keep_organisation_answer_of(&record);
+        assert_eq!(renamed.contact_is_organisation, None);
+        // The declaration's record is the same payer whatever the box says.
+        assert!(record.same_apart_from_organisation_box(&PayerRecord {
+            contact_is_organisation: None,
+            ..record.clone()
+        }));
+        assert!(!record.same_apart_from_organisation_box(&renamed));
+    }
 
     #[test]
     fn email_plausibility_rejects_obvious_typos() {

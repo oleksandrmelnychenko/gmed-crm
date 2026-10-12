@@ -743,54 +743,14 @@ export const DOCUMENT_BINDING_FIELDS: Record<string, BindingFieldDef[]> = {
       kind: "date",
     },
   ],
+  // The consent options (core consents, channels) are no staff bindings: the form ticks only
+  // what the person chose in the cabinet, else it prints empty boxes (2026-10-11/12).
   privacy_consents: [
-    {
-      key: "consent_healthcare",
-      label: "Erhebung, Verarbeitung und Übermittlung medizinischer Daten",
-      labelRu: "Сбор, обработка и передача медицинских данных",
-      kind: "boolean",
-    },
-    {
-      key: "consent_provider_release",
-      label: "Übermittlung der Behandlungsunterlagen durch Ärzte und Einrichtungen",
-      labelRu: "Получение медицинских данных от врачей и клиник",
-      kind: "boolean",
-    },
-    {
-      key: "consent_privacy",
-      label: "Speicherung und Verarbeitung im GMED-EDV-System",
-      labelRu: "Хранение и обработка данных в GMED-EDV-System",
-      kind: "boolean",
-    },
     {
       key: "extra_release_recipients",
       label: "Zusätzliche Empfänger der Daten",
       labelRu: "Дополнительные получатели данных",
       kind: "textarea",
-    },
-    {
-      key: "consent_email",
-      label: "E-mail",
-      labelRu: "E-mail",
-      kind: "boolean",
-    },
-    {
-      key: "consent_threema",
-      label: "Threema-Messenger",
-      labelRu: "Threema",
-      kind: "boolean",
-    },
-    {
-      key: "consent_whatsapp",
-      label: "WhatsApp-Messenger",
-      labelRu: "WhatsApp",
-      kind: "boolean",
-    },
-    {
-      key: "consent_telegram",
-      label: "Telegram-Messenger",
-      labelRu: "Telegram",
-      kind: "boolean",
     },
     {
       key: "party_sign_place",

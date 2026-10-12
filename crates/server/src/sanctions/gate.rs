@@ -26,6 +26,14 @@
 //! of services already rendered, GoBD); the hold is on new orders, contracts
 //! and signatures.
 //!
+//! Another patient record named as payer of an order or invoice
+//! (`payer_patient_id`) is screened as its own patient; its own open or
+//! confirmed hit and its countries also hold the patient it pays for (and
+//! the lead whose order names it), like a paying relation's (2026-10-12,
+//! [`Scope::payer_patient_ids`]). The CEO lifts its country for the patient
+//! it pays for. Nothing of it reaches the paid-for patient, the lead or the
+//! payer (no tipping-off): the gate answers staff only.
+//!
 //! The gate is one middleware on the protected router ([`middleware`]) so the
 //! rule lives in one place instead of in every handler. [`classify`] maps the
 //! guarded routes; its tests pin the list.
@@ -76,20 +84,51 @@ impl GateAction {
 pub struct Scope {
     pub lead_ids: Vec<Uuid>,
     pub patient_ids: Vec<Uuid>,
+    /// Other patient records an order or invoice of the scope names as payer
+    /// (`payer_patient_id`, also of the head order of a family order), filled
+    /// by [`Scope::expand`] (2026-10-12). Such a record is screened as its own
+    /// patient; its own open or confirmed hit (`subject_kind = 'patient'`)
+    /// and its citizenships and residence hold the patient it pays for like
+    /// a paying relation's would. Its other work stays its own: the hits of
+    /// its relations, payer contacts and leads, and its own lifts, do not
+    /// count here.
+    pub payer_patient_ids: Vec<Uuid>,
 }
+
+/// The patient records named as payer (`payer_patient_id`) on the orders of
+/// the patients `$1` or leads `$2`, on the head orders of those orders and on
+/// the patients' invoices — whatever their status, like a relation an order
+/// names as payer — other than the patients themselves.
+const PAYING_PATIENTS_SQL: &str = r#"
+    SELECT DISTINCT payer FROM (
+        SELECT o.payer_patient_id AS payer
+        FROM orders o
+        WHERE o.patient_id = ANY($1) OR o.source_lead_id = ANY($2)
+        UNION ALL
+        SELECT head.payer_patient_id
+        FROM orders o
+        JOIN orders head ON head.id = o.head_order_id
+        WHERE o.patient_id = ANY($1) OR o.source_lead_id = ANY($2)
+        UNION ALL
+        SELECT i.payer_patient_id
+        FROM invoices i
+        WHERE i.patient_id = ANY($1)
+    ) payers
+    WHERE payer IS NOT NULL AND payer <> ALL($1)
+    ORDER BY payer"#;
 
 impl Scope {
     pub fn lead(lead_id: Uuid) -> Self {
         Self {
             lead_ids: vec![lead_id],
-            patient_ids: Vec::new(),
+            ..Self::default()
         }
     }
 
     pub fn patient(patient_id: Uuid) -> Self {
         Self {
-            lead_ids: Vec::new(),
             patient_ids: vec![patient_id],
+            ..Self::default()
         }
     }
 
@@ -113,7 +152,8 @@ impl Scope {
         self.lead_ids.is_empty() && self.patient_ids.is_empty()
     }
 
-    /// Adds the lead a patient came from and the patient a lead became.
+    /// Adds the lead a patient came from and the patient a lead became, then
+    /// the patient records that pay for them ([`Scope::payer_patient_ids`]).
     pub async fn expand(mut self, db: &gmed_db::DbPool) -> Result<Self, sqlx::Error> {
         if self.is_empty() {
             return Ok(self);
@@ -134,8 +174,78 @@ impl Scope {
             self.add_patient(row.try_get("converted_patient_id")?);
             self.add_patient(row.try_get("prospect_patient_id")?);
         }
+        let payers: Vec<Uuid> = sqlx::query_scalar(PAYING_PATIENTS_SQL)
+            .bind(&self.patient_ids)
+            .bind(&self.lead_ids)
+            .fetch_all(db)
+            .await?;
+        self.payer_patient_ids
+            .retain(|payer| !self.patient_ids.contains(payer));
+        for payer in payers {
+            if !self.payer_patient_ids.contains(&payer) {
+                self.payer_patient_ids.push(payer);
+            }
+        }
         Ok(self)
     }
+}
+
+/// The patient records that pay for each of `patient_ids`
+/// ([`PAYING_PATIENTS_SQL`] per patient), for the CEO's «Страны» tab.
+async fn paying_patients_by_patient(
+    db: &gmed_db::DbPool,
+    patient_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Vec<Uuid>>, sqlx::Error> {
+    let mut by_patient: std::collections::HashMap<Uuid, Vec<Uuid>> =
+        std::collections::HashMap::new();
+    if patient_ids.is_empty() {
+        return Ok(by_patient);
+    }
+    let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        r#"SELECT DISTINCT patient_id, payer FROM (
+               SELECT o.patient_id, o.payer_patient_id AS payer
+               FROM orders o
+               WHERE o.patient_id = ANY($1)
+               UNION ALL
+               SELECT o.patient_id, head.payer_patient_id
+               FROM orders o
+               JOIN orders head ON head.id = o.head_order_id
+               WHERE o.patient_id = ANY($1)
+               UNION ALL
+               SELECT i.patient_id, i.payer_patient_id
+               FROM invoices i
+               WHERE i.patient_id = ANY($1)
+           ) payers
+           WHERE payer IS NOT NULL AND payer <> patient_id
+           ORDER BY patient_id, payer"#,
+    )
+    .bind(patient_ids)
+    .fetch_all(db)
+    .await?;
+    for (patient_id, payer) in rows {
+        by_patient.entry(patient_id).or_default().push(payer);
+    }
+    Ok(by_patient)
+}
+
+/// Citizenships and residence of the patient records that pay
+/// ([`Scope::payer_patient_ids`]): the person only, like a relation linked to
+/// a patient record.
+async fn payer_patient_countries(
+    db: &gmed_db::DbPool,
+    payer_patient_ids: &[Uuid],
+) -> Result<Vec<String>, sqlx::Error> {
+    let mut countries: Vec<String> = Vec::new();
+    for payer in payer_patient_ids {
+        if let Some(subject) = screening::load_patient_subject(db, *payer).await? {
+            for code in subject.countries() {
+                if !countries.contains(&code) {
+                    countries.push(code);
+                }
+            }
+        }
+    }
+    Ok(countries)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -215,16 +325,20 @@ impl Block {
     }
 }
 
-/// Open and confirmed hits of the expanded scope.
+/// Open and confirmed hits of the expanded scope: every hit of its leads and
+/// patients, and the own hit of a patient record that pays for them.
 async fn hit_counts(db: &gmed_db::DbPool, scope: &Scope) -> Result<(i64, i64), sqlx::Error> {
     let row = sqlx::query(
         r#"SELECT COUNT(*) FILTER (WHERE status = 'open') AS open_hits,
                   COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed_hits
            FROM sanctions_hits
-           WHERE lead_id = ANY($1) OR patient_id = ANY($2)"#,
+           WHERE lead_id = ANY($1)
+              OR patient_id = ANY($2)
+              OR (patient_id = ANY($3) AND subject_kind = 'patient')"#,
     )
     .bind(&scope.lead_ids)
     .bind(&scope.patient_ids)
+    .bind(&scope.payer_patient_ids)
     .fetch_one(db)
     .await?;
     Ok((row.try_get("open_hits")?, row.try_get("confirmed_hits")?))
@@ -232,7 +346,8 @@ async fn hit_counts(db: &gmed_db::DbPool, scope: &Scope) -> Result<(i64, i64), s
 
 /// Citizenship and residence codes of every subject in the scope: the
 /// leads' subjects and the patients' (the patient, the relations that pay or
-/// receive the invoices, the payer contacts of its orders and invoices).
+/// receive the invoices, the payer contacts of its orders and invoices), and
+/// the patient records that pay for them.
 pub async fn scope_countries(
     db: &gmed_db::DbPool,
     scope: &Scope,
@@ -256,6 +371,7 @@ pub async fn scope_countries(
             push(subject.countries());
         }
     }
+    push(payer_patient_countries(db, &scope.payer_patient_ids).await?);
     Ok(countries)
 }
 
@@ -274,7 +390,7 @@ pub async fn evaluate(
         for lead_id in &scope.lead_ids {
             screening::screen_lead(state, *lead_id).await?;
         }
-        for patient_id in &scope.patient_ids {
+        for patient_id in scope.patient_ids.iter().chain(&scope.payer_patient_ids) {
             screening::screen_patient(state, *patient_id).await?;
         }
     }
@@ -723,6 +839,7 @@ pub async fn middleware(State(state): State<AppState>, request: Request, next: N
                     "method": request.method().as_str(),
                     "lead_ids": scope.lead_ids,
                     "patient_ids": scope.patient_ids,
+                    "payer_patient_ids": scope.payer_patient_ids,
                 }),
             ));
             block.response()
@@ -974,6 +1091,7 @@ pub async fn patient_country_flags(
             })
             .collect();
     let overrides = policy::active_overrides(&state.db, &lead_ids, &patient_ids).await?;
+    let mut paying = paying_patients_by_patient(&state.db, &patient_ids).await?;
     let mut flags = Vec::new();
     for patient_id in patient_ids {
         let own_leads: Vec<Uuid> = lead_rows
@@ -990,11 +1108,19 @@ pub async fn patient_country_flags(
             .iter()
             .flat_map(|subject| subject.countries())
             .collect::<Vec<_>>();
+        // The patient records that pay for the patient.
+        let payer_codes =
+            payer_patient_countries(&state.db, &paying.remove(&patient_id).unwrap_or_default())
+                .await?;
         let lead_codes = lead_countries
             .iter()
             .filter(|(lead_id, _)| own_leads.contains(lead_id))
             .flat_map(|(_, codes)| codes.iter().cloned());
-        for code in patient_codes.into_iter().chain(lead_codes) {
+        for code in patient_codes
+            .into_iter()
+            .chain(lead_codes)
+            .chain(payer_codes)
+        {
             if !countries.contains(&code) {
                 countries.push(code);
             }

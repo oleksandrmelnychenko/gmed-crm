@@ -76,6 +76,7 @@ use uuid::Uuid;
 
 use crate::audit;
 use crate::auth::middleware::AuthUser;
+use crate::consent_choices;
 use crate::routes::documents::{MAX_FILE_SIZE, NewStoredDocument, persist_document_file};
 use crate::routes::lead_invoice_recipient;
 use crate::routes::lead_payer::{
@@ -330,6 +331,12 @@ pub fn router() -> Router<AppState> {
         .route(
             "/me/lead-requests/{lead_id}/consent/revoke",
             post(revoke_consent),
+        )
+        // The options of the consent form «Einverständniserklärung zur
+        // Datenübermittlung», chosen by the person (2026-10-12).
+        .route(
+            "/me/lead-requests/{lead_id}/consent-choices",
+            post(save_consent_choices),
         )
         .route(
             "/me/lead-requests/{lead_id}/documents",
@@ -2535,6 +2542,7 @@ pub(crate) async fn request_payload(
         );
     }
     let deadline = retention_deadline(state, &row, lead_id).await;
+    let consent_choice = consent_choices::current_for(&state.db, Some(lead_id), None).await?;
     Ok(json!({
         "lead_id": lead_id,
         "access_kind": kind.as_str(),
@@ -2564,6 +2572,8 @@ pub(crate) async fn request_payload(
         "identity_documents": identity_documents,
         "max_documents": MAX_PORTAL_UPLOADS,
         "consents": consents,
+        // The person's own choice of the consent form options (2026-10-12).
+        "consent_form": consent_form_json(consent_choice.as_ref()),
         "submitted_at": row
             .try_get::<Option<DateTime<Utc>>, _>("portal_submitted_at")
             .ok()
@@ -3686,6 +3696,127 @@ struct ConsentRequest {
 #[derive(Deserialize)]
 struct ConsentRevokeRequest {
     purpose: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConsentChoicesRequest {
+    choices: consent_choices::ConsentChoices,
+    /// [`consent_choices::TEXT_VERSION`] of the texts the person saw.
+    version: String,
+    language: String,
+}
+
+/// The cabinet's view of the person's own choice of the consent form options.
+fn consent_form_json(choice: Option<&consent_choices::OwnConsentChoice>) -> Value {
+    json!({
+        "version": consent_choices::TEXT_VERSION,
+        "choices": choice.map(|choice| choice.choices),
+        "chosen_at": choice.map(|choice| choice.chosen_at),
+    })
+}
+
+/// `POST /me/lead-requests/{lead_id}/consent-choices`: the person's own
+/// choice of the options of the consent form «Einverständniserklärung zur
+/// Datenübermittlung» (2026-10-12). Every save is a new row; the newest
+/// counts. Only the person (or the parent / guardian with access) chooses —
+/// staff have no route to set or change it, so a generated form never shows
+/// a box ticked by staff. A form generated earlier keeps its choice and is no
+/// longer sent for an electronic signature (`consent_choice_changed`).
+async fn save_consent_choices(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthUser>,
+    Path(lead_id): Path<Uuid>,
+    Json(body): Json<ConsentChoicesRequest>,
+) -> axum::response::Response {
+    if let Err(response) = require_patient(&auth) {
+        return response;
+    }
+    if body.version != consent_choices::TEXT_VERSION {
+        return coded(
+            StatusCode::CONFLICT,
+            "consent_version_outdated",
+            "The consent text has changed; reload the page",
+            json!({ "version": consent_choices::TEXT_VERSION }),
+        );
+    }
+    let language = body.language.trim().to_lowercase();
+    if !CONSENT_LANGUAGES.contains(&language.as_str()) {
+        return err(StatusCode::UNPROCESSABLE_ENTITY, "Unsupported language");
+    }
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(error) => return internal(error, "begin"),
+    };
+    let kind = match lock_my_lead(&mut tx, lead_id, auth.user_id).await {
+        Ok(Some((kind, _))) => kind,
+        Ok(None) => return not_found(),
+        Err(error) => return internal(error, "lock request"),
+    };
+    let choices = match serde_json::to_value(body.choices) {
+        Ok(value) => value,
+        Err(error) => return internal(error, "encode choices"),
+    };
+    let (choice_id, chosen_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
+        r#"INSERT INTO consent_form_choices (
+               template_id, lead_id, patient_id, choices, chosen_by, access_kind,
+               source, language, text_version)
+           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6
+           FROM leads l WHERE l.id = $7
+           RETURNING id, chosen_at"#,
+    )
+    .bind(consent_choices::TEMPLATE)
+    .bind(&choices)
+    .bind(auth.user_id)
+    .bind(kind.as_str())
+    .bind(&language)
+    .bind(consent_choices::TEXT_VERSION)
+    .bind(lead_id)
+    .fetch_one(&mut *tx)
+    .await
+    {
+        Ok(row) => row,
+        Err(error) => return internal(error, "insert consent choices"),
+    };
+    if let Err(error) = audit::write_in_transaction(
+        &mut tx,
+        &audit::domain_event(
+            "lead_portal_consent_choices_saved",
+            Some(auth.user_id),
+            "lead",
+            Some(lead_id),
+            json!({
+                "consent_form_choice_id": choice_id,
+                "template": consent_choices::TEMPLATE,
+                "choices": choices,
+                "text_version": consent_choices::TEXT_VERSION,
+                "language": language,
+                "access_kind": kind.as_str(),
+            }),
+        ),
+    )
+    .await
+    {
+        return internal(error, "audit consent choices");
+    }
+    if let Err(error) = tx.commit().await {
+        return internal(error, "commit consent choices");
+    }
+    crate::realtime::publish_lead_event(
+        &state,
+        Some(auth.user_id),
+        "lead.portal_updated",
+        lead_id,
+        json!({ "change": "consent_choices_saved", "access_kind": kind.as_str() }),
+    )
+    .await;
+    let saved = consent_choices::OwnConsentChoice {
+        id: choice_id,
+        choices: body.choices,
+        chosen_at,
+        source: "lead_portal".into(),
+    };
+    (StatusCode::CREATED, Json(consent_form_json(Some(&saved)))).into_response()
 }
 
 #[allow(clippy::result_large_err)]

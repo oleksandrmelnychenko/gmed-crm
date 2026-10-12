@@ -108,6 +108,7 @@ import {
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { PatientInvoicesPage } from "@/pages/patients/portal-invoices-page";
 import { usePatientDetailLabels } from "@/pages/patients/model/detail-model";
+import { organisationAfterTypedName } from "@/pages/orders/model/order-payer";
 import { cn } from "@/lib/utils";
 import {
   dunningLevelTone,
@@ -461,6 +462,8 @@ function createInvoiceUiState(seed: InvoiceCreateSeed): InvoiceUiState {
       payerPatientPid: "",
       payerRole: "",
       contactName: "",
+      isOrganisation: false,
+      organisationTouched: false,
       contactEmail: "",
       contactPhone: "",
       contactRelationship: "",
@@ -5005,15 +5008,38 @@ function useStaffInvoicesPageContent() {
                   <Input
                     className={shellInputClassName}
                     value={payerForm.contactName}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const contactName = event.target.value;
                       setPayerForm((current) => ({
                         ...current,
-                        contactName: event.target.value,
-                      }))
-                    }
+                        contactName,
+                        isOrganisation: organisationAfterTypedName(current, contactName),
+                      }));
+                    }}
                     disabled={!access.canEditPayer || payerBusy}
                   />
                 </Field>
+                {payerForm.contactName.trim() ? (
+                  <label className="flex min-h-9 items-center gap-2 rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground md:col-span-2">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      checked={payerForm.isOrganisation}
+                      onChange={(event) => {
+                        const isOrganisation = event.target.checked;
+                        setPayerForm((current) => ({
+                          ...current,
+                          isOrganisation,
+                          organisationTouched: true,
+                        }));
+                      }}
+                      disabled={!access.canEditPayer || payerBusy}
+                    />
+                    {lang === "de"
+                      ? "Organisation (Firma, Stiftung, Versicherung), keine Privatperson"
+                      : "Организация (компания, фонд, страховая), а не частное лицо"}
+                  </label>
+                ) : null}
                 <Field label={t.revenue_invoices_email}>
                   <Input
                     className={shellInputClassName}

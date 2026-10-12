@@ -42,10 +42,16 @@ use crate::auth::middleware::AuthUser;
 use crate::state::AppState;
 
 /// `final_invoice` settles `advance`: same order and patient, both issued
-/// and active, the advance issued first, billed to the same recipient (or an
-/// advance billing confirmed by number at the final's release), and of the
+/// and active, the advance released first, billed to the same recipient (or
+/// an advance billing confirmed by number at the final's release), and of the
 /// same quote unless the final invoice settles the whole order (no quote,
 /// cancelled order) or the advance's quote was replaced or closed.
+///
+/// "Released first" compares the release order (`release_sequence`, a
+/// database sequence taken at the release), not the clock: `issued_at` is the
+/// `now()` of two transactions and a clock that steps back between them left
+/// the advance unsettled (flaky `invoice_payer_api` test, 2026-10-12).
+/// Invoices released before the sequence existed fall back to `issued_at`.
 pub(crate) const FINAL_SETTLES_ADVANCE: &str = r#"
     final_invoice.order_id = advance.order_id
     AND final_invoice.patient_id = advance.patient_id
@@ -53,7 +59,12 @@ pub(crate) const FINAL_SETTLES_ADVANCE: &str = r#"
     AND final_invoice.status NOT IN ('draft', 'cancelled')
     AND advance.invoice_type = 'advance'
     AND advance.status NOT IN ('draft', 'cancelled')
-    AND advance.issued_at <= final_invoice.issued_at
+    AND CASE
+            WHEN advance.release_sequence IS NOT NULL
+                 AND final_invoice.release_sequence IS NOT NULL
+                THEN advance.release_sequence < final_invoice.release_sequence
+            ELSE advance.issued_at <= final_invoice.issued_at
+        END
     AND (
         invoice_recipient_identity(advance.recipient_snapshot)
             IS NOT DISTINCT FROM invoice_recipient_identity(final_invoice.recipient_snapshot)
@@ -130,7 +141,8 @@ pub(crate) async fn settling_final_invoice(
            FROM invoices advance
            JOIN invoices final_invoice ON {FINAL_SETTLES_ADVANCE}
            WHERE advance.id = $1
-           ORDER BY final_invoice.issued_at, final_invoice.id
+           ORDER BY final_invoice.release_sequence NULLS FIRST, final_invoice.issued_at,
+                    final_invoice.id
            LIMIT 1"#
     );
     let Some(row) = sqlx::query(&sql)
@@ -288,7 +300,7 @@ pub(super) async fn close_settled_advances_tx(
            FROM invoices final_invoice
            JOIN invoices advance ON {FINAL_SETTLES_ADVANCE}
            WHERE final_invoice.id = $1
-           ORDER BY advance.issued_at, advance.id"#
+           ORDER BY advance.release_sequence NULLS FIRST, advance.issued_at, advance.id"#
     );
     let rows = sqlx::query(&sql)
         .bind(final_invoice_id)

@@ -162,38 +162,18 @@ describe("document template binding payloads", () => {
     ).toBeNull();
   });
 
-  it("serializes every privacy checkbox as a boolean", () => {
-    expect(
-      buildBindingsPayload("privacy_consents", {
-        consent_healthcare: "true",
-        consent_provider_release: "false",
-        consent_privacy: "true",
-        consent_email: "true",
-        consent_threema: "false",
-        consent_whatsapp: "true",
-        consent_telegram: "false",
-      }),
-    ).toMatchObject({
-      consent_healthcare: true,
-      consent_provider_release: false,
-      consent_privacy: true,
-      consent_email: true,
-      consent_threema: false,
-      consent_whatsapp: true,
-      consent_telegram: false,
+  it("never sends consent options for the consent form: only the person's own choice ticks them", () => {
+    const payload = buildBindingsPayload("privacy_consents", {
+      consent_healthcare: "true",
+      consent_privacy: "true",
+      consent_email: "true",
+      consent_whatsapp: "true",
+      extra_release_recipients: "Maria Beispiel",
+      party_sign_place: "Berlin",
     });
-  });
-
-  it("sends explicit false defaults for untouched privacy checkboxes", () => {
-    expect(buildBindingsPayload("privacy_consents", {})).toMatchObject({
-      consent_healthcare: false,
-      consent_provider_release: false,
-      consent_privacy: false,
-      consent_email: false,
-      consent_threema: false,
-      consent_whatsapp: false,
-      consent_telegram: false,
-    });
+    expect(payload).toMatchObject({ extra_release_recipients: "Maria Beispiel", party_sign_place: "Berlin" });
+    expect(Object.keys(payload ?? {}).filter((key) => key.startsWith("consent_"))).toEqual([]);
+    expect(buildBindingsPayload("privacy_consents", {})).toBeNull();
   });
 
   it("serializes the complete AML form with the lead wizard backend contract", () => {
@@ -670,23 +650,27 @@ describe("document template binding payloads", () => {
     });
   });
 
-  it("hydrates persisted checked and unchecked consent values", () => {
+  it("does not bring back consent options staff stored on older consent forms", () => {
+    const hydrated = hydrateDocumentBindings(
+      "privacy_consents",
+      {
+        consent_healthcare: true,
+        consent_whatsapp: true,
+        extra_release_recipients: "Maria Beispiel",
+      },
+      null,
+    );
+    expect(hydrated).toMatchObject({ extra_release_recipients: "Maria Beispiel" });
+    expect(Object.keys(hydrated).filter((key) => key.startsWith("consent_"))).toEqual([]);
+  });
+
+  it("hydrates persisted checked and unchecked boolean values", () => {
     expect(
       hydrateDocumentBindings(
-        "privacy_consents",
-        {
-          consent_healthcare: true,
-          consent_provider_release: false,
-          consent_whatsapp: true,
-          consent_telegram: false,
-        },
+        "enhanced_due_diligence",
+        { aml_enhanced_due_diligence: { internalRiskAnalysis: true, individualReview: false } },
         null,
       ),
-    ).toMatchObject({
-      consent_healthcare: "true",
-      consent_provider_release: "false",
-      consent_whatsapp: "true",
-      consent_telegram: "false",
-    });
+    ).toMatchObject({ internalRiskAnalysis: "true", individualReview: "false" });
   });
 });

@@ -168,7 +168,7 @@ pub(super) async fn create_request(
     }
     for row in &rows {
         let id: Uuid = row.get("id");
-        if let Some(reason) = eligibility(row) {
+        if let Some(reason) = current_eligibility(state, row).await? {
             return Err(document_error(StatusCode::CONFLICT, reason, id));
         }
         if let Some(statute) = electronic_form_excluded(row) {
@@ -614,11 +614,11 @@ pub(super) async fn candidates(
         candidate["is_medical"] = json!(row.get::<bool, _>("is_medical"));
         candidate["pending_elsewhere"] = json!(pending.contains(&id));
         candidate["electronic_form_excluded"] = json!(electronic_form_excluded(&row));
-        candidate["ineligible_reason"] = json!(
-            eligibility(&row)
-                .or_else(|| electronic_form_excluded(&row).map(|_| "electronic_form_excluded"))
-                .or_else(|| pending.contains(&id).then_some("signature_already_pending"))
-        );
+        let ineligible_reason = current_eligibility(&state, &row)
+            .await?
+            .or_else(|| electronic_form_excluded(&row).map(|_| "electronic_form_excluded"))
+            .or_else(|| pending.contains(&id).then_some("signature_already_pending"));
+        candidate["ineligible_reason"] = json!(ineligible_reason);
         if first_row.is_none() {
             first_row = Some(row);
         }

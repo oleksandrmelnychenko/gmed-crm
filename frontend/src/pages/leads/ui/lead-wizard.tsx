@@ -443,10 +443,6 @@ type Draft = {
   costThreshold: string;
   privacyConsent: boolean;
   healthcareConsent: boolean;
-  providerReleaseConsent: boolean;
-  consentWhatsapp: boolean;
-  consentTelegram: boolean;
-  consentThreema: boolean;
 };
 
 export type { ServiceLine } from "@/pages/orders/model/order-service-line";
@@ -1096,12 +1092,6 @@ function autosavePayload(
       cost_threshold: draft.costThreshold,
       registration_country: draft.citizenships[0] ?? "",
       passport_expiry: draft.passportExpiry,
-      document_consents: {
-        provider_release: draft.providerReleaseConsent,
-        whatsapp: draft.consentWhatsapp,
-        telegram: draft.consentTelegram,
-        threema: draft.consentThreema,
-      },
       aml_enhanced_due_diligence: draft.amlEnhancedDueDiligence,
       selected_specialization_work_type_ids:
         draft.selectedSpecializationWorkTypeIds,
@@ -1686,7 +1676,6 @@ function applyPersistedClinicalProfile(
 }
 
 function draftFromLead(lead: LeadDetail): Draft {
-  const documentConsents = asRecord(lead.wizard_state?.["document_consents"]);
   const clinical = clinicalRowsFromLead(lead);
   return {
     firstName: lead.first_name ?? "",
@@ -1754,14 +1743,6 @@ function draftFromLead(lead: LeadDetail): Draft {
     costThreshold: inputString(lead.wizard_state?.["cost_threshold"]),
     privacyConsent: lead.consent_privacy_practices,
     healthcareConsent: lead.consent_healthcare,
-    providerReleaseConsent: typeof documentConsents?.["provider_release"] === "boolean"
-      ? documentConsents["provider_release"] as boolean
-      : lead.consent_healthcare,
-    consentWhatsapp: typeof documentConsents?.["whatsapp"] === "boolean"
-      ? documentConsents["whatsapp"] as boolean
-      : Boolean(lead.whatsapp_consent),
-    consentTelegram: documentConsents?.["telegram"] === true,
-    consentThreema: documentConsents?.["threema"] === true,
   };
 }
 
@@ -1815,10 +1796,6 @@ function blankDraft(): Draft {
     costThreshold: "",
     privacyConsent: false,
     healthcareConsent: false,
-    providerReleaseConsent: false,
-    consentWhatsapp: false,
-    consentTelegram: false,
-    consentThreema: false,
   };
 }
 
@@ -5757,17 +5734,8 @@ export function LeadWizard({
           order_number: order?.order_number,
           party_city: draft.city.trim() || undefined,
           party_sign_place: draft.city.trim() || undefined,
-          ...(templateId === "privacy_consents"
-            ? {
-                consent_privacy: draft.privacyConsent,
-                consent_healthcare: draft.healthcareConsent,
-                consent_provider_release: draft.providerReleaseConsent,
-                consent_email: Boolean(draft.email.trim()),
-                consent_whatsapp: draft.consentWhatsapp,
-                consent_telegram: draft.consentTelegram,
-                consent_threema: draft.consentThreema,
-              }
-            : {}),
+          // The consent form's boxes are never preset by staff: only the
+          // person's own choice from the cabinet ticks them (2026-10-12).
           // Required by the rule or carried out voluntarily: the tier names why.
           ...(templateId === "enhanced_due_diligence"
             ? {
@@ -8371,19 +8339,15 @@ ${serviceCommentLines.join("\n")}`
                   ) : null}
                   <ToggleRow id={PRIVACY_CONSENT_ID} checked={draft.privacyConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("privacyConsent", checked)} label={tx("Клиент ознакомлен с политикой конфиденциальности", "Datenschutzhinweise wurden bestätigt")} />
                   <ToggleRow id={HEALTHCARE_CONSENT_ID} checked={draft.healthcareConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("healthcareConsent", checked)} label={tx("Получено согласие на обработку медицинских данных", "Einwilligung zur Verarbeitung von Gesundheitsdaten liegt vor")} />
-                  <ToggleRow checked={draft.providerReleaseConsent} disabled={isBusy} withDivider={false} onChange={(checked) => patch("providerReleaseConsent", checked)} label={tx("Разрешена передача данных медицинским учреждениям и врачам", "Datenübermittlung an medizinische Einrichtungen und Ärztinnen/Ärzte ist erlaubt")} />
                 </div>
-                <div className="rounded-lg border border-border/70 bg-muted/10 px-3 py-3">
-                  <div className="mb-1 text-sm font-semibold text-foreground">
-                    {tx("Каналы связи в документе", "Kommunikationswege im Dokument")}
-                  </div>
-                  <ToggleRow checked={Boolean(draft.email.trim())} disabled withDivider={false} onChange={() => undefined} label={draft.email.trim()
-                    ? tx("E-Mail — отмечен автоматически", "E-Mail – automatisch ausgewählt")
-                    : tx("E-Mail — добавьте адрес в данных клиента", "E-Mail – Adresse in den Kundendaten ergänzen")} />
-                  <ToggleRow checked={draft.consentWhatsapp} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentWhatsapp", checked)} label="WhatsApp" />
-                  <ToggleRow checked={draft.consentTelegram} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentTelegram", checked)} label="Telegram" />
-                  <ToggleRow checked={draft.consentThreema} disabled={isBusy} withDivider={false} onChange={(checked) => patch("consentThreema", checked)} label="Threema" />
-                </div>
+                {/* The form's boxes (transfer, communication channels) are ticked only by the
+                    person's own choice in the cabinet (2026-10-12), never preset here. */}
+                <p data-testid="privacy-consents-own-choice-note" className="rounded-lg border border-border/70 bg-muted/10 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                  {tx(
+                    "Варианты согласия в форме (передача данных, каналы связи) отмечает только сам клиент — в кабинете, блок «Согласие на передачу данных». Без его выбора форма печатается с пустыми полями: клиент отмечает их на бумаге.",
+                    "Die Optionen im Formular (Datenübermittlung, Kommunikationswege) kreuzt nur der Kunde selbst an – im Kundenkabinett, Block „Einwilligung zur Datenübermittlung“. Ohne seine Auswahl wird das Formular mit leeren Kästchen gedruckt, die er auf Papier ankreuzt.",
+                  )}
+                </p>
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">

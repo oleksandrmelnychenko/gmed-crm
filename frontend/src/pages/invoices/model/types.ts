@@ -270,6 +270,11 @@ type InvoicePayer = {
   role?: PayerRole | null;
   patient_relation_id?: string | null;
   contact_name?: string | null;
+  /**
+   * Organisation box of the contact: the stored answer, else how the server screens the name
+   * (legal form); null without a contact name.
+   */
+  contact_is_organisation?: boolean | null;
   contact_email?: string | null;
   contact_phone?: string | null;
   contact_relationship?: string | null;
@@ -584,6 +589,10 @@ export type PayerForm = {
   payerPatientPid: string;
   payerRole: PayerRole | "";
   contactName: string;
+  /** The contact is an organisation (box "Организация"; sanctions screening). */
+  isOrganisation: boolean;
+  /** Staff set the box themselves (or it was stored); a typed name no longer changes it. */
+  organisationTouched: boolean;
   contactEmail: string;
   contactPhone: string;
   contactRelationship: string;

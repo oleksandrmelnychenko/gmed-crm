@@ -417,6 +417,76 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
 екземпляра з давнішою датою підпису стає версією документа, але пункт і
 згоду не відновлює (`record_document_signature_tx`).
 
+### Згоди з позначками й електронний підпис (2026-10-12)
+
+«Einverständniserklärung zur Datenübermittlung» (`privacy_consents`,
+Anlage 1) має поля для позначок: три основні згоди (обробка GMED, передача
+документів лікарями до GMED, зберігання в EDV-системі), передача названим
+особам/установам і канали зв'язку (E-Mail, Threema, WhatsApp, Telegram). З
+2026-10-11 форма друкує їх порожніми («[ ]», рішення власника: жодних
+заздалегідь проставлених позначок). На папері особа ставить позначки сама; за
+електронного підпису (Skribble QES/AES) поставити позначку неможливо — вибір
+губився. Правило (код — `crates/server/src/consent_choices.rs`):
+
+- **Власний активний вибір.** Особа обирає варіанти сама в кабінеті ліда
+  (крок «Anliegen & Unterlagen» з документами, блок «Согласие на передачу данных (приложение
+  1)» / «Einwilligung zur Datenübermittlung (Anlage 1)»; чотири мови
+  кабінету): нічого не позначено заздалегідь, вибір діє лише після кнопки
+  «Сохранить выбор» / «Auswahl speichern». `POST /me/lead-requests/{lead_id}/consent-choices`
+  (лише роль `patient` — власний логін ліда або батьків/опікуна з доступом;
+  персонал не має маршруту, щоб поставити чи змінити вибір). Кожне
+  збереження — новий рядок `consent_form_choices` (історія, append-only:
+  тригер забороняє змінювати рядок; діє найновіший за порядком збереження
+  `seq`, а не за годинником), аудит
+  `lead_portal_consent_choices_saved` з вибором. Версія текстів
+  `TEXT_VERSION` (`2026-10-12`; застаріла — 409 `consent_version_outdated`).
+  Вибір лишається з пацієнтом після конвертації (пошук за лідом пацієнта).
+  Рядки видаляються разом із лідом (`ON DELETE CASCADE`). Міграція
+  `20261012173200_consent_form_choices.sql`.
+- **Документ.** Генерація `privacy_consents` бере найновіший власний вибір
+  ліда/пацієнта: «[x]» лише для обраних варіантів (поле «Kommunikationsmedien» —
+  якщо обрано хоч один канал), «[ ]» для решти, рядок «bin damit
+  einverstanden (angekreuzt ist meine eigene Auswahl)» і під полями — дата й
+  час вибору (Europe/Berlin): «Die Auswahl hat die unterzeichnende Person am
+  DD.MM.YYYY um HH:MM Uhr selbst im GMED-Kundenkabinett getroffen; angekreuzt
+  ist nur, was sie gewählt hat.» Вибір записується в `generated_bindings`
+  (`_own_consent_choice`: id, варіанти, час, джерело). Без власного вибору
+  форма як і раніше друкує всі поля порожніми з «bitte ankreuzen».
+  Персонал позначок не ставить ніколи: застарілі ручні прив'язки
+  `consent_*` (`consent_email`, `consent_threema`, `consent_whatsapp`,
+  `consent_telegram`, а у формі прив'язок і `consent_healthcare`,
+  `consent_provider_release`, `consent_privacy`) прибрано з
+  `DocumentBindingOverrides`, з полів форми прив'язок
+  (`document-bindings.ts`), з генерації в майстрі ліда (перемикачі «Каналы
+  связи в документе» і «передача медицинским учреждениям» замінено
+  підказкою про власний вибір клієнта в кабінеті) і з
+  `docs/print/bindings-manifest.json`; клієнт, що ще надсилає ці ключі,
+  ігнорується.
+- **Електронний підпис.** Форма без власного вибору не пропонується й не
+  надсилається: `eligibility` → `consent_choice_missing` (кандидати
+  композитора, стан панелі, пресети, `POST /signature-packages`, старий
+  `POST /documents/{id}/signature-requests` — 409 з `document_id`). Якщо
+  особа змінила вибір після генерації, форма показує старий вибір —
+  `consent_choice_changed` (створіть документ заново). Персонал бачить:
+  «Пациент ещё не выбрал согласия — используйте бумажную подпись или
+  попросите выбрать в кабинете» / «Der Patient hat die Einwilligungen noch
+  nicht selbst ausgewählt – nutzen Sie die Unterschrift auf Papier oder
+  bitten Sie um die Auswahl im Kundenkabinett». Пакети онбордингу ліда
+  (`signing_companions`) пропускають таку форму; слот згоди в старому
+  маршруті необов'язковий (`OPTIONAL_SLOT_TEMPLATES`).
+- **Папір лишається.** Підпис на папері (`paper-signature`) не вимагає
+  власного вибору: особа позначає поля на примірнику сама.
+- Портал пацієнта власного блоку вибору не має: пацієнт без вибору з
+  кабінету ліда підписує форму на папері.
+- **Рекомендовано перевірку юристом** (правило закриває відкрите питання
+  2026-10-11 технічно, але юридичну достатність має підтвердити юрист).
+- Тести: `consent_choices::tests`, `documents::tests::adult_legal_documents_follow_reference_structure_and_bind_dynamic_data`
+  (друк «[x]»/«[ ]» і дати), інтеграційні
+  `lead_portal_api::the_lead_chooses_the_consent_form_options_and_the_form_records_the_choice`,
+  `signature_packages_api::a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only`;
+  фронтенд `lead-request-consent-form.test.tsx`,
+  `signature-package-composer.test.tsx`.
+
 ### Інші зміни
 
 - Документ в активному запиті не можна версіонувати, перегенерувати чи
@@ -500,7 +570,7 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
 | Доказ згоди | Art. 7 Abs. 1, Art. 8 DSGVO analog; §§ 1626, 1629 BGB | `consent_records.context`: джерело `electronic_signature`, підписанти з боку пацієнта (e-mail, роль, час, ID підпису, якість), рівень, ID запиту. Відкликаний, відхилений чи прострочений запит згоди не створює. Неповнолітній: підписують усі записані законні представники. |
 | Зберігання доказів | § 147 AO, § 257 HGB; Art. 17 Abs. 3 lit. b, e DSGVO | Видалення за Art. 17 (`admin_compliance`) і видалення ліда (`leads::LEAD_DOCUMENT_RETAINED_SQL`) не чіпають живі результати підпису (`ursprung` `electronic_signature` / `electronic_signature_package`). Тестові (DEMO) докази юридичної цінності не мають: тригер їх не захищає (і результат запиту, і копії учасників пакета зі старого потоку, пов'язані лише через `document_signature_members.result_document_id`), і вони видаляються разом із лідом чи пацієнтом. **Відкрите питання:** після завершення строку зберігання підписані оригінали наразі не мають шляху видалення — як рахунки й договори (`docs/compliance/04_loeschkonzept.md`). |
 | Тестовий режим без правових наслідків | — | DEMO: результат — внутрішній `signature_evidence` з префіксом «TEST – », без ефектів; UI показує банер і позначку DEMO/TEST. |
-| Згода без заздалегідь проставлених позначок | Art. 4 Nr. 11, Art. 7 DSGVO | Рішення власника 2026-10-11: «Einverständniserklärung zur Datenübermittlung» друкує під «bitte ankreuzen» усі поля порожніми «[ ]» — три основні згоди, отримувачів і канали зв'язку; позначки ставить сама особа на примірнику. Раніше три основні згоди друкувалися з «[x]», канали — за вибором у даних шаблону (`documents::build_adult_privacy_consents_pdf`, `adult_legal_checkbox`). |
+| Згода без заздалегідь проставлених позначок | Art. 4 Nr. 11, Art. 7 DSGVO | Рішення власника 2026-10-11: «Einverständniserklärung zur Datenübermittlung» друкує під «bitte ankreuzen» усі поля порожніми «[ ]» — три основні згоди, отримувачів і канали зв'язку; позначки ставить сама особа на примірнику. Раніше три основні згоди друкувалися з «[x]», канали — за вибором у даних шаблону (`documents::build_adult_privacy_consents_pdf`, `adult_legal_checkbox`). З 2026-10-12 — власний вибір особи в кабінеті ліда: «[x]» лише для обраного нею, з датою вибору; без такого вибору — лише папір (розділ [«Згоди з позначками й електронний підпис»](#згоди-з-позначками-й-електронний-підпис-2026-10-12)). |
 
 ### Потрібна перевірка юриста
 
@@ -516,10 +586,14 @@ node node_modules/@playwright/test/cli.js test tests/e2e/document-signatures.spe
 - Widerrufsbelehrung для договорів на відстані: у шаблонах її немає, власних
   текстів ми не створювали — **відкрите правове питання**.
 - Порожні поля «[ ]» в «Einverständniserklärung zur Datenübermittlung»
-  (2026-10-11): на папері особа ставить позначки сама; за електронного
-  підпису PDF підписується без позначок, тож вибір згод у такому разі треба
-  фіксувати інакше (поля форми в PDF чи окреме підтвердження) — **відкрите
-  питання** для юриста й власника.
+  (2026-10-11): **закрито 2026-10-12 правилом власного активного вибору**
+  (розділ [«Згоди з позначками й електронний підпис»](#згоди-з-позначками-й-електронний-підпис-2026-10-12)):
+  на папері особа ставить позначки сама; для електронного підпису — лише
+  форма з її власним вибором у кабінеті ліда («[x]» тільки для обраного, з
+  датою вибору), інакше електронний підпис цієї форми не пропонується.
+  **Рекомендовано перевірку юристом** (чи достатньо вибору в кабінеті разом
+  із QES/AES-підписом документа, що показує цей вибір, як доказу активної
+  згоди за Art. 7 Abs. 1 DSGVO; формулювання рядка з датою вибору).
 - Чи достатньо листа Skribble про завершення як «dauerhafter Datenträger» і
   чи потрібне автоматичне відкриття підписаного пакета в порталі пацієнта.
 - Строк видалення в Skribble після архівування (рекомендація 30 днів),

@@ -116,6 +116,16 @@ const ineligibleMessages: Record<string, [string, string]> = {
     "Dies ist ein Informationsdokument: Es wird nicht unterschrieben. Es geht automatisch als Anlage zur Kenntnisnahme mit dem Vertrag, dem Auftrag oder der Einwilligung mit – senden Sie diese zur Unterschrift.",
   ],
   electronic_form_excluded: ["Для этого документа закон исключает электронную форму — нужна подпись на бумаге.", "Für dieses Dokument ist die elektronische Form gesetzlich ausgeschlossen – Unterschrift auf Papier erforderlich."],
+  // The consent form: with an electronic signature nobody can tick its boxes, so it needs the
+  // patient's own choice from the cabinet (2026-10-12); paper stays possible.
+  consent_choice_missing: [
+    "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
+    "Der Patient hat die Einwilligungen noch nicht selbst ausgewählt – nutzen Sie die Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett.",
+  ],
+  consent_choice_changed: [
+    "Пациент изменил выбор согласий после создания документа — создайте документ заново или используйте бумажную подпись.",
+    "Der Patient hat seine Auswahl der Einwilligungen nach dem Erstellen des Dokuments geändert – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
+  ],
 };
 
 function requestTone(status: SignatureStatus) {

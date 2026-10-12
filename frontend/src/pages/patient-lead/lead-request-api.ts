@@ -212,6 +212,54 @@ export type LeadRequestConsent = {
   given_at: string | null;
 };
 
+/**
+ * The options of the consent form «Einverständniserklärung zur Datenübermittlung» (Anlage 1) the
+ * person chooses in the cabinet (2026-10-12): the generated form ticks only these, and only with
+ * such a choice GMED can send it for an electronic signature.
+ */
+export type ConsentFormChoices = {
+  agency_processing: boolean;
+  doctors_to_agency: boolean;
+  data_system: boolean;
+  named_recipients: boolean;
+  channel_email: boolean;
+  channel_threema: boolean;
+  channel_whatsapp: boolean;
+  channel_telegram: boolean;
+};
+
+export const CONSENT_FORM_OPTIONS: readonly (keyof ConsentFormChoices)[] = [
+  "agency_processing",
+  "doctors_to_agency",
+  "data_system",
+  "named_recipients",
+];
+
+export const CONSENT_FORM_CHANNELS: readonly (keyof ConsentFormChoices)[] = [
+  "channel_email",
+  "channel_threema",
+  "channel_whatsapp",
+  "channel_telegram",
+];
+
+export const NO_CONSENT_FORM_CHOICES: ConsentFormChoices = {
+  agency_processing: false,
+  doctors_to_agency: false,
+  data_system: false,
+  named_recipients: false,
+  channel_email: false,
+  channel_threema: false,
+  channel_whatsapp: false,
+  channel_telegram: false,
+};
+
+/** The person's saved choice; `choices` is null until they saved one. */
+export type LeadRequestConsentForm = {
+  version: string;
+  choices: ConsentFormChoices | null;
+  chosen_at: string | null;
+};
+
 export type LeadRequestDocument = {
   id: string;
   file_name: string | null;
@@ -636,6 +684,8 @@ export type LeadRequest = {
   documents: LeadRequestDocument[];
   max_documents: number;
   consents: Record<string, LeadRequestConsent>;
+  /** The person's own choice of the consent form options; absent on an older server. */
+  consent_form?: LeadRequestConsentForm;
   submitted_at: string | null;
   /** Data or documents changed after sending; absent on an older server. */
   changed_since_submit?: boolean;
@@ -701,6 +751,22 @@ export function giveLeadConsent(
   return apiFetch(`${base(leadId)}/consent`, {
     method: "POST",
     body: JSON.stringify({ purpose, version, language }),
+  });
+}
+
+/**
+ * Saves the person's own choice of the consent form options (every save is a new record; the
+ * newest counts). 409 `consent_version_outdated` when the texts changed meanwhile.
+ */
+export function saveLeadConsentFormChoices(
+  leadId: string,
+  choices: ConsentFormChoices,
+  version: string,
+  language: string,
+): Promise<LeadRequestConsentForm> {
+  return apiFetch<LeadRequestConsentForm>(`${base(leadId)}/consent-choices`, {
+    method: "POST",
+    body: JSON.stringify({ choices, version, language }),
   });
 }
 

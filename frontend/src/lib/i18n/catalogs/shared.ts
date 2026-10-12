@@ -18,6 +18,12 @@ export interface SharedCoreTranslations {
   topbar_realtime_disconnected: string;
   read_only_scope_title: string;
   read_only_scope_hint: string;
+  /** Shared file picker (`components/ui/file-picker.tsx`) instead of the browser's own texts. */
+  file_picker_choose: string;
+  file_picker_choose_multiple: string;
+  file_picker_none: string;
+  /** `{count}` files chosen. */
+  file_picker_count: string;
 }
 
 export const sharedCoreRu: SharedCoreTranslations = {
@@ -44,6 +50,10 @@ export const sharedCoreRu: SharedCoreTranslations = {
   topbar_realtime_disconnected: "Realtime отключен",
   read_only_scope_title: "Только просмотр",
   read_only_scope_hint: "Ваша роль не может вносить изменения на этой странице.",
+  file_picker_choose: "Выбрать файл",
+  file_picker_choose_multiple: "Выбрать файлы",
+  file_picker_none: "Файл не выбран",
+  file_picker_count: "Выбрано файлов: {count}",
 };
 
 export const sharedCoreDe: SharedCoreTranslations = {
@@ -70,4 +80,8 @@ export const sharedCoreDe: SharedCoreTranslations = {
   topbar_realtime_disconnected: "Realtime getrennt",
   read_only_scope_title: "Nur Ansicht",
   read_only_scope_hint: "Ihre Rolle kann auf dieser Seite keine Änderungen vornehmen.",
+  file_picker_choose: "Datei auswählen",
+  file_picker_choose_multiple: "Dateien auswählen",
+  file_picker_none: "Keine Datei ausgewählt",
+  file_picker_count: "{count} Dateien ausgewählt",
 };

@@ -5,8 +5,8 @@ import { Button } from "@/components/ui/button";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { useLang } from "@/lib/i18n";
 import {
-  blockingWarning, packageMinimumLevel, packageWarnings, requiredAttachmentTemplates,
-  type PackageCandidate, type PackageCandidates, type PackageWarning, type SignatureLevel,
+  CONSENT_CHOICE_REASONS, blockingWarning, packageMinimumLevel, packageWarnings, requiredAttachmentTemplates,
+  signatureErrorText, type PackageCandidate, type PackageCandidates, type PackageWarning, type SignatureLevel,
 } from "../data/document-signature-api";
 
 export type PackageSelection = {
@@ -36,7 +36,10 @@ function warningText(warning: PackageWarning, tx: (ru: string, de: string) => st
   switch (warning.kind) {
     case "no_frames": return tx("Нет поля для подписи — Skribble разместит подпись сам.", "Kein Unterschriftsfeld – Skribble platziert die Signatur selbst.");
     case "pending_elsewhere": return tx("Уже отправлен на подпись в другом запросе.", "Bereits in einer anderen Anfrage zur Unterschrift versendet.");
-    case "ineligible": return tx("Недоступен для подписи (архив, старая версия или уже подписан).", "Nicht signierbar (archiviert, frühere Version oder bereits unterschrieben).");
+    case "ineligible":
+      // The consent form without the patient's own choice of its options (2026-10-12).
+      if (warning.reason && CONSENT_CHOICE_REASONS.has(warning.reason)) return signatureErrorText(warning.reason, tx);
+      return tx("Недоступен для подписи (архив, старая версия или уже подписан).", "Nicht signierbar (archiviert, frühere Version oder bereits unterschrieben).");
     case "electronic_form_excluded": return tx("Электронная форма исключена законом — только бумажная подпись.", "Elektronische Form gesetzlich ausgeschlossen – nur Papierunterschrift.");
     case "too_large": return tx("Пакет больше 18 МБ — уберите документы или отправьте их отдельно.", "Das Paket ist größer als 18 MB – entfernen Sie Dokumente oder versenden Sie sie einzeln.");
     case "too_many": return tx("Не больше 10 документов в одном пакете.", "Höchstens 10 Dokumente pro Paket.");
@@ -161,7 +164,7 @@ export function SignaturePackageComposer({ documentId, candidates, selection, on
       {available.length > 0 && selection.documentIds.length < candidates.limits.max_documents ? <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">{tx("Добавить документ этого пациента/лида", "Dokument dieser Person hinzufügen")}
         <NativeComboboxSelect className="h-9 bg-field text-sm font-normal text-foreground" value="" disabled={disabled} onChange={event => { const id = event.target.value; if (id) update({ documentIds: [...selection.documentIds, id] }); }}>
           <option value="">{tx("Выберите документ", "Dokument auswählen")}</option>
-          {available.map(document => <option key={document.id} value={document.id} disabled={Boolean(document.ineligible_reason)}>{document.title} · v{document.version}{document.pending_elsewhere ? tx(" · уже на подписи", " · bereits versendet") : document.electronic_form_excluded ? tx(" · только на бумаге", " · nur Papierform") : ""}</option>)}
+          {available.map(document => <option key={document.id} value={document.id} disabled={Boolean(document.ineligible_reason)}>{document.title} · v{document.version}{document.pending_elsewhere ? tx(" · уже на подписи", " · bereits versendet") : document.electronic_form_excluded ? tx(" · только на бумаге", " · nur Papierform") : document.ineligible_reason && CONSENT_CHOICE_REASONS.has(document.ineligible_reason) ? tx(" · нет выбора пациента — на бумаге", " · ohne Auswahl des Patienten – Papierform") : ""}</option>)}
         </NativeComboboxSelect>
       </label> : null}
     </section>

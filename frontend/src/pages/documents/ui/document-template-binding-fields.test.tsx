@@ -7,7 +7,8 @@ import { DOCUMENT_BINDING_FIELDS } from "@/pages/documents/model/document-bindin
 import { DocumentTemplateBindingFields } from "@/pages/documents/ui/document-template-binding-fields";
 
 describe("DocumentTemplateBindingFields", () => {
-  it("renders every privacy-consent choice as an operator checkbox", () => {
+  it("offers staff no consent-option checkbox for the consent form, only recipients and signing place", () => {
+    // Only the person's own choice in the cabinet ticks the form's boxes (2026-10-12).
     const markup = renderToStaticMarkup(
       <LocalizationProvider dateAdapter={AdapterDayjs}>
         <DocumentTemplateBindingFields
@@ -20,10 +21,10 @@ describe("DocumentTemplateBindingFields", () => {
       </LocalizationProvider>,
     );
 
-    expect(markup.match(/type="checkbox"/g)).toHaveLength(7);
-    expect(markup).toContain("Сбор, обработка и передача медицинских данных");
-    expect(markup).toContain("Threema");
-    expect(markup).toContain("WhatsApp");
-    expect(markup).toContain("Telegram");
+    expect(markup).not.toContain('type="checkbox"');
+    expect(markup).not.toContain("Сбор, обработка и передача медицинских данных");
+    expect(markup).not.toContain("WhatsApp");
+    expect(markup).toContain("Дополнительные получатели данных");
+    expect(markup).toContain("Место подписания");
   });
 });

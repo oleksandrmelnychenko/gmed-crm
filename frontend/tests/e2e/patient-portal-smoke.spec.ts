@@ -828,6 +828,8 @@ test.describe("patient portal smoke flows", () => {
       /Versicherungsdokument|Insurance/i,
     );
     await page.getByLabel(/Titel|Название|Title/i).fill("Insurance card April");
+    // The app's own file picker: localized button, the chosen file's name.
+    await expect(page.getByText(/Datei auswählen|Выбрать файл/)).toBeVisible();
     await page
       .getByLabel(/Datei|Файл|File/i)
       .setInputFiles({
@@ -835,6 +837,7 @@ test.describe("patient portal smoke flows", () => {
         mimeType: "application/pdf",
         buffer: Buffer.from("insurance-card"),
       });
+    await expect(page.locator('[data-slot="file-picker-selection"]')).toHaveText("insurance-card.pdf");
     await page
       .getByLabel(/Notiz|Заметка|Note/i)
       .fill("Front and back scanned.");

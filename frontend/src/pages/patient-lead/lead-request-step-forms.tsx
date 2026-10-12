@@ -19,6 +19,7 @@ import {
   type LeadRequest,
 } from "./lead-request-api";
 import { BillingSections } from "./lead-request-billing";
+import { ConsentFormChoicesSection } from "./lead-request-consent-form";
 import {
   ContactChannelsField,
   IdentificationFormField,
@@ -909,6 +910,9 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
           onRemove={(documentId) => void remove(documentId)}
         />
       </Section>
+
+      {/* The person's own choice of the consent form options (2026-10-12). */}
+      <ConsentFormChoicesSection request={request} lang={lang} enqueue={enqueue} onChange={onChange} />
     </StepFrame>
   );
 }

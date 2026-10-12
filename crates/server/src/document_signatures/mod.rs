@@ -114,7 +114,33 @@ fn eligibility(row: &PgRow) -> Option<&'static str> {
     {
         return Some("pdf_required");
     }
-    None
+    // The consent form needs the person's own choice of its options: with an
+    // electronic signature nobody can tick a box (2026-10-12). Paper stays
+    // possible (`paper::refusal` does not ask for it).
+    crate::consent_choices::electronic_signing_refusal(
+        template_of(row).as_deref(),
+        row.get::<Option<Value>, _>("generated_bindings").as_ref(),
+    )
+}
+
+/// [`eligibility`], and for a consent form also whether the person chose
+/// differently since it was generated (`consent_choice_changed`).
+async fn current_eligibility(
+    state: &AppState,
+    row: &PgRow,
+) -> Result<Option<&'static str>, Response> {
+    if let Some(reason) = eligibility(row) {
+        return Ok(Some(reason));
+    }
+    crate::consent_choices::changed_since_generation(
+        &state.db,
+        template_of(row).as_deref(),
+        row.get::<Option<Value>, _>("generated_bindings").as_ref(),
+        row.get::<Option<Uuid>, _>("lead_id"),
+        row.get::<Option<Uuid>, _>("patient_id"),
+    )
+    .await
+    .map_err(db_error)
 }
 
 fn template_of(row: &PgRow) -> Option<String> {
@@ -593,6 +619,7 @@ async fn list(
         requests.push(public_request(&state, &auth, row, &mut access).await?);
     }
     let minimum = minimum_level(&source);
+    let source_eligibility = current_eligibility(&state, &source).await?;
     Ok(Json(json!({"enabled":provider.is_some(),"region":"DE",
         "can_configure":auth.can(gmed_domain::access::capabilities::Capability::AdminSignatures),
         "test_mode":provider.as_ref().is_none_or(|p| p.test_mode),"can_send":can_send,
@@ -607,7 +634,7 @@ async fn list(
         // An informational document (privacy information, cost estimate) is
         // attached for acknowledgement and never signed itself: saying so
         // here keeps the client from offering a composer that cannot send.
-        "ineligible_reason":eligibility(&source)
+        "ineligible_reason":source_eligibility
             .or_else(|| electronic_form_excluded(&source).map(|_| "electronic_form_excluded"))
             .or_else(|| legal::informational(template_of(&source).as_deref()).then_some("informational_document_not_signable")),
         "requests":requests})))

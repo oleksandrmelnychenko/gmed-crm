@@ -479,6 +479,8 @@ async function setup(
     representation: [] as Record<string, unknown>[],
     billing: [] as Record<string, unknown>[],
     consents: [] as string[],
+    /** Bodies of POST …/consent-choices (the consent form options, 2026-10-12). */
+    consentChoices: [] as Record<string, unknown>[],
     uploads: 0,
     identityUploads: 0,
     submits: 0,
@@ -688,6 +690,13 @@ async function setup(
       calls.consents.push(body.purpose);
       request.consents[body.purpose].given_at = "2026-10-03T09:15:00Z";
       return route.fulfill({ status: 201, json: { purpose: body.purpose, given_at: "2026-10-03T09:15:00Z", version: body.version } });
+    }
+    if (path === "/me/lead-requests/lead-1/consent-choices" && method === "POST") {
+      const body = req.postDataJSON() as Record<string, unknown>;
+      calls.consentChoices.push(body);
+      const saved = { version: body.version, choices: body.choices, chosen_at: "2026-10-12T08:05:00Z" };
+      Object.assign(request, { consent_form: saved });
+      return route.fulfill({ status: 201, json: saved });
     }
     if (path === "/me/lead-requests/lead-1/documents" && method === "POST") {
       calls.uploads += 1;
@@ -923,6 +932,39 @@ test.describe("lead cabinet", () => {
     await expect.poll(() => calls.submits).toBe(2);
     await expect(send).toHaveCount(0);
     await expect(page.getByTestId("lead-request-changed")).toHaveCount(0);
+  });
+
+  test("the person chooses the consent form options themselves; nothing is ticked in advance", async ({ page }) => {
+    const { calls } = await setup(page, "lead", {
+      prepare: (request) => Object.assign(request, { consent_form: { version: "2026-10-12", choices: null, chosen_at: null } }),
+    });
+    await page.goto("/");
+    await step(page, "documents");
+    const block = page.getByTestId("lead-request-consent-form");
+    await expect(block).toContainText("Einwilligung zur Datenübermittlung (Anlage 1)");
+    await expect(block.getByRole("checkbox")).toHaveCount(8);
+    for (const box of await block.getByRole("checkbox").all()) await expect(box).not.toBeChecked();
+    await expect(block).toContainText("Noch keine Auswahl gespeichert.");
+    await block.getByRole("checkbox", { name: /behandelnden Ärzte/ }).check();
+    await block.getByRole("checkbox", { name: "WhatsApp", exact: true }).check();
+    await page.getByTestId("lead-request-consent-form-save").click();
+    await expect(block).toContainText("Ihre Auswahl vom 12.10.2026");
+    expect(calls.consentChoices).toEqual([
+      {
+        version: "2026-10-12",
+        language: "de",
+        choices: {
+          agency_processing: false,
+          doctors_to_agency: true,
+          data_system: false,
+          named_recipients: false,
+          channel_email: false,
+          channel_threema: false,
+          channel_whatsapp: true,
+          channel_telegram: false,
+        },
+      },
+    ]);
   });
 
   test("another person as payer is named with name and citizenship before sending", async ({ page }) => {

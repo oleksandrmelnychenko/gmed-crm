@@ -15,8 +15,14 @@ const MINOR_CONSENTS: &[&str] = &["consent_data_release_child", "consent_data_re
 /// stay empty: a package without it is complete.
 const LEAD_SELF_DISCLOSURE: &str = "lead_self_disclosure";
 
+/// The consent form «Einverständniserklärung zur Datenübermittlung»: it goes
+/// into an electronic package only with the person's own choice of its
+/// options (2026-10-12, `crate::consent_choices`); without one it is signed
+/// on paper, so a package may go without it.
+const PRIVACY_CONSENTS: &str = crate::consent_choices::TEMPLATE;
+
 /// Preset slots a package may leave empty.
-const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[LEAD_SELF_DISCLOSURE];
+const OPTIONAL_SLOT_TEMPLATES: &[&str] = &[LEAD_SELF_DISCLOSURE, PRIVACY_CONSENTS];
 
 /// Whether a package may go without a document for this slot.
 fn optional_slot(slot: &[&str]) -> bool {
@@ -197,7 +203,7 @@ pub(super) async fn signing_options(
         for id in scope_documents(state, source, slot).await? {
             if let Ok(row) = signature_document_access(state, auth, id, false).await
                 && same_scope(source, &row)
-                && eligibility(&row).is_none()
+                && current_eligibility(state, &row).await?.is_none()
             {
                 choices.push(json!({"id":id,"title":row.get::<String,_>("auto_name"),"version":row.get::<i32,_>("version_number"),"template":template_of(&row)}));
             }
@@ -249,7 +255,7 @@ pub(super) async fn preset_document_ids(
         for id in scope_documents(state, source, slot).await? {
             if let Ok(row) = signature_document_access(state, auth, id, true).await
                 && same_scope(source, &row)
-                && eligibility(&row).is_none()
+                && current_eligibility(state, &row).await?.is_none()
             {
                 ids.push(id);
                 if template_of(&row).as_deref() == Some("single_order")

@@ -1770,13 +1770,26 @@ fn validate_dunning_level_transition(
     Ok(())
 }
 
+/// The order of an invoice's dunning letters: by escalation level. An invoice
+/// has each level at most once (unique index `idx_invoice_dunning_unique_level`)
+/// and the levels are sent in this order, so this is the sending order without
+/// relying on the clock: `sent_at` / `created_at` are the `now()` of separate
+/// transactions and came out of order when the database clock stepped back
+/// (flaky `invoices_api` dunning test, 2026-10-12).
+fn dunning_level_order(alias: &str) -> String {
+    format!(
+        "CASE {alias}.level WHEN 'first' THEN 1 WHEN 'second' THEN 2 WHEN 'collections' THEN 3 ELSE 4 END, {alias}.sent_at, {alias}.id"
+    )
+}
+
 async fn load_existing_dunning_levels(
     state: &AppState,
     invoice_id: Uuid,
 ) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar::<_, String>(
-        "SELECT level FROM invoice_dunning_events WHERE invoice_id = $1 ORDER BY sent_at, created_at",
-    )
+    sqlx::query_scalar::<_, String>(&format!(
+        "SELECT level FROM invoice_dunning_events dunning WHERE invoice_id = $1 ORDER BY {}",
+        dunning_level_order("dunning")
+    ))
     .bind(invoice_id)
     .fetch_all(&state.db)
     .await
@@ -4478,6 +4491,7 @@ async fn load_invoice_detail(
                   i.payer_address_street, i.payer_address_zip, i.payer_address_city,
                   i.payer_address_country,
                   i.payer_updated_at, i.payer_patient_id, i.payer_role,
+                  i.payer_contact_is_organisation,
                   NULLIF(trim(concat_ws(' ', payer_person.first_name, payer_person.last_name)), '') AS payer_patient_name,
                   payer_person.patient_id AS payer_patient_pid,
                   o.order_number, i.currency, o.contract_id, q.quote_number,
@@ -5013,6 +5027,12 @@ async fn load_invoice_detail(
             "role": row.try_get::<Option<String>, _>("payer_role").unwrap_or_default(),
             "patient_relation_id": row.try_get::<Option<Uuid>, _>("payer_patient_relation_id").unwrap_or_default(),
             "contact_name": row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+            // The box "Организация" of the payer dialog: the stored answer,
+            // else how the screening takes the name (legal form).
+            "contact_is_organisation": payer::contact_organisation_shown(
+                row.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+                row.try_get::<Option<bool>, _>("payer_contact_is_organisation").unwrap_or_default(),
+            ),
             "contact_email": row.try_get::<Option<String>, _>("payer_contact_email").unwrap_or_default(),
             "contact_phone": row.try_get::<Option<String>, _>("payer_contact_phone").unwrap_or_default(),
             "contact_relationship": row.try_get::<Option<String>, _>("payer_contact_relationship").unwrap_or_default(),
@@ -12441,7 +12461,8 @@ async fn load_dunning_event_rows(
 ) -> Result<Vec<Value>, sqlx::Error> {
     let mut conn = state.db.acquire().await?;
     let term_days = dunning_letters::load_dunning_payment_term_days(&mut conn).await?;
-    let rows = sqlx::query(
+    let order = dunning_level_order("ide");
+    let rows = sqlx::query(&format!(
         r#"SELECT ide.id, ide.level, ide.note, ide.due_date_snapshot, ide.balance_due,
                   ide.sent_at, ide.created_at, ide.payment_due_date,
                   u.name AS created_by_name, u.role AS created_by_role,
@@ -12451,8 +12472,8 @@ async fn load_dunning_event_rows(
            JOIN users u ON u.id = ide.created_by
            LEFT JOIN invoice_documents letter ON letter.dunning_event_id = ide.id
            WHERE ide.invoice_id = $1
-           ORDER BY ide.sent_at, ide.created_at"#,
-    )
+           ORDER BY {order}"#
+    ))
     .bind(invoice_id)
     .fetch_all(&mut *conn)
     .await?;

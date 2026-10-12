@@ -91,6 +91,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LANGUAGE_OPTIONS } from "@/components/ui/language-multi-select";
@@ -4813,11 +4814,10 @@ function StaffDocumentsPage({
 
                 <DocumentSheetSection title={t.documents_section_file}>
                   <div className="grid gap-4 md:grid-cols-2">
-                    <Field label={t.documents_filename} required>
-                      <Input
-                        type="file"
+                    <Field label={t.documents_section_file} required>
+                      <FilePicker
+                        selected={uploadForm.file}
                         onChange={handleUploadFileChange}
-                        className={shellInputClassName}
                       />
                     </Field>
                     <Field label={t.documents_filename}>

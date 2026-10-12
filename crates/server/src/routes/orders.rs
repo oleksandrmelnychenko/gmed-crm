@@ -12089,6 +12089,7 @@ async fn order_group_payload(
                 payer_contact_phone, payer_contact_relationship, payer_notes,
                 payer_patient_id, payer_address_street, payer_address_zip,
                 payer_address_city, payer_address_country, payer_role,
+                payer_contact_is_organisation,
                 (SELECT NULLIF(btrim(concat_ws(' ', person.first_name, person.last_name)), '')
                    FROM patients person WHERE person.id = orders.payer_patient_id)
                     AS payer_patient_name,
@@ -12193,6 +12194,12 @@ async fn order_group_payload(
             "payer_contact_name": head
                 .try_get::<Option<String>, _>("payer_contact_name")
                 .unwrap_or_default(),
+            // The box "Организация": the stored answer, else how the
+            // screening takes the name (legal form).
+            "payer_contact_is_organisation": payer::contact_organisation_shown(
+                head.try_get::<Option<String>, _>("payer_contact_name").unwrap_or_default(),
+                head.try_get::<Option<bool>, _>("payer_contact_is_organisation").unwrap_or_default(),
+            ),
             "payer_contact_email": head
                 .try_get::<Option<String>, _>("payer_contact_email")
                 .unwrap_or_default(),
@@ -12701,6 +12708,8 @@ async fn set_order_payer(
             return err(StatusCode::INTERNAL_SERVER_ERROR, FAILED);
         }
     };
+    let mut record = record;
+    record.keep_organisation_answer_of(&previous);
 
     if let Err(error) = sqlx::query(
         "UPDATE orders SET
@@ -12718,7 +12727,8 @@ async fn set_order_payer(
             payer_role = $13,
             payer_updated_by = $14,
             payer_updated_at = now(),
-            updated_at = now()
+            updated_at = now(),
+            payer_contact_is_organisation = $15
          WHERE id = $1",
     )
     .bind(order_id)
@@ -12735,6 +12745,7 @@ async fn set_order_payer(
     .bind(&record.address_country)
     .bind(&record.payer_role)
     .bind(auth.user_id)
+    .bind(record.contact_is_organisation)
     .execute(&mut *transaction)
     .await
     {
@@ -12774,6 +12785,7 @@ async fn set_order_payer(
         "payer_address_city": record.address_city,
         "payer_address_country": record.address_country,
         "payer_role": record.payer_role,
+        "payer_contact_is_organisation": record.contact_is_organisation_shown(),
     }))
     .into_response()
 }

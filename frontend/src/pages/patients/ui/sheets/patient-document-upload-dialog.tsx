@@ -11,6 +11,7 @@ import {
 } from "react";
 
 import { Button } from "@/components/ui/button";
+import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { toast } from "@/components/ui/toast";
 import {
@@ -286,10 +287,9 @@ function DocumentFileSection({
     <FormSection title={l("patients_file")}>
       <div className="grid gap-3 md:grid-cols-2">
         <FormField label={copy.fileLabel} htmlFor="document-file">
-          <Input
+          <FilePicker
             id="document-file"
-            type="file"
-            className={inputClass}
+            selected={form.file}
             onChange={onFileChange}
           />
         </FormField>

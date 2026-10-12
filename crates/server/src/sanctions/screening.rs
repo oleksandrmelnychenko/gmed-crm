@@ -362,7 +362,8 @@ async fn load_lead_contact_rows(
     let rows: Vec<(Uuid, Value)> = sqlx::query_as(
         r#"SELECT o.source_lead_id,
                   jsonb_build_object('name', o.payer_contact_name,
-                                     'country', o.payer_address_country)
+                                     'country', o.payer_address_country,
+                                     'organisation', o.payer_contact_is_organisation)
            FROM orders o
            LEFT JOIN patients p ON p.id = o.patient_id
            WHERE o.source_lead_id = ANY($1)
@@ -1085,10 +1086,11 @@ async fn load_relation_rows(
 }
 
 /// The free-text payer contacts of the patients' orders and invoices
-/// (`payer_contact_name` with the `payer_address_country`) as JSON rows
-/// `{name, country}` by patient, orders first, oldest first. Every order and
-/// invoice counts, whatever its status, like a relation an order names as
-/// payer.
+/// (`payer_contact_name` with the `payer_address_country` and the
+/// organisation box `payer_contact_is_organisation`) as JSON rows
+/// `{name, country, organisation}` by patient, orders first, oldest first.
+/// Every order and invoice counts, whatever its status, like a relation an
+/// order names as payer.
 async fn load_patient_contact_rows(
     db: &gmed_db::DbPool,
     patient_ids: &[Uuid],
@@ -1097,14 +1099,17 @@ async fn load_patient_contact_rows(
         r#"SELECT patient_id, contact FROM (
                SELECT o.patient_id, 0 AS source, o.created_at, o.id,
                       jsonb_build_object('name', o.payer_contact_name,
-                                         'country', o.payer_address_country) AS contact
+                                         'country', o.payer_address_country,
+                                         'organisation', o.payer_contact_is_organisation)
+                          AS contact
                FROM orders o
                WHERE o.patient_id = ANY($1)
                  AND NULLIF(btrim(o.payer_contact_name), '') IS NOT NULL
                UNION ALL
                SELECT i.patient_id, 1 AS source, i.created_at, i.id,
                       jsonb_build_object('name', i.payer_contact_name,
-                                         'country', i.payer_address_country)
+                                         'country', i.payer_address_country,
+                                         'organisation', i.payer_contact_is_organisation)
                FROM invoices i
                WHERE i.patient_id = ANY($1)
                  AND NULLIF(btrim(i.payer_contact_name), '') IS NOT NULL
@@ -1218,14 +1223,14 @@ fn notes_birth_date(notes: &str) -> Option<NaiveDate> {
 /// name.
 ///
 /// `organisation` is the box "Организация" of the relation dialog
-/// (`patient_relations.is_organisation`, 2026-10-12): ticked, an
+/// (`patient_relations.is_organisation`) or of the order and invoice payer
+/// dialogs (`payer_contact_is_organisation`, 2026-10-12): ticked, an
 /// organisation; not ticked, a person. A single word is screened as an
 /// organisation all the same, since a person needs a given name to be
 /// screened (like a payer without a first name). Without an answer (`None`:
 /// rows from before the box, relations written by the patient creation or
-/// the lead conversion, a payer contact of an order or invoice) the name
-/// decides: a legal form ([`ORGANISATION_LEGAL_FORMS`]) or a single word make
-/// it an organisation.
+/// the lead conversion) the name decides: a legal form
+/// ([`ORGANISATION_LEGAL_FORMS`]) or a single word make it an organisation.
 fn contact_subject(
     name: &str,
     date_of_birth: Option<NaiveDate>,
@@ -1388,8 +1393,8 @@ pub fn payer_contact_ref(key: &[String]) -> String {
 }
 
 /// The free-text payer contacts of an owner's orders and invoices
-/// (`payer_contact_name`, a payer who is no relation; rows `{name, country}`)
-/// as subjects of the owner, 2026-10-12.
+/// (`payer_contact_name`, a payer who is no relation; rows
+/// `{name, country, organisation}`) as subjects of the owner, 2026-10-12.
 ///
 /// * One subject per name ([`name_key`], [`payer_contact_ref`]): the same
 ///   contact on an order and its invoices is reviewed once; the countries of
@@ -1404,8 +1409,12 @@ pub fn payer_contact_ref(key: &[String]) -> String {
 ///   declared (birth date, citizenships, organisation or person, residence):
 ///   the same data as the lead's subject, so the CEO's decision on the lead's
 ///   hit carries over ([`covered_by_lead_hit`]).
-/// * Otherwise the contact is screened by its name like a separate relation
-///   without an answer to the organisation box ([`contact_subject`]).
+/// * Otherwise the contact is screened by its name and the organisation box
+///   of the order and invoice payer dialogs (`payer_contact_is_organisation`,
+///   [`contact_subject`]). Records of the same name that disagree: a ticked
+///   box on any of them makes it an organisation (it is then compared with
+///   the listed entities). Without any answer — rows from before the box —
+///   the legal form in the name decides.
 pub fn payer_contact_subjects(
     owner: Owner,
     rows: &[Value],
@@ -1422,49 +1431,77 @@ pub fn payer_contact_subjects(
         .map(|record| name_key(&record.subject))
         .filter(|key| !key.is_empty())
         .collect();
-    let mut subjects: Vec<(Vec<String>, SubjectRecord)> = Vec::new();
+    /// The records of one contact name.
+    struct Contact {
+        key: Vec<String>,
+        /// The name as first written.
+        name: String,
+        countries: Vec<String>,
+        /// The answer to the organisation box over all records.
+        organisation: Option<bool>,
+    }
+    let mut contacts: Vec<Contact> = Vec::new();
     for row in rows {
-        let plain = contact_subject(&json_text(row, "name"), None, None);
-        let key = name_key(&plain);
+        let name = json_text(row, "name");
+        let key = name_key(&contact_subject(&name, None, None));
         if key.is_empty() || known_keys.contains(&key) {
             continue;
         }
         let countries = json_codes(row, "country");
-        if let Some((_, record)) = subjects.iter_mut().find(|(existing, _)| *existing == key) {
-            for code in countries {
-                if !record.residence.contains(&code) {
-                    record.residence.push(code);
+        let answer = row.get("organisation").and_then(Value::as_bool);
+        let index = match contacts.iter().position(|contact| contact.key == key) {
+            Some(index) => index,
+            None => {
+                contacts.push(Contact {
+                    key,
+                    name,
+                    countries: Vec::new(),
+                    organisation: None,
+                });
+                contacts.len() - 1
+            }
+        };
+        let contact = &mut contacts[index];
+        for code in countries {
+            if !contact.countries.contains(&code) {
+                contact.countries.push(code);
+            }
+        }
+        contact.organisation = match (contact.organisation, answer) {
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), _) | (_, Some(false)) => Some(false),
+            (None, None) => None,
+        };
+    }
+    contacts
+        .into_iter()
+        .map(|contact| {
+            let (subject, mut residence) = match declared
+                .iter()
+                .find(|record| name_key(&record.subject) == contact.key)
+            {
+                Some(record) => (record.subject.clone(), record.residence.clone()),
+                None => (
+                    contact_subject(&contact.name, None, contact.organisation),
+                    Vec::new(),
+                ),
+            };
+            for code in contact.countries {
+                if !residence.contains(&code) {
+                    residence.push(code);
                 }
             }
-            continue;
-        }
-        let (subject, mut residence) = match declared
-            .iter()
-            .find(|record| name_key(&record.subject) == key)
-        {
-            Some(record) => (record.subject.clone(), record.residence.clone()),
-            None => (plain, Vec::new()),
-        };
-        for code in countries {
-            if !residence.contains(&code) {
-                residence.push(code);
-            }
-        }
-        let subject_ref = payer_contact_ref(&key);
-        subjects.push((
-            key,
             SubjectRecord {
                 kind: SubjectKind::PayerContact,
                 lead_id,
                 patient_id,
-                subject_ref,
+                subject_ref: payer_contact_ref(&contact.key),
                 subject,
                 residence,
                 relation: Some(PAYER_CONTACT_RELATION.to_string()),
-            },
-        ));
-    }
-    subjects.into_iter().map(|(_, record)| record).collect()
+            }
+        })
+        .collect()
 }
 
 /// Normalised fingerprint of what we know about a subject: a false-positive
@@ -3071,6 +3108,57 @@ mod tests {
         assert_eq!(again[0].subject_ref, person.subject_ref);
         assert!(again[0].lead_id.is_some());
         assert_eq!(again[0].patient_id, None);
+    }
+
+    #[test]
+    fn the_payer_dialogs_organisation_box_decides_how_a_payer_contact_is_screened() {
+        let index = crate::sanctions::matching::SanctionsIndex::build(
+            crate::sanctions::fsf::parse_fsf_xml(include_bytes!("testdata/synthetic_fsf_1_1.xml"))
+                .unwrap()
+                .entries,
+        );
+        let patient_id = Uuid::new_v4();
+        let with = |name: &str, organisation: Value| json!({ "name": name, "country": null, "organisation": organisation });
+        let screened = |rows: &[Value]| {
+            payer_contact_subjects(Owner::Patient(patient_id), rows, &[], &[]).remove(0)
+        };
+        // A company name without a legal form: the guess (old rows) takes it
+        // for a person, the ticked box compares it with the listed entities.
+        let guessed = screened(&[with("Polartek Shipping", Value::Null)]);
+        assert!(!guessed.subject.organisation);
+        assert!(screen_subject(&index, &guessed).is_empty());
+        let ticked = screened(&[with("Polartek Shipping", json!(true))]);
+        assert!(ticked.subject.organisation);
+        assert_eq!(ticked.subject.last_name, "Polartek Shipping");
+        assert_eq!(screen_subject(&index, &ticked).len(), 1);
+        // Not ticked: a person, even with a word that looks like a legal form.
+        let person = screened(&[with("Anna Ag", json!(false))]);
+        assert!(!person.subject.organisation);
+        assert_eq!(person.subject.first_name, "Anna");
+        assert!(
+            screened(&[with("Anna Ag", Value::Null)])
+                .subject
+                .organisation
+        );
+        // The same name on an order (old row, no answer) and an invoice
+        // (ticked): one subject, an organisation.
+        let both = payer_contact_subjects(
+            Owner::Patient(patient_id),
+            &[
+                with("Polartek Shipping", Value::Null),
+                with("polartek  shipping", json!(true)),
+            ],
+            &[],
+            &[],
+        );
+        assert_eq!(both.len(), 1);
+        assert!(both[0].subject.organisation);
+        assert_eq!(both[0].subject_ref, guessed.subject_ref);
+        // A changed answer is a changed fingerprint: reviewed again.
+        assert_ne!(
+            subject_fingerprint(&guessed.subject),
+            subject_fingerprint(&ticked.subject)
+        );
     }
 
     #[test]

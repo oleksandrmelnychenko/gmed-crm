@@ -508,11 +508,15 @@ export function payerRoleLabel(
 }
 
 export function invoiceToPayerForm(invoice: InvoiceItem): PayerForm {
+  const contactName = invoice.payer?.contact_name ?? "";
   return {
     payerPatientRelationId: invoice.payer?.patient_relation_id ?? "",
     payerPatientPid: invoice.payer?.patient_pid ?? "",
     payerRole: knownPayerRole(invoice.payer?.role),
-    contactName: invoice.payer?.contact_name ?? "",
+    contactName,
+    isOrganisation: Boolean(contactName.trim()) && invoice.payer?.contact_is_organisation === true,
+    // A saved contact keeps its answer; an empty one follows the name staff type.
+    organisationTouched: Boolean(contactName.trim()),
     contactEmail: invoice.payer?.contact_email ?? "",
     contactPhone: invoice.payer?.contact_phone ?? "",
     contactRelationship: invoice.payer?.contact_relationship ?? "",
@@ -547,6 +551,8 @@ export function payerFormToPayload(form: PayerForm) {
     payer_address_city: text(form.addressCity),
     payer_address_country: text(form.addressCountry),
     payer_notes: text(form.notes),
+    // Only a contact name carries the answer; the server stores none without one.
+    payer_contact_is_organisation: text(form.contactName) ? form.isOrganisation : null,
   };
 }
 

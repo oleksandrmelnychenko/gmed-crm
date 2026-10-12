@@ -197,7 +197,18 @@ export function requiredAttachmentTemplates(documents: Pick<PackageCandidate, "c
   return [...new Set(documents.flatMap(document => document.companion ? [document.companion] : []))];
 }
 
-export type PackageWarning = { document_id?: string; kind: "no_frames" | "pending_elsewhere" | "ineligible" | "electronic_form_excluded" | "too_large" | "too_many" | "policy_conflict" };
+export type PackageWarning = {
+  document_id?: string;
+  kind: "no_frames" | "pending_elsewhere" | "ineligible" | "electronic_form_excluded" | "too_large" | "too_many" | "policy_conflict";
+  /** The server's `ineligible_reason` of an `ineligible` document. */
+  reason?: string;
+};
+
+/**
+ * Reasons why the consent form is not offered for an electronic signature: the person has not chosen
+ * its options in the cabinet, or changed the choice after the document was generated (2026-10-12).
+ */
+export const CONSENT_CHOICE_REASONS: ReadonlySet<string> = new Set(["consent_choice_missing", "consent_choice_changed"]);
 
 /** Problems the composer shows before sending. Only `no_frames` does not block. */
 export function packageWarnings(selected: PackageCandidate[], limits: PackageCandidates["limits"]): PackageWarning[] {
@@ -205,7 +216,7 @@ export function packageWarnings(selected: PackageCandidate[], limits: PackageCan
   for (const document of selected) {
     if (document.electronic_form_excluded) warnings.push({ document_id: document.id, kind: "electronic_form_excluded" });
     else if (document.pending_elsewhere) warnings.push({ document_id: document.id, kind: "pending_elsewhere" });
-    else if (document.ineligible_reason) warnings.push({ document_id: document.id, kind: "ineligible" });
+    else if (document.ineligible_reason) warnings.push({ document_id: document.id, kind: "ineligible", reason: document.ineligible_reason });
     if (!document.has_frames) warnings.push({ document_id: document.id, kind: "no_frames" });
   }
   // The merged PDF is slightly larger than the sum of its parts; warn early.
@@ -320,6 +331,16 @@ export function signatureErrorText(
       return tx("PDF уже содержит цифровую подпись — в пакете она была бы потеряна. Отправьте этот документ отдельно или используйте неподписанную версию.", "Die PDF enthält bereits eine digitale Signatur, die im Paket verloren ginge. Versenden Sie dieses Dokument einzeln oder nutzen Sie die unsignierte Fassung.");
     case "signature_bundle_invalid_pdf":
       return tx("Один из PDF не удаётся прочитать, поэтому его нельзя объединить в пакет.", "Eine der PDFs kann nicht gelesen und daher nicht in das Paket übernommen werden.");
+    case "consent_choice_missing":
+      return tx(
+        "Пациент ещё не выбрал согласия — используйте бумажную подпись или попросите выбрать в кабинете.",
+        "Der Patient hat die Einwilligungen noch nicht selbst ausgewählt – nutzen Sie die Unterschrift auf Papier oder bitten Sie um die Auswahl im Kundenkabinett.",
+      );
+    case "consent_choice_changed":
+      return tx(
+        "Пациент изменил выбор согласий после создания документа — создайте документ заново или используйте бумажную подпись.",
+        "Der Patient hat seine Auswahl der Einwilligungen nach dem Erstellen des Dokuments geändert – erstellen Sie das Dokument neu oder nutzen Sie die Unterschrift auf Papier.",
+      );
     case "electronic_form_excluded":
       return tx(`Для этого документа закон исключает электронную форму${details?.statute ? ` (${details.statute})` : ""}. Его нужно подписать на бумаге.`, `Für dieses Dokument ist die elektronische Form gesetzlich ausgeschlossen${details?.statute ? ` (${details.statute})` : ""}. Es muss auf Papier unterschrieben werden.`);
     case "signature_level_too_low":

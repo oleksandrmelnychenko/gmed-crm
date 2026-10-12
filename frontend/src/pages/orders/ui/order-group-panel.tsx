@@ -22,6 +22,7 @@ import {
   isPlausiblePayerEmail,
   orderPayerPayload,
   orderPayerToForm,
+  organisationAfterTypedName,
   type OrderPayerForm,
 } from "../model/order-payer";
 import type { OrderSummary } from "../model/types";
@@ -417,10 +418,36 @@ export function OrderGroupPanel({
               />
               <Input
                 value={payer.name}
-                onChange={(event) => updatePayer({ name: event.target.value })}
+                onChange={(event) => {
+                  const name = event.target.value;
+                  setPayer((current) => ({
+                    ...current,
+                    name,
+                    isOrganisation: organisationAfterTypedName(current, name),
+                  }));
+                }}
                 placeholder={tx("Имя плательщика (напр. отец)", "Name des Zahlers (z. B. Vater)")}
                 className="h-9"
               />
+              {payer.name.trim() ? (
+                <label className="flex min-h-9 items-center gap-2 rounded-md border border-input bg-background px-2 text-sm text-foreground sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    className="size-4"
+                    checked={payer.isOrganisation}
+                    onChange={(event) =>
+                      updatePayer({
+                        isOrganisation: event.target.checked,
+                        organisationTouched: true,
+                      })
+                    }
+                  />
+                  {tx(
+                    "Организация (компания, фонд, страховая), а не частное лицо",
+                    "Organisation (Firma, Stiftung, Versicherung), keine Privatperson",
+                  )}
+                </label>
+              ) : null}
               <Input
                 value={payer.relationship}
                 onChange={(event) => updatePayer({ relationship: event.target.value })}

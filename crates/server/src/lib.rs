@@ -13,6 +13,7 @@ pub mod auth;
 pub(crate) mod bmp;
 pub mod business_metrics;
 pub mod config;
+pub mod consent_choices;
 pub mod crypto;
 pub mod datev;
 pub mod document_signatures;

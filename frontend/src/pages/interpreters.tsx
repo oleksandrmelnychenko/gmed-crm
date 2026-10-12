@@ -29,6 +29,7 @@ import {
   AdminSheetScaffold,
   SheetFormFooter,
 } from "@/components/admin-page-patterns";
+import { FilePicker } from "@/components/ui/file-picker";
 import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -2093,9 +2094,9 @@ export function InterpretersPage() {
                                 {credential.documentName || profileCopy.downloadDocument}
                               </Button>
                             ) : null}
-                            <Input
-                              type="file"
-                              className={inputClass}
+                            <FilePicker
+                              aria-label={profileCopy.document}
+                              showSelection={false}
                               disabled={
                                 uploadingDocumentKey === `credential-${index}`
                               }
@@ -2192,9 +2193,9 @@ export function InterpretersPage() {
                             profileCopy.downloadDocument}
                         </Button>
                       ) : null}
-                      <Input
-                        type="file"
-                        className={inputClass}
+                      <FilePicker
+                        aria-label={profileCopy.document}
+                        showSelection={false}
                         disabled={
                           uploadingDocumentKey === "confidentiality-document"
                         }
@@ -2256,9 +2257,9 @@ export function InterpretersPage() {
                           {form.avvDocumentName || profileCopy.downloadDocument}
                         </Button>
                       ) : null}
-                      <Input
-                        type="file"
-                        className={inputClass}
+                      <FilePicker
+                        aria-label={profileCopy.avvDocument}
+                        showSelection={false}
                         disabled={uploadingDocumentKey === "avv-document"}
                         onChange={(event) => {
                           const file = event.currentTarget.files?.[0];

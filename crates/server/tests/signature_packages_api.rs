@@ -453,7 +453,52 @@ async fn upload_bytes(
     .execute(&env.pool)
     .await
     .unwrap();
+    if template == "privacy_consents" {
+        // As generated after the patient chose the options in the cabinet:
+        // only such a consent form goes into an electronic package
+        // (2026-10-12).
+        let choice = own_consent_choice(&env.pool, patient_id).await;
+        sqlx::query(
+            "UPDATE documents SET generated_bindings = generated_bindings || jsonb_build_object('_own_consent_choice', $2::jsonb) WHERE id = $1",
+        )
+        .bind(id)
+        .bind(choice)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
     id
+}
+
+/// The patient's own choice of the consent form options (as the lead cabinet
+/// saves it), the current one or a new one, in the form a generated consent
+/// form records it.
+async fn own_consent_choice(pool: &PgPool, patient_id: Uuid) -> Value {
+    let existing: Option<(Uuid, Value, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        "SELECT id, choices, chosen_at FROM consent_form_choices WHERE patient_id = $1 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(patient_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap();
+    let (id, choices, chosen_at) = match existing {
+        Some(row) => row,
+        None => sqlx::query_as(
+            r#"INSERT INTO consent_form_choices (template_id, patient_id, choices, access_kind,
+                                                 source, language, text_version)
+               VALUES ('privacy_consents', $1,
+                       '{"agency_processing":true,"doctors_to_agency":true,"data_system":true,
+                         "named_recipients":false,"channel_email":true,"channel_threema":false,
+                         "channel_whatsapp":false,"channel_telegram":false}'::jsonb,
+                       'self', 'lead_portal', 'de', '2026-10-12')
+               RETURNING id, choices, chosen_at"#,
+        )
+        .bind(patient_id)
+        .fetch_one(pool)
+        .await
+        .unwrap(),
+    };
+    json!({ "id": id, "choices": choices, "chosen_at": chosen_at, "source": "lead_portal" })
 }
 
 fn signer(first: &str, email: &str, role: &str) -> Value {
@@ -1579,6 +1624,126 @@ async fn paper_signature(
     )
 }
 
+/// The consent form prints its boxes empty since 2026-10-11; with an
+/// electronic signature nobody could tick them (2026-10-12). Only a form
+/// generated with the patient's own choice from the cabinet goes into an
+/// electronic package; one without a choice, or with a choice the patient has
+/// changed since, is refused (staff: "Пациент ещё не выбрал согласия …") and
+/// stays open for the paper signature.
+#[tokio::test]
+async fn a_consent_form_without_the_patients_own_choice_is_signed_on_paper_only() {
+    let Some(env) = env().await else { return };
+    let patient = seed_patient(&env.pool, env.admin_id, "1985-07-07").await;
+    let consents = upload(&env, patient, Doc::new("privacy_consents", 1)).await;
+    let set_choice = |choice: Value| {
+        let pool = env.pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE documents SET generated_bindings = (generated_bindings - '_own_consent_choice') || $2::jsonb WHERE id = $1",
+            )
+            .bind(consents)
+            .bind(choice)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+    };
+    let candidate_reason = || {
+        let (app, ceo) = (&env.app, &env.ceo);
+        async move {
+            let (status, candidates) = call(
+                app,
+                "GET",
+                &format!("/api/v1/signature-packages/candidates?patient_id={patient}"),
+                ceo,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{candidates}");
+            candidates["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|document| document["id"] == consents.to_string())
+                .unwrap()["ineligible_reason"]
+                .clone()
+        }
+    };
+    let send = || {
+        call(
+            &env.app,
+            "POST",
+            "/api/v1/signature-packages",
+            &env.ceo,
+            Some(
+                json!({"document_ids":[consents],"signers":[signer("Erika", "erika@example.org", "client")]}),
+            ),
+        )
+    };
+
+    // Generated before the patient chose (or without a choice at all).
+    set_choice(json!({})).await;
+    assert_eq!(candidate_reason().await, "consent_choice_missing");
+    let (status, body) = send().await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "consent_choice_missing");
+    assert_eq!(body["document_id"], consents.to_string());
+    let (status, state) = call(
+        &env.app,
+        "GET",
+        &format!("/api/v1/documents/{consents}/signature-requests"),
+        &env.ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    assert_eq!(state["ineligible_reason"], "consent_choice_missing");
+    assert_eq!(state["can_sign_on_paper"], true);
+    // Staff bindings that "preselect" channels are no choice of the patient.
+    set_choice(json!({"consent_email": true, "consent_whatsapp": true})).await;
+    assert_eq!(candidate_reason().await, "consent_choice_missing");
+
+    // Generated with the patient's own choice: offered.
+    let choice = own_consent_choice(&env.pool, patient).await;
+    set_choice(json!({ "_own_consent_choice": choice })).await;
+    assert_eq!(candidate_reason().await, Value::Null);
+
+    // The patient chooses again: the form shows the old choice.
+    sqlx::query(
+        r#"INSERT INTO consent_form_choices (template_id, patient_id, choices, access_kind, source,
+                                             language, text_version, chosen_at)
+           VALUES ('privacy_consents', $1, '{"agency_processing":true}'::jsonb, 'self',
+                   'lead_portal', 'de', '2026-10-12', now() + interval '1 minute')"#,
+    )
+    .bind(patient)
+    .execute(&env.pool)
+    .await
+    .unwrap();
+    assert_eq!(candidate_reason().await, "consent_choice_changed");
+    let (status, body) = send().await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "consent_choice_changed");
+
+    // A choice is history: never changed in place.
+    let changed =
+        sqlx::query("UPDATE consent_form_choices SET choices = '{}'::jsonb WHERE patient_id = $1")
+            .bind(patient)
+            .execute(&env.pool)
+            .await;
+    assert!(changed.is_err(), "a consent choice is append-only");
+
+    // Paper stays possible: the patient ticks the boxes on the printed copy.
+    let scan = pdf(1, 0, false);
+    let (status, value) = paper_signature(
+        &env,
+        consents,
+        ("scan.pdf", "application/pdf", &scan[..]),
+        None,
+    )
+    .await;
+    assert!(status.is_success(), "{status} {value}");
+}
+
 /// TASK-FB4D: a document signed on paper. The scan becomes the signed next
 /// version, and the contract and the order follow as after an electronic
 /// signature.
@@ -1899,6 +2064,18 @@ async fn frames_of_older_generated_documents_are_found_and_follow_the_bundle_pag
     .bind(format!("alt-{}@example.org", Uuid::new_v4().simple()))
     .bind(env.admin_id)
     .fetch_one(&env.pool)
+    .await
+    .unwrap();
+    // The lead chose the consent form options in the cabinet: the form is
+    // generated with that choice and may be signed electronically.
+    sqlx::query(
+        r#"INSERT INTO consent_form_choices (template_id, lead_id, choices, access_kind, source,
+                                             language, text_version)
+           VALUES ('privacy_consents', $1, '{"agency_processing":true,"data_system":true}'::jsonb,
+                   'self', 'lead_portal', 'de', '2026-10-12')"#,
+    )
+    .bind(lead)
+    .execute(&env.pool)
     .await
     .unwrap();
     let mut generated = Vec::new();

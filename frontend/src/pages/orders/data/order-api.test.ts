@@ -118,6 +118,7 @@ describe("normalizeOrderGroup", () => {
         payer_contact_phone: "+49 30 123",
         payer_contact_relationship: "father",
         payer_notes: "Pays for both children",
+        payer_contact_is_organisation: false,
       },
       subs: [
         { id: "sub-1", order_number: "A-2", patient_id: "child", status: "active", total_estimated: "300" },
@@ -132,6 +133,7 @@ describe("normalizeOrderGroup", () => {
     expect(group.head.payer_contact_phone).toBe("+49 30 123");
     expect(group.head.payer_contact_relationship).toBe("father");
     expect(group.head.payer_notes).toBe("Pays for both children");
+    expect(group.head.payer_contact_is_organisation).toBe(false);
     expect(group.subs).toHaveLength(1);
     expect(group.subs[0].order_number).toBe("A-2");
     expect(group.covered_patient_ids).toEqual(["father", "child"]);
@@ -149,6 +151,7 @@ describe("normalizeOrderGroup", () => {
     expect(group.head.payer_contact_phone).toBeNull();
     expect(group.head.payer_contact_relationship).toBeNull();
     expect(group.head.payer_notes).toBeNull();
+    expect(group.head.payer_contact_is_organisation).toBeNull();
     expect(group.subs).toEqual([]);
     expect(group.covered_patient_ids).toEqual([]);
     expect(group.rollup_total_estimated).toBeNull();

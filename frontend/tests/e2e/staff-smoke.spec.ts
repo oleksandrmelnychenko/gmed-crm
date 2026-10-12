@@ -3450,9 +3450,11 @@ test.describe("lead onboarding wizard", () => {
     await navigation.getByRole("tab", { name: /Unterlagen/i }).click();
     await expect(wizard.getByText("Ausweisdokument")).toBeVisible();
     await expect(wizard.getByText("Einverständniserklärung zur Datenübermittlung", { exact: true })).toBeVisible();
-    // The WhatsApp consent is one of the communication channels listed in the consent document.
-    await expect(wizard.getByText("Kommunikationswege im Dokument", { exact: true })).toBeVisible();
-    await expect(wizard.getByRole("checkbox", { name: "WhatsApp", exact: true })).toBeVisible();
+    // Staff no longer preset the form's boxes (channels, transfer): only the person's own
+    // choice in the cabinet ticks them (2026-10-12).
+    await expect(wizard.getByTestId("privacy-consents-own-choice-note")).toContainText("Kundenkabinett");
+    await expect(wizard.getByText("Kommunikationswege im Dokument", { exact: true })).toHaveCount(0);
+    await expect(wizard.getByRole("checkbox", { name: "WhatsApp", exact: true })).toHaveCount(0);
     await expect(wizard.getByText("Unterlagen und Anamnese vervollständigen")).toHaveCount(0);
     await expect(wizard.getByRole("button", { name: "Anamnese abschließen" })).toHaveCount(0);
     // Intake completion and qualification now run when the intake is confirmed at release
