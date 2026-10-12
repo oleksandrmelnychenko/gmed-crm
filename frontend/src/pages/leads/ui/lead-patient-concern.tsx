@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowDownToLine, Download, Eye, FileText } from "lucide-react";
+import { ArrowDownToLine, Download, Eye, FileText, UserRound } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
@@ -63,14 +63,15 @@ export function LeadPatientConcern({
   };
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/10 p-3" data-testid="lead-patient-concern">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-xs font-semibold text-foreground">
+    <div className="mb-3 space-y-2 rounded-xl border border-border/70 bg-card p-4" data-testid="lead-patient-concern">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-2">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold">
+            <UserRound aria-hidden className="size-3.5" />
             {tx("Со слов пациента", "Angaben der Patientin / des Patienten")}
           </span>
           {reason?.updated_at ? (
-            <span className="text-[11px] text-muted-foreground" data-testid="lead-patient-concern-date">
+            <span className="text-xs tabular-nums text-muted-foreground" data-testid="lead-patient-concern-date">
               {formatAppDateTime(reason.updated_at)}
             </span>
           ) : null}
@@ -93,7 +94,7 @@ export function LeadPatientConcern({
         ) : null}
       </div>
       {reason ? (
-        <p className="whitespace-pre-line break-words text-sm text-foreground" data-testid="lead-patient-concern-text">
+        <p className="whitespace-pre-line break-words text-sm" data-testid="lead-patient-concern-text">
           {reason.text}
         </p>
       ) : null}
