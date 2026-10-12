@@ -4557,7 +4557,9 @@ mod tests {
         assert_eq!(other.payment_route_flags(), ["other_method"]);
         // Cryptocurrency is no longer offered (owner 2026-10-12); an older
         // answer keeps its flag.
-        assert!(apply_billing_patch(&other, &patch(json!({ "payment_method": "crypto" }))).is_err());
+        assert!(
+            apply_billing_patch(&other, &patch(json!({ "payment_method": "crypto" }))).is_err()
+        );
         let crypto = Declaration {
             payment_method: Some("crypto".into()),
             payment_method_details: None,

@@ -25922,7 +25922,9 @@ fn build_adult_privacy_consents_pdf(
     );
     // The persons the person named in the cabinet (owner 2026-10-12), then
     // any staff added.
-    let named = own_choice.map(|choice| choice.recipient_lines()).unwrap_or_default();
+    let named = own_choice
+        .map(|choice| choice.recipient_lines())
+        .unwrap_or_default();
     for line in named
         .iter()
         .map(String::as_str)
@@ -25930,7 +25932,15 @@ fn build_adult_privacy_consents_pdf(
         .map(str::trim)
         .filter(|line| !line.is_empty())
     {
-        layout.text_block(line, 10.5, false, 12.0, TreatmentPlanPdfColor::Body, 0.0, 0.8);
+        layout.text_block(
+            line,
+            10.5,
+            false,
+            12.0,
+            TreatmentPlanPdfColor::Body,
+            0.0,
+            0.8,
+        );
     }
     adult_legal_checkbox(
         &mut layout,
@@ -26177,18 +26187,34 @@ fn build_consent_pdf(context: &GeneratedConsentContext) -> Result<GeneratedPdf, 
     );
     // The persons a parent or the guardian named in the cabinet (owner
     // 2026-10-12), then any staff added; a blank line when there are none.
-    let named = own_choice.map(|choice| choice.recipient_lines()).unwrap_or_default();
+    let named = own_choice
+        .map(|choice| choice.recipient_lines())
+        .unwrap_or_default();
     let lines: Vec<&str> = named
         .iter()
         .map(String::as_str)
-        .chain(context.extra_release_recipients.as_deref().into_iter().flat_map(str::lines))
+        .chain(
+            context
+                .extra_release_recipients
+                .as_deref()
+                .into_iter()
+                .flat_map(str::lines),
+        )
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect();
     match lines.is_empty() {
         false => {
             for line in lines {
-                layout.text_block(line, 10.5, false, 12.0, TreatmentPlanPdfColor::Body, 0.0, 0.8);
+                layout.text_block(
+                    line,
+                    10.5,
+                    false,
+                    12.0,
+                    TreatmentPlanPdfColor::Body,
+                    0.0,
+                    0.8,
+                );
             }
         }
         true => {

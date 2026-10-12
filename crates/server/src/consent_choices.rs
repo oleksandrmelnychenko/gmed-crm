@@ -164,7 +164,12 @@ impl ConsentRecipient {
     /// The line the form prints: "Name (Beziehung), Kontakt".
     pub fn printed_line(&self) -> String {
         let mut line = format!("{} ({})", self.name.trim(), self.relation_label());
-        if let Some(contact) = self.contact.as_deref().map(str::trim).filter(|contact| !contact.is_empty()) {
+        if let Some(contact) = self
+            .contact
+            .as_deref()
+            .map(str::trim)
+            .filter(|contact| !contact.is_empty())
+        {
             line.push_str(", ");
             line.push_str(contact);
         }
@@ -190,7 +195,11 @@ pub fn clean_recipients(
     }
     let mut cleaned = Vec::with_capacity(recipients.len());
     for recipient in recipients {
-        let name = recipient.name.split_whitespace().collect::<Vec<_>>().join(" ");
+        let name = recipient
+            .name
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
         let relation = recipient.relation.trim().to_string();
         let contact = recipient
             .contact
@@ -199,11 +208,17 @@ pub fn clean_recipients(
         if name.is_empty()
             || name.chars().count() > RECIPIENT_TEXT_MAX
             || !RECIPIENT_RELATIONS.contains(&relation.as_str())
-            || contact.as_ref().is_some_and(|contact| contact.chars().count() > RECIPIENT_TEXT_MAX)
+            || contact
+                .as_ref()
+                .is_some_and(|contact| contact.chars().count() > RECIPIENT_TEXT_MAX)
         {
             return Err(RECIPIENTS_INVALID);
         }
-        cleaned.push(ConsentRecipient { name, relation, contact });
+        cleaned.push(ConsentRecipient {
+            name,
+            relation,
+            contact,
+        });
     }
     if choices.named_recipients && cleaned.is_empty() {
         return Err(RECIPIENTS_REQUIRED);
@@ -259,7 +274,10 @@ impl OwnConsentChoice {
         if !self.choices.named_recipients {
             return Vec::new();
         }
-        self.recipients.iter().map(ConsentRecipient::printed_line).collect()
+        self.recipients
+            .iter()
+            .map(ConsentRecipient::printed_line)
+            .collect()
     }
 
     /// The choice a generated document recorded, if any.
@@ -670,14 +688,20 @@ mod tests {
             relation: relation.into(),
             contact: contact.map(Into::into),
         };
-        assert_eq!(clean_recipients(&named, Vec::new()), Err(RECIPIENTS_REQUIRED));
+        assert_eq!(
+            clean_recipients(&named, Vec::new()),
+            Err(RECIPIENTS_REQUIRED)
+        );
         assert_eq!(
             clean_recipients(&core(), vec![person("Olga", "spouse", None)]),
             Ok(Vec::new()),
             "not chosen: nobody is kept"
         );
         assert_eq!(
-            clean_recipients(&named, vec![person("  Olga   Muster ", "spouse", Some("  "))]),
+            clean_recipients(
+                &named,
+                vec![person("  Olga   Muster ", "spouse", Some("  "))]
+            ),
             Ok(vec![person("Olga Muster", "spouse", None)])
         );
         for invalid in [
@@ -686,10 +710,16 @@ mod tests {
             person(&"x".repeat(121), "other", None),
             person("Olga", "other", Some(&"1".repeat(121))),
         ] {
-            assert_eq!(clean_recipients(&named, vec![invalid]), Err(RECIPIENTS_INVALID));
+            assert_eq!(
+                clean_recipients(&named, vec![invalid]),
+                Err(RECIPIENTS_INVALID)
+            );
         }
         assert_eq!(
-            clean_recipients(&named, vec![person("Olga", "spouse", None); MAX_RECIPIENTS + 1]),
+            clean_recipients(
+                &named,
+                vec![person("Olga", "spouse", None); MAX_RECIPIENTS + 1]
+            ),
             Err(RECIPIENTS_INVALID)
         );
 
@@ -698,7 +728,10 @@ mod tests {
             person("Olga Muster", "spouse", Some("+49 151 000000")),
             person("Praxis Dr. Beispiel", "family_doctor", None),
         ];
-        assert!(recorded.recipient_lines().is_empty(), "not chosen: nothing printed");
+        assert!(
+            recorded.recipient_lines().is_empty(),
+            "not chosen: nothing printed"
+        );
         recorded.choices.named_recipients = true;
         assert_eq!(
             recorded.recipient_lines(),

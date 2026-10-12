@@ -5898,7 +5898,36 @@ async fn a_minors_own_login_is_closed_while_the_parents_have_access() {
     let request = format!("/api/v1/me/lead-requests/{lead_id}");
     // While nothing says the lead is a minor, the own login chooses.
     let (status, body) = choose(router, lead_id, &child, &all).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["code"], "consent_recipients_required", "{body}");
+    let recipients = json!([{
+        "name": "Praxis Dr. Beispiel",
+        "relation": "family_doctor",
+        "contact": "praxis.consent@example.com"
+    }]);
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{request}/consent-choices"),
+        &child,
+        Some(json!({
+            "choices": all, "recipients": recipients,
+            "version": "2026-10-12", "language": "de"
+        })),
+    )
+    .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["recipients"], recipients, "{body}");
+    let (status, intake) = json_request(
+        router,
+        "GET",
+        &format!("/api/v1/leads/{lead_id}/portal-intake"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{intake}");
+    assert_eq!(intake["consent_form"]["recipients"], recipients, "{intake}");
 
     // Staff set a date of birth under 18 and name the mother.
     let mother = Uuid::new_v4();

@@ -204,8 +204,8 @@ describe("named recipients of the consent form (owner 2026-10-12)", () => {
       />,
     );
     expect(html).toContain("Доверенные лица и учреждения");
-    expect(html).toContain(value=Olga Muster);
-    expect(html).toContain(value=+49 151 000000);
+    expect(html).toContain('value="Olga Muster"');
+    expect(html).toContain('value="+49 151 000000"');
     expect(html).toContain("которых я назову ниже");
   });
 });
