@@ -2125,6 +2125,25 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // The task history (append-only) keeps an edited comment's earlier text
+    // and the attachment name; the erasure may change the text values only.
+    let comment_ref = Uuid::new_v4();
+    let history_event: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+           VALUES ($1, 'comment_edited', $2, $3) RETURNING id"#,
+    )
+    .bind(task_id)
+    .bind(admin_id)
+    .bind(json!({
+        "comment_id": comment_ref,
+        "previous_body": format!("{person} called, mail {tag}@example.com"),
+        "body": "Call back tomorrow",
+        "attachments": [{ "file_name": format!("Befund {person}.pdf"), "file_size": 10 }],
+        "edited": true,
+    }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     // Shared internal notes link to no patient: the full name and the e-mail
     // address are replaced, a first name alone (anyone's) stays.
     let named_note: Uuid = sqlx::query_scalar(
@@ -2267,6 +2286,37 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
             .await
             .unwrap();
     assert_eq!(first_name_note_title, format!("Dienstplan First {tag}"));
+    assert!(
+        scrubbed["task_events"].as_u64().unwrap_or_default() >= 1,
+        "{scrubbed}"
+    );
+    let history_payload: Value =
+        sqlx::query_scalar("SELECT payload FROM concierge_operational_task_events WHERE id = $1")
+            .bind(history_event)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        history_payload,
+        json!({
+            "comment_id": comment_ref,
+            "previous_body": format!("{anon} called, mail {anon}"),
+            "body": "Call back tomorrow",
+            "attachments": [{ "file_name": format!("Befund {anon}.pdf"), "file_size": 10 }],
+            "edited": true,
+        })
+    );
+    // The exception ends with the erasure: an ordinary update is refused.
+    let refused = sqlx::query(
+        r#"UPDATE concierge_operational_task_events
+           SET payload = jsonb_set(payload, '{body}', '"changed"')
+           WHERE id = $1"#,
+    )
+    .bind(history_event)
+    .execute(&pool)
+    .await
+    .unwrap_err();
+    assert!(refused.to_string().contains("append-only"), "{refused}");
     let (task_title, task_description, task_status, task_due): (
         String,
         Option<String>,
@@ -2553,6 +2603,153 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
 /// with the patient is open — a running order, an invoice with an amount to
 /// settle, an invoice draft. The refusal names them with a code the UI
 /// translates; the request stays and the handler can hold or reject it.
+/// Runs `statement` (binding `$1`) in a transaction with the erasure setting
+/// on, as the erasure does; commits when it succeeds.
+async fn update_task_history_in_erasure(
+    pool: &PgPool,
+    statement: &str,
+    event_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    match sqlx::query(statement)
+        .bind(event_id)
+        .execute(&mut *tx)
+        .await
+    {
+        Ok(done) => {
+            tx.commit().await.unwrap();
+            Ok(done.rows_affected())
+        }
+        Err(error) => {
+            let _ = tx.rollback().await;
+            Err(error)
+        }
+    }
+}
+
+#[tokio::test]
+async fn task_history_stays_append_only_except_for_text_in_the_erasure() {
+    let Some((_app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("task-history-append-only");
+    let task_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (title, assigned_to, assigned_by, status)
+           VALUES ($1, $2, $2, 'open') RETURNING id"#,
+    )
+    .bind(format!("Call {tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let event_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_operational_task_events (task_id, event_type, actor_id, payload)
+           VALUES ($1, 'comment_edited', $2, $3) RETURNING id"#,
+    )
+    .bind(task_id)
+    .bind(admin_id)
+    .bind(json!({ "previous_body": format!("Text {tag}"), "count": 1, "tags": ["a"] }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let append_only = |error: sqlx::Error| {
+        assert!(error.to_string().contains("append-only"), "{error}");
+    };
+
+    // Outside the erasure nothing changes, not even a text.
+    append_only(
+        sqlx::query(
+            r#"UPDATE concierge_operational_task_events
+               SET payload = jsonb_set(payload, '{previous_body}', '"changed"')
+               WHERE id = $1"#,
+        )
+        .bind(event_id)
+        .execute(&pool)
+        .await
+        .unwrap_err(),
+    );
+    // In the erasure: no other column, no number, no new or removed key, no
+    // delete.
+    for statement in [
+        "UPDATE concierge_operational_task_events SET event_type = 'edited' WHERE id = $1",
+        "UPDATE concierge_operational_task_events SET created_at = now() - interval '1 day' WHERE id = $1",
+        r#"UPDATE concierge_operational_task_events SET payload = jsonb_set(payload, '{count}', '2') WHERE id = $1"#,
+        r#"UPDATE concierge_operational_task_events SET payload = payload || '{"extra": "x"}' WHERE id = $1"#,
+        "UPDATE concierge_operational_task_events SET payload = payload - 'tags' WHERE id = $1",
+        r#"UPDATE concierge_operational_task_events SET payload = jsonb_set(payload, '{tags}', '["a", "b"]') WHERE id = $1"#,
+        "DELETE FROM concierge_operational_task_events WHERE id = $1",
+    ] {
+        append_only(
+            update_task_history_in_erasure(&pool, statement, event_id)
+                .await
+                .unwrap_err(),
+        );
+    }
+    // Texts may change there, also inside an array.
+    let changed = update_task_history_in_erasure(
+        &pool,
+        r#"UPDATE concierge_operational_task_events
+           SET payload = jsonb_set(jsonb_set(payload, '{previous_body}', '"ANON-0000"'),
+                                   '{tags,0}', '"b"')
+           WHERE id = $1"#,
+        event_id,
+    )
+    .await
+    .unwrap();
+    assert_eq!(changed, 1);
+    let payload: Value =
+        sqlx::query_scalar("SELECT payload FROM concierge_operational_task_events WHERE id = $1")
+            .bind(event_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        payload,
+        json!({ "previous_body": "ANON-0000", "count": 1, "tags": ["b"] })
+    );
+    // The setting ends with its transaction.
+    append_only(
+        sqlx::query(
+            r#"UPDATE concierge_operational_task_events
+               SET payload = jsonb_set(payload, '{previous_body}', '"again"')
+               WHERE id = $1"#,
+        )
+        .bind(event_id)
+        .execute(&pool)
+        .await
+        .unwrap_err(),
+    );
+    // The scrub helper cuts a changed text to the limit of its key and leaves
+    // the rest alone.
+    let scrubbed: Value = sqlx::query_scalar(
+        r#"SELECT gmed_scrub_jsonb_text(
+                  $1, '(^|[^[:alnum:]_])(Anna Muster)(?=[^[:alnum:]_]|$)', '\1ANON-12345678',
+                  '{"label": 12}'::jsonb)"#,
+    )
+    .bind(json!({
+        "label": "Anna Muster here",
+        "other": "anna muster",
+        "untouched": "Annamuster",
+        "nested": [{ "label": "x" }, 3, null],
+    }))
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        scrubbed,
+        json!({
+            "label": "ANON-1234567",
+            "other": "ANON-12345678",
+            "untouched": "Annamuster",
+            "nested": [{ "label": "x" }, 3, null],
+        })
+    );
+}
+
 #[tokio::test]
 async fn erasure_waits_for_open_orders_and_invoices() {
     let Some((app, pool, admin_id)) = test_context().await else {

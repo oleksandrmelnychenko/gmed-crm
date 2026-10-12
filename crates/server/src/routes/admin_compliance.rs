@@ -3369,6 +3369,8 @@ struct ScrubbedFreeText {
     tasks: u64,
     task_comments: u64,
     task_checklist_items: u64,
+    /// Entries of the tasks' history (append-only except for the erasure).
+    task_events: u64,
     appointments: u64,
     appointment_checklists: u64,
     appointment_communications: u64,
@@ -3674,6 +3676,7 @@ async fn scrub_patient_free_text_in_tx(
     scrubbed.appointment_checklists = counts[4];
     scrubbed.appointment_communications = counts[5];
     scrubbed.interpreter_reports = counts[6];
+    scrubbed.task_events = scrub_task_history_in_tx(tx, &task_ids, &pattern, &replacement).await?;
     scrubbed.appointment_requests = sqlx::query(&scrub_statement(
         "patient_appointment_requests",
         &[
@@ -3705,6 +3708,60 @@ async fn scrub_patient_free_text_in_tx(
         .await?
         .rows_affected();
     }
+    Ok(scrubbed)
+}
+
+/// The history of the patient's tasks repeats earlier texts in its payloads:
+/// the previous body of an edited or deleted comment, the previous text of a
+/// checklist item, attachment names, earlier titles. The history is
+/// append-only; the one exception (owner decision 2026-10-12, Art. 17 DSGVO,
+/// migration `20261012160000_dsgvo_erasure_task_event_scrub.sql`) lets the
+/// erasure change the text values of a payload while the transaction-local
+/// setting `gmed.dsgvo_erasure` is on: same keys and structure, no other
+/// column, no delete. The setting is switched on only for this statement.
+/// The same replacement as in the tasks themselves; a changed text under a
+/// key that mirrors a column with a limit is cut to that limit.
+async fn scrub_task_history_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_ids: &[Uuid],
+    pattern: &str,
+    replacement: &str,
+) -> Result<u64, sqlx::Error> {
+    if task_ids.is_empty() {
+        return Ok(0);
+    }
+    let limits = json!({
+        "body": 4000,
+        "previous_body": 4000,
+        "label": 500,
+        "previous_label": 500,
+        "file_name": 255,
+    });
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'on', true)")
+        .execute(&mut **tx)
+        .await?;
+    let scrubbed = sqlx::query(
+        r#"WITH scrubbed AS (
+               SELECT id, gmed_scrub_jsonb_text(payload, $2, $3, $4) AS payload
+               FROM concierge_operational_task_events
+               WHERE task_id = ANY($1)
+           )
+           UPDATE concierge_operational_task_events event
+           SET payload = scrubbed.payload
+           FROM scrubbed
+           WHERE event.id = scrubbed.id
+             AND event.payload IS DISTINCT FROM scrubbed.payload"#,
+    )
+    .bind(task_ids)
+    .bind(pattern)
+    .bind(replacement)
+    .bind(&limits)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    sqlx::query("SELECT set_config('gmed.dsgvo_erasure', 'off', true)")
+        .execute(&mut **tx)
+        .await?;
     Ok(scrubbed)
 }
 

@@ -105,6 +105,15 @@ Die Ausführung
 - löscht die Dateien der Anhänge an den Aufgaben des Patienten wie die Dateien
   gelöschter Dokumente; der Eintrag bleibt mit Typ, Größe, Hochlader, Datum und
   Löschvermerk, der Dateiname wird neutral („erased-file“ mit der Endung),
+- ersetzt dieselben Merkmale auch im Ereignisverlauf der Aufgaben des Patienten
+  (früherer Text bearbeiteter oder gelöschter Kommentare und Checklistenpunkte,
+  Dateinamen der Anhänge, frühere Titel), mit denselben Längengrenzen
+  (Entscheidung des Inhabers vom 12.10.2026). Der Verlauf ist sonst nur
+  fortschreibbar; die Ausnahme gilt nur innerhalb der Löschtransaktion
+  (transaktionslokale Einstellung `gmed.dsgvo_erasure`), nur für Textwerte der
+  Ereignisdaten, nie für das Löschen von Einträgen oder andere Spalten; die
+  Löschung selbst wird im unveränderlichen Audit-Log festgehalten
+  (`dsgvo_anonymize`, Zähler `task_events`),
 - behält Rechnungen (mit dem festgeschriebenen Empfänger), Verträge und Aufträge
   (Art. 17 Abs. 3 lit. b DSGVO). Ist der gelöschte Patient selbst Zahler der
   Rechnung oder des Auftrags eines anderen Patienten (Patientenakte als Zahler),
@@ -127,10 +136,7 @@ Kabinett vor der Prüfung zurückzieht.
 Verbleibende Lücke: strukturierte medizinische Einträge (Diagnosen, Medikation,
 Labor) bleiben ohne Personenbezug zum anonymisierten Datensatz bestehen. Ob das als
 Anonymisierung genügt, ist mit dem DSB zu bewerten; seltene Diagnosen können
-reidentifizierbar sein. Ebenso offen: Der Ereignisverlauf der Aufgaben
-(nur fortschreibbar) behält den früheren Text bearbeiteter Kommentare und
-Checklistenpunkte sowie die Dateinamen der Anhänge; eine Ausnahme für die Löschung
-ist noch zu entscheiden.
+reidentifizierbar sein.
 
 ## Mitteilung an Empfänger (Art. 19)
 
