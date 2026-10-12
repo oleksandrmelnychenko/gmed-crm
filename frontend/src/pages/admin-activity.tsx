@@ -21,6 +21,7 @@ import {
 import { AdminGuideButton } from "@/components/admin-guide";
 import { AiMark } from "@/components/ui/ai-mark";
 import {
+  ADMIN_INLINE_METRICS_GRID,
   AdminInlineMetric,
   AdminSheetScaffold,
   SheetActionsFooter,
@@ -47,6 +48,11 @@ import {
 import { humanizeAuditCode } from "@/lib/i18n/catalogs/audit-activity";
 import { useDebouncedRealtimeSubscription } from "@/lib/realtime";
 import { cn } from "@/lib/utils";
+import {
+  activityActorLabel,
+  activityContextEntries,
+  activityContextSummary,
+} from "@/pages/admin-activity-context";
 import { formatAdminDateTime } from "@/pages/admin-pages.helpers";
 import { fetchAdminActivity } from "@/pages/admin/data/admin-api";
 import {
@@ -77,11 +83,11 @@ function isRedactedContext(context: Record<string, unknown> | null): boolean {
   return Boolean(context && context.redacted === true);
 }
 
-function actorLabel(activity: Pick<ActivityRow, "user_name" | "actor_role">, translations: Translations): string {
-  if (activity.user_name) return activity.user_name;
-  return activity.actor_role === "patient"
-    ? translations.activity_portal_actor
-    : translations.activity_anonymous_actor;
+function actorLabel(
+  activity: Pick<ActivityRow, "user_name" | "actor_role" | "action" | "entity_type">,
+  translations: Translations,
+): string {
+  return activityActorLabel(activity, translations);
 }
 
 const ADMIN_ACTIVITY_REALTIME_EVENTS = [
@@ -496,8 +502,6 @@ function ActivityActionBadge({
   );
 }
 
-const TECHNICAL_CONTEXT_KEYS = new Set(["latency_ms", "method", "route", "status"]);
-
 function contextSummary(
   context: Record<string, unknown> | null,
   action: string,
@@ -520,21 +524,8 @@ function contextSummary(
       .join(" · ") || "\u2014";
   }
 
-  const entries = Object.entries(context)
-    .filter(([key]) => !TECHNICAL_CONTEXT_KEYS.has(key))
-    .slice(0, 3);
-  if (entries.length === 0) return "\u2014";
-  return entries
-    .map(([key, value]) => {
-      const normalized =
-        typeof value === "string"
-          ? value
-          : value === null
-            ? "null"
-            : JSON.stringify(value);
-      return `${key}: ${normalized}`;
-    })
-    .join(", ");
+  // Known keys with translated labels and formatted values (QA E2-03).
+  return activityContextSummary(context, translations);
 }
 
 function entityTechnicalValue(entityType: string | null, entityId: unknown): string {
@@ -586,6 +577,51 @@ function prettyContext(context: Record<string, unknown> | null) {
   return context ? JSON.stringify(context, null, 2) : "-";
 }
 
+/** Known context entries as a label/value list, raw JSON folded below (QA E2-03). */
+function ActivityContextDetails({
+  context,
+  t,
+}: {
+  context: Record<string, unknown> | null;
+  t: Translations;
+}) {
+  if (isRedactedContext(context)) {
+    return (
+      <p className="rounded-lg border border-border/50 bg-card/60 p-3 text-xs text-muted-foreground">
+        {t.activity_context_redacted}
+      </p>
+    );
+  }
+  const entries = activityContextEntries(context, t);
+  const hasRaw = Boolean(context && Object.keys(context).length > 0);
+  return (
+    <div className="space-y-2.5">
+      {entries.length ? (
+        <dl className="grid gap-x-4 gap-y-1.5 rounded-lg border border-border/50 bg-card/60 p-3 text-xs sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
+          {entries.map((entry) => (
+            <div key={entry.key} className="contents">
+              <dt className="text-muted-foreground">{entry.label}</dt>
+              <dd className="break-words text-foreground">{entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <p className="text-xs text-muted-foreground">{t.uiText.activity_context_empty}</p>
+      )}
+      {hasRaw ? (
+        <details className="rounded-lg border border-border/50 bg-card/60">
+          <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+            {t.uiText.activity_technical_data}
+          </summary>
+          <pre className="overflow-x-auto border-t border-border/50 p-3 text-xs leading-6 text-muted-foreground">
+            {prettyContext(context)}
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
 type AdminActivityMetricsValue = {
   activity24h: number;
   activeUsers24h: number;
@@ -604,7 +640,7 @@ function AdminActivityMetrics({
   t,
 }: AdminActivityMetricsProps) {
   return (
-    <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+    <div className={ADMIN_INLINE_METRICS_GRID}>
       <AdminInlineMetric
         icon={Activity}
         tone="sky"
@@ -659,7 +695,7 @@ function AdminActivityDetailSheet({
           title={selectedActivity ? actionLabel(selectedActivity.action, t) : t.activity_details}
           description={
             selectedActivity
-              ? `${selectedActivity.user_name} - ${formatAdminDateTime(selectedActivity.created_at, lang)}`
+              ? `${actorLabel(selectedActivity, t)} · ${formatAdminDateTime(selectedActivity.created_at, lang)}`
               : t.activity_subtitle
           }
           footer={(
@@ -720,13 +756,9 @@ function AdminActivityDetailSheet({
               <section className={`space-y-2.5 rounded-xl p-3.5 ${tokens.surface.softCard}`}>
                 <h3 className={cn(tokens.text.sectionTitle, "inline-flex items-center gap-2")}>
                   <span aria-hidden className="size-1.5 rounded-full bg-[var(--brand)]" />
-                  <span>{t.activity_payload}</span>
+                  <span>{t.activity_details}</span>
                 </h3>
-                <pre className="overflow-x-auto rounded-lg border border-border/50 bg-card/60 p-3 text-xs leading-6 text-muted-foreground">
-                  {isRedactedContext(selectedActivity.context)
-                    ? t.activity_context_redacted
-                    : prettyContext(selectedActivity.context)}
-                </pre>
+                <ActivityContextDetails context={selectedActivity.context} t={t} />
               </section>
             </>
           ) : (

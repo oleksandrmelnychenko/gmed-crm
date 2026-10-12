@@ -368,6 +368,124 @@ async fn audit_analytics_surfaces_summary_recent_events_and_top_readers() {
     );
 }
 
+/// QA E2-01 (2026-10-12): the security analytics follow the activity log —
+/// a lead or patient reading their own file is not named to the IT admin
+/// (no name, no account id, no record id); the CEO still sees who it was.
+/// Sign-in events name the endpoint they came from (QA E2-06).
+#[tokio::test]
+async fn audit_analytics_hides_portal_readers_from_the_it_admin() {
+    let Some(app) = test_context().await else {
+        return;
+    };
+    let pool = app.suite.pool.clone();
+    let ceo_id = seed_user(&pool, "audit-analytics-portal", "ceo").await;
+    let pm_id = seed_user(&pool, "audit-analytics-portal", "patient_manager").await;
+    let portal_name = format!("Anna Muster {}", Uuid::new_v4().simple());
+    let portal_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO users (email, password_hash, name, role)
+           VALUES ($1, 'test-password-hash', $2, 'patient')
+           RETURNING id"#,
+    )
+    .bind(format!(
+        "anna.muster.{}@example.com",
+        Uuid::new_v4().simple()
+    ))
+    .bind(&portal_name)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let other_portal_id = seed_user(&pool, "audit-analytics-portal", "patient").await;
+    let own_record = Uuid::new_v4();
+
+    sqlx::query(
+        r#"INSERT INTO audit_log (user_id, action, entity_type, entity_id, context, ip_address, created_at)
+           VALUES
+                ($1, 'read_patient', 'patient', $4, '{"route":"/api/v1/me/patient","status":200}'::jsonb, 'sha256:ip-p', now() - interval '1 hour'),
+                ($1, 'read_document', 'document', $4, '{"route":"/api/v1/me/documents/{id}","status":200}'::jsonb, 'sha256:ip-p', now() - interval '2 hour'),
+                ($2, 'read_patient', 'patient', gen_random_uuid(), '{}'::jsonb, 'sha256:ip-q', now() - interval '3 hour'),
+                ($3, 'read_patient', 'patient', gen_random_uuid(), '{}'::jsonb, 'sha256:ip-s', now() - interval '4 hour'),
+                ($1, 'login_failure', 'auth', $1, '{"reason":"wrong_password","failed_attempts":2}'::jsonb, 'sha256:ip-p', now() - interval '5 minute'),
+                (NULL, 'login_failure', 'auth', NULL, '{"reason":"unknown_email"}'::jsonb, 'sha256:ip-x', now() - interval '6 minute')"#,
+    )
+    .bind(portal_id)
+    .bind(other_portal_id)
+    .bind(pm_id)
+    .bind(own_record)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("it_admin", app.it_admin_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let raw = body.to_string();
+    assert!(!raw.contains(&portal_name), "{raw}");
+    assert!(!raw.contains(&portal_id.to_string()), "{raw}");
+    assert!(!raw.contains(&other_portal_id.to_string()), "{raw}");
+    assert!(!raw.contains(&own_record.to_string()), "{raw}");
+
+    let readers = body["top_sensitive_readers"].as_array().expect("readers");
+    // Both portal logins collapse into one anonymous row.
+    let portal_rows: Vec<&Value> = readers
+        .iter()
+        .filter(|row| row["user_role"] == "patient")
+        .collect();
+    assert_eq!(portal_rows.len(), 1, "{body}");
+    assert_eq!(portal_rows[0]["user_id"], Value::Null);
+    assert_eq!(portal_rows[0]["user_name"], Value::Null);
+    assert_eq!(portal_rows[0]["event_count"], 3);
+    // Staff readers stay named.
+    assert!(
+        readers
+            .iter()
+            .any(|row| row["user_id"] == pm_id.to_string() && row["event_count"] == 1),
+        "{body}"
+    );
+
+    let recent = body["recent_suspicious_events"].as_array().expect("events");
+    let portal_failure = recent
+        .iter()
+        .find(|row| row["action"] == "login_failure" && row["user_role"] == "patient")
+        .expect("portal sign-in failure listed");
+    assert_eq!(portal_failure["user_name"], Value::Null);
+    assert_eq!(portal_failure["entity_id"], Value::Null);
+    assert_eq!(portal_failure["context"], json!({ "redacted": true }));
+    assert_eq!(portal_failure["route"], "/api/v1/auth/login");
+    assert_eq!(portal_failure["method"], "POST");
+    let unknown = recent
+        .iter()
+        .find(|row| row["action"] == "login_failure" && row["user_role"].is_null())
+        .expect("unknown e-mail failure listed");
+    assert_eq!(unknown["route"], "/api/v1/auth/login");
+    assert_eq!(unknown["context"]["reason"], "unknown_email");
+
+    // The CEO sees who read what.
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        "/api/v1/admin/audit-analytics",
+        &auth_header_for("ceo", ceo_id),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let readers = body["top_sensitive_readers"].as_array().expect("readers");
+    assert!(
+        readers
+            .iter()
+            .any(|row| row["user_name"] == portal_name.as_str()
+                && row["user_id"] == portal_id.to_string()
+                && row["event_count"] == 2),
+        "{body}"
+    );
+}
+
 /// QA E-14: "Datenänderungen 24 h" counted only rows with an HTTP write
 /// method, so domain events (`update_lead`, `create_invoice`, ...) never
 /// counted. Reads, downloads, sign-ins and technical rows still do not.

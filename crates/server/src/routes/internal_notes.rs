@@ -53,6 +53,9 @@ struct ListNotesQuery {
 struct CreateNoteRequest {
     title: String,
     body: Option<String>,
+    /// `private` (default), `role` or `staff`.
+    #[serde(default)]
+    visibility: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -61,6 +64,115 @@ struct UpdateNoteRequest {
     title: String,
     body: Option<String>,
     expected_updated_at: String,
+    /// Omitted keeps the current visibility; only the author (or the CEO)
+    /// changes it.
+    #[serde(default)]
+    visibility: Option<String>,
+}
+
+/// Who reads a note, chosen by its author (owner decision 2026-10-12, QA
+/// E-23): only the author, the author's role or all staff. The CEO reads
+/// every note.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NoteVisibility {
+    Private,
+    Role,
+    Staff,
+}
+
+impl NoteVisibility {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "private" => Some(Self::Private),
+            "role" => Some(Self::Role),
+            "staff" => Some(Self::Staff),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Private => "private",
+            Self::Role => "role",
+            Self::Staff => "staff",
+        }
+    }
+}
+
+/// The visibility of a stored note, as the read checks need it.
+struct NoteAccess {
+    created_by: Uuid,
+    visibility: NoteVisibility,
+    visible_role: Option<String>,
+}
+
+/// SQL condition "the reader may see `note`" — binds: viewer id, viewer role
+/// code, full access.
+fn visible_note_condition(viewer: usize, role: usize, full: usize) -> String {
+    format!(
+        "(${full}::bool OR note.visibility = 'staff' OR note.created_by = ${viewer} \
+          OR (note.visibility = 'role' AND note.visible_role = ${role}::text))"
+    )
+}
+
+fn can_read_note(auth: &AuthUser, note: &NoteAccess) -> bool {
+    auth.role.has_full_access()
+        || note.created_by == auth.user_id
+        || match note.visibility {
+            NoteVisibility::Staff => true,
+            NoteVisibility::Role => note.visible_role.as_deref() == Some(role_code(auth.role)),
+            NoteVisibility::Private => false,
+        }
+}
+
+fn can_change_visibility(auth: &AuthUser, note: &NoteAccess) -> bool {
+    auth.role.has_full_access() || note.created_by == auth.user_id
+}
+
+#[allow(clippy::result_large_err)]
+fn parse_visibility(
+    value: Option<&str>,
+) -> Result<Option<NoteVisibility>, axum::response::Response> {
+    match value {
+        None => Ok(None),
+        Some(value) => NoteVisibility::parse(value)
+            .map(Some)
+            .ok_or_else(|| err(StatusCode::UNPROCESSABLE_ENTITY, "note_visibility_invalid")),
+    }
+}
+
+/// The live note's visibility, or `None` when it does not exist, is
+/// archived or is hidden from the reader (answered like a missing note).
+async fn readable_note(
+    state: &AppState,
+    auth: &AuthUser,
+    note_id: Uuid,
+) -> Result<Option<NoteAccess>, axum::response::Response> {
+    let row = sqlx::query(
+        r#"SELECT created_by, visibility, visible_role
+           FROM internal_notes
+           WHERE id = $1 AND archived_at IS NULL"#,
+    )
+    .bind(note_id)
+    .fetch_optional(&state.db)
+    .await
+    .map_err(|error| {
+        tracing::error!(error = %error, note_id = %note_id, "load internal note visibility");
+        err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to load note")
+    })?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let note = NoteAccess {
+        created_by: row.try_get("created_by").unwrap_or_else(|_| Uuid::nil()),
+        visibility: row
+            .try_get::<String, _>("visibility")
+            .ok()
+            .and_then(|value| NoteVisibility::parse(&value))
+            .unwrap_or(NoteVisibility::Private),
+        visible_role: row.try_get("visible_role").unwrap_or_default(),
+    };
+    Ok(can_read_note(auth, &note).then_some(note))
 }
 
 async fn list_notes(
@@ -77,9 +189,10 @@ async fn list_notes(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| format!("%{value}%"));
-    let rows = match sqlx::query(
+    // Hidden notes are filtered in SQL, so the search never finds them.
+    let sql = format!(
         r#"SELECT note.id, note.title, note.body, note.created_by, note.updated_by,
-                  note.created_at, note.updated_at,
+                  note.created_at, note.updated_at, note.visibility, note.visible_role,
                   creator.name AS created_by_name, editor.name AS updated_by_name,
                   COUNT(attachment.id) AS attachment_count
            FROM internal_notes note
@@ -87,14 +200,20 @@ async fn list_notes(
            JOIN users editor ON editor.id = note.updated_by
            LEFT JOIN internal_note_attachments attachment ON attachment.note_id = note.id
            WHERE note.archived_at IS NULL
+             AND {visible}
              AND ($1::text IS NULL OR note.title ILIKE $1 OR COALESCE(note.body, '') ILIKE $1)
            GROUP BY note.id, creator.name, editor.name
            ORDER BY note.updated_at DESC
            LIMIT 500"#,
-    )
-    .bind(search)
-    .fetch_all(&state.db)
-    .await
+        visible = visible_note_condition(2, 3, 4),
+    );
+    let rows = match sqlx::query(&sql)
+        .bind(search)
+        .bind(auth.user_id)
+        .bind(role_code(auth.role))
+        .bind(auth.role.has_full_access())
+        .fetch_all(&state.db)
+        .await
     {
         Ok(rows) => rows,
         Err(error) => {
@@ -118,18 +237,24 @@ async fn create_note(
     if let Err(response) = require_internal_staff(&auth) {
         return response;
     }
+    let visibility = match parse_visibility(body.visibility.as_deref()) {
+        Ok(value) => value.unwrap_or(NoteVisibility::Private),
+        Err(response) => return response,
+    };
     let (title, body) = match validate_note_fields(&body.title, body.body.as_deref()) {
         Ok(value) => value,
         Err(response) => return response,
     };
     let note_id = match sqlx::query_scalar::<_, Uuid>(
-        r#"INSERT INTO internal_notes (title, body, created_by, updated_by)
-           VALUES ($1, $2, $3, $3)
+        r#"INSERT INTO internal_notes (title, body, created_by, updated_by, visibility, visible_role)
+           VALUES ($1, $2, $3, $3, $4, CASE WHEN $4 = 'role' THEN $5 END)
            RETURNING id"#,
     )
     .bind(title)
     .bind(body)
     .bind(auth.user_id)
+    .bind(visibility.as_str())
+    .bind(role_code(auth.role))
     .fetch_one(&state.db)
     .await
     {
@@ -144,7 +269,7 @@ async fn create_note(
         Some(auth.user_id),
         "internal_note",
         Some(note_id),
-        serde_json::json!({}),
+        serde_json::json!({ "visibility": visibility.as_str() }),
     ));
     match load_note(&state, note_id).await {
         Ok(Some(value)) => (StatusCode::CREATED, Json(value)).into_response(),
@@ -160,6 +285,11 @@ async fn get_note(
 ) -> axum::response::Response {
     if let Err(response) = require_internal_staff(&auth) {
         return response;
+    }
+    match readable_note(&state, &auth, note_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Note not found"),
+        Err(response) => return response,
     }
     match load_note(&state, note_id).await {
         Ok(Some(value)) => Json(value).into_response(),
@@ -177,6 +307,25 @@ async fn update_note(
     if let Err(response) = require_internal_staff(&auth) {
         return response;
     }
+    let requested_visibility = match parse_visibility(body.visibility.as_deref()) {
+        Ok(value) => value,
+        Err(response) => return response,
+    };
+    let current = match readable_note(&state, &auth, note_id).await {
+        Ok(Some(value)) => value,
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Note not found"),
+        Err(response) => return response,
+    };
+    // Only the author (or the CEO) decides who reads the note.
+    let visibility = match requested_visibility {
+        Some(value) if value != current.visibility => {
+            if !can_change_visibility(&auth, &current) {
+                return err(StatusCode::FORBIDDEN, "note_visibility_author_only");
+            }
+            value
+        }
+        _ => current.visibility,
+    };
     let (title, body_text) = match validate_note_fields(&body.title, body.body.as_deref()) {
         Ok(value) => value,
         Err(response) => return response,
@@ -191,9 +340,17 @@ async fn update_note(
                 );
             }
         };
+    // "My role" is the author's role; it stays as shared until the
+    // visibility changes again.
     let result = match sqlx::query(
         r#"UPDATE internal_notes
-           SET title = $2, body = $3, updated_by = $4, updated_at = now()
+           SET title = $2, body = $3, updated_by = $4, updated_at = now(),
+               visibility = $6,
+               visible_role = CASE
+                   WHEN $6 <> 'role' THEN NULL
+                   WHEN visibility = 'role' THEN visible_role
+                   ELSE (SELECT author.role FROM users author WHERE author.id = internal_notes.created_by)
+               END
            WHERE id = $1 AND archived_at IS NULL AND updated_at = $5"#,
     )
     .bind(note_id)
@@ -201,6 +358,7 @@ async fn update_note(
     .bind(body_text)
     .bind(auth.user_id)
     .bind(expected_updated_at)
+    .bind(visibility.as_str())
     .execute(&state.db)
     .await
     {
@@ -210,6 +368,18 @@ async fn update_note(
             return err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to update note");
         }
     };
+    if result.rows_affected() > 0 && visibility != current.visibility {
+        state.audit_sender.try_send(audit::domain_event(
+            "update_internal_note_visibility",
+            Some(auth.user_id),
+            "internal_note",
+            Some(note_id),
+            serde_json::json!({
+                "from": current.visibility.as_str(),
+                "to": visibility.as_str(),
+            }),
+        ));
+    }
     if result.rows_affected() == 0 {
         let exists = sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM internal_notes WHERE id = $1 AND archived_at IS NULL)",
@@ -238,6 +408,11 @@ async fn archive_note(
 ) -> axum::response::Response {
     if let Err(response) = require_internal_staff(&auth) {
         return response;
+    }
+    match readable_note(&state, &auth, note_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Note not found"),
+        Err(response) => return response,
     }
     let result = match sqlx::query(
         r#"UPDATE internal_notes
@@ -270,15 +445,10 @@ async fn upload_attachment(
     if let Err(response) = require_internal_staff(&auth) {
         return response;
     }
-    let exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM internal_notes WHERE id = $1 AND archived_at IS NULL)",
-    )
-    .bind(note_id)
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(false);
-    if !exists {
-        return err(StatusCode::NOT_FOUND, "Note not found");
+    match readable_note(&state, &auth, note_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Note not found"),
+        Err(response) => return response,
     }
 
     let mut upload: Option<(String, String, Vec<u8>)> = None;
@@ -392,6 +562,11 @@ async fn download_attachment(
     if let Err(response) = require_internal_staff(&auth) {
         return response;
     }
+    match readable_note(&state, &auth, note_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Attachment not found"),
+        Err(response) => return response,
+    }
     let row = match sqlx::query(
         r#"SELECT attachment.file_name, attachment.mime_type, attachment.storage_key,
                   attachment.file_nonce, attachment.encryption_key_id
@@ -456,6 +631,11 @@ async fn delete_attachment(
 ) -> axum::response::Response {
     if let Err(response) = require_internal_staff(&auth) {
         return response;
+    }
+    match readable_note(&state, &auth, note_id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return err(StatusCode::NOT_FOUND, "Attachment not found"),
+        Err(response) => return response,
     }
     let storage_key = match sqlx::query_scalar::<_, String>(
         r#"DELETE FROM internal_note_attachments
@@ -533,6 +713,8 @@ fn note_summary_json(row: &sqlx::postgres::PgRow) -> Option<serde_json::Value> {
         "updated_by": row.try_get::<Uuid, _>("updated_by").ok()?,
         "updated_by_name": row.try_get::<String, _>("updated_by_name").unwrap_or_default(),
         "attachment_count": row.try_get::<i64, _>("attachment_count").unwrap_or_default(),
+        "visibility": row.try_get::<String, _>("visibility").unwrap_or_else(|_| "private".to_string()),
+        "visible_role": row.try_get::<Option<String>, _>("visible_role").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok()?.to_rfc3339(),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").ok()?.to_rfc3339(),
     }))
@@ -544,7 +726,7 @@ async fn load_note(
 ) -> Result<Option<serde_json::Value>, axum::response::Response> {
     let row = sqlx::query(
         r#"SELECT note.id, note.title, note.body, note.created_by, note.updated_by,
-                  note.created_at, note.updated_at,
+                  note.created_at, note.updated_at, note.visibility, note.visible_role,
                   creator.name AS created_by_name, editor.name AS updated_by_name
            FROM internal_notes note
            JOIN users creator ON creator.id = note.created_by
@@ -585,6 +767,8 @@ async fn load_note(
         "created_by_name": row.try_get::<String, _>("created_by_name").unwrap_or_default(),
         "updated_by": row.try_get::<Uuid, _>("updated_by").ok(),
         "updated_by_name": row.try_get::<String, _>("updated_by_name").unwrap_or_default(),
+        "visibility": row.try_get::<String, _>("visibility").unwrap_or_else(|_| "private".to_string()),
+        "visible_role": row.try_get::<Option<String>, _>("visible_role").unwrap_or_default(),
         "created_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at").ok().map(|value| value.to_rfc3339()),
         "updated_at": row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at").ok().map(|value| value.to_rfc3339()),
         "attachments": attachments.iter().filter_map(|attachment| Some(serde_json::json!({
@@ -621,6 +805,22 @@ fn require_internal_staff(auth: &AuthUser) -> Result<(), axum::response::Respons
     ))
 }
 
+fn role_code(role: Role) -> &'static str {
+    match role {
+        Role::Ceo => "ceo",
+        Role::CeoAssistant => "ceo_assistant",
+        Role::PatientManager => "patient_manager",
+        Role::TeamleadInterpreter => "teamlead_interpreter",
+        Role::Interpreter => "interpreter",
+        Role::Concierge => "concierge",
+        Role::Billing => "billing",
+        Role::Sales => "sales",
+        Role::ItAdmin => "it_admin",
+        Role::Patient => "patient",
+        _ => "unknown",
+    }
+}
+
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": message }))).into_response()
 }
@@ -628,6 +828,56 @@ fn err(status: StatusCode, message: &str) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn reader(role: Role) -> AuthUser {
+        AuthUser {
+            user_id: Uuid::new_v4(),
+            role,
+            family_id: Uuid::new_v4(),
+            access_token_jti: Uuid::new_v4(),
+            access_token_expires_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn note_visibility_follows_author_role_and_ceo() {
+        let author = reader(Role::PatientManager);
+        let note = |visibility, visible_role: Option<&str>| NoteAccess {
+            created_by: author.user_id,
+            visibility,
+            visible_role: visible_role.map(str::to_string),
+        };
+        let colleague = reader(Role::PatientManager);
+        let interpreter = reader(Role::Interpreter);
+        let ceo = reader(Role::Ceo);
+
+        let private = note(NoteVisibility::Private, None);
+        assert!(can_read_note(&author, &private));
+        assert!(!can_read_note(&colleague, &private));
+        assert!(can_read_note(&ceo, &private));
+
+        let role = note(NoteVisibility::Role, Some("patient_manager"));
+        assert!(can_read_note(&colleague, &role));
+        assert!(!can_read_note(&interpreter, &role));
+
+        let staff = note(NoteVisibility::Staff, None);
+        assert!(can_read_note(&interpreter, &staff));
+
+        assert!(can_change_visibility(&author, &staff));
+        assert!(can_change_visibility(&ceo, &staff));
+        assert!(!can_change_visibility(&colleague, &staff));
+    }
+
+    #[test]
+    fn note_visibility_codes_round_trip() {
+        for value in ["private", "role", "staff"] {
+            assert_eq!(
+                NoteVisibility::parse(value).map(NoteVisibility::as_str),
+                Some(value)
+            );
+        }
+        assert_eq!(NoteVisibility::parse("everyone"), None);
+    }
 
     #[test]
     fn validates_supported_note_files() {

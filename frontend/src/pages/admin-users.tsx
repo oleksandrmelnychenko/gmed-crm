@@ -82,6 +82,7 @@ import {
   isAdminUserLocked,
   isPasswordConfirmationMismatch,
 } from "@/pages/admin-users.helpers";
+import { knownTwoFactorError } from "@/pages/two-factor-errors";
 
 interface User {
   id: string;
@@ -268,6 +269,7 @@ type AdminUsersState = {
   generatedResetPassword: string | null;
   confirmPasswordReset: boolean;
   confirmGenerateReset: boolean;
+  confirmTotpReset: boolean;
   confirmRevokeSessions: User | null;
   unlockingUserId: string | null;
   revokingUserId: string | null;
@@ -326,6 +328,7 @@ const INITIAL_EDIT_FIELDS = {
   generatedResetPassword: null,
   confirmPasswordReset: false,
   confirmGenerateReset: false,
+  confirmTotpReset: false,
 } satisfies Partial<AdminUsersState>;
 
 function useAdminUsersPageContent() {
@@ -377,6 +380,7 @@ function useAdminUsersPageContent() {
     generatedResetPassword,
     confirmPasswordReset,
     confirmGenerateReset,
+    confirmTotpReset,
     confirmRevokeSessions,
     unlockingUserId,
     revokingUserId,
@@ -987,17 +991,35 @@ function useAdminUsersPageContent() {
     }
   };
 
+  // Asked first like the password reset; the open dialog shows the new state
+  // ("not set up") at once (QA E2-07).
   const resetTotp = () => {
     if (!editUser) return;
+    const target = editUser;
     setEditError(null);
     setEditNotice(null);
-    resetUserTotp(editUser.id)
+    setAdminUsersField("euSaving", true);
+    resetUserTotp(target.id)
       .then(() => {
-        setEditNotice(t.uiText.twofactor_admin_reset_done);
+        dispatchAdminUsersState((current) => ({
+          confirmTotpReset: false,
+          editNotice: t.uiText.twofactor_admin_reset_done,
+          editUser:
+            current.editUser?.id === target.id
+              ? { ...current.editUser, totp_enrolled: false }
+              : current.editUser,
+        }));
         clearApiCache("/users");
         void loadUsers();
       })
-      .catch((e: unknown) => setEditError(describeError(e, editUser.role)));
+      .catch((e: unknown) => {
+        dispatchAdminUsersState({ confirmTotpReset: false });
+        // A role-specific text first (CEO rows), else the translated 2FA refusal.
+        const described = describeError(e, target.role);
+        const raw = e instanceof Error ? e.message : "";
+        setEditError(described === raw ? (knownTwoFactorError(e, t) ?? described) : described);
+      })
+      .finally(() => setAdminUsersField("euSaving", false));
   };
 
   const fieldLabelClass = "text-[11.5px] font-medium text-muted-foreground leading-tight";
@@ -1357,8 +1379,8 @@ function useAdminUsersPageContent() {
                   type="button"
                   variant="outline"
                   className="mt-2 h-9 rounded-lg px-3.5"
-                  disabled={euSaving || !editActions?.canResetTotp}
-                  onClick={resetTotp}
+                  disabled={euSaving || !editActions?.canResetTotp || !editUser?.totp_enrolled}
+                  onClick={() => setAdminUsersField("confirmTotpReset", true)}
                 >
                   {t.uiText.twofactor_admin_reset}
                 </Button>
@@ -1664,6 +1686,16 @@ function useAdminUsersPageContent() {
         confirmDisabled={euSaving}
         onCancel={() => setConfirmGenerateReset(false)}
         onConfirm={() => void generateOneTimeResetPassword()}
+      />
+      <DirtyDismissConfirmDialog
+        open={confirmTotpReset}
+        title={t.uiText.twofactor_admin_reset}
+        message={t.uiText.twofactor_admin_reset_confirm}
+        cancelLabel={t.common_cancel}
+        confirmLabel={t.uiText.twofactor_admin_reset}
+        confirmDisabled={euSaving}
+        onCancel={() => setAdminUsersField("confirmTotpReset", false)}
+        onConfirm={resetTotp}
       />
       <DirtyDismissConfirmDialog
         open={confirmRevokeSessions !== null}

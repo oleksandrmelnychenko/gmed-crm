@@ -271,6 +271,15 @@ test("a role that must use 2FA gets only the setup with a QR code until it is en
   await expect(gate).toContainText("Настройте двухфакторный вход");
   await expect(page.getByRole("navigation")).toHaveCount(0);
 
+  // QA E2-07: "mandatory" is said once, and the gate has its own language switch.
+  await expect(gate.getByRole("button", { name: "Начать настройку", exact: true })).toBeVisible();
+  expect((await gate.innerText()).match(/обязател/g)?.length).toBe(1);
+  await gate.getByTestId("two-factor-language-toggle").click();
+  await expect(gate).toContainText("Zwei-Faktor-Anmeldung einrichten");
+  expect((await gate.innerText()).match(/Pflicht/g)?.length).toBe(1);
+  await gate.getByTestId("two-factor-language-toggle").click();
+  await expect(gate).toContainText("Настройте двухфакторный вход");
+
   await gate.getByRole("button", { name: "Начать настройку", exact: true }).click();
   const qr = gate.getByTestId("qr-code");
   await expect(qr).toBeVisible();

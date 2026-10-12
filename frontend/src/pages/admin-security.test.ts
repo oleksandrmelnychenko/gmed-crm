@@ -3,7 +3,35 @@ import { describe, expect, it } from "vitest";
 import { de } from "@/lib/i18n/de";
 import { ru } from "@/lib/i18n/ru";
 
-import { customMaintenanceMessage, securityReasonLabel } from "./admin-security";
+import {
+  customMaintenanceMessage,
+  securityActorName,
+  securityEventRoute,
+  securityReasonLabel,
+  securitySessionStatus,
+} from "./admin-security";
+
+describe("security page leftovers (QA E2-01, E2-06)", () => {
+  it("shows the request route of an event, not its reason", () => {
+    expect(securityEventRoute({ method: "POST", route: "/api/v1/auth/login" })).toBe(
+      "POST /api/v1/auth/login",
+    );
+    expect(securityEventRoute({ route: "/api/v1/patients/{id}" })).toBe("/api/v1/patients/{id}");
+    expect(securityEventRoute({ method: null, route: null })).toBe("—");
+  });
+
+  it("names a single revoked session in the singular", () => {
+    expect(securitySessionStatus(true, ru)).toBe("Отозвана");
+    expect(securitySessionStatus(true, de)).toBe("Widerrufen");
+    expect(securitySessionStatus(false, ru)).toBe(ru.common_active);
+  });
+
+  it("never names a portal login the server anonymised", () => {
+    expect(securityActorName({ user_name: null, user_role: "patient" }, ru)).toBe(ru.activity_portal_actor);
+    expect(securityActorName({ user_name: null, user_role: null }, de)).toBe(de.security_anonymous);
+    expect(securityActorName({ user_name: "Ben Muster", user_role: "patient_manager" }, ru)).toBe("Ben Muster");
+  });
+});
 
 describe("security page texts (QA E-06)", () => {
   it("translates the reason of a suspicious event by its code", () => {

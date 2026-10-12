@@ -13,6 +13,7 @@ import { apiFetch, clearApiCache } from "@/lib/api";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { useLang, type Lang } from "@/lib/i18n";
+import { hasCapability } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { TASK_REALTIME_EVENTS, useTaskRealtimeRefresh } from "@/pages/concierge/use-task-realtime";
 import { useStaffNavigate } from "@/lib/use-staff-navigate";
@@ -256,7 +257,11 @@ export function ProjectsPage() {
           role: user.role,
           is_active: true,
         }] : []),
-        apiFetch<PatientSummary[]>("/patients?active_only=true", { cacheTtlMs: 30_000, forceFresh }).catch(() => []),
+        // A role without patient access (Sales) gets no patient picker and no
+        // 403 in the console (QA E2-04).
+        hasCapability(user, "patients.view")
+          ? apiFetch<PatientSummary[]>("/patients?active_only=true", { cacheTtlMs: 30_000, forceFresh }).catch(() => [])
+          : Promise.resolve<PatientSummary[]>([]),
       ]);
       setAssignees(userRows);
       setPatients(patientRows);

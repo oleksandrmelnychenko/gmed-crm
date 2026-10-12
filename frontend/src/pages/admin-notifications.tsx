@@ -22,6 +22,7 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  ADMIN_INLINE_METRICS_GRID,
   AdminInlineMetric,
   AdminSectionTitle,
   AdminSheetScaffold,
@@ -582,7 +583,7 @@ function useAdminNotificationsPageContent() {
           ) : null}
         </AdminToolbar>
 
-        <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+        <div className={ADMIN_INLINE_METRICS_GRID} data-testid="notification-metrics">
           <AdminInlineMetric
             icon={BellRing}
             tone="sky"

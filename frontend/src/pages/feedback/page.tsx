@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import {
+  ADMIN_INLINE_METRICS_GRID,
   AdminInlineMetric,
   AdminSheetScaffold,
   AdminTableCard,
@@ -1899,7 +1900,7 @@ function useStaffFeedbackWorkspaceContent() {
       {notice ? <Banner tone="success">{notice}</Banner> : null}
       {error && !capturePatientError ? <Banner tone="error">{error}</Banner> : null}
 
-      <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+      <div className={ADMIN_INLINE_METRICS_GRID} data-testid="feedback-metrics">
         <AdminInlineMetric
           icon={MessageSquare}
           label={t.feedback_total_metric}

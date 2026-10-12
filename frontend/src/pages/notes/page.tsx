@@ -16,9 +16,11 @@ import { PageHeader } from "@/components/ui-shell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache, downloadApiFile } from "@/lib/api";
 import { formatAppDateTime } from "@/lib/app-time-zone";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -31,13 +33,22 @@ type NoteAttachment = {
   created_at: string;
 };
 
+/** Who reads a note, chosen by its author; the CEO reads every note (owner 2026-10-12). */
+export type NoteVisibility = "private" | "role" | "staff";
+
+export const NOTE_VISIBILITIES: readonly NoteVisibility[] = ["private", "role", "staff"];
+
 type NoteSummary = {
   id: string;
   title: string;
   body: string | null;
+  created_by: string;
   created_by_name: string;
   updated_by_name: string;
   attachment_count: number;
+  /** Older servers send no visibility: their notes were visible to all staff. */
+  visibility?: NoteVisibility;
+  visible_role?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -46,7 +57,7 @@ type InternalNote = Omit<NoteSummary, "attachment_count"> & {
   attachments: NoteAttachment[];
 };
 
-const copy = {
+export const NOTES_COPY = {
   de: {
     title: "Interne Notizen",
     subtitle: "Schnelle interne Arbeitsnotizen mit PDF-, Bild- und Word-Anhängen",
@@ -73,6 +84,13 @@ const copy = {
     fileAdded: "Datei angehängt",
     error: "Aktion fehlgeschlagen",
     cancel: "Abbrechen",
+    visibility: "Sichtbarkeit",
+    visibilityHint: "Wer die Notiz lesen darf. Der CEO sieht alle Notizen.",
+    visibilityAuthorOnly: "Die Sichtbarkeit ändert nur die Person, die die Notiz angelegt hat.",
+    visibilityOwn: { private: "Nur ich", role: "Meine Rolle", staff: "Alle Mitarbeitenden" },
+    visibilityOther: { private: "Nur Autor:in", role: "Rolle", staff: "Alle Mitarbeitenden" },
+    errorNotFound: "Die Notiz gibt es nicht mehr oder sie ist nicht für Sie freigegeben.",
+    errorConflict: "Die Notiz wurde inzwischen von jemand anderem geändert. Bitte neu laden.",
   },
   ru: {
     title: "Заметки",
@@ -100,8 +118,58 @@ const copy = {
     fileAdded: "Файл прикреплён",
     error: "Не удалось выполнить действие",
     cancel: "Отмена",
+    visibility: "Видимость",
+    visibilityHint: "Кто может читать заметку. CEO видит все заметки.",
+    visibilityAuthorOnly: "Видимость меняет только автор заметки.",
+    visibilityOwn: { private: "Только я", role: "Моя роль", staff: "Все сотрудники" },
+    visibilityOther: { private: "Только автор", role: "Роль", staff: "Все сотрудники" },
+    errorNotFound: "Заметки больше нет или она вам недоступна.",
+    errorConflict: "Заметку тем временем изменил другой сотрудник. Обновите страницу.",
   },
 } as const;
+
+type NotesCopy = (typeof NOTES_COPY)[keyof typeof NOTES_COPY];
+
+/**
+ * The badge of a note: the author reads the choices of the form ("Только я",
+ * "Моя роль", "Все сотрудники"); everyone else (the CEO, a colleague) reads
+ * whose note it is ("Только автор", "Роль: …").
+ */
+export function noteVisibilityLabel(
+  note: Pick<NoteSummary, "visibility" | "visible_role" | "created_by">,
+  viewerId: string | undefined,
+  labels: NotesCopy,
+  roleName: (role: string) => string,
+): string {
+  const visibility = note.visibility ?? "staff";
+  if (viewerId && note.created_by === viewerId) return labels.visibilityOwn[visibility];
+  if (visibility === "role" && note.visible_role) {
+    return `${labels.visibilityOther.role}: ${roleName(note.visible_role)}`;
+  }
+  return labels.visibilityOther[visibility];
+}
+
+/** Server refusals of the notes API in the UI language. */
+export function noteErrorMessage(error: unknown, labels: NotesCopy): string {
+  const code = error instanceof ApiRequestError ? error.code : undefined;
+  switch (code) {
+    case "note_visibility_author_only":
+      return labels.visibilityAuthorOnly;
+    case "Note not found":
+    case "Attachment not found":
+      return labels.errorNotFound;
+    case "Note was changed by another user":
+      return labels.errorConflict;
+    default:
+      return error instanceof Error && error.message ? error.message : labels.error;
+  }
+}
+
+function visibilityTone(visibility: NoteVisibility): string {
+  if (visibility === "private") return "border-slate-200 bg-slate-50 text-slate-700";
+  if (visibility === "role") return "border-amber-200 bg-amber-50 text-amber-800";
+  return "border-emerald-200 bg-emerald-50 text-emerald-800";
+}
 
 function formatDate(value: string) {
   return formatAppDateTime(value) || value;
@@ -114,14 +182,23 @@ function formatSize(value: number) {
 }
 
 export function InternalNotesPage() {
-  const { lang } = useLang();
-  const labels = copy[lang];
+  const { lang, t } = useLang();
+  const { user } = useAuth();
+  const labels = NOTES_COPY[lang];
+  const roleName = useCallback(
+    (role: string) => {
+      const label = (t as unknown as Record<string, unknown>)[`role_${role}`];
+      return typeof label === "string" ? label : role;
+    },
+    [t],
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeNote, setActiveNote] = useState<InternalNote | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftBody, setDraftBody] = useState("");
+  const [draftVisibility, setDraftVisibility] = useState<NoteVisibility>("private");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -131,6 +208,18 @@ export function InternalNotesPage() {
   const [newNoteOpen, setNewNoteOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newBody, setNewBody] = useState("");
+  // New notes stay with their author unless the author shares them.
+  const [newVisibility, setNewVisibility] = useState<NoteVisibility>("private");
+  // Only the author (or the CEO) decides who reads a note; the server checks it too.
+  const canChangeVisibility = Boolean(
+    activeNote && user && (activeNote.created_by === user.id || user.role === "ceo"),
+  );
+  // A plain list: the select reads its <option> children, not a fragment.
+  const visibilityOptions = NOTE_VISIBILITIES.map((value) => (
+    <option key={value} value={value}>
+      {labels.visibilityOwn[value]}
+    </option>
+  ));
 
   const loadNotes = useCallback(async (keepSelection = true) => {
     setLoading(true);
@@ -143,11 +232,11 @@ export function InternalNotesPage() {
         return rows[0]?.id ?? null;
       });
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : labels.error);
+      setError(noteErrorMessage(loadError, labels));
     } finally {
       setLoading(false);
     }
-  }, [labels.error]);
+  }, [labels]);
 
   useEffect(() => {
     void loadNotes(false);
@@ -162,14 +251,15 @@ export function InternalNotesPage() {
         setActiveNote(note);
         setDraftTitle(note.title);
         setDraftBody(note.body ?? "");
+        setDraftVisibility(note.visibility ?? "staff");
       })
       .catch((loadError) => {
-        if (!cancelled) setError(loadError instanceof Error ? loadError.message : labels.error);
+        if (!cancelled) setError(noteErrorMessage(loadError, labels));
       });
     return () => {
       cancelled = true;
     };
-  }, [labels.error, selectedId]);
+  }, [labels, selectedId]);
 
   const visibleNotes = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
@@ -190,15 +280,17 @@ export function InternalNotesPage() {
           title,
           body: draftBody.trim() || null,
           expected_updated_at: activeNote.updated_at,
+          ...(canChangeVisibility ? { visibility: draftVisibility } : {}),
         }),
       });
       clearApiCache("/internal-notes");
       setActiveNote(saved);
       setSelectedId(saved.id);
+      setDraftVisibility(saved.visibility ?? "staff");
       setNotice(labels.saved);
       await loadNotes();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : labels.error);
+      setError(noteErrorMessage(saveError, labels));
     } finally {
       setSaving(false);
     }
@@ -213,18 +305,20 @@ export function InternalNotesPage() {
     try {
       const saved = await apiFetch<InternalNote>("/internal-notes", {
         method: "POST",
-        body: JSON.stringify({ title, body: newBody.trim() || null }),
+        body: JSON.stringify({ title, body: newBody.trim() || null, visibility: newVisibility }),
       });
       clearApiCache("/internal-notes");
       setNewNoteOpen(false);
       setNewTitle("");
       setNewBody("");
+      setNewVisibility("private");
       setActiveNote(saved);
       setSelectedId(saved.id);
+      setDraftVisibility(saved.visibility ?? newVisibility);
       setNotice(labels.saved);
       await loadNotes();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : labels.error);
+      setError(noteErrorMessage(saveError, labels));
     } finally {
       setSaving(false);
     }
@@ -247,7 +341,7 @@ export function InternalNotesPage() {
       setNotice(labels.fileAdded);
       await loadNotes();
     } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : labels.error);
+      setError(noteErrorMessage(uploadError, labels));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -263,7 +357,7 @@ export function InternalNotesPage() {
       setActiveNote(refreshed);
       await loadNotes();
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : labels.error);
+      setError(noteErrorMessage(deleteError, labels));
     } finally {
       setUploading(false);
     }
@@ -278,7 +372,7 @@ export function InternalNotesPage() {
       setSelectedId(null);
       await loadNotes(false);
     } catch (archiveError) {
-      setError(archiveError instanceof Error ? archiveError.message : labels.error);
+      setError(noteErrorMessage(archiveError, labels));
     } finally {
       setSaving(false);
     }
@@ -289,7 +383,7 @@ export function InternalNotesPage() {
       <PageHeader
         title={labels.title}
         description={labels.subtitle}
-        actions={<Button type="button" onClick={() => { setNewTitle(""); setNewBody(""); setNewNoteOpen(true); }}><Plus />{labels.newNote}</Button>}
+        actions={<Button type="button" onClick={() => { setNewTitle(""); setNewBody(""); setNewVisibility("private"); setNewNoteOpen(true); }}><Plus />{labels.newNote}</Button>}
       />
 
       {error ? <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p> : null}
@@ -316,6 +410,12 @@ export function InternalNotesPage() {
                 <div className="flex items-start justify-between gap-2">
                   <p className="line-clamp-1 text-[13px] font-semibold">{note.title}</p>
                   <div className="flex shrink-0 items-center gap-1">
+                    <span
+                      className={cn("inline-flex items-center rounded-md border px-1.5 py-0.5 text-[9px] font-medium", visibilityTone(note.visibility ?? "staff"))}
+                      data-testid="note-visibility-badge"
+                    >
+                      {noteVisibilityLabel(note, user?.id, labels, roleName)}
+                    </span>
                     {note.attachment_count > 0 ? <Badge variant="secondary" className="h-5 shrink-0 rounded-full px-1.5 text-[9px]"><Paperclip className="size-2.5" />{note.attachment_count}</Badge> : null}
                     <span className="inline-flex items-center rounded-md border border-sky-200 bg-sky-50 px-1.5 py-0.5 font-mono text-[9px] font-medium tabular-nums text-sky-700">
                       {formatDate(note.updated_at)}
@@ -349,6 +449,28 @@ export function InternalNotesPage() {
                 <span>{labels.noteTitle}</span>
                 <Input className="h-9 bg-field" value={draftTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setDraftTitle(event.target.value)} />
               </label>
+              {activeNote ? (
+                <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
+                  <span>{labels.visibility}</span>
+                  {canChangeVisibility ? (
+                    <NativeComboboxSelect
+                      value={draftVisibility}
+                      onChange={(event) => setDraftVisibility(event.target.value as NoteVisibility)}
+                      className="h-9 w-full max-w-xs rounded-lg bg-field text-[13px]"
+                      aria-label={labels.visibility}
+                    >
+                      {visibilityOptions}
+                    </NativeComboboxSelect>
+                  ) : (
+                    <span className={cn("inline-flex w-fit items-center rounded-md border px-2 py-1 text-xs font-medium", visibilityTone(activeNote.visibility ?? "staff"))}>
+                      {noteVisibilityLabel(activeNote, user?.id, labels, roleName)}
+                    </span>
+                  )}
+                  <span className="block text-xs font-normal text-muted-foreground">
+                    {canChangeVisibility ? labels.visibilityHint : labels.visibilityAuthorOnly}
+                  </span>
+                </label>
+              ) : null}
               <label className="mx-4 mt-3 block space-y-1.5 text-sm font-medium sm:mx-5">
                 <span>{labels.noteBody}</span>
                 <textarea
@@ -412,6 +534,18 @@ export function InternalNotesPage() {
             <label className="grid gap-1.5 text-sm font-medium">
               <span>{labels.noteTitle}</span>
               <Input autoFocus value={newTitle} maxLength={255} placeholder={labels.untitled} onChange={(event) => setNewTitle(event.target.value)} />
+            </label>
+            <label className="grid gap-1.5 text-sm font-medium">
+              <span>{labels.visibility}</span>
+              <NativeComboboxSelect
+                value={newVisibility}
+                onChange={(event) => setNewVisibility(event.target.value as NoteVisibility)}
+                className="h-9 w-full rounded-lg bg-field text-[13px]"
+                aria-label={labels.visibility}
+              >
+                {visibilityOptions}
+              </NativeComboboxSelect>
+              <span className="text-xs font-normal text-muted-foreground">{labels.visibilityHint}</span>
             </label>
             <label className="grid gap-1.5 text-sm font-medium">
               <span>{labels.noteBody}</span>

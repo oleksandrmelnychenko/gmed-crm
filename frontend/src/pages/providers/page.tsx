@@ -1707,6 +1707,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       ? providerDetailReturnTo
       : "/providers";
   const permissions = useMemo(() => providerPermissions(user), [user]);
+  const canViewPatients = hasCapability(user, "patients.view");
   const providerPageCopy = useMemo(() => {
     if (!permissions.forceNonMedical) {
       return {
@@ -2517,7 +2518,9 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
       fetchInsuranceProviders(true),
       fetchProviders("/providers?active_only=false"),
       fetchProviderStaffRoles(true),
-      fetchProviderPeoplePatients(),
+      // Sales sees providers but no patients: no request that answers 403
+      // and fails the whole catalogue load (QA E2-04).
+      canViewPatients ? fetchProviderPeoplePatients() : Promise.resolve([]),
       fetchProviderTaxonomy(),
     ])
       .then(([specializationItems, insuranceProviderItems, providerItems, roleItems, patientItems, taxonomy]) => {
@@ -2545,7 +2548,7 @@ function useProvidersPageContent({ detailRouteId = "" }: ProvidersPageProps = {}
     return () => {
       cancelled = true;
     };
-  }, [permissions.canViewPage]);
+  }, [canViewPatients, permissions.canViewPage]);
 
   useEffect(() => {
     const shouldLoadDetail = detailOpen || detailPageMode;

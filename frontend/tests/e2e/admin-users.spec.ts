@@ -55,6 +55,7 @@ async function setup(page: Page, options: { role?: string } = {}) {
     createBodies: [] as Record<string, unknown>[],
     resetBodies: [] as Array<{ userId: string; body: Record<string, unknown> }>,
     revoked: [] as string[],
+    totpResets: [] as string[],
     deactivated: [] as string[],
     deactivateResponse: null as null | { status: number; json: Record<string, unknown> },
   };
@@ -140,7 +141,15 @@ async function setup(page: Page, options: { role?: string } = {}) {
       );
       return route.fulfill({ status: 204 });
     }
-    if (path.match(/^\/users\/[^/]+\/(unlock|activate|totp\/reset|update)$/)) {
+    const totpResetMatch = path.match(/^\/users\/([^/]+)\/totp\/reset$/);
+    if (totpResetMatch && method === "POST") {
+      state.totpResets.push(totpResetMatch[1]);
+      state.users = state.users.map((user) =>
+        user.id === totpResetMatch[1] ? { ...user, totp_enrolled: false, active_sessions: 0 } : user,
+      );
+      return route.fulfill({ json: { ok: true } });
+    }
+    if (path.match(/^\/users\/[^/]+\/(unlock|activate|update)$/)) {
       return route.fulfill({ json: { ok: true } });
     }
     if (path === "/stats/overview") return route.fulfill({ json: {} });
@@ -234,6 +243,32 @@ test("IT admin cannot touch CEO rows but manages locks, sessions and generated r
   await expect(sheet.getByTestId("one-time-password")).toHaveText(RESET_ONE_TIME_PASSWORD);
   await expect(sheet).toContainText("при следующем входе пользователь должен задать новый пароль");
   expect(state.resetBodies).toEqual([{ userId: "pm-locked", body: { generate: true } }]);
+});
+
+test("IT admin resets the second factor only after confirming; the open dialog shows it removed (QA E2-07)", async ({ page }) => {
+  const state = await setup(page);
+  await page.goto("/admin/users");
+
+  const lockedRow = page.getByRole("row").filter({ hasText: "Locked Manager" });
+  await lockedRow.getByRole("button", { name: "Редактировать" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toContainText("Подключён");
+  const resetButton = sheet.getByRole("button", { name: "Сбросить двухфакторный вход", exact: true });
+
+  // The first click only asks.
+  await resetButton.click();
+  const confirm = page.getByRole("alertdialog");
+  await expect(confirm).toContainText("Второй фактор будет удалён");
+  await confirm.getByRole("button", { name: "Отмена", exact: true }).click();
+  await expect(page.getByRole("alertdialog")).toHaveCount(0);
+  expect(state.totpResets).toEqual([]);
+
+  await resetButton.click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "Сбросить двухфакторный вход", exact: true }).click();
+  await expect.poll(() => state.totpResets).toEqual(["pm-locked"]);
+  await expect(sheet).toContainText("Второй фактор удалён.");
+  await expect(sheet).toContainText("Не подключён");
+  await expect(resetButton).toBeDisabled();
 });
 
 test("last-CEO guard is shown as readable text", async ({ page }) => {

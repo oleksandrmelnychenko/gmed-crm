@@ -736,12 +736,19 @@ async fn audit_analytics(
         }
     };
 
+    // Without full access (the IT admin) the lists below follow the activity
+    // log: patient and lead logins stay anonymous and business payloads stay
+    // redacted (QA E-45, E2-01).
+    let full_access = auth.role.has_full_access();
     let recent_events = match sqlx::query(
         r#"SELECT al.id, al.user_id, al.action, al.entity_type, al.entity_id, al.context,
                   al.ip_address, al.created_at,
-                  u.name AS user_name, u.role AS user_role
+                  u.name AS user_name, u.role AS user_role,
+                  COALESCE(target.role = 'patient', false) AS target_is_portal
            FROM audit_log al
            LEFT JOIN users u ON u.id = al.user_id
+           LEFT JOIN users target
+                  ON al.entity_type IN ('user', 'auth') AND target.id = al.entity_id
            WHERE al.action IN ('login_failure', 'login_blocked', 'refresh_token_theft', 'refresh_family_revoked')
               OR COALESCE(al.context->>'is_ceo_access', 'false') = 'true'
               OR (
@@ -762,11 +769,11 @@ async fn audit_analytics(
             .into_iter()
             .map(|row| {
                 let action = row.try_get::<String, _>("action").unwrap_or_default();
-                let full_access = auth.role.has_full_access();
                 let entity_type = row.try_get::<String, _>("entity_type").unwrap_or_default();
                 let user_role = row
                     .try_get::<Option<String>, _>("user_role")
                     .unwrap_or_default();
+                let target_is_portal = row.try_get::<bool, _>("target_is_portal").unwrap_or(false);
                 // Patient and lead logins stay anonymous and non-technical
                 // contexts stay redacted without full access (QA E-45).
                 let actor_hidden = !full_access && user_role.as_deref() == Some("patient");
@@ -774,10 +781,7 @@ async fn audit_analytics(
                     .try_get::<Option<serde_json::Value>, _>("context")
                     .unwrap_or_default()
                     .unwrap_or_else(|| serde_json::json!({}));
-                let route = raw_context
-                    .get("route")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string);
+                let (method, route) = suspicious_event_route(&action, &raw_context);
                 let status = raw_context
                     .get("status")
                     .and_then(serde_json::Value::as_i64);
@@ -788,10 +792,17 @@ async fn audit_analytics(
                 let context = super::admin_settings::visible_activity_context(
                     full_access,
                     Some(entity_type.as_str()),
-                    false,
+                    target_is_portal,
                     Some(raw_context),
                 )
                 .unwrap_or_else(|| serde_json::json!({}));
+                // The record a portal login touched is its own account or
+                // file: hidden together with the actor.
+                let entity_id = if actor_hidden || (!full_access && target_is_portal) {
+                    None
+                } else {
+                    row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default()
+                };
                 // `reason_code` is what the UI translates; `reason` stays the
                 // English fallback for older clients.
                 let (reason_code, reason) = if action == "refresh_token_theft" {
@@ -821,9 +832,10 @@ async fn audit_analytics(
                     "user_role": user_role,
                     "action": action,
                     "entity_type": entity_type,
-                    "entity_id": row.try_get::<Option<Uuid>, _>("entity_id").unwrap_or_default(),
+                    "entity_id": entity_id,
                     "reason_code": reason_code,
                     "reason": reason,
+                    "method": method,
                     "route": route,
                     "status": status,
                     "ip_hash": row.try_get::<Option<String>, _>("ip_address").unwrap_or_default(),
@@ -844,8 +856,12 @@ async fn audit_analytics(
         }
     };
 
+    // Patient and lead logins reading their own files are one anonymous row
+    // for a reader without full access: no name, no account id (QA E2-01).
     let top_sensitive_readers = match sqlx::query(
-        r#"SELECT al.user_id, u.name AS user_name, u.role AS user_role,
+        r#"SELECT CASE WHEN $1::bool OR u.role <> 'patient' THEN al.user_id END AS user_id,
+                  CASE WHEN $1::bool OR u.role <> 'patient' THEN u.name END AS user_name,
+                  u.role AS user_role,
                   count(*) AS event_count,
                   count(DISTINCT al.entity_id) AS distinct_entities
            FROM audit_log al
@@ -859,10 +875,11 @@ async fn audit_analytics(
                     AND al.action <> 'http_request'
                  )
              )
-           GROUP BY al.user_id, u.name, u.role
-           ORDER BY event_count DESC, distinct_entities DESC, u.name
+           GROUP BY 1, 2, 3
+           ORDER BY event_count DESC, distinct_entities DESC, user_name NULLS LAST
            LIMIT 10"#,
     )
+    .bind(full_access)
     .fetch_all(&state.db)
     .await
     {
@@ -870,8 +887,8 @@ async fn audit_analytics(
             .into_iter()
             .map(|row| {
                 serde_json::json!({
-                    "user_id": row.try_get::<Uuid, _>("user_id").unwrap_or_default(),
-                    "user_name": row.try_get::<String, _>("user_name").unwrap_or_default(),
+                    "user_id": row.try_get::<Option<Uuid>, _>("user_id").unwrap_or_default(),
+                    "user_name": row.try_get::<Option<String>, _>("user_name").unwrap_or_default(),
                     "user_role": row.try_get::<String, _>("user_role").unwrap_or_default(),
                     "event_count": row.try_get::<i64, _>("event_count").unwrap_or(0),
                     "distinct_entities": row.try_get::<i64, _>("distinct_entities").unwrap_or(0),
@@ -895,8 +912,80 @@ async fn audit_analytics(
     .into_response()
 }
 
+/// The request behind a suspicious event: the matched route the audit
+/// middleware recorded, or — for sign-in events, which are written before a
+/// session exists and carry no route — the sign-in endpoint they come from
+/// (QA E2-06).
+fn suspicious_event_route(
+    action: &str,
+    context: &serde_json::Value,
+) -> (Option<String>, Option<String>) {
+    let text = |key: &str| {
+        context
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    if let Some(route) = text("route") {
+        return (text("method"), Some(route));
+    }
+    let route = match action {
+        "login_failure" | "login_blocked"
+            if text("reason").is_some_and(|reason| reason.starts_with("totp_")) =>
+        {
+            "/api/v1/auth/totp"
+        }
+        "login_failure" | "login_blocked" => "/api/v1/auth/login",
+        "refresh_token_theft" | "refresh_family_revoked" => "/api/v1/auth/refresh",
+        _ => return (None, None),
+    };
+    (Some("POST".to_string()), Some(route.to_string()))
+}
+
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod suspicious_event_route_tests {
+    use super::suspicious_event_route;
+    use serde_json::json;
+
+    #[test]
+    fn recorded_route_wins() {
+        assert_eq!(
+            suspicious_event_route(
+                "read_patient",
+                &json!({ "method": "GET", "route": "/api/v1/patients/{id}" })
+            ),
+            (
+                Some("GET".to_string()),
+                Some("/api/v1/patients/{id}".to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn sign_in_events_name_their_endpoint() {
+        let login = |action, context| suspicious_event_route(action, &context).1;
+        assert_eq!(
+            login("login_failure", json!({ "reason": "unknown_email" })).as_deref(),
+            Some("/api/v1/auth/login")
+        );
+        assert_eq!(
+            login("login_blocked", json!({ "reason": "throttled" })).as_deref(),
+            Some("/api/v1/auth/login")
+        );
+        assert_eq!(
+            login("login_failure", json!({ "reason": "totp_mismatch" })).as_deref(),
+            Some("/api/v1/auth/totp")
+        );
+        assert_eq!(
+            login("refresh_family_revoked", json!({})).as_deref(),
+            Some("/api/v1/auth/refresh")
+        );
+        assert_eq!(login("view_message_conversation", json!({})), None);
+    }
 }
 
 #[cfg(test)]

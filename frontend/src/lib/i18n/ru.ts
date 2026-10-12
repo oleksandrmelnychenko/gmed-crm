@@ -17,10 +17,18 @@ import { revenueRu } from "./catalogs/revenue";
 import { sanctionsRu } from "./catalogs/sanctions";
 import { sharedCoreRu } from "./catalogs/shared";
 import { staffAccessRu } from "./catalogs/staff-access";
+import { securityReviewUiRu } from "./catalogs/security-review-ui";
 
 export const ru = {
   // Audit labels first: a label already in the extracted catalog wins.
-  uiText: { ...auditActivityUiTextRu, ...extractedUiRu, ...ordersUiRu, ...billingUiRu, ...legalStatusUiRu },
+  uiText: {
+    ...auditActivityUiTextRu,
+    ...extractedUiRu,
+    ...ordersUiRu,
+    ...billingUiRu,
+    ...legalStatusUiRu,
+    ...securityReviewUiRu,
+  },
   staffAccess: staffAccessRu,
   app_name: "GMED CONSOLE",
   app_subtitle: "Управление медицинским туризмом",
@@ -797,7 +805,6 @@ export const ru = {
   activity_user: "Пользователь",
   activity_time: "Время",
   activity_details: "Детали",
-  activity_payload: "Payload",
   activity_filter_user: "Фильтр по пользователю",
   activity_filter_action: "Фильтр по действию",
   activity_action_login_success: "Успешный вход",

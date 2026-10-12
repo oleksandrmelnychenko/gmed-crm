@@ -1,4 +1,50 @@
+import { ApiRequestError, isLocalizedApiError } from "@/lib/api";
+import type { Translations } from "@/lib/i18n";
+
 export type ConsentAction = "grant" | "revoke";
+
+/**
+ * The DSGVO register refusals of `routes/admin_compliance.rs` (review,
+ * steps, execution) carry only an English sentence and the HTTP reason; the
+ * page shows them in the UI language (QA round 2, group E). Coded refusals
+ * (`erasure_blocked_by_retention` …) are translated by `apiFetch` already.
+ */
+const PRIVACY_REQUEST_ERROR_KEYS: Record<string, string> = {
+  "Privacy request must be approved before execution": "compliance_error_not_approved",
+  "Only CEO or IT admin can execute this privacy request type": "compliance_error_execute_role",
+  "Verify and record the requester's identity before executing this request":
+    "compliance_error_identity_required",
+  "Privacy request was already executed": "compliance_error_already_executed",
+  "Unknown privacy request type": "compliance_error_unknown_type",
+  "Privacy request not found": "compliance_error_not_found",
+  "Patient not found": "compliance_error_not_found",
+  "Rejecting a request needs a reason of at least 10 characters for the data subject":
+    "compliance_error_reason_required",
+  "Revising an approved request needs a reason of at least 10 characters":
+    "compliance_error_reason_required",
+  "An extension needs a reason of at least 10 characters": "compliance_error_reason_required",
+  "The reason must be between 10 and 2000 characters": "compliance_error_reason_required",
+  "reason must be between 10 and 2000 characters": "compliance_error_reason_required",
+  "Only CEO or IT admin can revise an approved privacy request": "compliance_error_revise_role",
+  "Privacy request can no longer be reviewed": "compliance_error_closed",
+  "Privacy request is already closed": "compliance_error_closed",
+  "Privacy request is already approved": "compliance_error_already_approved",
+  "The deadline of this request was already extended once": "compliance_error_extended_once",
+  "Privacy review action is invalid": "compliance_error_invalid_input",
+  "Unknown step": "compliance_error_invalid_input",
+  "Unknown identity verification method": "compliance_error_invalid_input",
+  "Unknown notification channel": "compliance_error_invalid_input",
+};
+
+export function privacyRequestErrorMessage(error: unknown, t: Translations): string {
+  if (isLocalizedApiError(error)) return error.message;
+  const message = error instanceof Error ? error.message : String(error);
+  const key = PRIVACY_REQUEST_ERROR_KEYS[message.trim()];
+  if (key && t.uiText[key]) return t.uiText[key];
+  if (error instanceof ApiRequestError && error.status === 403) return t.uiText.compliance_error_forbidden;
+  if (error instanceof ApiRequestError && (error.status ?? 0) >= 500) return t.uiText.compliance_error_failed;
+  return message || t.uiText.compliance_error_failed;
+}
 
 export function buildConsentFormPatchAfterSuccess(action: ConsentAction) {
   if (action === "revoke") {
@@ -31,6 +77,18 @@ export function privacySourceUiKey(
       : "privacy_source_patient_request_staff";
   }
   return null;
+}
+
+/**
+ * Roles the server lets produce the data export of Art. 15 — it contains the
+ * clinical record: CEO and patient manager (`export_patient_data` in
+ * `routes/admin_compliance.rs`). Everyone else, the IT admin included, gets
+ * the hint instead of a button that answers 403 (QA E2-08).
+ */
+const PATIENT_EXPORT_ROLES = new Set(["ceo", "patient_manager"]);
+
+export function canExportPatientData(role: string | null | undefined): boolean {
+  return PATIENT_EXPORT_ROLES.has(role ?? "");
 }
 
 export type PatientLabelSource = {

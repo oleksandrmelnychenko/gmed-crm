@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { formatAppDate } from "@/lib/app-time-zone";
 import { uiText, useLang, type Translations } from "@/lib/i18n";
 import { recordCompliancePrivacyRequestStep } from "@/pages/admin/data/admin-api";
+import { privacyRequestErrorMessage } from "@/pages/admin-compliance.helpers";
 
 export type PrivacyRequestStepFacts = {
   identity_verification?: { method?: string; at?: string } | null;
@@ -70,7 +71,7 @@ export function PrivacyRequestSteps({ requestId, status, facts, t, onRecorded }:
       if (step === "extend_deadline") setExtensionReason("");
       await onRecorded();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(privacyRequestErrorMessage(cause, t));
     } finally {
       setBusy(false);
     }

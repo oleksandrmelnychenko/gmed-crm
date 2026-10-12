@@ -17,10 +17,18 @@ import { revenueDe } from "./catalogs/revenue";
 import { sanctionsDe } from "./catalogs/sanctions";
 import { sharedCoreDe } from "./catalogs/shared";
 import { staffAccessDe } from "./catalogs/staff-access";
+import { securityReviewUiDe } from "./catalogs/security-review-ui";
 
 export const de = {
   // Audit labels first: a label already in the extracted catalog wins.
-  uiText: { ...auditActivityUiTextDe, ...extractedUiDe, ...ordersUiDe, ...billingUiDe, ...legalStatusUiDe },
+  uiText: {
+    ...auditActivityUiTextDe,
+    ...extractedUiDe,
+    ...ordersUiDe,
+    ...billingUiDe,
+    ...legalStatusUiDe,
+    ...securityReviewUiDe,
+  },
   staffAccess: staffAccessDe,
   app_name: "GMED CONSOLE",
   app_subtitle: "Medizintourismus-Management",
@@ -800,7 +808,6 @@ export const de = {
   activity_user: "Benutzer",
   activity_time: "Zeitpunkt",
   activity_details: "Details",
-  activity_payload: "Payload",
   activity_filter_user: "Nach Benutzer filtern",
   activity_filter_action: "Nach Aktion filtern",
   activity_action_login_success: "Erfolgreiche Anmeldung",

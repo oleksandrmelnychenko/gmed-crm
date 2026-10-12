@@ -489,6 +489,7 @@ const ACTIONS: Record<string, Pair> = {
   create_crm_project_workflow_dependency: ["Зависимость в проекте добавлена", "Abhängigkeit im Projekt hinzugefügt"],
   delete_crm_project_workflow_dependency: ["Зависимость в проекте удалена", "Abhängigkeit im Projekt entfernt"],
   create_internal_note: ["Заметка создана", "Notiz angelegt"],
+  update_internal_note_visibility: ["Видимость заметки изменена", "Sichtbarkeit der Notiz geändert"],
   reconcile_recommendation_lifecycle: ["Статусы рекомендаций согласованы", "Status der Empfehlungen abgeglichen"],
 
   // Recommendations

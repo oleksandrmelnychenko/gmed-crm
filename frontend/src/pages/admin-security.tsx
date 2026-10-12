@@ -19,6 +19,7 @@ import {
 
 import { AdminGuideButton } from "@/components/admin-guide";
 import {
+  ADMIN_INLINE_METRICS_GRID,
   AdminInlineMetric,
   AdminSectionTitle,
   AdminSheetScaffold,
@@ -99,6 +100,7 @@ interface AuditAnalyticsSummary {
 
 interface AuditAnalyticsEvent {
   id: number;
+  /** `null` for anonymous attempts and, without full access, portal logins. */
   user_name: string | null;
   user_role: string | null;
   action: string;
@@ -106,6 +108,8 @@ interface AuditAnalyticsEvent {
   /** Stable code of `reason`; older servers send only the English text. */
   reason_code?: string | null;
   reason: string;
+  /** HTTP method of `route` (sign-in events: the sign-in endpoint, QA E2-06). */
+  method?: string | null;
   route: string | null;
   status: number | null;
   ip_hash: string | null;
@@ -113,11 +117,32 @@ interface AuditAnalyticsEvent {
 }
 
 interface AuditAnalyticsReader {
-  user_id: string;
-  user_name: string;
+  /** `null` for the anonymous row of portal logins (QA E2-01). */
+  user_id: string | null;
+  user_name: string | null;
   user_role: string;
   event_count: number;
   distinct_entities: number;
+}
+
+/** "POST /api/v1/auth/login", or "—" when the event has no request. */
+export function securityEventRoute(event: Pick<AuditAnalyticsEvent, "method" | "route">): string {
+  if (!event.route) return "—";
+  return event.method ? `${event.method} ${event.route}` : event.route;
+}
+
+/** Name of the actor; portal logins and anonymous attempts get a neutral label. */
+export function securityActorName(
+  actor: { user_name: string | null; user_role: string | null },
+  t: Translations,
+): string {
+  if (actor.user_name) return actor.user_name;
+  return actor.user_role === "patient" ? t.activity_portal_actor : t.security_anonymous;
+}
+
+/** One-word status of a sign-in session: "Отозвана" / "Активна", never a plural (QA E2-06). */
+export function securitySessionStatus(isRevoked: boolean, t: Translations): string {
+  return isRevoked ? t.uiText.security_session_revoked : t.common_active;
 }
 
 interface AuditAnalyticsPayload {
@@ -522,7 +547,7 @@ function useAdminSecurityPageContent() {
       render: (event) => (
         <div className="min-w-0">
           <div className="text-xs text-foreground">
-            {event.user_name ?? t.security_anonymous}
+            {securityActorName(event, t)}
           </div>
           <div className="text-xs text-foreground">
             {event.user_role ? roleLabel(event.user_role) : securityActionLabel(event.action)}
@@ -536,24 +561,31 @@ function useAdminSecurityPageContent() {
       accessor: (event) => securityReasonLabel(event, t),
       sortable: true,
       width: 260,
-      render: (event) => (
-        <div className="min-w-0">
-          <div className="truncate text-xs text-foreground">{securityReasonLabel(event, t)}</div>
-          <div className="text-xs text-muted-foreground">
-            {securityEntityLabel(event.entity_type)} · {securityActionLabel(event.action)}
+      render: (event) => {
+        const reason = securityReasonLabel(event, t);
+        const action = securityActionLabel(event.action);
+        // The action is named only when it says more than the reason.
+        return (
+          <div className="min-w-0">
+            <div className="truncate text-xs text-foreground">{reason}</div>
+            <div className="text-xs text-muted-foreground">
+              {action === reason
+                ? securityEntityLabel(event.entity_type)
+                : `${securityEntityLabel(event.entity_type)} · ${action}`}
+            </div>
           </div>
-        </div>
-      ),
+        );
+      },
     },
     {
       id: "route",
       label: t.security_col_route,
-      accessor: (event) => event.route ?? "",
+      accessor: (event) => securityEventRoute(event),
       sortable: true,
-      width: 220,
+      width: 240,
       render: (event) => (
-        <span className="truncate text-xs text-foreground">
-          {event.route ?? "-"}
+        <span className="truncate font-mono text-xs text-foreground" title={securityEventRoute(event)}>
+          {securityEventRoute(event)}
         </span>
       ),
     },
@@ -581,12 +613,12 @@ function useAdminSecurityPageContent() {
     {
       id: "user",
       label: t.activity_user,
-      accessor: (reader) => reader.user_name,
+      accessor: (reader) => securityActorName(reader, t),
       sortable: true,
       width: 220,
       render: (reader) => (
         <div className="min-w-0">
-          <div className="text-xs text-foreground">{reader.user_name}</div>
+          <div className="text-xs text-foreground">{securityActorName(reader, t)}</div>
           <div className="text-xs text-foreground">
             {roleLabel(reader.user_role)}
           </div>
@@ -609,7 +641,7 @@ function useAdminSecurityPageContent() {
       width: 160,
       render: (reader) => <span className="tabular-nums">{reader.distinct_entities}</span>,
     },
-  ], [roleLabel, t.activity_user, t.security_col_distinct_entities, t.security_col_events]);
+  ], [roleLabel, t]);
 
   const ipColumns = useMemo<ColumnDef<IpEntry>[]>(() => [
     {
@@ -739,20 +771,11 @@ function useAdminSecurityPageContent() {
       width: 140,
       render: (entry) => (
         <StatusBadge tone={entry.is_revoked ? "error" : "success"}>
-          {entry.is_revoked ? t.compliance_revoked : t.common_active}
+          {securitySessionStatus(entry.is_revoked, t)}
         </StatusBadge>
       ),
     },
-  ], [
-    lang,
-    t.activity_time,
-    t.activity_user,
-    t.common_active,
-    t.common_device,
-    t.common_ip,
-    t.compliance_revoked,
-    t.users_status,
-  ]);
+  ], [lang, t]);
 
   return (
     <>
@@ -806,7 +829,7 @@ function useAdminSecurityPageContent() {
 
         {!loading && !error ? (
           <>
-            <div className="grid grid-flow-col auto-cols-fr overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block">
+            <div className={ADMIN_INLINE_METRICS_GRID} data-testid="security-metrics">
               <AdminInlineMetric
                 icon={ShieldCheck}
                 tone={maintEnabled ? "rose" : "emerald"}
@@ -952,7 +975,7 @@ function useAdminSecurityPageContent() {
                       defaultDensity="comfortable"
                       defaultSort={[{ field: "event_count", dir: "desc" }]}
                       dictionary={t as unknown as Record<string, string>}
-                      rowId={(reader) => reader.user_id}
+                      rowId={(reader) => reader.user_id ?? `anonymous-${reader.user_role}`}
                       tableClassName="min-h-[320px]"
                     />
                   ) : (

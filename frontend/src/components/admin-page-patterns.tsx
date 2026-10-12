@@ -120,6 +120,14 @@ export function AdminToolbar({
   );
 }
 
+/**
+ * Grid of `AdminInlineMetric` cards: one column on the narrowest phones, two
+ * from 360 px, all in one row from `xl`. A fixed column count squeezed four
+ * cards into 82 px columns at 375 px and their texts overlapped (QA E-32).
+ */
+export const ADMIN_INLINE_METRICS_GRID =
+  "grid grid-cols-1 gap-y-3 overflow-hidden rounded-xl border border-border px-3 pb-3 pt-4 min-[360px]:grid-cols-2 xl:grid-flow-col xl:grid-cols-none xl:auto-cols-fr [&>article:not(:last-child)_.admin-inline-metric-separator]:xl:block";
+
 export function AdminInlineMetric({
   icon: Icon,
   label,

@@ -60,7 +60,7 @@ import {
   fetchPatientCompliancePrivacyRequests,
   reviewCompliancePrivacyRequest,
 } from "@/pages/admin/data/admin-api";
-import { apiFetch, clearApiCache } from "@/lib/api";
+import { ApiRequestError, apiFetch, clearApiCache } from "@/lib/api";
 import { appDateKeyOf, formatAppDate } from "@/lib/app-time-zone";
 import { useRealtimeSubscription } from "@/lib/realtime";
 import { IncidentRegisterSection } from "@/pages/admin/ui/incident-register-section";
@@ -70,6 +70,8 @@ import {
   type PrivacyRequestStepFacts,
 } from "@/pages/admin/ui/privacy-request-steps";
 import {
+  canExportPatientData,
+  privacyRequestErrorMessage,
   patientLabel as composePatientLabel,
   privacySourceUiKey,
   resolveActivePatientLabel,
@@ -496,11 +498,11 @@ function useAdminCompliancePageContent() {
       setPatientPrivacyRequests(privacyRequests);
     } catch (error) {
       setPatientPrivacyRequests([]);
-      setPatientError(error instanceof Error ? error.message : String(error));
+      setPatientError(privacyRequestErrorMessage(error, t));
     } finally {
       setPatientLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const [decisionReason, setDecisionReason] = useState("");
   const [reviewNote, setReviewNote] = useState("");
@@ -664,7 +666,7 @@ function useAdminCompliancePageContent() {
         loadPatientWorkspace(targetPatientId),
       ]);
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(privacyRequestErrorMessage(error, t));
     } finally {
       setPrivacyCreateBusy(false);
     }
@@ -698,7 +700,7 @@ function useAdminCompliancePageContent() {
       ]);
       return true;
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(privacyRequestErrorMessage(error, t));
       return false;
     } finally {
       setPrivacyActionBusy(null);
@@ -733,7 +735,7 @@ function useAdminCompliancePageContent() {
       ]);
       return true;
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error));
+      setActionError(privacyRequestErrorMessage(error, t));
       return false;
     } finally {
       setPrivacyActionBusy(null);
@@ -806,11 +808,15 @@ function useAdminCompliancePageContent() {
       const filename = await downloadPatientComplianceExport(targetPatientId);
       setExportResult(`${t.compliance_downloaded} ${filename}`);
     } catch (error) {
-      setExportResult(
-        `${t.admin_system_export_error_prefix}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      // A refusal is explained in the UI language, never as the raw server
+      // text "Insufficient permissions" (QA E2-08).
+      const message =
+        error instanceof ApiRequestError && error.status === 403
+          ? t.uiText.compliance_export_forbidden
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      setExportResult(`${t.admin_system_export_error_prefix}: ${message}`);
     }
   };
 
@@ -1162,37 +1168,47 @@ function useAdminCompliancePageContent() {
           </Section>
 
           <Section title={t.compliance_export}>
-            <div className={cn("grid gap-4 rounded-xl p-3.5 md:grid-cols-[minmax(0,1fr)_auto]", tokens.surface.card)}>
-              <Field label={t.orders_patient}>
-                {patientOptions.length > 0 ? (
-                  <NativeComboboxSelect
-                    value={patientInput}
-                    onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 w-full rounded-lg bg-field text-[13px]"
-                  >
-                    <option value="">{t.orders_patient}</option>
-                    {patientOptions.map((option) => (
-                      <option key={option.id} value={option.id}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeComboboxSelect>
-                ) : (
-                  <Input
-                    placeholder={t.compliance_uses_loaded_uuid}
-                    value={patientInput}
-                    onChange={(event) => setPatientInput(event.target.value)}
-                    className="h-9 rounded-lg bg-field"
-                  />
-                )}
-              </Field>
-              <div className="flex items-end">
-                <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => void doExport()}>
-                  <Download className="mr-1 size-4" />
-                  {t.compliance_export}
-                </Button>
+            {canExportPatientData(user?.role) ? (
+              <div className={cn("grid gap-4 rounded-xl p-3.5 md:grid-cols-[minmax(0,1fr)_auto]", tokens.surface.card)}>
+                <Field label={t.orders_patient}>
+                  {patientOptions.length > 0 ? (
+                    <NativeComboboxSelect
+                      value={patientInput}
+                      onChange={(event) => setPatientInput(event.target.value)}
+                      className="h-9 w-full rounded-lg bg-field text-[13px]"
+                    >
+                      <option value="">{t.orders_patient}</option>
+                      {patientOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </NativeComboboxSelect>
+                  ) : (
+                    <Input
+                      placeholder={t.compliance_uses_loaded_uuid}
+                      value={patientInput}
+                      onChange={(event) => setPatientInput(event.target.value)}
+                      className="h-9 rounded-lg bg-field"
+                    />
+                  )}
+                </Field>
+                <div className="flex items-end">
+                  <Button type="button" className="h-9 rounded-lg px-3.5" onClick={() => void doExport()}>
+                    <Download className="mr-1 size-4" />
+                    {t.compliance_export}
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : (
+              // QA E2-08: no button that only answers 403.
+              <p
+                className="rounded-xl border border-border/60 bg-card/60 px-3.5 py-3 text-sm text-muted-foreground"
+                data-testid="compliance-export-not-available"
+              >
+                {t.uiText.compliance_export_ceo_pm_only}
+              </p>
+            )}
             {exportResult ? (
               exportResultIsError ? (
                 <Banner tone="error">{exportResult}</Banner>

@@ -7,6 +7,7 @@ import { Banner, PageHeader, Section } from "@/components/ui-shell";
 import { apiFetch, clearApiCache, refreshAuthSession } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
+import { twoFactorErrorMessage } from "@/pages/two-factor-errors";
 
 type TotpStatus = { enrolled: boolean; required: boolean };
 type Enrolment = { secret: string; otpauth_uri: string; issuer: string; account: string };
@@ -36,7 +37,14 @@ export function TwoFactorPage() {
  * After a change the session is refreshed, so a role that must use a second
  * factor leaves (or enters) the enrolment-only session at once.
  */
-export function TwoFactorSection({ onEnrolled }: { onEnrolled?: () => void } = {}) {
+export function TwoFactorSection({
+  onEnrolled,
+  hideRequiredBanner = false,
+}: {
+  onEnrolled?: () => void;
+  /** The enrolment gate says "mandatory" in its intro already (QA E2-07). */
+  hideRequiredBanner?: boolean;
+} = {}) {
   const { t } = useLang();
   const { refreshUser } = useAuth();
   const l = useCallback((key: string) => t.uiText[key] ?? key, [t]);
@@ -51,9 +59,9 @@ export function TwoFactorSection({ onEnrolled }: { onEnrolled?: () => void } = {
     try {
       setStatus(await fetchTotpStatus());
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(twoFactorErrorMessage(cause, t));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void load();
@@ -68,8 +76,8 @@ export function TwoFactorSection({ onEnrolled }: { onEnrolled?: () => void } = {
       clearApiCache();
       await load();
     } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      setError(/code does not match/i.test(message) ? l("twofactor_error_code") : message || l("twofactor_error_generic"));
+      // Server refusals in the UI language, never "Sign in again" & co.
+      setError(twoFactorErrorMessage(cause, t));
     } finally {
       setBusy(false);
     }
@@ -120,7 +128,7 @@ export function TwoFactorSection({ onEnrolled }: { onEnrolled?: () => void } = {
     <div className="space-y-4" data-testid="twofactor-section">
       {error ? <Banner tone="error">{error}</Banner> : null}
       {notice ? <p className="text-sm text-emerald-700">{notice}</p> : null}
-      {status?.required && !status.enrolled ? (
+      {status?.required && !status.enrolled && !hideRequiredBanner ? (
         <Banner tone="warning" withIcon>{l("twofactor_required_banner")}</Banner>
       ) : null}
 

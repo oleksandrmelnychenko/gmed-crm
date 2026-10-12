@@ -148,7 +148,9 @@ async fn internal_notes_support_crud_encrypted_attachments_and_staff_only_access
         &ceo,
         Some(json!({
             "title": format!("P0 handover {tag}"),
-            "body": "Operational handover without medical data"
+            "body": "Operational handover without medical data",
+            // New notes are private by default (owner decision 2026-10-12).
+            "visibility": "staff"
         })),
     )
     .await;

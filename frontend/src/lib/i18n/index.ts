@@ -674,7 +674,6 @@ export interface Translations
   activity_user: string;
   activity_time: string;
   activity_details: string;
-  activity_payload: string;
   activity_filter_user: string;
   activity_filter_action: string;
   activity_action_login_success: string;
