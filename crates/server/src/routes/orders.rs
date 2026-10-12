@@ -4223,6 +4223,8 @@ async fn get_order(
         None
     };
 
+    let sanctions_hold = order_sanctions_hold(&state, patient_id, source_lead_id).await;
+
     Json(serde_json::json!({
         "id": order_db_id, "order_number": order_number,
         "patient_id": patient_id,
@@ -4234,6 +4236,7 @@ async fn get_order(
         "patient_name": patient_name,
         "patient_pid": patient_pid,
         "phase": phase, "status": status,
+        "sanctions_hold": sanctions_hold,
         "cancellation_reason": order.try_get::<Option<String>, _>("cancellation_reason").unwrap_or_default(),
         "cancelled_at": order.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("cancelled_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "cancellation": cancellation,
@@ -4257,6 +4260,40 @@ async fn get_order(
         "created_at": created_at, "updated_at": updated_at,
     }))
     .into_response()
+}
+
+/// Whether the sanctions gate holds new work on this order (QA C2-07): the
+/// code of the block (`sanctions_review_pending`, `sanctions_confirmed`), so
+/// the full order view can say so before an action fails. Staff only — the
+/// scoped views and everything a patient, lead or payer sees never carry it
+/// (no tipping-off), and it names no person, list entry or reason. Read only:
+/// nobody is screened again here.
+async fn order_sanctions_hold(
+    state: &AppState,
+    patient_id: Option<Uuid>,
+    lead_id: Option<Uuid>,
+) -> Option<&'static str> {
+    let scope = crate::sanctions::gate::Scope {
+        patient_ids: patient_id.into_iter().collect(),
+        lead_ids: lead_id.into_iter().collect(),
+        ..Default::default()
+    };
+    if scope.is_empty() {
+        return None;
+    }
+    match crate::sanctions::gate::evaluate(
+        state,
+        scope,
+        crate::sanctions::gate::GateAction::OrderContractWork,
+    )
+    .await
+    {
+        Ok(block) => block.map(|block| block.code),
+        Err(error) => {
+            tracing::error!(%error, "order sanctions hold");
+            None
+        }
+    }
 }
 
 /// Notes of an order line as a reader may see them.
@@ -5151,7 +5188,7 @@ async fn update_order_commercial_basis(
 
     let order = match sqlx::query(
         r#"SELECT patient_id, source_lead_id, date_from, date_to,
-                  total_estimated, prepayment_amount,
+                  total_estimated, prepayment_amount, signed_patient,
                   intake_state = 'draft' AND EXISTS (
                       SELECT 1 FROM leads l WHERE l.id = orders.source_lead_id
                       AND l.repeat_patient_id = orders.patient_id AND l.converted_patient_id IS NULL
@@ -5193,6 +5230,19 @@ async fn update_order_commercial_basis(
         Ok(true) => {}
         Ok(false) => return err(StatusCode::FORBIDDEN, "Insufficient permissions"),
         Err(resp) => return resp,
+    }
+
+    // Owner decision 2026-10-12 (QA C2-14): the client's signature of the
+    // single order (Einzelauftrag) counts only with proof, like the framework
+    // contract. It is recorded by the signed order document itself — a QES or
+    // the scan of the signed copy (`POST /documents/{id}/paper-signature`) —
+    // never by setting the flag by hand. A flag set earlier stays as it is.
+    if body.signed_patient == Some(true) && !order.get::<bool, _>("signed_patient") {
+        return coded_err(
+            StatusCode::CONFLICT,
+            "order_signature_evidence_required",
+            "The client's signature of the order is recorded only by its signed document: a qualified electronic signature or the scan of the signed copy",
+        );
     }
 
     if order.get::<bool, _>("repeat_draft")

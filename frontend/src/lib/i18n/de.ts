@@ -9,6 +9,7 @@ import { ordersUiDe } from "./catalogs/orders-ui";
 import { billingUiDe } from "./catalogs/billing-ui";
 import { legalStatusUiDe } from "./catalogs/legal-status-ui";
 import { patientRecordUiDe } from "./catalogs/patient-record-ui";
+import { careUiDe } from "./catalogs/care-ui";
 import { financeBalancesDe } from "./catalogs/finance-balances";
 import { gwgTrainingDe } from "./catalogs/gwg-training";
 import { operationsDe } from "./catalogs/operations";
@@ -30,6 +31,7 @@ export const de = {
     ...legalStatusUiDe,
     ...securityReviewUiDe,
     ...patientRecordUiDe,
+    ...careUiDe,
   },
   staffAccess: staffAccessDe,
   app_name: "GMED CONSOLE",

@@ -637,6 +637,8 @@ const TASK_NOTIFICATION_TITLES: Record<string, { de: string; ru: string }> = {
   "Task accepted": { de: "Aufgabe angenommen", ru: "Задача принята" },
   "Task returned for rework": { de: "Aufgabe zur Nacharbeit zurückgegeben", ru: "Задача возвращена на доработку" },
   "Task cancelled after review": { de: "Aufgabe nach Prüfung storniert", ru: "Задача отменена после проверки" },
+  // Any cancellation by someone else, sent to the assignee (QA C-25).
+  "Task cancelled": { de: "Aufgabe storniert", ru: "Задача отменена" },
 };
 
 function taskNotificationTitle(item: Notification, lang: "ru" | "de"): string | null {

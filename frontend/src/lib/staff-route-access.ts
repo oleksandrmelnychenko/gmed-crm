@@ -566,7 +566,8 @@ const STAFF_ROUTE_RULES: RouteRule[] = [
     path: "/services",
     roles: ROLES_SERVICES,
     capability: "services.view",
-    nav: { section: "crm", labelKey: "nav_my_services" },
+    // The page title's name (QA C-24); the patient portal's item stays "Каталог сервисов".
+    nav: { section: "crm", labelKey: "staff_services_title" },
   },
   {
     id: "documents",

@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { canAccessStaffRoute } from "@/lib/staff-route-access";
-import { decimal, emptyBreakfast, filterHotelStays, groupHotels, hotelsCsv, initialFilters, matchesStaySearch, moneyCents, monthlyCosts, stayCost, stayNights, summarizeBreakfast, summarizeStays, type HotelStay } from "./model";
+import { decimal, emptyBreakfast, filterHotelStays, groupHotels, hotelsCsv, initialFilters, matchesStaySearch, moneyCents, monthAxisLabel, monthlyCosts, stayCost, stayNights, summarizeBreakfast, summarizeStays, type HotelStay } from "./model";
+
+describe("hotel chart months (QA C2-16)", () => {
+  it("names the month with the full year, never 'февр. 26 г.'", () => {
+    expect(monthAxisLabel("2026-02", "ru")).toBe("фев 2026");
+    expect(monthAxisLabel("2026-02", "de")).toBe("Feb 2026");
+    expect(monthAxisLabel("2026-03", "de")).toBe("Mär 2026");
+    expect(monthAxisLabel("2026-12", "ru")).toBe("дек 2026");
+    expect(monthAxisLabel("bogus", "ru")).toBe("bogus");
+  });
+});
 
 const today = "2026-09-10";
 function stay(overrides: Partial<HotelStay> = {}): HotelStay {

@@ -112,6 +112,13 @@ describe("task notifications", () => {
       .toBe("Aufgabe angenommen");
   });
 
+  it("tells the assignee its task was cancelled (QA C-25)", () => {
+    expect(localizedNotificationCopy(taskNotice("operational_task_cancelled", "Task cancelled", "Arztbrief"), "ru").title)
+      .toBe("Задача отменена");
+    expect(localizedNotificationCopy(taskNotice("operational_task_cancelled", "Task cancelled", "Arztbrief"), "de").title)
+      .toBe("Aufgabe storniert");
+  });
+
   it("keeps unknown titles and other notification kinds unchanged", () => {
     expect(localizedNotificationCopy(taskNotice("operational_task_updated", "Something new", "Flowers"), "ru").title)
       .toBe("Something new");

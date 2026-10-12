@@ -5,6 +5,7 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import { Button } from "../../../src/components/ui/button";
 import { Input } from "../../../src/components/ui/input";
 import { NativeComboboxSelect } from "../../../src/components/ui/combobox-select";
+import { CitizenshipMultiSelect } from "../../../src/components/ui/citizenship-multi-select";
 import { SelectField } from "../../../src/components/ui/select-field";
 import { Dialog, DialogContent, DialogTitle } from "../../../src/components/ui/dialog";
 import { Sheet, SheetContent, SheetTitle } from "../../../src/components/ui/sheet";
@@ -32,6 +33,8 @@ function Harness() {
   const [childOpen, setChildOpen] = useState(false);
   const [childName, setChildName] = useState("");
   const [rows, setRows] = useState(["First", "Second"]);
+  const [citizenships, setCitizenships] = useState<string[]>([]);
+  const [sex, setSex] = useState("");
   const fullDraftDirty = useOpenedFormDirty(open, { name, notes, checked, choice, status, radio, date, rows });
   const controlled = new URLSearchParams(location.search).get("controlled") === "true";
   const sheet = new URLSearchParams(location.search).get("kind") === "sheet";
@@ -42,7 +45,7 @@ function Harness() {
     <Button onClick={() => { setOpen(true); setError(""); }}>Open editor</Button>
     <output aria-label="Save count">{saved}</output>
     <Root open={open} onOpenChange={setOpen} requireChanges dirty={controlled ? fullDraftDirty : undefined}>
-      <Content className="p-6 sm:max-w-xl" aria-describedby={undefined}>
+      <Content className="overflow-y-auto p-6 sm:max-w-xl" aria-describedby={undefined}>
         <Title>Edit values</Title>
         <form className="grid gap-3" onSubmit={(event) => {
           event.preventDefault();
@@ -59,6 +62,12 @@ function Harness() {
           <NativeComboboxSelect aria-label="Choice" value={choice} onChange={(event) => setChoice(event.target.value)} searchPlaceholder="Search choices"><option value="a">Alpha</option><option value="b">Beta</option></NativeComboboxSelect>
           <SelectField aria-label="Status" value={status} onValueChange={setStatus} options={[{ value: "a", label: "First" }, { value: "b", label: "Second" }]} />
           <Input aria-label="Date" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <CitizenshipMultiSelect id="harness-citizenships" value={citizenships} onChange={setCitizenships} placeholder="Add citizenship" lang="de" />
+          <output aria-label="Chosen citizenships">{citizenships.join(",")}</output>
+          <NativeComboboxSelect aria-label="Sex" value={sex} onChange={(event) => setSex(event.target.value ?? "")} hidePlaceholderOption>
+            <option value="">Choose sex</option><option value="male">Male</option><option value="female">Female</option><option value="diverse">Diverse</option>
+          </NativeComboboxSelect>
+          <output aria-label="Chosen sex">{sex}</output>
           <Button type="button" onClick={() => setFailSave(true)}>Simulate save failure</Button>
           <Button type="button" onClick={() => { setName("Original"); setNotes("Initial notes"); }}>Reset text fields</Button>
           <Button type="button" onClick={() => setRows((current) => [...current].reverse())}>Reverse rows</Button>

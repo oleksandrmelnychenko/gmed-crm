@@ -898,6 +898,46 @@ async fn task_notification_titles(pool: &PgPool, user_id: Uuid, kind: &str) -> V
     .unwrap()
 }
 
+/// QA C-25: the manager learned of a cancelled task only by looking.
+#[tokio::test]
+async fn the_assignee_hears_when_the_author_cancels_its_task() {
+    let Some((app, pool, _admin_id, ceo_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("c25-cancel");
+    let manager = seed_user(&pool, &tag, "patient_manager").await;
+    let task = create_task(&app, &ceo_bearer, "Arztbrief senden", manager, None).await;
+    let (status, cancelled) = change_task_status(&app, &ceo_bearer, &task, "cancelled").await;
+    assert_eq!(status, StatusCode::OK, "{cancelled}");
+    assert_eq!(
+        task_notification_titles(&pool, manager, "operational_task_cancelled").await,
+        vec!["Task cancelled".to_string()]
+    );
+    // Its own task cancelled by itself: nobody to tell.
+    let own = create_task(
+        &app,
+        &auth_header_for(manager, "patient_manager"),
+        "Eigene Aufgabe",
+        manager,
+        None,
+    )
+    .await;
+    let (status, _) = change_task_status(
+        &app,
+        &auth_header_for(manager, "patient_manager"),
+        &own,
+        "cancelled",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        task_notification_titles(&pool, manager, "operational_task_cancelled")
+            .await
+            .len(),
+        1
+    );
+}
+
 #[tokio::test]
 async fn closing_subtasks_applies_the_review_rule_per_child_and_assignees_hear_decisions() {
     let Some((app, pool, admin_id, ceo_bearer)) = test_context().await else {

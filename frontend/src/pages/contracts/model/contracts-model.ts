@@ -507,8 +507,12 @@ export function patientOptionLabel(patient: PatientOption) {
   return `${patient.patient_id} · ${[patient.first_name, patient.last_name].filter(Boolean).join(" ")}`;
 }
 
+/** "A-… · P-… · Name"; a lead's order has no patient number yet (QA C2-05: "A-… · · Name"). */
 export function orderOptionLabel(order: OrderOption) {
-  return `${order.order_number} · ${order.patient_pid} · ${order.patient_name}`;
+  return [order.order_number, order.patient_pid, order.patient_name]
+    .map((part) => (typeof part === "string" ? part.trim() : ""))
+    .filter(Boolean)
+    .join(" · ");
 }
 
 export function buildSearchParams(

@@ -201,6 +201,7 @@ import {
   canSignWizardDocument,
   documentSignedFor,
   leadConsentFormTemplate,
+  orderClientSignatureState,
   signatureNeedsProof,
 } from "../model/wizard-document-signing";
 import {
@@ -2270,8 +2271,8 @@ function frameworkContractSignErrorText(error: unknown, tx: Tx): string | null {
   const reasons = Array.isArray(error.body.reasons) ? error.body.reasons : [];
   if (reasons.length !== 1 || reasons[0] !== "client_order_signature_missing") return null;
   return tx(
-    "Подпись рамочного договора подтверждается после подписи заказа: сначала отметьте «Клиент подписал заказ», затем подтвердите подпись договора.",
-    "Die Unterschrift des Rahmenvertrags wird nach der Unterschrift des Auftrags bestätigt: zuerst „Auftrag vom Kunden unterzeichnet“ markieren, dann die Vertragsunterschrift bestätigen.",
+    "Подпись рамочного договора подтверждается после подписи заказа: сначала загрузите скан подписанного документа заказа («Подписано на бумаге» в блоке «Подписи») или подпишите его электронно, затем подтвердите подпись договора.",
+    "Die Unterschrift des Rahmenvertrags wird nach der Unterschrift des Auftrags bestätigt: zuerst den Scan des unterschriebenen Einzelauftrags hochladen („Auf Papier unterschrieben“ unter „Unterschriften“) oder ihn elektronisch unterschreiben lassen, dann die Vertragsunterschrift bestätigen.",
   );
 }
 
@@ -5897,7 +5898,10 @@ ${serviceCommentLines.join("\n")}`
         : {}),
       // Existing repeat signatures are changed only by the explicit signature action.
       // Sending cached checkboxes here would restore signatures invalidated by a service edit.
-      signed_patient: flags.signed_patient ?? (prospectMergeOnlyRef.current ? undefined : signedPatient),
+      // The client's signature follows the signed order document only (owner
+      // decision 2026-10-12): never sent from the cached state, which would
+      // undo a scan or QES recorded meanwhile.
+      signed_patient: flags.signed_patient,
       signed_agency: flags.signed_agency ?? (prospectMergeOnlyRef.current ? undefined : signedAgency),
       needs_description: needsDescription,
       date_from: draft.programDateFrom,
@@ -8654,11 +8658,23 @@ ${serviceCommentLines.join("\n")}`
                   aria-describedby={orderFieldError("specialties") ? `${SERVICE_SPECIALTIES_ID}-error` : undefined}
                   name="specialty"
                   value=""
+                  // The chosen ones stay visible in the field and ticked in the
+                  // list; a second pick removes one (QA C-07).
+                  selectedValues={selectedSpecializationItems.map((item) => item.id)}
+                  showValueIndicator={false}
+                  hidePlaceholderOption
+                  selectedLabel={
+                    draft.specialties.length > 0
+                      ? `${tx("Выбрано", "Ausgewählt")}: ${draft.specialties.map((value) => specialtyLabel(value)).join(", ")}`
+                      : undefined
+                  }
+                  title={draft.specialties.map((value) => specialtyLabel(value)).join(", ") || undefined}
                   onChange={(event) => {
                     const selected = specialties.find((item) => item.id === event.target.value);
                     if (!selected) return;
                     const value = specializationValue(selected);
-                    if (!draft.specialties.includes(value)) patch("specialties", [...draft.specialties, value]);
+                    if (draft.specialties.includes(value)) removeSpecializationSelection(value);
+                    else patch("specialties", [...draft.specialties, value]);
                   }}
                   className={cn(selectClass, orderFieldError("specialties") && "border-destructive")}
                 >
@@ -9174,18 +9190,60 @@ ${serviceCommentLines.join("\n")}`
               {renderPayerSignatureFlow(true)}
               <Section className={WIZARD_DOCUMENT_SECTION_CLASS} title={tx("Подписи", "Unterschriften")}>
                 <div>
-                <ToggleRow
-                  checked={signedPatient}
-                  disabled={isBusy}
-                  onChange={(checked) => {
-                    setSignedPatient(checked);
-                    void saveFlags(
-                      { signed_patient: checked },
-                      { signed_patient: signedPatient },
-                    );
-                  }}
-                  label={tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")}
-                />
+                {/* Owner decision 2026-10-12 (QA C2-14): the client's signature of the
+                    order counts only with proof — the scan of the signed copy or a QES
+                    (inside the contract package during intake) — never one click. */}
+                {(() => {
+                  const { needsDocument, documentToSign, manualOnly } = orderClientSignatureState(
+                    commercialDocuments.single_order,
+                    signedPatient,
+                  );
+                  return (
+                    <div
+                      data-testid="lead-order-client-signature"
+                      className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 py-3"
+                    >
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <StateMark
+                          done={signedPatient}
+                          label={signedPatient
+                            ? tx("Клиент подписал заказ", "Auftrag vom Kunden unterzeichnet")
+                            : tx("Клиент ещё не подписал заказ", "Auftrag noch nicht vom Kunden unterzeichnet")}
+                        />
+                        <p className={cn("text-xs", manualOnly ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground")}>
+                          {manualOnly
+                            ? tx(
+                                "Отмечено вручную, подписанный документ заказа отсутствует. Отметка продолжает действовать; загрузите скан подписанного экземпляра.",
+                                "Manuell markiert, kein unterschriebener Einzelauftrag vorhanden. Die Markierung zählt weiterhin; laden Sie den Scan des unterschriebenen Exemplars hoch.",
+                              )
+                            : signedPatient
+                              ? tx("По подписанному документу заказа.", "Laut unterschriebenem Einzelauftrag.")
+                              : needsDocument
+                                ? tx(
+                                    "Сначала создайте документ заказа. Подпись клиента фиксируется только подписанным документом: электронно в пакете договора или сканом подписанного экземпляра.",
+                                    "Erstellen Sie zuerst den Einzelauftrag. Die Unterschrift des Kunden zählt nur mit unterschriebenem Dokument: elektronisch im Vertragspaket oder als Scan des unterschriebenen Exemplars.",
+                                  )
+                                : tx(
+                                    "Подпись клиента фиксируется только подписанным документом: электронно в пакете договора или сканом подписанного экземпляра («Подписано на бумаге»).",
+                                    "Die Unterschrift des Kunden zählt nur mit unterschriebenem Dokument: elektronisch im Vertragspaket oder als Scan des unterschriebenen Exemplars („Auf Papier unterschrieben“).",
+                                  )}
+                        </p>
+                      </div>
+                      {documentToSign ? (
+                        <PaperSignatureConfirmButton
+                          documentId={documentToSign.id}
+                          title={wizardDocumentFilename(documentToSign)}
+                          lang={lang}
+                          size="sm"
+                          label={tx("Подписано на бумаге", "Auf Papier unterschrieben")}
+                          disabled={isBusy}
+                          errorText={(error) => wizardSignatureErrorText(error, tx)}
+                          onDone={() => { void refreshDocumentsState(); }}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 <ToggleRow
                   checked={signedAgency}
                   disabled={isBusy}

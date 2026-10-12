@@ -811,6 +811,25 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
     assert_eq!(quotes.as_array().expect("quotes").len(), 1);
     assert_eq!(quotes[0]["lead_id"], lead_id.to_string());
 
+    // The client's signature of the order is never set by hand (owner decision
+    // 2026-10-12, QA C2-14): only the signed order document records it.
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/orders/{order_id}/commercial-basis"),
+        &pm_bearer,
+        Some(json!({ "signed_patient": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "response: {refused}");
+    assert_eq!(refused["error"], "order_signature_evidence_required");
+    // What the scan or the QES of the order document leaves behind.
+    sqlx::query("UPDATE orders SET signed_patient = true, signed_patient_at = now() WHERE id = $1")
+        .bind(Uuid::parse_str(order_id).unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+
     let (status, commercial) = json_request(
         &app,
         "POST",
@@ -818,6 +837,7 @@ async fn lead_order_and_service_are_idempotent_without_creating_patient() {
         &pm_bearer,
         Some(json!({
             "contract_id": contract_id,
+            // Re-sending an already recorded signature is harmless.
             "signed_patient": true,
             "signed_agency": true,
             "prepayment_required": true,

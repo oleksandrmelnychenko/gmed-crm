@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
 import { PageHeader } from "@/components/ui-shell";
 import { apiFetch, clearApiCache } from "@/lib/api";
-import { appDateKey, appDateTimeFormat, formatAppDate } from "@/lib/app-time-zone";
+import { appDateKey, formatAppDate } from "@/lib/app-time-zone";
 import { useAuth } from "@/lib/auth";
 import { hasCapability } from "@/lib/permissions";
 import { ReadOnlyScope } from "@/components/read-only-scope";
@@ -22,7 +22,7 @@ import { HotelDocuments } from "./hotel-documents";
 import { CreateHotelSheet } from "./create-hotel-sheet";
 import { HotelTable } from "./hotel-table";
 import { HotelBreakfastTermsEditor } from "./hotel-breakfast-terms";
-import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels, hotelKey, hotelPermissions, hotelsCsv, initialFilters, matchesStaySearch, monthlyCosts, stayCost, stayNights, summarizeStays, type HotelDirectoryItem, type HotelFilters, type HotelStay, type HotelWorkspace } from "./model";
+import { breakfastModes, decimal, emptyHotelGroup, filterHotelStays, groupHotels, hotelKey, hotelPermissions, hotelsCsv, initialFilters, matchesStaySearch, monthAxisLabel, monthlyCosts, stayCost, stayNights, summarizeStays, type HotelDirectoryItem, type HotelFilters, type HotelStay, type HotelWorkspace } from "./model";
 
 const panelClass = "rounded-xl border border-border/70 bg-card shadow-sm";
 const statusOptions = ["committed", "completed", "in_service", "future", "confirmed", "booked", "planned", "cancelled", "all"] as const;
@@ -116,7 +116,7 @@ function HotelStatisticsPageContent() {
   const currencies = [...new Set([filters.currency, ...(workspace?.rows ?? []).map(row => row.currency)])].sort();
   const money = (cents: bigint) => formatMoneyAmount(decimal(cents), filters.currency);
   const monthly = monthlyCosts(rows, period.from, period.to).map(row => ({
-    ...row, label: appDateTimeFormat(lang === "ru" ? "ru-RU" : "de-DE", { month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(`${row.month}-01T00:00:00Z`)),
+    ...row, label: monthAxisLabel(row.month, lang === "ru" ? "ru" : "de"),
     // Empty months are measured zero; unpriced bookings remain gaps, not zero-cost stays.
     actual: row.bookings && !row.known ? null : Number(row.actual) / 100,
     estimated: row.bookings && !row.known ? null : Number(row.estimated) / 100,

@@ -3,6 +3,7 @@ import {
   canSignWizardDocument,
   documentSignedFor,
   leadConsentFormTemplate,
+  orderClientSignatureState,
   signatureNeedsProof,
 } from "./wizard-document-signing";
 
@@ -17,6 +18,41 @@ describe("the consent form the wizard creates (QA 2026-10-12, A2-06)", () => {
     expect(leadConsentFormTemplate(true, "joint")).toBe("consent_data_release_child");
     expect(leadConsentFormTemplate(true, "sole_parent")).toBe("consent_data_release_single");
     expect(leadConsentFormTemplate(true, "guardian")).toBe("consent_data_release_single");
+  });
+});
+
+
+// Owner decision 2026-10-12 (QA C2-14): the client's signature of the order
+// counts only with the signed order document, never by one click.
+describe("client signature of the single order", () => {
+  const order = (id: string, created_at: string, extra: { signed_at?: string | null; is_latest_version?: boolean } = {}) => ({
+    id, created_at, signed_at: null as string | null, is_latest_version: true, ...extra,
+  });
+
+  it("asks for the order document first", () => {
+    expect(orderClientSignatureState([], false)).toEqual({ needsDocument: true, documentToSign: null, manualOnly: false });
+  });
+
+  it("offers the scan of the newest unsigned order document", () => {
+    const old = order("old", "2026-10-01T09:00:00Z", { is_latest_version: false });
+    const current = order("current", "2026-10-12T09:00:00Z");
+    const state = orderClientSignatureState([old, current], false);
+    expect(state.needsDocument).toBe(false);
+    expect(state.documentToSign?.id).toBe("current");
+    expect(state.manualOnly).toBe(false);
+  });
+
+  it("shows a signature recorded by the signed document without any action", () => {
+    const signed = order("signed", "2026-10-12T10:00:00Z", { signed_at: "2026-10-12T10:00:00Z" });
+    const original = order("original", "2026-10-12T09:00:00Z", { is_latest_version: false });
+    expect(orderClientSignatureState([original, signed], true)).toEqual({ needsDocument: false, documentToSign: null, manualOnly: false });
+  });
+
+  it("flags an order marked signed by hand before the rule and still offers the scan", () => {
+    const current = order("current", "2026-10-12T09:00:00Z");
+    const state = orderClientSignatureState([current], true);
+    expect(state.manualOnly).toBe(true);
+    expect(state.documentToSign?.id).toBe("current");
   });
 });
 
@@ -86,6 +122,8 @@ describe("signature proof", () => {
     // The patient form records no compliance kind; "other" does not open the one click.
     ["lead_self_disclosure", "other"],
     ["enhanced_due_diligence", "other"],
+    // The single order since the owner decision of 2026-10-12 (QA C2-14).
+    ["single_order", "other"],
   ])("asks for the scan of a generated %s confirmed as %s", (generated_template_id, kind) => {
     expect(signatureNeedsProof({ generated_template_id, signed_at: null }, kind)).toBe(true);
   });

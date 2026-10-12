@@ -2829,6 +2829,21 @@ async fn a_free_text_payer_contact_of_an_order_or_invoice_is_screened() {
     .await;
     assert_eq!(code, StatusCode::CONFLICT, "{body}");
     assert_eq!(body["error"], "sanctions_review_pending");
+    // The full order view tells staff about the hold before an action fails
+    // (QA C2-07): the code only, no name, list entry or reason.
+    let (code, order) = request(
+        &app,
+        "GET",
+        &format!("/orders/{order_id}"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(code, StatusCode::OK, "{order}");
+    assert_eq!(
+        order["sanctions_hold"], "sanctions_review_pending",
+        "{order}"
+    );
 
     // The same contact on an invoice: one subject, both countries.
     sqlx::query(
@@ -2866,6 +2881,15 @@ async fn a_free_text_payer_contact_of_an_order_or_invoice_is_screened() {
         "Another person: payer's passport and birth date checked",
     )
     .await;
+    let (_, order) = request(
+        &app,
+        "GET",
+        &format!("/orders/{order_id}"),
+        &app.ceo(),
+        None,
+    )
+    .await;
+    assert_eq!(order["sanctions_hold"], Value::Null, "{order}");
     let (_, body) = countersign(&app, order_id).await;
     assert!(not_a_gate_block(&body), "{body}");
     // The payer's country in the blocked list holds the countersignature

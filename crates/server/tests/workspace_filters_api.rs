@@ -8196,6 +8196,7 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
     let assigned_concierge = seed_user(&pool, &format!("{tag}-c1"), "concierge").await;
     let unassigned_concierge = seed_user(&pool, &format!("{tag}-c2"), "concierge").await;
     let billing = seed_user(&pool, &format!("{tag}-billing"), "billing").await;
+    let assistant = seed_user(&pool, &format!("{tag}-assistant"), "ceo_assistant").await;
     for user_id in [
         pm_id,
         booked_interpreter,
@@ -8272,6 +8273,21 @@ async fn reminder_recipients_must_be_able_to_work_on_the_appointment() {
         body["message"],
         "This role does not take part in this appointment's preparation"
     );
+    assert_eq!(body["error"], "reminder_role_not_involved");
+    // The CEO assistant is an active user but read-only: the same reason, not
+    // "must be an active user" (QA C-11).
+    let (status, body) = remind(assistant).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "reminder_role_not_involved");
+    // Somebody who is no active staff member at all.
+    sqlx::query("UPDATE users SET is_active = false WHERE id = $1")
+        .bind(unassigned_concierge)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (status, body) = remind(unassigned_concierge).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+    assert_eq!(body["error"], "reminder_target_inactive");
 
     // A declined booking no longer counts.
     sqlx::query("UPDATE appointments SET interpreter_response = 'declined' WHERE id = $1")

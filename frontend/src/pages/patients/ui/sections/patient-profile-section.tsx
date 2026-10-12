@@ -15,6 +15,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { countryNameForDisplay } from "@/components/ui/country-select";
+import { languageName } from "@/components/ui/language-multi-select";
 import { apiFetch } from "@/lib/api";
 import { useLang, type Translations, useLanguageBound } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -761,7 +762,11 @@ function usePatientProfileTabContent({
           />
           <ProfileSummaryLine
             label={t.patients_languages}
-            value={hiddenOr("languages", fieldValue(detail.languages, t.common_not_set))}
+            // Names, not the stored codes ("Немецкий", not "de"; QA C2-06).
+            value={hiddenOr("languages", fieldValue(
+              detail.languages?.map((code) => languageName(code, lang)),
+              t.common_not_set,
+            ))}
             onEdit={editAction}
             editLabel={editPatientFieldLabel(t.patients_languages, t.patient_profile_edit_field_aria)}
           />

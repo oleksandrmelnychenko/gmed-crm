@@ -914,7 +914,7 @@ function InterpreterAssignmentManagement({
 
   return (
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
-      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {appointmentText("appointments_interpreter_assignment")}
@@ -1872,7 +1872,7 @@ function AppointmentCompletionSectionContent({
   return (
     <>
     <section className="overflow-hidden rounded-lg border border-border/70 bg-card">
-      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <span className="flex shrink-0 items-center gap-2 text-[13px] font-semibold tracking-tight text-foreground">
               <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-[var(--brand)]" />
           {appointmentText("appointments_completion_readiness")}

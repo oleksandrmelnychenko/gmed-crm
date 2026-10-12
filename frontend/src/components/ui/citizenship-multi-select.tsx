@@ -96,6 +96,7 @@ export function CitizenshipMultiSelect({
         selectedValues={selected}
         showValueIndicator={false}
         hidePlaceholderOption
+        keepOpenOnSelect
         title={selected.map((code) => countryLabel(code, lang)).join(", ") || placeholder}
       >
         <option value="">{placeholder}</option>

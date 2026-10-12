@@ -1,28 +1,34 @@
-import { agencyServiceNameLabel, agencyServiceUnitLabel } from "@/lib/agency-service-labels";
-import type { Translations } from "@/lib/i18n";
+import {
+  agencyServiceLineName,
+  agencyServiceNameLabel,
+  agencyServiceUnitCount,
+} from "@/lib/agency-service-labels";
+import type { Lang, Translations } from "@/lib/i18n";
 
 import type { OrderDetail } from "./types";
 
 type ScopedLine = OrderDetail["leistungen"][number];
 
 /**
- * The service name of a line in the read-only order part. The line's own
- * description is what the patient manager chose or wrote (in the UI
- * language); the catalog name is stored in English and only translated for
- * the known catalog entries.
+ * The service name of a line in the read-only order part. The line keeps the
+ * catalogue's own (German) name or what the patient manager wrote; a known
+ * catalogue name shows in the UI language like on the staff screens
+ * ("Flughafentransfer" → "Трансфер из аэропорта", QA C2-13), own text stays.
  */
 export function scopedLineName(line: ScopedLine, translations: Translations): string {
   const description = line.description?.trim();
-  if (description) return description;
+  if (description) {
+    return agencyServiceLineName(line.agency_service_key, description, translations) || description;
+  }
   return agencyServiceNameLabel(line.agency_service_key, line.agency_service_name, translations);
 }
 
-export function scopedLineQuantity(line: ScopedLine, translations: Translations): string {
+/** "2 поездки", "1,5 часа" (QA C2-04: "2 поездка"). */
+export function scopedLineQuantity(line: ScopedLine, translations: Translations, lang: Lang): string {
   const quantity = line.quantity;
   const value =
     typeof quantity === "number" || typeof quantity === "string" ? String(quantity) : "";
-  const unit = line.agency_service_unit_label;
-  return unit ? `${value} ${agencyServiceUnitLabel(unit, translations)}` : value;
+  return agencyServiceUnitCount(value, line.agency_service_unit_label, translations, lang);
 }
 
 /**

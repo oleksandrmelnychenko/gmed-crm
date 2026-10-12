@@ -253,6 +253,11 @@ export type OrderDetail = {
     settlement: unknown;
   } | null;
   termination_settlement?: { id: string; status: "open" | "settled" } | null;
+  /**
+   * The sanctions gate holds new work on the order (full staff view only, QA
+   * C2-07): the block code, never a name or a reason.
+   */
+  sanctions_hold?: "sanctions_review_pending" | "sanctions_confirmed" | "blocked_country" | null;
   created_at: string;
   updated_at: string;
   /** Present when the server returned a partial projection of the order. */

@@ -164,6 +164,17 @@ pub(crate) fn normalize_intake_language(
         .map(str::to_string)
 }
 
+/// The languages a patient created from a lead starts with: the lead's
+/// preferred language, else the language of its cabinet, else German, the
+/// agency's working language. The wizard does not require the field, and a
+/// patient without any language was blocked for every repeat order (QA C2-06).
+pub(crate) fn converted_patient_languages(
+    value: Option<&str>,
+    locale: Option<&str>,
+) -> Vec<String> {
+    vec![normalize_intake_language(value, locale).unwrap_or_else(|| "de".to_string())]
+}
+
 // ----------------------------------------------------------------------------
 // Authenticated CRUD
 // ----------------------------------------------------------------------------
@@ -5588,9 +5599,7 @@ async fn create_prospect_patient(
     let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
     let locale: Option<String> = lead.try_get("locale").ok().flatten();
     let languages: Vec<String> =
-        normalize_intake_language(primary_language.as_deref(), locale.as_deref())
-            .into_iter()
-            .collect();
+        converted_patient_languages(primary_language.as_deref(), locale.as_deref());
     let has_insurance: Option<bool> = lead.try_get("has_insurance").ok().flatten();
     let explicit_insurance_type: Option<String> = lead
         .try_get::<Option<String>, _>("insurance_type")
@@ -5997,9 +6006,7 @@ async fn convert_lead(
     let primary_language: Option<String> = lead.try_get("primary_language").ok().flatten();
     let locale: Option<String> = lead.try_get("locale").ok().flatten();
     let languages: Vec<String> =
-        normalize_intake_language(primary_language.as_deref(), locale.as_deref())
-            .into_iter()
-            .collect();
+        converted_patient_languages(primary_language.as_deref(), locale.as_deref());
     let has_insurance: Option<bool> = lead.try_get("has_insurance").ok().flatten();
     let explicit_insurance_type: Option<String> = lead
         .try_get::<Option<String>, _>("insurance_type")
@@ -9339,6 +9346,28 @@ mod questionnaire_mapping_tests {
         assert_eq!(
             normalize_intake_language(Some("ky"), Some("ru-RU")),
             Some("ky".to_string())
+        );
+    }
+
+    /// QA C2-06: a lead converted without a preferred language still gets one,
+    /// or every repeat order is blocked by "Preferred language is missing".
+    #[test]
+    fn a_converted_patient_always_has_a_language() {
+        assert_eq!(
+            converted_patient_languages(Some("Russian"), Some("de")),
+            vec!["ru".to_string()]
+        );
+        assert_eq!(
+            converted_patient_languages(None, Some("uk-UA")),
+            vec!["uk".to_string()]
+        );
+        assert_eq!(
+            converted_patient_languages(None, None),
+            vec!["de".to_string()]
+        );
+        assert_eq!(
+            converted_patient_languages(Some("  "), Some("")),
+            vec!["de".to_string()]
         );
     }
 

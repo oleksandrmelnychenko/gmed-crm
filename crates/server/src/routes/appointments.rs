@@ -810,8 +810,9 @@ async fn create_my_appointment_request(
     let location = normalize_optional_text(body.location);
 
     if preferred_date_from.is_none() && preferred_date_to.is_none() && reason.is_none() {
-        return err(
+        return coded_err(
             StatusCode::UNPROCESSABLE_ENTITY,
+            "appointment_request_date_or_reason_required",
             "Appointment request must include a preferred date or a reason",
         );
     }
@@ -835,9 +836,11 @@ async fn create_my_appointment_request(
     .await
     .unwrap_or(false);
 
+    // Coded: the patient portal shows it translated (QA C2-11).
     if open_request_exists {
-        return err(
+        return coded_err(
             StatusCode::CONFLICT,
+            "appointment_request_open_exists",
             "An open appointment request of this type already exists",
         );
     }
@@ -879,8 +882,9 @@ async fn create_my_appointment_request(
             if e.as_database_error()
                 .is_some_and(|db| db.is_unique_violation())
             {
-                return err(
+                return coded_err(
                     StatusCode::CONFLICT,
+                    "appointment_request_open_exists",
                     "An open appointment request of this type already exists",
                 );
             }
@@ -8049,9 +8053,10 @@ async fn add_reminder(
     let target_role = match load_active_user_role(&state, body.user_id).await {
         Ok(Some(role)) => role,
         Ok(None) => {
-            return err(
+            return coded_err(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "Reminder target must be an active user",
+                "reminder_target_inactive",
+                "Reminder target must be an active staff member",
             );
         }
         Err(resp) => return resp,
@@ -8109,7 +8114,11 @@ async fn add_reminder(
         &appointment,
         assigned_to_patient,
     ) {
-        return err(StatusCode::UNPROCESSABLE_ENTITY, message);
+        return coded_err(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            reminder_refusal_code(message),
+            message,
+        );
     }
 
     match create_reminder_record(
@@ -11750,6 +11759,15 @@ const REMINDER_INTERPRETER_NOT_BOOKED: &str =
 const REMINDER_NO_APPOINTMENT_ACCESS: &str =
     "The selected user has no access to this appointment or its patient";
 
+/// The error code of a refused reminder recipient, which the UI translates.
+fn reminder_refusal_code(message: &str) -> &'static str {
+    match message {
+        REMINDER_INTERPRETER_NOT_BOOKED => "reminder_interpreter_not_booked",
+        REMINDER_NO_APPOINTMENT_ACCESS => "reminder_no_appointment_access",
+        _ => "reminder_role_not_involved",
+    }
+}
+
 /// Why a reminder cannot go to this user, if it cannot. The recipient must be
 /// able to open the appointment and complete the reminder, so a role without
 /// `appointments.view` is never a recipient: IT administration does not work
@@ -12440,6 +12458,9 @@ async fn load_active_user_role(
         .try_get("role")
         .map_err(|_| err(StatusCode::INTERNAL_SERVER_ERROR, "Failed to validate user"))?;
 
+    // Every staff role: whether one may take part is decided by the caller
+    // (`reminder_recipient_refusal` refuses the read-only CEO assistant with
+    // the real reason instead of "not an active user", QA C-11).
     if matches!(
         role.as_str(),
         "interpreter"
@@ -12448,6 +12469,7 @@ async fn load_active_user_role(
             | "concierge"
             | "billing"
             | "ceo"
+            | "ceo_assistant"
             | "it_admin"
     ) {
         Ok(Some(role))
@@ -12636,6 +12658,15 @@ async fn validate_provider_doctor_context(
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+/// A refusal with a stable code the UI shows translated (no raw English text).
+fn coded_err(status: StatusCode, code: &str, message: &str) -> axum::response::Response {
+    (
+        status,
+        Json(serde_json::json!({ "error": code, "message": message })),
+    )
+        .into_response()
 }
 
 fn err_with_details(

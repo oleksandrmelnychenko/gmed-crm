@@ -1,4 +1,5 @@
-import type { TranslationKey, Translations } from "@/lib/i18n";
+import type { Lang, TranslationKey, Translations } from "@/lib/i18n";
+import { pluralWord, type PluralWords } from "@/lib/i18n/plural";
 
 const AGENCY_SERVICE_NAME_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
   treatment_organization: "revenue_agency_service_catalog_treatment_organization",
@@ -139,6 +140,37 @@ export function agencyServiceUnitLabel(
     unitLabel?.trim() ??
     translations.common_not_set
   );
+}
+
+// Counted units ("2 поездки", "5 поездок"; "2 Fahrten"): the forms of the
+// translated unit labels above (QA C2-04: "2 поездка").
+const AGENCY_SERVICE_UNIT_PLURALS: Partial<Record<TranslationKey, PluralWords>> = {
+  revenue_unit_package: { ru: ["пакет", "пакета", "пакетов"], de: ["Paket", "Pakete"] },
+  revenue_unit_hour: { ru: ["час", "часа", "часов"], de: ["Stunde", "Stunden"] },
+  revenue_unit_ride: { ru: ["поездка", "поездки", "поездок"], de: ["Fahrt", "Fahrten"] },
+  revenue_unit_day: { ru: ["день", "дня", "дней"], de: ["Tag", "Tage"] },
+  revenue_unit_appointment: { ru: ["приём", "приёма", "приёмов"], de: ["Termin", "Termine"] },
+};
+
+/**
+ * A quantity with its unit in the UI language and the form the count needs
+ * ("2 поездки", "1,5 часа", "3 Fahrten"); abbreviations ("шт.", "Stk.") and
+ * units typed by staff stay as they are.
+ */
+export function agencyServiceUnitCount(
+  quantity: string | number | null | undefined,
+  unitLabel: string | null | undefined,
+  translations: Translations,
+  lang: Lang,
+) {
+  const raw = quantity === null || quantity === undefined ? "" : String(quantity).trim();
+  const value = raw.replace(".", ",");
+  if (!unitLabel?.trim()) return value;
+  const key = AGENCY_SERVICE_UNIT_LABEL_KEYS[normalizedKey(unitLabel)];
+  const forms = key ? AGENCY_SERVICE_UNIT_PLURALS[key] : undefined;
+  const count = Number(raw.replace(",", "."));
+  if (forms && raw && Number.isFinite(count)) return `${value} ${pluralWord(lang, count, forms)}`;
+  return `${value} ${agencyServiceUnitLabel(unitLabel, translations)}`.trim();
 }
 
 type LocalizedCatalogItem = {

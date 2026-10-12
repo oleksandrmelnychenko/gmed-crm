@@ -18,6 +18,22 @@ export function taskRealtimeBatchAffects(events: readonly RealtimeEvent[], taskI
   return events.some(event => event.type.startsWith("realtime.") || !taskId || event.entity_id === taskId);
 }
 
+/**
+ * A refresh asked for by the browser (window focus, back online, tab shown) or
+ * by the socket (re)connecting, not by a change: right after the view loaded
+ * (or refreshed) it would only repeat the same requests (QA C-33: every list
+ * of the task manager was loaded twice per navigation).
+ */
+export const PASSIVE_REFRESH_MIN_GAP_MS = 3_000;
+
+export function isPassiveRealtimeBatch(events: readonly RealtimeEvent[]) {
+  return events.length > 0 && events.every(event => event.type === "realtime.connected");
+}
+
+export function passiveRefreshDue(lastRefreshAt: number, now = Date.now()) {
+  return now - lastRefreshAt >= PASSIVE_REFRESH_MIN_GAP_MS;
+}
+
 // Use the same lifecycle events in every task view. Coalesced events must all
 // be checked: the last frame in a burst may belong to a different task.
 export function useTaskRealtimeRefresh(
@@ -45,6 +61,9 @@ export function useTaskRealtimeRefresh(
     lastRefresh.current = Date.now();
     current.refresh();
   }, []);
+  const requestPassiveRefresh = useCallback(() => {
+    if (passiveRefreshDue(lastRefresh.current)) requestRefresh();
+  }, [requestRefresh]);
 
   useEffect(() => {
     latest.current = { refresh, enabled, busy };
@@ -53,7 +72,9 @@ export function useTaskRealtimeRefresh(
   }, [refresh, enabled, busy, requestRefresh]);
 
   useDebouncedRealtimeSubscription(eventTypes, (_event, events) => {
-    if (taskRealtimeBatchAffects(events, taskId)) requestRefresh();
+    if (!taskRealtimeBatchAffects(events, taskId)) return;
+    if (isPassiveRealtimeBatch(events)) requestPassiveRefresh();
+    else requestRefresh();
   });
 
   useEffect(() => {
@@ -63,14 +84,14 @@ export function useTaskRealtimeRefresh(
     const timer = window.setInterval(() => {
       if (!pollingPaused && Date.now() - lastRefresh.current >= (status === "connected" ? 60_000 : 10_000)) requestRefresh();
     }, 1_000);
-    window.addEventListener("focus", requestRefresh);
-    window.addEventListener("online", requestRefresh);
-    document.addEventListener("visibilitychange", requestRefresh);
+    window.addEventListener("focus", requestPassiveRefresh);
+    window.addEventListener("online", requestPassiveRefresh);
+    document.addEventListener("visibilitychange", requestPassiveRefresh);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("focus", requestRefresh);
-      window.removeEventListener("online", requestRefresh);
-      document.removeEventListener("visibilitychange", requestRefresh);
+      window.removeEventListener("focus", requestPassiveRefresh);
+      window.removeEventListener("online", requestPassiveRefresh);
+      document.removeEventListener("visibilitychange", requestPassiveRefresh);
     };
-  }, [enabled, pollingPaused, status, requestRefresh]);
+  }, [enabled, pollingPaused, status, requestRefresh, requestPassiveRefresh]);
 }

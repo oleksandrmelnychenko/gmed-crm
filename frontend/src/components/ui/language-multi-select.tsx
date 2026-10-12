@@ -93,6 +93,13 @@ function selectedOptionValues(
   return values;
 }
 
+/** A stored language code as its name in the UI language ("de" → "Немецкий"); unknown text stays. */
+export function languageName(value: string, lang: "de" | "ru") {
+  const key = normalizeLanguageKey(value);
+  const option = LANGUAGE_OPTIONS.find((item) => normalizeLanguageKey(item.value) === key);
+  return option ? languageOptionLabel(option, lang) : value;
+}
+
 export function languageLabel(value: string, lang: "de" | "ru") {
   const key = normalizeLanguageKey(value);
   const option = LANGUAGE_OPTIONS.find((item) => normalizeLanguageKey(item.value) === key);
@@ -167,6 +174,7 @@ export function LanguageMultiSelect({
         selectedValues={selectedOptionValues(options, selectedKeys)}
         showValueIndicator={false}
         hidePlaceholderOption
+        keepOpenOnSelect
         title={selected.map((item) => languageLabel(item, lang)).join(", ") || placeholder}
       >
         <option value="">{triggerLabel}</option>

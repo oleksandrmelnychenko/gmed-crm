@@ -116,7 +116,7 @@ function AppointmentTimelineSection({
 
   return (
     <div className="overflow-hidden rounded-lg border border-border/70 bg-card shadow-sm">
-      <div className="relative z-30 flex flex-nowrap items-center gap-1.5 overflow-x-auto border-b border-border/70 bg-card px-3 py-2">
+      <div className="relative z-30 flex flex-wrap items-center gap-1.5 border-b sm:flex-nowrap sm:overflow-x-auto border-border/70 bg-card px-3 py-2">
         <NativeComboboxSelect
           key={`kind-${timelineEvents.length}`}
           // A filter is reading: it stays usable on a read-only appointment.
@@ -156,7 +156,8 @@ function AppointmentTimelineSection({
               {group.items.map((item) => (
                 <div
                   key={item.id}
-                  className="flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0"
+                  // Phones wrap the row instead of pushing the date out of the sheet (QA C2-10).
+                  className="flex w-full flex-wrap items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0 sm:flex-nowrap"
                 >
                   <span
                     className={cn(

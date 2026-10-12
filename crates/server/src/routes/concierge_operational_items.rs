@@ -2089,20 +2089,14 @@ pub(crate) async fn update_item_status(
     } else {
         None
     };
-    // The assignee learns how the author decided on the work it handed in.
-    let assignee_notification = match review_decision_title(&previous_status, &body.status) {
-        Some(decision)
+    // The assignee learns how the author decided on the work it handed in,
+    // and that its task was cancelled.
+    let assignee_notification = match assignee_notice(&previous_status, &body.status) {
+        Some((kind, decision))
             if auth.user_id != assigned_to && assigned_to != assigned_by && can_review =>
         {
-            match insert_task_notification(
-                &mut tx,
-                assigned_to,
-                "operational_task_review_decision",
-                decision,
-                &title,
-                item_id,
-            )
-            .await
+            match insert_task_notification(&mut tx, assigned_to, kind, decision, &title, item_id)
+                .await
             {
                 Ok(value) => Some(value),
                 Err(response) => return response,
@@ -2368,14 +2362,14 @@ async fn close_children(
                 Err(response) => return response,
             }
         }
-        if let Some(title) = review_decision_title(&child.status, &body.status)
+        if let Some((kind, title)) = assignee_notice(&child.status, &body.status)
             && auth.user_id != child.assigned_to
             && child.assigned_to != child.assigned_by
         {
             match insert_task_notification(
                 &mut tx,
                 child.assigned_to,
-                "operational_task_review_decision",
+                kind,
                 title,
                 &child.title,
                 child.id,
@@ -2451,6 +2445,16 @@ fn review_decision_title(previous_status: &str, status: &str) -> Option<&'static
         "cancelled" => Some("Task cancelled after review"),
         _ => None,
     }
+}
+
+/// What the assignee hears when someone else changes its task: the author's
+/// decision on handed-in work (Q9), and a cancellation at any stage (QA C-25:
+/// a manager learned of a cancelled task only by looking). Kind and title.
+fn assignee_notice(previous_status: &str, status: &str) -> Option<(&'static str, &'static str)> {
+    if let Some(title) = review_decision_title(previous_status, status) {
+        return Some(("operational_task_review_decision", title));
+    }
+    (status == "cancelled").then_some(("operational_task_cancelled", "Task cancelled"))
 }
 
 async fn archive_item(

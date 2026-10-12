@@ -182,6 +182,21 @@ export function monthlyCosts(rows: HotelStay[], from: string, to: string) {
   }
   return months;
 }
+const MONTH_AXIS_NAMES = {
+  ru: ["янв", "фев", "мар", "апр", "май", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"],
+  de: ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"],
+} as const;
+
+/**
+ * The month of a chart axis ("2026-02"): "фев 2026" / "Feb 2026". The
+ * browser's short form read "февр. 26 г." (QA C2-16).
+ */
+export function monthAxisLabel(month: string, lang: "de" | "ru") {
+  const [year, monthNumber] = month.split("-");
+  const name = MONTH_AXIS_NAMES[lang][Number(monthNumber) - 1];
+  return name && year ? `${name} ${year}` : month;
+}
+
 export function csvCell(value: string | number) {
   let text = String(value);
   if (/^[\s]*[=+\-@\t\r]/.test(text)) text = `'${text}`;

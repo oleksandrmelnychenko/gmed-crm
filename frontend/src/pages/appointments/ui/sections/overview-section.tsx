@@ -397,7 +397,7 @@ function RecurringSeriesDetails({
               <div
                 key={item.series_id}
                 className={cn(
-                  "flex w-full items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0",
+                  "flex w-full flex-wrap items-center gap-2.5 border-b border-border/50 px-3 py-2 last:border-b-0 sm:flex-nowrap",
                   item.relation === "current" && "bg-orange-50/40",
                 )}
               >

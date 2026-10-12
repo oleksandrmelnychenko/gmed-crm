@@ -349,7 +349,9 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
         blocked["reasons"],
         json!(["client_order_signature_missing", "cost_assumption_missing"])
     );
-    let (status, signed) = json_request(
+    // The client's signature comes only from the signed order document (owner
+    // decision 2026-10-12), never from the flag.
+    let (status, refused) = json_request(
         &app,
         "POST",
         &commercial,
@@ -357,7 +359,13 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
         Some(json!({"signed_patient": true})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{signed}");
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "order_signature_evidence_required");
+    sqlx::query("UPDATE orders SET signed_patient = true, signed_patient_at = now() WHERE id = $1")
+        .bind(order_id)
+        .execute(pool)
+        .await
+        .unwrap();
     let (status, _) = json_request(
         &app,
         "POST",

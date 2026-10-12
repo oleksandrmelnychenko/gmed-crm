@@ -46,6 +46,41 @@ export function leadConsentFormTemplate(
     : "consent_data_release_child";
 }
 
+type OrderSignatureDocument = Pick<DocumentItem, "id" | "signed_at" | "is_latest_version" | "created_at">;
+
+export type OrderClientSignatureState<T extends OrderSignatureDocument = OrderSignatureDocument> = {
+  /** No current order document yet: it has to be created first. */
+  needsDocument: boolean;
+  /** The current, unsigned order document whose signed scan can be uploaded. */
+  documentToSign: T | null;
+  /** The order is marked signed by the client but no signed order document exists
+   * (marked by hand before the owner decision of 2026-10-12): still valid, flagged. */
+  manualOnly: boolean;
+};
+
+/**
+ * The client's signature of a lead's single order (Einzelauftrag): it counts
+ * only with proof — a QES or the scan of the signed copy — never by one click
+ * (owner decision 2026-10-12, QA C2-14). `signedPatient` is the order's flag,
+ * which only the signed document sets.
+ */
+export function orderClientSignatureState<T extends OrderSignatureDocument>(
+  orderDocuments: readonly T[],
+  signedPatient: boolean,
+): OrderClientSignatureState<T> {
+  const current = orderDocuments
+    .filter((document) => document.is_latest_version)
+    .sort((left, right) => (right.created_at ?? "").localeCompare(left.created_at ?? ""));
+  const signedByDocument = orderDocuments.some((document) => Boolean(document.signed_at));
+  const manualOnly = signedPatient && !signedByDocument;
+  const unsigned = current.find((document) => !document.signed_at) ?? null;
+  return {
+    needsDocument: current.length === 0,
+    documentToSign: !signedPatient || manualOnly ? unsigned : null,
+    manualOnly,
+  };
+}
+
 // A wizard action policy, not a replacement for the signing API's permissions.
 // Use document types, not translated titles or filenames (e.g. privacy notices).
 export function canSignWizardDocument(document: SigningDocument): boolean {

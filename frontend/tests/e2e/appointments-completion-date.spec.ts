@@ -209,6 +209,33 @@ async function openReportReview(page: Page) {
   return sheet;
 }
 
+// QA C2-10: on a phone the appointment sheet scrolled sideways (section
+// toolbars with the curator picker and the 1 week / 1 month / 6 months chips,
+// timeline rows pushing their date out).
+test("the appointment sheet fits a 375 px phone without sideways scrolling", async ({ page }, testInfo) => {
+  test.setTimeout(coldStartTestTimeout);
+  await page.setViewportSize({ width: 375, height: 812 });
+  await openMockedAppointment(page, berlinDate(0), { detailTab: "workflow" });
+  await expect(page.getByRole("button", { name: /1 Woche/ }).first()).toBeVisible(lazyPageLoad);
+  const overflow = await page.evaluate(() => {
+    const width = document.documentElement.clientWidth;
+    const found: string[] = [];
+    document.querySelectorAll<HTMLElement>("[role=dialog] *").forEach((element) => {
+      const style = getComputedStyle(element);
+      if ((style.overflowX === "auto" || style.overflowX === "scroll") && element.scrollWidth > element.clientWidth + 1) {
+        found.push(`scrolls: ${(element.textContent ?? "").trim().slice(0, 40)}`);
+      }
+      const box = element.getBoundingClientRect();
+      if (box.width > 0 && box.right > width + 1 && element.closest("[aria-hidden=true]") === null) {
+        found.push(`outside: ${(element.textContent ?? "").trim().slice(0, 40)}`);
+      }
+    });
+    return found;
+  });
+  await page.screenshot({ path: testInfo.outputPath("appointment-sheet-375.png") });
+  expect(overflow).toEqual([]);
+});
+
 test.describe("appointment completion date rule", () => {
   test.describe.configure({ timeout: coldStartTestTimeout });
   test("a future appointment keeps completion closed with a hint", async ({ page }) => {

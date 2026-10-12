@@ -7,6 +7,7 @@ import {
   formatDate,
   formatDateTime,
   formatQuantity,
+  orderOptionLabel,
   listAgencyServicePriceChoices,
   resolveAgencyServicePrice,
   validateCreateContractForm,
@@ -23,6 +24,14 @@ import {
   type ContractFormValidationMessages,
 } from "./contracts-model";
 import type { AgencyServiceItem, ContractItem } from "./types";
+
+describe("orderOptionLabel (QA C2-05)", () => {
+  const order = { id: "o1", order_number: "A-20261012-0007", patient_id: "", patient_name: "Mia Muster", patient_pid: "", phase: "intake", status: "active" };
+  it("leaves out the patient number a lead's order does not have", () => {
+    expect(orderOptionLabel(order)).toBe("A-20261012-0007 · Mia Muster");
+    expect(orderOptionLabel({ ...order, patient_pid: "P-20261012-0005" })).toBe("A-20261012-0007 · P-20261012-0005 · Mia Muster");
+  });
+});
 
 describe("formatQuantity", () => {
   it("writes quote quantities German style like the order card", () => {

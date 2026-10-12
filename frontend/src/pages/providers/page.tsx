@@ -536,6 +536,7 @@ function SpecializationMultiSelect({
           selectedValues={compactSelectedOptionValues}
           showValueIndicator={false}
           hidePlaceholderOption
+          keepOpenOnSelect
           title={selectedTitle || selectPlaceholder}
         >
           <option value="">{compactPlaceholder}</option>
@@ -571,6 +572,7 @@ function SpecializationMultiSelect({
         onChange={(event) => addSpecialization(event.target.value)}
         className={formSelectClassName}
         disabled={disabled || availableOptions.length === 0}
+        keepOpenOnSelect
       >
         <option value="">{selectPlaceholder}</option>
         {availableOptions.map((option) => (
@@ -708,6 +710,7 @@ function InsuranceProviderMultiSelect({
           selectedValues={compactSelectedOptionValues}
           showValueIndicator={false}
           hidePlaceholderOption
+          keepOpenOnSelect
           title={selectedTitle || selectPlaceholder}
         >
           <option value="">{compactPlaceholder}</option>
@@ -743,6 +746,7 @@ function InsuranceProviderMultiSelect({
         onChange={(event) => addInsuranceProvider(event.target.value)}
         className={formSelectClassName}
         disabled={disabled || availableOptions.length === 0}
+        keepOpenOnSelect
       >
         <option value="">{selectPlaceholder}</option>
         {availableOptions.map((option) => (

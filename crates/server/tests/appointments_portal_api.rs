@@ -249,6 +249,23 @@ async fn patient_can_create_appointment_request_and_pm_can_review_queue() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body.as_array().unwrap()[0]["status"], "approved");
 
+    // A second request of the same type while one is open: a code the portal
+    // shows in the patient's language (QA C2-11), never the English text.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        "/api/v1/me/appointment-requests",
+        &patient_bearer,
+        Some(json!({
+            "appointment_type": "medical",
+            "preferred_date_from": "2026-05-20",
+            "reason": "Second request"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "appointment_request_open_exists");
+
     let pm_notifications: i64 = sqlx::query_scalar(
         r#"SELECT count(*)
            FROM user_notifications

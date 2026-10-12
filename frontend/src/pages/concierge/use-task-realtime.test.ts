@@ -1,5 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { TASK_REALTIME_EVENTS, taskRealtimeBatchAffects } from "./use-task-realtime";
+import {
+  isPassiveRealtimeBatch,
+  PASSIVE_REFRESH_MIN_GAP_MS,
+  passiveRefreshDue,
+  TASK_REALTIME_EVENTS,
+  taskRealtimeBatchAffects,
+} from "./use-task-realtime";
+
+// QA C-33: focus or the socket connecting right after the page loaded loaded
+// every list a second time.
+describe("passive task refresh", () => {
+  it("does not repeat a load that just happened", () => {
+    expect(passiveRefreshDue(10_000, 10_000 + PASSIVE_REFRESH_MIN_GAP_MS - 1)).toBe(false);
+    expect(passiveRefreshDue(10_000, 10_000 + PASSIVE_REFRESH_MIN_GAP_MS)).toBe(true);
+  });
+  it("treats only a bare (re)connect as passive; a resync or a change always reloads", () => {
+    const frame = (type: string) => ({ type, entity_type: "realtime", entity_id: "user" });
+    expect(isPassiveRealtimeBatch([frame("realtime.connected")])).toBe(true);
+    expect(isPassiveRealtimeBatch([frame("realtime.resync_required")])).toBe(false);
+    expect(isPassiveRealtimeBatch([frame("realtime.connected"), frame("task.created")])).toBe(false);
+    expect(isPassiveRealtimeBatch([])).toBe(false);
+  });
+});
 
 const event = (entity_id: string, type = "concierge_operational_item.updated") => ({ type, entity_id, entity_type: "task" });
 

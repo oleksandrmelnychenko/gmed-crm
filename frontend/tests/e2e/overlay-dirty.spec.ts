@@ -94,6 +94,56 @@ for (const kind of ["dialog", "sheet"]) {
       await expect(page.getByRole("alertdialog")).toBeVisible();
     });
 
+    test("Escape right after a pick in a multi-select closes only its list (QA C2-01)", async ({ page }) => {
+      const picker = page.locator("#harness-citizenships");
+      await picker.click();
+      await page.getByRole("option", { name: "Deutschland (DE)" }).click();
+      await expect(page.getByLabel("Chosen citizenships")).toHaveText("DE");
+      // The list stays open for the next pick; Escape closes only the list.
+      await expect(page.getByRole("option", { name: "Österreich (AT)" })).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("option")).toHaveCount(0);
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Edit values" })).toBeVisible();
+      // Picked from the keyboard: the search is cleared for the next one.
+      await picker.click();
+      const search = page.locator("[data-overlay-interaction-root] input");
+      await expect(search).toHaveValue("");
+      await search.fill("Österr");
+      await expect(page.getByRole("option")).toHaveCount(1);
+      await search.press("Enter");
+      await expect(page.getByLabel("Chosen citizenships")).toHaveText("DE,AT");
+      await expect(page.getByRole("option", { name: "Frankreich (FR)" })).toBeVisible();
+      // A search left behind is gone the next time the list opens.
+      await search.fill("Fra");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("option")).toHaveCount(0);
+      await expect(page.getByRole("alertdialog")).toHaveCount(0);
+      await expect(page.getByRole("dialog", { name: "Edit values" })).toBeVisible();
+      await picker.click();
+      await expect(search).toHaveValue("");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("option")).toHaveCount(0);
+      // With the list closed, Escape asks before dropping the change.
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("alertdialog")).toBeVisible();
+    });
+
+    test("a required select without a default is set by mouse and by keyboard", async ({ page }) => {
+      const sex = page.getByRole("combobox", { name: "Sex" });
+      await expect(sex).toHaveText(/Choose sex/);
+      await sex.click();
+      await page.getByRole("option", { name: "Female", exact: true }).click();
+      await expect(page.getByLabel("Chosen sex")).toHaveText("female");
+      await expect(sex).toHaveText(/Female/);
+      await sex.focus();
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.type("Div");
+      await page.keyboard.press("Enter");
+      await expect(page.getByLabel("Chosen sex")).toHaveText("diverse");
+      await expect(sex).toHaveText(/Diverse/);
+    });
+
     test("compares dates selected in a picker", async ({ page }) => {
       const save = page.getByRole("button", { name: "Save values" });
       await page.getByRole("spinbutton", { name: pickerSection.day }).fill("06");

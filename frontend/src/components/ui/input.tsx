@@ -60,6 +60,11 @@ export function parseTimeValue(value: string | number | readonly string[] | unde
   return getTimePickerReferenceDate().hour(hour).minute(minute)
 }
 
+// The desktop variant everywhere: typed segments stay editable and a click on
+// the field never swaps it for the modal calendar, also on touch devices and
+// in automation without a fine pointer (QA 2026-10-12 C2-02).
+const PICKER_DESKTOP_MODE = "@media all"
+
 export function getTimePickerReferenceDate() {
   return dayjs(TIME_PICKER_REFERENCE_DATE)
 }
@@ -417,6 +422,7 @@ function Input({
     if (type === "datetime-local") {
       return wrapPicker(
         <DateTimePicker
+          desktopModeMediaQuery={PICKER_DESKTOP_MODE}
           value={pickerDraft.draft}
           onChange={handlePickerChange}
           minDateTime={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}
@@ -436,6 +442,7 @@ function Input({
     if (type === "time") {
       return wrapPicker(
         <TimePicker
+          desktopModeMediaQuery={PICKER_DESKTOP_MODE}
           value={pickerDraft.draft}
           // Hours and minutes can be typed; the clock button opens the lists,
           // and "OK", Escape or a click elsewhere close them.
@@ -459,6 +466,7 @@ function Input({
 
     return wrapPicker(
       <DatePicker
+        desktopModeMediaQuery={PICKER_DESKTOP_MODE}
         value={pickerDraft.draft}
         onChange={handlePickerChange}
         minDate={typeof min === "string" && min ? parseDateValue(min) ?? undefined : undefined}

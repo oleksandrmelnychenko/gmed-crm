@@ -10,8 +10,10 @@ import {
   parseDateKey,
 } from "@/lib/app-time-zone";
 import { useLang, type Lang } from "@/lib/i18n";
-import { formatCount } from "@/lib/i18n/plural";
+import { formatCount, type PluralWords } from "@/lib/i18n/plural";
 import { cn } from "@/lib/utils";
+
+const AGE_YEARS: PluralWords = { ru: ["год", "года", "лет"], de: ["Jahr", "Jahre"] };
 import { specializationLabelForValue } from "@/pages/providers/model/specialization-labels";
 
 import { darreichungsformLabel } from "../../data/medication-options";
@@ -662,7 +664,8 @@ export function PatientOverviewCard({
           <DemoItem label={tx("Дата рождения", "Geburtsdatum")} value={formatBirthDate(birthDate)} />
           <DemoItem
             label={tx("Возраст", "Alter")}
-            value={age != null ? `${age} ${tx("лет", "J.")}` : ""}
+            // "41 год", "42 года", "45 лет" (QA C2-04: "41 лет").
+            value={age != null ? formatCount(lang, age, AGE_YEARS) : ""}
           />
           <DemoItem label={tx("Пол", "Geschlecht")} value={genderText(gender, tx)} />
           <DemoItem label={tx("Телефон", "Telefon")} value={phone ?? ""} />

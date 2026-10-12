@@ -282,6 +282,64 @@ async fn general_task_booking_is_task_native_and_manager_accessible() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{inactive}");
 }
 
+/// QA C2-15: the CEO booked a transfer that had no concierge, and the new task
+/// went to the CEO. It goes to the patient's coordinating concierge; the CEO
+/// stays its author.
+#[tokio::test]
+async fn a_service_without_concierge_gets_the_patients_concierge_as_executor() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let tag = Uuid::new_v4().simple().to_string();
+    let ceo_id = seed_user(&ctx.pool, "ceo", &format!("queue-ceo-{tag}")).await;
+    let concierge_id = seed_user(&ctx.pool, "concierge", &format!("queue-concierge-{tag}")).await;
+    let patient_id = seed_patient(&ctx.pool, ctx.admin_id, &format!("queue-{tag}")).await;
+    let provider_id = seed_provider(&ctx.pool, "non_medical", &format!("queue-{tag}")).await;
+    sqlx::query(
+        "INSERT INTO patient_assignments (patient_id, user_id, assigned_by) VALUES ($1, $2, $3)",
+    )
+    .bind(patient_id)
+    .bind(concierge_id)
+    .bind(ctx.admin_id)
+    .execute(&ctx.pool)
+    .await
+    .unwrap();
+    let service_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_services (
+               patient_id, service_kind, title, status, created_by
+           ) VALUES ($1, 'transfer', $2, 'planned', $3)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(format!("Flughafentransfer {tag}"))
+    .bind(ceo_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+
+    let (status, booked) = json_request(
+        &ctx.app,
+        "POST",
+        &format!("/api/v1/concierge-services/{service_id}/book-provider"),
+        &auth_header_for(ceo_id, "ceo"),
+        Some(booking_body(Uuid::new_v4(), provider_id, "confirmed")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{booked}");
+    let (assigned_to, assigned_by): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT assigned_to, assigned_by FROM tasks WHERE id = concierge_service_canonical_task_id($1)",
+    )
+    .bind(service_id)
+    .fetch_one(&ctx.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        assigned_to, concierge_id,
+        "the patient's concierge works it"
+    );
+    assert_eq!(assigned_by, ceo_id, "the booking CEO stays the author");
+}
+
 #[tokio::test]
 async fn assigned_concierge_books_non_medical_partner_with_retry_safe_history() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

@@ -148,7 +148,7 @@ export function ScopedOrderDetail({
                     <td className="px-4 py-2">{scopedLineName(line, translations)}</td>
                     <td className="px-4 py-2 text-muted-foreground">{line.provider_name ?? "—"}</td>
                     <td className="px-4 py-2 font-mono text-xs tabular-nums">
-                      {scopedLineQuantity(line, translations)}
+                      {scopedLineQuantity(line, translations, lang)}
                     </td>
                     <td className="px-4 py-2">{lineStatusLabel(line.status)}</td>
                     <td className="px-4 py-2 text-xs text-muted-foreground">

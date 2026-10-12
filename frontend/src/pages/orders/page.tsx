@@ -657,10 +657,18 @@ function useOrdersPageContent() {
   const canManageOrderGroupAndAmendments =
     permissions.canManagePhase || hasCapability(user, "invoices.finance");
   const locale = lang === "de" ? "de-DE" : "ru-RU";
+  // A counted text takes its plural form (`key_one` / `_few` / `_many` /
+  // `_other`) when the catalogue has one: "2 позиции", "5 позиций" (QA C2-04).
   const l = useCallback(
-    (key: string, values?: UiTextValues) =>
-      formatUiText(t.uiText[key] ?? key, values),
-    [t],
+    (key: string, values?: UiTextValues) => {
+      const count = values?.count;
+      if (typeof count === "number") {
+        const plural = t.uiText[`${key}_${new Intl.PluralRules(lang).select(count)}`];
+        if (plural) return formatUiText(plural, values);
+      }
+      return formatUiText(t.uiText[key] ?? key, values);
+    },
+    [lang, t],
   );
   const lWorkflow = useCallback(
     (key: string) => t.uiText[key] ?? key,
@@ -3893,6 +3901,15 @@ function useOrdersPageContent() {
                     lang={lang}
                   />
                 ) : null}
+                {/* Staff only: the sanctions gate holds new work on this order. The
+                    same neutral text as the refused action, no names or reasons (QA C2-07). */}
+                {orderDetail.sanctions_hold && orderDetail.status !== "cancelled" ? (
+                  <div data-testid="order-sanctions-hold">
+                    <Banner tone="warning" withIcon>
+                      {l(`api_${orderDetail.sanctions_hold}`)}
+                    </Banner>
+                  </div>
+                ) : null}
                 <section className="relative rounded-xl border border-border/70 bg-card shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
                   <div className="relative px-4 py-3 sm:px-5">
                     <span
@@ -4274,6 +4291,7 @@ function useOrdersPageContent() {
                             [
                               lang === "de" ? "Leistungsfortschritt" : "Состояние услуг",
                               l("orders_leistung_metrics_summary", {
+                                count: leistungMetrics.total,
                                 total: leistungMetrics.total,
                                 delivered: leistungMetrics.delivered,
                                 approved: leistungMetrics.approved,
@@ -7255,6 +7273,7 @@ function useOrdersPageContent() {
                       <OrderGroupPanel
                         orderId={orderDetail.id}
                         canManage={canManageOrderGroupAndAmendments}
+                        onPayerSaved={() => setReloadNonce((current) => current + 1)}
                       />
                     </SectionCard>
                   </>
@@ -9042,20 +9061,46 @@ function useOrdersPageContent() {
                     </NativeComboboxSelect>
                   </Field>
                 ) : null}
-                <Field htmlFor="order-service-description" label={t.orders_service_description} className="md:col-span-2">
-                  <Input
-                    required
-                    id="order-service-description"
-                    value={leistungForm.description}
-                    onChange={(event) =>
-                      setLeistungForm((current) => ({
-                        ...current,
-                        description: event.target.value,
-                      }))
-                    }
-                    className={inputClassName}
-                  />
-                </Field>
+                {(() => {
+                  // The line keeps the catalogue's own (German) name for the
+                  // documents; the field shows it in the UI language while it
+                  // is untouched (QA C2-13: "Flughafentransfer" in the RU form).
+                  const catalogStoredName = selectedLeistungAgencyService
+                    ? agencyServiceStoredName(
+                        selectedLeistungAgencyService.service_key,
+                        selectedLeistungAgencyService.service_name,
+                        t,
+                      )
+                    : "";
+                  const showsCatalogName = Boolean(selectedLeistungAgencyService)
+                    && leistungForm.description.trim() === catalogStoredName;
+                  const displayValue = showsCatalogName && selectedLeistungAgencyService
+                    ? agencyCatalogItemName(selectedLeistungAgencyService, t, lang)
+                    : leistungForm.description;
+                  return (
+                    <Field htmlFor="order-service-description" label={t.orders_service_description} className="md:col-span-2">
+                      <Input
+                        required
+                        id="order-service-description"
+                        value={displayValue}
+                        onChange={(event) => {
+                          const typed = event.target.value;
+                          setLeistungForm((current) => ({
+                            ...current,
+                            description: showsCatalogName && typed === displayValue ? current.description : typed,
+                          }));
+                        }}
+                        className={inputClassName}
+                      />
+                      {showsCatalogName && displayValue !== catalogStoredName ? (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {lang === "de" ? "In Dokumenten: " : "В документах: "}
+                          {catalogStoredName}
+                        </p>
+                      ) : null}
+                    </Field>
+                  );
+                })()}
                 <Field htmlFor="order-service-notes" label={t.orders_service_notes} className="md:col-span-2">
                   <Input
                     id="order-service-notes"

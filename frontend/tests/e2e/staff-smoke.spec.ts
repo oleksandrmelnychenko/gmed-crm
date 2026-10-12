@@ -4490,7 +4490,7 @@ test.describe("responsive staff workspace", () => {
       signedAgency = payload.signed_agency ?? signedAgency;
       prepaymentRequired = payload.prepayment_required ?? prepaymentRequired;
       if (commercialBasisRequests === 1) await commercialBasisGate;
-      if (payload.signed_agency === true) await agencyConfirmationGate;
+      else if (payload.signed_agency === true) await agencyConfirmationGate;
       return json(route, { ok: true, order_id: orderId });
     });
     // The quote mirrors the saved service line, so the wizard treats it as current.
@@ -4526,11 +4526,20 @@ test.describe("responsive staff workspace", () => {
       return json(route, quoteCreated ? [createdQuote] : []);
     });
 
-    const patientSignatureToggle = wizard.getByRole("checkbox", {
-      name: "Auftrag vom Kunden unterzeichnet",
+    // Owner decision 2026-10-12 (QA C2-14): the client's signature is no
+    // one-click checkbox; it follows the signed order document (scan or QES).
+    await expect(wizard.getByRole("checkbox", { name: "Auftrag vom Kunden unterzeichnet" })).toHaveCount(0);
+    await expect(wizard.getByTestId("lead-order-client-signature")).toContainText(
+      "Auftrag noch nicht vom Kunden unterzeichnet",
+    );
+    await expect(wizard.getByTestId("lead-order-client-signature")).toContainText(
+      "Erstellen Sie zuerst den Einzelauftrag",
+    );
+    const agencyConfirmationToggle = wizard.getByRole("checkbox", {
+      name: "Auftrag von der Agentur bestätigt",
     });
-    await patientSignatureToggle.check();
-    await expect(patientSignatureToggle).toBeChecked();
+    // The first save creates the order.
+    await agencyConfirmationToggle.check();
     await expect.poll(() => commercialBasisRequests).toBe(1);
     expect(orderCreatePayload?.needs_description).toContain("Kundennachricht");
     expect(orderCreatePayload?.needs_description).toContain("Kann anreisen: Ja");
@@ -4547,22 +4556,26 @@ test.describe("responsive staff workspace", () => {
     expect(commercialBasisPayloads[0]).toMatchObject({
       date_from: "2026-09-01",
       date_to: "2026-09-15",
+      signed_agency: true,
     });
+    // A cached client signature is never sent: it would undo a scan recorded meanwhile.
+    expect(commercialBasisPayloads[0]).not.toHaveProperty("signed_patient");
     releaseCommercialBasis();
-    await expect(patientSignatureToggle).toBeEnabled();
-    await expect(patientSignatureToggle).toBeChecked();
+    await expect(agencyConfirmationToggle).toBeEnabled();
+    await expect(agencyConfirmationToggle).toBeChecked();
     // After the service lines are saved, the order total is recalculated from what the server kept.
     await expect.poll(() => commercialBasisRequests).toBe(2);
     expect(commercialBasisPayloads[1]).toEqual({ total_estimated: "14875.00" });
 
-    const agencyConfirmationToggle = wizard.getByRole("checkbox", {
-      name: "Auftrag von der Agentur bestätigt",
-    });
+    await agencyConfirmationToggle.uncheck();
+    await expect.poll(() => commercialBasisRequests).toBe(3);
+    expect(commercialBasisPayloads[2]).toEqual({ signed_agency: false });
+    await expect(agencyConfirmationToggle).toBeEnabled();
     await agencyConfirmationToggle.check();
     // The confirmation shows at once; since 3cffe0f2 the wizard stays busy until it is saved.
     await expect(agencyConfirmationToggle).toBeChecked();
-    await expect.poll(() => commercialBasisRequests).toBe(3);
-    expect(commercialBasisPayloads[2]).toEqual({ signed_agency: true });
+    await expect.poll(() => commercialBasisRequests).toBe(4);
+    expect(commercialBasisPayloads[3]).toEqual({ signed_agency: true });
     await expect(agencyConfirmationToggle).toBeDisabled();
     await expect(wizard.locator("footer").getByText("Wird gespeichert…", { exact: true })).toBeVisible();
     releaseAgencyConfirmation();

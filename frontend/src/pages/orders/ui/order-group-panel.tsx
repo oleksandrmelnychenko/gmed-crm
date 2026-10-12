@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
 import { useLang } from "@/lib/i18n";
 
 import {
@@ -96,9 +97,12 @@ export function localizedOrderGroupError(message: string, tx: Bilingual): string
 export function OrderGroupPanel({
   orderId,
   canManage = true,
+  onPayerSaved,
 }: {
   orderId: string;
   canManage?: boolean;
+  /** The order view reloads: a new payer is screened and may hold the order (QA C2-07). */
+  onPayerSaved?: () => void;
 }) {
   const { lang } = useLang();
   const tx: Bilingual = (ru, de) => (lang === "de" ? de : ru);
@@ -160,7 +164,11 @@ export function OrderGroupPanel({
     };
   }, [orderId]);
 
-  async function run(action: () => Promise<unknown>, reloadOnly = false) {
+  async function run(
+    action: () => Promise<unknown>,
+    reloadOnly = false,
+    onSuccess?: () => void,
+  ) {
     setBusy(true);
     setError("");
     try {
@@ -170,6 +178,7 @@ export function OrderGroupPanel({
       } else {
         applyGroup(result as OrderGroup);
       }
+      onSuccess?.();
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -528,7 +537,15 @@ export function OrderGroupPanel({
               className="mt-2 rounded-lg"
               disabled={busy || !isPlausiblePayerEmail(payer.email)}
               onClick={() =>
-                void run(() => setOrderPayer(group.head.id, orderPayerPayload(payer)), true)
+                void run(
+                  () => setOrderPayer(group.head.id, orderPayerPayload(payer)),
+                  true,
+                  () => {
+                    // Saved quietly before (QA C2-07).
+                    toast.success(tx("Плательщик сохранён.", "Zahler gespeichert."));
+                    onPayerSaved?.();
+                  },
+                )
               }
             >
               {tx("Сохранить плательщика", "Zahler speichern")}

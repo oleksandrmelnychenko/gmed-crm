@@ -5333,8 +5333,12 @@ const SERVICE_ROW_SELECT: &str = r#"SELECT cs.id, cs.patient_id, cs.appointment_
                   service_task.id AS linked_task_id,
                   service_task.status AS linked_task_status,
                   service_task.archived AS linked_task_archived,
-                  COALESCE(service_task.assigned_to, cs.assigned_concierge_id, service_task_author.author_id)
-                      AS task_assignee_id,
+                  COALESCE(
+                      service_task.assigned_to,
+                      cs.assigned_concierge_id,
+                      concierge_service_coordinator_id(cs.patient_id),
+                      service_task_author.author_id
+                  ) AS task_assignee_id,
                   service_task_author.author_id AS task_author_id,
                   task_author.role AS task_author_role
            FROM concierge_services cs
@@ -5481,7 +5485,15 @@ pub(crate) async fn ensure_task_for_service(
                created_at, updated_at
            )
            SELECT title, service_notes,
-                  COALESCE(assigned_concierge_id, author.id), author.id,
+                  -- No concierge on the service: the patient's coordinating
+                  -- concierge (else manager, else CEO) works it, not whoever
+                  -- happened to book it (QA C2-15).
+                  COALESCE(
+                      assigned_concierge_id,
+                      concierge_service_coordinator_id(concierge_services.patient_id),
+                      author.id
+                  ),
+                  author.id,
                   patient_id, appointment_id,
                   (SELECT appointment.order_id FROM appointments appointment
                    WHERE appointment.id = concierge_services.appointment_id),

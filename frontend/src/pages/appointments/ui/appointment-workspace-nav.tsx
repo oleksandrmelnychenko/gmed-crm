@@ -12,6 +12,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 
 import { StaffLink } from "@/components/staff-link";
+import { useAuth } from "@/lib/auth";
 import { useLang } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { normalizeAppointmentWorkspaceTab } from "@/pages/appointments/model/selectors";
@@ -25,7 +26,9 @@ type WorkspaceItem = {
 export function AppointmentWorkspaceNav() {
   const [searchParams] = useSearchParams();
   const { t } = useLang();
+  const { user } = useAuth();
   const l = (key: string) => t.uiText[key] ?? key;
+  const isInterpreter = user?.role === "interpreter";
 
   const appointmentId = searchParams.get("appointment");
   const currentTab = normalizeAppointmentWorkspaceTab(
@@ -50,7 +53,11 @@ export function AppointmentWorkspaceNav() {
     },
     {
       key: "clinical",
-      label: l("appointments_clinical_2"),
+      // The interpreter report lives here: the tab names it (QA C-17). An
+      // interpreter sees only the report in this tab.
+      label: isInterpreter
+        ? l("appointments_workspace_tab_interpreter_report")
+        : l("appointments_workspace_tab_clinical_report"),
       icon: FileHeart,
     },
     {

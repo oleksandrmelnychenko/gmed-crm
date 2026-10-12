@@ -125,16 +125,16 @@ describe("patients list model", () => {
 
 describe("patient detail model", () => {
   // Server role lists of the patient sub-resources (crates/server/src/routes/patients.rs,
-  // workflow_checklists.rs): narrower than the capabilities, e.g. no CEO assistant.
-  const RECORD_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
+  // workflow_checklists.rs). The CEO assistant reads every tab read-only (owner decision
+  // 2026-10-11, QA B2-06).
+  const RECORD_ROLES = ["ceo", "ceo_assistant", "patient_manager", "billing", "teamlead_interpreter", "interpreter", "concierge"];
   // The interpreter reads only its own appointments: no orders, no timeline.
-  const CARE_HISTORY_ROLES = ["ceo", "patient_manager", "billing", "teamlead_interpreter"];
+  const CARE_HISTORY_ROLES = ["ceo", "ceo_assistant", "patient_manager", "billing", "teamlead_interpreter"];
   // Billing reads orders and the timeline but holds no `appointments.view`.
-  const APPOINTMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "concierge", "interpreter"];
-  const ASSIGNMENT_ROLES = ["ceo", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
-  // `/patients/{id}/documents`: the record roles and, read-only, the CEO
-  // assistant (owner decision 2026-10-11).
-  const DOCUMENT_ROLES = [...RECORD_ROLES, "ceo_assistant"];
+  const APPOINTMENT_ROLES = ["ceo", "ceo_assistant", "patient_manager", "teamlead_interpreter", "concierge", "interpreter"];
+  const ASSIGNMENT_ROLES = ["ceo", "ceo_assistant", "patient_manager", "teamlead_interpreter", "interpreter", "concierge"];
+  // `/patients/{id}/documents`: the record roles (the CEO assistant read-only).
+  const DOCUMENT_ROLES = RECORD_ROLES;
 
   it.each(STAFF_ROLES)("derives every surface from capabilities and server role lists for %s", (role) => {
     forEachActor((actor, has, actorRole) => {

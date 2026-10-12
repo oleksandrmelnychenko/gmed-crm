@@ -38,7 +38,8 @@ const COMPANY_FINANCE = define(
   "nav_company_finance",
   "company_finance.view",
 );
-const SERVICES = define("services", "/services", "nav_my_services", "services.view");
+// Same name as the page title (QA C-24); the patient portal keeps "Каталог сервисов".
+const SERVICES = define("services", "/services", "staff_services_title", "services.view");
 const HOTELS = define("hotels", "/hotels", "nav_hotels", "hotels.view");
 const APPOINTMENTS = define(
   "appointments",

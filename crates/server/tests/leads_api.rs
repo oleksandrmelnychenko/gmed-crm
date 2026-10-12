@@ -5530,6 +5530,7 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         StatusCode::CONFLICT,
         "Old documents cannot be signed as the current order"
     );
+    let mut order_document = String::new();
     for template in ["single_order", "order_cost_estimate"] {
         let payload = json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de","status":"active","bindings":{"period_from":"1999-01-01","estimate_total":"1 EUR"}});
         let (s, generated) = json_request(
@@ -5542,6 +5543,9 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         .await;
         assert!(s.is_success(), "{generated}");
         let id = Uuid::parse_str(generated["id"].as_str().unwrap()).unwrap();
+        if template == "single_order" {
+            order_document = id.to_string();
+        }
         let (owner, bindings): (Option<Uuid>, Value) =
             sqlx::query_as("SELECT lead_id,generated_bindings FROM documents WHERE id=$1")
                 .bind(id)
@@ -5566,15 +5570,41 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
         assert!(s.is_success(), "{replayed}");
         assert_eq!(generated["id"], replayed["id"]);
     }
+    // Owner decision 2026-10-12 (QA C2-14): the client's signature is recorded
+    // only by the signed order document — here the scan of the paper copy,
+    // which carries both signatures — never by the flag.
     let (s, b) = json_request(
         &app,
         "POST",
         &path,
         &pm,
-        Some(json!({"signed_patient":true,"signed_agency":true})),
+        Some(json!({"signed_patient":true})),
     )
     .await;
+    assert_eq!(s, StatusCode::CONFLICT, "{b}");
+    assert_eq!(b["error"], "order_signature_evidence_required");
+    let (s, b) = support::paper_signature(&app, &pm, &order_document).await;
     assert_eq!(s, StatusCode::OK, "{b}");
+    let flags: (bool, bool) =
+        sqlx::query_as("SELECT signed_patient, signed_agency FROM orders WHERE id=$1")
+            .bind(order)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    assert_eq!(flags, (true, true));
+    // The signed scan stays the current document of the same order facts.
+    let (_, checked) = json_request(&app, "GET", &format!("/api/v1/leads/{lead}"), &pm, None).await;
+    let order_document_check = checked["readiness"]["checks"]
+        .as_array()
+        .and_then(|checks| {
+            checks
+                .iter()
+                .find(|check| check["key"] == "order_document_generated")
+        })
+        .cloned();
+    if let Some(check) = order_document_check {
+        assert_eq!(check["passed"], true, "{checked}");
+    }
     let(s,b)=json_request(&app,"POST",&format!("/api/v1/orders/{order}/leistungen"),&pm,Some(json!({
         "description":"Initial orthopedic coordination","quantity":1,"unit_price":100,"vat_rate":19,
         "client_reference":format!("lead-onboarding:{lead}:service:1")
@@ -5607,6 +5637,9 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     for template in ["single_order", "order_cost_estimate"] {
         let(s,b)=json_request(&app,"POST","/api/v1/documents/generate",&ceo,Some(json!({"template_id":template,"lead_id":lead,"order_id":order,"language":"de","status":"active"}))).await;
         assert!(s.is_success(), "{b}");
+        if template == "single_order" {
+            order_document = b["id"].as_str().unwrap().to_string();
+        }
     }
     // Concurrent retries of the same prepared estimate produce one current quote.
     let quote_path = format!("/api/v1/orders/{order}/quotes");
@@ -5627,14 +5660,7 @@ async fn repeat_order_document_changes_require_current_documents_before_confirma
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{accepted}");
-    let (s, b) = json_request(
-        &app,
-        "POST",
-        &path,
-        &pm,
-        Some(json!({"signed_patient":true,"signed_agency":true})),
-    )
-    .await;
+    let (s, b) = support::paper_signature(&app, &pm, &order_document).await;
     assert_eq!(s, StatusCode::OK, "{b}");
     let (status, qualified) = json_request(
         &app,

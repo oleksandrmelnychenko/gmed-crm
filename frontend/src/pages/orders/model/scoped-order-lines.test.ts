@@ -38,10 +38,26 @@ describe("scoped order lines", () => {
     );
   });
 
-  it("translates the catalog unit", () => {
-    expect(scopedLineQuantity(line({}), t("ru"))).toBe(`1 ${t("ru").revenue_unit_ride}`);
-    expect(scopedLineQuantity(line({}), t("ru"))).not.toContain("ride");
-    expect(scopedLineQuantity(line({ agency_service_unit_label: null }), t("ru"))).toBe("1");
+  it("shows the catalogue's German name in the UI language, own text as written (QA C2-13)", () => {
+    expect(scopedLineName(line({ description: "Flughafentransfer" }), t("ru"))).toBe(
+      t("ru").revenue_agency_service_catalog_airport_transfer,
+    );
+    expect(scopedLineName(line({ description: "Flughafentransfer" }), t("de"))).toBe(
+      t("de").revenue_agency_service_catalog_airport_transfer,
+    );
+    expect(scopedLineName(line({ description: "Abholung Hotel Adlon 7:30" }), t("ru"))).toBe(
+      "Abholung Hotel Adlon 7:30",
+    );
+  });
+
+  it("translates the catalog unit in the form the count needs (QA C2-04)", () => {
+    expect(scopedLineQuantity(line({}), t("ru"), "ru")).toBe("1 поездка");
+    expect(scopedLineQuantity(line({ quantity: "2" }), t("ru"), "ru")).toBe("2 поездки");
+    expect(scopedLineQuantity(line({ quantity: "5" }), t("ru"), "ru")).toBe("5 поездок");
+    expect(scopedLineQuantity(line({ quantity: "2" }), t("de"), "de")).toBe("2 Fahrten");
+    expect(scopedLineQuantity(line({ quantity: "1.5", agency_service_unit_label: "hour" }), t("ru"), "ru")).toBe("1,5 часа");
+    expect(scopedLineQuantity(line({}), t("ru"), "ru")).not.toContain("ride");
+    expect(scopedLineQuantity(line({ agency_service_unit_label: null }), t("ru"), "ru")).toBe("1");
   });
 
   it("lets only the concierge record an open service line of its order part as delivered", () => {

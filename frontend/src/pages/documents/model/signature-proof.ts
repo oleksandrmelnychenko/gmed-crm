@@ -27,6 +27,8 @@ const PROOF_REQUIRED_SIGNATURE_TEMPLATES = new Set([
   "enhanced_due_diligence",
   "cost_coverage_declaration",
   "lead_self_disclosure",
+  // The single order (Einzelauftrag), owner decision 2026-10-12 (QA C2-14).
+  "single_order",
 ]);
 
 /**

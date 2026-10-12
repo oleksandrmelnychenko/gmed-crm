@@ -934,9 +934,10 @@ function useStaffAppointmentsPageContent() {
         ? t.appointments_billing_sync_missing_catalog
         : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? appointmentText("appointments_concierge_services_operational_open", {
-            count: serviceInFlightCount,
-          })
+        ? appointmentPluralText(
+            "appointments_concierge_services_operational_open",
+            serviceInFlightCount,
+          )
         : "",
       detail?.type === "non_medical" &&
       detailServices.length > 0 &&
@@ -965,9 +966,10 @@ function useStaffAppointmentsPageContent() {
         ? appointmentText("appointments_interpreter_report_or_approval_is_still_pending")
         : "",
       detail?.type === "non_medical" && serviceInFlightCount > 0
-        ? appointmentText("appointments_concierge_services_in_progress_warning", {
-            count: serviceInFlightCount,
-          })
+        ? appointmentPluralText(
+            "appointments_concierge_services_in_progress_warning",
+            serviceInFlightCount,
+          )
         : "",
     ].filter(Boolean);
 

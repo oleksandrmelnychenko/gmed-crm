@@ -257,7 +257,9 @@ async fn returning_patient_intake_preserves_history_and_guards_every_transition(
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{blocked}");
     let (status, next) = save(&ctx.app, &token, &ws, &draft, "prepare").await;
     assert_eq!(status, StatusCode::OK, "{next}");
-    let (status, signed) = request(
+    // The order document is signed only with proof (owner decision
+    // 2026-10-12, QA C2-14): no one-click confirmation, the signed scan.
+    let (status, refused) = request(
         &ctx.app,
         &token,
         "POST",
@@ -265,6 +267,10 @@ async fn returning_patient_intake_preserves_history_and_guards_every_transition(
         json!({"compliance_kind":"other"}),
     )
     .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "signature_evidence_required");
+    let (status, signed) =
+        support::paper_signature(&ctx.app, &format!("Bearer {token}"), document_id).await;
     assert_eq!(status, StatusCode::OK, "{signed}");
     let (status, next) = request(
         &ctx.app,

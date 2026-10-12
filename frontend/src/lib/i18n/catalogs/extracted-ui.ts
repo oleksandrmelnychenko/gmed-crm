@@ -391,7 +391,7 @@ export const extractedUiDe = {
   "appointments_preparation": "Vorbereitung",
   "appointments_provider": "Leistungserbringer",
   "appointments_provider_and_doctor": "Provider und Arzt",
-  "appointments_queue": "Queue",
+  "appointments_queue": "Warteschlange",
   "appointments_quick_scope": "Schnellbereich",
   "appointments_ready": "Bereit",
   "appointments_refresh": "Aktualisieren",

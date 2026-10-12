@@ -1131,8 +1131,9 @@ const PROOF_REQUIRED_SIGNATURE_KINDS: [&str; 5] = [
 /// [`PROOF_REQUIRED_SIGNATURE_KINDS`] and the lead's patient form
 /// (Patientenformular, `lead_self_disclosure`), which records no compliance
 /// kind. The GwG identification sheet is GMED's own record and stays one
-/// click.
-const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 9] = [
+/// click. The single order (Einzelauftrag) since the owner decision of
+/// 2026-10-12 (QA C2-14).
+const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 10] = [
     "privacy_consents",
     "consent_data_release",
     "consent_data_release_child",
@@ -1142,6 +1143,7 @@ const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 9] = [
     "enhanced_due_diligence",
     "cost_coverage_declaration",
     "lead_self_disclosure",
+    "single_order",
 ];
 
 /// Whether `POST /documents/{id}/mark-signed` must refuse: the document is the
@@ -4980,6 +4982,8 @@ mod tests {
             // Nor does "other" open the one click for the others.
             ("other", "enhanced_due_diligence"),
             ("other", "cost_coverage_declaration"),
+            // The single order since 2026-10-12 (QA C2-14).
+            ("other", "single_order"),
         ] {
             assert!(
                 needs_proof(kind, Some(template), false),
@@ -4997,7 +5001,6 @@ mod tests {
         // An identity document is checked, not signed; GMED signs its GwG sheet.
         assert!(!needs_proof("identity", Some("passport"), false));
         assert!(!needs_proof("other", Some("gwg_identification"), false));
-        assert!(!needs_proof("other", Some("single_order"), false));
     }
 
     #[test]

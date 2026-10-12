@@ -62,14 +62,17 @@ export function PatientCuratorsTab({
   t,
   tr,
 }: PatientCuratorsTabProps) {
+  // Curators are staff: the patient's own portal login, linked the same way,
+  // is not one of them (QA C2-12).
+  const staffAssignments = assignments.filter((item) => item.user_role !== "patient");
   return (
     <TabsContent value="curators" className="space-y-4 mt-4 min-h-[400px]">
       <div className="space-y-2.5">
-        {assignments.length === 0 ? (
+        {staffAssignments.length === 0 ? (
           <EmptyCell>{t.patients_no_assignments}</EmptyCell>
         ) : (
           <div className="space-y-2">
-            {assignments.map((item) => (
+            {staffAssignments.map((item) => (
               <div
                 key={`${item.user_id}-${item.assigned_at}`}
                 className="flex items-center gap-4 rounded-xl border border-border/50 bg-card px-4 py-3"
@@ -148,9 +151,10 @@ export function PatientCuratorsTab({
               </Label>
               <NativeComboboxSelect
                 value={selectedAssignee}
-
-
+                hidePlaceholderOption
                 onChange={(event) => onSelectedAssigneeChange(event.target.value ?? "")} id="patient-curator-assign" className={cn("w-full", formInputClassName)}>
+                  {/* An empty picker says "not selected", not "value unavailable" (QA C-14). */}
+                  <option value="">{l("patients_curator_not_selected")}</option>
                   {assignableStaff.map((staff) => (
                     <option key={staff.id} value={staff.id}>
                       {staff.name} · {roleLabel(staff.role, tr)}

@@ -268,6 +268,8 @@ function AssignmentsSection({
   const { formatPatientDateTime } = usePatientListFormatters();
   const { t } = useLang();
   const tr = t as unknown as Record<string, string>;
+  // Curators are staff, not the patient's own portal login (QA C2-12).
+  const staffAssignments = assignments.filter((item) => item.user_role !== "patient");
 
   return (
     <section className="space-y-2.5 rounded-xl border border-border/60 bg-card p-3.5">
@@ -275,11 +277,11 @@ function AssignmentsSection({
 
       {assignmentError ? <Banner tone="error">{assignmentError}</Banner> : null}
 
-      {assignments.length === 0 ? (
+      {staffAssignments.length === 0 ? (
         <p className="text-[12.5px] text-muted-foreground italic">{t.patients_no_assignments}</p>
       ) : (
         <div className="space-y-1.5">
-          {assignments.map((item) => (
+          {staffAssignments.map((item) => (
             <div
               key={`${item.user_id}-${item.assigned_at}`}
               className="rounded-lg border border-border/50 bg-card/60 px-3 py-2.5"
@@ -312,8 +314,9 @@ function AssignmentsSection({
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] pt-1">
           <div className="space-y-1">
             <div className="text-[12px] font-medium text-muted-foreground">{t.patients_assign_owner}</div>
-            <NativeComboboxSelect value={selectedAssignee}
+            <NativeComboboxSelect value={selectedAssignee} hidePlaceholderOption aria-label={t.patients_assign_owner}
               onChange={(event) => onAssigneeChange(event.target.value ?? "")} className={cn("w-full", formInputClassName)}>
+                <option value="">{t.uiText.patients_curator_not_selected ?? ""}</option>
                 {assignableStaff.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name} · {getPatientRoleLabel(item.role, tr)}

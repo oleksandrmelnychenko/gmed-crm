@@ -221,17 +221,21 @@ export function DataTableSurface<T>({
     return map;
   }, [enhancedColumns]);
 
-  const visibleRows = useMemo(() => {
+  const { visibleRows, filteredCount } = useMemo(() => {
     const filtered = applyFilters(rows, filters, { accessors });
     const sorted = applySort(filtered, sortStack, { accessors });
     // Child rows are injected after filtering/sorting so they always stay
-    // attached directly under their parent row.
-    return expandRow
-      ? sorted.flatMap((row) => {
-          const children = expandRow(row);
-          return children && children.length > 0 ? [row, ...children] : [row];
-        })
-      : sorted;
+    // attached directly under their parent row. The count names the rows
+    // themselves, not their opened sub-rows (QA C2-03: "5 / 4").
+    return {
+      visibleRows: expandRow
+        ? sorted.flatMap((row) => {
+            const children = expandRow(row);
+            return children && children.length > 0 ? [row, ...children] : [row];
+          })
+        : sorted,
+      filteredCount: sorted.length,
+    };
   }, [accessors, expandRow, filters, rows, sortStack]);
 
   const paginationResetKey = pagination
@@ -263,14 +267,14 @@ export function DataTableSurface<T>({
       ? footer({
           rows,
           visibleRows,
-          filteredCount: visibleRows.length,
+          filteredCount,
           totalCount: rows.length,
         })
       : footer ?? (
           <span className="tabular-nums">
-            {visibleRows.length === rows.length
+            {filteredCount === rows.length
               ? `${rows.length}`
-              : `${visibleRows.length} / ${rows.length}`}
+              : `${filteredCount} / ${rows.length}`}
           </span>
         );
 
