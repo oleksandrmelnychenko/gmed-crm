@@ -1,5 +1,9 @@
 import { NativeComboboxSelect } from "@/components/ui/combobox-select";
-import { OrderWorkspaceNav } from "@/components/order-workspace-nav";
+import {
+  ORDER_LOADED_EVENT,
+  ORDER_NAV_REQUEST_EVENT,
+  OrderWorkspaceNav,
+} from "@/components/order-workspace-nav";
 import { StaffLink } from "@/components/staff-link";
 import { DocumentSignatureAction } from "@/pages/documents/ui/document-signature-action";
 import {
@@ -1588,6 +1592,28 @@ function useOrdersPageContent() {
   const currentLifecyclePhaseIndex = orderDetail
     ? ORDER_PHASES.indexOf(orderDetail.phase as (typeof ORDER_PHASES)[number])
     : -1;
+  // The workspace rail renders in the app shell and learns the phase and the
+  // read scope from here instead of fetching the order a second time; it
+  // asks again after a remount.
+  const navOrderId = orderDetail?.id ?? null;
+  const navOrderPhase = orderDetail?.phase ?? null;
+  const navPartialRead = Boolean(orderDetail && isPartialOrderRead(orderDetail));
+  useEffect(() => {
+    if (!navOrderId || !navOrderPhase) return;
+    const announce = () =>
+      window.dispatchEvent(
+        new CustomEvent(ORDER_LOADED_EVENT, {
+          detail: { orderId: navOrderId, phase: navOrderPhase, partialRead: navPartialRead },
+        }),
+      );
+    const handleRequest = (event: Event) => {
+      const detail = (event as CustomEvent<{ orderId?: string }>).detail;
+      if (detail?.orderId === navOrderId) announce();
+    };
+    window.addEventListener(ORDER_NAV_REQUEST_EVENT, handleRequest);
+    announce();
+    return () => window.removeEventListener(ORDER_NAV_REQUEST_EVENT, handleRequest);
+  }, [navOrderId, navOrderPhase, navPartialRead]);
   const planningReadinessApplicable = isOrderReadinessGateApplicable(
     orderDetail?.phase,
     "planning",
@@ -4714,7 +4740,7 @@ function useOrdersPageContent() {
                         : "Заказ проходит пять этапов. Открытые пункты ниже блокируют следующий шаг."
                     }
                   >
-                    <div className="grid gap-2 @min-[38rem]:grid-cols-5">
+                    <div className="grid gap-2 @min-[28rem]:grid-cols-3 @min-[38rem]:grid-cols-5">
                       {ORDER_PHASES.map((phase, index) => {
                         const isCurrent = phase === orderDetail.phase;
                         const isCompleted =
