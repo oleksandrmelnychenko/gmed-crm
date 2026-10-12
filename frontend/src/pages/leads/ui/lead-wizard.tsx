@@ -197,7 +197,7 @@ import { PaperSignatureConfirmButton } from "@/pages/documents/ui/paper-signatur
 import { agencyCatalogItemName, agencyServiceLineDisplayName, germanDocumentUnitLabel } from "@/lib/agency-service-labels";
 import { DocumentReviewStatus } from "@/pages/documents/ui/document-review-status";
 import { SignatureDocumentPreview } from "@/pages/documents/ui/signature-document-preview";
-import { canSignWizardDocument, signatureNeedsProof } from "../model/wizard-document-signing";
+import { canSignWizardDocument, documentSignedFor, signatureNeedsProof } from "../model/wizard-document-signing";
 import {
   daysUntilRetentionDeadline,
   retentionCountdownHint,
@@ -2883,11 +2883,7 @@ function WizardDocumentRows({
   const archivedDocuments = sortedDocuments.filter((document) => !document.is_latest_version);
 
   const renderDocument = (document: DocumentItem, archived: boolean) => {
-    const signed = Boolean(
-      complianceKind
-      && document.signed_at
-      && document.compliance_kind === complianceKind,
-    );
+    const signed = documentSignedFor(document, complianceKind);
     return (
       <div key={document.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5">
         {archived
@@ -4387,9 +4383,7 @@ export function LeadWizard({
   const previewedDocument = [...currentPatientEvidence, ...documents].find((item) => item.id === documentPreview?.id);
   const previewComplianceKind = previewedDocument ? wizardDocumentComplianceKind(previewedDocument) : null;
   const previewDocumentSigned = Boolean(
-    previewComplianceKind
-    && previewedDocument?.signed_at
-    && previewedDocument.compliance_kind === previewComplianceKind,
+    previewedDocument && documentSignedFor(previewedDocument, previewComplianceKind),
   );
   const intakeType = lead ? leadIntakeTypeFromLead(lead) : null;
   const isQuestionnaireLead = intakeType === "questionnaire";
@@ -6789,7 +6783,8 @@ ${serviceCommentLines.join("\n")}`
           onDownload={(document) => void downloadDocument(document)}
           onSign={(document, kind) => void signDocument(document.id, kind)}
           onDelete={(document) => { setDeleteError(""); setDeleteReason(""); setDeleteDocument(document); }}
-          onChanged={() => { void refreshDocumentsState(); }}
+          // The signed scan (owner decision 2026-10-11) also changes the payer's state.
+          onChanged={() => { void reloadPayer(); void refreshDocumentsState(); }}
         />
       )}
     />

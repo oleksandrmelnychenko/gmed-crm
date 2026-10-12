@@ -4509,6 +4509,14 @@ async fn withdraw_my_lead_document(
         .bind(auth.user_id)
         .execute(&mut *tx)
         .await?;
+        // What was derived from the file goes with it, translations made as
+        // documents of their own included (same procedure as a deleted file).
+        let derived = crate::routes::documents::purge_document_derived_content_in_tx(
+            &mut tx,
+            &[document_id],
+            Some(auth.user_id),
+        )
+        .await?;
         sqlx::query("UPDATE lead_portal_uploads SET withdrawn_at = now() WHERE document_id = $1")
             .bind(document_id)
             .execute(&mut *tx)
@@ -4525,21 +4533,29 @@ async fn withdraw_my_lead_document(
                     "access_kind": kind.as_str(),
                     "kind": upload_kind,
                     "file_removed_from_disk": staged.is_some(),
+                    "derived_content_removed": derived,
                 }),
             ),
         )
         .await?;
-        tx.commit().await
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(derived)
     }
     .await;
-    if let Err(error) = result {
-        if let Some(staged) = staged.as_ref() {
-            crate::routes::documents::rollback_staged_document_delete(staged).await;
+    let derived = match result {
+        Ok(derived) => derived,
+        Err(error) => {
+            if let Some(staged) = staged.as_ref() {
+                crate::routes::documents::rollback_staged_document_delete(staged).await;
+            }
+            return internal(error, "withdraw upload");
         }
-        return internal(error, "withdraw upload");
-    }
+    };
     if let Some(staged) = staged.as_ref() {
         crate::routes::documents::finalize_staged_document_delete(staged).await;
+    }
+    for storage_key in &derived.translated_document_files {
+        crate::routes::documents::remove_document_blob(storage_key).await;
     }
     crate::realtime::publish_lead_event(
         &state,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canSignWizardDocument, signatureNeedsProof } from "./wizard-document-signing";
+import { canSignWizardDocument, documentSignedFor, signatureNeedsProof } from "./wizard-document-signing";
 
 const pdf = {
   generated_template_id: null as string | null,
@@ -61,10 +61,31 @@ describe("signature proof", () => {
     expect(signatureNeedsProof({ generated_template_id, signed_at: null }, kind)).toBe(true);
   });
 
+  it.each([
+    ["enhanced_due_diligence", "enhanced_due_diligence"],
+    ["cost_coverage_declaration", "cost_coverage_declaration"],
+    // The patient form records no compliance kind; "other" does not open the one click.
+    ["lead_self_disclosure", "other"],
+    ["enhanced_due_diligence", "other"],
+  ])("asks for the scan of a generated %s confirmed as %s", (generated_template_id, kind) => {
+    expect(signatureNeedsProof({ generated_template_id, signed_at: null }, kind)).toBe(true);
+  });
+
   it("keeps the one-click confirmation of uploaded scans, signed versions and other kinds", () => {
     expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "dsgvo")).toBe(false);
+    expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "enhanced_due_diligence")).toBe(false);
     expect(signatureNeedsProof({ generated_template_id: "privacy_consents", signed_at: "2026-10-11T10:00:00Z" }, "dsgvo")).toBe(false);
+    expect(signatureNeedsProof({ generated_template_id: "lead_self_disclosure", signed_at: "2026-10-11T10:00:00Z" }, "other")).toBe(false);
     expect(signatureNeedsProof({ generated_template_id: "gwg_identification", signed_at: null }, "other")).toBe(false);
     expect(signatureNeedsProof({ generated_template_id: null, signed_at: null }, "identity")).toBe(false);
+  });
+
+  it("shows a paper-signed patient form as signed although it records no kind", () => {
+    const signed = { signed_at: "2026-10-12T09:00:00Z", compliance_kind: null };
+    expect(documentSignedFor(signed, "other")).toBe(true);
+    expect(documentSignedFor(signed, "enhanced_due_diligence")).toBe(false);
+    expect(documentSignedFor({ ...signed, compliance_kind: "enhanced_due_diligence" }, "enhanced_due_diligence")).toBe(true);
+    expect(documentSignedFor({ signed_at: null, compliance_kind: "other" }, "other")).toBe(false);
+    expect(documentSignedFor(signed, null)).toBe(false);
   });
 });

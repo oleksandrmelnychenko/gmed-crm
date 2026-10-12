@@ -742,7 +742,40 @@ async fn uploads_need_the_health_consent_and_can_be_withdrawn_until_review() {
         1
     );
 
-    // Withdrawn before review.
+    // A translation made from it as a document of its own (synthetic).
+    let translation_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, storage_key, version_root_document_id,
+                version_number, uploaded_by, generated_manual_text, ursprung
+           ) VALUES (
+                $1, $2, 'Translation DE - Befund', 'translation-de.pdf', 'translated_document',
+                'translation', 'active', 'internal', true, 'application/pdf', 10, $3, $1, 1, $4,
+                'Befund: synthetisch', 'document_translation'
+           )"#,
+    )
+    .bind(translation_id)
+    .bind(lead_id)
+    .bind(format!("{translation_id}_synthetic.pdf"))
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, translated_text, translated_document_id,
+                created_by
+           ) VALUES ($1, 'de', 'manual', 'Befund: synthetisch', $2, $3)"#,
+    )
+    .bind(document_id)
+    .bind(translation_id)
+    .bind(user_id)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    // Withdrawn before review; the translation goes with it.
     let (status, request) = json_request(
         router,
         "DELETE",
@@ -760,6 +793,22 @@ async fn uploads_need_the_health_consent_and_can_be_withdrawn_until_review() {
             .await
             .unwrap();
     assert!(deleted.is_some());
+    let (translation_key, translation_text, translation_reason): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT storage_key, generated_manual_text, file_delete_reason FROM documents WHERE id = $1",
+    )
+    .bind(translation_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!((translation_key, translation_text), (None, None));
+    assert_eq!(
+        translation_reason.as_deref(),
+        Some("source_document_deleted")
+    );
 
     // After staff review the patient can no longer remove it.
     let (_, request) = upload(router, &documents_path, &patient, PDF).await;

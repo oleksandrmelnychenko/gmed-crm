@@ -7888,7 +7888,10 @@ async fn list_patient_documents(
                                'privacy_consents', 'privacy_information', 'consent_data_release_child',
                                'consent_data_release_single')
                            OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
-                  ) AS bundles_consent_document
+                  ) AS bundles_consent_document,
+                  -- A translation of a consent document, in any depth, is one too
+                  -- (owner decision 2026-10-11; migration 20261012150000).
+                  document_translates_consent(d.id) AS translates_consent_document
            FROM documents d
            LEFT JOIN users u ON u.id = d.uploaded_by
            WHERE d.patient_id = $1

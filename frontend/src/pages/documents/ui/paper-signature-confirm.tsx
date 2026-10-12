@@ -31,9 +31,10 @@ type Props = {
 /**
  * Confirms a signature given on paper: staff upload the scan of the signed
  * copy and attest that they compared it ("Подписано на бумаге"). Owner
- * decision 2026-10-11: a generated consent, confidentiality release or
- * framework contract becomes "signed" only with this proof or a QES, never by
- * one click.
+ * decisions 2026-10-11: a generated consent, confidentiality release,
+ * framework contract, enhanced due diligence form, cost coverage declaration
+ * or patient form becomes "signed" only with this proof or a QES, never by
+ * one click (`model/signature-proof.ts`).
  */
 export function PaperSignatureConfirmButton({
   documentId,

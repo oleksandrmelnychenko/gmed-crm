@@ -2822,11 +2822,15 @@ async fn get_lead(
     };
 
     let attachments = match sqlx::query(
-        r#"SELECT id, file_name, content_type, size_bytes, uploaded_at,
-                  imported_document_id, imported_at
-           FROM lead_attachments
-           WHERE lead_id = $1
-           ORDER BY uploaded_at ASC"#,
+        r#"SELECT attachment.id, attachment.file_name, attachment.content_type,
+                  attachment.size_bytes, attachment.uploaded_at,
+                  attachment.imported_document_id, attachment.imported_at,
+                  imported.category, imported.art, imported.generated_template_id,
+                  imported.compliance_kind
+           FROM lead_attachments attachment
+           LEFT JOIN documents imported ON imported.id = attachment.imported_document_id
+           WHERE attachment.lead_id = $1
+           ORDER BY attachment.uploaded_at ASC"#,
     )
     .bind(lead_id)
     .fetch_all(&state.db)
@@ -2834,6 +2838,12 @@ async fn get_lead(
     {
         Ok(rows) => rows
             .into_iter()
+            // The central consent rule (documents.rs): Concierge and Billing
+            // get no consent document, also not as the questionnaire upload
+            // it was imported from.
+            .filter(|r| {
+                !crate::routes::documents::consent_document_closed_to_role(auth.role, r)
+            })
             .map(|r| {
                 json!({
                     "id": r.try_get::<Uuid, _>("id").unwrap_or_default(),
@@ -7390,15 +7400,25 @@ async fn download_attachment(
     }
 
     match sqlx::query(
-        r#"SELECT file_name, content_type, data
-           FROM lead_attachments
-           WHERE id = $1 AND lead_id = $2"#,
+        r#"SELECT attachment.file_name, attachment.content_type, attachment.data,
+                  imported.category, imported.art, imported.generated_template_id,
+                  imported.compliance_kind
+           FROM lead_attachments attachment
+           LEFT JOIN documents imported ON imported.id = attachment.imported_document_id
+           WHERE attachment.id = $1 AND attachment.lead_id = $2"#,
     )
     .bind(attachment_id)
     .bind(lead_id)
     .fetch_optional(&state.db)
     .await
     {
+        // An upload imported as a consent document is a consent document:
+        // closed to Concierge and Billing like the document itself.
+        Ok(Some(row))
+            if crate::routes::documents::consent_document_closed_to_role(auth.role, &row) =>
+        {
+            err(StatusCode::FORBIDDEN, "Insufficient permissions")
+        }
         Ok(Some(row)) => {
             let file_name: String = row.try_get("file_name").unwrap_or_default();
             let content_type: Option<String> = row.try_get("content_type").ok().flatten();
@@ -8291,7 +8311,7 @@ async fn purge_lead_documents_in_tx(
     prospect_patient_id: Option<Uuid>,
 ) -> Result<Vec<String>, sqlx::Error> {
     // Newest version first: a version chain is deleted from its tip.
-    let documents: Vec<(Uuid, Option<String>)> = sqlx::query_as(&format!(
+    let owned: Vec<(Uuid, Option<String>)> = sqlx::query_as(&format!(
         r#"SELECT id, storage_key
            FROM documents
            WHERE (lead_id = $1 OR ($2::uuid IS NOT NULL AND patient_id = $2))
@@ -8303,6 +8323,28 @@ async fn purge_lead_documents_in_tx(
     .bind(prospect_patient_id)
     .fetch_all(&mut **tx)
     .await?;
+    // A translation generated as a document of its own belongs to neither the
+    // lead nor a patient when its source was the lead's: it goes with its
+    // source (derived content), and first, as it names the source.
+    let owned_ids: Vec<Uuid> = owned.iter().map(|(id, _)| *id).collect();
+    let translated =
+        crate::routes::documents::translated_documents_of_in_tx(tx, &owned_ids).await?;
+    let mut documents: Vec<(Uuid, Option<String>)> = if translated.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query_as(&format!(
+            r#"SELECT id, storage_key
+               FROM documents
+               WHERE id = ANY($1)
+                 AND NOT {LEAD_DOCUMENT_RETAINED_SQL}
+               ORDER BY version_number DESC, created_at DESC
+               FOR UPDATE"#
+        ))
+        .bind(&translated)
+        .fetch_all(&mut **tx)
+        .await?
+    };
+    documents.extend(owned);
 
     let mut removed_blobs = Vec::new();
     for (document_id, storage_key) in documents {
@@ -8350,8 +8392,13 @@ async fn purge_lead_documents_in_tx(
                 .await?;
                 // The kept row loses the texts derived from its file too
                 // (translations, import drafts), as with a deleted file.
-                crate::routes::documents::purge_document_derived_content_in_tx(tx, &[document_id])
-                    .await?;
+                let derived = crate::routes::documents::purge_document_derived_content_in_tx(
+                    tx,
+                    &[document_id],
+                    None,
+                )
+                .await?;
+                removed_blobs.extend(derived.translated_document_files);
             }
             Err(error) => return Err(error),
         }

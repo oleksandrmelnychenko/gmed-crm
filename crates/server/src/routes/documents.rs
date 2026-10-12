@@ -13039,6 +13039,7 @@ async fn fetch_document_row(
                                'consent_data_release_single')
                            OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
                   ) AS bundles_consent_document,
+                  document_translates_consent(d.id) AS translates_consent_document,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -13729,8 +13730,10 @@ const CONSENT_DOCUMENT_CODES: &[&str] = &[
 
 /// Whether a document row is a consent document of the patient or lead: by
 /// its category (`consent`), type, generated template or recorded compliance
-/// kind, or as a signed package that holds one (`bundles_consent_document`,
-/// read where the query selects it).
+/// kind, as a signed package that holds one (`bundles_consent_document`), or
+/// as a translation of one — also a translation of such a translation, in any
+/// depth and any version (`translates_consent_document`, the database function
+/// `document_translates_consent`; both read where the query selects them).
 pub(crate) fn is_consent_document_row(row: &sqlx::postgres::PgRow) -> bool {
     let code = |column: &str| {
         row.try_get::<Option<String>, _>(column)
@@ -13752,13 +13755,17 @@ pub(crate) fn is_consent_document_row(row: &sqlx::postgres::PgRow) -> bool {
         || row
             .try_get::<bool, _>("bundles_consent_document")
             .unwrap_or(false)
+        || row
+            .try_get::<bool, _>("translates_consent_document")
+            .unwrap_or(false)
 }
 
 /// Owner decision 2026-10-11: Concierge and Billing never list, open or
-/// download a patient's consent documents — no share or record rule opens
-/// them. CEO, Patient Manager and CEO Assistant keep their access; Billing
-/// keeps the identity document scans (owner decision 2026-10-06).
-fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
+/// download a patient's or lead's consent documents — no share or record rule
+/// opens them, and the lead routes (`leads.rs`) follow the same rule. CEO,
+/// Patient Manager and CEO Assistant keep their access; Billing keeps the
+/// identity document scans (owner decision 2026-10-06).
+pub(crate) fn consent_document_closed_to_role(role: Role, row: &sqlx::postgres::PgRow) -> bool {
     matches!(role, Role::Concierge | Role::Billing) && is_consent_document_row(row)
 }
 
@@ -26942,6 +26949,7 @@ async fn list_documents(
                                'consent_data_release_single')
                            OR member_document.compliance_kind IN ('dsgvo', 'confidentiality_release'))
                   ) AS bundles_consent_document,
+                  document_translates_consent(d.id) AS translates_consent_document,
                   provider_context.provider_context_ids
            FROM documents d
            LEFT JOIN patients p ON p.id = d.patient_id
@@ -32188,13 +32196,95 @@ async fn update_document(
 }
 
 /// What [`purge_document_derived_content_in_tx`] removed, for the audit.
-#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+#[derive(Debug, Default, Clone, serde::Serialize)]
 pub(crate) struct DocumentDerivedContentPurge {
     pub extracted_texts: u64,
     pub translation_requests: u64,
     pub translations: u64,
     pub clinical_import_drafts: u64,
     pub auto_naming_results: u64,
+    /// Translations generated as documents of their own that lost their file
+    /// with the source.
+    pub translated_documents: u64,
+    /// The stored files of those translations: the caller removes them after
+    /// the commit, so a failed transaction keeps them.
+    #[serde(skip)]
+    pub translated_document_files: Vec<String>,
+}
+
+/// `file_delete_reason` of a translation whose file went with its source.
+pub(crate) const SOURCE_DOCUMENT_DELETED_REASON: &str = "source_document_deleted";
+
+/// The translations generated from these documents as documents of their own
+/// (`translated_document_id` of a translation request or a stored
+/// translation), with every version of them and their own translations, in
+/// any depth. The given documents are not part of the result.
+pub(crate) async fn translated_documents_of_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    document_ids: &[Uuid],
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let mut seen: HashSet<Uuid> = document_ids.iter().copied().collect();
+    let mut derived = Vec::new();
+    let mut frontier = document_ids.to_vec();
+    while !frontier.is_empty() {
+        let found: Vec<Uuid> = sqlx::query_scalar(
+            r#"WITH translated AS (
+                   SELECT translated_document_id AS id
+                   FROM document_translation_requests
+                   WHERE document_id = ANY($1) AND translated_document_id IS NOT NULL
+                   UNION
+                   SELECT translated_document_id
+                   FROM document_translations
+                   WHERE document_id = ANY($1) AND translated_document_id IS NOT NULL
+               )
+               SELECT DISTINCT version.id
+               FROM translated
+               JOIN documents translation ON translation.id = translated.id
+               JOIN documents version
+                 ON COALESCE(version.version_root_document_id, version.id)
+                    = COALESCE(translation.version_root_document_id, translation.id)"#,
+        )
+        .bind(&frontier)
+        .fetch_all(&mut **tx)
+        .await?;
+        frontier = found.into_iter().filter(|id| seen.insert(*id)).collect();
+        derived.extend(frontier.iter().copied());
+    }
+    Ok(derived)
+}
+
+/// Whether any of these documents was sent or signed: an opening (share or
+/// portal release), a signature, a recorded acknowledgement or signature
+/// evidence. Such a document is delivery evidence and keeps its file.
+async fn any_document_delivery_protected(
+    executor: impl sqlx::PgExecutor<'_>,
+    document_ids: &[Uuid],
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        r#"SELECT EXISTS(
+               SELECT 1
+               FROM documents protected_document
+               WHERE protected_document.id = ANY($1)
+                 AND (
+                   protected_document.signed_at IS NOT NULL
+                   OR EXISTS(SELECT 1 FROM document_shares protected_share
+                             WHERE protected_share.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_review_events review_event
+                             WHERE review_event.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
+                             WHERE signature_request.source_document_id = protected_document.id
+                                OR signature_request.result_document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
+                             WHERE signature_attachment.document_id = protected_document.id)
+                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
+                             WHERE signature_member.document_id = protected_document.id
+                                OR signature_member.result_document_id = protected_document.id)
+                 )
+           )"#,
+    )
+    .bind(document_ids)
+    .fetch_one(executor)
+    .await
 }
 
 /// Removes what the system keeps beside a document's file that repeats the
@@ -32202,19 +32292,78 @@ pub(crate) struct DocumentDerivedContentPurge {
 /// generated document and its template bindings, the source and translated
 /// texts of its translation requests and stored translations (also where the
 /// document is the translation), the drafts of its clinical imports and the
-/// result of the automatic naming. Open translation requests are cancelled,
-/// open clinical imports and naming jobs fail: there is no file left to work
-/// on. The document rows keep their metadata and history, the clinical record
-/// built from an applied import stays (it is the medical documentation, not a
-/// copy of the file). One procedure for "delete the stored file" and for the
+/// result of the automatic naming. A translation generated as a document of
+/// its own ([`translated_documents_of_in_tx`]) is derived content too: it
+/// loses its file (archived, `file_delete_reason` =
+/// [`SOURCE_DOCUMENT_DELETED_REASON`], openings revoked) and the same texts;
+/// the files are returned for removal after the commit. A legal original of
+/// an electronic signature keeps its file (database trigger). Open
+/// translation requests are cancelled, open clinical imports and naming jobs
+/// fail: there is no file left to work on. The document rows keep their
+/// metadata and history, the clinical record built from an applied import
+/// stays (it is the medical documentation, not a copy of the file). One
+/// procedure for "delete the stored file", the purge of a lead and the
 /// erasure of a patient (Art. 17, Art. 9 DSGVO).
 pub(crate) async fn purge_document_derived_content_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     document_ids: &[Uuid],
+    actor_id: Option<Uuid>,
 ) -> Result<DocumentDerivedContentPurge, sqlx::Error> {
     if document_ids.is_empty() {
         return Ok(DocumentDerivedContentPurge::default());
     }
+    let translated = translated_documents_of_in_tx(tx, document_ids).await?;
+    let translated_rows: Vec<(Uuid, Option<String>)> = sqlx::query_as(
+        r#"SELECT id, storage_key
+           FROM documents
+           WHERE id = ANY($1)
+             AND COALESCE(ursprung, '') NOT IN ('electronic_signature', 'electronic_signature_package')
+           FOR UPDATE"#,
+    )
+    .bind(&translated)
+    .fetch_all(&mut **tx)
+    .await?;
+    let translated_ids: Vec<Uuid> = translated_rows.iter().map(|(id, _)| *id).collect();
+    let translated_document_files: Vec<String> = translated_rows
+        .into_iter()
+        .filter_map(|(_, key)| key.filter(|key| !key.trim().is_empty()))
+        .collect();
+    let mut translated_documents = 0;
+    if !translated_ids.is_empty() {
+        sqlx::query(
+            "UPDATE document_shares SET revoked_at = now() WHERE document_id = ANY($1) AND revoked_at IS NULL",
+        )
+        .bind(&translated_ids)
+        .execute(&mut **tx)
+        .await?;
+        // The SET expressions read the row before the update: only a
+        // translation that still had its file gets the deletion stamp.
+        translated_documents = sqlx::query(
+            r#"UPDATE documents
+               SET status = 'archived',
+                   visibility = 'internal',
+                   storage_key = NULL,
+                   file_deleted_at = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                          THEN now() ELSE file_deleted_at END,
+                   file_deleted_by = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                          THEN $2 ELSE file_deleted_by END,
+                   file_delete_reason = CASE WHEN storage_key IS NOT NULL AND file_deleted_at IS NULL
+                                             THEN $3 ELSE file_delete_reason END
+               WHERE id = ANY($1)"#,
+        )
+        .bind(&translated_ids)
+        .bind(actor_id)
+        .bind(SOURCE_DOCUMENT_DELETED_REASON)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    }
+    let all_ids: Vec<Uuid> = document_ids
+        .iter()
+        .chain(translated_ids.iter())
+        .copied()
+        .collect();
+    let document_ids = all_ids.as_slice();
     let extracted_texts = sqlx::query(
         r#"UPDATE documents
            SET extracted_text = NULL,
@@ -32296,6 +32445,8 @@ pub(crate) async fn purge_document_derived_content_in_tx(
         translations,
         clinical_import_drafts,
         auto_naming_results,
+        translated_documents,
+        translated_document_files,
     })
 }
 
@@ -32445,32 +32596,7 @@ async fn delete_document_file(
 
     // Delivery and signature evidence is append-only. Check after locking the
     // document row so a concurrent send/sign flow cannot race with deletion.
-    let delivery_protected = match sqlx::query_scalar::<_, bool>(
-        r#"SELECT EXISTS(
-               SELECT 1
-               FROM documents protected_document
-               WHERE protected_document.id = $1
-                 AND (
-                   protected_document.signed_at IS NOT NULL
-                   OR EXISTS(SELECT 1 FROM document_shares protected_share
-                             WHERE protected_share.document_id = protected_document.id)
-                   OR EXISTS(SELECT 1 FROM document_review_events review_event
-                             WHERE review_event.document_id = protected_document.id)
-                   OR EXISTS(SELECT 1 FROM document_signature_requests signature_request
-                             WHERE signature_request.source_document_id = protected_document.id
-                                OR signature_request.result_document_id = protected_document.id)
-                   OR EXISTS(SELECT 1 FROM document_signature_attachments signature_attachment
-                             WHERE signature_attachment.document_id = protected_document.id)
-                   OR EXISTS(SELECT 1 FROM document_signature_members signature_member
-                             WHERE signature_member.document_id = protected_document.id
-                                OR signature_member.result_document_id = protected_document.id)
-                 )
-           )"#,
-    )
-    .bind(id)
-    .fetch_one(&mut *tx)
-    .await
-    {
+    let delivery_protected = match any_document_delivery_protected(&mut *tx, &[id]).await {
         Ok(value) => value,
         Err(error) => {
             tracing::error!(error = %error, document_id = %id, "validate signature evidence before delete");
@@ -32487,6 +32613,32 @@ async fn delete_document_file(
                 "message":"Sent or signed documents cannot be deleted"})),
         )
             .into_response();
+    }
+    // The translations generated from the file as documents of their own go
+    // with it (derived content); one that was sent or signed is delivery
+    // evidence, so the file and its translations stay.
+    let translation_protected = match translated_documents_of_in_tx(&mut tx, &[id]).await {
+        Ok(translations) if translations.is_empty() => Ok(false),
+        Ok(translations) => any_document_delivery_protected(&mut *tx, &translations).await,
+        Err(error) => Err(error),
+    };
+    match translation_protected {
+        Ok(false) => {}
+        Ok(true) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({"error":"document_translation_delivery_protected",
+                    "message":"A translation of this document was sent or signed; the document and its translations are kept"})),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            tracing::error!(error = %error, document_id = %id, "validate translation evidence before delete");
+            return err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate document references",
+            );
+        }
     }
 
     let staged_delete = match stage_document_file_delete(had_storage_key.as_deref()).await {
@@ -32543,8 +32695,15 @@ async fn delete_document_file(
     };
 
     // The dialog keeps metadata and history, not the content: the extracted
-    // text, translations and import drafts go with the file.
-    let derived_content = match purge_document_derived_content_in_tx(&mut tx, &[id]).await {
+    // text, translations (also those generated as documents of their own) and
+    // import drafts go with the file.
+    let derived_content = match purge_document_derived_content_in_tx(
+        &mut tx,
+        &[id],
+        Some(auth.user_id),
+    )
+    .await
+    {
         Ok(value) => value,
         Err(error) => {
             if let Some(staged) = staged_delete.as_ref() {
@@ -32609,6 +32768,9 @@ async fn delete_document_file(
 
     if let Some(staged) = staged_delete.as_ref() {
         finalize_staged_document_delete(staged).await;
+    }
+    for storage_key in &derived_content.translated_document_files {
+        remove_document_blob(storage_key).await;
     }
 
     let revoked_share_ids: Vec<_> = revoked_rows

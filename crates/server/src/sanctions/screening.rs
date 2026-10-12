@@ -2098,6 +2098,38 @@ pub async fn purge_for_lead_in_tx(
     Ok(())
 }
 
+/// Removes the screening results of patient relations deleted with the
+/// person they named (the erasure of a patient removes other patients'
+/// relations linked to the erased record), with their notifications.
+pub async fn purge_for_relations_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    relation_ids: &[Uuid],
+) -> Result<(), sqlx::Error> {
+    if relation_ids.is_empty() {
+        return Ok(());
+    }
+    let subject_refs: Vec<String> = relation_ids.iter().map(Uuid::to_string).collect();
+    sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE entity_type = $2
+             AND entity_id IN (
+                 SELECT h.id FROM sanctions_hits h
+                 WHERE h.subject_kind = 'patient_relation' AND h.subject_ref = ANY($1)
+             )"#,
+    )
+    .bind(&subject_refs)
+    .bind(HIT_ENTITY_TYPE)
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM sanctions_hits WHERE subject_kind = 'patient_relation' AND subject_ref = ANY($1)",
+    )
+    .bind(&subject_refs)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// Removes the screening results of an erased patient inside the erasure
 /// transaction.
 pub async fn purge_for_patient_in_tx(

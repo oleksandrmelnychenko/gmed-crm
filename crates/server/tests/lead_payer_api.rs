@@ -434,7 +434,9 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
     assert_eq!(status, StatusCode::CONFLICT, "{blocked}");
     assert_eq!(blocked["reasons"], json!(["cost_assumption_unsigned"]));
 
-    let (status, marked) = json_request(
+    // Owner decision 2026-10-11: the generated declaration is signed only
+    // with proof, never by one click; the scan of the signed copy is it.
+    let (status, refused) = json_request(
         &app,
         "POST",
         &format!("/api/v1/documents/{document_id}/mark-signed"),
@@ -442,7 +444,12 @@ async fn third_party_payer_pays_the_order_and_gmed_signs_last() {
         Some(json!({"compliance_kind": "cost_coverage_declaration"})),
     )
     .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "signature_evidence_required");
+    let (status, marked) =
+        support::paper_signature(&app.suite.app, &pm, &document_id.to_string()).await;
     assert_eq!(status, StatusCode::OK, "{marked}");
+    assert_eq!(marked["compliance_kind"], "cost_coverage_declaration");
 
     let (status, confirmed) = json_request(
         &app,

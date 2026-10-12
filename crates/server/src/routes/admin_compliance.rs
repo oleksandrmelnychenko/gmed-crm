@@ -31,10 +31,9 @@ pub fn router() -> Router<AppState> {
             "/admin/compliance/patient/{patient_id}/export",
             get(export_patient_data),
         )
-        .route(
-            "/admin/compliance/patient/{patient_id}/anonymize",
-            post(anonymize_patient),
-        )
+        // The direct `…/anonymize` endpoint is retired (QA 2026-10-11): an
+        // erasure goes only through the register (request → review →
+        // identity check → execution), with its retention and identity checks.
         .route(
             "/admin/compliance/patient/{patient_id}/restriction/lift",
             post(lift_processing_restriction),
@@ -189,6 +188,110 @@ fn erasure_blocked_by_retention(retention_until: DateTime<Utc>) -> axum::respons
             "retention_until": retention_until.to_rfc3339(),
             "retention_until_display": display,
             "legal_basis": CLINICAL_RETENTION_LEGAL_BASIS,
+        })),
+    )
+        .into_response()
+}
+
+/// The business with a patient that is still open (audit 2026-10-01, item 6):
+/// running orders and invoices with an amount still to settle.
+#[derive(Debug, Default)]
+struct OpenBusiness {
+    /// Numbers of the orders still `active` or `paused`.
+    orders: Vec<String>,
+    /// Numbers of issued invoices with an open amount, or paid advances not
+    /// yet set off against a final invoice.
+    invoices: Vec<String>,
+    /// Invoice drafts not yet issued (they have no number).
+    invoice_drafts: usize,
+}
+
+impl OpenBusiness {
+    fn is_empty(&self) -> bool {
+        self.orders.is_empty() && self.invoices.is_empty() && self.invoice_drafts == 0
+    }
+}
+
+/// The patient's open business, read in the erasure transaction: orders not
+/// completed or cancelled; invoices not cancelled whose gross amount is not
+/// settled by credit notes, payments and applied advances (a draft too), and
+/// advance invoices whose paid amount is not yet applied to a final invoice
+/// (the patient's money the agency still holds).
+async fn load_open_business_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<OpenBusiness, sqlx::Error> {
+    let orders: Vec<String> = sqlx::query_scalar(
+        r#"SELECT order_number
+           FROM orders
+           WHERE patient_id = $1 AND status IN ('active', 'paused')
+           ORDER BY created_at, order_number"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let invoices: Vec<Option<String>> = sqlx::query_scalar(
+        r#"SELECT invoice.invoice_number
+           FROM invoices invoice
+           WHERE invoice.patient_id = $1
+             AND invoice.status <> 'cancelled'
+             AND (
+                 COALESCE(invoice.total_gross, 0) - COALESCE(invoice.credited_amount, 0)
+                     - COALESCE(invoice.paid_amount, 0)
+                     - COALESCE(invoice.prepayment_applied_amount, 0) > 0
+                 OR (
+                     invoice.invoice_type = 'advance'
+                     AND invoice.status <> 'draft'
+                     AND LEAST(COALESCE(invoice.paid_amount, 0),
+                               COALESCE(invoice.total_gross, 0)
+                                   - COALESCE(invoice.credited_amount, 0))
+                         - COALESCE((
+                             SELECT SUM(allocation.amount_gross)
+                             FROM invoice_prepayment_allocations allocation
+                             WHERE allocation.advance_invoice_id = invoice.id
+                         ), 0) > 0
+                 )
+             )
+           ORDER BY invoice.created_at, invoice.invoice_number"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let invoice_drafts = invoices.iter().filter(|number| number.is_none()).count();
+    Ok(OpenBusiness {
+        orders,
+        invoices: invoices.into_iter().flatten().collect(),
+        invoice_drafts,
+    })
+}
+
+/// The refusal of an erasure while business with the patient is open: the
+/// code names the open orders and invoices (the staff UI words it in RU/DE);
+/// the request stays as it is, and the handler can hold or reject it.
+fn erasure_blocked_by_open_business(open: &OpenBusiness) -> axum::response::Response {
+    let label = |numbers: &[String]| {
+        if numbers.is_empty() {
+            "—".to_string()
+        } else {
+            numbers.join(", ")
+        }
+    };
+    (
+        StatusCode::CONFLICT,
+        Json(json!({
+            "error": "erasure_blocked_by_open_business",
+            "message": format!(
+                "The patient still has open orders ({}) or open invoices ({}; drafts: {}). \
+                 Complete or cancel them first, or hold or reject the request.",
+                label(&open.orders),
+                label(&open.invoices),
+                open.invoice_drafts,
+            ),
+            "open_orders": open.orders,
+            "open_invoices": open.invoices,
+            "open_invoice_drafts": open.invoice_drafts,
+            "open_orders_label": label(&open.orders),
+            "open_invoices_label": label(&open.invoices),
         })),
     )
         .into_response()
@@ -1129,54 +1232,6 @@ fn build_patient_export_zip(
                 "Failed to build export bundle",
             )
         })
-}
-
-async fn anonymize_patient(
-    State(state): State<AppState>,
-    Extension(auth): Extension<AuthUser>,
-    Path(patient_id): Path<Uuid>,
-) -> axum::response::Response {
-    if let Err(e) = auth.require_capability(Capability::AdminCompliance) {
-        return e;
-    }
-
-    if let Err(response) = ensure_patient_visible(&state, &auth, patient_id).await {
-        return response;
-    }
-
-    // The direct path is held to the same retention rule as the register:
-    // refused before it records a self-approved request.
-    match running_clinical_retention(&state.db, patient_id).await {
-        Ok(Some(retention_until)) => return erasure_blocked_by_retention(retention_until),
-        Ok(None) => {}
-        Err(e) => {
-            tracing::error!(error = %e, patient_id = %patient_id, "check retention before direct erasure");
-            return err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to anonymize patient",
-            );
-        }
-    }
-
-    let manual_request_id =
-        match create_manual_erasure_request(&state, patient_id, auth.user_id).await {
-            Ok(request_id) => request_id,
-            Err(response) => return response,
-        };
-
-    match complete_privacy_request_execution(
-        &state,
-        patient_id,
-        manual_request_id,
-        "erasure",
-        auth.user_id,
-        true,
-    )
-    .await
-    {
-        Ok(payload) => Json(payload).into_response(),
-        Err(response) => response,
-    }
 }
 
 async fn lift_processing_restriction(
@@ -2486,7 +2541,6 @@ async fn execute_privacy_request(
         request.id,
         &request.request_type,
         auth.user_id,
-        false,
     )
     .await
     {
@@ -2971,120 +3025,12 @@ async fn has_open_privacy_request(
     })
 }
 
-async fn create_manual_erasure_request(
-    state: &AppState,
-    patient_id: Uuid,
-    actor_id: Uuid,
-) -> Result<Uuid, axum::response::Response> {
-    if has_open_privacy_request(state, patient_id, "erasure").await? {
-        return Err(open_privacy_request_exists());
-    }
-
-    let record_summary = load_patient_record_summary(state, patient_id).await?;
-    let reviewed_at = Utc::now();
-    let request_id = sqlx::query_scalar::<_, Uuid>(&format!(
-        r#"INSERT INTO patient_privacy_requests (
-                patient_id, requested_by, request_type, source, status, reason,
-                due_at, reviewed_by, reviewed_at, review_note, context, retention_until
-           ) VALUES (
-                $1, $2, 'erasure', 'admin_intake', 'approved', $3,
-                $4, $2, $4, $5, $6, {PATIENT_RETENTION_SNAPSHOT_SQL}
-           )
-           RETURNING id"#
-    ))
-    .bind(patient_id)
-    .bind(actor_id)
-    .bind("Legacy direct anonymize endpoint")
-    .bind(reviewed_at)
-    .bind("Automatic approval for direct anonymization")
-    .bind(json!({
-        "record_summary": record_summary,
-        "manual_override": true,
-        "created_via": "legacy_anonymize_endpoint",
-    }))
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| match e {
-        sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some("23505") => {
-            open_privacy_request_exists()
-        }
-        other => {
-            tracing::error!(error = %other, patient_id = %patient_id, "create manual erasure request");
-            err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to prepare privacy request",
-            )
-        }
-    })?;
-
-    state.audit_sender.try_send(audit::domain_event(
-        "privacy_request_created",
-        Some(actor_id),
-        "patient",
-        Some(patient_id),
-        json!({
-            "request_id": request_id,
-            "request_type": "erasure",
-            "source": "admin_intake",
-            "reason": "Legacy direct anonymize endpoint",
-            "manual_override": true,
-        }),
-    ));
-
-    state.audit_sender.try_send(audit::domain_event(
-        "privacy_request_reviewed",
-        Some(actor_id),
-        "patient",
-        Some(patient_id),
-        json!({
-            "request_id": request_id,
-            "request_type": "erasure",
-            "review_action": "approve",
-            "status": "approved",
-            "review_note": "Automatic approval for direct anonymization",
-            "manual_override": true,
-        }),
-    ));
-
-    crate::realtime::publish_privacy_request_event(
-        state,
-        Some(actor_id),
-        "privacy_request.created",
-        request_id,
-        json!({
-            "patient_id": patient_id,
-            "request_type": "erasure",
-            "source": "admin_intake",
-            "status": "approved",
-            "manual_override": true,
-        }),
-    )
-    .await;
-    crate::realtime::publish_privacy_request_event(
-        state,
-        Some(actor_id),
-        "privacy_request.reviewed",
-        request_id,
-        json!({
-            "patient_id": patient_id,
-            "request_type": "erasure",
-            "review_action": "approve",
-            "status": "approved",
-            "manual_override": true,
-        }),
-    )
-    .await;
-
-    Ok(request_id)
-}
-
 async fn complete_privacy_request_execution(
     state: &AppState,
     patient_id: Uuid,
     request_id: Uuid,
     request_type: &str,
     actor_id: Uuid,
-    manual_override: bool,
 ) -> Result<Value, axum::response::Response> {
     // Dispatch by name: an unknown type must never fall through to erasure.
     let execution = match request_type {
@@ -3094,10 +3040,7 @@ async fn complete_privacy_request_execution(
         "third_party_revoke" => {
             revoke_third_party_consents(state, patient_id, request_id, actor_id).await?
         }
-        "erasure" => {
-            anonymize_patient_record(state, patient_id, request_id, actor_id, manual_override)
-                .await?
-        }
+        "erasure" => anonymize_patient_record(state, patient_id, request_id, actor_id).await?,
         // Answered by staff outside the system (export handed over, data
         // corrected, objection assessed); execution records that it was done.
         "access" | "rectification" | "portability" | "objection" => json!({
@@ -3127,10 +3070,7 @@ async fn complete_privacy_request_execution(
     .bind(request_id)
     .bind(actor_id)
     .bind(executed_at)
-    .bind(json!({
-        "execution": execution,
-        "manual_override": manual_override,
-    }))
+    .bind(json!({ "execution": execution }))
     .execute(&state.db)
     .await
     .map_err(|e| {
@@ -3155,7 +3095,6 @@ async fn complete_privacy_request_execution(
         json!({
             "request_id": request_id,
             "request_type": request_type,
-            "manual_override": manual_override,
             "executed_at": executed_at.to_rfc3339(),
             "execution": execution,
         }),
@@ -3169,7 +3108,6 @@ async fn complete_privacy_request_execution(
         json!({
             "patient_id": patient_id,
             "request_type": request_type,
-            "manual_override": manual_override,
             "status": "completed",
             "executed_at": executed_at.to_rfc3339(),
             "execution": execution.clone(),
@@ -3290,12 +3228,669 @@ pub(crate) async fn anonymize_patient_identity(
     .await
 }
 
+/// What the erasure did with the relatives, guardians and payers recorded on
+/// the patient (`patient_relations`).
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+struct ErasedRelations {
+    /// Deleted: no business record names them.
+    removed: u64,
+    /// Kept as the payer, invoice recipient or contracting party of an
+    /// invoice, order or framework contract, without phone and notes.
+    kept_for_business_records: u64,
+    /// Relations of other patients that named the erased patient (linked to
+    /// the record) and were deleted: no business record names them.
+    linked_removed: u64,
+    /// Such relations kept for a business record of the other patient,
+    /// without phone and notes and unlinked from the erased record unless a
+    /// released invoice is addressed to them (its recipient is frozen).
+    linked_kept: u64,
+}
+
+/// A relation that an invoice, an order (payer or contracting party) or a
+/// framework contract names (`relation` is the alias of `patient_relations`).
+const RELATION_NAMED_BY_BUSINESS_RECORD_SQL: &str = r#"(
+    EXISTS (SELECT 1 FROM invoices invoice
+            WHERE invoice.payer_patient_relation_id = relation.id)
+    OR EXISTS (SELECT 1 FROM orders o
+               WHERE o.payer_patient_relation_id = relation.id
+                  OR relation.id = ANY(o.contracting_relation_ids))
+    OR EXISTS (SELECT 1 FROM framework_contracts contract
+               WHERE relation.id = ANY(contract.contracting_relation_ids))
+)"#;
+
+/// The patient's relations (`patient_relations`: relatives, guardians,
+/// payers). One that no invoice, order or framework contract names is deleted.
+/// One they name is the payer, invoice recipient or contracting party of that
+/// business record, which commercial and tax law oblige the agency to keep
+/// (§ 14 Abs. 4 UStG, § 257 HGB, § 147 AO; Art. 17 Abs. 3 lit. b DSGVO): it
+/// keeps its name and billing address, and loses the phone, the notes and the
+/// emergency-contact and default-payer flags. A released invoice keeps its
+/// frozen recipient (`recipient_snapshot`) either way. Runs before the
+/// sanctions purge, which drops the screening these changes queue.
+///
+/// The relations of other patients that name the erased patient (linked to
+/// the record, `related_patient_id`) are the erased person's data too and
+/// follow the same rule: deleted with their screening results unless a
+/// business record of that patient names them; a kept one loses phone, notes
+/// and flags and is unlinked from the erased record, unless a released
+/// invoice is addressed to it (the recipient identity it froze stays).
+async fn erase_patient_relations_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<ErasedRelations, sqlx::Error> {
+    let kept: Vec<Uuid> = sqlx::query_scalar(&format!(
+        r#"SELECT relation.id
+           FROM patient_relations relation
+           WHERE relation.patient_id = $1
+             AND {RELATION_NAMED_BY_BUSINESS_RECORD_SQL}
+           FOR UPDATE OF relation"#
+    ))
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let linked_kept: Vec<(Uuid, bool)> = sqlx::query_as(&format!(
+        r#"SELECT relation.id,
+                  EXISTS (SELECT 1 FROM invoices invoice
+                          WHERE invoice.payer_patient_relation_id = relation.id
+                            AND invoice.released_at IS NOT NULL) AS frozen
+           FROM patient_relations relation
+           WHERE relation.related_patient_id = $1
+             AND relation.patient_id <> $1
+             AND {RELATION_NAMED_BY_BUSINESS_RECORD_SQL}
+           FOR UPDATE OF relation"#
+    ))
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let linked_kept_ids: Vec<Uuid> = linked_kept.iter().map(|(id, _)| *id).collect();
+    let linked_frozen_ids: Vec<Uuid> = linked_kept
+        .iter()
+        .filter(|(_, frozen)| *frozen)
+        .map(|(id, _)| *id)
+        .collect();
+    let linked_removed_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"DELETE FROM patient_relations
+           WHERE related_patient_id = $1
+             AND patient_id <> $1
+             AND NOT (id = ANY($2))
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .bind(&linked_kept_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    let linked_kept_count = sqlx::query(
+        r#"UPDATE patient_relations
+           SET phone = NULL,
+               notes = NULL,
+               is_emergency_contact = false,
+               is_default_payer = false,
+               related_patient_id = CASE WHEN id = ANY($2) THEN related_patient_id END
+           WHERE id = ANY($1)"#,
+    )
+    .bind(&linked_kept_ids)
+    .bind(&linked_frozen_ids)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    // The other patients' screening of a deleted relation went with it.
+    crate::sanctions::screening::purge_for_relations_in_tx(tx, &linked_removed_ids).await?;
+    let removed =
+        sqlx::query("DELETE FROM patient_relations WHERE patient_id = $1 AND NOT (id = ANY($2))")
+            .bind(patient_id)
+            .bind(&kept)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    let kept_for_business_records = sqlx::query(
+        r#"UPDATE patient_relations
+           SET phone = NULL,
+               notes = NULL,
+               is_emergency_contact = false,
+               is_default_payer = false
+           WHERE id = ANY($1)"#,
+    )
+    .bind(&kept)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(ErasedRelations {
+        removed,
+        kept_for_business_records,
+        linked_removed: linked_removed_ids.len() as u64,
+        linked_kept: linked_kept_count,
+    })
+}
+
+/// What the erasure scrubbed in the free text of the patient's tasks and
+/// appointments (rows whose text named the patient).
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+struct ScrubbedFreeText {
+    tasks: u64,
+    task_comments: u64,
+    task_checklist_items: u64,
+    appointments: u64,
+    appointment_checklists: u64,
+    appointment_communications: u64,
+    interpreter_reports: u64,
+    appointment_requests: u64,
+    /// Shared internal notes that named the patient (they link to no patient,
+    /// so only the strong identifiers are looked for).
+    internal_notes: u64,
+    /// Attachments of the patient's tasks whose files were deleted (the row
+    /// stays as the record that a file was there).
+    task_attachments_deleted: u64,
+    removed_notifications: u64,
+}
+
+/// The words that identify the patient in free text (see
+/// [`load_identity_terms_in_tx`]).
+struct IdentityTerms {
+    /// Everything, for text linked to the patient.
+    all: Vec<String>,
+    /// Without the first or last name alone and without the street, for
+    /// text that links to no patient (a common first name must not change
+    /// unrelated notes).
+    strong: Vec<String>,
+}
+
+/// The words that identify the patient in free text, read before the record
+/// is anonymised: the names (alone and together), the patient number, e-mail,
+/// phone numbers (also the extra contacts), passport and insurance number,
+/// street, and the emergency contact. Two characters at least (a shorter name
+/// is left as it is); the longest first, so a full name is replaced as one.
+async fn load_identity_terms_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<IdentityTerms, sqlx::Error> {
+    let Some(row) = sqlx::query(
+        r#"SELECT patient_id, first_name, last_name, email, phone_primary, phone_secondary,
+                  passport_number, insurance_number, address_street,
+                  emergency_contact_name, emergency_contact_phone
+           FROM patients WHERE id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_optional(&mut **tx)
+    .await?
+    else {
+        return Ok(IdentityTerms {
+            all: Vec::new(),
+            strong: Vec::new(),
+        });
+    };
+    let text = |column: &str| {
+        row.try_get::<Option<String>, _>(column)
+            .ok()
+            .flatten()
+            .map(|value| value.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|value| !value.is_empty())
+    };
+    let first = text("first_name");
+    let last = text("last_name");
+    let mut terms: Vec<String> = Vec::new();
+    if let (Some(first), Some(last)) = (&first, &last) {
+        terms.push(format!("{first} {last}"));
+        terms.push(format!("{last} {first}"));
+        terms.push(format!("{last}, {first}"));
+    }
+    for column in [
+        "patient_id",
+        "email",
+        "phone_primary",
+        "phone_secondary",
+        "passport_number",
+        "insurance_number",
+        "emergency_contact_name",
+        "emergency_contact_phone",
+    ] {
+        terms.extend(text(column));
+    }
+    let contacts: Vec<String> =
+        sqlx::query_scalar("SELECT value FROM patient_contacts WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_all(&mut **tx)
+            .await?;
+    terms.extend(contacts.into_iter().map(|value| value.trim().to_string()));
+    let tidy = |mut terms: Vec<String>| {
+        let mut seen = std::collections::HashSet::new();
+        terms.retain(|term| term.chars().count() >= 2 && seen.insert(term.to_lowercase()));
+        terms.sort_by_key(|term| std::cmp::Reverse(term.chars().count()));
+        terms
+    };
+    let strong = tidy(terms.clone());
+    // The street, and either name alone, only where the text belongs to
+    // the patient (a shared note may name the same street or first name).
+    terms.extend(text("address_street"));
+    terms.extend(first);
+    terms.extend(last);
+    Ok(IdentityTerms {
+        all: tidy(terms),
+        strong,
+    })
+}
+
+/// The `UPDATE` that replaces the patient's words in the text columns of the
+/// rows `filter` selects (`$1` in the filter, `$2` the pattern, `$3` the
+/// replacement). A column with a length limit keeps it: the replaced text is
+/// cut to the limit, so the erasure never fails on a check constraint.
+fn scrub_statement(table: &str, columns: &[(&str, Option<u32>)], filter: &str) -> String {
+    let set = columns
+        .iter()
+        .map(|(column, limit)| match limit {
+            Some(limit) => {
+                format!("{column} = left(regexp_replace({column}, $2, $3, 'gi'), {limit})")
+            }
+            None => format!("{column} = regexp_replace({column}, $2, $3, 'gi')"),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    let matches = columns
+        .iter()
+        .map(|(column, _)| format!("{column} ~* $2"))
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    format!("UPDATE {table} SET {set} WHERE ({filter}) AND ({matches})")
+}
+
+/// A PostgreSQL regular expression (ARE) that finds any of the terms as a
+/// whole word, case-insensitively with the flag `i`: the character before is
+/// kept in group 1, the one after is only looked at. `None` without terms.
+fn identity_terms_pattern(terms: &[String]) -> Option<String> {
+    if terms.is_empty() {
+        return None;
+    }
+    let escaped: Vec<String> = terms
+        .iter()
+        .map(|term| {
+            term.chars()
+                .flat_map(|ch| {
+                    let special = matches!(
+                        ch,
+                        '\\' | '^'
+                            | '$'
+                            | '.'
+                            | '|'
+                            | '?'
+                            | '*'
+                            | '+'
+                            | '('
+                            | ')'
+                            | '['
+                            | ']'
+                            | '{'
+                            | '}'
+                    );
+                    special
+                        .then_some('\\')
+                        .into_iter()
+                        .chain(std::iter::once(ch))
+                })
+                .collect()
+        })
+        .collect();
+    Some(format!(
+        "(^|[^[:alnum:]_])({})(?=[^[:alnum:]_]|$)",
+        escaped.join("|")
+    ))
+}
+
+/// The free text of the patient's tasks and appointments names the patient
+/// (audit 2026-10-01, item 1/15): titles, descriptions, notes, locations,
+/// comments and checklist items of the tasks of the patient, of the
+/// patient's appointments and orders, the appointments' notes, checklists,
+/// clinic communication and interpreter reports, and the patient's own
+/// appointment requests. Every mention of the patient (names, number,
+/// contacts) becomes the anonymised label; dates, statuses, hours and amounts
+/// stay for the business records. A text with a length limit is cut to it
+/// after the replacement, so a long label never fails the erasure. The shared
+/// internal notes link to no patient: there only the strong identifiers are
+/// replaced (full name, number, contacts, documents), not a first or last
+/// name alone. Notifications about these tasks and appointments go, like the
+/// patient's own. Runs before the record is anonymised (the terms come from
+/// it).
+async fn scrub_patient_free_text_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    anon: &str,
+) -> Result<ScrubbedFreeText, sqlx::Error> {
+    let terms = load_identity_terms_in_tx(tx, patient_id).await?;
+    let mut scrubbed = ScrubbedFreeText::default();
+    let appointment_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM appointments WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_all(&mut **tx)
+            .await?;
+    let task_ids: Vec<Uuid> = sqlx::query_scalar(
+        r#"SELECT id FROM tasks
+           WHERE patient_id = $1
+              OR appointment_id = ANY($2)
+              OR order_id IN (SELECT id FROM orders WHERE patient_id = $1)"#,
+    )
+    .bind(patient_id)
+    .bind(&appointment_ids)
+    .fetch_all(&mut **tx)
+    .await?;
+    scrubbed.removed_notifications = sqlx::query(
+        r#"DELETE FROM user_notifications
+           WHERE (entity_type = 'task' AND entity_id = ANY($1))
+              OR (entity_type IN ('appointment', 'appointment_request') AND entity_id = ANY($2))
+              OR (entity_type = 'appointment_request'
+                  AND entity_id IN (SELECT id FROM patient_appointment_requests
+                                    WHERE patient_id = $3))"#,
+    )
+    .bind(&task_ids)
+    .bind(&appointment_ids)
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    let Some(pattern) = identity_terms_pattern(&terms.all) else {
+        return Ok(scrubbed);
+    };
+    let replacement = format!("\\1{anon}");
+    // One statement per table: every listed text column of the rows, with
+    // the length limit the schema sets for it.
+    let statements = [
+        (
+            scrub_statement(
+                "tasks",
+                &[("title", None), ("description", None), ("location", None)],
+                "id = ANY($1)",
+            ),
+            &task_ids,
+        ),
+        (
+            scrub_statement(
+                "concierge_operational_task_comments",
+                &[("body", Some(4000))],
+                "task_id = ANY($1)",
+            ),
+            &task_ids,
+        ),
+        (
+            scrub_statement(
+                "concierge_operational_task_checklist_items",
+                &[("label", Some(500))],
+                "task_id = ANY($1)",
+            ),
+            &task_ids,
+        ),
+        (
+            scrub_statement(
+                "appointments",
+                &[
+                    ("title", None),
+                    ("location", None),
+                    ("notes", None),
+                    ("preparation_notes", None),
+                    ("followup_notes", None),
+                    ("interpreter_response_comment", Some(1000)),
+                ],
+                "id = ANY($1)",
+            ),
+            &appointment_ids,
+        ),
+        (
+            scrub_statement(
+                "appointment_checklists",
+                &[("item_text", None)],
+                "appointment_id = ANY($1)",
+            ),
+            &appointment_ids,
+        ),
+        (
+            scrub_statement(
+                "appointment_communications",
+                &[("subject", None), ("message", None)],
+                "appointment_id = ANY($1)",
+            ),
+            &appointment_ids,
+        ),
+        (
+            scrub_statement(
+                "interpreter_reports",
+                &[("report_text", None), ("notes", None)],
+                "appointment_id = ANY($1)",
+            ),
+            &appointment_ids,
+        ),
+    ];
+    let mut counts = Vec::with_capacity(statements.len());
+    for (statement, ids) in &statements {
+        counts.push(
+            sqlx::query(statement)
+                .bind(*ids)
+                .bind(&pattern)
+                .bind(&replacement)
+                .execute(&mut **tx)
+                .await?
+                .rows_affected(),
+        );
+    }
+    scrubbed.tasks = counts[0];
+    scrubbed.task_comments = counts[1];
+    scrubbed.task_checklist_items = counts[2];
+    scrubbed.appointments = counts[3];
+    scrubbed.appointment_checklists = counts[4];
+    scrubbed.appointment_communications = counts[5];
+    scrubbed.interpreter_reports = counts[6];
+    scrubbed.appointment_requests = sqlx::query(&scrub_statement(
+        "patient_appointment_requests",
+        &[
+            ("reason", None),
+            ("notes", None),
+            ("review_note", None),
+            ("cancellation_reason", None),
+        ],
+        "patient_id = $1",
+    ))
+    .bind(patient_id)
+    .bind(&pattern)
+    .bind(&replacement)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    // The shared internal notes link to no patient: every note (archived
+    // ones too) is searched, for the strong identifiers only. `$1` is unused.
+    if let Some(strong_pattern) = identity_terms_pattern(&terms.strong) {
+        scrubbed.internal_notes = sqlx::query(&scrub_statement(
+            "internal_notes",
+            &[("title", Some(255)), ("body", Some(20000))],
+            "$1::uuid IS NOT NULL",
+        ))
+        .bind(patient_id)
+        .bind(&strong_pattern)
+        .bind(&replacement)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    }
+    Ok(scrubbed)
+}
+
+/// Erasure of the files attached to the patient's tasks, like the files of
+/// the erased documents: the stored file goes (after the commit, so a failed
+/// erasure keeps it), the row stays with type, size, uploader and dates as
+/// the record that a file was there, and the name (which may name the
+/// patient) becomes a neutral one with the original extension. An attachment
+/// deleted earlier keeps its deletion stamp and gets the neutral name too.
+/// Returns the count of attachments deleted now and their stored files.
+async fn erase_patient_task_attachments_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+    actor_id: Uuid,
+) -> Result<(u64, Vec<String>), sqlx::Error> {
+    const NEUTRAL_NAME: &str =
+        r#"'erased-file' || COALESCE(substring(file_name from '\.[A-Za-z0-9]{1,8}$'), '')"#;
+    let task_filter = r#"task_id IN (
+               SELECT id FROM tasks
+               WHERE patient_id = $1
+                  OR appointment_id IN (SELECT id FROM appointments WHERE patient_id = $1)
+                  OR order_id IN (SELECT id FROM orders WHERE patient_id = $1))"#;
+    let storage_keys: Vec<String> = sqlx::query_scalar(&format!(
+        r#"UPDATE concierge_operational_task_attachments
+           SET deleted_at = now(), deleted_by = $2, file_name = {NEUTRAL_NAME}
+           WHERE {task_filter} AND deleted_at IS NULL
+           RETURNING storage_key"#
+    ))
+    .bind(patient_id)
+    .bind(actor_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    sqlx::query(&format!(
+        r#"UPDATE concierge_operational_task_attachments
+           SET file_name = {NEUTRAL_NAME}
+           WHERE {task_filter} AND deleted_at IS NOT NULL
+             AND file_name <> {NEUTRAL_NAME}"#
+    ))
+    .bind(patient_id)
+    .execute(&mut **tx)
+    .await?;
+    let deleted = storage_keys.len() as u64;
+    Ok((
+        deleted,
+        storage_keys
+            .into_iter()
+            .filter(|key| !key.trim().is_empty())
+            .collect(),
+    ))
+}
+
+/// What the erasure cleared in the order preparations of the patient.
+#[derive(Debug, Default, Clone, Copy, serde::Serialize)]
+struct ErasedOrderIntakeFacts {
+    order_intakes: u64,
+    fact_reviews: u64,
+    document_contexts: u64,
+}
+
+/// The copies of the patient's record an order preparation keeps
+/// (`order_intakes`: the draft, the prepared and confirmed facts, the
+/// confirmation snapshot; `order_intake_fact_reviews`; the context stored on
+/// the order's documents): the insurance, phone, e-mail and address go, as on
+/// the record itself, and so do the copies of the identity. The order, its
+/// lines and prices stay (§ 257 HGB), and so do the GwG answers (PEP,
+/// representative) the record keeps as well (§ 8 Abs. 4 GwG).
+async fn erase_order_intake_facts_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    patient_id: Uuid,
+) -> Result<ErasedOrderIntakeFacts, sqlx::Error> {
+    use super::order_intakes::{erase_personal_data, erase_personal_facts};
+
+    #[derive(sqlx::FromRow)]
+    struct StoredIntake {
+        order_id: Uuid,
+        data: Value,
+        prepared_data: Option<Value>,
+        baseline_facts: Value,
+        confirmed_facts: Option<Value>,
+        confirmation_snapshot: Option<Value>,
+    }
+
+    let mut erased = ErasedOrderIntakeFacts::default();
+    let intakes: Vec<StoredIntake> = sqlx::query_as(
+        r#"SELECT intake.order_id, intake.data, intake.prepared_data, intake.baseline_facts,
+                  intake.confirmed_facts, intake.confirmation_snapshot
+           FROM order_intakes intake
+           JOIN orders o ON o.id = intake.order_id
+           WHERE o.patient_id = $1
+           FOR UPDATE OF intake"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for intake in intakes {
+        let StoredIntake {
+            order_id,
+            mut data,
+            prepared_data: mut prepared,
+            baseline_facts: mut baseline,
+            confirmed_facts: mut confirmed,
+            confirmation_snapshot: mut snapshot,
+        } = intake;
+        let mut changed = erase_personal_data(&mut data);
+        changed |= prepared.as_mut().is_some_and(erase_personal_data);
+        changed |= erase_personal_facts(&mut baseline);
+        changed |= confirmed.as_mut().is_some_and(erase_personal_facts);
+        changed |= snapshot.as_mut().is_some_and(erase_personal_data);
+        if !changed {
+            continue;
+        }
+        sqlx::query(
+            r#"UPDATE order_intakes
+               SET data = $2, prepared_data = $3, baseline_facts = $4,
+                   confirmed_facts = $5, confirmation_snapshot = $6
+               WHERE order_id = $1"#,
+        )
+        .bind(order_id)
+        .bind(&data)
+        .bind(&prepared)
+        .bind(&baseline)
+        .bind(&confirmed)
+        .bind(&snapshot)
+        .execute(&mut **tx)
+        .await?;
+        erased.order_intakes += 1;
+    }
+
+    let reviews: Vec<(Uuid, Value, Value)> = sqlx::query_as(
+        r#"SELECT review.id, review.before_facts, review.after_facts
+           FROM order_intake_fact_reviews review
+           JOIN orders o ON o.id = review.order_id
+           WHERE o.patient_id = $1
+           FOR UPDATE OF review"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (review_id, mut before, mut after) in reviews {
+        let changed = erase_personal_facts(&mut before) | erase_personal_facts(&mut after);
+        if !changed {
+            continue;
+        }
+        sqlx::query(
+            "UPDATE order_intake_fact_reviews SET before_facts = $2, after_facts = $3 WHERE id = $1",
+        )
+        .bind(review_id)
+        .bind(&before)
+        .bind(&after)
+        .execute(&mut **tx)
+        .await?;
+        erased.fact_reviews += 1;
+    }
+
+    // The kept documents of the order (contract, order, estimate) carry the
+    // same context; the erased ones lose it entirely further on.
+    let contexts: Vec<(Uuid, Value)> = sqlx::query_as(
+        r#"SELECT d.id, d.order_intake_context
+           FROM documents d
+           WHERE d.order_intake_context IS NOT NULL
+             AND (d.patient_id = $1
+                  OR d.order_id IN (SELECT o.id FROM orders o WHERE o.patient_id = $1))
+           FOR UPDATE OF d"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    for (document_id, mut context) in contexts {
+        if !erase_personal_data(&mut context) {
+            continue;
+        }
+        sqlx::query("UPDATE documents SET order_intake_context = $2 WHERE id = $1")
+            .bind(document_id)
+            .bind(&context)
+            .execute(&mut **tx)
+            .await?;
+        erased.document_contexts += 1;
+    }
+    Ok(erased)
+}
+
 async fn anonymize_patient_record(
     state: &AppState,
     patient_id: Uuid,
     request_id: Uuid,
     actor_id: Uuid,
-    manual_override: bool,
 ) -> Result<Value, axum::response::Response> {
     let anon = format!("ANON-{}", &patient_id.to_string()[..8]);
     let anonymized_at = Utc::now();
@@ -3332,6 +3927,26 @@ async fn anonymize_patient_record(
     if let Some(retention_until) = running_retention {
         return Err(erasure_blocked_by_retention(retention_until));
     }
+    // Nor while the business with the patient is still open: a running order
+    // or an invoice with an amount still to settle (also a draft, and a paid
+    // advance not yet set off against a final invoice). The handler can hold
+    // or reject the request meanwhile.
+    let open_business = load_open_business_in_tx(&mut tx, patient_id)
+        .await
+        .map_err(|e| failed(e, "check open orders and invoices"))?;
+    if !open_business.is_empty() {
+        return Err(erasure_blocked_by_open_business(&open_business));
+    }
+    // The free text of tasks and appointments, while the record still names
+    // the patient (the words to replace come from it).
+    let mut scrubbed_free_text = scrub_patient_free_text_in_tx(&mut tx, patient_id, &anon)
+        .await
+        .map_err(|e| failed(e, "scrub tasks and appointments"))?;
+    let (task_attachments_deleted, task_attachment_files) =
+        erase_patient_task_attachments_in_tx(&mut tx, patient_id, actor_id)
+            .await
+            .map_err(|e| failed(e, "erase task attachments"))?;
+    scrubbed_free_text.task_attachments_deleted = task_attachments_deleted;
 
     let update = anonymize_patient_identity(
         &mut *tx,
@@ -3354,6 +3969,15 @@ async fn anonymize_patient_record(
             "Failed to anonymize patient",
         ));
     }
+
+    // Relatives and payers, and the copies an order preparation keeps; before
+    // the sanctions purge, which also drops the screening these changes queue.
+    let erased_relations = erase_patient_relations_in_tx(&mut tx, patient_id)
+        .await
+        .map_err(|e| failed(e, "erase patient relations"))?;
+    let erased_order_intakes = erase_order_intake_facts_in_tx(&mut tx, patient_id)
+        .await
+        .map_err(|e| failed(e, "erase order preparation facts"))?;
 
     // Sanctions screening results follow the patient's retention.
     if let Err(e) = crate::sanctions::screening::purge_for_patient_in_tx(&mut tx, patient_id).await
@@ -3470,7 +4094,7 @@ async fn anonymize_patient_record(
     .await
     .map_err(|e| failed(e, "load patient documents"))?;
     let erased_document_ids: Vec<Uuid> = erased_documents.iter().map(|(id, _)| *id).collect();
-    let erased_file_keys: Vec<String> = erased_documents
+    let mut erased_file_keys: Vec<String> = erased_documents
         .into_iter()
         .filter_map(|(_, key)| key.filter(|key| !key.trim().is_empty()))
         .collect();
@@ -3500,10 +4124,16 @@ async fn anonymize_patient_record(
     .execute(&mut *tx)
     .await
     .map_err(|e| failed(e, "erase patient documents"))?;
-    let derived_content =
-        super::documents::purge_document_derived_content_in_tx(&mut tx, &erased_document_ids)
-            .await
-            .map_err(|e| failed(e, "erase derived document content"))?;
+    // With it the translations generated from them as documents of their own,
+    // also where such a translation belongs to no patient (a lead's document).
+    let derived_content = super::documents::purge_document_derived_content_in_tx(
+        &mut tx,
+        &erased_document_ids,
+        Some(actor_id),
+    )
+    .await
+    .map_err(|e| failed(e, "erase derived document content"))?;
+    erased_file_keys.extend(derived_content.translated_document_files.iter().cloned());
 
     // Further copies of the identity: the extra phone numbers and e-mail
     // addresses, the identity block of imported medication plans, and
@@ -3551,7 +4181,7 @@ async fn anonymize_patient_record(
 
     let removed_attachments = remove_redacted_chat_attachments(patient_id, attachment_keys).await;
     // Blobs are removed only after the commit, so a failed erasure keeps them.
-    for storage_key in &erased_file_keys {
+    for storage_key in erased_file_keys.iter().chain(&task_attachment_files) {
         super::documents::remove_document_blob(storage_key).await;
     }
 
@@ -3564,7 +4194,6 @@ async fn anonymize_patient_record(
             "article": "Art. 17",
             "anonymized_to": anon,
             "request_id": request_id,
-            "manual_override": manual_override,
             "assignments_revoked": assignments_revoked,
             "consents_revoked": consents_revoked,
             "redacted_messages": redacted_messages,
@@ -3572,6 +4201,9 @@ async fn anonymize_patient_record(
             "erased_document_files": erased_file_keys.len(),
             "erased_documents": erased_document_ids.len(),
             "erased_document_content": derived_content,
+            "erased_relations": erased_relations,
+            "erased_order_intake_facts": erased_order_intakes,
+            "scrubbed_free_text": scrubbed_free_text,
             "removed_contacts": removed_contacts,
             "removed_medication_plan_imports": removed_medication_plan_imports,
             "removed_notifications": removed_notifications,
@@ -3593,6 +4225,9 @@ async fn anonymize_patient_record(
         "erased_document_files": erased_file_keys.len(),
         "erased_documents": erased_document_ids.len(),
         "erased_document_content": derived_content,
+        "erased_relations": erased_relations,
+        "erased_order_intake_facts": erased_order_intakes,
+        "scrubbed_free_text": scrubbed_free_text,
         "removed_contacts": removed_contacts,
         "removed_medication_plan_imports": removed_medication_plan_imports,
         "removed_notifications": removed_notifications,
@@ -4060,8 +4695,8 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "request_type": request_type,
         "source": source,
         // How the request reached the register: the patient portal, the
-        // compliance workspace (staff recorded it), the retention sweep or the
-        // direct erasure endpoint.
+        // compliance workspace (staff recorded it) or the retention sweep;
+        // older rows also the retired direct erasure endpoint.
         "created_via": context
             .get("created_via")
             .and_then(Value::as_str)
@@ -4079,6 +4714,7 @@ fn map_privacy_request_row(row: &PgRow) -> Value {
         "reviewed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("reviewed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "executed_at": row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("executed_at").unwrap_or_default().map(|value| value.to_rfc3339()),
         "record_summary": context.get("record_summary").cloned(),
+        // Set on rows of the retired direct erasure endpoint only.
         "manual_override": context.get("manual_override").and_then(Value::as_bool).unwrap_or(false),
         "is_overdue": is_overdue,
         "identity_verification": context.get("identity_verification").cloned(),
@@ -4222,4 +4858,35 @@ fn normalize_optional(value: Option<&str>) -> Option<String> {
 
 fn err(status: StatusCode, message: &str) -> axum::response::Response {
     (status, Json(serde_json::json!({ "error": status.canonical_reason().unwrap_or("error"), "message": message }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{identity_terms_pattern, scrub_statement};
+
+    #[test]
+    fn the_identity_pattern_escapes_the_terms_and_matches_whole_words() {
+        assert_eq!(identity_terms_pattern(&[]), None);
+        let pattern =
+            identity_terms_pattern(&["Anna Muster".to_string(), "+49 (30) 1234.567".to_string()])
+                .unwrap();
+        assert_eq!(
+            pattern,
+            r"(^|[^[:alnum:]_])(Anna Muster|\+49 \(30\) 1234\.567)(?=[^[:alnum:]_]|$)"
+        );
+    }
+
+    #[test]
+    fn a_scrubbed_column_with_a_length_limit_is_cut_to_it() {
+        assert_eq!(
+            scrub_statement(
+                "internal_notes",
+                &[("title", Some(255)), ("body", None)],
+                "id = ANY($1)",
+            ),
+            "UPDATE internal_notes SET title = left(regexp_replace(title, $2, $3, 'gi'), 255), \
+             body = regexp_replace(body, $2, $3, 'gi') \
+             WHERE (id = ANY($1)) AND (title ~* $2 OR body ~* $2)"
+        );
+    }
 }

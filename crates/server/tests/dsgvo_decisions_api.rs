@@ -390,6 +390,216 @@ async fn retention_sweep_respects_rejections_and_clinical_retention() {
     assert_eq!(raised(expired).await, 2);
 }
 
+/// An erasure put on hold until the retention of the medical documentation
+/// ends returns to the queue on that date: requested again with a new
+/// deadline and the step in its history, audited, and CEO and IT admin are
+/// told. A hold whose patient's retention was moved on by a later clinical
+/// entry follows the new date instead.
+#[tokio::test]
+async fn an_erasure_hold_returns_to_the_queue_when_the_retention_ends() {
+    let Some(ctx) = support::suite_context(TEST_SECRET).await else {
+        return;
+    };
+    let (app, pool, admin_id) = (ctx.app.clone(), ctx.pool.clone(), ctx.admin_id);
+    let t = tag("hold-requeue");
+    let ended = seed_patient(&pool, admin_id, &format!("{t}-a")).await;
+    let running = seed_patient(&pool, admin_id, &format!("{t}-b")).await;
+    let it_admin = seed_user(&pool, &format!("{t}-it"), "it_admin").await;
+    let ceo = bearer(admin_id, "ceo");
+
+    let mut requests = Vec::new();
+    for patient in [ended, running] {
+        sqlx::query(
+            "UPDATE patients SET clinical_retention_until = now() + interval '10 years' WHERE id = $1",
+        )
+        .bind(patient)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/compliance/patient/{patient}/privacy-requests"),
+            &ceo,
+            Some(json!({
+                "request_type": "erasure",
+                "source": "admin_intake",
+                "reason": "Synthetic erasure request",
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        let request_id = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+        let (status, body) = json_request(
+            &app,
+            "POST",
+            &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review"),
+            &ceo,
+            Some(json!({
+                "action": "hold",
+                "reason": "Medical documentation must be kept (§ 630f BGB)",
+            })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["status"], "retention_hold");
+        requests.push(request_id);
+    }
+    let (ended_request, running_request) = (requests[0], requests[1]);
+    // Any request type can be held until a date: a restriction request of the
+    // second patient, held for 30 days.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{running}/privacy-requests"),
+        &ceo,
+        Some(json!({
+            "request_type": "restriction",
+            "source": "admin_intake",
+            "reason": "Synthetic restriction request",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let restriction_request = Uuid::parse_str(body["id"].as_str().unwrap()).unwrap();
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{restriction_request}/review"),
+        &ceo,
+        Some(json!({
+            "action": "hold",
+            "reason": "Waiting for the outcome of the clinic's review",
+            "retention_days": 30,
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "retention_hold");
+    let requeue = || gmed_server::routes::retention::requeue_expired_retention_holds(&ctx.state);
+
+    // Nothing comes back before the date.
+    assert_eq!(requeue().await.unwrap(), 0);
+
+    // The date passes. The first file's documentation may go now; the second
+    // got a clinical entry meanwhile, which moved its retention on.
+    sqlx::query(
+        "UPDATE patient_privacy_requests SET retention_until = now() - interval '1 hour' WHERE id = ANY($1)",
+    )
+    .bind(vec![ended_request, running_request, restriction_request])
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE patients SET clinical_retention_until = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(ended)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let report = gmed_server::routes::retention::flag_expired_patient_files(&ctx.state)
+        .await
+        .unwrap();
+    // The ended erasure and the restriction (its date does not depend on the
+    // medical documentation); not the erasure whose retention moved on.
+    assert_eq!(report.requeued, 2);
+    let restriction_status: String =
+        sqlx::query_scalar("SELECT status FROM patient_privacy_requests WHERE id = $1")
+            .bind(restriction_request)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(restriction_status, "requested");
+    let restriction_notice: Value = sqlx::query_scalar(
+        r#"SELECT params FROM user_notifications
+           WHERE user_id = $1 AND kind = 'privacy_request' AND entity_id = $2"#,
+    )
+    .bind(it_admin)
+    .bind(running)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(restriction_notice["origin"], "retention_hold_ended");
+    assert_eq!(restriction_notice["request_type"], "restriction");
+
+    let (status, decision_reason, due_at, context): (
+        String,
+        Option<String>,
+        chrono::DateTime<Utc>,
+        Value,
+    ) = sqlx::query_as(
+        "SELECT status, decision_reason, due_at, context FROM patient_privacy_requests WHERE id = $1",
+    )
+    .bind(ended_request)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "requested");
+    assert_eq!(decision_reason, None);
+    assert!(due_at > Utc::now() + Duration::days(29), "{due_at}");
+    let history = context["decision_history"].as_array().unwrap();
+    let last = history.last().unwrap();
+    assert_eq!(last["action"], "requeue");
+    assert_eq!(last["from_status"], "retention_hold");
+    assert_eq!(last["to_status"], "requested");
+    // The processing stays restricted until the erasure is executed.
+    let restricted: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id = $1")
+        .bind(ended)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(restricted["processing_restricted"], true, "{restricted}");
+    assert_eq!(
+        audit_count(&pool, "privacy_request_requeued", ended, 1).await,
+        1
+    );
+    let notice: Value = sqlx::query_scalar(
+        r#"SELECT params FROM user_notifications
+           WHERE user_id = $1 AND kind = 'privacy_request' AND entity_id = $2"#,
+    )
+    .bind(it_admin)
+    .bind(ended)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(notice["origin"], "retention_hold_ended");
+    assert_eq!(notice["request_type"], "erasure");
+    assert!(notice["due_date"].is_string(), "{notice}");
+
+    // Back in the queue it is decided as usual: now it can be approved.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{ended_request}/review"),
+        &ceo,
+        Some(json!({ "action": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "approved");
+
+    // The other hold follows the moved retention and the restriction with it.
+    let (status, held_until): (String, Option<chrono::DateTime<Utc>>) = sqlx::query_as(
+        "SELECT status, retention_until FROM patient_privacy_requests WHERE id = $1",
+    )
+    .bind(running_request)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(status, "retention_hold");
+    assert!(held_until.is_some_and(|until| until > Utc::now() + Duration::days(3000)));
+    let legal_status: Value = sqlx::query_scalar("SELECT legal_status FROM patients WHERE id = $1")
+        .bind(running)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        legal_status["processing_restricted_until"].is_string(),
+        "{legal_status}"
+    );
+    assert_eq!(requeue().await.unwrap(), 0);
+}
+
 #[tokio::test]
 async fn incident_reopening_needs_a_reason_and_high_risk_needs_subject_notice() {
     let Some(ctx) = support::suite_context(TEST_SECRET).await else {

@@ -88,6 +88,43 @@ describe("API validation errors", () => {
     expect(failure.message).not.toContain("The patient's medical documentation");
   });
 
+  it("names the open orders and invoices that hold an erasure, in the user's language", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "erasure_blocked_by_open_business",
+      message: "The patient still has open orders (A-1) or open invoices (R-7; drafts: 1).",
+      open_orders: ["A-20261012-0001"],
+      open_invoices: ["R-2026-0007"],
+      open_invoice_drafts: 1,
+      open_orders_label: "A-20261012-0001",
+      open_invoices_label: "R-2026-0007",
+    }), { status: 409, headers: { "Content-Type": "application/json" } })));
+    const { apiFetch } = await loadApiModule();
+    const failure = await apiFetch("/admin/compliance/privacy-requests/r/execute", { method: "POST", body: "{}" })
+      .catch((error: unknown) => error as Error & { code?: string });
+    expect(failure).toMatchObject({ status: 409, code: "erasure_blocked_by_open_business" });
+    expect(failure.message).toContain("A-20261012-0001");
+    expect(failure.message).toContain("R-2026-0007");
+    expect(failure.message).not.toContain("{open_");
+    expect(failure.message).not.toContain("The patient still has");
+  });
+
+  it("explains in the user's language why a file with a sent translation is kept", async () => {
+    setWindowOrigin("http://app.local:4173");
+    setTokenStorage("test-token");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      error: "document_translation_delivery_protected",
+      message: "A translation of this document was sent or signed; the document and its translations are kept",
+    }), { status: 409, headers: { "Content-Type": "application/json" } })));
+    const { apiFetch } = await loadApiModule();
+    const failure = await apiFetch("/documents/d/delete", { method: "POST", body: "{}" })
+      .catch((error: unknown) => error as Error & { code?: string });
+    expect(failure).toMatchObject({ status: 409, code: "document_translation_delivery_protected" });
+    expect(failure.message).not.toContain("A translation of this document");
+    expect(failure.message.length).toBeGreaterThan(20);
+  });
+
   it("does not display a gateway HTML page as a validation message", async () => {
     setWindowOrigin("http://app.local:4173");
     setTokenStorage("test-token");

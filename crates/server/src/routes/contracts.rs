@@ -1110,25 +1110,59 @@ fn compute_quote_totals(items: &[QuoteLineItem]) -> QuoteTotals {
     }
 }
 
-/// Kinds of documents GMED generates for the client's signature that count as
-/// signed only with proof (owner decision 2026-10-11): the scan of the signed
-/// copy ("Подписано на бумаге", `POST /documents/{id}/paper-signature`) or a
-/// qualified electronic signature — never a one-click confirmation.
-const PROOF_REQUIRED_SIGNATURE_KINDS: [&str; 3] =
-    ["dsgvo", "confidentiality_release", "framework_contract"];
+/// Kinds of documents GMED generates for a signature that count as signed only
+/// with proof (owner decisions 2026-10-11): the scan of the signed copy
+/// ("Подписано на бумаге", `POST /documents/{id}/paper-signature`) or a
+/// qualified electronic signature — never a one-click confirmation. The
+/// consents and the framework contract, the enhanced due diligence form and
+/// the payer's cost coverage declaration (Kostenübernahmeerklärung). The
+/// confirmation of an identity document is a check, not a signature, and stays
+/// one click.
+const PROOF_REQUIRED_SIGNATURE_KINDS: [&str; 5] = [
+    "dsgvo",
+    "confidentiality_release",
+    "framework_contract",
+    "enhanced_due_diligence",
+    "cost_coverage_declaration",
+];
+
+/// Templates whose generated document counts as signed only with proof, under
+/// whatever compliance kind staff confirm it (also `other`): the documents of
+/// [`PROOF_REQUIRED_SIGNATURE_KINDS`] and the lead's patient form
+/// (Patientenformular, `lead_self_disclosure`), which records no compliance
+/// kind. The GwG identification sheet is GMED's own record and stays one
+/// click.
+const PROOF_REQUIRED_SIGNATURE_TEMPLATES: [&str; 9] = [
+    "privacy_consents",
+    "consent_data_release",
+    "consent_data_release_child",
+    "consent_data_release_single",
+    "confidentiality_release",
+    "framework_contract",
+    "enhanced_due_diligence",
+    "cost_coverage_declaration",
+    "lead_self_disclosure",
+];
 
 /// Whether `POST /documents/{id}/mark-signed` must refuse: the document is the
-/// unsigned output of a template (`generated_template_id`) and the kind needs
-/// proof. An uploaded scan is the proof itself, and a version that is already
-/// signed (paper scan, QES result) only receives its compliance kind.
+/// unsigned output of a template (`generated_template_id`) and the kind or the
+/// template needs proof. An uploaded scan is the proof itself, and a version
+/// that is already signed (paper scan, QES result) only receives its
+/// compliance kind.
 pub(crate) fn mark_signed_needs_proof(
     kind: &str,
     generated_template_id: Option<&str>,
     already_signed: bool,
 ) -> bool {
-    PROOF_REQUIRED_SIGNATURE_KINDS.contains(&kind)
-        && !already_signed
-        && generated_template_id.is_some_and(|template| !template.trim().is_empty())
+    let Some(template) = generated_template_id
+        .map(str::trim)
+        .filter(|template| !template.is_empty())
+    else {
+        return false;
+    };
+    !already_signed
+        && (PROOF_REQUIRED_SIGNATURE_KINDS.contains(&kind)
+            || PROOF_REQUIRED_SIGNATURE_TEMPLATES.contains(&template))
 }
 
 /// The refusal of [`mark_signed_needs_proof`].
@@ -4927,6 +4961,43 @@ mod tests {
         for status in ["sent", "signed", "terminated"] {
             assert_eq!(patient_contract_status(status), status);
         }
+    }
+
+    /// Owner decisions 2026-10-11: a generated consent, contract, EDD form,
+    /// cost coverage declaration or patient form is signed only with a scan or
+    /// a QES; the identity check and GMED's GwG sheet stay one click.
+    #[test]
+    fn generated_signature_documents_need_proof_to_count_as_signed() {
+        use super::mark_signed_needs_proof as needs_proof;
+        for (kind, template) in [
+            ("dsgvo", "privacy_consents"),
+            ("confidentiality_release", "confidentiality_release"),
+            ("framework_contract", "framework_contract"),
+            ("enhanced_due_diligence", "enhanced_due_diligence"),
+            ("cost_coverage_declaration", "cost_coverage_declaration"),
+            // The patient form records no compliance kind.
+            ("other", "lead_self_disclosure"),
+            // Nor does "other" open the one click for the others.
+            ("other", "enhanced_due_diligence"),
+            ("other", "cost_coverage_declaration"),
+        ] {
+            assert!(
+                needs_proof(kind, Some(template), false),
+                "{kind} {template}"
+            );
+            // A signed version (scan or QES result) only gets its kind.
+            assert!(
+                !needs_proof(kind, Some(template), true),
+                "{kind} {template}"
+            );
+        }
+        // An uploaded scan is the proof itself.
+        assert!(!needs_proof("enhanced_due_diligence", None, false));
+        assert!(!needs_proof("cost_coverage_declaration", Some("  "), false));
+        // An identity document is checked, not signed; GMED signs its GwG sheet.
+        assert!(!needs_proof("identity", Some("passport"), false));
+        assert!(!needs_proof("other", Some("gwg_identification"), false));
+        assert!(!needs_proof("other", Some("single_order"), false));
     }
 
     #[test]

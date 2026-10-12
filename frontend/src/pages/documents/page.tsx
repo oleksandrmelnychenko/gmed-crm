@@ -5645,6 +5645,7 @@ function StaffDocumentsPage({
                     <MarkComplianceSignedControl
                       documentId={detail.id}
                       patientId={detail.patient_id}
+                      document={detail}
                       onDone={() => refresh()}
                     />
                   ) : null}

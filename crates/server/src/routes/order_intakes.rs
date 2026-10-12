@@ -72,6 +72,78 @@ struct Facts {
     representative_authority: String,
 }
 
+/// The [`Facts`] copied from the patient's record that the Art. 17 erasure
+/// clears on the record (`anonymize_patient_identity`): insurance, phone,
+/// e-mail and address. The GwG answers (PEP, representative) stay with the
+/// record's `legal_status` and so with its copies (§ 8 Abs. 4 GwG).
+const ERASED_FACT_FIELDS: [&str; 9] = [
+    "insurance_type",
+    "insurance_provider",
+    "insurance_number",
+    "phone_primary",
+    "email",
+    "address_street",
+    "address_city",
+    "address_zip",
+    "address_country",
+];
+
+/// Copies of the person in a stored context: the identity of the patient
+/// ([`context_tx`]) and the patient and lead of a repeat order's document
+/// context (`repeat_order_document_context`).
+const ERASED_CONTEXT_PERSONS: [&str; 3] = ["identity", "patient", "lead"];
+
+/// Clears the copied record fields of one stored facts object
+/// (`baseline_facts`, `confirmed_facts`, a review's `before_facts` /
+/// `after_facts`) for the Art. 17 erasure. Only fields present are touched,
+/// and they become empty text, as [`facts`] reads an erased record. Whether
+/// anything changed.
+pub(crate) fn erase_personal_facts(facts: &mut Value) -> bool {
+    let Some(object) = facts.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for field in ERASED_FACT_FIELDS {
+        if let Some(value) = object.get_mut(field)
+            && value.as_str() != Some("")
+        {
+            *value = Value::String(String::new());
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Clears the person in a stored draft (`data`, `prepared_data`), document
+/// context (`documents.order_intake_context`) or confirmation snapshot for the
+/// Art. 17 erasure: the copied facts ([`erase_personal_facts`]) and the
+/// identity copies become empty, in nested `data` and `context` too. The
+/// order's content (dates, lines, prices, prepayment) stays. Whether anything
+/// changed.
+pub(crate) fn erase_personal_data(value: &mut Value) -> bool {
+    let Some(object) = value.as_object_mut() else {
+        return false;
+    };
+    let mut changed = false;
+    for key in ERASED_CONTEXT_PERSONS {
+        if let Some(person) = object.get_mut(key)
+            && person.is_object()
+        {
+            *person = Value::Null;
+            changed = true;
+        }
+    }
+    if let Some(facts) = object.get_mut("facts") {
+        changed |= erase_personal_facts(facts);
+    }
+    for nested in ["data", "context"] {
+        if let Some(inner) = object.get_mut(nested) {
+            changed |= erase_personal_data(inner);
+        }
+    }
+    changed
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct Line {
@@ -1084,5 +1156,96 @@ mod document_review_tests {
             );
             assert_eq!(check["expiry"], json!(expiry));
         }
+    }
+}
+
+#[cfg(test)]
+mod erasure_tests {
+    use super::*;
+
+    fn stored_facts() -> Value {
+        json!(Facts {
+            insurance_type: "private".into(),
+            insurance_provider: "Beispiel Versicherung".into(),
+            insurance_number: "A123456789".into(),
+            phone_primary: "+49 30 1234567".into(),
+            email: "anna.muster@example.com".into(),
+            address_street: "Musterweg 1".into(),
+            address_city: "Berlin".into(),
+            address_zip: "10115".into(),
+            address_country: "DE".into(),
+            pep_contract_partner: Some(false),
+            pep_beneficial_owner: Some(false),
+            pep_office: String::new(),
+            pep_asset_origin: String::new(),
+            representative_name: "Ben Muster".into(),
+            representative_phone: "+49 30 7654321".into(),
+            representative_authority: "Vollmacht".into(),
+        })
+    }
+
+    #[test]
+    fn the_erasure_clears_the_copied_record_fields_and_keeps_the_gwg_answers() {
+        let mut facts = stored_facts();
+        assert!(erase_personal_facts(&mut facts));
+        let erased: Facts = serde_json::from_value(facts.clone()).unwrap();
+        assert_eq!(erased.insurance_number, "");
+        assert_eq!(erased.email, "");
+        assert_eq!(erased.address_street, "");
+        assert_eq!(erased.phone_primary, "");
+        assert_eq!(erased.pep_contract_partner, Some(false));
+        assert_eq!(erased.representative_name, "Ben Muster");
+        // Erasing twice changes nothing more; an empty object stays empty.
+        assert!(!erase_personal_facts(&mut facts));
+        let mut empty = json!({});
+        assert!(!erase_personal_facts(&mut empty));
+        assert_eq!(empty, json!({}));
+    }
+
+    #[test]
+    fn the_erasure_clears_the_person_in_drafts_contexts_and_snapshots() {
+        let draft = json!(Draft {
+            facts: serde_json::from_value(stored_facts()).unwrap(),
+            needs_description: "Kardiologische Abklärung".into(),
+            ..Default::default()
+        });
+        let mut snapshot = json!({
+            "context": {
+                "order_id": Uuid::nil(),
+                "data": draft.clone(),
+                "facts": stored_facts(),
+                "identity": { "first_name": "Anna", "last_name": "Muster", "birth_date": "1985-03-02" },
+                "contract": { "number": "RV-1" },
+            },
+            "checks": [{ "key": "facts", "status": "passed" }],
+        });
+        assert!(erase_personal_data(&mut snapshot));
+        let context = &snapshot["context"];
+        assert!(context["identity"].is_null());
+        assert_eq!(context["facts"]["email"], "");
+        assert_eq!(context["data"]["facts"]["insurance_number"], "");
+        assert_eq!(
+            context["data"]["needs_description"],
+            "Kardiologische Abklärung"
+        );
+        assert_eq!(context["contract"]["number"], "RV-1");
+        // The draft still reads as a draft.
+        let mut data = draft;
+        assert!(erase_personal_data(&mut data));
+        let erased: Draft = serde_json::from_value(data).unwrap();
+        assert_eq!(erased.facts.address_city, "");
+        assert_eq!(erased.facts.representative_authority, "Vollmacht");
+
+        // A repeat order's document context names the patient and the lead.
+        let mut repeat = json!({
+            "kind": "repeat-order-v2",
+            "patient": { "first_name": "Anna", "insurance_number": "A123456789" },
+            "lead": { "first_name": "Anna", "zip_code": "10115" },
+            "services": [{ "description": "Beratung" }],
+        });
+        assert!(erase_personal_data(&mut repeat));
+        assert!(repeat["patient"].is_null() && repeat["lead"].is_null());
+        assert_eq!(repeat["services"][0]["description"], "Beratung");
+        assert!(!erase_personal_data(&mut repeat));
     }
 }

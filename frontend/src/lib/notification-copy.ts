@@ -199,6 +199,35 @@ function legacyPrivacyRequestType(body: string | null): string | null {
 
 function privacyRequest(item: NotificationFacts, lang: Lang): NotificationCopy | null {
   const tr = translationsFor(lang);
+  // A request held until a date (for an erasure: the retention of the data) is back in
+  // the queue on that date (crates/server/src/routes/retention.rs, requeue_expired_retention_holds).
+  if (text(item, "origin") === "retention_hold_ended") {
+    const patient = text(item, "patient_label") ?? "";
+    const type = text(item, "request_type");
+    const until = day(text(item, "retention_until"));
+    const due = day(text(item, "due_date"));
+    const heading = pick({
+      ru: "Отложенный запрос DSGVO снова в очереди",
+      de: "Zurückgestellter DSGVO-Antrag wieder in der Warteschlange",
+    }, lang);
+    const parts = [
+      type ? `${privacyRequestTypeLabel(type, tr)}:` : null,
+      until
+        ? fill({
+            ru: "запрос был отложен до {until}. Проверьте и исполните его.",
+            de: "Der Antrag war bis {until} zurückgestellt. Prüfen und ausführen.",
+          }, lang, { until })
+        : pick({
+            ru: "Проверьте и исполните запрос.",
+            de: "Den Antrag prüfen und ausführen.",
+          }, lang),
+      due ? fill({ ru: "Срок: {due}", de: "Frist: {due}" }, lang, { due }) : null,
+    ].filter(Boolean);
+    return {
+      title: patient ? `${heading}: ${patient}` : heading,
+      body: parts.join(" "),
+    };
+  }
   const retentionTitle = legacy(item.title, /^Retention: (\d+) patient file\(s\) due for erasure$/);
   if (text(item, "origin") === "retention_sweep" || retentionTitle) {
     const count = num(item, "count") ?? Number(retentionTitle?.[1] ?? 0);

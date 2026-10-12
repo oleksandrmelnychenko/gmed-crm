@@ -3879,6 +3879,14 @@ async fn withdraw_upload(
         .bind(document_id)
         .execute(&mut *tx)
         .await?;
+        // What was derived from the file goes with it, translations made as
+        // documents of their own included (same procedure as a deleted file).
+        let derived = crate::routes::documents::purge_document_derived_content_in_tx(
+            &mut tx,
+            &[document_id],
+            None,
+        )
+        .await?;
         sqlx::query("UPDATE lead_portal_uploads SET withdrawn_at = now() WHERE document_id = $1")
             .bind(document_id)
             .execute(&mut *tx)
@@ -3893,21 +3901,29 @@ async fn withdraw_upload(
                     "lead_id": link.lead_id,
                     "kind": kind,
                     "file_removed_from_disk": staged.is_some(),
+                    "derived_content_removed": derived,
                 }),
             ),
         )
         .await?;
-        tx.commit().await
+        tx.commit().await?;
+        Ok::<_, sqlx::Error>(derived)
     }
     .await;
-    if let Err(error) = result {
-        if let Some(staged) = staged.as_ref() {
-            crate::routes::documents::rollback_staged_document_delete(staged).await;
+    let derived = match result {
+        Ok(derived) => derived,
+        Err(error) => {
+            if let Some(staged) = staged.as_ref() {
+                crate::routes::documents::rollback_staged_document_delete(staged).await;
+            }
+            return intake::internal(error, "withdraw payer upload");
         }
-        return intake::internal(error, "withdraw payer upload");
-    }
+    };
     if let Some(staged) = staged.as_ref() {
         crate::routes::documents::finalize_staged_document_delete(staged).await;
+    }
+    for storage_key in &derived.translated_document_files {
+        crate::routes::documents::remove_document_blob(storage_key).await;
     }
     publish(&state, None, link.lead_id, Some("payer")).await;
     questionnaire_response(&state, link.lead_id, Viewer::Payer, StatusCode::OK).await

@@ -2756,6 +2756,52 @@ test.describe("lead wizard UX", () => {
     expect(statusOrMarkRequests).toBe(0);
   });
 
+  test("the enhanced check and the patient form need the signed scan instead of one click", async ({ page }) => {
+    const leadId = "00000000-0000-0000-0000-000000000902";
+    const eddId = "00000000-0000-0000-0000-000000000981";
+    const formId = "00000000-0000-0000-0000-000000000982";
+    const signed = new Set<string>();
+    const generated = (id: string, template: string, filename: string, kind: string | null) => ({
+      id, lead_id: leadId, auto_name: filename, original_filename: filename,
+      generated_template_id: template, mime_type: "application/pdf", file_size: 2048,
+      created_at: "2026-09-05T10:00:00Z", has_stored_file: true, is_latest_version: true,
+      signed_at: signed.has(id) ? "2026-09-05T11:00:00Z" : null,
+      // A paper-signed patient form records no compliance kind.
+      compliance_kind: signed.has(id) ? kind : null,
+    });
+    await page.route(`**/api/v1/documents?lead_id=${leadId}&include_archived_versions=true`, (route) => json(route, [
+      generated(eddId, "enhanced_due_diligence", "verstaerkte-pruefung.pdf", "enhanced_due_diligence"),
+      generated(formId, "lead_self_disclosure", "patientenformular.pdf", null),
+    ]));
+    // Owner decision 2026-10-11: signed only with the scan or a QES.
+    let oneClickAttempts = 0;
+    await page.route("**/api/v1/documents/*/mark-signed", (route) => {
+      oneClickAttempts += 1;
+      return json(route, { error: "signature_evidence_required" }, 409);
+    });
+    for (const id of [eddId, formId]) {
+      await page.route(`**/api/v1/documents/${id}/paper-signature`, (route) => {
+        signed.add(id);
+        return json(route, { ok: true, document_id: id, replaced_document_id: id, signed_at: "2026-09-05T11:00:00Z" });
+      });
+    }
+    await page.goto(`/leads?lead=${leadId}&view=wizard`);
+    const wizard = page.getByRole("dialog", { name: "Lead-Aufnahme" });
+    await wizard.locator('[data-step="documents"]').click();
+    for (const testId of ["lead-wizard-enhanced-check-section", "lead-wizard-self-disclosure-section"]) {
+      const section = wizard.getByTestId(testId);
+      await section.getByRole("button", { name: "Unterschrift bestätigen", exact: true }).click();
+      const paper = page.getByRole("dialog", { name: "Unterschrift bestätigen", exact: true });
+      await paper.locator('input[type="file"]').setInputFiles({ name: "signed.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed") });
+      await paper.getByRole("checkbox").check();
+      await paper.getByRole("button", { name: "Als unterschrieben speichern", exact: true }).click();
+      await expect(paper).toBeHidden();
+      // Signed: no confirmation is offered any more, also not for the patient form without a kind.
+      await expect(section.getByRole("button", { name: "Unterschrift bestätigen", exact: true })).toHaveCount(0);
+    }
+    expect(oneClickAttempts).toBe(0);
+  });
+
   test("document preview keeps mobile actions visible and omits signing for information sheets", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     const leadId = "00000000-0000-0000-0000-000000000902";

@@ -203,6 +203,45 @@ async fn seed_document(
     .unwrap()
 }
 
+/// An erasure through the register, the only way since the direct
+/// `…/anonymize` endpoint was retired: recorded by GMED (no identity check
+/// needed), approved and executed. Returns the execution's response.
+async fn erase_through_register(app: &axum::Router, patient_id: Uuid, bearer: &str) -> Value {
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        bearer,
+        Some(json!({
+            "request_type": "erasure",
+            "source": "admin_intake",
+            "reason": "Synthetic erasure for the test",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let request_id = body["id"].as_str().unwrap().to_string();
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review"),
+        bearer,
+        Some(json!({ "action": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+        bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body
+}
+
 #[tokio::test]
 async fn patient_manager_can_manage_patient_consents_and_export_contains_history() {
     let Some((app, pool, admin_id)) = test_context().await else {
@@ -1631,7 +1670,8 @@ async fn erasure_waits_for_the_clinical_retention_and_restricts_processing_inste
     assert_eq!(&display[2..3], ".");
     assert!(body["legal_basis"].as_str().unwrap().contains("630f"));
 
-    // The direct endpoint is held to the same rule and records nothing.
+    // The old direct endpoint is retired: no erasure outside the register,
+    // and nothing is recorded.
     let (status, body) = json_request(
         &app,
         "POST",
@@ -1640,8 +1680,13 @@ async fn erasure_waits_for_the_clinical_retention_and_restricts_processing_inste
         None,
     )
     .await;
-    assert_eq!(status, StatusCode::CONFLICT, "{body}");
-    assert_eq!(body["error"], "erasure_blocked_by_retention");
+    assert!(
+        matches!(
+            status,
+            StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+        ),
+        "{status} {body}"
+    );
     let erasure_requests: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM patient_privacy_requests WHERE patient_id = $1 AND request_type = 'erasure'",
     )
@@ -1818,14 +1863,147 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     .fetch_one(&pool)
     .await
     .unwrap();
+    // The translation generated as a document of its own; it names no patient
+    // (as one made from a lead's document), so only its source leads to it.
+    let translated_document = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, storage_key, version_root_document_id,
+                version_number, uploaded_by, generated_manual_text, ursprung
+           ) VALUES (
+                $1, $2, 'translation-ru.pdf', 'translated_document', 'translation', 'active',
+                'internal', false, 'application/pdf', 10, $3, $1, 1, $4, $5,
+                'document_translation'
+           )"#,
+    )
+    .bind(translated_document)
+    .bind(format!("Translation RU - {person}"))
+    .bind(format!("{translated_document}_synthetic.pdf"))
+    .bind(admin_id)
+    .bind(format!("Имя: {person}"))
+    .execute(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         r#"INSERT INTO document_translations (
-                document_id, target_language, provider, source_text, translated_text, created_by
-           ) VALUES ($1, 'ru', 'manual', $2, $2, $3)"#,
+                document_id, target_language, provider, source_text, translated_text,
+                translated_document_id, created_by
+           ) VALUES ($1, 'ru', 'manual', $2, $2, $3, $4)"#,
     )
     .bind(sticker)
     .bind(format!("Name: {person}"))
+    .bind(translated_document)
     .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Relations: a relative no business record names, and the father who
+    // pays the order (Kostenträger of the business record).
+    let relative: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_relations (
+                patient_id, related_name, relation_type, is_emergency_contact, phone, notes,
+                email, address_street, address_city, address_zip, address_country
+           ) VALUES ($1, 'Ben Muster', 'spouse', true, '+49 30 1111111', 'Calls in the evening',
+                     'ben.muster@example.com', 'Musterweg 1', 'Berlin', '10115', 'DE')
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let payer: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO patient_relations (
+                patient_id, related_name, relation_type, is_emergency_contact, phone, notes,
+                email, address_street, address_city, address_zip, address_country,
+                is_default_payer
+           ) VALUES ($1, 'Viktor Zahler', 'parent', true, '+49 30 2222222', 'Pays by transfer',
+                     'viktor.zahler@example.com', 'Zahlerstraße 2', 'Köln', '50667', 'DE', true)
+           RETURNING id"#,
+    )
+    .bind(patient_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // A completed order: an open one would hold the erasure (audit item 6).
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by,
+                               payer_patient_relation_id)
+           VALUES ($1, $2, 'closure', 'completed', $3, $4)
+           RETURNING id"#,
+    )
+    .bind(format!("ORD-{tag}"))
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(payer)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // The order preparation keeps copies of the record and the identity.
+    let facts = json!({
+        "insurance_type": "private",
+        "insurance_provider": "Beispiel Versicherung",
+        "insurance_number": "A123456789",
+        "phone_primary": "+49 30 1234567",
+        "email": format!("{tag}@example.com"),
+        "address_street": "Musterweg 1",
+        "address_city": "Berlin",
+        "address_zip": "10115",
+        "address_country": "DE",
+        "pep_contract_partner": false,
+        "pep_beneficial_owner": false,
+        "pep_office": "",
+        "pep_asset_origin": "",
+        "representative_name": "Viktor Zahler",
+        "representative_phone": "+49 30 2222222",
+        "representative_authority": "parent",
+    });
+    let identity =
+        json!({ "first_name": format!("First {tag}"), "last_name": format!("Last {tag}") });
+    sqlx::query(
+        r#"INSERT INTO order_intakes (
+                order_id, data, prepared_data, baseline_facts, confirmed_facts, confirmation_snapshot
+           ) VALUES ($1, $2, $2, $3, $3, $4)"#,
+    )
+    .bind(order_id)
+    .bind(json!({ "facts": facts, "needs_description": "Check-up" }))
+    .bind(&facts)
+    .bind(json!({
+        "context": { "data": { "facts": facts }, "facts": facts, "identity": identity },
+        "checks": [],
+    }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO order_intake_fact_reviews (order_id, before_facts, after_facts, confirmed_by)
+           VALUES ($1, $2, $2, $3)"#,
+    )
+    .bind(order_id)
+    .bind(&facts)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // The order document is kept (§ 257 HGB); its stored context is not.
+    let order_document = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, patient_id, order_id, auto_name, original_filename, art, category, status,
+                visibility, is_medical, mime_type, file_size, storage_key,
+                version_root_document_id, version_number, uploaded_by, order_intake_context
+           ) VALUES (
+                $1, $2, $3, 'Einzelauftrag', 'einzelauftrag.pdf', 'single_order', 'order',
+                'active', 'internal', false, 'application/pdf', 10, $4, $1, 1, $5, $6
+           )"#,
+    )
+    .bind(order_document)
+    .bind(patient_id)
+    .bind(order_id)
+    .bind(format!("{order_document}_synthetic.pdf"))
+    .bind(admin_id)
+    .bind(json!({ "order_id": order_id, "facts": facts, "identity": identity, "data": { "facts": facts } }))
     .execute(&pool)
     .await
     .unwrap();
@@ -1860,17 +2038,412 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     .await
     .unwrap();
 
-    let (status, body) = json_request(
-        &app,
-        "POST",
-        &format!("/api/v1/admin/compliance/patient/{patient_id}/anonymize"),
-        &auth_header_for(admin_id, "ceo"),
-        None,
+    // Free text of tasks and appointments names the patient (audit item 1/15).
+    let appointment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO appointments (patient_id, appointment_type, title, date, status, notes, created_by)
+           VALUES ($1, 'medical', $2, CURRENT_DATE + 7, 'planned', $3, $4)
+           RETURNING id"#,
     )
-    .await;
-    assert_eq!(status, StatusCode::OK, "{body}");
+    .bind(patient_id)
+    .bind(format!("Kardiologie {person}"))
+    .bind(format!("Patient {person}, mail {tag}@example.com, PT-{tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let task_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO tasks (title, description, assigned_to, assigned_by, patient_id,
+                              appointment_id, due_date)
+           VALUES ($1, $2, $3, $3, $4, $5, now() + interval '2 days')
+           RETURNING id"#,
+    )
+    .bind(format!("Call {person}"))
+    .bind(format!("Reminder for Last {tag}: bring the passport"))
+    .bind(admin_id)
+    .bind(patient_id)
+    .bind(appointment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO concierge_operational_task_comments (task_id, body, created_by, request_id)
+           VALUES ($1, $2, $3, gen_random_uuid())"#,
+    )
+    .bind(task_id)
+    .bind(format!("{person} asked for a taxi"))
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO patient_appointment_requests (patient_id, requested_by, appointment_type, reason)
+           VALUES ($1, $2, 'medical', $3)"#,
+    )
+    .bind(patient_id)
+    .bind(patient_user_id)
+    .bind(format!("Termin für {person}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A checklist item near its limit repeats a short phone number: with the
+    // longer label in its place the text is cut to the 500 characters the
+    // column allows, and the erasure does not fail on it.
+    let short_phone = format!("+{}", 100_000_000 + Uuid::new_v4().as_u128() % 900_000_000);
+    sqlx::query(
+        "INSERT INTO patient_contacts (patient_id, contact_kind, value) VALUES ($1, 'phone', $2)",
+    )
+    .bind(patient_id)
+    .bind(&short_phone)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let long_label = vec![short_phone.clone(); 45].join(" ");
+    assert!(long_label.chars().count() <= 500);
+    sqlx::query(
+        r#"INSERT INTO concierge_operational_task_checklist_items (task_id, label, created_by, request_id)
+           VALUES ($1, $2, $3, gen_random_uuid())"#,
+    )
+    .bind(task_id)
+    .bind(&long_label)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A file attached to the task: the stored file goes, the row stays as the
+    // record that a file was there, without the name.
+    let attachment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO concierge_operational_task_attachments (
+                task_id, file_name, mime_type, file_size, storage_key,
+                file_nonce, encryption_key_id, uploaded_by
+           ) VALUES ($1, $2, 'application/pdf', 10, $3, '\x00'::bytea, 'test', $4)
+           RETURNING id"#,
+    )
+    .bind(task_id)
+    .bind(format!("Befund {person}.pdf"))
+    .bind(format!("synthetic/{tag}-task-attachment.pdf"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // Shared internal notes link to no patient: the full name and the e-mail
+    // address are replaced, a first name alone (anyone's) stays.
+    let named_note: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO internal_notes (title, body, created_by, updated_by)
+           VALUES ($1, $2, $3, $3) RETURNING id"#,
+    )
+    .bind(format!("Rückruf {person}"))
+    .bind(format!("Mail an {tag}@example.com senden"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let first_name_note: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO internal_notes (title, body, created_by, updated_by)
+           VALUES ($1, NULL, $2, $2) RETURNING id"#,
+    )
+    .bind(format!("Dienstplan First {tag}"))
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    // Another patient's file names the erased person: as a spouse (nothing
+    // else names that relation) and as the payer of his completed order.
+    let other_patient = seed_patient(&pool, admin_id, &format!("{tag}-other")).await;
+    let mut linked = Vec::new();
+    for (relation_type, phone) in [("spouse", "+49 30 3333333"), ("relative", "+49 30 4444444")] {
+        let relation_id: Uuid = sqlx::query_scalar(
+            r#"INSERT INTO patient_relations (
+                    patient_id, related_patient_id, related_name, relation_type,
+                    is_emergency_contact, phone, notes, email, address_street
+               ) VALUES ($1, $2, $3, $4, true, $5, 'Synthetic note', 'linked@example.com',
+                         'Musterweg 1')
+               RETURNING id"#,
+        )
+        .bind(other_patient)
+        .bind(patient_id)
+        .bind(&person)
+        .bind(relation_type)
+        .bind(phone)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        linked.push(relation_id);
+    }
+    let (linked_spouse, linked_payer) = (linked[0], linked[1]);
+    sqlx::query(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by,
+                               payer_patient_relation_id)
+           VALUES ($1, $2, 'closure', 'completed', $3, $4)"#,
+    )
+    .bind(format!("ORD-{tag}-other"))
+    .bind(other_patient)
+    .bind(admin_id)
+    .bind(linked_payer)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The erasure runs through the register only (the direct endpoint is
+    // retired): recorded, approved and executed by the CEO.
+    let body = erase_through_register(&app, patient_id, &auth_header_for(admin_id, "ceo")).await;
     assert_eq!(body["execution"]["erased_documents"], 2, "{body}");
     assert_eq!(body["execution"]["disabled_portal_accounts"], 1, "{body}");
+    assert_eq!(
+        body["execution"]["erased_document_content"]["translated_documents"], 1,
+        "{body}"
+    );
+    assert_eq!(
+        body["execution"]["erased_relations"],
+        json!({
+            "removed": 1,
+            "kept_for_business_records": 1,
+            "linked_removed": 1,
+            "linked_kept": 1,
+        }),
+        "{body}"
+    );
+    // Tasks and appointments keep dates and statuses; the patient is the
+    // anonymised label in their text.
+    let anon = body["execution"]["anonymized_name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let scrubbed = &body["execution"]["scrubbed_free_text"];
+    for (counter, expected) in [
+        ("tasks", 1),
+        ("task_comments", 1),
+        ("task_checklist_items", 1),
+        ("appointments", 1),
+        ("appointment_requests", 1),
+        ("internal_notes", 1),
+        ("task_attachments_deleted", 1),
+    ] {
+        assert_eq!(scrubbed[counter], expected, "{counter}: {scrubbed}");
+    }
+    let label: String = sqlx::query_scalar(
+        "SELECT label FROM concierge_operational_task_checklist_items WHERE task_id = $1",
+    )
+    .bind(task_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(label.chars().count(), 500, "{label}");
+    assert!(label.starts_with(&format!("{anon} {anon} ")), "{label}");
+    assert!(!label.contains(&short_phone), "{label}");
+    let attachment = sqlx::query(
+        r#"SELECT file_name, mime_type, file_size, deleted_at IS NOT NULL AS deleted, deleted_by
+           FROM concierge_operational_task_attachments WHERE id = $1"#,
+    )
+    .bind(attachment_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(attachment.get::<String, _>("file_name"), "erased-file.pdf");
+    assert_eq!(attachment.get::<String, _>("mime_type"), "application/pdf");
+    assert_eq!(attachment.get::<i64, _>("file_size"), 10);
+    assert!(attachment.get::<bool, _>("deleted"));
+    assert_eq!(
+        attachment.get::<Option<Uuid>, _>("deleted_by"),
+        Some(admin_id)
+    );
+    let named_note_row: (String, Option<String>) =
+        sqlx::query_as("SELECT title, body FROM internal_notes WHERE id = $1")
+            .bind(named_note)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        named_note_row,
+        (
+            format!("Rückruf {anon}"),
+            Some(format!("Mail an {anon} senden"))
+        )
+    );
+    let first_name_note_title: String =
+        sqlx::query_scalar("SELECT title FROM internal_notes WHERE id = $1")
+            .bind(first_name_note)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(first_name_note_title, format!("Dienstplan First {tag}"));
+    let (task_title, task_description, task_status, task_due): (
+        String,
+        Option<String>,
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as("SELECT title, description, status, due_date FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(task_title, format!("Call {anon}"));
+    assert_eq!(
+        task_description.as_deref(),
+        Some(format!("Reminder for {anon}: bring the passport").as_str())
+    );
+    assert_eq!(task_status, "open");
+    assert!(task_due.is_some());
+    let comment: String = sqlx::query_scalar(
+        "SELECT body FROM concierge_operational_task_comments WHERE task_id = $1",
+    )
+    .bind(task_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(comment, format!("{anon} asked for a taxi"));
+    let (appointment_title, appointment_notes, appointment_status): (
+        String,
+        Option<String>,
+        String,
+    ) = sqlx::query_as("SELECT title, notes, status FROM appointments WHERE id = $1")
+        .bind(appointment_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(appointment_title, format!("Kardiologie {anon}"));
+    assert_eq!(
+        appointment_notes.as_deref(),
+        Some(format!("Patient {anon}, mail {anon}, {anon}").as_str())
+    );
+    assert_eq!(appointment_status, "planned");
+    let request_reason: Option<String> =
+        sqlx::query_scalar("SELECT reason FROM patient_appointment_requests WHERE patient_id = $1")
+            .bind(patient_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(request_reason, Some(format!("Termin für {anon}")));
+
+    // The other patient's file: the spouse entry is gone; the payer of his
+    // order stays for that order, without phone and notes, unlinked from the
+    // erased record (no released invoice froze it).
+    let linked_rows = sqlx::query(
+        "SELECT id, related_patient_id, phone, notes, is_emergency_contact FROM patient_relations WHERE id = ANY($1)",
+    )
+    .bind(vec![linked_spouse, linked_payer])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(linked_rows.len(), 1);
+    let linked_row = &linked_rows[0];
+    assert_eq!(linked_row.get::<Uuid, _>("id"), linked_payer);
+    assert_eq!(
+        linked_row.get::<Option<Uuid>, _>("related_patient_id"),
+        None
+    );
+    assert_eq!(linked_row.get::<Option<String>, _>("phone"), None);
+    assert_eq!(linked_row.get::<Option<String>, _>("notes"), None);
+    assert!(!linked_row.get::<bool, _>("is_emergency_contact"));
+    assert_eq!(
+        body["execution"]["erased_order_intake_facts"],
+        json!({ "order_intakes": 1, "fact_reviews": 1, "document_contexts": 1 }),
+        "{body}"
+    );
+
+    // The relative is gone; the payer of the order stays with the name and
+    // billing address the business record needs, without phone and notes.
+    let relations = sqlx::query(
+        r#"SELECT id, related_name, phone, notes, address_street,
+                  is_emergency_contact, is_default_payer
+           FROM patient_relations WHERE patient_id = $1"#,
+    )
+    .bind(patient_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(relations.len(), 1);
+    let kept = &relations[0];
+    assert_eq!(kept.get::<Uuid, _>("id"), payer);
+    assert_ne!(kept.get::<Uuid, _>("id"), relative);
+    assert_eq!(kept.get::<String, _>("related_name"), "Viktor Zahler");
+    assert_eq!(kept.get::<Option<String>, _>("phone"), None);
+    assert_eq!(kept.get::<Option<String>, _>("notes"), None);
+    assert_eq!(
+        kept.get::<Option<String>, _>("address_street").as_deref(),
+        Some("Zahlerstraße 2")
+    );
+    assert!(!kept.get::<bool, _>("is_emergency_contact"));
+    assert!(!kept.get::<bool, _>("is_default_payer"));
+    let order_payer: Option<Uuid> =
+        sqlx::query_scalar("SELECT payer_patient_relation_id FROM orders WHERE id = $1")
+            .bind(order_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(order_payer, Some(payer));
+
+    // The order preparation keeps no copy of the record or the identity; the
+    // GwG answers and the order's content stay.
+    let (data, prepared, baseline, confirmed, snapshot): (Value, Value, Value, Value, Value) =
+        sqlx::query_as(
+            r#"SELECT data, prepared_data, baseline_facts, confirmed_facts, confirmation_snapshot
+               FROM order_intakes WHERE order_id = $1"#,
+        )
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    for stored in [
+        &data["facts"],
+        &prepared["facts"],
+        &baseline,
+        &confirmed,
+        &snapshot["context"]["facts"],
+        &snapshot["context"]["data"]["facts"],
+    ] {
+        for field in [
+            "insurance_number",
+            "email",
+            "phone_primary",
+            "address_street",
+        ] {
+            assert_eq!(stored[field], "", "{field} in {stored}");
+        }
+        assert_eq!(stored["representative_name"], "Viktor Zahler", "{stored}");
+    }
+    assert!(snapshot["context"]["identity"].is_null(), "{snapshot}");
+    assert_eq!(data["needs_description"], "Check-up");
+    let (before, after): (Value, Value) = sqlx::query_as(
+        "SELECT before_facts, after_facts FROM order_intake_fact_reviews WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (&before["email"], &after["email"]),
+        (&json!(""), &json!(""))
+    );
+    let (order_document_key, order_context): (Option<String>, Value) =
+        sqlx::query_as("SELECT storage_key, order_intake_context FROM documents WHERE id = $1")
+            .bind(order_document)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(order_document_key.is_some(), "the order document is kept");
+    assert!(order_context["identity"].is_null(), "{order_context}");
+    assert_eq!(order_context["facts"]["insurance_number"], "");
+    assert_eq!(order_context["order_id"], order_id.to_string());
+
+    // The translation generated from an erased document lost its file and text.
+    let (translation_key, translation_text, translation_reason): (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT storage_key, generated_manual_text, file_delete_reason FROM documents WHERE id = $1",
+    )
+    .bind(translated_document)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(translation_key, None);
+    assert_eq!(translation_text, None);
+    assert_eq!(
+        translation_reason.as_deref(),
+        Some("source_document_deleted")
+    );
 
     let scrubbed = sqlx::query(
         r#"SELECT id, auto_name, original_filename, notes, addressee_person, source_person,
@@ -1974,4 +2547,117 @@ async fn erasure_removes_names_and_content_from_the_patients_documents() {
     assert_eq!(email, format!("deleted-patient-{patient_user_id}@invalid"));
     assert_eq!(name, "Deleted patient");
     assert!(!active);
+}
+
+/// Audit 2026-10-01, item 6: an erasure is not executed while the business
+/// with the patient is open — a running order, an invoice with an amount to
+/// settle, an invoice draft. The refusal names them with a code the UI
+/// translates; the request stays and the handler can hold or reject it.
+#[tokio::test]
+async fn erasure_waits_for_open_orders_and_invoices() {
+    let Some((app, pool, admin_id)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("privacy-open-business");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let ceo = auth_header_for(admin_id, "ceo");
+    let order_number = format!("ORD-{tag}");
+    let order_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO orders (order_number, patient_id, phase, status, created_by)
+           VALUES ($1, $2, 'execution', 'active', $3)
+           RETURNING id"#,
+    )
+    .bind(&order_number)
+    .bind(patient_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let invoice_number = format!("INV-{tag}");
+    for (number, status) in [(Some(invoice_number.clone()), "sent"), (None, "draft")] {
+        sqlx::query(
+            r#"INSERT INTO invoices (
+                    order_id, patient_id, invoice_number, invoice_type, status,
+                    total_net, total_vat, total_gross, line_items, portal_visible, created_by
+               ) VALUES ($1, $2, $3, 'final', $4, 30, 0, 30, '[]', true, $5)"#,
+        )
+        .bind(order_id)
+        .bind(patient_id)
+        .bind(number)
+        .bind(status)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/patient/{patient_id}/privacy-requests"),
+        &ceo,
+        Some(json!({
+            "request_type": "erasure",
+            "source": "admin_intake",
+            "reason": "Synthetic erasure with open business",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let request_id = body["id"].as_str().unwrap().to_string();
+    let review = format!("/api/v1/admin/compliance/privacy-requests/{request_id}/review");
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &review,
+        &ceo,
+        Some(json!({ "action": "approve" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/admin/compliance/privacy-requests/{request_id}/execute"),
+        &ceo,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "erasure_blocked_by_open_business");
+    assert_eq!(body["open_orders"], json!([order_number]));
+    assert_eq!(body["open_invoices"], json!([invoice_number]));
+    assert_eq!(body["open_invoice_drafts"], 1);
+    assert_eq!(body["open_orders_label"], order_number);
+
+    // Nothing changed: the record keeps its name, the request stays approved.
+    let (first_name, anonymized, request_status): (String, bool, String) = sqlx::query_as(
+        r#"SELECT p.first_name, (p.legal_status->>'anonymized_at') IS NOT NULL, pr.status
+           FROM patients p
+           JOIN patient_privacy_requests pr ON pr.patient_id = p.id
+           WHERE pr.id = $1::uuid"#,
+    )
+    .bind(&request_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(first_name, format!("First {tag}"));
+    assert!(!anonymized);
+    assert_eq!(request_status, "approved");
+
+    // The handler can still put it on hold with a reason.
+    let (status, body) = json_request(
+        &app,
+        "POST",
+        &review,
+        &ceo,
+        Some(json!({
+            "action": "hold",
+            "reason": "Order and invoice still open; erasure after settlement",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "retention_hold");
 }

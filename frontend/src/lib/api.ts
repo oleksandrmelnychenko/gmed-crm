@@ -526,10 +526,13 @@ const LOCALIZED_API_ERRORS: Record<string, string> = {
   privacy_request_open_exists: "api_privacy_request_open_exists",
   own_privacy_request_open_exists: "api_own_privacy_request_open_exists",
   erasure_blocked_by_retention: "api_erasure_blocked_by_retention",
+  erasure_blocked_by_open_business: "api_erasure_blocked_by_open_business",
   // Portal release of an archived or file-less document (documents.rs).
   document_archived_not_releasable: "api_document_archived_not_releasable",
   // DSGVO consent and the confidentiality release follow signed documents only (patients.rs).
   legal_status_requires_signed_document: "api_patients_legal_status_requires_signed_document",
+  // A file whose generated translation was sent or signed keeps both (documents.rs).
+  document_translation_delivery_protected: "api_document_translation_delivery_protected",
   // Orders, contracts, quotes and the service catalogues (lib/order-api-errors.ts).
   ...ORDER_API_ERROR_KEYS,
   // Internal notes and re-billing waivers (lib/billing-api-errors.ts).

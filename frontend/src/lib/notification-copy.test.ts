@@ -135,6 +135,34 @@ describe("notifications in the viewer's language (QA A-23, E-16, E-33)", () => {
     });
   });
 
+  it("words a request that is back in the queue after its hold, with its type", () => {
+    const item = notice("privacy_request", "Hold ended: erasure request of PT-1 · Anna Muster is due", "x", {
+      origin: "retention_hold_ended",
+      request_type: "erasure",
+      patient_label: "PT-1 · Anna Muster",
+      retention_until: "2026-10-12",
+      due_date: "2026-11-11",
+    });
+    expect(notificationCopyFromFacts(item, "ru")).toEqual({
+      title: "Отложенный запрос DSGVO снова в очереди: PT-1 · Anna Muster",
+      body: "Удаление данных (ст. 17): запрос был отложен до 12.10.2026. Проверьте и исполните его. Срок: 11.11.2026",
+    });
+    expect(notificationCopyFromFacts(item, "de")?.body).toBe(
+      "Löschung (Art. 17): Der Antrag war bis 12.10.2026 zurückgestellt. Prüfen und ausführen. Frist: 11.11.2026",
+    );
+    const restriction = notice("privacy_request", "Hold ended", "x", {
+      origin: "retention_hold_ended",
+      request_type: "restriction",
+      patient_label: "PT-2",
+      retention_until: null,
+      due_date: "2026-11-11",
+    });
+    expect(notificationCopyFromFacts(restriction, "de")).toEqual({
+      title: "Zurückgestellter DSGVO-Antrag wieder in der Warteschlange: PT-2",
+      body: "Einschränkung der Verarbeitung (Art. 18): Den Antrag prüfen und ausführen. Frist: 11.11.2026",
+    });
+  });
+
   it("words a patient's DSGVO request with its type and due day", () => {
     const item = notice("privacy_request", "Patient GDPR request: PT-1 · Anna", "x", {
       origin: "patient_portal",

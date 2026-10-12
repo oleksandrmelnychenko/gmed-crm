@@ -4842,6 +4842,235 @@ async fn concierge_and_billing_are_refused_consent_documents_but_billing_keeps_i
     assert_eq!(status, StatusCode::OK, "CEO: {body}");
 }
 
+/// The translation of a consent document is a consent document too (owner
+/// decision 2026-10-11): Concierge and Billing neither list, open nor
+/// download it, in any of its versions; the translation of another document
+/// stays as it was, and the CEO keeps both.
+#[tokio::test]
+async fn concierge_and_billing_are_refused_the_translation_of_a_consent_document() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("consent-translation-access");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let mut uploaded = Vec::new();
+    // The translations are released to the patient: without the consent rule
+    // Concierge and Billing would read them (general documents).
+    for (art, category, name, visibility) in [
+        (
+            "confidentiality_release",
+            "consent",
+            "Schweigepflichtsentbindung",
+            "internal",
+        ),
+        (
+            "translated_document",
+            "translation",
+            "Translation RU v1",
+            "patient_visible",
+        ),
+        (
+            "translated_document",
+            "translation",
+            "Translation RU v2",
+            "patient_visible",
+        ),
+        (
+            "terminbestaetigung",
+            "administrative",
+            "Terminbestätigung",
+            "patient_visible",
+        ),
+        (
+            "translated_document",
+            "translation",
+            "Translation RU Termin",
+            "patient_visible",
+        ),
+        (
+            "translated_document",
+            "translation",
+            "Translation DE of the RU translation",
+            "patient_visible",
+        ),
+    ] {
+        let (status, body) = multipart_upload(
+            &app,
+            "/api/v1/documents/upload",
+            &admin_bearer,
+            &[
+                ("patient_id", patient_id.to_string()),
+                ("auto_name", format!("{name} {tag}")),
+                ("art", art.to_string()),
+                ("category", category.to_string()),
+                ("status", "active".to_string()),
+                ("visibility", visibility.to_string()),
+                ("is_medical", "false".to_string()),
+            ],
+            &format!("{art}-{tag}.pdf"),
+            "application/pdf",
+            b"%PDF-consent-translation%",
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        uploaded.push(Uuid::parse_str(body["id"].as_str().unwrap()).unwrap());
+    }
+    let (consent_id, translation_v1, translation_v2, appointment_letter, letter_translation) = (
+        uploaded[0],
+        uploaded[1],
+        uploaded[2],
+        uploaded[3],
+        uploaded[4],
+    );
+    // A translation of the translation (made from its first version).
+    let second_translation = uploaded[5];
+    let mut staff = Vec::new();
+    for role in ["concierge", "billing"] {
+        let user_id = seed_user(&pool, &format!("{tag}-{role}"), role).await;
+        seed_patient_assignment(&pool, patient_id, user_id, admin_id).await;
+        let bearer = auth_header_for(user_id, role);
+        // Before the link the role reads the translation like any released
+        // general document.
+        for translation in [translation_v2, second_translation] {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{translation}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{role} before the link: {body}");
+        }
+        // Whether the role opens the letter's translation before it is linked.
+        let (letter_status, _) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{letter_translation}"),
+            &bearer,
+            None,
+        )
+        .await;
+        staff.push((role, bearer, letter_status));
+    }
+
+    // The second version replaces the first; the stored translation links the
+    // latest one, the translation request the letter's translation.
+    sqlx::query(
+        r#"UPDATE documents
+           SET version_root_document_id = $2, replaces_document_id = $2, version_number = 2
+           WHERE id = $1"#,
+    )
+    .bind(translation_v2)
+    .bind(translation_v1)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, translated_text,
+                translated_document_id, created_by
+           ) VALUES ($1, 'ru', 'manual', 'Освобождение от тайны', $2, $3)"#,
+    )
+    .bind(consent_id)
+    .bind(translation_v2)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, translated_text,
+                translated_document_id, created_by
+           ) VALUES ($1, 'de', 'manual', 'Schweigepflichtentbindung', $2, $3)"#,
+    )
+    .bind(translation_v1)
+    .bind(second_translation)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, requested_by, status,
+                translated_text, translated_document_id
+           ) VALUES ($1, $2, 'ru', $3, 'completed', 'Подтверждение записи', $4)"#,
+    )
+    .bind(appointment_letter)
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(letter_translation)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for (role, bearer, letter_status_before) in staff {
+        for path in [
+            format!("/api/v1/patients/{patient_id}/documents"),
+            format!("/api/v1/documents?patient_id={patient_id}&include_archived_versions=true"),
+        ] {
+            let (status, body) = json_request(&app, "GET", &path, &bearer, None).await;
+            assert_eq!(status, StatusCode::OK, "{role} {path}: {body}");
+            let listed = listed_ids(&body);
+            for translation in [translation_v1, translation_v2, second_translation] {
+                assert!(
+                    !listed.contains(&translation.to_string()),
+                    "{role} {path} lists {translation}: {body}"
+                );
+            }
+        }
+        for translation in [translation_v1, translation_v2, second_translation] {
+            let (status, body) = json_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{translation}"),
+                &bearer,
+                None,
+            )
+            .await;
+            assert!(
+                matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+                "{role} opens {translation}: {status} {body}"
+            );
+            let (status, _) = bytes_request(
+                &app,
+                "GET",
+                &format!("/api/v1/documents/{translation}/download"),
+                &bearer,
+            )
+            .await;
+            assert!(
+                matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+                "{role} downloads {translation}: {status}"
+            );
+        }
+        // The translation of another document is not a consent document:
+        // linking it changes nothing for the role.
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{letter_translation}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(
+            status, letter_status_before,
+            "{role}: the letter's translation: {body}"
+        );
+    }
+
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents/{translation_v2}"),
+        &admin_bearer,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "CEO: {body}");
+}
+
 #[tokio::test]
 async fn ceo_assistant_only_sees_released_medical_documents() {
     let Some((app, pool, admin_id, _admin_bearer)) = test_context().await else {
@@ -9196,6 +9425,234 @@ async fn deleting_a_document_file_removes_its_text_translations_and_drafts() {
     .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refused}");
     assert_eq!(refused["error"], "document_archived_not_releasable");
+}
+
+/// Uploads a synthetic PDF for the patient and returns the document and its
+/// stored file.
+async fn upload_stored_pdf(
+    app: &axum::Router,
+    bearer: &str,
+    patient_id: Uuid,
+    art: &str,
+    name: &str,
+    pool: &PgPool,
+) -> (Uuid, std::path::PathBuf) {
+    let (status, upload) = multipart_upload(
+        app,
+        "/api/v1/documents/upload",
+        bearer,
+        &[
+            ("patient_id", patient_id.to_string()),
+            ("auto_name", name.to_string()),
+            ("art", art.to_string()),
+            ("category", "medical".to_string()),
+            ("status", "active".to_string()),
+            ("visibility", "internal".to_string()),
+            ("is_medical", "true".to_string()),
+        ],
+        &format!("{art}.pdf"),
+        "application/pdf",
+        b"%PDF-1.4 synthetic",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{upload}");
+    let document_id = Uuid::parse_str(upload["id"].as_str().unwrap()).unwrap();
+    let storage_key: String = sqlx::query_scalar("SELECT storage_key FROM documents WHERE id = $1")
+        .bind(document_id)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let stored_path = FsPath::new("uploads/documents").join(&storage_key);
+    assert!(stored_path.exists());
+    (document_id, stored_path)
+}
+
+/// A translation generated as a document of its own (and its second version)
+/// is derived content of the source: deleting the source's file deletes the
+/// translation's file and texts with it. A translation that was sent or signed
+/// is delivery evidence: then the source's file is not deleted either, with a
+/// code the UI translates.
+#[tokio::test]
+async fn deleting_a_document_file_deletes_its_translation_documents_too() {
+    let Some((app, pool, admin_id, admin_bearer)) = test_context().await else {
+        return;
+    };
+    let tag = unique_tag("doc-delete-translation");
+    let patient_id = seed_patient(&pool, admin_id, &tag).await;
+    let (source, source_path) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "arztbrief",
+        &format!("Arztbrief {tag}"),
+        &pool,
+    )
+    .await;
+    let (translation, translation_path) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "translated_document",
+        &format!("Translation RU - Arztbrief {tag}"),
+        &pool,
+    )
+    .await;
+    let (translation_v2, translation_v2_path) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "translated_document",
+        &format!("Translation RU - Arztbrief {tag} v2"),
+        &pool,
+    )
+    .await;
+    // The second version of the translation replaces the first; the stored
+    // translation links the latest one, as the translation workspace does.
+    sqlx::query(
+        r#"UPDATE documents
+           SET version_root_document_id = $2, replaces_document_id = $2, version_number = 2
+           WHERE id = $1"#,
+    )
+    .bind(translation_v2)
+    .bind(translation)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"UPDATE documents
+           SET generated_manual_text = 'Диагнозы: I10', extracted_text = 'Диагнозы: I10',
+               text_extraction_status = 'completed'
+           WHERE id = ANY($1)"#,
+    )
+    .bind(vec![translation, translation_v2])
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translations (
+                document_id, target_language, provider, source_text, translated_text,
+                translated_document_id, created_by
+           ) VALUES ($1, 'ru', 'manual', 'Diagnosen: I10', 'Диагнозы: I10', $2, $3)"#,
+    )
+    .bind(source)
+    .bind(translation_v2)
+    .bind(admin_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (status, deleted) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{source}/delete"),
+        &admin_bearer,
+        Some(json!({ "reason": "Synthetic file uploaded to the wrong patient" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{deleted}");
+    assert!(!source_path.exists());
+    for (document_id, path) in [
+        (translation, &translation_path),
+        (translation_v2, &translation_v2_path),
+    ] {
+        assert!(!path.exists(), "translation file {document_id}");
+        let row = sqlx::query(
+            r#"SELECT status, storage_key, file_deleted_at, file_deleted_by, file_delete_reason,
+                      generated_manual_text, extracted_text
+               FROM documents WHERE id = $1"#,
+        )
+        .bind(document_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(row.get::<String, _>("status"), "archived");
+        assert_eq!(row.get::<Option<String>, _>("storage_key"), None);
+        assert!(
+            row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("file_deleted_at")
+                .is_some()
+        );
+        assert_eq!(
+            row.get::<Option<Uuid>, _>("file_deleted_by"),
+            Some(admin_id)
+        );
+        assert_eq!(
+            row.get::<Option<String>, _>("file_delete_reason")
+                .as_deref(),
+            Some("source_document_deleted")
+        );
+        assert_eq!(row.get::<Option<String>, _>("generated_manual_text"), None);
+        assert_eq!(row.get::<Option<String>, _>("extracted_text"), None);
+        let (status, _) = bytes_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents/{document_id}/download"),
+            &admin_bearer,
+        )
+        .await;
+        assert_ne!(
+            status,
+            StatusCode::OK,
+            "translation {document_id} still downloads"
+        );
+    }
+
+    // A translation that was signed keeps itself and its source.
+    let (kept_source, kept_source_path) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "arztbrief",
+        &format!("Arztbrief kept {tag}"),
+        &pool,
+    )
+    .await;
+    let (sent_translation, sent_translation_path) = upload_stored_pdf(
+        &app,
+        &admin_bearer,
+        patient_id,
+        "translated_document",
+        &format!("Translation DE - kept {tag}"),
+        &pool,
+    )
+    .await;
+    sqlx::query("UPDATE documents SET signed_at = now(), signed_by = $2 WHERE id = $1")
+        .bind(sent_translation)
+        .bind(admin_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        r#"INSERT INTO document_translation_requests (
+                document_id, patient_id, requested_language, requested_by, status,
+                translated_text, translated_document_id
+           ) VALUES ($1, $2, 'de', $3, 'completed', 'Befund', $4)"#,
+    )
+    .bind(kept_source)
+    .bind(patient_id)
+    .bind(admin_id)
+    .bind(sent_translation)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (status, refused) = json_request(
+        &app,
+        "POST",
+        &format!("/api/v1/documents/{kept_source}/delete"),
+        &admin_bearer,
+        Some(json!({ "reason": "Synthetic file uploaded to the wrong patient" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["error"], "document_translation_delivery_protected");
+    assert!(kept_source_path.exists());
+    assert!(sent_translation_path.exists());
+    let keys: Vec<Option<String>> =
+        sqlx::query_scalar("SELECT storage_key FROM documents WHERE id = ANY($1)")
+            .bind(vec![kept_source, sent_translation])
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(keys.iter().all(Option::is_some), "{keys:?}");
 }
 
 #[tokio::test]

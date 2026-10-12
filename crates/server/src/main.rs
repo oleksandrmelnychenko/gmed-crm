@@ -341,21 +341,38 @@ fn spawn_expired_message_sweeper(state: state::AppState) {
 /// The sweeper is fail-safe: a DB error logs a warning and the loop
 /// continues, so one bad day never leaves the next day unattended.
 fn spawn_patient_retention_sweeper(state: state::AppState) {
-    // Once a day, an hour after boot so the migration backfill has settled.
+    // The full sweep once a day, an hour after boot so the migration backfill
+    // has settled. In between, every hour, privacy requests whose hold ended
+    // return to the queue, so that happens on the hold date.
     tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(3_600)).await;
-        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(86_400));
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(3_600));
+        let mut hour: u32 = 0;
         loop {
             ticker.tick().await;
-            match gmed_server::routes::retention::flag_expired_patient_files(&state).await {
-                Ok(report) if report.flagged > 0 => tracing::info!(
-                    retention_days = report.retention_days,
-                    flagged = report.flagged,
-                    "Patient file retention sweep raised erasure requests"
-                ),
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "Patient file retention sweep failed"),
+            if hour.is_multiple_of(24) {
+                match gmed_server::routes::retention::flag_expired_patient_files(&state).await {
+                    Ok(report) if report.flagged > 0 || report.requeued > 0 => tracing::info!(
+                        retention_days = report.retention_days,
+                        flagged = report.flagged,
+                        requeued = report.requeued,
+                        "Patient file retention sweep raised or requeued privacy requests"
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "Patient file retention sweep failed"),
+                }
+            } else {
+                match gmed_server::routes::retention::requeue_expired_retention_holds(&state).await
+                {
+                    Ok(requeued) if requeued > 0 => tracing::info!(
+                        requeued,
+                        "Privacy requests returned to the queue after their hold"
+                    ),
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!(error = %e, "Retention hold requeue failed"),
+                }
             }
+            hour = hour.wrapping_add(1);
         }
     });
 }

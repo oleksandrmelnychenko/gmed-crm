@@ -10,6 +10,9 @@ import {
   type DocumentComplianceKind,
 } from "../data/document-api";
 import { signatureGateErrorText } from "../data/document-signature-api";
+import { signatureNeedsProof } from "../model/signature-proof";
+import type { DocumentItem } from "../model/types";
+import { PaperSignatureConfirmButton } from "./paper-signature-confirm";
 
 type Bilingual = (ru: string, de: string) => string;
 
@@ -46,14 +49,23 @@ function kindLabel(kind: DocumentComplianceKind, tx: Bilingual): string {
  * Record a document as signed compliance evidence and, atomically on the
  * backend, flip the matching flag on the linked patient's legal_status (#13).
  * Replaces the old two-step "upload a scan" + "tick a checkbox" dance.
+ *
+ * A document GMED generated for a signature (consents, contract, enhanced
+ * due diligence, cost coverage declaration, patient form) counts as signed
+ * only with the scan of the signed copy or a QES (owner decisions
+ * 2026-10-11): for it the control offers "Подписано на бумаге" instead of the
+ * one-click confirmation.
  */
 export function MarkComplianceSignedControl({
   documentId,
   patientId,
+  document,
   onDone,
 }: {
   documentId: string;
   patientId: string | null;
+  /** The document's template, signature and name: decides whether proof is needed. */
+  document?: Pick<DocumentItem, "generated_template_id" | "signed_at" | "auto_name" | "original_filename">;
   onDone?: () => void;
 }) {
   const { lang } = useLang();
@@ -63,6 +75,7 @@ export function MarkComplianceSignedControl({
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+  const needsProof = Boolean(document && signatureNeedsProof(document, kind));
 
   async function submit() {
     setBusy(true);
@@ -107,12 +120,33 @@ export function MarkComplianceSignedControl({
             </option>
           ))}
         </NativeComboboxSelect>
-        <Button type="button" onClick={submit} disabled={busy || done}>
-          {done
-            ? tx("Отмечено ✓", "Erfasst ✓")
-            : tx("Отметить подписанным", "Als unterzeichnet markieren")}
-        </Button>
+        {needsProof && !done ? (
+          <PaperSignatureConfirmButton
+            documentId={documentId}
+            title={document?.original_filename || document?.auto_name || ""}
+            lang={lang === "de" ? "de" : "ru"}
+            size="sm"
+            onDone={() => {
+              setDone(true);
+              onDone?.();
+            }}
+          />
+        ) : (
+          <Button type="button" onClick={submit} disabled={busy || done}>
+            {done
+              ? tx("Отмечено ✓", "Erfasst ✓")
+              : tx("Отметить подписанным", "Als unterzeichnet markieren")}
+          </Button>
+        )}
       </div>
+      {needsProof && !done ? (
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="mark-signed-proof-hint">
+          {tx(
+            "Созданный документ считается подписанным только с подтверждением: загрузите скан подписанного экземпляра или подпишите его электронно.",
+            "Ein erstelltes Dokument gilt erst mit Nachweis als unterschrieben: Scan des unterschriebenen Exemplars hochladen oder elektronisch unterschreiben lassen.",
+          )}
+        </p>
+      ) : null}
       {!patientId ? (
         <p className="mt-2 text-xs text-amber-600">
           {tx(

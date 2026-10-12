@@ -14,6 +14,8 @@ Umsetzung. Fristen in eckigen Klammern legt die Organisation mit dem DSB fest.
 | Eigene GwG-Angaben einer Anfrage aus dem Patientenportal (`lead_gwg_declarations`: Geburtsort und -land, Ausweisdokument, Angaben zu PEP, Hochrisiko-Drittstaat und Sanktionsbezug, Bestätigung der Richtigkeit) samt hochgeladener Ausweiskopie | nicht zustande gekommen: wie die Anfrage; zustande gekommen: 5 Jahre nach Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG) | Anonymisierung der Anfrage bzw. Ende der Geschäftsbeziehung | bei Löschung/Anonymisierung einer nicht konvertierten Anfrage in derselben Transaktion mitgelöscht (`purge_portal_intake_in_tx`, `anonymize_lead_pii`); die Ausweiskopie wird mit den Dokumenten der Anfrage gelöscht; nach der Konvertierung bleiben die Angaben bei der Geschäftsbeziehung wie die Zahlererklärung; Löschung nach Ablauf **offen** |
 | Bestätigung der Zahlung vom eigenen Konto zu einer Anfrage (§ 12 Abs. 1 GwG, Identifizierung per qualifizierter elektronischer Signatur; `lead_identification_payments`: Person, Zeitpunkt, bestätigende Mitarbeiterin/bestätigender Mitarbeiter, Notiz) | nicht zustande gekommen: wie die Anfrage; zustande gekommen: 5 Jahre nach Ende der Geschäftsbeziehung (§ 8 Abs. 4 GwG) | Anonymisierung der Anfrage bzw. Ende der Geschäftsbeziehung | bei Löschung/Anonymisierung einer nicht konvertierten Anfrage in derselben Transaktion mitgelöscht (`purge_portal_intake_in_tx`, `anonymize_lead_pii`); nach der Konvertierung bleibt die Bestätigung bei der Geschäftsbeziehung wie die Zahlererklärung; Löschung nach Ablauf **offen** |
 | Zahler- und Empfängerdaten ausgestellter Rechnungen (`recipient_snapshot`, `payer_*`) | wie die Rechnung (8 / 10 Jahre) | Ende des Kalenderjahres | mit der Ausstellung festgeschrieben (Datenbank-Trigger); die Anonymisierung des Patienten und das Ändern des Angehörigen lassen sie unverändert (Art. 17 Abs. 3 lit. b DSGVO); ein Angehöriger, an den ausgestellte Rechnungen adressiert sind, kann nicht gelöscht werden; nach Ablauf **offen** |
+| Angehörige, Vertreter und Zahler eines Patienten (`patient_relations`: Name, Telefon, E-Mail, Anschrift, Notizen) | wie die Patientenakte; als Zahler, Rechnungsempfänger oder Vertragspartei: wie Rechnung bzw. Vertrag (6 / 8 / 10 Jahre) | Anonymisierung der Patientenakte bzw. Ende des Kalenderjahres | bei der Löschung nach Art. 17 gelöscht, wenn keine Rechnung, kein Auftrag und kein Rahmenvertrag die Person nennt; sonst bleiben nur Name und Rechnungsanschrift (mit E-Mail) für diesen Geschäftsvorgang (§ 14 Abs. 4 UStG, § 257 HGB, § 147 AO), Telefon, Notizen und die Kennzeichen „Notfallkontakt“ und „Standardzahler“ werden entfernt. Dasselbe gilt für Einträge in den Akten **anderer** Patienten, die mit der gelöschten Akte verknüpft sind: ohne Geschäftsvorgang gelöscht (mit ihren Ergebnissen der Sanktionslisten-Prüfung), sonst im genannten Umfang behalten und von der gelöschten Akte gelöst, außer eine ausgestellte Rechnung ist an sie adressiert (deren festgeschriebener Empfänger hängt daran); nach Ablauf **offen** |
+| Auftragsvorbereitung (`order_intakes`: Entwurf, bestätigte Angaben, Bestätigungsstand; `order_intake_fact_reviews`; gespeicherter Kontext der Auftragsdokumente) | wie der Auftrag (6 Jahre, § 257 HGB) | Ende des Kalenderjahres | bei der Löschung nach Art. 17 werden die Kopien der Stammdaten (Versicherung, Telefon, E-Mail, Anschrift) geleert und die Kopien der Identität entfernt, wie in der Akte selbst; Inhalt des Auftrags (Zeitraum, Leistungen, Preise, Vorauszahlung) und die GwG-Angaben (PEP, Vertreter, § 8 Abs. 4 GwG), die auch die Akte behält, bleiben; nach Ablauf **offen** |
 | Verträge, Aufträge, Geschäftsbriefe | 6 Jahre | Ende des Kalenderjahres | von der Löschung ausgenommen (§ 257 HGB); nach Ablauf **offen** |
 | Elektronisch signierte Originale (signierte PDF, Dokumentenpaket, Signaturprotokoll, Signaturnachweise der Anfrage) | wie der zugrunde liegende Vertrag bzw. die Einwilligung (6 / 8 / 10 Jahre) | Ende des Kalenderjahres der Unterzeichnung | unveränderlich gespeichert (Datenbank-Trigger `protect_signed_signature_documents`, `protect_archived_signature_requests`); von der Löschung nach Art. 17 und von der Löschung nicht qualifizierter Anfragen ausgenommen (Art. 17 Abs. 3 lit. b, e DSGVO). Testsignaturen (DEMO) sind nicht geschützt und werden mitgelöscht. Nach Ablauf der Frist gibt es derzeit **keinen Löschweg** – **offen**, wie bei Rechnungen und Verträgen |
 | Personalakten (je Kategorie, `personnel_document_categories`) | 3 bis 8 Jahre: Entgeltabrechnung 8 J. (§ 147 AO), Lohnsteuer 6 J. (§ 41 EStG), Stundenzettel und Sozialversicherung 6 J. (§ 28f SGB IV), Verträge und Kündigung 6 J. nach Austritt, Arbeitsunfähigkeit, Abmahnung 3 J., übrige 3 J. nach Austritt [vom Steuerberater zu bestätigen] | Ende des Kalenderjahres des Dokuments bzw. des Austritts | Löschung nur durch die Geschäftsführung mit Begründung, nach Fristablauf, ohne Legal Hold und erst nach Freischaltung (`personnel_retention_deletion_enabled`, Standard: aus); die Datei wird entfernt, der Datensatz bleibt als Nachweis mit Prüfsumme erhalten |
@@ -31,14 +33,31 @@ Ablauf im Register: Antrag → Prüfung (Genehmigung, Ablehnung mit Begründung 
 Aufschub wegen Aufbewahrungspflicht mit Datum; die Begründung sieht die betroffene
 Person im Portal) → bei Antrag der betroffenen Person vermerkte Identitätsprüfung →
 Ausführung. Eine genehmigte Löschung können CEO und IT-Admin mit Begründung noch
-ablehnen oder zurückstellen.
+ablehnen oder zurückstellen. Einen anderen Löschweg gibt es nicht: der frühere
+direkte Weg (`…/anonymize`, Löschung ohne Antrag und Prüfung) ist entfernt
+(2026-10-12).
+
+Ende des Aufschubs: Ein bis zu einem Datum zurückgestellter Antrag – jeder Art,
+jeder Aufschub trägt ein Datum – kommt an diesem Datum von selbst wieder in die
+Warteschlange (stündliche Prüfung `requeue_expired_retention_holds`): Status
+„Angefordert“, neue Frist (`patient_erasure_due_days`), Eintrag im Verlauf des
+Antrags, Audit `privacy_request_requeued` und Hinweis an CEO und IT-Admin. Bei
+einer Löschung bleibt die Einschränkung der Verarbeitung bis zur Ausführung
+bestehen; hat ein späterer ärztlicher Eintrag die Aufbewahrung der Dokumentation
+verlängert, folgt ihr Aufschub dem neuen Datum.
+
+Offene Geschäftsvorgänge (Prüfbericht 2026-10-01, Punkt 6): Solange für den
+Patienten ein Auftrag läuft (aktiv oder pausiert), eine Rechnung nicht beglichen ist
+(auch ein Rechnungsentwurf) oder eine bezahlte Anzahlung noch nicht mit einer
+Schlussrechnung verrechnet ist, wird die Löschung nicht ausgeführt; das System
+nennt die offenen Aufträge und Rechnungen. Der Antrag bleibt bestehen und kann mit
+Begründung zurückgestellt oder abgelehnt werden.
 
 Aufbewahrung der ärztlichen Dokumentation: Jeder Antrag übernimmt bei der Anlage
 das Datum, bis zu dem die medizinische Dokumentation des Patienten aufzubewahren
 ist (`clinical_retention_until`, § 630f Abs. 3 BGB). Solange diese Frist läuft,
 besteht kein Löschanspruch (Art. 17 Abs. 3 lit. b DSGVO): Die Löschung wird weder
-genehmigt noch ausgeführt, auch nicht über den alten direkten Löschweg; das System
-nennt Datum und Rechtsgrundlage. An die Stelle der Löschung tritt die Einschränkung
+genehmigt noch ausgeführt; das System nennt Datum und Rechtsgrundlage. An die Stelle der Löschung tritt die Einschränkung
 der Verarbeitung (Art. 18 DSGVO, § 35 Abs. 3 BDSG): „Sperren“ stellt den Antrag bis
 zum Fristende zurück und schränkt die Verarbeitung der Akte ein; alternativ wird
 der Antrag mit dieser Begründung abgelehnt.
@@ -50,25 +69,68 @@ Die Ausführung
 - anonymisiert die zugehörige Anfrage (Lead),
 - löscht die gespeicherten Dateien des Patienten und alles, was aus ihnen abgeleitet
   ist (extrahierter Text, Übersetzungen, Entwürfe des klinischen Imports,
-  Vorlagenbelegung), und entfernt Namen von den Dokumenten (Dokumentname wird zur
+  Vorlagenbelegung, als eigenes Dokument erzeugte Übersetzungen samt Datei und Text
+  in allen Versionen), und entfernt Namen von den Dokumenten (Dokumentname wird zur
   Dokumentart, Dateiname, Notizen, genannte Personen) – auch bei Dokumenten, deren
   Datei schon früher gelöscht wurde,
+- löscht die Angehörigen und Vertreter, die kein Geschäftsvorgang nennt; ein
+  Angehöriger, der Zahler, Rechnungsempfänger oder Vertragspartei einer Rechnung,
+  eines Auftrags oder eines Rahmenvertrags ist, bleibt nur mit Name und
+  Rechnungsanschrift (ohne Telefon, Notizen, Notfall- und Standardzahler-Kennzeichen);
+  ebenso Einträge anderer Patienten, die mit der gelöschten Akte verknüpft sind,
+- leert in der Auftragsvorbereitung die Kopien der Stammdaten und der Identität
+  (Entwurf, bestätigte Angaben, Prüfprotokoll, Bestätigungsstand, gespeicherter
+  Kontext der Auftragsdokumente); Inhalt des Auftrags und GwG-Angaben bleiben,
 - löscht weitere Kontaktdaten, die Identitätsangaben importierter Medikationspläne
   und die Benachrichtigungen, die den Patienten oder seine gelöschten Dokumente
   nennen,
 - redigiert Nachrichten samt Anhängen und deaktiviert und anonymisiert den
   Portalzugang des Patienten (und einen Elternzugang, der nur zu ihm führt),
 - widerruft Zuweisungen und Einwilligungen,
-- behält Rechnungen, Verträge und Aufträge (Art. 17 Abs. 3 lit. b DSGVO).
+- ersetzt in den Freitexten der Aufgaben und Termine des Patienten (Titel,
+  Beschreibung, Ort, Notizen, Kommentare, Checklisten, Kommunikation mit der Klinik,
+  Dolmetscherberichte, Terminanfragen) jede Nennung des Patienten – Namen,
+  Patientennummer, E-Mail, Telefonnummern, Pass- und Versicherungsnummer, Straße,
+  Notfallkontakt – durch die Anonymisierungskennung; Termine, Status, Stunden und
+  Beträge bleiben für die Geschäftsunterlagen; die Benachrichtigungen zu diesen
+  Aufgaben und Terminen werden gelöscht. Ein Text mit Längengrenze wird nach der
+  Ersetzung auf die Grenze des Feldes gekürzt, die Löschung scheitert daran nicht.
+  Begriffe unter 2 Zeichen (etwa ein Vorname aus einem Buchstaben) werden bewusst
+  nicht ersetzt,
+- ersetzt in den gemeinsamen internen Notizen (auch archivierten), die keinem
+  Patienten zugeordnet sind, nur die eindeutigen Merkmale (vollständiger Name,
+  Patientennummer, E-Mail, Telefonnummern, Pass- und Versicherungsnummer,
+  Notfallkontakt), nicht Vor- oder Nachname allein und nicht die Straße; Anhänge
+  dieser Notizen werden nicht geprüft,
+- löscht die Dateien der Anhänge an den Aufgaben des Patienten wie die Dateien
+  gelöschter Dokumente; der Eintrag bleibt mit Typ, Größe, Hochlader, Datum und
+  Löschvermerk, der Dateiname wird neutral („erased-file“ mit der Endung),
+- behält Rechnungen (mit dem festgeschriebenen Empfänger), Verträge und Aufträge
+  (Art. 17 Abs. 3 lit. b DSGVO). Ist der gelöschte Patient selbst Zahler der
+  Rechnung oder des Auftrags eines anderen Patienten (Patientenakte als Zahler),
+  behalten ausgestellte Rechnungen ihren festgeschriebenen Empfänger; Entwürfe und
+  Aufträge zeigen danach die Anonymisierungskennung (bewusst so entschieden).
 
 Das Löschen einer einzelnen gespeicherten Datei („Datei endgültig löschen“) entfernt
-ebenso den extrahierten Text, die Übersetzungstexte, die Import-Entwürfe und das
-Ergebnis der automatischen Benennung; Metadaten und Versionsgeschichte bleiben.
+ebenso den extrahierten Text, die Übersetzungstexte, die Import-Entwürfe, das
+Ergebnis der automatischen Benennung und die als eigene Dokumente erzeugten
+Übersetzungen (Datei und Text, alle Versionen; Löschgrund
+`source_document_deleted`); Metadaten und Versionsgeschichte bleiben. Wurde eine
+solche Übersetzung bereits versendet oder unterschrieben, ist sie Nachweis der
+Übermittlung: dann bleiben die Datei und ihre Übersetzungen erhalten (Hinweis im
+System). Dasselbe Verfahren gilt bei der Löschung einer Anfrage (Lead): Übersetzungen
+ihrer Dokumente werden mitgelöscht, auch wenn sie weder der Anfrage noch einem
+Patienten zugeordnet sind; ebenso, wenn die anfragende Person, ein Zahler über
+seinen Link oder die Person beim Entfernen eines Vertreters ein Hochladen im
+Kabinett vor der Prüfung zurückzieht.
 
 Verbleibende Lücke: strukturierte medizinische Einträge (Diagnosen, Medikation,
 Labor) bleiben ohne Personenbezug zum anonymisierten Datensatz bestehen. Ob das als
 Anonymisierung genügt, ist mit dem DSB zu bewerten; seltene Diagnosen können
-reidentifizierbar sein.
+reidentifizierbar sein. Ebenso offen: Der Ereignisverlauf der Aufgaben
+(nur fortschreibbar) behält den früheren Text bearbeiteter Kommentare und
+Checklistenpunkte sowie die Dateinamen der Anhänge; eine Ausnahme für die Löschung
+ist noch zu entscheiden.
 
 ## Mitteilung an Empfänger (Art. 19)
 

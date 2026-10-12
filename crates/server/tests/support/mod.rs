@@ -212,6 +212,49 @@ pub async fn seed_signed_consent_document(
     document_id
 }
 
+/// Records a paper signature (`POST /documents/{id}/paper-signature`) with a
+/// synthetic scan of the signed copy: the proof a generated document needs to
+/// count as signed (owner decisions 2026-10-11). Returns the status and body;
+/// the body names the signed version (`document_id`).
+#[allow(dead_code)]
+pub async fn paper_signature(
+    app: &axum::Router,
+    bearer: &str,
+    document_id: &str,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    use tower::ServiceExt;
+
+    let boundary = format!("----gmed-paper-{}", Uuid::new_v4().simple());
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"signed-scan.pdf\"\r\nContent-Type: application/pdf\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(b"%PDF-1.4 synthetic signed scan");
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(format!("/api/v1/documents/{document_id}/paper-signature"))
+        .header("Authorization", bearer)
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(axum::body::Body::from(body))
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+    )
+}
+
 #[allow(dead_code)]
 pub async fn wait_until<F, Fut>(description: &str, mut predicate: F)
 where

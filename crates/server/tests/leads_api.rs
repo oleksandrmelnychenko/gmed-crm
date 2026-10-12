@@ -779,6 +779,133 @@ async fn create_and_get_lead() {
     assert!(items.iter().any(|item| item["id"] == lead_id));
 }
 
+/// Owner decision 2026-10-11: Concierge and Billing never open a consent
+/// document, also not through the lead screens — the lead's document list,
+/// the document, its download, and the questionnaire upload it was imported
+/// from. The patient manager keeps them.
+#[tokio::test]
+async fn concierge_and_billing_never_open_a_leads_consent_documents() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let tag = Uuid::new_v4().simple().to_string();
+    let lead_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO leads (first_name, last_name, email, qualification_status,
+                              compliance_status, intake_source, created_by)
+           VALUES ('Anna', 'Muster', $1, 'new', 'signed', 'staff_wizard', $2)
+           RETURNING id"#,
+    )
+    .bind(format!("consent-{tag}@example.com"))
+    .bind(app.patient_manager_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let consent_id = Uuid::new_v4();
+    sqlx::query(
+        r#"INSERT INTO documents (
+                id, lead_id, auto_name, original_filename, art, category, status, visibility,
+                is_medical, mime_type, file_size, generated_template_id,
+                version_root_document_id, version_number, uploaded_by,
+                signed_at, signed_by, compliance_kind
+           ) VALUES (
+                $1, $2, 'Schweigepflichtsentbindung Anna Muster', 'schweigepflicht.pdf',
+                'confidentiality_release', 'consent', 'active', 'internal', false,
+                'application/pdf', 4, 'confidentiality_release', $1, 1, $3,
+                now(), $3, 'confidentiality_release'
+           )"#,
+    )
+    .bind(consent_id)
+    .bind(lead_id)
+    .bind(app.patient_manager_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    let attachment_id: Uuid = sqlx::query_scalar(
+        r#"INSERT INTO lead_attachments (
+                lead_id, file_name, content_type, size_bytes, data, imported_document_id,
+                imported_at
+           ) VALUES ($1, 'schweigepflicht-scan.pdf', 'application/pdf', 4,
+                     '\x25504446'::bytea, $2, now())
+           RETURNING id"#,
+    )
+    .bind(lead_id)
+    .bind(consent_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let listed = |body: &Value| {
+        body.as_array().is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item["id"] == consent_id.to_string())
+        })
+    };
+    let lead_path = format!("/api/v1/leads/{lead_id}");
+    let attachment_path = format!("/api/v1/leads/{lead_id}/attachments/{attachment_id}");
+
+    for role in ["concierge", "billing"] {
+        let bearer = app.auth_header(role);
+        let (status, body) = json_request(
+            &app,
+            "GET",
+            &format!("/api/v1/documents?lead_id={lead_id}"),
+            &bearer,
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{role}: {body}");
+        assert!(!listed(&body), "{role} lists the consent: {body}");
+        for path in [
+            format!("/api/v1/documents/{consent_id}"),
+            format!("/api/v1/documents/{consent_id}/download"),
+            format!("/api/v1/documents/{consent_id}/text-extraction"),
+            attachment_path.clone(),
+        ] {
+            let (status, _) = json_request(&app, "GET", &path, &bearer, None).await;
+            assert!(
+                matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+                "{role} {path}: {status}"
+            );
+        }
+        let (status, lead) = json_request(&app, "GET", &lead_path, &bearer, None).await;
+        if status == StatusCode::OK {
+            let attachments = lead["attachments"].as_array().cloned().unwrap_or_default();
+            assert!(
+                !attachments
+                    .iter()
+                    .any(|item| item["id"] == attachment_id.to_string()),
+                "{role} sees the consent upload: {lead}"
+            );
+        } else {
+            assert_eq!(status, StatusCode::FORBIDDEN, "{role}: {lead}");
+        }
+    }
+
+    // The patient manager keeps the consent in the lead screens.
+    let pm = app.auth_header("patient_manager");
+    let (status, body) = json_request(
+        &app,
+        "GET",
+        &format!("/api/v1/documents?lead_id={lead_id}"),
+        &pm,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(listed(&body), "{body}");
+    let (status, lead) = json_request(&app, "GET", &lead_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK, "{lead}");
+    assert!(
+        lead["attachments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == attachment_id.to_string()),
+        "{lead}"
+    );
+    let (status, _) = json_request(&app, "GET", &attachment_path, &pm, None).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn sales_sees_leads_without_their_medical_content() {
     let Some(app) = test_app().await else { return };
@@ -6630,14 +6757,9 @@ async fn declare_mother_as_payer_and_sign(app: &TestApp, lead_id: Uuid, order_id
     .await;
     assert_eq!(status, StatusCode::OK, "{generated}");
     let document_id = generated["id"].as_str().unwrap().to_string();
-    let (status, marked) = json_request(
-        app,
-        "POST",
-        &format!("/api/v1/documents/{document_id}/mark-signed"),
-        &pm,
-        Some(json!({ "compliance_kind": "cost_coverage_declaration" })),
-    )
-    .await;
+    // Signed only with proof (owner decision 2026-10-11): the scan of the
+    // signed copy.
+    let (status, marked) = support::paper_signature(app, &pm, &document_id).await;
     assert_eq!(status, StatusCode::OK, "{marked}");
 }
 

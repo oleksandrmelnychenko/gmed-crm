@@ -1696,6 +1696,24 @@ async fn remove_person(
         }
         .await;
         withdrawn.map_err(|error| intake::internal(error, "withdraw representative upload"))?;
+        // What was derived from the file goes with it, translations made as
+        // documents of their own included; their files are staged with the
+        // upload's, so a failed transaction keeps them.
+        let derived = crate::routes::documents::purge_document_derived_content_in_tx(
+            tx,
+            &[document_id],
+            Some(actor),
+        )
+        .await
+        .map_err(|error| {
+            intake::internal(error, "remove derived content of representative upload")
+        })?;
+        for storage_key in &derived.translated_document_files {
+            staged.0.extend(
+                crate::routes::documents::stage_document_file_delete(Some(storage_key.as_str()))
+                    .await?,
+            );
+        }
     }
     sqlx::query("DELETE FROM lead_representatives WHERE lead_id = $1 AND contact_id = $2")
         .bind(lead_id)
