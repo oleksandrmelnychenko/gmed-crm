@@ -1,4 +1,6 @@
 version: 2
+# Routine version-update branches are paused for the main-only workflow.
+# This setting does not disable Dependabot security alerts or security updates.
 updates:
   - package-ecosystem: cargo
     directory: "/"
@@ -7,7 +9,7 @@ updates:
       day: monday
       time: "06:00"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
     labels:
       - dependencies
       - rust
@@ -26,7 +28,7 @@ updates:
       day: monday
       time: "06:00"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 0
     labels:
       - dependencies
       - frontend
@@ -45,7 +47,7 @@ updates:
       day: monday
       time: "06:00"
       timezone: "Europe/Berlin"
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     labels:
       - dependencies
       - ci
