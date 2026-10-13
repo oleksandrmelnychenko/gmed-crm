@@ -34,7 +34,11 @@ def log(event):
 def state():
     return json.loads(state_file.read_text())
 def memory(mb):
-    (root / "meminfo").write_text(f"MemAvailable: {mb * 1024} kB\n")
+    # Publish a complete snapshot, like /proc/meminfo. Truncating the sampled
+    # file in place lets the runner's concurrent awk see an empty file.
+    pending = root / f"meminfo.{os.getpid()}.tmp"
+    pending.write_text(f"MemAvailable: {mb * 1024} kB\n")
+    pending.replace(root / "meminfo")
 if args[0] == "inspect":
     if os.environ.get("MOCK_INSPECT_FAIL") == args[-1]:
         sys.exit(1)
@@ -49,6 +53,8 @@ elif args[0] in ("start", "stop"):
     state_file.write_text(json.dumps(current))
     if action == "stop":
         memory(int(os.environ.get("MOCK_RECOVER_MB", "6000")))
+        if not any(current.values()):
+            (root / "workers-paused").touch()
         if os.environ.get("MOCK_STOP_FAIL") == container:
             sys.exit(17)
 elif args[0] == "compose" and "build" in args:
@@ -72,7 +78,16 @@ elif args[0] == "compose" and "build" in args:
     if os.environ.get("MOCK_DROP_MB"):
         memory(int(os.environ["MOCK_DROP_MB"]))
     (root / "building").touch()
-    time.sleep(60 if child is not None else 0.1)
+    if os.environ.get("MOCK_FINISH_AFTER_OCR_PAUSE"):
+        # Keep the build alive until the guard observes the drop; a fixed
+        # 100 ms build can finish before a busy CI host samples memory.
+        deadline = time.monotonic() + 10
+        while not (root / "workers-paused").exists():
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Memory guard did not pause OCR workers")
+            time.sleep(0.01)
+    else:
+        time.sleep(60 if child is not None else 0.1)
     log(["build-ended"])
     sys.exit(int(os.environ.get("MOCK_BUILD_EXIT", "0")))
 elif args[0] == "compose" and "up" in args:
@@ -125,7 +140,9 @@ sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
         self.prefix = self.prefix.replace("sleep 2", "sleep 0.02")
 
     def memory(self, mb):
-        (self.root / "meminfo").write_text(f"MemAvailable: {mb * 1024} kB\n")
+        pending = self.root / f"meminfo.{os.getpid()}.tmp"
+        pending.write_text(f"MemAvailable: {mb * 1024} kB\n")
+        pending.replace(self.root / "meminfo")
 
     def events(self):
         path = self.root / "events.jsonl"
@@ -221,10 +238,12 @@ sys.exit(int(os.environ.get("MOCK_COSIGN_EXIT", "0")))
         self.assertNotIn(["start", OCR[1]], self.events())
 
     def test_memory_drop_pauses_workers_during_a_build(self):
-        result = self.run_guard(MOCK_DROP_MB="1000")
+        result = self.run_guard(MOCK_DROP_MB="1000", MOCK_FINISH_AFTER_OCR_PAUSE="1")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.events()[0], ["build", "backend"])
-        self.assertIn(["stop", OCR[0]], self.events())
+        events = self.events()
+        self.assertEqual(events[0], ["build", "backend"])
+        for container in OCR:
+            self.assertLess(events.index(["stop", container]), events.index(["build-ended"]))
         self.assert_running()
 
     def test_critical_memory_cancels_build_children_before_restoring_workers(self):
