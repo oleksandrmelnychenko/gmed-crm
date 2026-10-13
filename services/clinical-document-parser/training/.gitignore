@@ -1,0 +1,6 @@
+# Training outputs and model weights are not source files.
+out/
+*.pt
+*.bin
+*.ckpt
+*.safetensors

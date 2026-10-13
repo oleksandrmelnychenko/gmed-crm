@@ -1,0 +1,19 @@
+{
+  "name": "emea-v3",
+  "url": "https://object.pouta.csc.fi/OPUS-EMEA/v3/moses/de-en.txt.zip",
+  "license": "EU agency documents (EMA) redistributed via OPUS. Treated as reusable under Commission Decision 2011/833/EU (reuse of Commission documents) for commercial and non-commercial use with attribution. Cite Tiedemann (2012) LREC OPUS paper. OPUS does not claim ownership; remove if rights holder objects.",
+  "format": "csv id,lang,source_text,target_text (source=en, target=de)",
+  "pair_count_deduped": 346474,
+  "csv_sha256": "bd5c773c14c0068f1908e07ce38eb4ee1d50b0fe15d07bfcec08ca8ea4d4e7f7",
+  "csv_bytes": 74156330,
+  "raw_en_lines": 1108752,
+  "raw_de_lines": 1108752,
+  "medical_keyword_subsample": {
+    "path": "emea-v3-en-de.medical-keyword-subsample.csv",
+    "pair_count": 162442,
+    "max_cap": null,
+    "sha256": "701464cb0c62edb97632fce0218a2b2280b973aaf677fed4d4fa2ef051e265cd",
+    "bytes": 46753882,
+    "note": "Uncapped keyword filter over full deduped EMEA CSV"
+  }
+}

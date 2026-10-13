@@ -1,0 +1,13 @@
+# Downloaded corpora and converted data stay on local / external data storage.
+# Keep preparation scripts, provenance metadata, licenses and documentation in Git.
+raw/
+extracted/
+csv/
+*.csv
+*.tsv
+*.zip
+*.gz
+*.tmx
+*.pdf
+*.dtd
+sources/*.json

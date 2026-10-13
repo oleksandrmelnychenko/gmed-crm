@@ -1,0 +1,11 @@
+{
+  "name": "ecdc-v2016-03-16",
+  "url": "https://object.pouta.csc.fi/OPUS-ECDC/v2016-03-16/moses/de-en.txt.zip",
+  "license": "EU/ECDC Translation Memory: worldwide, royalty-free, perpetual, non-exclusive licence for any commercial and non-commercial purpose (Commission Reuse Decision 2011/833/EU). Retain copyright notice on unmodified distributions; no endorsement using Owner's name. See LICENSE in package.",
+  "format": "csv id,lang,source_text,target_text (source=en, target=de)",
+  "pair_count_deduped": 2394,
+  "csv_sha256": "c5c743b26429ac887ca2057423bb5f1d4b9d20dbbef3f683a8fe11f65a173258",
+  "csv_bytes": 578228,
+  "raw_en_lines": 2561,
+  "raw_de_lines": 2561
+}

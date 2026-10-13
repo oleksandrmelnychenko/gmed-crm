@@ -1,0 +1,5 @@
+EU agency documents (EMA) redistributed via OPUS. Treated as reusable under Commission Decision 2011/833/EU (reuse of Commission documents) for commercial and non-commercial use with attribution. Cite Tiedemann (2012) LREC OPUS paper. OPUS does not claim ownership; remove if rights holder objects.
+
+Source: http://www.ema.europa.eu/ (historical emea.europa.eu)
+OPUS page: https://opus.nlpl.eu/legacy/EMEA.php
+Download: https://object.pouta.csc.fi/OPUS-EMEA/v3/moses/de-en.txt.zip

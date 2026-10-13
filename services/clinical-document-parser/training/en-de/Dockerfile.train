@@ -1,0 +1,40 @@
+# Training image for EN→DE OpenNMT on RTX 5080 (Blackwell).
+# Host Windows .venv cannot install/run torch (Application Control) — use Docker GPU.
+#
+# Build (from clinical-document-parser / service root):
+#   docker build -f training/en-de/Dockerfile.train -t gmed-en-de-train:local .
+#
+# DO NOT write into models/translate-en_de-1_3 (production).
+
+FROM pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# OpenNMT-py 3.5 pins torch<2.3; install WITHOUT deps, then add runtime deps
+# that do not replace the base-image torch 2.11+cu128 (needed for sm_120).
+RUN pip install --no-cache-dir --break-system-packages --no-deps "OpenNMT-py==3.5.1"
+
+RUN pip install --no-cache-dir --break-system-packages \
+      "ctranslate2>=4.5,<5" \
+      "sentencepiece>=0.2" \
+      "pyyaml" \
+      "sacrebleu" \
+      "pyonmttok>=1.37" \
+      "configargparse" \
+      "flask" \
+      "waitress" \
+      "pyahocorasick" \
+      "rapidfuzz" \
+      "tensorboard" \
+      "tqdm" \
+      "lxml" \
+      "httpx"
+
+# If any transitive dep downgraded torch, force the CUDA 12.8 wheel back.
+RUN pip install --no-cache-dir --break-system-packages --force-reinstall \
+      --index-url https://download.pytorch.org/whl/cu128 \
+      torch==2.11.0
+
+WORKDIR /workspace

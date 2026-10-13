@@ -1,0 +1,82 @@
+# Skeleton OpenNMT-py config for a small EN→DE medical fine-tune / from-scratch run.
+# Adjust paths after running scripts/prepare_elrc_en_de.py.
+# DO NOT point save_model at models/translate-en_de-1_3 (production).
+#
+# Suggested flow:
+#   1) prepare_elrc_en_de.py  → training/en-de/out/elrc-filtered/{train,valid,test}.{en,de}
+#   2) onmt_build_vocab -config this file -n_sample -1
+#   3) onmt_train -config this file
+#   4) ct2-opennmt-py-converter --model_path <checkpoint> --output_dir <ct2_dir> --quantization int8
+#   5) wrap CT2 dir + SentencePiece + metadata.json into a side package under training/en-de/out/packages/
+#
+# This corpus is small (~10k filtered pairs). Prefer continued training / domain
+# adaptation of an existing EN–DE checkpoint over training Transformer from scratch
+# unless you merge larger public medical bitext.
+
+## Where the samples will be written
+save_data: training/en-de/out/opennmt/data
+
+## Corpus
+data:
+  corpus_1:
+    path_src: training/en-de/out/elrc-filtered/train.en
+    path_tgt: training/en-de/out/elrc-filtered/train.de
+  valid:
+    path_src: training/en-de/out/elrc-filtered/valid.en
+    path_tgt: training/en-de/out/elrc-filtered/valid.de
+
+## Vocabulary
+src_vocab: training/en-de/out/opennmt/data.vocab.src
+tgt_vocab: training/en-de/out/opennmt/data.vocab.tgt
+share_vocab: true
+src_vocab_size: 32000
+tgt_vocab_size: 32000
+
+## Model (small Transformer — placeholder; raise if you have more data + GPU headroom)
+decoder_type: transformer
+encoder_type: transformer
+word_vec_size: 512
+hidden_size: 512
+layers: 6
+heads: 8
+transformer_ff: 2048
+dropout: 0.1
+attention_dropout: 0.1
+position_encoding: true
+share_decoder_embeddings: true
+share_embeddings: true
+
+## Optimization
+optim: adam
+learning_rate: 2.0
+warmup_steps: 4000
+decay_method: noam
+adam_beta2: 0.998
+max_grad_norm: 0.0
+label_smoothing: 0.1
+param_init: 0.0
+param_init_glorot: true
+
+## Batching / train length (keep short for a dry-run; raise for real training)
+batch_type: tokens
+batch_size: 4096
+valid_batch_size: 8
+accum_count: 4
+train_steps: 5000
+valid_steps: 500
+save_checkpoint_steps: 1000
+keep_checkpoint: 3
+report_every: 100
+seed: 42
+
+## IO — side folder only
+save_model: training/en-de/out/opennmt/model
+tensorboard: true
+tensorboard_log_dir: training/en-de/out/opennmt/tensorboard
+
+## Hardware hints (override on CLI)
+world_size: 1
+gpu_ranks: [0]
+
+## Dataloader (avoid Windows bind-mount worker hangs)
+num_workers: 0

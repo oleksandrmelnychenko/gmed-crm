@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -16,7 +17,16 @@ def translate_payload(payload: dict, model_path: Path) -> dict:
     import sentencepiece
 
     metadata = json.loads((model_path / "metadata.json").read_text(encoding="utf-8"))
-    if (metadata.get("from_code"), metadata.get("to_code"), metadata.get("package_version")) != ("en", "de", "1.3"):
+    # Default: pin Argos EN->DE package_version 1.3 (production).
+    # Optional escape hatch for side packages under training/en-de/out/... :
+    #   PARSER_TRANSLATION_ALLOW_NONPINNED_MODEL=1
+    # still requires from_code=en and to_code=de. Leave unset in production.
+    if (metadata.get("from_code"), metadata.get("to_code")) != ("en", "de"):
+        raise ValueError("Unexpected translation model")
+    allow_nonpinned = os.getenv("PARSER_TRANSLATION_ALLOW_NONPINNED_MODEL", "").strip().lower() in {
+        "1", "true", "yes",
+    }
+    if not allow_nonpinned and metadata.get("package_version") != "1.3":
         raise ValueError("Unexpected translation model")
     tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(model_path / "sentencepiece.model"))
     engine = ctranslate2.Translator(str(model_path / "model"), device="cpu", compute_type="int8",
