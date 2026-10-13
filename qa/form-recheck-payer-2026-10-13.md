@@ -1,0 +1,49 @@
+# Повторна перевірка формуляра: платник і отримувач рахунку
+
+Дата: 2026-10-13. Базовий реліз: `37416f6b`; повторний незалежний перегляд поточного коду після релізу. Перевірено кабінет ліда, окреме посилання платника, кабінет батька/матері-платника, дані для персоналу та Selbstauskunft PDF. Стилі й parser training не входять у цю перевірку.
+
+Усі браузерні записи — синтетичні Playwright mocks, порт 5195, proxy `http://127.0.0.1:9`. Реальні DEV/PROD дані не змінювалися. Rust/БД запускає root; цей агент не запускав Cargo чи БД.
+
+## Підтверджені дефекти та виправлення
+
+| ID | Проблема до виправлення | Зміна й перевірка |
+| --- | --- | --- |
+| P-R1 | 422 на e-mail отримувача відхиляла весь PATCH, разом із новим містом/телефоном. Успішне збереження іншого поля прибирало всі помилки, зокрема ще невиправленого телефона. | `lead-request-invoice-recipient.tsx`: зберігати незалежні поля окремо, залишати помилку біля саме відхиленого значення; тільки HTTP 422 означає field refusal. E2E `recipient recheck: invalid fields do not discard other changes or hide each other's errors`: дві незалежні помилки, успішне місто, послідовне виправлення e-mail/телефона. |
+| P-R2 | Окреме посилання платника після невдалого autosave все одно викликало submit і могло зафіксувати старі, раніше повні відповіді. | `payer-link-form.tsx`: save/flush повертає результат; submit зупиняється при невдалому flush. E2E для 422 і 503: старі відповіді не надсилаються; 503 можна повторити без додаткового редагування, 422 — після виправлення поля. |
+| P-R3 | Та сама проблема у формулярі батька/матері-платника; крім того, 503 із `field` у тілі помилки помилково запам'ятовувалася як невалідне значення і блокувала повтор. | `lead-request-payer-questionnaire.tsx`: підтверджений результат save, перевірка status 422, transient failure не «отруює» значення. Дві аналогічні browser regressions (422/503). |
+| P-R4 | Черга autosave могла повернути старі, незмінені користувачем дані поверх нового server response. Відтворено: email-write повернув `city=Hamburg`, наступний queued phone-write надсилав старе `recipient_city=Berlin`. У paying-parent наступний funds-write стирав `former_names` у null. | Recipient, billing + extras, paying-parent questionnaire, public payer-link: scope PATCH до полів, захоплених при постановці в чергу; rebase React draft і queued draft через `lead-request-autosave.ts`; successive responses порівнюються з baseline на початку виконання. Props updates billing/public зберігають поточне введення. Чотири delayed-response E2E для цих потоків, public case також перевіряє дві послідовні server corrections. Доказ до fix: `.tmp/form-recheck/payer-rebase-before/*/error-context.md`. |
+| P-R5 | Платник-організація заповнював `legal_form`, `vat_id`, `payment_reason`, але нормалізатор staff API їх викидав. У «Данных плательщика» вони не відображалися. | `lead-payer-link-api.ts` зберігає всі три поля; `payerQuestionnaireGroups` показує правову форму, USt-IdNr. й підставу оплати. Unit `lead-payer-link-organisation-recheck.test.ts` перевіряє API normalization + row values. |
+| P-R6 | Ті самі три відповіді організації не потрапляли в Selbstauskunft PDF. | `PayerSelfDisclosure` і `build_payer_self_disclosure_pdf` передають/друкують їх. Розширено існуючий PDF extraction test `the_payers_self_disclosure_prints_its_own_answers_and_one_payer_signature`; медичний privacy exclusion та одна signature збережені. Runtime перевірку виконує root. |
+| P-R7 | Після зміни персоналом особи/типу платника checkbox `payerInformed=true` лишався від попереднього платника. Autosave надсилав явне true, сервер законно трактував це як нове підтвердження повідомлення нової особи. | `withPayerDeclarationField` скидає inherited checkbox при зміні effective identity (тип, ім'я, прізвище, DOB, назва організації). Адресні/trim-only правки не скидають. Явне нове підтвердження дозволене. Два unit-тести; staff organization E2E підтверджує, що попередня дата consent не переноситься. |
+| P-R8 | Під час очікування submit/flush поля paying-parent і навігація public payer-link залишалися активними. Пізніша правка могла потрапити в чергу вже після submit і не ввійти у надісланий формуляр. | На час submitting поля й дії заморожені; backend write guard не змінювався, flush працює. Дві delayed E2E перевіряють disabled поля/навігацію до завершення та успішне надсилання останнього введеного значення. |
+| P-R9 | Після відповіді платника CountrySelect отримувача-платника лишався editable, тоді як решта його даних уже заблокована. | Додано відсутній `disabled={lockedParty}`. Два E2E перевіряють і locked payer, і незалежного отримувача, який не платить: його країна лишається editable. Це виправлення UI consistency; серверні дозволи не послаблювалися. |
+| P-R10 | Clinical cross-review: файли batch ставилися в чергу по одному; submit міг виконатися між ними, після чого наступний upload отримував 409 submitted. Локальний busy guard paying-parent губився після переходу billing → person → billing, бо форма remount-иться. | Public payer-link враховує busy identity/funds uploads, paying-parent — uploading; handler і кнопка не надсилають форму до завершення всього batch. Public summary показує локалізований стан завантаження. Paying-parent додатково резервує один enqueue для всього batch, із прямими API await і чинною обробкою кожного файлу; remount не дозволяє submit вклинитися. Чотири delayed regressions для batch із 3 файлів тримають перший і останній upload, зокрема перевіряють перехід між кроками й submit після повернення. До атомарного fix останній сценарій реально надсилав форму перед третім upload (`payer-upload-navigation-before`); після fix усі файли збережені перед єдиним submit. |
+
+## Перевірені переходи, що вже працювали
+
+- Отримувач рахунку і платник можуть бути різними; default checkbox не замінює попереднього платника до повних даних і явного підтвердження.
+- Відкриття кабінету представником не перезаписує збереженого self-payer. Батько/мати, що платить, має власний questionnaire; інший представник його не отримує.
+- Посилання платника: OTP/cooldown, неправильні коди, новий token у тій самій вкладці, expired/revoked link, приватний платник, компанія, UBO, proof of funds, required enhanced check, read-only після submit, стан пакета підпису та чотири мови.
+- Staff: мова відправлення, resend/reopen/revoke, blocked reason, parent cabinet замість окремого link, PEP/enhanced check, company/person/insurance transitions, USt-IdNr./Steuernummer отримувача, підтримка старшого backend без organization keys.
+- Обидва потоки мають перевірку 390px/широкого екрана. Нові перевірки не надсилають листи, не створюють реальні заявки й не змінюють серверну політику оплати.
+
+## Верифікація цього повторного аудиту
+
+- Початкові targeted frontend unit: **161 PASS** (8 файлів).
+- Після виправлень targeted unit: **75 PASS** (6 файлів), включно з новими organization visibility і informed reset cases.
+- Targeted ESLint усіх змінених payer/recipient hooks і браузерних специфікацій: **PASS**.
+- Повний payer browser пакет до останнього concurrency-посилення: **50/50 PASS** (`.tmp/form-recheck/payer-final-results`).
+- Delayed-response regressions після першого concurrency fix: **4/4 PASS** (`.tmp/form-recheck/payer-rebase-after`). До fix дві реальні втрати даних відтворено; первинний billing fixture потребував `submitted_at`, бо follow-up не показується до надсилання, fixture виправлено без послаблення assertion.
+- Останній повний payer/recipient/billing прогін зі successive-response і submit-lock changes: **усі 48 distinct cases PASS** (46 основного прогону + 2 exact retry), artifacts `.tmp/form-recheck/payer-final-v2` і `.tmp/form-recheck/payer-final-retry`. Один старий billing case завис на country dropdown, exact retry без змін пройшов за 8.2s. Public-submit case пройшов lock і submit, але мав неправильний thank-you testid у новому assert; assert виправлено на справжнє повідомлення, exact retry PASS.
+- Додаткові CountrySelect lock regressions: **2/2 PASS** у тому самому exact retry (разом 4/4 PASS). З попередніми staff specs отримано **66 distinct payer/recipient/billing/staff browser cases PASS** у цій перевірці.
+- Фінальний upload-batch boundary: targeted ESLint **PASS**; **3/3 browser regressions PASS**, artifacts `.tmp/form-recheck/payer-upload-batch`. Разом у payer-секторі **69 distinct browser cases PASS**.
+- Додаткова remount-regression відтворила submit між файлами після переходу між кроками. Після атомарного enqueue: **2/2 upload regressions PASS** (звичайна та remount), artifacts `.tmp/form-recheck/payer-upload-navigation-after`; targeted ESLint і `git diff --check` **PASS**. Разом **70 distinct payer-sector browser cases PASS**.
+- Root виконує спільні typecheck/build, повний frontend gate і Rust/API/PDF. Не ототожнювати старі релізні результати з новою runtime перевіркою.
+
+## Початкові прогалини покриття й межі
+
+Старі browser tests не моделювали повільні взаємно залежні autosaves, 503 з назвою поля, повтор без редагування та незалежні 422 у recipient. Staff-fixture повертав стару дату consent навіть після identity change, через що не показував P-R7. Застарілі assert-и ручної кнопки «Сохранить», мови privacy URL й точного оформлення risk hints оновлено відповідно до поточної поведінки; product assertions про identity, consent та збереження не послаблено.
+
+Це функціональний аудит зазначених потоків і цільових переходів, не гарантія всіх можливих комбінацій даних чи зовнішнього SMTP/signature провайдера. Реальний Gmail spam/logo delivery у цей синтетичний прогін не входить.
+
+Root runtime verification: `lead_payer_api` 11/11, `lead_payer_link_api` 9/9, `lead_payer_package_api` 7/7 — PASS на disposable PostgreSQL. PDF regression `the_payers_self_disclosure_prints_its_own_answers_and_one_payer_signature` — PASS; діагностичні логи у `.tmp/form-recheck/rust-api.log` та `rust-pdf-final.log`.

@@ -19,7 +19,7 @@ import {
   MAX_CONSENT_RECIPIENTS,
   NO_CONSENT_FORM_CHOICES,
   hasCoreConsents,
-  saveLeadConsentFormChoices,
+  saveLeadConsentFormChoicesAndRefresh,
   type ConsentFormChoices,
   type ConsentRecipient,
   type ConsentRecipientRelation,
@@ -168,11 +168,11 @@ export function ConsentFormChoicesSection({
     setError("");
     try {
       const saved = await enqueue(() =>
-        saveLeadConsentFormChoices(request.lead_id, draft, form.version, lang, toSend),
+        saveLeadConsentFormChoicesAndRefresh(request.lead_id, draft, form.version, lang, toSend),
       );
-      onChange({ ...request, consent_form: saved });
-      setDraft(saved.choices ?? draft);
-      setRecipients(recipientDrafts(saved.recipients ?? toSend));
+      onChange(saved);
+      setDraft(saved.consent_form?.choices ?? draft);
+      setRecipients(recipientDrafts(saved.consent_form?.recipients ?? toSend));
     } catch (cause) {
       const code = errorBody(cause)?.code;
       setError(

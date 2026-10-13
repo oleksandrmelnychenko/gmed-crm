@@ -447,6 +447,7 @@ export function FileUploadField({
   consentReady,
   text,
   lang,
+  enqueue,
   upload,
   remove,
   testId,
@@ -461,6 +462,8 @@ export function FileUploadField({
   consentReady: boolean;
   text: LeadRequestText;
   lang: string;
+  enqueue: RequestQueue;
+  /** Direct upload: the field queues the complete selection as one operation. */
   upload: (file: File) => Promise<void>;
   remove: (documentId: string) => Promise<void>;
   testId: string;
@@ -473,21 +476,24 @@ export function FileUploadField({
     if (files.length === 0) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    for (const file of files) {
-      if (file.size > 25 * 1024 * 1024) {
-        nextErrors.push(text.fileTooLarge(file.name));
-        continue;
+    // Reserve all files together so a follow-up submit cannot split the batch.
+    await enqueue(async () => {
+      for (const file of files) {
+        if (file.size > 25 * 1024 * 1024) {
+          nextErrors.push(text.fileTooLarge(file.name));
+          continue;
+        }
+        try {
+          await upload(file);
+        } catch (cause) {
+          nextErrors.push(
+            errorBody(cause)?.code === "inquiry_consent_required"
+              ? text.identityUploadNeedsConsent
+              : `${file.name}: ${errorMessage(cause, text)}`,
+          );
+        }
       }
-      try {
-        await upload(file);
-      } catch (cause) {
-        nextErrors.push(
-          errorBody(cause)?.code === "inquiry_consent_required"
-            ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause, text)}`,
-        );
-      }
-    }
+    });
     setErrors(Array.from(new Set(nextErrors)));
     setUploading(false);
   }

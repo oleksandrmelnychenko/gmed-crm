@@ -11,7 +11,8 @@ const PASSPORT_NAME = /^[\p{Script=Latin}\p{M}\s'’.-]*$/u;
 
 /** True when the name has a character a passport name cannot contain. */
 export function nameNeedsLatinSpelling(value: string): boolean {
-  return !PASSPORT_NAME.test(value.trim());
+  const trimmed = value.trim();
+  return trimmed.length > 0 && (!PASSPORT_NAME.test(trimmed) || !/\p{L}/u.test(trimmed));
 }
 
 const RUSSIAN: Record<string, string> = {

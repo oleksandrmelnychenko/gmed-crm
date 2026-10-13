@@ -11,6 +11,8 @@ import {
   tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { cn } from "@/lib/utils";
+import { ApiRequestError } from "@/lib/api";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 import {
   fetchMyLeadRequests,
@@ -104,6 +106,7 @@ function useBillingForm({
 }): BillingForm {
   const [draft, setDraft] = useState<BillingDraft>(() => draftFromBilling(billing));
   const savedRef = useRef<BillingDraft>(draftFromBilling(billing));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
   const failedRef = useRef(false);
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
@@ -124,14 +127,12 @@ function useBillingForm({
     const incoming = draftFromBilling(billing);
     const changed = changedOnServer(savedRef.current, incoming);
     if (changed.length > 0) {
+      const baseline = savedRef.current;
       const cleared = clearedOwnRoute(savedRef.current, lastRouteByRef.current, incoming);
       if (cleared) OWN_ROUTE_SET_ASIDE.set(request.lead_id, { routeBy: lastRouteByRef.current, route: cleared });
       savedRef.current = incoming;
-      setDraft((current) => {
-        const next = { ...current };
-        for (const field of changed) next[field] = incoming[field];
-        return next;
-      });
+      queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, baseline, incoming, baseline, changed);
+      setDraft((current) => mergeSavedDraft(current, baseline, incoming, baseline, changed));
     }
     lastRouteByRef.current = billing.payment_route_by;
     const kept = OWN_ROUTE_SET_ASIDE.get(request.lead_id);
@@ -149,6 +150,8 @@ function useBillingForm({
 
   const save = useCallback(
     (snapshot: BillingDraft) => {
+      const fields = queuedDraftFields(billingPatch(savedRef.current, snapshot, routeByRef.current), billingPatch(queuedDraftRef.current, snapshot, routeByRef.current));
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
         let saved = false;
         let failed = false;
@@ -157,12 +160,18 @@ function useBillingForm({
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = billingPatch(savedRef.current, snapshot, routeByRef.current, rejected);
+          const patch = scopedDraftPatch(billingPatch(savedRef.current, snapshot, routeByRef.current, rejected), fields);
           if (Object.keys(patch).length === 0) break;
           onSaveState("saving");
           try {
+            const baseline = savedRef.current;
             const next = await saveLeadBilling(request.lead_id, patch);
-            if (next.billing) savedRef.current = draftFromBilling(next.billing);
+            if (next.billing) {
+              const fresh = draftFromBilling(next.billing);
+              savedRef.current = fresh;
+              queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+              setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
+            }
             saved = true;
             onChange(next);
             break;
@@ -183,7 +192,7 @@ function useBillingForm({
               continue;
             }
             const field = typeof body?.field === "string" ? body.field : "";
-            const next = field in patch ? withRejectedBilling(rejected, field, snapshot) : null;
+            const next = cause instanceof ApiRequestError && cause.status === 422 && field in patch ? withRejectedBilling(rejected, field, snapshot) : null;
             if (!next) {
               failed = true;
               break;
@@ -537,6 +546,7 @@ function BillingExtras({
 }) {
   const [draft, setDraft] = useState<BillingExtrasDraft>(() => draftFromBillingExtras(billing));
   const savedRef = useRef<BillingExtrasDraft>(draftFromBillingExtras(billing));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<Partial<Record<BillingExtrasField, string>>>({});
   const [refused, setRefused] = useState<Partial<Record<BillingExtrasField, string>>>({});
 
@@ -547,29 +557,34 @@ function BillingExtras({
     const changed = BILLING_EXTRAS_FIELDS.filter((field) => billingExtrasValue(field, incoming) !== billingExtrasValue(field, saved));
     if (changed.length === 0) return;
     savedRef.current = incoming;
-    setDraft((current) => {
-      const next = { ...current };
-      for (const field of changed) next[field] = incoming[field];
-      return next;
-    });
+    queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, saved, incoming, saved, changed);
+    setDraft((current) => mergeSavedDraft(current, saved, incoming, saved, changed));
   }, [billing]);
 
   const save = useCallback(
     (snapshot: BillingExtrasDraft) => {
+      const fields = queuedDraftFields(billingExtrasPatch(savedRef.current, snapshot), billingExtrasPatch(queuedDraftRef.current, snapshot));
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
-        const patch = billingExtrasPatch(savedRef.current, snapshot, refusedRef.current);
+        const patch = scopedDraftPatch(billingExtrasPatch(savedRef.current, snapshot, refusedRef.current), fields);
         if (Object.keys(patch).length === 0) return;
         onSaveState("saving");
         try {
+          const baseline = savedRef.current;
           const next = await saveLeadBillingExtras(request.lead_id, patch);
-          if (next.billing) savedRef.current = draftFromBillingExtras(next.billing);
+          if (next.billing) {
+            const fresh = draftFromBillingExtras(next.billing);
+            savedRef.current = fresh;
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+            setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
+          }
           refusedRef.current = {};
           setRefused({});
           onSaveState("saved");
           onChange(next);
         } catch (cause) {
           const field = errorBody(cause)?.field;
-          if (field === "via_third_party_kind" || field === "expected_total_eur") {
+          if (cause instanceof ApiRequestError && cause.status === 422 && (field === "via_third_party_kind" || field === "expected_total_eur")) {
             refusedRef.current = { ...refusedRef.current, [field]: billingExtrasValue(field, snapshot) };
             setRefused(refusedRef.current);
           }

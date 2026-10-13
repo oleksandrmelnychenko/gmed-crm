@@ -516,7 +516,7 @@ test("a blocked link names the reason", async ({ page }) => {
   await expect(send).toBeDisabled();
   await expect(send).not.toHaveAttribute("data-highlight", "true");
   await expect(panel.getByTestId("lead-payer-link-blocked")).toHaveText(
-    "Der Link kann gesendet werden, sobald der Patient die Anfrage im Portal gesendet hat",
+    "Der Patient muss die aktuelle Anfrage im Portal absenden. Nach einer Änderung des Zahlers oder Einverständnisses ist ein erneutes Absenden erforderlich",
   );
   await expect(panel.getByTestId("lead-payer-link-ready")).toHaveCount(0);
   expect(calls.sends).toEqual([]);
@@ -586,7 +586,8 @@ test("the payer's answers stand after invoice and payment: a PEP in amber, level
   );
   const missingProof = group.getByTestId("lead-payer-funds-proof-missing");
   await expect(missingProof).toHaveText("Prüfstufe 2: Der Nachweis der Herkunft der Mittel fehlt noch");
-  await expect(missingProof).toHaveClass(/text-amber-700/);
+  await expect(missingProof).toHaveClass(/bg-amber-50/);
+  await expect(missingProof).toHaveClass(/text-amber-900/);
   await expect(group.getByTestId("lead-gwg-payer-privacy")).toHaveText(
     "Datenschutzhinweis bestätigt am 06.10.2026 12:06 · Version payer-privacy-2026-10-06 · IP 203.0.113.7 · Kontaktwege: E-Mail",
   );
@@ -618,9 +619,8 @@ test("the enhanced check follows the server's rule: a black-list citizenship req
   );
   const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
   await expect(section).toHaveAttribute("data-required", "true");
-  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toHaveText(
-    "Erforderlich: Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)",
-  );
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status").getByText("Erforderlich", { exact: true })).toBeVisible();
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Staatsangehörigkeit des Zahlers auf der Blacklist (Iran)");
   const hints = section.getByTestId("lead-wizard-enhanced-check-hint");
   await expect(hints).toHaveText([
     "möglicher Sanktionstreffer wartet auf die Entscheidung",
@@ -651,7 +651,7 @@ test("a PEP alone leaves the enhanced check voluntary", async ({ page }) => {
   );
   const section = wizard.getByTestId("lead-wizard-enhanced-check-section");
   await expect(section).toHaveAttribute("data-required", "false");
-  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Не обязательна");
+  await expect(section.getByTestId("lead-wizard-enhanced-check-status")).toContainText("Добровольная проверка");
   await expect(section.getByTestId("lead-wizard-enhanced-check-hint")).toHaveText(
     "PEP: по § 15 GwG обычно требуется усиленная проверка — решение за сотрудником",
   );

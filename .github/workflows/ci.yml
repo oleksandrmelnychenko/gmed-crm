@@ -116,9 +116,9 @@ jobs:
         run: npx playwright test --list
 
       # Mocked API; the patient-facing lead cabinet in four languages.
-      - name: Lead cabinet browser gate
+      - name: Lead cabinet and payer browser gate
         working-directory: frontend
-        run: npx playwright test tests/e2e/lead-cabinet.spec.ts
+        run: npx playwright test 'lead-.*\.spec\.ts' 'payer-link\.spec\.ts'
 
   android:
     runs-on: ubuntu-latest
@@ -195,6 +195,7 @@ jobs:
           tests/e2e-live/rbac-denied-routes.live.spec.ts
           tests/e2e-live/chat-secure.live.spec.ts
           tests/e2e-live/realtime.live.spec.ts
+          tests/e2e-live/cabinet-roundtrip.spec.ts
 
       - name: Upload failed live browser diagnostics
         if: failure()

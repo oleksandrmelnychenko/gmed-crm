@@ -27,6 +27,7 @@ import {
   type RepresentativeSlot,
   type RepresentativeUploadKind,
 } from "./lead-request-api";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { MAX_UPLOAD_BYTES, combinedSaveState, consentGiven, type SaveState } from "./lead-request-model";
 import {
   CabinetSection as Section,
@@ -192,6 +193,7 @@ function useRepresentativeForm({
 }): RepresentativeForm {
   const [draft, setDraft] = useState<RepresentativeDraft>(() => draftFromRepresentative(person));
   const savedRef = useRef<RepresentativeDraft>(draftFromRepresentative(person));
+  const queuedDraftRef = useRef<RepresentativeDraft>(draftFromRepresentative(person));
   // The id the person has on the server, or the one made for the first save.
   const idRef = useRef<string | null>(person?.id ?? null);
   const existsRef = useRef(Boolean(person));
@@ -210,6 +212,12 @@ function useRepresentativeForm({
   const save = useCallback(
     (snapshot: RepresentativeDraft) => {
       if (removedRef.current || !isShown(slot)) return;
+      const options = { create: existsRef.current ? null : ROLE_OF_SLOT[slot], emailLocked: lockedRef.current };
+      const fields = queuedDraftFields(
+        representativePatch(savedRef.current, snapshot, options) ?? {},
+        representativePatch(queuedDraftRef.current, snapshot, options) ?? {},
+      );
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
         if (removedRef.current) return;
         let saved = false;
@@ -219,18 +227,26 @@ function useRepresentativeForm({
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = representativePatch(savedRef.current, snapshot, {
+          const candidate = representativePatch(savedRef.current, snapshot, {
             rejected,
             create: existsRef.current ? null : ROLE_OF_SLOT[slot],
             emailLocked: lockedRef.current,
           });
-          if (!patch) break;
+          if (!candidate) break;
+          const patch = scopedDraftPatch(candidate, fields);
+          if (Object.keys(patch).length === 0) break;
           onSaveState("saving");
           const id = (idRef.current ??= newRepresentativeId());
           try {
+            const baseline = savedRef.current;
             const next = await saveLeadRepresentative(request.lead_id, id, patch);
             const stored = next.representation?.representatives.find((item) => item.id === id);
-            if (stored) savedRef.current = draftFromRepresentative(stored);
+            if (stored) {
+              const fresh = draftFromRepresentative(stored);
+              savedRef.current = fresh;
+              queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+              setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
+            }
             existsRef.current = true;
             saved = true;
             onChange(next);
@@ -336,21 +352,24 @@ function RepresentativeUpload({
     if (files.length === 0 || !person) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_UPLOAD_BYTES) {
-        nextErrors.push(text.fileTooLarge(file.name));
-        continue;
+    // The parent step may unmount while the selection is still uploading.
+    await enqueue(async () => {
+      for (const file of files) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          nextErrors.push(text.fileTooLarge(file.name));
+          continue;
+        }
+        try {
+          onChange(await uploadLeadRepresentativeDocument(request.lead_id, person.id, kind, file));
+        } catch (cause) {
+          nextErrors.push(
+            errorBody(cause)?.code === "inquiry_consent_required"
+              ? text.identityUploadNeedsConsent
+              : `${file.name}: ${errorMessage(cause, text)}`,
+          );
+        }
       }
-      try {
-        onChange(await enqueue(() => uploadLeadRepresentativeDocument(request.lead_id, person.id, kind, file)));
-      } catch (cause) {
-        nextErrors.push(
-          errorBody(cause)?.code === "inquiry_consent_required"
-            ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause, text)}`,
-        );
-      }
-    }
+    });
     setErrors(Array.from(new Set(nextErrors)));
     setUploading(false);
   }

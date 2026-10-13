@@ -752,6 +752,10 @@ export type PersonalDataPatch = Partial<Record<keyof LeadRequestPersonalData, st
 
 const base = (leadId: string) => `/me/lead-requests/${encodeURIComponent(leadId)}`;
 
+export function fetchMyLeadRequest(leadId: string): Promise<LeadRequest> {
+  return apiFetch<LeadRequest>(base(leadId), { forceFresh: true });
+}
+
 export async function fetchMyLeadRequests(): Promise<LeadRequest[]> {
   return (await fetchMyLeadRequestList()).requests;
 }
@@ -841,6 +845,14 @@ export function saveLeadConsentFormChoices(
     method: "POST",
     body: JSON.stringify({ choices, recipients, version, language }),
   });
+}
+
+/** Keep this whole operation in the write queue: the choice also changes submission state. */
+export async function saveLeadConsentFormChoicesAndRefresh(
+  ...args: Parameters<typeof saveLeadConsentFormChoices>
+): Promise<LeadRequest> {
+  await saveLeadConsentFormChoices(...args);
+  return fetchMyLeadRequest(args[0]);
 }
 
 export function revokeLeadConsent(leadId: string, purpose: string): Promise<{ revoked: boolean }> {

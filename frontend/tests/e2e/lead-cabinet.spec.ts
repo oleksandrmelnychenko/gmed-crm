@@ -523,6 +523,9 @@ async function setup(
         json: options.ownAccessClosed ? { requests: [], own_access_closed: true } : { requests: [request] },
       });
     }
+    if (path === "/me/lead-requests/lead-1" && method === "GET") {
+      return route.fulfill({ json: request });
+    }
     if (path === "/me/lead-requests/lead-1/personal-data" && method === "POST") {
       const patch = req.postDataJSON() as Record<string, unknown>;
       calls.personalData.push(patch);

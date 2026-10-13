@@ -217,6 +217,10 @@ function recompute(value: Questionnaire, representativeMissing: string[]) {
 }
 
 type SetupOptions = {
+  ready?: boolean;
+  afterAnswersWrite?: (answers: Record<string, unknown>, patch: Record<string, unknown>) => Promise<void> | void;
+  beforeUpload?: (count: number) => Promise<void> | void;
+  writeFailure?: { status: number | null };
   paying?: boolean;
   adult?: boolean;
   representativeMissing?: string[];
@@ -252,7 +256,7 @@ async function setup(page: Page, options: SetupOptions = {}) {
     questionnaire: questionnaire(),
     questionnaireSignature: options.questionnaireSignature as Record<string, unknown> | null | undefined,
   };
-  if (options.submitted) {
+  if (options.submitted || options.ready) {
     Object.assign(state.questionnaire.privacy, { acknowledged_at: "2026-10-06T10:00:00Z", contact_channels: ["email"] });
     Object.assign(state.questionnaire.answers, {
       occupation: "Ingenieurin",
@@ -262,8 +266,10 @@ async function setup(page: Page, options: SetupOptions = {}) {
       high_risk_country: false,
       sanctions_links: false,
     });
-    Object.assign(state.questionnaire, { state: "submitted", declared_correct_at: "2026-10-06T10:30:00Z", submitted_at: "2026-10-06T10:30:00Z" });
-    request.payer_questionnaire = { ...(request.payer_questionnaire as Record<string, unknown>), submitted_at: "2026-10-06T10:30:00Z", missing_count: 0 };
+    if (options.submitted) {
+      Object.assign(state.questionnaire, { state: "submitted", declared_correct_at: "2026-10-06T10:30:00Z", submitted_at: "2026-10-06T10:30:00Z" });
+      request.payer_questionnaire = { ...(request.payer_questionnaire as Record<string, unknown>), submitted_at: "2026-10-06T10:30:00Z", missing_count: 0 };
+    }
   }
   recompute(state.questionnaire, representativeMissing);
   const calls = {
@@ -325,12 +331,16 @@ async function setup(page: Page, options: SetupOptions = {}) {
       calls.patches.push(patch);
       if (!state.questionnaire.privacy.acknowledged_at) return route.fulfill(refuse(403, "payer_consent_required"));
       if (state.questionnaire.submitted_at) return route.fulfill(refuse(409, "payer_submitted"));
+      if (options.writeFailure?.status && "occupation" in patch) {
+        return route.fulfill(refuse(options.writeFailure.status, options.writeFailure.status === 422 ? "invalid_field" : "unavailable", "occupation"));
+      }
       const unknown = Object.keys(patch).find((key) => !WRITABLE.includes(key));
       if (unknown) return route.fulfill(refuse(422, "invalid_field", unknown));
       Object.assign(state.questionnaire.answers, patch);
       for (const [question, details] of LEGAL) {
         if (state.questionnaire.answers[question] !== true) state.questionnaire.answers[details] = null;
       }
+      await options.afterAnswersWrite?.(state.questionnaire.answers, patch);
       return route.fulfill({ json: answer() });
     }
     if (path === `${own}/consent` && method === "POST") {
@@ -343,6 +353,8 @@ async function setup(page: Page, options: SetupOptions = {}) {
     if (path === `${own}/funds-proof` && method === "POST") {
       calls.uploads += 1;
       if (!state.questionnaire.privacy.acknowledged_at) return route.fulfill(refuse(403, "payer_consent_required"));
+      if (state.questionnaire.state === "submitted") return route.fulfill(refuse(409, "payer_submitted"));
+      await options.beforeUpload?.(calls.uploads);
       state.questionnaire.funds_proof_documents.push({
         id: `proof-${calls.uploads}`,
         file_name: "kontoauszug.pdf",
@@ -402,6 +414,122 @@ const TITLE = "Angaben als zahlende Person";
 /** Opens a step of the cabinet by its tab. */
 const step = (page: Page, id: string) => page.locator(`[data-step="${id}"]`).click();
 
+test("paying-parent recheck: a queued edit keeps the server's corrected untouched answers", async ({ page }) => {
+  let release = () => {};
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const { state, calls } = await setup(page, { ready: true, afterAnswersWrite: async (answers, patch) => {
+    if (patch.occupation === "Neue Tätigkeit") {
+      answers.former_names = "Frueherer Name";
+      await response;
+    }
+  } });
+  await page.goto("/");
+  await step(page, "billing");
+  const section = page.getByTestId("lead-request-payer-questionnaire");
+  await section.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ }).fill("Neue Tätigkeit");
+  await expect.poll(() => calls.patches.length).toBe(1);
+  await section.locator("textarea[id$='funds_description']").fill("Monatliches Gehalt");
+  await step(page, "person");
+  release();
+  await expect.poll(() => state.questionnaire.answers.funds_description).toBe("Monatliches Gehalt");
+  expect(calls.patches[1]).toEqual({ funds_description: "Monatliches Gehalt" });
+  expect(state.questionnaire.answers.former_names).toBe("Frueherer Name");
+});
+
+test("paying-parent recheck: sending locks editing until the pending save has finished", async ({ page }) => {
+  let release = () => {};
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const { state } = await setup(page, { ready: true, afterAnswersWrite: () => response });
+  await page.goto("/");
+  await step(page, "billing");
+  const section = page.getByTestId("lead-request-payer-questionnaire");
+  const occupation = section.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ });
+  await occupation.fill("Neue Tätigkeit");
+  await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+  await section.getByTestId("lead-request-payer-submit").click();
+  await expect(occupation).toBeDisabled();
+  release();
+  await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+  expect(state.questionnaire.answers.occupation).toBe("Neue Tätigkeit");
+});
+
+test("paying-parent recheck: sending waits for the entire proof upload batch", async ({ page }) => {
+  let releaseFirst = () => {};
+  let releaseLast = () => {};
+  const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const last = new Promise<void>((resolve) => { releaseLast = resolve; });
+  const { state, calls } = await setup(page, { ready: true, beforeUpload: (count) => count === 1 ? first : count === 3 ? last : undefined });
+  await page.goto("/");
+  await step(page, "billing");
+  const section = page.getByTestId("lead-request-payer-questionnaire");
+  await page.locator("#lead-request-payer-funds-proof-files").setInputFiles([1, 2, 3].map((index) => ({
+    name: `proof-${index}.pdf`, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+  })));
+  await expect.poll(() => calls.uploads).toBe(1);
+  await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+  const submit = section.getByTestId("lead-request-payer-submit");
+  await expect(submit).toBeDisabled();
+  releaseFirst();
+  await expect.poll(() => calls.uploads).toBe(3);
+  await expect(submit).toBeDisabled();
+  expect(calls.submits).toEqual([]);
+  releaseLast();
+  await expect(submit).toBeEnabled();
+  expect(state.questionnaire.funds_proof_documents).toHaveLength(3);
+  await submit.click();
+  await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+});
+
+test("paying-parent recheck: leaving and reopening billing cannot submit between batch files", async ({ page }) => {
+  let releaseFirst = () => {};
+  let releaseLast = () => {};
+  const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+  const last = new Promise<void>((resolve) => { releaseLast = resolve; });
+  const { state, calls } = await setup(page, { ready: true, beforeUpload: (count) => count === 1 ? first : count === 3 ? last : undefined });
+  await page.goto("/");
+  await step(page, "billing");
+  await page.locator("#lead-request-payer-funds-proof-files").setInputFiles([1, 2, 3].map((index) => ({
+    name: `proof-${index}.pdf`, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+  })));
+  await expect.poll(() => calls.uploads).toBe(1);
+  await step(page, "person");
+  await step(page, "billing");
+  const section = page.getByTestId("lead-request-payer-questionnaire");
+  await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+  await section.getByTestId("lead-request-payer-submit").click();
+  releaseFirst();
+  await expect.poll(() => calls.uploads).toBe(3);
+  expect(calls.submits).toEqual([]);
+  expect(state.questionnaire.state).not.toBe("submitted");
+  releaseLast();
+  await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+  expect(state.questionnaire.funds_proof_documents).toHaveLength(3);
+  expect(calls.submits).toHaveLength(1);
+});
+
+for (const status of [422, 503]) {
+  test(`paying-parent recheck: failed save ${status} cannot submit the old complete answers`, async ({ page }) => {
+    const writeFailure = { status: status as number | null };
+    const { state, calls } = await setup(page, { ready: true, writeFailure });
+    await page.goto("/");
+    await step(page, "billing");
+    const section = page.getByTestId("lead-request-payer-questionnaire");
+    const occupation = section.getByRole("textbox", { name: /Beruf \/ Tätigkeit/ });
+    await occupation.fill("Neue Tätigkeit");
+    await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
+    await section.getByTestId("lead-request-payer-declaration").getByRole("checkbox").check();
+    await section.getByTestId("lead-request-payer-submit").click();
+    await expect(section).toContainText("Nicht gespeichert");
+    expect(calls.submits).toEqual([]);
+    expect(state.questionnaire.answers.occupation).toBe("Ingenieurin");
+    writeFailure.status = null;
+    if (status === 422) await occupation.fill("Korrigierte Tätigkeit");
+    await section.getByTestId("lead-request-payer-submit").click();
+    await expect(section.getByTestId("lead-request-payer-sent")).toBeVisible();
+    expect(state.questionnaire.answers.occupation).toBe(status === 422 ? "Korrigierte Tätigkeit" : "Neue Tätigkeit");
+  });
+}
+
 test.describe("lead cabinet: the paying parent's questionnaire", () => {
   test("the paying parent acknowledges the notice first, then the answers save on their own and are sent", async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1440, height: 1000 });
@@ -422,7 +550,7 @@ test.describe("lead cabinet: the paying parent's questionnaire", () => {
     await expect(notice).toContainText("Datenschutzhinweis für die zahlende Person");
     await expect(notice).toContainText("Verantwortlich für die Verarbeitung ist GMED.");
     await expect(notice).toContainText("§ 8 Abs. 4 GwG");
-    await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal#privacy");
+    await expect(notice.getByRole("link", { name: "Datenschutzhinweise" })).toHaveAttribute("href", "/legal?lang=de#privacy");
     // Why the fields wait only after a press (QA 2026-10-10: no hint before "Weiter").
     await expect(section.getByTestId("lead-request-payer-notice-first")).toHaveCount(0);
     await expect(section.getByTestId("lead-request-payer-fields")).toHaveCount(0);

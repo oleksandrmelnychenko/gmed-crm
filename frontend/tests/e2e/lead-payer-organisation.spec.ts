@@ -144,15 +144,18 @@ async function mount(page: Page, lang: "ru" | "de", declaration: Declaration) {
       };
     } else if (path === `/leads/${leadId}/payer-declaration`) {
       if (request.method() === "POST") {
-        // Like the server: the body replaces the declaration, the Art. 14
-        // confirmation keeps its time, the lead's consent is not touched.
+        // Confirmations belong to the named payer; staff cannot carry a
+        // patient's consent across a change to another person or organisation.
         const { payer_informed: informed, ...body } = request.postDataJSON() as Declaration;
+        const identity = (data: Declaration) => JSON.stringify([data.payer_type ?? "person", data.organisation_name ?? null, data.first_name, data.last_name, data.date_of_birth]);
+        const sameIdentity = identity(state.declaration) === identity({ ...state.declaration, ...body });
         saves.push({ payer_informed: informed, ...body });
         state.declaration = {
           ...state.declaration,
           ...body,
-          payer_informed_at: informed ? state.declaration.payer_informed_at ?? "2026-10-05T10:00:00Z" : null,
-          updated_at: "2026-10-05T10:00:00Z",
+          payer_informed_at: informed ? (sameIdentity ? state.declaration.payer_informed_at : null) ?? "2026-10-05T10:00:00Z" : null,
+          contact_consent_at: sameIdentity ? state.declaration.contact_consent_at : null,
+          updated_at: new Date(Date.UTC(2026, 9, 5, 10, 0, saves.length)).toISOString(),
         };
       }
       response = {
@@ -268,10 +271,8 @@ test("staff turn a private payer into a company: name and seat instead of the pe
   await page.screenshot({ path: testInfo.outputPath("lead-payer-company-ru-mobile.png"), animations: "disabled" });
   await page.setViewportSize({ width: 1440, height: 1100 });
 
-  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
-  expect(saves).toHaveLength(1);
-  expect(saves[0]).toMatchObject({
+  await expect(section.getByRole("button", { name: "Сохранить", exact: true })).toHaveCount(0);
+  await expect.poll(() => saves.at(-1)).toMatchObject({
     payer_kind: "third_party",
     payer_type: "company",
     organisation_name: "Beispiel GmbH",
@@ -287,13 +288,13 @@ test("staff turn a private payer into a company: name and seat instead of the pe
     city: "Wien",
     country: "AT",
     email: "viktor.zahler@example.com",
-    payer_informed: true,
+    payer_informed: false,
   });
   // The consent is the lead's: staff never send it. This server knows no
   // USt-IdNr. / Steuernummer either: the keys stay out of the body.
-  expect(Object.keys(saves[0]).filter((key) => key.includes("consent"))).toEqual([]);
-  expect(saves[0]).not.toHaveProperty("invoice_vat_id");
-  expect(saves[0]).not.toHaveProperty("invoice_tax_number");
+  expect(Object.keys(saves.at(-1)!).filter((key) => key.includes("consent"))).toEqual([]);
+  expect(saves.at(-1)).not.toHaveProperty("invoice_vat_id");
+  expect(saves.at(-1)).not.toHaveProperty("invoice_tax_number");
 
   // The saved company stays in the form; no sheet for natural persons for it.
   await expect(type).toContainText("Компания");
@@ -320,9 +321,9 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   const seat = section.getByRole("group", { name: "Sitz" });
   await expect(seat.getByLabel(/^Straße und Hausnummer/)).toHaveValue("Musterweg 1");
   await expect(seat.getByRole("combobox", { name: "Sitzland des Kostenübernehmers" })).toContainText("Österreich");
-  await expect(section.getByTestId("lead-payer-contact-consent")).toHaveText(
-    "Einverständnis zur Weitergabe der Kontaktdaten an den Zahler: 05.10.2026 11:30",
-  );
+  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("Einverständnis zur Weitergabe der Kontaktdaten an den Zahler:");
+  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("erteilt");
+  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
   await expect(wizard.getByTestId("gwg-identification-payer-organisation")).toHaveText(
     "Für Organisationen wird der Bogen für natürliche Personen nicht erstellt",
   );
@@ -334,17 +335,17 @@ test("a stored company with the lead's consent, in German", async ({ page }, tes
   await section.getByRole("combobox", { name: "Art des Zahlers", exact: true }).click();
   await page.getByRole("option", { name: "Versicherung", exact: true }).click();
   await section.getByLabel(/^Name/).fill("Beispiel Versicherung AG");
-  await section.getByRole("button", { name: "Speichern", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("Angaben zum Zahler gespeichert");
-  expect(saves[0]).toMatchObject({
+  await expect.poll(() => saves.at(-1)).toMatchObject({
     payer_type: "insurance",
     organisation_name: "Beispiel Versicherung AG",
     relationship_kind: "employer",
     first_name: null,
     citizenships: [],
   });
-  expect(Object.keys(saves[0]).filter((key) => key.includes("consent"))).toEqual([]);
-  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("05.10.2026 11:30");
+  expect(Object.keys(saves.at(-1)!).filter((key) => key.includes("consent"))).toEqual([]);
+  expect(saves.at(-1)?.payer_informed).toBe(false);
+  await expect(section.getByTestId("lead-payer-contact-consent")).toContainText("noch nicht erteilt");
+  await expect(section.getByTestId("lead-payer-contact-consent")).not.toContainText("05.10.2026 11:30");
 });
 
 test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the invoice goes stays the lead's choice", async ({ page }, testInfo) => {
@@ -369,10 +370,7 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
   await taxNumber.fill(" 30/123/45678 ");
   await recipient.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-payer-invoice-tax-ru-desktop.png"), animations: "disabled" });
-  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
-  expect(saves).toHaveLength(1);
-  expect(saves[0]).toMatchObject({
+  await expect.poll(() => saves.at(-1)).toMatchObject({
     payer_kind: "third_party",
     payer_type: "company",
     organisation_name: "Beispiel GmbH",
@@ -381,15 +379,13 @@ test("staff add USt-IdNr. and Steuernummer of the invoice recipient; where the i
   });
   // The lead's answers of sections 7–8 and the consent are never in the body.
   for (const key of [...LEAD_BILLING_KEYS, "contact_consent_at"]) {
-    expect(saves[0]).not.toHaveProperty(key);
+    expect(saves.at(-1)).not.toHaveProperty(key);
   }
   // The saved values stay in the form; a cleared field is sent as null.
   await expect(vatId).toHaveValue("DE123456789");
   await expect(taxNumber).toHaveValue("30/123/45678");
   await taxNumber.fill("");
-  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
-  expect(saves[1]).toMatchObject({ invoice_vat_id: "DE123456789", invoice_tax_number: null });
+  await expect.poll(() => saves.at(-1)).toMatchObject({ invoice_vat_id: "DE123456789", invoice_tax_number: null });
 });
 
 test("the lead's choice of another address is named, in German", async ({ page }) => {
@@ -424,11 +420,9 @@ test("an older backend keeps the form of a private person and gets none of the n
   const relationship = section.getByLabel(/^Кем приходится пациенту/);
   await expect(relationship).toHaveValue("brother");
   await relationship.fill("Bruder");
-  await section.getByRole("button", { name: "Сохранить", exact: true }).click();
-  await expect(section.getByRole("status")).toHaveText("Данные о плательщике сохранены");
-  expect(saves[0]).toMatchObject({ payer_kind: "third_party", first_name: "Viktor", relationship: "Bruder", citizenships: ["AT"] });
+  await expect.poll(() => saves.at(-1)).toMatchObject({ payer_kind: "third_party", first_name: "Viktor", relationship: "Bruder", citizenships: ["AT"] });
   for (const key of ["payer_type", "organisation_name", "relationship_kind", "invoice_vat_id", "invoice_tax_number"]) {
-    expect(saves[0]).not.toHaveProperty(key);
+    expect(saves.at(-1)).not.toHaveProperty(key);
   }
   // The payer is a person there: the sheet can be created.
   await expect(sheetActions.getByRole("button", { name: "Для плательщика", exact: true })).toBeVisible();

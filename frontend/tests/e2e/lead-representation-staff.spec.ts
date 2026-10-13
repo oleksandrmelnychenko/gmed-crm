@@ -587,9 +587,10 @@ test("the patient form waits until the request was sent", async ({ page }) => {
   await expect(section.getByRole("heading", { name: "Patientenformular", exact: true })).toBeVisible();
   await expect(section.getByRole("button", { name: "Dokument erstellen", exact: true })).toBeDisabled();
   await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveText(
-    "Das Dokument kann erstellt werden, sobald der Patient die Anfrage im Kabinett gesendet hat.",
+    "Anfrage des Patienten noch nicht gesendet — danach kann das Formular erstellt werden.",
   );
-  await expect(section).toContainText("Dokument wurde noch nicht erstellt");
+  await expect(section.getByTestId("lead-wizard-self-disclosure-hint")).toHaveClass(/bg-amber-50/);
+  await expect(section).not.toContainText("Dokument wurde noch nicht erstellt");
   expect(calls.generated).toHaveLength(0);
 });
 

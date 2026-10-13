@@ -133,13 +133,18 @@ jobs:
         working-directory: frontend
         run: npx playwright test tests/e2e/chat-secure.spec.ts
 
-      - name: Secure chat and realtime live gate
+      - name: Lead cabinet and payer browser gate
+        working-directory: frontend
+        run: npx playwright test 'lead-.*\.spec\.ts' 'payer-link\.spec\.ts'
+
+      - name: Secure chat, realtime and cabinet live gate
         working-directory: frontend
         run: >-
           npx playwright test
           -c playwright.live.config.ts
           tests/e2e-live/chat-secure.live.spec.ts
           tests/e2e-live/realtime.live.spec.ts
+          tests/e2e-live/cabinet-roundtrip.spec.ts
 
       - name: Setup Python
         uses: actions/setup-python@v6

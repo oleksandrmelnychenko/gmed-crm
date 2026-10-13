@@ -226,6 +226,7 @@ function completeRoute(): Partial<Route8> {
 const empty = (value: unknown) => value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0);
 
 type Options = {
+  writeFailure?: { status: number | null };
   payerType?: PayerType;
   linkStatus?: "active" | "revoked" | "expired" | "locked";
   language?: string;
@@ -243,6 +244,9 @@ type Options = {
   enhancedCheckRequired?: boolean;
   /** Signed in already (a session from an earlier visit of this tab). */
   answers?: Partial<Answers>;
+  afterAnswersWrite?: (answers: Answers, patch: Record<string, unknown>) => Promise<void> | void;
+  beforeSubmit?: () => Promise<void>;
+  beforeUpload?: (count: number) => Promise<void> | void;
   route?: Partial<Route8>;
   acknowledged?: boolean;
   identityDocuments?: Doc[];
@@ -500,6 +504,9 @@ async function setup(page: Page, options: Options = {}) {
       calls.patches.push(patch);
       if (!q.privacy.acknowledged_at) return refuse(route, 403, "payer_consent_required");
       if (q.state === "submitted") return refuse(route, 409, "payer_submitted");
+      if (options.writeFailure?.status && "occupation" in patch) {
+        return refuse(route, options.writeFailure.status, options.writeFailure.status === 422 ? "invalid_field" : "unavailable", { field: "occupation" });
+      }
       const otherType = payerType === "person" ? ORGANISATION_ONLY : PERSON_ONLY;
       for (const key of Object.keys(patch)) {
         const known = ALL_ANSWER_KEYS.includes(key) || (ROUTE_KEYS.includes(key) && q.payment_route.asked);
@@ -517,11 +524,14 @@ async function setup(page: Page, options: Options = {}) {
       }
       clearDependents();
       recompute();
+      await options.afterAnswersWrite?.(q.answers, patch);
       return route.fulfill({ json: view() });
     }
     if ((path === "/public/payer-link/identity-document" || path === "/public/payer-link/funds-proof") && method === "POST") {
       if (!q.privacy.acknowledged_at) return refuse(route, 403, "payer_consent_required");
+      if (q.state === "submitted") return refuse(route, 409, "payer_submitted");
       state.documents += 1;
+      await options.beforeUpload?.(state.documents);
       const name = (body as { file?: string } | null)?.file ?? "file.pdf";
       const list = path.endsWith("identity-document") ? q.identity_documents : q.funds_proof_documents;
       list.push(document(`doc-${state.documents}`, name));
@@ -540,6 +550,7 @@ async function setup(page: Page, options: Options = {}) {
       recompute();
       if (q.missing_for_submit.length > 0) return refuse(route, 422, "questionnaire_incomplete", { missing: q.missing_for_submit });
       if ((body as { declared_correct?: boolean } | null)?.declared_correct !== true) return refuse(route, 422, "declaration_required");
+      await options.beforeSubmit?.();
       q.state = "submitted";
       q.declared_correct_at = "2026-10-06T10:30:00Z";
       q.submitted_at = "2026-10-06T10:30:00Z";
@@ -608,6 +619,122 @@ const next = (page: Page) => page.getByTestId("payer-link-next").click();
 const stepTitle = (page: Page) => page.getByTestId("payer-link-step-title");
 const merged = (patches: Record<string, unknown>[]) => Object.assign({}, ...patches) as Record<string, unknown>;
 
+test("payer recheck: a queued edit keeps the server's corrected untouched answers", async ({ page }) => {
+  let release = () => {};
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const { q, calls } = await setup(page, {
+    acknowledged: true, answers: completeAnswers("person"), route: completeRoute(), identityDocuments: [document("doc-id", "pass.pdf")],
+    afterAnswersWrite: async (answers, patch) => {
+      if (patch.occupation === "Neue Tätigkeit") {
+        answers.city = "Hamburg";
+        await response;
+      }
+      if (patch.funds_description === "Monatliches Gehalt") answers.city = "Muenchen";
+    },
+  });
+  await signIn(page);
+  await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
+  const funds = page.getByTestId("payer-link-step-funds");
+  await funds.getByRole("textbox", { name: /Beruf/ }).fill("Neue Tätigkeit");
+  await expect.poll(() => calls.patches.length).toBe(1);
+  await funds.locator("textarea").fill("Monatliches Gehalt");
+  // Let the autosave debounce enqueue the edit while the previous response is held.
+  await page.waitForTimeout(850);
+  release();
+  await expect.poll(() => q.answers.funds_description).toBe("Monatliches Gehalt");
+  expect(calls.patches[1]).toEqual({ funds_description: "Monatliches Gehalt" });
+  expect(q.answers.city).toBe("Muenchen");
+  await funds.locator("textarea").fill("Monatliches Gehalt, bestätigt");
+  await expect.poll(() => q.answers.funds_description).toBe("Monatliches Gehalt, bestätigt");
+  expect(calls.patches.at(-1)).toEqual({ funds_description: "Monatliches Gehalt, bestätigt" });
+  expect(q.answers.city).toBe("Muenchen");
+});
+
+test("payer recheck: sending locks navigation until submission completes", async ({ page }) => {
+  let release = () => {};
+  const response = new Promise<void>((resolve) => { release = resolve; });
+  const { q } = await setup(page, {
+    acknowledged: true, answers: completeAnswers("person"), route: completeRoute(), identityDocuments: [document("doc-id", "pass.pdf")],
+    beforeSubmit: () => response,
+  });
+  await signIn(page);
+  await page.getByTestId("payer-link-confirm").check();
+  await page.getByTestId("payer-link-submit").click();
+  await expect(page.getByTestId("payer-link-summary-funds").getByRole("button")).toBeDisabled();
+  await expect(page.getByTestId("payer-link-form").getByRole("button", { name: "Zurück", exact: true })).toBeDisabled();
+  release();
+  await expect(page.getByText("Vielen Dank. Ihre Angaben sind bei GMED eingegangen.", { exact: true })).toBeVisible();
+  expect(q.state).toBe("submitted");
+});
+
+for (const kind of ["identity", "funds"] as const) {
+  test(`payer recheck: sending waits for the entire ${kind} upload batch`, async ({ page }) => {
+    let releaseFirst = () => {};
+    let releaseLast = () => {};
+    const first = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const last = new Promise<void>((resolve) => { releaseLast = resolve; });
+    const { q, state, calls } = await setup(page, {
+      acknowledged: true, answers: completeAnswers("person"), route: completeRoute(), identityDocuments: [document("doc-id", "pass.pdf")],
+      beforeUpload: (count) => count === 1 ? first : count === 3 ? last : undefined,
+    });
+    await signIn(page);
+    await page.getByTestId(`payer-link-summary-${kind}`).getByRole("button").click();
+    await page.locator(`#payer-link-${kind}-files`).setInputFiles([1, 2, 3].map((index) => ({
+      name: `proof-${index}.pdf`, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n"),
+    })));
+    await expect.poll(() => state.documents).toBe(1);
+    for (let index = 0; index < (kind === "identity" ? 4 : 3); index += 1) await next(page);
+    await page.getByTestId("payer-link-confirm").check();
+    const submit = page.getByTestId("payer-link-submit");
+    await expect(submit).toBeDisabled();
+    releaseFirst();
+    await expect.poll(() => state.documents).toBe(3);
+    await expect(submit).toBeDisabled();
+    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toEqual([]);
+    releaseLast();
+    await expect(submit).toBeEnabled();
+    expect(kind === "identity" ? q.identity_documents.length : q.funds_proof_documents.length).toBe(kind === "identity" ? 4 : 3);
+    await submit.click();
+    await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
+  });
+}
+
+for (const status of [422, 503]) {
+  test(`payer recheck: failed save ${status} cannot submit the old complete answers`, async ({ page }) => {
+    const writeFailure = { status: status as number | null };
+    const { q, calls } = await setup(page, {
+      acknowledged: true, answers: completeAnswers("person"), route: completeRoute(),
+      identityDocuments: [document("doc-id", "pass.pdf")], writeFailure,
+    });
+    await signIn(page);
+    await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
+    await page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ }).fill("Neue Tätigkeit");
+    await expect.poll(() => calls.patches.some((patch) => patch.occupation === "Neue Tätigkeit")).toBe(true);
+    await next(page);
+    await next(page);
+    await next(page);
+    await page.getByTestId("payer-link-confirm").check();
+    await page.getByTestId("payer-link-submit").click();
+    await expect(page.getByTestId("payer-link-step-summary").getByRole("alert")).toHaveText("Nicht gespeichert");
+    expect(calls.payer.filter((call) => call.path.endsWith("/submit"))).toHaveLength(0);
+    expect(q.answers.occupation).toBe("Ingenieur");
+
+    writeFailure.status = null;
+    if (status === 422) {
+      await page.getByTestId("payer-link-summary-funds").getByRole("button").click();
+      await page.getByTestId("payer-link-step-funds").getByRole("textbox", { name: /Beruf/ }).fill("Korrigierte Tätigkeit");
+      await next(page);
+      await next(page);
+      await next(page);
+      await page.getByTestId("payer-link-confirm").check();
+    }
+    // A transient failure retries the same unsaved draft without requiring another edit.
+    await page.getByTestId("payer-link-submit").click();
+    await expect(page.getByTestId("payer-link-thanks")).toBeVisible();
+    expect(q.answers.occupation).toBe(status === 422 ? "Korrigierte Tätigkeit" : "Neue Tätigkeit");
+  });
+}
+
 test.describe("payer link", () => {
   // A payer in Germany: before the link names its language, the page follows the browser.
   test.use({ locale: "de-DE" });
@@ -663,7 +790,7 @@ test.describe("payer link", () => {
     await expect(page.getByTestId("payer-link-notice")).toHaveText("Bitte bestätigen Sie zuerst die Datenschutzhinweise.");
     await expect(page.getByTestId("payer-link-step-privacy")).toBeVisible();
     await expect(page.getByTestId("payer-link-privacy-notice")).toContainText("§§ 10–12 GwG");
-    await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal#privacy");
+    await expect(page.getByRole("link", { name: "Vollständige Datenschutzhinweise" })).toHaveAttribute("href", "/legal?lang=de#privacy");
 
     // A reload keeps the session of this tab: no new code.
     await page.reload();

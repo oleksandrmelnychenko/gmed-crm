@@ -773,7 +773,10 @@ pub(crate) fn name_needs_latin_spelling(value: &str) -> bool {
     static NAME: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
         regex::Regex::new(r"^[\p{Latin}\p{M}\s'’.-]*$").expect("passport name regex")
     });
-    !NAME.is_match(value.trim())
+    static LETTER: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\p{L}").expect("passport letter regex"));
+    let trimmed = value.trim();
+    !trimmed.is_empty() && (!NAME.is_match(trimmed) || !LETTER.is_match(trimmed))
 }
 /// Same values as the staff wizard and `patients.insurance_type`.
 const INSURANCE_TYPE_VALUES: [&str; 4] = ["private", "public", "foreign", "self_pay"];
@@ -2285,7 +2288,7 @@ async fn retention_deadline(state: &AppState, row: &PgRow, lead_id: Uuid) -> Opt
 }
 
 /// The caller's consent of the current version for this lead, if given.
-async fn active_consent<'e, E>(
+pub(crate) async fn active_consent<'e, E>(
     executor: E,
     lead_id: Uuid,
     user_id: Uuid,
@@ -4085,8 +4088,8 @@ async fn save_consent_choices(
     let (choice_id, chosen_at): (Uuid, DateTime<Utc>) = match sqlx::query_as(
         r#"INSERT INTO consent_form_choices (
                template_id, lead_id, patient_id, choices, chosen_by, access_kind,
-               source, language, text_version, recipients)
-           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8
+               source, language, text_version, recipients, chosen_at)
+           SELECT $1, l.id, l.prospect_patient_id, $2, $3, $4, 'lead_portal', $5, $6, $8, clock_timestamp()
            FROM leads l WHERE l.id = $7
            RETURNING id, chosen_at"#,
     )
@@ -6501,6 +6504,8 @@ mod tests {
     #[test]
     fn passport_spelling_is_required_only_for_submission() {
         for accepted in [
+            "",
+            " ",
             "Anna",
             "Müller",
             "José",
@@ -6511,7 +6516,9 @@ mod tests {
         ] {
             assert!(!name_needs_latin_spelling(accepted), "{accepted}");
         }
-        for rejected in ["Анна", "王", "Anna2", "Anna🙂"] {
+        for rejected in [
+            "Анна", "王", "Anna2", "Anna🙂", "--", "...", "’", "\u{301}", "\u{5b0}",
+        ] {
             assert!(name_needs_latin_spelling(rejected), "{rejected}");
         }
         let data = apply_personal_data_patch(

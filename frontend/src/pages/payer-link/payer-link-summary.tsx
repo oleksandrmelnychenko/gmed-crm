@@ -292,6 +292,7 @@ export function SummaryStep({
   text,
   lang,
   submitting,
+  uploading = false,
   error,
   onGoTo,
   onSubmit,
@@ -301,13 +302,14 @@ export function SummaryStep({
   text: PayerLinkText;
   lang: string;
   submitting: boolean;
+  uploading?: boolean;
   error: string | null;
   onGoTo: (step: PayerStep) => void;
   onSubmit: () => void;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const missing = (questionnaire.missing_for_submit ?? []).length > 0;
-  const blockedReason = missing ? text.submitNeedsMissing : !confirmed ? text.submitNeedsConfirm : null;
+  const blockedReason = uploading ? text.uploading : missing ? text.submitNeedsMissing : !confirmed ? text.submitNeedsConfirm : null;
   return (
     <div className="space-y-5" data-testid="payer-link-step-summary">
       <MissingList questionnaire={questionnaire} steps={steps} text={text} onGoTo={onGoTo} />

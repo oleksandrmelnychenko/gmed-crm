@@ -187,13 +187,14 @@ test("staff read the lead's GwG statements beside the identification sheet", asy
   await expect(block.getByTestId("lead-gwg-answer-high_risk_country")).toHaveCount(0);
   await expect(block.getByTestId("lead-gwg-declared-correct")).toHaveText("Подтвердил правильность: 05.10.2026 11:30");
 
-  // Read-only, inside the section of the sheet and above its explanation.
+  // Read-only beneath the sheet actions; the redundant explanatory label was removed.
   await expect(block.locator("input, textarea, select, button")).toHaveCount(0);
-  const explanation = wizard.getByText(/^Заполняется из заявки:/);
+  await expect(wizard.getByText(/^Заполняется из заявки:/)).toHaveCount(0);
+  const actions = wizard.getByTestId("gwg-identification-actions");
+  await expect(actions).toBeVisible();
   const blockBox = await block.boundingBox();
-  const explanationBox = await explanation.boundingBox();
-  expect(blockBox!.y + blockBox!.height).toBeLessThanOrEqual(explanationBox!.y);
-  await expect(wizard.getByTestId("gwg-identification-actions")).toBeVisible();
+  const actionsBox = await actions.boundingBox();
+  expect(actionsBox!.y + actionsBox!.height).toBeLessThanOrEqual(blockBox!.y);
 
   await block.scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath("lead-gwg-statements-ru-desktop.png"), animations: "disabled" });
@@ -395,7 +396,8 @@ test("the invoice recipient and the payment route follow the economic interest; 
   await expect(third).toHaveAttribute("data-warning", "true");
   const flag = group.getByTestId("lead-gwg-billing-flag");
   await expect(flag).toHaveText("Требуется проверка комплаенса: наличные, платёж через третье лицо");
-  await expect(flag).toHaveClass(/text-amber-700/);
+  await expect(flag).toHaveClass(/bg-amber-50/);
+  await expect(flag).toHaveClass(/border-amber-200/);
   await expect(group.getByTestId("lead-gwg-billing-by-payer")).toHaveCount(0);
   // Read-only: nothing forces the EDD sheet or blocks anything; staff decide.
   await expect(group.locator("input, textarea, select, button")).toHaveCount(0);

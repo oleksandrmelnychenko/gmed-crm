@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { MAX_UPLOAD_BYTES } from "@/pages/patient-lead/lead-request-model";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "@/pages/patient-lead/lead-request-autosave";
 
 import { PayerLinkError, type PayerLinkClient, type PayerQuestionnaire, type PayerSignaturePackage } from "./payer-link-api";
 import {
@@ -13,7 +14,6 @@ import {
   fundsSourceOptions,
   missingByStep,
   payerSteps,
-  reconcileDraft,
   refusedField,
   requiredFields,
   stillRejected,
@@ -77,11 +77,12 @@ function useAnswersForm({
   onQuestionnaire: (questionnaire: PayerQuestionnaire) => void;
   onSaveState: (state: SaveState) => void;
   onFailure: (error: PayerLinkError | null) => void;
-}): AnswersForm & { flush: () => Promise<void> } {
+}): AnswersForm & { flush: () => Promise<boolean> } {
   const [draft, setDraft] = useState<PayerDraft>(() => draftFromQuestionnaire(questionnaire));
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const savedRef = useRef<PayerDraft>(draftFromQuestionnaire(questionnaire));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
   const failedRef = useRef(false);
@@ -97,25 +98,25 @@ function useAnswersForm({
     const incoming = draftFromQuestionnaire(questionnaire);
     const changed = changedOnServer(savedRef.current, incoming);
     if (changed.length === 0) return;
+    const baseline = savedRef.current;
     savedRef.current = incoming;
-    setDraft((current) => {
-      const next = { ...current } as Record<string, unknown>;
-      for (const field of changed) next[field] = incoming[field];
-      return next as PayerDraft;
-    });
+    queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, baseline, incoming, baseline, changed);
+    setDraft((current) => mergeSavedDraft(current, baseline, incoming, baseline, changed));
   }, [questionnaire]);
 
   const save = useCallback(
-    (snapshot: PayerDraft) =>
-      enqueue(async () => {
-        if (!writableRef.current || closed.current) return;
+    (snapshot: PayerDraft) => {
+      const fields = queuedDraftFields(answersPatch(savedRef.current, snapshot, contextRef.current), answersPatch(queuedDraftRef.current, snapshot, contextRef.current));
+      queuedDraftRef.current = snapshot;
+      return enqueue(async () => {
+        if (!writableRef.current || closed.current) return false;
         let saved = false;
         let failed = false;
         let rejected = stillRejected(refusedRef.current.values, snapshot);
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = answersPatch(savedRef.current, snapshot, contextRef.current, rejected);
+          const patch = scopedDraftPatch(answersPatch(savedRef.current, snapshot, contextRef.current, rejected), fields);
           const keys = Object.keys(patch);
           if (keys.length === 0) break;
           onSaveState("saving");
@@ -124,8 +125,8 @@ function useAnswersForm({
             const previous = savedRef.current;
             const stored = draftFromQuestionnaire(next);
             savedRef.current = stored;
-            const still = rejected;
-            setDraft((current) => reconcileDraft(current, snapshot, previous, stored, keys, still));
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, stored, previous, keys, fields);
+            setDraft((current) => mergeSavedDraft(current, snapshot, stored, previous, keys, fields));
             saved = true;
             onQuestionnaire(next);
             break;
@@ -151,7 +152,9 @@ function useAnswersForm({
         failedRef.current = failed || Object.keys(rejected).length > 0;
         if (failedRef.current) onSaveState("error");
         else if (saved || wasFailed) onSaveState("saved");
-      }),
+        return !failedRef.current;
+      });
+    },
     [client, closed, enqueue, onFailure, onQuestionnaire, onSaveState],
   );
 
@@ -428,6 +431,7 @@ function DraftForm({
   };
 
   const goTo = (next: PayerStep) => {
+    if (submitting) return;
     if (next !== "privacy" && !consented) {
       setNotice(text.privacyFirst);
       return;
@@ -458,11 +462,15 @@ function DraftForm({
   }
 
   async function submit() {
+    if (submitting || identityUploads.busy || fundsUploads.busy) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
       // The last entry first: what was typed just before "send" belongs to it.
-      await form.flush();
+      if (!await form.flush()) {
+        setSubmitError(text.notSaved);
+        return;
+      }
       const next = await enqueue(() => client.submit());
       closedRef.current = true;
       onQuestionnaire(next);
@@ -536,6 +544,7 @@ function DraftForm({
           text={text}
           lang={lang}
           submitting={submitting}
+          uploading={identityUploads.busy || fundsUploads.busy}
           error={submitError}
           onGoTo={goTo}
           onSubmit={() => void submit()}
@@ -544,7 +553,7 @@ function DraftForm({
   }
 
   return (
-    <div className="space-y-5" data-testid="payer-link-form" data-step={step}>
+    <fieldset disabled={submitting} aria-busy={submitting} className="min-w-0 space-y-5 border-0 p-0" data-testid="payer-link-form" data-step={step}>
       <div ref={topRef} className="scroll-mt-4 space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs text-muted-foreground">
           <span data-testid="payer-link-step-of">{text.stepOf(position + 1, steps.length)}</span>
@@ -600,6 +609,6 @@ function DraftForm({
         ) : null}
       </div>
       <p className="text-xs text-muted-foreground">{text.autosaveNote}</p>
-    </div>
+    </fieldset>
   );
 }

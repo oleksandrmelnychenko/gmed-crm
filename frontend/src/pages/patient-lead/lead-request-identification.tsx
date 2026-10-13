@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { LoaderCircle, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -88,12 +89,18 @@ export function useIdentificationForm({
 }): IdentificationForm {
   const [draft, setDraft] = useState<IdentificationDraft>(() => draftFromIdentification(request.identification));
   const savedRef = useRef<IdentificationDraft>(draftFromIdentification(request.identification));
+  const queuedDraftRef = useRef<IdentificationDraft>(draftFromIdentification(request.identification));
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
   const failedRef = useRef(false);
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
 
   const save = useCallback(
     (snapshot: IdentificationDraft) => {
+      const fields = queuedDraftFields(
+        identificationPatch(savedRef.current, snapshot),
+        identificationPatch(queuedDraftRef.current, snapshot),
+      );
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
         let saved = false;
         let failed = false;
@@ -101,12 +108,16 @@ export function useIdentificationForm({
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = identificationPatch(savedRef.current, snapshot, rejected);
+          const patch = scopedDraftPatch(identificationPatch(savedRef.current, snapshot, rejected), fields);
           if (Object.keys(patch).length === 0) break;
           onSaveState("saving");
           try {
+            const baseline = savedRef.current;
             const next = await saveLeadIdentification(request.lead_id, patch);
-            savedRef.current = draftFromIdentification(next.identification);
+            const fresh = draftFromIdentification(next.identification);
+            savedRef.current = fresh;
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+            setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
             saved = true;
             onChange(next);
             break;
@@ -361,21 +372,24 @@ export function IdentityDocumentSection({
     if (files.length === 0) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_UPLOAD_BYTES) {
-        nextErrors.push(text.fileTooLarge(file.name));
-        continue;
+    // Reserve the whole selection before navigation can queue a submission.
+    await enqueue(async () => {
+      for (const file of files) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          nextErrors.push(text.fileTooLarge(file.name));
+          continue;
+        }
+        try {
+          onChange(await uploadLeadIdentityDocument(request.lead_id, file));
+        } catch (cause) {
+          nextErrors.push(
+            errorBody(cause)?.code === "inquiry_consent_required"
+              ? text.identityUploadNeedsConsent
+              : `${file.name}: ${errorMessage(cause, text)}`,
+          );
+        }
       }
-      try {
-        onChange(await enqueue(() => uploadLeadIdentityDocument(request.lead_id, file)));
-      } catch (cause) {
-        nextErrors.push(
-          errorBody(cause)?.code === "inquiry_consent_required"
-            ? text.identityUploadNeedsConsent
-            : `${file.name}: ${errorMessage(cause, text)}`,
-        );
-      }
-    }
+    });
     setErrors(Array.from(new Set(nextErrors)));
     setUploading(false);
   }

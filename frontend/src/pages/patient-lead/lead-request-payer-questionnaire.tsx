@@ -13,6 +13,7 @@ import {
   tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { formatAppDate, formatAppDateTime } from "@/lib/app-time-zone";
+import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import {
@@ -66,6 +67,7 @@ import {
   type RequestQueue,
 } from "./lead-request-parts";
 import { payerQuestionnaireFieldLabel, type LeadRequestText } from "./lead-request-text";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 
 /**
  * "Your details as the paying person" (contract phase 3a, 5.2): the parent
@@ -193,6 +195,7 @@ function PayerQuestionnaireForm({
   const submitted = payerQuestionnaireSubmitted(questionnaire);
   const [draft, setDraft] = useState<PayerQuestionnaireDraft>(() => draftFromPayerQuestionnaire(questionnaire));
   const savedRef = useRef<PayerQuestionnaireDraft>(draftFromPayerQuestionnaire(questionnaire));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<RefusedValues>({ values: {}, codes: {} });
   const failedRef = useRef(false);
   const [refused, setRefused] = useState<RefusedValues>(refusedRef.current);
@@ -221,44 +224,35 @@ function PayerQuestionnaireForm({
 
   const save = useCallback(
     (snapshot: PayerQuestionnaireDraft) => {
-      if (!writableRef.current) return;
-      void enqueue(async () => {
+      if (!writableRef.current) return Promise.resolve(false);
+      const fields = queuedDraftFields(payerQuestionnairePatch(savedRef.current, snapshot), payerQuestionnairePatch(queuedDraftRef.current, snapshot));
+      queuedDraftRef.current = snapshot;
+      return enqueue(async () => {
+        if (!writableRef.current) return false;
         let saved = false;
         let failed = false;
         let rejected = stillRejectedPayerFields(refusedRef.current.values, snapshot);
         const codes = { ...refusedRef.current.codes };
         // Each round either saves or sets one more refused field aside.
         for (;;) {
-          const patch = payerQuestionnairePatch(savedRef.current, snapshot, rejected);
+          const patch = scopedDraftPatch(payerQuestionnairePatch(savedRef.current, snapshot, rejected), fields);
           if (Object.keys(patch).length === 0) break;
           onSaveState("saving");
           try {
+            const baseline = savedRef.current;
             const next = normalizeLeadPayerQuestionnaire(await saveLeadPayerQuestionnaire(leadId, patch));
             const stored = next ? draftFromPayerQuestionnaire(next) : { ...savedRef.current, ...snapshot };
             savedRef.current = stored;
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, stored, baseline, Object.keys(patch), fields);
+            setDraft((current) => mergeSavedDraft(current, snapshot, stored, baseline, Object.keys(patch), fields));
             if (next) apply(next);
-            // What the server cleared or changed of the sent keys (a residence equal to the address
-            // country, details without a "yes") replaces the entry, unless it was typed on since.
-            const adjusted = (Object.keys(patch) as PayerQuestionnaireField[]).filter(
-              (field) => payerQuestionnaireValue(field, stored) !== payerQuestionnaireValue(field, snapshot),
-            );
-            if (adjusted.length > 0) {
-              setDraft((current) => {
-                const merged = { ...current };
-                for (const field of adjusted) {
-                  if (payerQuestionnaireValue(field, current) === payerQuestionnaireValue(field, snapshot)) {
-                    Object.assign(merged, { [field]: stored[field] });
-                  }
-                }
-                return merged;
-              });
-            }
             saved = true;
             break;
           } catch (cause) {
             const body = errorBody(cause);
             const field = typeof body?.field === "string" ? body.field : "";
-            const next = field in patch ? withRejectedPayerField(rejected, field, snapshot) : null;
+            const next = cause instanceof ApiRequestError && cause.status === 422 && field in patch
+              ? withRejectedPayerField(rejected, field, snapshot) : null;
             if (!next) {
               failed = true;
               setErrors([messageOf(cause)]);
@@ -274,6 +268,7 @@ function PayerQuestionnaireForm({
         failedRef.current = failed || Object.keys(rejected).length > 0;
         if (failedRef.current) onSaveState("error");
         else if (saved || wasFailed) onSaveState("saved");
+        return !failedRef.current;
       });
     },
     [apply, enqueue, leadId, messageOf, onSaveState],
@@ -329,19 +324,21 @@ function PayerQuestionnaireForm({
     if (files.length === 0) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_UPLOAD_BYTES) {
-        nextErrors.push(text.fileTooLarge(file.name));
-        continue;
+    await enqueue(async () => {
+      for (const file of files) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          nextErrors.push(text.fileTooLarge(file.name));
+          continue;
+        }
+        try {
+          const next = normalizeLeadPayerQuestionnaire(await uploadLeadPayerFundsProof(leadId, file));
+          if (next) apply(next);
+          else await reload();
+        } catch (cause) {
+          nextErrors.push(`${file.name}: ${messageOf(cause)}`);
+        }
       }
-      try {
-        const next = normalizeLeadPayerQuestionnaire(await enqueue(() => uploadLeadPayerFundsProof(leadId, file)));
-        if (next) apply(next);
-        else await reload();
-      } catch (cause) {
-        nextErrors.push(`${file.name}: ${messageOf(cause)}`);
-      }
-    }
+    });
     setErrors(Array.from(new Set(nextErrors)));
     setUploading(false);
   }
@@ -361,6 +358,7 @@ function PayerQuestionnaireForm({
   const stepMissingShown = useContext(MissingShownContext);
 
   async function submit() {
+    if (submitting || uploading) return;
     setShowMissing(true);
     // Something is still missing: the press shows what (QA 2026-10-10: a disabled
     // button left the parent without a hint).
@@ -369,7 +367,10 @@ function PayerQuestionnaireForm({
     setErrors([]);
     try {
       // The last entries go first: the queue sends the submit after them.
-      save(draft);
+      if (!await save(draft)) {
+        setErrors([text.notSaved]);
+        return;
+      }
       const next = normalizeLeadPayerQuestionnaire(await enqueue(() => submitLeadPayerQuestionnaire(leadId)));
       if (next) apply(next);
       else await reload();
@@ -388,9 +389,9 @@ function PayerQuestionnaireForm({
     ...document,
     uploaded_at: document.uploaded_at ?? "",
     uploaded_by_me: true,
-    can_delete: document.can_delete && !submitted,
+    can_delete: document.can_delete && !submitted && !submitting,
   }));
-  const readOnly = !acknowledged || submitted;
+  const readOnly = !acknowledged || submitted || submitting;
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   return (
@@ -433,7 +434,7 @@ function PayerQuestionnaireForm({
                   type="checkbox"
                   className={checkboxClass}
                   checked={channels.includes(channel)}
-                  disabled={noticeBusy || submitted}
+                  disabled={noticeBusy || submitted || submitting}
                   onChange={(event) => toggleChannel(channel, event.target.checked)}
                 />
                 {text.contactChannelOptions[channel]}
@@ -702,7 +703,7 @@ function PayerQuestionnaireForm({
           <Button
             type="button"
             className="h-auto min-h-9 w-full gap-2 whitespace-normal py-1.5 sm:w-auto"
-            disabled={submitting || !canSubmitPayerQuestionnaire({ ...questionnaire, missing_for_submit: [] }, declared)}
+            disabled={submitting || uploading || !canSubmitPayerQuestionnaire({ ...questionnaire, missing_for_submit: [] }, declared)}
             data-testid="lead-request-payer-submit"
             onClick={() => void submit()}
           >

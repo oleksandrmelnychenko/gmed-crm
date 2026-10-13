@@ -304,7 +304,11 @@ async function choose(page: Page, select: Locator, option: string) {
 const overflow = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
-async function setup(page: Page, options: { minor?: boolean; prepare?: (request: Request) => void } = {}) {
+async function setup(page: Page, options: {
+  minor?: boolean;
+  prepare?: (request: Request) => void;
+  afterBillingWrite?: (request: Request, patch: Record<string, unknown>) => Promise<void> | void;
+} = {}) {
   await startClockAt(page);
   const request = leadRequest(options.minor ?? false);
   options.prepare?.(request);
@@ -353,13 +357,19 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
       const billing = request.billing;
       const party = billing.recipient;
       const before = billing.invoice_recipient;
+      // Validation is atomic on the server: nothing in a rejected patch is stored.
+      for (const [key, value] of Object.entries(patch)) {
+        if (key === "recipient_email" && typeof value === "string" && value && !value.includes("@")) {
+          return route.fulfill({ status: 422, json: { code: "invalid_field", field: key } });
+        }
+        if (key === "recipient_phone" && value === "invalid-phone") {
+          return route.fulfill({ status: 422, json: { code: "invalid_field", field: key } });
+        }
+      }
       for (const [key, value] of Object.entries(patch)) {
         if (key === "invoice_recipient") billing.invoice_recipient = (value as string) || null;
         else if (key === "invoice_recipient_is_payer") billing.invoice_recipient_is_payer = value as boolean | null;
         else if (key.startsWith("recipient_")) {
-          if (key === "recipient_email" && typeof value === "string" && value && !value.includes("@")) {
-            return route.fulfill({ status: 422, json: { code: "invalid_field", message: "invalid", field: key } });
-          }
           (party as Record<string, unknown>)[key.slice("recipient_".length)] = value === "" ? null : value;
         } else {
           if (!request.payer) return route.fulfill({ status: 409, json: { code: "payer_not_declared", message: "payer" } });
@@ -384,6 +394,7 @@ async function setup(page: Page, options: { minor?: boolean; prepare?: (request:
         party.payment_reason = null;
       }
       if (billing.invoice_recipient_is_payer === true) party.payment_reason = null;
+      await options.afterBillingWrite?.(request, patch);
       return route.fulfill({ json: answer() });
     }
     if (path === `${base}/payer` && method === "POST") {
@@ -668,6 +679,97 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(page.locator("#lead-request-recipient_email-error")).toHaveCount(0);
   });
 
+  test("recipient recheck: invalid fields do not discard other changes or hide each other's errors", async ({ page }) => {
+    const { request } = await setup(page, { prepare: (request) => {
+      request.billing.invoice_recipient = "third_party";
+      request.billing.invoice_recipient_is_payer = false;
+      request.billing.recipient = { ...emptyParty(), type: "person", first_name: "Eva", last_name: "Muster" };
+      request.payer = selfPayer();
+    } });
+    await page.goto("/");
+    await step(page, "billing");
+    await page.locator("#lead-request-recipient_email").fill("invalid-email");
+    await page.locator("#lead-request-recipient_phone").fill("invalid-phone");
+    await page.locator("#lead-request-recipient_city").fill("Hamburg");
+    await expect.poll(() => request.billing.recipient.city).toBe("Hamburg");
+    await expect(page.locator("#lead-request-recipient_email-error")).toBeVisible();
+    await expect(page.locator("#lead-request-recipient_phone-error")).toBeVisible();
+    await page.locator("#lead-request-recipient_email").fill("eva@example.com");
+    await expect.poll(() => request.billing.recipient.email).toBe("eva@example.com");
+    await expect(page.locator("#lead-request-recipient_email-error")).toHaveCount(0);
+    await expect(page.locator("#lead-request-recipient_phone-error")).toBeVisible();
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Nicht gespeichert");
+    await page.locator("#lead-request-recipient_phone").fill("+49123456789");
+    await expect.poll(() => request.billing.recipient.phone).toBe("+49123456789");
+    await expect(page.locator("#lead-request-recipient_phone-error")).toHaveCount(0);
+    await expect(page.getByTestId("lead-request-save-state")).toHaveText("Gespeichert");
+  });
+
+  test("recipient recheck: a queued edit keeps the server's corrected untouched fields", async ({ page }) => {
+    let release = () => {};
+    const response = new Promise<void>((resolve) => { release = resolve; });
+    const { request, calls } = await setup(page, {
+      prepare: (request) => {
+        request.billing.invoice_recipient = "third_party";
+        request.billing.invoice_recipient_is_payer = false;
+        request.billing.recipient = { ...emptyParty(), type: "person", first_name: "Eva", last_name: "Muster", city: "Berlin" };
+        request.payer = selfPayer();
+      },
+      afterBillingWrite: async (request, patch) => {
+        if (patch.recipient_email === "eva@example.com") {
+          request.billing.recipient.city = "Hamburg";
+          await response;
+        }
+      },
+    });
+    await page.goto("/");
+    await step(page, "billing");
+    await page.locator("#lead-request-recipient_email").fill("eva@example.com");
+    await expect.poll(() => calls.billing.length).toBe(1);
+    await page.locator("#lead-request-recipient_phone").fill("+49123456789");
+    // Leaving the step queues the latest draft while the first response is pending.
+    await step(page, "person");
+    release();
+    await expect.poll(() => request.billing.recipient.phone).toBe("+49123456789");
+    expect(calls.billing[1]).toEqual({ recipient_phone: "+49123456789" });
+    expect(request.billing.recipient.city).toBe("Hamburg");
+    await step(page, "billing");
+    await expect(page.locator("#lead-request-recipient_city")).toHaveValue("Hamburg");
+  });
+
+  test("billing recheck: a queued payment edit keeps the server's corrected account holder", async ({ page }) => {
+    let release = () => {};
+    const response = new Promise<void>((resolve) => { release = resolve; });
+    const { request, calls } = await setup(page, {
+      prepare: (request) => {
+        request.billing.invoice_recipient = "self";
+        request.billing.invoice_recipient_is_payer = true;
+        request.payer = selfPayer();
+        Object.assign(request.billing, { payment_method: "bank_transfer", account_holder: "Anna Muster", bank_name: "Old bank", via_third_party: true });
+        request.submitted_at = "2026-10-11T12:00:00Z";
+        request.follow_up = { required: true, blocks: ["C"], missing: {}, answered_at: null };
+      },
+      afterBillingWrite: async (request, patch) => {
+        if (patch.bank_name === "New bank") {
+          Object.assign(request.billing, { account_holder: "Anna Maria Muster" });
+          await response;
+        }
+      },
+    });
+    await page.goto("/");
+    await step(page, "follow_up");
+    await page.locator("#lead-request-bank_name").fill("New bank");
+    await expect.poll(() => calls.billing.length).toBe(1);
+    await page.locator("#lead-request-via_third_party_details").fill("Mein Bruder");
+    await step(page, "person");
+    release();
+    await expect.poll(() => (request.billing as Record<string, unknown>).via_third_party_details).toBe("Mein Bruder");
+    expect(calls.billing[1]).toEqual({ via_third_party_details: "Mein Bruder" });
+    expect(request.billing.account_holder).toBe("Anna Maria Muster");
+    await step(page, "follow_up");
+    await expect(page.locator("#lead-request-account_holder")).toHaveValue("Anna Maria Muster");
+  });
+
   test("the step fits a phone", async ({ page }) => {
     await setup(page, {
       prepare: (request) => {
@@ -690,6 +792,29 @@ test.describe("lead cabinet: step 3, the invoice recipient first", () => {
     await expect(page.getByTestId("lead-request-recipient-party")).toBeVisible();
     expect(await overflow(page)).toBeLessThanOrEqual(1);
   });
+
+  for (const recipientPays of [true, false]) {
+    test(`recipient recheck: country follows the answered-payer lock (recipient pays: ${recipientPays})`, async ({ page }) => {
+      const { calls } = await setup(page, { prepare: (request) => {
+        request.billing.invoice_recipient = "third_party";
+        request.billing.invoice_recipient_is_payer = recipientPays;
+        request.billing.recipient = { ...emptyParty(), type: "person", first_name: "Eva", last_name: "Muster", country: "DE" };
+        request.payer = { ...selfPayer(), payer_kind: "third_party", payer_type: "person", first_name: "Eva", last_name: "Muster", country: "DE", answered_by_payer: true };
+      } });
+      await page.goto("/");
+      await step(page, "billing");
+      const country = page.getByTestId("lead-request-recipient-party").getByRole("combobox", { name: "Land", exact: true });
+      if (recipientPays) {
+        await expect(country).toBeDisabled();
+        await expect(page.locator("#lead-request-recipient_first_name")).toBeDisabled();
+        expect(calls.billing).toEqual([]);
+      } else {
+        await expect(country).toBeEnabled();
+        await choose(page, country, "Österreich");
+        await expect.poll(() => calls.billing.at(-1)).toEqual({ recipient_country: "AT" });
+      }
+    });
+  }
 });
 
 

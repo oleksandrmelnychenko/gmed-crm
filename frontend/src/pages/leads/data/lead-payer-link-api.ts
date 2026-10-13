@@ -94,6 +94,9 @@ export type PayerQuestionnaireAnswers = {
   id_issued_on: string | null;
   id_valid_until: string | null;
   organisation_name: string | null;
+  legal_form: string | null;
+  vat_id: string | null;
+  payment_reason: string | null;
   register_court: string | null;
   register_number: string | null;
   representative_first_name: string | null;
@@ -307,6 +310,9 @@ const TEXT_ANSWER_KEYS = [
   "id_issued_on",
   "id_valid_until",
   "organisation_name",
+  "legal_form",
+  "vat_id",
+  "payment_reason",
   "register_court",
   "register_number",
   "representative_first_name",

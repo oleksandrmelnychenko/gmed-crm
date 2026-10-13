@@ -62,6 +62,7 @@ import {
   payerTypeLabel,
   statedFundsSourcesLabel,
   sourceOfFundsLabel,
+  withPayerDeclarationField,
   type PayerDeclaration,
   type PayerDeclarationForm,
   type PayerDeclarationResponse,
@@ -265,7 +266,7 @@ export function LeadPayerDeclarationSection({
   }, [data, dirty, leadId, prefill, prefillActive]);
 
   const patch = <K extends keyof PayerDeclarationForm>(key: K, value: PayerDeclarationForm[K]) => {
-    const next = { ...formRef.current, [key]: value };
+    const next = withPayerDeclarationField(formRef.current, key, value);
     formRef.current = next;
     setDirty(true);
     setMessage(null);

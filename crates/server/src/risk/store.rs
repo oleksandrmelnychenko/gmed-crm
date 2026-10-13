@@ -1115,7 +1115,7 @@ pub async fn follow_up_answered(
         return Ok(None);
     };
     sqlx::query(
-        "UPDATE lead_risk_assessments SET follow_up_answered_at = now(), updated_at = now() WHERE lead_id = $1",
+        "UPDATE lead_risk_assessments SET follow_up_answered_at = clock_timestamp(), updated_at = now() WHERE lead_id = $1",
     )
     .bind(lead_id)
     .execute(&mut *conn)

@@ -559,6 +559,8 @@ export function payerQuestionnaireGroups(
     ? [
         row("payer_type", tx("Тип плательщика", "Art des Zahlers"), isPayerType(questionnaire.payer_type) ? payerTypeLabel(questionnaire.payer_type, tx) : questionnaire.payer_type),
         row("organisation_name", tx("Название", "Name"), answers.organisation_name),
+        row("legal_form", tx("Правовая форма", "Rechtsform"), answers.legal_form),
+        row("vat_id", tx("USt-IdNr.", "USt-IdNr."), answers.vat_id),
         row("seat", tx("Юридический адрес", "Sitz"), address),
         row("register_court", tx("Регистрационный суд", "Registergericht"), answers.register_court),
         row("register_number", tx("Регистрационный номер", "Registernummer"), answers.register_number),
@@ -617,6 +619,7 @@ export function payerQuestionnaireGroups(
     : answers.relationship_kind ?? "";
   const sources = answers.funds_sources.map((source) => payerFundsSourceLabel(source, tx)).join(", ");
   const relation: PayerStatementRow[] = [
+    ...(organisation ? [row("payment_reason", tx("Основание оплаты", "Grund der Zahlung"), answers.payment_reason, { wide: true })] : []),
     row("relationship", tx("Кем приходится пациенту", "Beziehung zum Patienten"), relationshipKind, {
       details: answers.relationship_kind === "other" || !answers.relationship_kind ? answers.relationship : null,
     }),

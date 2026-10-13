@@ -24168,6 +24168,13 @@ fn build_payer_self_disclosure_pdf(
         section.heading(&mut layout, "Angaben zur Organisation");
         aml_labeled_value(&mut layout, "Firma", Some(payer_name.as_str()));
         aml_labeled_value(&mut layout, "Art", Some(payer_type_label(&data.payer_type)));
+        aml_labeled_value(&mut layout, "Rechtsform", data.legal_form.as_deref());
+        aml_labeled_value(&mut layout, "USt-IdNr.", data.vat_id.as_deref());
+        aml_labeled_value(
+            &mut layout,
+            "Grund der Zahlung",
+            data.payment_reason.as_deref(),
+        );
         aml_labeled_value(&mut layout, "Sitz", address.as_deref());
         aml_labeled_value(
             &mut layout,
@@ -36250,6 +36257,9 @@ mod tests {
             first_name: None,
             last_name: None,
             organisation_name: Some("Beispiel GmbH".to_string()),
+            legal_form: Some("GmbH".to_string()),
+            vat_id: Some("DE123456789".to_string()),
+            payment_reason: Some("Arbeitgeber übernimmt die Kosten".to_string()),
             register_court: Some("Amtsgericht Köln".to_string()),
             register_number: Some("HRB 12345".to_string()),
             industry: Some("Handel".to_string()),
@@ -36279,6 +36289,9 @@ mod tests {
             "1. Angaben zur Organisation",
             "Beispiel GmbH",
             "Unternehmen",
+            "Rechtsform GmbH",
+            "USt-IdNr. DE123456789",
+            "Grund der Zahlung Arbeitgeber übernimmt die Kosten",
             "HRB 12345",
             "Max Muster, Geschäftsführer",
             "2. Ausweisdokument der vertretungsberechtigten Person",

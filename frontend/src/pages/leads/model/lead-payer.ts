@@ -592,6 +592,23 @@ export function payerDeclarationPayload(form: PayerDeclarationForm) {
   };
 }
 
+/** An Art. 14 confirmation belongs to the named payer, not the editor. */
+export function withPayerDeclarationField<K extends keyof PayerDeclarationForm>(
+  form: PayerDeclarationForm,
+  field: K,
+  value: PayerDeclarationForm[K],
+): PayerDeclarationForm {
+  const next = { ...form, [field]: value };
+  const identity = (draft: PayerDeclarationForm) => {
+    const body = payerDeclarationPayload(draft);
+    return JSON.stringify([
+      body.payer_kind, body.payer_type ?? "person", body.organisation_name ?? null,
+      body.first_name, body.last_name, body.date_of_birth,
+    ]);
+  };
+  return identity(next) === identity(form) ? next : { ...next, payerInformed: false };
+}
+
 /**
  * Where the invoice goes, as the lead chose it in the cabinet: "пациенту",
  * "плательщику", "по другому адресу"; "не указано" while unanswered. The

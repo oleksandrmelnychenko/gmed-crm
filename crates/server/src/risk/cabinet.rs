@@ -275,7 +275,8 @@ pub async fn follow_up_json(
               AND (f.value->>'at')::timestamptz > $2
         ) OR EXISTS (
             SELECT 1 FROM lead_portal_uploads u WHERE u.lead_id = $1
-              AND u.kind IN ('self_funds_proof','relationship_proof','identity')
+              AND u.kind IN ('self_funds_proof','relationship_proof','identity',
+                             'representative_identity','representative_authority')
               AND (u.created_at > $2 OR u.withdrawn_at > $2)
         )"#).bind(lead_id).bind(answered_at).fetch_one(&mut *conn).await?
     } else {
@@ -446,15 +447,6 @@ async fn submit_follow_up(
             json!({}),
         );
     }
-    if !follow_up["answered_at"].is_null() && follow_up["changed_since_answer"] != json!(true) {
-        if let Err(error) = tx.commit().await {
-            return intake::internal(error, "commit unchanged follow-up");
-        }
-        return match intake::request_payload(&state, lead_id, auth.user_id, kind).await {
-            Ok(payload) => Json(payload).into_response(),
-            Err(error) => intake::internal(error, "load request"),
-        };
-    }
     let missing = match follow_up_missing(&mut tx, lead_id, auth.user_id).await {
         Ok(missing) => missing,
         Err(error) => return intake::internal(error, "load follow-up"),
@@ -466,6 +458,34 @@ async fn submit_follow_up(
             "Please complete the additional information first",
             json!({ "missing": missing }),
         );
+    }
+    match intake::active_consent(
+        &mut *tx,
+        lead_id,
+        auth.user_id,
+        intake::ConsentPurpose::InquiryProcessing,
+    )
+    .await
+    {
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            return coded(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "inquiry_consent_required",
+                "Please agree to the processing of your data for the request first",
+                json!({ "purpose": "lead_inquiry_processing" }),
+            );
+        }
+        Err(error) => return intake::internal(error, "load inquiry consent"),
+    }
+    if !follow_up["answered_at"].is_null() && follow_up["changed_since_answer"] != json!(true) {
+        if let Err(error) = tx.commit().await {
+            return intake::internal(error, "commit unchanged follow-up");
+        }
+        return match intake::request_payload(&state, lead_id, auth.user_id, kind).await {
+            Ok(payload) => Json(payload).into_response(),
+            Err(error) => intake::internal(error, "load request"),
+        };
     }
     match store::follow_up_answered(&mut tx, lead_id, auth.user_id).await {
         Ok(_) => {}

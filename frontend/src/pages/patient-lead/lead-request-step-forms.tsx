@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { ArrowLeft, ArrowRight, CircleAlert, LoaderCircle, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -204,12 +205,18 @@ function usePersonalForm({
 }) {
   const [draft, setDraft] = useState<PersonalDraft>(() => draftFromPersonalData(request.personal_data));
   const savedRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
+  const queuedDraftRef = useRef<PersonalDraft>(draftFromPersonalData(request.personal_data));
   const rejectedRef = useRef<RejectedPersonal>({});
   const failedRef = useRef(false);
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<PersonalField, string>>>({});
 
   const save = useCallback(
     (snapshot: PersonalDraft) => {
+      const fields = queuedDraftFields(
+        personalDataPatch(savedRef.current, snapshot),
+        personalDataPatch(queuedDraftRef.current, snapshot),
+      );
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
         const rejected: RejectedPersonal = {};
         for (const [field, value] of Object.entries(rejectedRef.current)) {
@@ -218,12 +225,16 @@ function usePersonalForm({
         let failed = false;
         let saved = false;
         for (;;) {
-          const patch = personalDataPatch(savedRef.current, snapshot, rejected);
+          const patch = scopedDraftPatch(personalDataPatch(savedRef.current, snapshot, rejected), fields);
           if (Object.keys(patch).length === 0) break;
           onSaveState("saving");
           try {
+            const baseline = savedRef.current;
             const next = await saveLeadPersonalData(request.lead_id, patch);
-            savedRef.current = draftFromPersonalData(next.personal_data);
+            const fresh = draftFromPersonalData(next.personal_data);
+            savedRef.current = fresh;
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+            setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
             saved = true;
             onChange(next);
             break;
@@ -880,17 +891,20 @@ export function DocumentsStep({ request, text, lang, enqueue, onChange, missing,
     if (files.length === 0) return;
     setUploading(true);
     const nextErrors: string[] = [];
-    for (const file of files) {
-      if (file.size > MAX_UPLOAD_BYTES) {
-        nextErrors.push(text.fileTooLarge(file.name));
-        continue;
+    // Sending from the next step must wait for every selected document.
+    await enqueue(async () => {
+      for (const file of files) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          nextErrors.push(text.fileTooLarge(file.name));
+          continue;
+        }
+        try {
+          onChange(await uploadLeadDocument(request.lead_id, file));
+        } catch (cause) {
+          nextErrors.push(`${file.name}: ${errorMessage(cause, text)}`);
+        }
       }
-      try {
-        onChange(await enqueue(() => uploadLeadDocument(request.lead_id, file)));
-      } catch (cause) {
-        nextErrors.push(`${file.name}: ${errorMessage(cause, text)}`);
-      }
-    }
+    });
     setErrors(nextErrors);
     setUploading(false);
   }

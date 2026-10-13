@@ -14,9 +14,11 @@ import {
   tokens,
 } from "@/components/record-workspace/primitives/design-tokens";
 import { appDateKey } from "@/lib/app-time-zone";
+import { ApiRequestError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import { saveLeadInvoiceRecipient, type LeadRequest } from "./lead-request-api";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import type { IdentificationForm } from "./lead-request-identification";
 import {
   RELATIONSHIP_KINDS,
@@ -119,32 +121,53 @@ export function InvoiceRecipientSection({
   const onRecipientState = partState("recipient");
   const [draft, setDraft] = useState<RecipientDraft>(() => draftFromRecipient(request.billing));
   const savedRef = useRef<RecipientDraft>(draftFromRecipient(request.billing));
+  const queuedDraftRef = useRef(savedRef.current);
   const refusedRef = useRef<Refused>({});
   const [refused, setRefused] = useState<Refused>({});
 
   const save = useCallback(
     (snapshot: RecipientDraft) => {
+      const fields = queuedDraftFields(recipientPatch(savedRef.current, snapshot), recipientPatch(queuedDraftRef.current, snapshot));
+      const edited = new Set(Array.from(fields).map(recipientFieldOf).filter((field): field is keyof RecipientDraft => field !== null));
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
-        const patch = recipientPatch(savedRef.current, snapshot, refusedRef.current);
-        if (Object.keys(patch).length === 0) return;
-        onRecipientState("saving");
-        try {
-          const next = await saveLeadInvoiceRecipient(request.lead_id, patch);
-          savedRef.current = draftFromRecipient(next.billing);
-          refusedRef.current = {};
-          setRefused({});
-          onRecipientState("saved");
-          onChange(next);
-        } catch (cause) {
-          const key = errorBody(cause)?.field;
-          const field = typeof key === "string" ? recipientFieldOf(key) : null;
-          // The refused value is not sent again until it is changed.
-          if (field) {
-            refusedRef.current = { ...refusedRef.current, [field]: recipientValue(field, snapshot) };
-            setRefused(refusedRef.current);
+        const hadRefusal = Object.keys(refusedRef.current).length > 0;
+        const rejected = Object.fromEntries(Object.entries(refusedRef.current).filter(
+          ([field, value]) => recipientValue(field as keyof RecipientDraft, snapshot) === value,
+        )) as Refused;
+        let saved = false;
+        let failed = false;
+        // A refused value stays visible while the other changed fields save.
+        for (;;) {
+          const patch = scopedDraftPatch(recipientPatch(savedRef.current, snapshot, rejected), fields);
+          if (Object.keys(patch).length === 0) break;
+          onRecipientState("saving");
+          try {
+            const baseline = savedRef.current;
+            const next = await saveLeadInvoiceRecipient(request.lead_id, patch);
+            const fresh = draftFromRecipient(next.billing);
+            const written = Object.keys(patch).map(recipientFieldOf).filter((field): field is keyof RecipientDraft => field !== null);
+            savedRef.current = fresh;
+            queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, written, edited);
+            setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, written, edited));
+            onChange(next);
+            saved = true;
+            break;
+          } catch (cause) {
+            const key = errorBody(cause)?.field;
+            const field = typeof key === "string" ? recipientFieldOf(key) : null;
+            if (cause instanceof ApiRequestError && cause.status === 422 && field && typeof key === "string" && key in patch && rejected[field] === undefined) {
+              rejected[field] = recipientValue(field, snapshot);
+              continue;
+            }
+            failed = true;
+            break;
           }
-          onRecipientState("error");
         }
+        refusedRef.current = rejected;
+        setRefused(rejected);
+        if (failed || Object.keys(rejected).length > 0) onRecipientState("error");
+        else if (saved || hadRefusal) onRecipientState("saved");
       });
     },
     [enqueue, onChange, onRecipientState, request.lead_id],
@@ -342,6 +365,7 @@ export function InvoiceRecipientSection({
                     <CountrySelect
                       value={draft.country || null}
                       lang={lang}
+                      disabled={lockedParty}
                       className={selectClass}
                       aria-label={recipientFieldLabel(text, "country")}
                       onChange={(code) => set("country", code ?? "")}

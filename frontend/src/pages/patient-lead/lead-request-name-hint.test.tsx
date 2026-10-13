@@ -87,11 +87,16 @@ describe("passport spelling hint", () => {
     expect(html).toContain('id="lead-request-first_name-latin-hint"');
     expect(html).not.toContain("lead-request-first_name-latin-apply");
   });
+
+  it.each(["--", "...", "’", "\u0301", "\u05B0"])("flags a name made only of separators or marks: %s", (name) => {
+    expect(nameNeedsLatinSpelling(name)).toBe(true);
+    expect(render([name, "Muster", ""])).toContain('id="lead-request-first_name-latin-hint"');
+  });
 });
 
 describe("passport spelling of a Cyrillic name", () => {
   it("accepts Latin letters with accents, spaces, hyphens, apostrophes and dots", () => {
-    for (const name of ["Anna", "Müller", "José", "Anna-Maria", "O'Neil", "St. John", "Łukasz"]) {
+    for (const name of ["", " ", "Anna", "Müller", "José", "Jose\u0301", "Anna-Maria", "O'Neil", "St. John", "Łukasz"]) {
       expect(nameNeedsLatinSpelling(name)).toBe(false);
     }
     for (const name of ["Анна", "Anna2", "Anna_", "安娜"]) expect(nameNeedsLatinSpelling(name)).toBe(true);

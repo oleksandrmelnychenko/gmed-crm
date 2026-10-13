@@ -24,6 +24,7 @@ import {
   type FollowUpBlock,
   type LeadRequest,
 } from "./lead-request-api";
+import { mergeSavedDraft, queuedDraftFields, scopedDraftPatch } from "./lead-request-autosave";
 import { BillingSections } from "./lead-request-billing";
 import {
   askedExtraFields,
@@ -131,6 +132,7 @@ export function FollowUpStep({
   const [error, setError] = useState("");
   const answered = followUpAnswered(request);
   const answeredAt = request.follow_up?.answered_at ?? null;
+  const inquiryConsent = consentGiven(request, INQUIRY_CONSENT);
 
   async function send() {
     // A send also shows what is still missing.
@@ -261,6 +263,7 @@ export function FollowUpStep({
       ))}
 
       {error ? <Banner tone="error">{error}</Banner> : null}
+      {!inquiryConsent ? <Banner tone="warning">{text.inquiryConsentMissing}</Banner> : null}
 
       <StepFooter
         index={index}
@@ -292,7 +295,7 @@ export function FollowUpStep({
           <Button
             type="button"
             className="h-9 gap-2"
-            disabled={sending || answered || Object.values(states).some((state) => state === "saving")}
+            disabled={sending || answered || !inquiryConsent || Object.values(states).some((state) => state === "saving")}
             onClick={() => void send()}
             data-testid="lead-request-follow-up-submit"
           >
@@ -335,6 +338,7 @@ function FundsBlock({
   const asked = useMemo(() => askedExtraFields(JSON.parse(asksKey) as typeof asks), [asksKey]);
   const [draft, setDraft] = useState<ExtraDraft>(() => draftFromExtra(extra));
   const savedRef = useRef<ExtraDraft>(draftFromExtra(extra));
+  const queuedDraftRef = useRef<ExtraDraft>(draftFromExtra(extra));
   const refusedRef = useRef<Refused>({});
   const [refused, setRefused] = useState<Refused>({});
   const consentReady = consentGiven(request, INQUIRY_CONSENT);
@@ -349,27 +353,33 @@ function FundsBlock({
     );
     if (changed.length === 0) return;
     savedRef.current = incoming;
-    setDraft((current) => {
-      const next = { ...current };
-      for (const field of changed) (next as Record<string, unknown>)[field] = incoming[field];
-      return next;
-    });
+    queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, saved, incoming, saved, changed);
+    setDraft((current) => mergeSavedDraft(current, saved, incoming, saved, changed));
   }, [extra]);
 
   const save = useCallback(
     (snapshot: ExtraDraft) => {
+      const fields = queuedDraftFields(
+        extraPatch(savedRef.current, snapshot, asked),
+        extraPatch(queuedDraftRef.current, snapshot, asked),
+      );
+      queuedDraftRef.current = snapshot;
       void enqueue(async () => {
         const stillRefused: Refused = {};
         for (const [field, value] of Object.entries(refusedRef.current) as Array<[keyof ExtraDraft, string]>) {
           if (value === extraValue(field, snapshot)) stillRefused[field] = value;
         }
         refusedRef.current = stillRefused;
-        const patch = extraPatch(savedRef.current, snapshot, asked, stillRefused);
+        const patch = scopedDraftPatch(extraPatch(savedRef.current, snapshot, asked, stillRefused), fields);
         if (Object.keys(patch).length === 0) return;
         onSaveState("saving");
         try {
+          const baseline = savedRef.current;
           const next = await saveLeadEnhancedDetails(leadId, patch);
-          savedRef.current = draftFromExtra(next.follow_up);
+          const fresh = draftFromExtra(next.follow_up);
+          savedRef.current = fresh;
+          queuedDraftRef.current = mergeSavedDraft(queuedDraftRef.current, snapshot, fresh, baseline, Object.keys(patch), fields);
+          setDraft((current) => mergeSavedDraft(current, snapshot, fresh, baseline, Object.keys(patch), fields));
           setRefused(stillRefused);
           onSaveState(Object.keys(stillRefused).length > 0 ? "error" : "saved");
           onChange(next);
@@ -494,7 +504,8 @@ function FundsBlock({
           consentReady={consentReady}
           text={text}
           lang={lang}
-          upload={async (file) => onChange(await enqueue(() => uploadLeadFundsProof(leadId, file)))}
+          enqueue={enqueue}
+          upload={async (file) => onChange(await uploadLeadFundsProof(leadId, file))}
           remove={async (documentId) => onChange(await enqueue(() => withdrawLeadDocument(leadId, documentId)))}
           testId="lead-request-funds-proof"
         />
@@ -546,7 +557,8 @@ function RelationshipBlock({
           consentReady={consentGiven(request, INQUIRY_CONSENT)}
           text={text}
           lang={lang}
-          upload={async (file) => onChange(await enqueue(() => uploadLeadRelationshipProof(leadId, file)))}
+          enqueue={enqueue}
+          upload={async (file) => onChange(await uploadLeadRelationshipProof(leadId, file))}
           remove={async (documentId) => onChange(await enqueue(() => withdrawLeadDocument(leadId, documentId)))}
           testId="lead-request-relationship-proof"
         />

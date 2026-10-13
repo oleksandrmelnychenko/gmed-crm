@@ -5315,7 +5315,22 @@ async fn a_black_list_citizenship_opens_follow_up_blocks_without_telling_why() {
     let answered_at = body["follow_up"]["answered_at"].clone();
     let (status, repeated) = json_request(router, "POST", &follow_up_submit, &patient, None).await;
     assert_eq!(status, StatusCode::OK, "{repeated}");
-    assert_eq!(repeated["follow_up"]["answered_at"], answered_at);
+    let marker_times: Value = sqlx::query_scalar(
+        "SELECT jsonb_build_object('fields', l.portal_field_updates,
+            'uploads', (SELECT jsonb_agg(jsonb_build_object('kind', u.kind,
+                'created_at', u.created_at, 'withdrawn_at', u.withdrawn_at))
+                FROM lead_portal_uploads u WHERE u.lead_id=l.id),
+            'clock', clock_timestamp()) FROM leads l WHERE l.id=$1",
+    )
+    .bind(lead_id)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        repeated["follow_up"]["answered_at"], answered_at,
+        "first_follow_up={}; repeated_follow_up={}; marker_times={marker_times}",
+        body["follow_up"], repeated["follow_up"]
+    );
     let events: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM lead_risk_events WHERE lead_id=$1 AND kind='follow_up_answered'",
     )
@@ -6953,4 +6968,327 @@ async fn rejected_minor_birth_date_notifies_staff_once_without_persisting_it() {
         .await
         .unwrap();
     assert_eq!(dob, "1990-01-01");
+}
+
+/// Wait for the HTTP transaction to reach the row lock held by the test.
+/// Use blocker identity: pg_stat_activity truncates long query text before its
+/// trailing FOR UPDATE clause. No timing assumptions about Tokio scheduling.
+async fn wait_for_cabinet_lead_lock(pool: &PgPool, blocker_pid: i32) {
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database()
+                 AND pid <> pg_backend_pid() AND $1 = ANY(pg_blocking_pids(pid)))",
+            )
+            .bind(blocker_pid)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+            if waiting {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("cabinet request did not reach the lead lock");
+}
+
+#[tokio::test]
+async fn consent_choice_after_waiting_for_submission_is_a_new_change() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (lead, _, patient) = lead_with_login(&app, "Choice", "choice.clock@example.com").await;
+    fill_in_complete_request(&app.suite.app, lead, &patient).await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{base}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let mut sending = pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM leads WHERE id=$1 FOR UPDATE")
+        .bind(lead)
+        .execute(&mut *sending)
+        .await
+        .unwrap();
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *sending)
+        .await
+        .unwrap();
+    let router = app.suite.app.clone();
+    let bearer = patient.clone();
+    let path = format!("{base}/consent-choices");
+    let choice = tokio::spawn(async move {
+        json_request(&router, "POST", &path, &bearer, Some(json!({
+            "version": "2026-10-12", "language": "en",
+            "choices": {"agency_processing": true, "doctors_to_agency": true, "data_system": true}
+        }))).await
+    });
+    wait_for_cabinet_lead_lock(pool, blocker_pid).await;
+    // A concurrent submission finishes after the choice transaction started.
+    sqlx::query("UPDATE leads SET portal_submitted_at=clock_timestamp() WHERE id=$1")
+        .bind(lead)
+        .execute(&mut *sending)
+        .await
+        .unwrap();
+    sending.commit().await.unwrap();
+    let (status, body) = choice.await.unwrap();
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let newer: bool = sqlx::query_scalar(
+        "SELECT c.chosen_at > l.portal_submitted_at FROM consent_form_choices c
+         JOIN leads l ON l.id=c.lead_id WHERE l.id=$1 ORDER BY c.seq DESC LIMIT 1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        newer,
+        "the choice time must be taken after acquiring the lock"
+    );
+    let (status, current) = json_request(&app.suite.app, "GET", &base, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    assert_eq!(current["changed_since_submit"], true, "{current}");
+}
+
+#[tokio::test]
+async fn follow_up_after_waiting_for_an_edit_consumes_that_edit_once() {
+    let Some(app) = test_app().await else { return };
+    let pool = &app.suite.pool;
+    let (lead, _, patient) = lead_with_login(&app, "Clock", "followup.clock@example.com").await;
+    fill_in_complete_request(&app.suite.app, lead, &patient).await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+    let (status, body) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{base}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    // Setup writes are unrelated to the lock-order regression. Keep their
+    // values and files, but give only their timestamps a fixed past baseline:
+    // Docker's wall clock can jump backwards between these setup requests.
+    // The new statements marker and the API's answer below remain untouched.
+    sqlx::query(
+        "UPDATE leads l SET portal_field_updates = COALESCE(
+            (SELECT jsonb_object_agg(f.key, jsonb_set(f.value, '{at}',
+                to_jsonb(TIMESTAMPTZ '2000-01-01 00:00:00+00')))
+             FROM jsonb_each(l.portal_field_updates) f), '{}'::jsonb)
+         WHERE l.id=$1",
+    )
+    .bind(lead)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE lead_portal_uploads SET created_at=TIMESTAMPTZ '2000-01-01 00:00:00+00',
+            withdrawn_at=CASE WHEN withdrawn_at IS NOT NULL
+                THEN TIMESTAMPTZ '2000-01-01 00:00:00+00' END
+         WHERE lead_id=$1",
+    )
+    .bind(lead)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE lead_risk_assessments SET requested_blocks=ARRAY['K'], follow_up_answered_at=NULL WHERE lead_id=$1")
+        .bind(lead).execute(pool).await.unwrap();
+    let mut editing = pool.begin().await.unwrap();
+    sqlx::query("SELECT id FROM leads WHERE id=$1 FOR UPDATE")
+        .bind(lead)
+        .execute(&mut *editing)
+        .await
+        .unwrap();
+    let blocker_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *editing)
+        .await
+        .unwrap();
+    let router = app.suite.app.clone();
+    let bearer = patient.clone();
+    let path = format!("{base}/follow-up/submit");
+    let sending =
+        tokio::spawn(async move { json_request(&router, "POST", &path, &bearer, None).await });
+    wait_for_cabinet_lead_lock(pool, blocker_pid).await;
+    sqlx::query("UPDATE leads SET portal_field_updates=portal_field_updates || jsonb_build_object('statements', jsonb_build_object('at',clock_timestamp())) WHERE id=$1")
+        .bind(lead).execute(&mut *editing).await.unwrap();
+    editing.commit().await.unwrap();
+    let (status, body) = sending.await.unwrap();
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let target_times: Value = sqlx::query_scalar(
+        "SELECT jsonb_build_object(
+            'target_marker', (l.portal_field_updates->'statements'->>'at')::timestamptz,
+            'answered_at', a.follow_up_answered_at,
+            'answer_after_target', a.follow_up_answered_at >
+                (l.portal_field_updates->'statements'->>'at')::timestamptz)
+         FROM leads l JOIN lead_risk_assessments a ON a.lead_id=l.id WHERE l.id=$1",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        target_times["answer_after_target"], true,
+        "the answer must be timed after the edit whose lock it awaited: {target_times}"
+    );
+    assert_eq!(
+        body["follow_up"]["changed_since_answer"], false,
+        "target_times={target_times}; request={body}"
+    );
+    let answered_at = body["follow_up"]["answered_at"].clone();
+    let (status, again) = json_request(
+        &app.suite.app,
+        "POST",
+        &format!("{base}/follow-up/submit"),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["follow_up"]["answered_at"], answered_at);
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM lead_risk_events WHERE lead_id=$1 AND kind='follow_up_answered'",
+    )
+    .bind(lead)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1);
+}
+
+#[tokio::test]
+async fn representative_follow_up_tracks_files_and_requires_current_inquiry_consent() {
+    let Some(app) = test_app().await else { return };
+    let router = &app.suite.app;
+    let pool = &app.suite.pool;
+    let (lead, _, patient) = lead_with_login(&app, "Files", "followup.files@example.com").await;
+    fill_in_complete_request(router, lead, &patient).await;
+    let base = format!("/api/v1/me/lead-requests/{lead}");
+    let send = format!("{base}/follow-up/submit");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/submit"),
+        &patient,
+        declared(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/representation"),
+        &patient,
+        Some(json!({"has_representative": true, "under_guardianship": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let agent = Uuid::new_v4();
+    let person = format!("{base}/representatives/{agent}");
+    let (status, body) = json_request(router, "POST", &person, &patient, Some(json!({
+        "role": "authorised_representative", "first_name": "Alex", "last_name": "Example",
+        "date_of_birth": "1980-01-01", "street": "Example 1", "zip": "10115", "city": "Berlin", "country": "DE"
+    }))).await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let mut documents = Vec::new();
+    for (kind, key) in [
+        ("identity-document", "identity_documents"),
+        ("authority-document", "authority_documents"),
+    ] {
+        let (status, body) = upload_file(
+            router,
+            &format!("{person}/{kind}"),
+            &patient,
+            "representative.pdf",
+            "application/pdf",
+            PDF,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        documents.push(
+            body["representation"]["representatives"][0][key][0]["id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+    // Staff explicitly requested G; it remains open after the answer is complete.
+    sqlx::query("UPDATE lead_risk_assessments SET requested_blocks=ARRAY['G'], follow_up_answered_at=NULL WHERE lead_id=$1")
+        .bind(lead).execute(pool).await.unwrap();
+    let (status, body) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["changed_since_answer"], false, "{body}");
+    let answered_at = body["follow_up"]["answered_at"].clone();
+    // Removing required evidence must reopen the answer, and cannot pass as an unchanged retry.
+    let (status, body) = json_request(
+        router,
+        "DELETE",
+        &format!("{base}/documents/{}", documents[1]),
+        &patient,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["changed_since_answer"], true, "{body}");
+    let (status, refusal) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert_eq!(refusal["code"], "follow_up_incomplete");
+    assert!(
+        refusal["missing"]["G"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("agent_authority_upload"))
+    );
+    // The same missing state must be rejected even without a newer portal timestamp
+    // (for example, staff discover that existing evidence no longer satisfies the request).
+    sqlx::query(
+        "UPDATE lead_risk_assessments SET follow_up_answered_at=clock_timestamp() WHERE lead_id=$1",
+    )
+    .bind(lead)
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, refusal) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert_eq!(refusal["code"], "follow_up_incomplete");
+    let (status, body) = upload_file(
+        router,
+        &format!("{person}/authority-document"),
+        &patient,
+        "replacement.pdf",
+        "application/pdf",
+        PDF,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["follow_up"]["changed_since_answer"], true, "{body}");
+    let (status, body) = json_request(
+        router,
+        "POST",
+        &format!("{base}/consent/revoke"),
+        &patient,
+        Some(json!({"purpose": "lead_inquiry_processing"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, refusal) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{refusal}");
+    assert_eq!(refusal["code"], "inquiry_consent_required");
+    give_consent(router, lead, &patient, "lead_inquiry_processing").await;
+    let (status, body) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["follow_up"]["changed_since_answer"], false, "{body}");
+    assert_ne!(body["follow_up"]["answered_at"], answered_at);
+    let (status, again) = json_request(router, "POST", &send, &patient, None).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(
+        again["follow_up"]["answered_at"],
+        body["follow_up"]["answered_at"]
+    );
 }
