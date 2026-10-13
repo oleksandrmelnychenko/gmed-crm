@@ -78,7 +78,7 @@ export function LeadRequestPage() {
   const [sessions] = useState(() => new Map<string, { enqueue: RequestQueue; flushers: Set<AutosaveFlush> }>());
   const [saveBlocked, setSaveBlocked] = useState(false);
   const leaving = useRef(false);
-  const navigate = useCallback(async (leadId: string, action: () => void) => {
+  const switchAfterSave = useCallback(async (leadId: string, action: () => void) => {
     if (leaving.current) return;
     leaving.current = true;
     try {
@@ -212,7 +212,7 @@ export function LeadRequestPage() {
                   ? "border-[var(--brand)] bg-[var(--brand-soft)] text-[var(--brand)]"
                   : "border-border text-muted-foreground",
               )}
-              onClick={() => { void navigate(request.lead_id, () => setSelected(item.lead_id)); }}
+              onClick={() => { void switchAfterSave(request.lead_id, () => setSelected(item.lead_id)); }}
             >
               {[item.personal_data.first_name, item.personal_data.last_name].filter(Boolean).join(" ")}
             </button>
@@ -221,7 +221,7 @@ export function LeadRequestPage() {
       ) : null}
       {saveBlocked ? <div role="alert" data-testid="lead-request-save-blocked"><Banner tone="error">{text.saveBeforeLeaving}</Banner></div> : null}
       <AutosaveFlushContext.Provider value={session.flushers}>
-        <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} navigate={navigate} onChange={replaceRequest} onAccessLost={load} />
+        <LeadRequestView key={request.lead_id} request={request} text={text} lang={lang} enqueue={session.enqueue} switchAfterSave={switchAfterSave} onChange={replaceRequest} onAccessLost={load} />
       </AutosaveFlushContext.Provider>
     </LeadCabinetFrame>
   );
@@ -304,7 +304,7 @@ function LeadRequestView({
   onChange,
   onAccessLost,
   enqueue,
-  navigate,
+  switchAfterSave,
 }: {
   request: LeadRequest;
   text: LeadRequestText;
@@ -312,7 +312,7 @@ function LeadRequestView({
   onChange: (request: LeadRequest) => void;
   onAccessLost: () => Promise<void>;
   enqueue: RequestQueue;
-  navigate: (leadId: string, action: () => void) => Promise<void>;
+  switchAfterSave: (leadId: string, action: () => void) => Promise<void>;
 }) {
   const guardian = request.access_kind === "guardian";
   const [chosenStep, setChosenStep] = useState<StepId>(() => initialStep(request));
@@ -349,7 +349,7 @@ function LeadRequestView({
   );
 
   const go = useCallback((next: StepId) => {
-    void navigate(request.lead_id, () => {
+    void switchAfterSave(request.lead_id, () => {
       setChosenStep(next);
       if (next === "send") setSendOpened(true);
       // A long step was left at its bottom: the next one starts at its top.
@@ -359,7 +359,7 @@ function LeadRequestView({
         top.scrollIntoView({ block: "start", behavior: reduced ? "auto" : "smooth" });
       }
     });
-  }, [navigate, request.lead_id]);
+  }, [switchAfterSave, request.lead_id]);
 
   const nav: StepNav = {
     index: position + 1,
